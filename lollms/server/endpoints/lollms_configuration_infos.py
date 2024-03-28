@@ -150,7 +150,7 @@ async def apply_settings(request: Request):
 
         try:
             for key in lollmsElfServer.config.config.keys():
-                lollmsElfServer.config.config[key] = config.get(key, lollmsElfServer.config.config[key])
+                lollmsElfServer.config.config[key] = sanitize_path(config.get(key, lollmsElfServer.config.config[key]))
             ASCIIColors.success("OK")
             lollmsElfServer.rebuild_personalities()
             if lollmsElfServer.config.auto_save:
