@@ -1,0 +1,47 @@
+# requirements.txt
+
+# --- Core FastAPI and Server ---
+fastapi
+uvicorn[standard]  # Includes python-multipart and other useful server extras
+werkzeug           # For secure_filename
+
+# --- Configuration & Utilities ---
+toml  # For reading config.toml
+sqlalchemy
+passlib[bcrypt]  # For password hashing (bcrypt is a common and secure scheme)
+
+# --- LoLLMs Client Library and Common Backends ---
+lollms-client>=0.10.0
+ascii_colors>0.11.0
+
+# Dependencies for specific lollms_client backends (based on your config examples):
+openai  # If using the OpenAI binding (e.g., for gpt-3.5-turbo)
+tiktoken # Required by the OpenAI binding in lollms_client for tokenization
+
+ollama # for ollama
+# Add other lollms_client backend dependencies if you plan to use them, e.g.:
+# torch
+# transformers
+# accelerate
+# (Note: lollms-client itself pulls in requests, ascii-colors, pillow, pipmaster, yaml, pydantic, lollmsvectordb, numpy)
+
+
+# --- SafeStore Library and Common Features ---
+# Using safe_store[all] is a convenient way to get most features.
+# It typically includes:
+# - sentence-transformers (for ST vectorizers)
+# - scikit-learn (for TF-IDF)
+# - pypdf, python-docx, beautifulsoup4, lxml (for document parsing)
+# - cryptography (for encryption)
+# - filelock (core concurrency mechanism for safe_store)
+safe_store[all]>=1.6.1
+
+# If you prefer to install safe_store features individually:
+# safe_store
+# sentence-transformers  # For 'st:' vectorizers like all-MiniLM-L6-v2
+# cryptography          # For safe_store encryption if encryption_key is used
+# beautifulsoup4        # For HTML parsing
+# lxml                  # Often used with beautifulsoup4 for parsing
+# pypdf                 # For PDF parsing
+# python-docx           # For DOCX parsing
+# scikit-learn          # For TF-IDF vectorizers (if you plan to use them)
