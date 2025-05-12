@@ -6,12 +6,12 @@ set -e
 echo "🚀 Starting Lollms Installation Script"
 
 # Create virtual environment if it doesn't exist
-if [ ! -d ".venv" ]; then
+if [ ! -d "venv" ]; then
     echo "🔧 Creating Python Virtual Environment..."
-    python3 -m venv .venv
+    python3 -m venv venv
     
     # Activate the virtual environment
-    source ./.venv/bin/activate
+    source ./venv/bin/activate
 
     # Install requirements if file exists
     if [ -f "requirements.txt" ]; then
@@ -110,12 +110,12 @@ fi
 
 # Final message
 echo $'\n✅ Installation complete!'
-echo "Virtual environment created in .venv"
+echo "Virtual environment created in venv"
 echo "Configuration saved to config.toml"
 
-if [ -f ".venv/bin/activate" ]; then
+if [ -f "venv/bin/activate" ]; then
     echo $'\nTo activate the virtual environment:'
-    echo 'source ./.venv/bin/activate'
+    echo 'source ./venv/bin/activate'
 fi
 
 echo "You can now start your application!"
