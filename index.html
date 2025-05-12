@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title data-i18n="appTitle">LoLLMs Chat</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script>
       tailwind.config = {
@@ -13,63 +14,22 @@
           extend: {
             colors: {
               primary: { light: '#a5b4fc', DEFAULT: '#6366f1', dark: '#4f46e5' },
-              secondary: {
-                50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 300: '#cbd5e1', 400: '#94a3b8',
-                500: '#64748b', 600: '#475569', 700: '#334155', 800: '#1e293b', 900: '#0f172a',
-                950: '#020617'
-              },
+              secondary: { 50: '#f9fafb', 100: '#f3f4f6', 200: '#e5e7eb', 300: '#d1d5db', 400: '#9ca3af', 500: '#6b7280', 600: '#4b5563', 700: '#374151', 800: '#1f2937', 900: '#111827', 950: '#030712', '850': '#161f2d' /* Custom for input bg */ },
               accent: { light: '#6ee7b7', DEFAULT: '#10b981', dark: '#059669' },
               danger: { light: '#fca5a5', DEFAULT: '#ef4444', dark: '#dc2626' },
-              warning: { light: '#fcd34d', DEFAULT: '#f59e0b', dark: '#d97706' }
+              warning: { light: '#fcd34d', DEFAULT: '#f59e0b', dark: '#d97706' },
+              star: { DEFAULT: '#facc15' } // Yellow for star
             },
             animation: { 'spin-slow': 'spin 3s linear infinite', 'fade-in': 'fadeIn 0.3s ease-out', 'slide-in': 'slideIn 0.3s ease-out', 'pulse-bg': 'pulseBg 2s infinite ease-in-out' },
-            keyframes: { 
-                fadeIn: { '0%': { opacity: 0 }, '100%': { opacity: 1 } }, 
+            keyframes: {
+                fadeIn: { '0%': { opacity: 0 }, '100%': { opacity: 1 } },
                 slideIn: { '0%': { transform: 'translateY(20px)', opacity: 0 }, '100%': { transform: 'translateY(0)', opacity: 1 } },
                 pulseBg: { '0%, 100%': { backgroundColor: 'theme("colors.primary.DEFAULT / 80%")' }, '50%': { backgroundColor: 'theme("colors.primary.DEFAULT")' } }
             },
             fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', '"Noto Sans"', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'], },
             typography: ({ theme }) => ({
-                DEFAULT: { css: { 
-                    '--tw-prose-body': theme('colors.secondary.700'), '--tw-prose-headings': theme('colors.secondary.900'), 
-                    '--tw-prose-pre-bg': theme('colors.secondary.100'),
-                    '--tw-prose-code': theme('colors.primary.dark'), 
-                    'code': { 
-                        backgroundColor: theme('colors.secondary.100'), padding: '0.1em 0.3em', borderRadius: '0.25rem', border: `1px solid ${theme('colors.secondary.200')}`,
-                        fontWeight: '500', color: theme('colors.primary.dark'),
-                    },
-                    'pre': {
-                        backgroundColor: theme('colors.secondary.100') + '!important', // Override for CM parent
-                        padding: '0 !important', // Override for CM parent
-                        color: theme('colors.secondary.700'),
-                        border: `1px solid ${theme('colors.secondary.200')}`,
-                        borderRadius: '0.375rem',
-                    },
-                    'pre code': { // Styles for code inside pre, before CM takes over
-                        backgroundColor: 'transparent', padding: '0', border: 'none', color: 'inherit',
-                    },
-                    'a': {color: theme('colors.primary.DEFAULT')} 
-                }},
-                invert: { css: { 
-                    '--tw-prose-body': theme('colors.secondary.300'), '--tw-prose-headings': theme('colors.secondary.100'),
-                    '--tw-prose-pre-bg': theme('colors.secondary.800'),
-                    '--tw-prose-code': theme('colors.primary.light'),
-                     'code': { 
-                        backgroundColor: theme('colors.secondary.800'), border: `1px solid ${theme('colors.secondary.700')}`,
-                        fontWeight: '500', color: theme('colors.primary.light'),
-                    },
-                    'pre': {
-                        backgroundColor: theme('colors.secondary.800') + '!important',
-                        padding: '0 !important',
-                        color: theme('colors.secondary.300'),
-                        border: `1px solid ${theme('colors.secondary.700')}`,
-                        borderRadius: '0.375rem',
-                    },
-                    'pre code': {
-                         backgroundColor: 'transparent', padding: '0', border: 'none', color: 'inherit',
-                    },
-                    'a': {color: theme('colors.primary.light')}
-                }},
+                DEFAULT: { css: { '--tw-prose-body': theme('colors.secondary.700'), '--tw-prose-headings': theme('colors.secondary.900'), code: { color: theme('colors.primary.dark'), fontWeight: '500', backgroundColor: theme('colors.secondary.100'), padding: '0.2em 0.4em', margin: '0', fontSize: '85%', borderRadius: '3px'}, 'code::before': {content: '""'}, 'code::after': {content: '""'}, pre: { backgroundColor: theme('colors.secondary.100'), color: theme('colors.secondary.800'), padding:'1em', borderRadius:'0.5rem', overflowX:'auto'}, a: {color: theme('colors.primary.DEFAULT')} } },
+                invert: { css: { '--tw-prose-body': theme('colors.secondary.300'), '--tw-prose-headings': theme('colors.secondary.100'), code: { color: theme('colors.primary.light'), backgroundColor: theme('colors.secondary.800')}, 'code::before': {content: '""'}, 'code::after': {content: '""'}, pre: { backgroundColor: theme('colors.secondary.800'), color: theme('colors.secondary.200')}, a: {color: theme('colors.primary.light')} } },
             }),
           }
         }
@@ -79,120 +39,58 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/neo.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/material-darker.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/meta.js"></script> <!-- For findModeByExtension -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/python/python.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/xml/xml.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/css/css.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/markdown/markdown.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/shell/shell.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/sql/sql.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/yaml/yaml.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/runmode/runmode.min.js"></script>
-
-
     <style>
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: theme('colors.secondary.200'); border-radius: 3px; }
-        .dark ::-webkit-scrollbar-track { background: theme('colors.secondary.800'); }
-        ::-webkit-scrollbar-thumb { background: theme('colors.secondary.400'); border-radius: 3px; }
-        .dark ::-webkit-scrollbar-thumb { background: theme('colors.secondary.600'); }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: theme('colors.secondary.400'); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: theme('colors.secondary.500'); }
+        .dark ::-webkit-scrollbar-thumb { background: theme('colors.secondary.600'); }
         .dark ::-webkit-scrollbar-thumb:hover { background: theme('colors.secondary.500'); }
-        
-        .prose code::before, .prose code::after { content: none; }
-        
-        .cm-readonly-display .CodeMirror {
-            border-radius: 0.375rem; font-size: 0.875rem; line-height: 1.5;
-            height: auto; /* Allow CM to size based on content */
-        }
-        .cm-readonly-display .CodeMirror-gutters { 
-            background-color: theme('colors.secondary.100') !important; 
-            border-right: 1px solid theme('colors.secondary.300') !important;
-            border-top-left-radius: 0.375rem; border-bottom-left-radius: 0.375rem;
-        }
-        .dark .cm-readonly-display .CodeMirror-gutters { 
-            background-color: theme('colors.secondary.800') !important; 
-            border-right: 1px solid theme('colors.secondary.700') !important;
-        }
-        .cm-readonly-display .CodeMirror-linenumber { color: theme('colors.secondary.500') !important; padding: 0 3px 0 5px; }
-        .dark .cm-readonly-display .CodeMirror-linenumber { color: theme('colors.secondary.400') !important; }
-        .cm-readonly-display .CodeMirror-scroll { 
-            overflow-y: hidden !important; /* Prevent double scrollbars */
-            overflow-x: auto !important; 
-        }
-        /* Ensure CodeMirror themes are applied */
-        .cm-s-default.CodeMirror { background-color: theme('colors.secondary.100'); color: theme('colors.secondary.800'); }
-        .cm-s-neo.CodeMirror, .cm-s-material-darker.CodeMirror { background-color: theme('colors.secondary.800'); color: theme('colors.secondary.200'); }
-        .cm-s-neo .CodeMirror-gutters { background: theme('colors.secondary.800'); border-right: 1px solid theme('colors.secondary.700');}
-        .cm-s-material-darker .CodeMirror-gutters { background: #31363f; border-right: 1px solid #444;}
-        .cm-s-neo .CodeMirror-cursor { border-left: 1px solid theme('colors.secondary.100'); }
-        .cm-s-material-darker .CodeMirror-cursor { border-left: 1px solid #f8f8f0; }
-
-
-        .loader { border: 3px solid theme('colors.secondary.300'); border-top: 3px solid theme('colors.primary.DEFAULT'); border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; }
+        /* Ensure prose code doesn't get extra quotes */
+        .prose code::before, .prose code::after { content: none !important; }
+        .loader { border: 3px solid theme('colors.secondary.200'); border-top: 3px solid theme('colors.primary.DEFAULT'); border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; }
         .dark .loader { border-color: theme('colors.secondary.700'); border-top-color: theme('colors.primary.light');}
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         textarea { scrollbar-width: thin; scrollbar-color: theme('colors.secondary.400') transparent; }
         .dark textarea { scrollbar-color: theme('colors.secondary.600') transparent; }
-        .think-block details { background-color: theme('colors.warning.DEFAULT / 10%'); border: 1px solid theme('colors.warning.DEFAULT / 30%'); border-radius: 6px; margin: 0.5em 0; }
+        .think-block details { background-color: theme('colors.warning.DEFAULT / 10%'); border: 1px solid theme('colors.warning.DEFAULT / 30%'); border-radius: 4px; margin: 0.5em 0; }
         .dark .think-block details { background-color: theme('colors.warning.dark / 15%'); border-color: theme('colors.warning.dark / 40%');}
-        .think-block summary { cursor: pointer; padding: 0.35em 0.7em; font-style: italic; color: theme('colors.secondary.500'); list-style-position: inside; font-weight: 500; }
+        .think-block summary { cursor: pointer; padding: 0.25em 0.5em; font-style: italic; color: theme('colors.secondary.500'); list-style-position: inside; }
         .dark .think-block summary { color: theme('colors.secondary.400'); }
         .think-block summary::marker { font-size: 0.8em; }
         .think-block summary:focus { outline: none; box-shadow: 0 0 0 2px theme('colors.primary.DEFAULT / 50%'); }
-        .think-block div { padding: 0.5em 0.7em; font-size: 0.9em; white-space: pre-wrap; color: theme('colors.secondary.600'); border-top: 1px dashed theme('colors.warning.DEFAULT / 30%'); margin-top: 0.25em; }
+        .think-block div { padding: 0.5em; font-size: 0.9em; white-space: pre-wrap; color: theme('colors.secondary.600'); border-top: 1px dashed theme('colors.warning.DEFAULT / 30%'); margin-top: 0.25em; }
         .dark .think-block div { color: theme('colors.secondary.300'); border-top-color: theme('colors.warning.dark / 40%'); }
-        .message-actions { display: none; position: absolute; bottom: 4px; opacity: 0; transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out; z-index: 10; transform: translateY(5px); }
-        .message-bubble-outer:hover .message-actions { display: flex; opacity: 0.9; transform: translateY(0); }
+        .message-actions { display: none; position: absolute; bottom: 2px; opacity: 0.8; transition: opacity 0.15s ease-in-out; z-index:10; }
+        .message-bubble-outer:hover .message-actions { display: flex; }
         .message-actions:hover { opacity: 1; }
-        .user-message .message-actions { right: 4px; }
-        .assistant-message .message-actions { left: 4px; }
-        .modal-backdrop { background-color: rgba(0, 0, 0, 0.6); backdrop-filter: blur(5px); }
-        *:focus-visible { outline: 2px solid theme('colors.primary.DEFAULT'); outline-offset: 2px; border-radius: 4px;}
+        .user-message .message-actions { right: -2px; }
+        .assistant-message .message-actions { left: -2px; }
+        .modal-backdrop { background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px); }
+        *:focus-visible { outline: 2px solid theme('colors.primary.DEFAULT'); outline-offset: 2px; border-radius: 2px;}
         .dark *:focus-visible { outline-color: theme('colors.primary.light'); }
-
+        .prose :where(code):not(:where([class~="not-prose"] *)) { padding: 0.2em 0.4em; margin: 0; font-size: 85%; border-radius: 3px; background-color: theme('colors.secondary.100'); font-weight: 500; }
+        .dark .prose :where(code):not(:where([class~="not-prose"] *)) { background-color: theme('colors.secondary.800'); }
+        .prose pre code { background-color: transparent !important; padding: 0 !important; margin: 0 !important; font-size: inherit !important; border-radius: 0 !important; } /* Reset nested code styles in pre */
         .send-button-loading { animation: pulseBg 1.5s infinite ease-in-out; cursor: not-allowed; }
         .send-button-loading svg:not(.loader) { display: none; }
-        .send-button-loading .loader { display: inline-block !important; }
-        .initial-load-spinner {
-            border: 4px solid theme('colors.secondary.300');
-            border-top-color: theme('colors.primary.DEFAULT');
-            width: 40px; height: 40px;
-        }
-        .dark .initial-load-spinner {
-            border-color: theme('colors.secondary.600');
-            border-top-color: theme('colors.primary.light');
-        }
-        .image-preview-container { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-        .image-preview-item { position: relative; }
-        .image-preview-item img { max-height: 60px; max-width: 80px; border-radius: 4px; border: 1px solid theme('colors.secondary.300'); object-fit: cover; }
-        .dark .image-preview-item img { border-color: theme('colors.secondary.600'); }
-        .remove-image-btn {
-            position: absolute; top: -6px; right: -6px; background-color: theme('colors.danger.DEFAULT'); color: white;
-            border-radius: 50%; width: 18px; height: 18px; font-size: 11px; line-height: 16px; text-align: center;
-            cursor: pointer; border: 2px solid white; box-shadow: 0 1px 2px rgba(0,0,0,0.2); display: flex; justify-content: center; align-items: center;
-        }
-        .remove-image-btn:hover { background-color: theme('colors.danger.dark'); }
-
-        .sender-label {
-            font-size: 0.75rem; /* text-xs */
-            font-weight: 600; /* font-semibold */
-            margin-bottom: 0.25rem; /* mb-1 */
-            color: theme('colors.secondary.500');
-        }
-        .dark .sender-label { color: theme('colors.secondary.400'); }
-        .user-message .sender-label { text-align: right; margin-right: 0.5rem; /* Adjust as needed */ }
-        .assistant-message .sender-label { text-align: left; margin-left: 0.5rem; /* Adjust as needed */ }
-
+        .send-button-loading .loader { display: block !important; }
+        .initial-load-spinner { border: 4px solid theme('colors.secondary.300'); border-top-color: theme('colors.primary.DEFAULT'); width: 40px; height: 40px; }
+        .dark .initial-load-spinner { border-color: theme('colors.secondary.600'); border-top-color: theme('colors.primary.light'); }
+        .sidebar-item-actions { display: flex; opacity: 0; transition: opacity 0.15s ease-in-out; }
+        li.group:hover .sidebar-item-actions { opacity: 1; }
+        li.group.is-active .sidebar-item-actions { opacity: 1; } /* Show actions always on active */
+        .star-icon.starred { color: theme('colors.star.DEFAULT'); fill: theme('colors.star.DEFAULT'); }
+        .star-icon.unstarred { color: theme('colors.secondary.500'); }
+        .star-icon.unstarred:hover { color: theme('colors.star.DEFAULT'); }
+        li.is-starred { /* Optional: Add visual cue for starred items */ font-weight: 500; }
+        /* Ensure scrollbar in modals */
+        .modal-scroll-content { max-height: 60vh; /* Adjust as needed */ overflow-y: auto; }
     </style>
 </head>
 <body class="bg-secondary-100 dark:bg-secondary-900 text-secondary-900 dark:text-secondary-100 font-sans antialiased overflow-hidden">
 
+    <!-- Login Screen -->
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
         <div class="bg-white dark:bg-secondary-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-sm animate-fade-in">
             <div class="text-center mb-6">
@@ -212,89 +110,96 @@
             </form>
         </div>
     </div>
-    
+
+    <!-- Initial Loading Overlay (after login, before app is ready) -->
     <div id="initial-loading-overlay" class="fixed inset-0 z-[60] flex flex-col items-center justify-center p-4 modal-backdrop hidden">
         <div class="initial-load-spinner loader animate-spin rounded-full"></div>
         <p class="mt-4 text-white text-lg" data-i18n="initializingApp">Initializing Application...</p>
     </div>
 
-    <div id="app-container" class="flex h-screen hidden">
+
+    <!-- Main Application Container -->
+    <div id="app-container" class="flex h-screen hidden"> <!-- Initially hidden -->
+        <!-- Sidebar -->
         <aside id="sidebar" class="w-64 sm:w-72 bg-secondary-800 dark:bg-secondary-950 text-secondary-300 flex flex-col p-3 sm:p-4 border-r border-secondary-700 dark:border-secondary-800 shadow-lg shrink-0">
             <img src="/logo.png" alt="Logo" class="mx-auto h-10 w-auto mb-4">
             <div id="user-info" class="p-2 text-center text-sm mb-3">
                 <span data-i18n="welcomeMessage">Welcome</span>, <span id="user-display-name" class="font-semibold text-primary-light">User</span>!
             </div>
-            <button id="new-discussion-btn" class="w-full flex items-center justify-center space-x-2 bg-primary hover:bg-primary-dark text-white font-medium py-2 px-3 rounded-lg transition duration-150 mb-3 text-sm shadow hover:shadow-md">
+            <button id="new-discussion-btn" class="w-full flex items-center justify-center space-x-2 bg-primary hover:bg-primary-dark text-white font-medium py-2 px-3 rounded-lg transition duration-150 mb-3 text-sm">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 <span data-i18n="newDiscussionButton">New Discussion</span>
             </button>
-            <h2 class="text-xs font-semibold uppercase text-secondary-500 dark:text-secondary-400 pt-2 pb-1 px-1 tracking-wider" data-i18n="discussionsTitle">Discussions</h2>
+            <h2 class="text-xs font-semibold uppercase text-secondary-500 dark:text-secondary-400 pt-2 pb-1 px-1" data-i18n="discussionsTitle">Discussions</h2>
             <div id="discussion-list-container" class="flex-grow overflow-y-auto space-y-1 -mr-2 pr-2">
                  <ul id="discussion-list"></ul>
                  <p id="discussion-list-loader" class="text-center text-xs text-secondary-400 hidden" data-i18n="loadingDiscussions">Loading discussions...</p>
             </div>
-            <div class="mt-auto pt-4 space-y-2 border-t border-secondary-700 dark:border-secondary-800">
-                 <button id="file-manager-btn" class="w-full flex items-center justify-start space-x-3 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-850 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+            <!-- Bottom Buttons -->
+            <div class="mt-auto pt-3 space-y-2 border-t border-secondary-700 dark:border-secondary-800">
+                 <button id="file-manager-btn" class="w-full flex items-center justify-center space-x-2 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-800 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                     <span data-i18n="fileManagerButton">File Manager</span>
                 </button>
-                 <button id="settings-btn" class="w-full flex items-center justify-start space-x-3 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-850 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826 3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                 <button id="settings-btn" class="w-full flex items-center justify-center space-x-2 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-800 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826 3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                     <span data-i18n="settingsMenu">Settings</span>
                 </button>
-                <button id="export-discussions-btn-modal-trigger" class="w-full flex items-center justify-start space-x-3 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-850 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                    <span data-i18n="exportDiscussionsButton">Export Data</span>
-                </button>
-                 <button id="theme-toggle-btn" class="w-full flex items-center justify-start space-x-3 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-850 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
-                    <svg class="w-4 h-4 block dark:hidden shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
-                    <svg class="w-4 h-4 hidden dark:block shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                 <!-- Data Management Buttons -->
+                 <div class="flex gap-1">
+                     <button id="export-discussions-btn-modal-trigger" class="flex-1 flex items-center justify-center space-x-1 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-800 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-2 rounded-md transition duration-150" data-i18n-title="exportDiscussionsTooltip">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        <span data-i18n="exportDataButton">Export</span>
+                    </button>
+                    <button id="import-discussions-btn-modal-trigger" class="flex-1 flex items-center justify-center space-x-1 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-800 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-2 rounded-md transition duration-150" data-i18n-title="importDiscussionsTooltip">
+                       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4 8l-4-4m0 0l-4-4m4-4v12"></path></svg>
+                        <span data-i18n="importDataButton">Import</span>
+                    </button>
+                 </div>
+                 <button id="theme-toggle-btn" class="w-full flex items-center justify-center space-x-2 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-800 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
+                    <svg class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                    <svg class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
                     <span data-i18n="toggleTheme">Toggle Theme</span>
                 </button>
-                 <button id="admin-btn" class="w-full flex items-center justify-start space-x-3 bg-yellow-500 hover:bg-yellow-600 dark:bg-yellow-600 dark:hover:bg-yellow-700 text-white text-xs py-2 px-3 rounded-md transition duration-150 hidden">
-                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                    <span data-i18n="adminButton">Admin Panel</span>
-                </button>
-                <button id="logout-btn" class="w-full flex items-center justify-start space-x-3 bg-danger/80 hover:bg-danger text-white text-xs py-2 px-3 rounded-md transition duration-150 mt-2">
-                   <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                <button id="logout-btn" class="w-full flex items-center justify-center space-x-2 bg-danger/80 hover:bg-danger text-white text-xs py-2 px-3 rounded-md transition duration-150">
+                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                     <span data-i18n="logoutButton">Logout</span>
                 </button>
             </div>
         </aside>
 
+        <!-- Main Chat Area -->
         <main id="main-content" class="flex-grow flex flex-col bg-white dark:bg-secondary-900 overflow-hidden">
-            <div id="chat-header" class="p-3 sm:p-4 border-b border-secondary-200 dark:border-secondary-800 text-base sm:text-lg font-semibold text-secondary-700 dark:text-secondary-200 flex items-center justify-between shrink-0 shadow-sm">
+            <!-- Chat Header -->
+            <div id="chat-header" class="p-3 sm:p-4 border-b border-secondary-200 dark:border-secondary-800 text-base sm:text-lg font-semibold text-secondary-700 dark:text-secondary-200 flex items-center justify-between shrink-0">
                 <span id="chat-title-text" class="truncate mr-2" data-i18n="selectDiscussionPrompt">Select a discussion...</span>
-                <button id="edit-chat-title-btn" class="ml-2 p-1.5 text-secondary-500 hover:text-primary dark:hover:text-primary-light focus:outline-none rounded-md hidden transition-colors" data-i18n-title="editTitleTooltip">
+                <button id="edit-chat-title-btn" class="ml-2 p-1.5 text-secondary-500 hover:text-primary dark:hover:text-primary-light focus:outline-none rounded-md hidden" data-i18n-title="editTitleTooltip">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                 </button>
             </div>
-            <div id="chat-messages" class="flex-grow p-3 sm:p-4 md:p-6 space-y-4 overflow-y-auto bg-secondary-50 dark:bg-secondary-850">
+            <!-- Chat Messages Area -->
+            <div id="chat-messages" class="flex-grow p-3 sm:p-4 md:p-6 space-y-4 overflow-y-auto">
+                <!-- Messages will be rendered here -->
                  <p id="chat-messages-placeholder" class="text-center text-secondary-500 dark:text-secondary-400" data-i18n="noMessagesYet">No messages yet. Start the conversation!</p>
             </div>
-            <div class="p-3 sm:p-4 border-t border-secondary-200 dark:border-secondary-800 bg-secondary-100 dark:bg-secondary-900 shrink-0">
-                <div id="image-preview-area" class="image-preview-container mb-2 hidden">
-                </div>
+            <!-- Chat Input Area -->
+            <div class="p-3 sm:p-4 border-t border-secondary-200 dark:border-secondary-800 bg-secondary-50 dark:bg-secondary-850 shrink-0">
                 <div class="flex items-end space-x-2 sm:space-x-3">
-                    <button id="image-upload-btn" title="Attach Images" class="p-2.5 text-secondary-500 hover:text-primary dark:hover:text-primary-light rounded-lg border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-700 hover:bg-secondary-50 dark:hover:bg-secondary-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                    </button>
-                    <input type="file" id="image-upload-input" accept="image/*" multiple class="hidden">
-                    
                     <textarea id="message-input" class="flex-grow p-2.5 sm:p-3 text-sm sm:text-base border border-secondary-300 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent dark:bg-secondary-700 resize-none transition-shadow shadow-sm focus:shadow-md" rows="1" data-i18n-placeholder="typeYourMessage" disabled></textarea>
-                    <button id="send-button" class="bg-primary hover:bg-primary-dark text-white font-semibold p-2.5 sm:p-3 rounded-xl flex items-center justify-center transition duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary-light dark:focus-visible:ring-offset-secondary-900 disabled:opacity-50 disabled:cursor-not-allowed shadow hover:shadow-md" disabled>
+                    <button id="send-button" class="bg-primary hover:bg-primary-dark text-white font-semibold p-2.5 sm:p-3 rounded-xl flex items-center justify-center transition duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary-light dark:focus-visible:ring-offset-secondary-850 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                         <svg class="w-5 h-5 icon-send" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-                         <div class="loader w-5 h-5 hidden" style="border-width: 2px;"></div>
+                        <svg id="send-loader" class="loader w-5 h-5 hidden" style="border-width: 2px;" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"></svg>
                     </button>
                 </div>
                 <div id="rag-toggle-container" class="mt-2.5 flex items-center" style="display: none;">
-                    <input type="checkbox" id="use-rag-checkbox" class="h-4 w-4 text-primary border-secondary-300 dark:border-secondary-600 rounded focus:ring-primary dark:bg-secondary-700 focus:ring-offset-0 dark:focus:ring-offset-secondary-900">
+                    <input type="checkbox" id="use-rag-checkbox" class="h-4 w-4 text-primary border-secondary-300 dark:border-secondary-600 rounded focus:ring-primary dark:bg-secondary-700 focus:ring-offset-0 dark:focus:ring-offset-secondary-850">
                     <label for="use-rag-checkbox" class="ml-2 text-xs sm:text-sm text-secondary-600 dark:text-secondary-300 select-none cursor-pointer" data-i18n="ragToggleLabel">Use RAG</label>
                 </div>
             </div>
         </main>
     </div>
 
+    <!-- Settings Modal -->
     <div id="settings-modal" class="fixed inset-0 z-40 flex items-center justify-center p-4 hidden modal-backdrop animate-fade-in">
         <div class="bg-white dark:bg-secondary-800 p-5 sm:p-6 rounded-xl shadow-2xl w-full max-w-lg space-y-4 sm:space-y-5 transform transition-all max-h-[90vh] overflow-y-auto animate-slide-in">
             <div class="flex justify-between items-center pb-3 border-b border-secondary-200 dark:border-secondary-700">
@@ -307,25 +212,28 @@
                  <div>
                     <label for="language-select" class="block text-xs sm:text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1" data-i18n="languageLabel">Language</label>
                     <select id="language-select" class="w-full p-2 text-sm border border-secondary-300 dark:border-secondary-600 rounded-md focus:ring-1 focus:ring-primary focus:border-primary dark:bg-secondary-700">
-                        <option value="en">English</option><option value="fr">Français</option>
+                        <option value="en">English</option>
+                        <option value="fr">Français</option>
+                        <!-- Add other languages here -->
                     </select>
                 </div>
                  <div>
                     <label for="lollms-model-select" class="block text-xs sm:text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1" data-i18n="lollmsModelLabel">LoLLMs Model:</label>
                     <select id="lollms-model-select" class="w-full p-2 text-sm border border-secondary-300 dark:border-secondary-600 rounded-md focus:ring-1 focus:ring-primary focus:border-primary dark:bg-secondary-700"></select>
-                    <button id="set-lollms-model-btn" class="mt-1.5 w-full bg-primary/80 hover:bg-primary text-white py-1.5 rounded-md text-xs font-medium shadow-sm hover:shadow" data-i18n="setModelButton">Set Model</button>
+                    <button id="set-lollms-model-btn" class="mt-1.5 w-full bg-primary/80 hover:bg-primary text-white py-1.5 rounded-md text-xs" data-i18n="setModelButton">Set Model</button>
                 </div>
                  <div>
                     <label for="vectorizer-select" class="block text-xs sm:text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1" data-i18n="activeVectorizerLabel">Active RAG Vectorizer:</label>
                     <select id="vectorizer-select" class="w-full p-2 text-sm border border-secondary-300 dark:border-secondary-600 rounded-md focus:ring-1 focus:ring-primary focus:border-primary dark:bg-secondary-700"></select>
                     <input type="text" id="new-vectorizer-name" data-i18n-placeholder="newVectorizerPlaceholder" class="mt-1.5 w-full p-2 text-sm border border-secondary-300 dark:border-secondary-600 rounded-md focus:ring-1 focus:ring-primary focus:border-primary dark:bg-secondary-700 placeholder-secondary-400 dark:placeholder-secondary-500">
-                    <button id="set-vectorizer-btn" class="mt-1.5 w-full bg-accent/80 hover:bg-accent text-white py-1.5 rounded-md text-xs font-medium shadow-sm hover:shadow" data-i18n="setVectorizerButton">Set Active Vectorizer</button>
+                    <button id="set-vectorizer-btn" class="mt-1.5 w-full bg-accent/80 hover:bg-accent text-white py-1.5 rounded-md text-xs" data-i18n="setVectorizerButton">Set Active Vectorizer</button>
                 </div>
                  <p id="settings-status" class="text-xs text-center text-secondary-600 dark:text-secondary-400 min-h-[1rem]"></p>
             </div>
         </div>
     </div>
 
+    <!-- File Manager Modal -->
      <div id="file-manager-modal" class="fixed inset-0 z-40 flex items-center justify-center p-4 hidden modal-backdrop animate-fade-in">
         <div class="bg-white dark:bg-secondary-800 p-5 sm:p-6 rounded-xl shadow-2xl w-full max-w-xl space-y-4 sm:space-y-5 transform transition-all max-h-[90vh] flex flex-col animate-slide-in">
             <div class="flex justify-between items-center pb-3 border-b border-secondary-200 dark:border-secondary-700 shrink-0">
@@ -334,21 +242,21 @@
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                  </button>
             </div>
-            <div id="rag-file-list-container" class="flex-grow overflow-y-auto border border-secondary-300 dark:border-secondary-600 rounded-md p-2 min-h-[150px]">
+            <div id="rag-file-list-container" class="flex-grow overflow-y-auto border border-secondary-300 dark:border-secondary-600 rounded-md p-2 min-h-[150px] modal-scroll-content">
                 <ul id="rag-file-list" class="space-y-1"></ul>
                 <p id="rag-list-loader" class="text-center text-xs text-secondary-400 hidden" data-i18n="loadingFiles">Loading files...</p>
             </div>
              <div class="pt-3 border-t border-secondary-200 dark:border-secondary-700 shrink-0 space-y-2">
                  <label class="block text-xs sm:text-sm font-medium text-secondary-700 dark:text-secondary-300" data-i18n="addDocumentLabel">Add Document(s)/Folder:</label>
                  <div class="flex flex-col sm:flex-row gap-2">
-                    <input type="file" id="file-upload-input-fm" multiple class="flex-grow text-xs sm:text-sm text-secondary-500 dark:text-secondary-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/80 file:text-white hover:file:bg-primary file:cursor-pointer dark:file:bg-secondary-600 dark:file:text-secondary-200 dark:hover:file:bg-secondary-500 border border-secondary-300 dark:border-secondary-600 rounded-md">
+                    <input type="file" id="file-upload-input" multiple class="flex-grow text-xs sm:text-sm text-secondary-500 dark:text-secondary-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/80 file:text-white hover:file:bg-primary file:cursor-pointer dark:file:bg-secondary-600 dark:file:text-secondary-200 dark:hover:file:bg-secondary-500 border border-secondary-300 dark:border-secondary-600 rounded-md">
                      <input type="file" id="folder-upload-input" webkitdirectory directory style="display:none;">
-                    <button id="upload-folder-btn" class="shrink-0 bg-blue-500 hover:bg-blue-600 text-white py-1.5 px-3 rounded-md text-xs flex items-center justify-center gap-1 shadow-sm hover:shadow" data-i18n-title="uploadFolderTooltip">
+                    <button id="upload-folder-btn" class="shrink-0 bg-blue-500 hover:bg-blue-600 text-white py-1.5 px-3 rounded-md text-xs flex items-center justify-center gap-1" data-i18n-title="uploadFolderTooltip">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                         <span data-i18n="uploadFolderButton">Folder</span>
                     </button>
                 </div>
-                <button id="upload-document-btn" class="w-full bg-accent hover:bg-accent-dark text-white py-1.5 rounded-md text-xs flex items-center justify-center gap-1 font-medium shadow hover:shadow-md" data-i18n="uploadDocumentButton">
+                <button id="upload-document-btn" class="w-full bg-accent hover:bg-accent-dark text-white py-1.5 rounded-md text-xs flex items-center justify-center gap-1" data-i18n="uploadDocumentButton">
                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
                     <span>Upload Selected File(s)</span>
                 </button>
@@ -357,6 +265,7 @@
         </div>
     </div>
 
+    <!-- Export Discussions Modal -->
     <div id="export-modal" class="fixed inset-0 z-40 flex items-center justify-center p-4 hidden modal-backdrop animate-fade-in">
         <div class="bg-white dark:bg-secondary-800 p-5 sm:p-6 rounded-xl shadow-2xl w-full max-w-lg space-y-4 sm:space-y-5 transform transition-all max-h-[90vh] flex flex-col animate-slide-in">
             <div class="flex justify-between items-center pb-3 border-b border-secondary-200 dark:border-secondary-700 shrink-0">
@@ -365,7 +274,7 @@
                     <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div id="export-discussion-list-container" class="flex-grow overflow-y-auto border border-secondary-300 dark:border-secondary-600 rounded-md p-3 min-h-[200px]">
+            <div id="export-discussion-list-container" class="flex-grow overflow-y-auto border border-secondary-300 dark:border-secondary-600 rounded-md p-3 min-h-[200px] modal-scroll-content">
                 <div id="export-discussion-list-loader" class="text-center hidden"><span class="loader"></span> <span data-i18n="loadingDiscussions">Loading...</span></div>
                 <ul id="export-discussion-list" class="space-y-1"></ul>
             </div>
@@ -375,13 +284,49 @@
                     <span class="mx-1 text-xs text-secondary-400">|</span>
                     <button id="export-select-none-btn" class="text-xs text-primary hover:underline" data-i18n="selectNone">Select None</button>
                 </div>
-                <button id="confirm-export-btn" class="bg-accent hover:bg-accent-dark text-white font-semibold py-2 px-4 rounded-lg text-sm shadow hover:shadow-md" data-i18n="exportSelectedButton">Export Selected</button>
+                <button id="confirm-export-btn" class="bg-accent hover:bg-accent-dark text-white font-semibold py-2 px-4 rounded-lg text-sm" data-i18n="exportSelectedButton">Export Selected</button>
             </div>
              <p id="export-status" class="text-xs text-center text-secondary-600 dark:text-secondary-400 min-h-[1rem]"></p>
         </div>
     </div>
 
+    <!-- Import Discussions Modal -->
+    <div id="import-modal" class="fixed inset-0 z-40 flex items-center justify-center p-4 hidden modal-backdrop animate-fade-in">
+        <div class="bg-white dark:bg-secondary-800 p-5 sm:p-6 rounded-xl shadow-2xl w-full max-w-xl space-y-4 sm:space-y-5 transform transition-all max-h-[90vh] flex flex-col animate-slide-in">
+            <div class="flex justify-between items-center pb-3 border-b border-secondary-200 dark:border-secondary-700 shrink-0">
+                <h3 class="text-lg sm:text-xl font-semibold" data-i18n="importDiscussionsTitle">Import Discussions</h3>
+                <button id="close-import-modal-btn" class="text-secondary-400 hover:text-secondary-600 dark:hover:text-secondary-300 p-1 rounded-full">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div class="space-y-3">
+                <div>
+                    <label for="import-file-input" class="block text-xs sm:text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1" data-i18n="selectImportFileLabel">Select JSON Export File:</label>
+                    <input type="file" id="import-file-input" accept=".json,application/json" class="w-full text-xs sm:text-sm text-secondary-500 dark:text-secondary-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/80 file:text-white hover:file:bg-primary file:cursor-pointer dark:file:bg-secondary-600 dark:file:text-secondary-200 dark:hover:file:bg-secondary-500 border border-secondary-300 dark:border-secondary-600 rounded-md">
+                </div>
+                <div id="import-preview-section" class="hidden">
+                    <label class="block text-xs sm:text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1" data-i18n="selectDiscussionsToImportLabel">Select Discussions to Import:</label>
+                    <div id="import-preview-list-container" class="flex-grow overflow-y-auto border border-secondary-300 dark:border-secondary-600 rounded-md p-3 min-h-[200px] modal-scroll-content">
+                        <div id="import-preview-loader" class="text-center hidden"><span class="loader"></span> <span data-i18n="loadingPreview">Parsing file...</span></div>
+                        <ul id="import-preview-list" class="space-y-1"></ul>
+                    </div>
+                    <div class="flex justify-between items-center pt-2">
+                        <div>
+                            <button id="import-select-all-btn" class="text-xs text-primary hover:underline" data-i18n="selectAll">Select All</button>
+                            <span class="mx-1 text-xs text-secondary-400">|</span>
+                            <button id="import-select-none-btn" class="text-xs text-primary hover:underline" data-i18n="selectNone">Select None</button>
+                        </div>
+                        <button id="confirm-import-btn" class="bg-accent hover:bg-accent-dark text-white font-semibold py-2 px-4 rounded-lg text-sm" data-i18n="importSelectedButton">Import Selected</button>
+                    </div>
+                </div>
+            </div>
+            <p id="import-status" class="text-xs text-center text-secondary-600 dark:text-secondary-400 min-h-[1rem]"></p>
+        </div>
+    </div>
+
+
 <script>
+    // --- DOM Element References ---
     const $ = (selector) => document.getElementById(selector);
     const loginScreen = $('login-screen'), loginFormTag = $('login-form-tag'),
           loginButton = $('login-button'), loginSpinner = $('login-spinner'), loginError = $('login-error'),
@@ -389,55 +334,67 @@
     const initialLoadingOverlay = $('initial-loading-overlay');
     const appContainer = $('app-container'), sidebar = $('sidebar'),
           mainContent = $('main-content'), userDisplayName = $('user-display-name');
-    const discussionListContainer = $('discussion-list-container'), 
+    const discussionListContainer = $('discussion-list-container'),
           discussionList = $('discussion-list'), discussionListLoader = $('discussion-list-loader'),
           newDiscussionBtn = $('new-discussion-btn'),
-          exportDiscussionsBtnModalTrigger = $('export-discussions-btn-modal-trigger'), 
-          settingsBtn = $('settings-btn'), fileManagerBtn = $('file-manager-btn'), 
-          themeToggleBtn = $('theme-toggle-btn'), logoutBtn = $('logout-btn'), adminBtn = $('admin-btn');
+          exportDiscussionsBtnModalTrigger = $('export-discussions-btn-modal-trigger'),
+          importDiscussionsBtnModalTrigger = $('import-discussions-btn-modal-trigger'), // New
+          settingsBtn = $('settings-btn'), fileManagerBtn = $('file-manager-btn'),
+          themeToggleBtn = $('theme-toggle-btn'), logoutBtn = $('logout-btn');
     const chatHeader = $('chat-header'), chatTitleText = $('chat-title-text'),
           editChatTitleBtn = $('edit-chat-title-btn'), chatMessages = $('chat-messages'),
           chatMessagesPlaceholder = $('chat-messages-placeholder'),
           messageInput = $('message-input'), sendButton = $('send-button'),
           sendLoader = $('send-loader'), useRagCheckbox = $('use-rag-checkbox'),
           ragToggleContainer = $('rag-toggle-container');
-    const imageUploadBtn = $('image-upload-btn'), imageUploadInput = $('image-upload-input'),
-          imagePreviewArea = $('image-preview-area');
+    // Settings Modal
     const settingsModal = $('settings-modal'), closeSettingsBtn = $('close-settings-btn'),
           languageSelect = $('language-select'), lollmsModelSelect = $('lollms-model-select'),
           setLollmsModelBtn = $('set-lollms-model-btn'), vectorizerSelect = $('vectorizer-select'),
           newVectorizerNameInput = $('new-vectorizer-name'), setVectorizerBtn = $('set-vectorizer-btn'),
           settingsStatus = $('settings-status');
+    // File Manager Modal
     const fileManagerModal = $('file-manager-modal'), closeFileManagerBtn = $('close-file-manager-btn'),
-          fileUploadInputFM = $('file-upload-input-fm'),
-          folderUploadInput = $('folder-upload-input'),
+          fileUploadInput = $('file-upload-input'), folderUploadInput = $('folder-upload-input'),
           uploadFolderBtn = $('upload-folder-btn'), uploadDocumentBtn = $('upload-document-btn'),
           uploadStatus = $('upload-status'), ragFileList = $('rag-file-list'), ragListLoader = $('rag-list-loader');
+    // Export Modal
     const exportModal = $('export-modal'), closeExportModalBtn = $('close-export-modal-btn'),
           exportDiscussionListContainer = $('export-discussion-list-container'),
           exportDiscussionList = $('export-discussion-list'), exportDiscussionListLoader = $('export-discussion-list-loader'),
           exportSelectAllBtn = $('export-select-all-btn'), exportSelectNoneBtn = $('export-select-none-btn'),
           confirmExportBtn = $('confirm-export-btn'), exportStatus = $('export-status');
+    // Import Modal (New)
+    const importModal = $('import-modal'), closeImportModalBtn = $('close-import-modal-btn'),
+          importFileInput = $('import-file-input'),
+          importPreviewSection = $('import-preview-section'),
+          importPreviewListContainer = $('import-preview-list-container'),
+          importPreviewLoader = $('import-preview-loader'), importPreviewList = $('import-preview-list'),
+          importSelectAllBtn = $('import-select-all-btn'), importSelectNoneBtn = $('import-select-none-btn'),
+          confirmImportBtn = $('confirm-import-btn'), importStatus = $('import-status');
+    let selectedImportFile = null; // Store the selected file for FormData
 
+
+    // --- Application State ---
     let currentAuth = null;
     let currentDiscussionId = null;
-    let currentUserDetails = null; 
+    let currentUserDetails = null;
     let currentLanguage = localStorage.getItem('preferredLanguage') || navigator.language.split('-')[0] || 'en';
     let translations = {};
     let isSendingMessage = false;
-    let attachedImageFiles = []; 
-    let codeMirrorInstances = {}; // To manage CM instances for debounce/updates
+    let discussionsDataCache = []; // Cache for discussion list data (incl. starred status)
 
-
+    // --- API Request Helper ---
     async function apiRequest(url, options = {}) {
         if (!currentAuth && !url.startsWith('./locales/')) {
             console.error("Authentication token not set for API request to:", url);
             showFlashMessage(t('authError') || "Authentication error. Please log in again.", 'error');
-            showLoginScreen(); 
+            showLoginScreen();
             throw new Error("Not authenticated for API request.");
         }
 
         const defaultHeaders = {};
+        // Content-Type is automatically set by browser for FormData
         if (!(options.body instanceof FormData) && !url.startsWith('./locales/')) {
             defaultHeaders['Content-Type'] = 'application/json';
         }
@@ -446,10 +403,13 @@
         }
 
         const mergedOptions = { ...options, headers: { ...defaultHeaders, ...options.headers } };
-        if (mergedOptions.body && !(mergedOptions.body instanceof FormData) && mergedOptions.headers['Content-Type'] === 'application/json') {
+
+        // Only stringify if Content-Type is explicitly JSON and body is not FormData
+        if (mergedOptions.body && !(mergedOptions.body instanceof FormData) &&
+            mergedOptions.headers['Content-Type'] === 'application/json') {
             mergedOptions.body = JSON.stringify(mergedOptions.body);
         }
-        
+
         try {
             const response = await fetch(url, mergedOptions);
             if (response.status === 401 && !url.startsWith('./locales/')) {
@@ -467,23 +427,33 @@
         }
     }
 
+    // --- Translation Helpers ---
     async function loadTranslations(lang) {
         try {
-            const response = await apiRequest(`./locales/${lang}.json`);
-            if (!response.ok) throw new Error(`Failed to load ${lang}.json`);
+            // Try fetching locale, fall back to English
+            let response = await fetch(`./locales/${lang}.json`);
+            if (!response.ok && lang !== 'en') {
+                console.warn(`Locale ${lang}.json not found, falling back to en.json`);
+                response = await fetch(`./locales/en.json`);
+            }
+            if (!response.ok) {
+                 throw new Error(`Failed to load en.json`);
+            }
+
             translations = await response.json();
-            currentLanguage = lang;
-            localStorage.setItem('preferredLanguage', lang);
+            currentLanguage = response.url.includes('/en.json') ? 'en' : lang; // Update language based on loaded file
+            localStorage.setItem('preferredLanguage', currentLanguage);
+            languageSelect.value = currentLanguage; // Ensure select reflects loaded language
             applyTranslations();
-            document.documentElement.lang = lang;
         } catch (error) {
             console.error('Error loading translations:', error);
-            if (lang !== 'en') await loadTranslations('en'); 
+            translations = {}; // Clear potentially partial translations
+            // Optionally show an error to the user
         }
     }
 
     function t(key, params = {}) {
-        let text = translations[key] || key; 
+        let text = translations[key] || key; // Fallback to key if translation missing
         for (const param in params) {
             text = text.replace(new RegExp(`{${param}}`, 'g'), params[param]);
         }
@@ -500,8 +470,9 @@
         document.querySelectorAll('[data-i18n-title]').forEach(el => {
             el.title = t(el.dataset.i18nTitle);
         });
-        document.title = t('appTitle'); 
+        document.title = t('appTitle');
 
+        // Update dynamic elements
         if (chatTitleText && !currentDiscussionId) chatTitleText.textContent = t('selectDiscussionPrompt');
         if (chatMessagesPlaceholder && chatMessages.children.length === 1 && chatMessages.firstChild === chatMessagesPlaceholder) {
             chatMessagesPlaceholder.textContent = t('noMessagesYet');
@@ -510,19 +481,22 @@
              discussionList.innerHTML = `<li class="text-center text-xs text-secondary-400 p-2">${t('noDiscussionsFound')}</li>`;
         }
         messageInput.disabled = !currentDiscussionId || isSendingMessage;
-        sendButton.disabled = !currentDiscussionId || isSendingMessage || (!messageInput.value.trim() && attachedImageFiles.length === 0);
+        sendButton.disabled = !currentDiscussionId || isSendingMessage;
+        // Update tooltips/labels added dynamically if necessary
     }
 
     languageSelect.addEventListener('change', (e) => loadTranslations(e.target.value));
 
+
+    // --- UI Helpers ---
     function showFlashMessage(message, type = 'info', duration = 5000) {
         const flashDiv = document.createElement('div');
-        let bgColor = 'bg-primary text-white'; 
+        let bgColor = 'bg-primary text-white'; // default info
         if (type === 'success') bgColor = 'bg-accent text-white';
         else if (type === 'error') bgColor = 'bg-danger text-white';
         else if (type === 'warning') bgColor = 'bg-warning text-secondary-900';
-        
-        flashDiv.className = `fixed bottom-4 right-4 p-3 rounded-lg shadow-lg text-sm z-[100] animate-fade-in ${bgColor}`;
+
+        flashDiv.className = `fixed bottom-4 right-4 p-3 rounded-lg shadow-md text-sm z-[100] animate-fade-in ${bgColor}`;
         flashDiv.textContent = message;
         document.body.appendChild(flashDiv);
         setTimeout(() => {
@@ -536,16 +510,17 @@
         const statusElement = $(elementId);
         if (!statusElement) return;
         statusElement.textContent = message;
-        let textColor = 'text-secondary-600 dark:text-secondary-400'; 
+        let textColor = 'text-secondary-600 dark:text-secondary-400'; // default info
         if (type === 'success') textColor = 'text-accent dark:text-accent-light';
         else if (type === 'error') textColor = 'text-danger dark:text-danger-light';
         else if (type === 'warning') textColor = 'text-warning dark:text-warning-light';
         statusElement.className = `text-xs text-center min-h-[1rem] ${textColor}`;
-        if (duration > 0 && message) { 
+        if (duration > 0 && message) { // If duration is positive, set a timeout to clear
             setTimeout(() => { if (statusElement.textContent === message) statusElement.textContent = ''; }, duration);
-        } else if (!message) { 
+        } else if (!message) { // Clear immediately if message is empty
             statusElement.textContent = '';
         }
+        // If duration <= 0, the message persists until explicitly cleared or updated.
     }
 
      function applyTheme(theme) {
@@ -555,12 +530,6 @@
             document.documentElement.classList.remove('dark');
         }
         localStorage.setItem('theme', theme);
-        document.querySelectorAll('.CodeMirror').forEach(cmWrapper => {
-            const cmInstance = cmWrapper.CodeMirror;
-            if (cmInstance) {
-                cmInstance.setOption("theme", theme === 'dark' ? 'material-darker' : 'default');
-            }
-        });
     }
 
     themeToggleBtn.addEventListener('click', () => {
@@ -568,122 +537,145 @@
         applyTheme(isDark ? 'light' : 'dark');
     });
 
+
+    // --- Authentication ---
     function showLoginScreen() {
-        currentAuth = null; currentUserDetails = null; currentDiscussionId = null;
+        currentAuth = null; currentUserDetails = null; currentDiscussionId = null; discussionsDataCache = [];
         loginScreen.classList.remove('hidden');
         initialLoadingOverlay.classList.add('hidden');
         appContainer.classList.add('hidden');
         settingsModal.classList.add('hidden');
         fileManagerModal.classList.add('hidden');
         exportModal.classList.add('hidden');
+        importModal.classList.add('hidden'); // Hide import modal too
         discussionList.innerHTML = ''; chatMessages.innerHTML = '';
-        chatTitleText.textContent = t('selectDiscussionPrompt'); 
+        chatTitleText.textContent = t('selectDiscussionPrompt');
         editChatTitleBtn.classList.add('hidden');
-        messageInput.disabled = true; sendButton.disabled = true; 
+        messageInput.disabled = true; sendButton.disabled = true;
         usernameInput.value = ''; passwordInput.value = '';
-        loginError.textContent = ''; loginError.classList.add('hidden'); 
+        loginError.textContent = ''; loginError.classList.add('hidden');
         loginButton.disabled = false; loginSpinner.classList.add('hidden');
-        adminBtn.classList.add('hidden'); 
-        clearImagePreviews(); 
+        // Reset import modal state
+        importFileInput.value = '';
+        importPreviewList.innerHTML = '';
+        importPreviewSection.classList.add('hidden');
+        updateStatus('import-status', '', 'info', 0);
+        selectedImportFile = null;
     }
 
     loginFormTag.addEventListener('submit', async (e) => {
-        e.preventDefault(); 
+        e.preventDefault();
         loginButton.disabled = true; loginSpinner.classList.remove('hidden');
         loginError.classList.add('hidden');
-        const usernameVal = usernameInput.value, passwordVal = passwordInput.value;
-        if (!usernameVal || !passwordVal) {
+        const username = usernameInput.value, password = passwordInput.value;
+        if (!username || !password) {
             loginError.textContent = t('credentialsRequiredError'); loginError.classList.remove('hidden');
             loginButton.disabled = false; loginSpinner.classList.add('hidden'); return;
         }
-        currentAuth = btoa(`${usernameVal}:${passwordVal}`);
+        currentAuth = btoa(`${username}:${password}`);
         try {
+            // Ping /me to verify auth and get user details
             const response = await apiRequest('/api/auth/me');
-            if (!response.ok) {
+            if (!response.ok) { // apiRequest handles 401 by calling showLoginScreen
                  const errorData = await response.json().catch(() => ({ detail: t('invalidCredentialsError') }));
                  loginError.textContent = errorData.detail || t('invalidCredentialsError');
                  loginError.classList.remove('hidden');
-                 currentAuth = null; 
+                 currentAuth = null;
                  loginButton.disabled = false; loginSpinner.classList.add('hidden');
-                 return;
+                 return; // Stop further processing
             }
             currentUserDetails = await response.json();
             userDisplayName.textContent = currentUserDetails.username;
-            adminBtn.classList.toggle('hidden', !currentUserDetails.is_admin);
-            
-            loginScreen.classList.add('hidden');
-            initialLoadingOverlay.classList.remove('hidden');
 
-            languageSelect.value = localStorage.getItem('preferredLanguage') || currentUserDetails.language || currentLanguage;
-            await loadTranslations(languageSelect.value);
-            
+            loginScreen.classList.add('hidden');
+            initialLoadingOverlay.classList.remove('hidden'); // Show app loading overlay
+
+            // Determine initial language and load translations
+            const initialLang = localStorage.getItem('preferredLanguage') || currentUserDetails.language || currentLanguage;
+            languageSelect.value = initialLang; // Set dropdown before loading
+            await loadTranslations(initialLang);
+
+            // Load all essential data in parallel
             await Promise.all([
                 loadDiscussions(),
                 loadLollmsModels(),
-                loadStoreVectorizers()
+                loadStoreVectorizers() // This includes fetching active vectorizer
             ]);
-            
+
+            // Update RAG toggle based on loaded active vectorizer
             ragToggleContainer.style.display = currentUserDetails.safe_store_vectorizer ? 'flex' : 'none';
             useRagCheckbox.checked = !!currentUserDetails.safe_store_vectorizer;
 
-            initialLoadingOverlay.classList.add('hidden');
-            appContainer.classList.remove('hidden');      
+            initialLoadingOverlay.classList.add('hidden'); // Hide app loading overlay
+            appContainer.classList.remove('hidden');       // Show main app
 
             chatTitleText.textContent = t('selectDiscussionPrompt');
             editChatTitleBtn.classList.add('hidden');
-            messageInput.disabled = true;
+            messageInput.disabled = true; // Keep disabled until a discussion is selected
             sendButton.disabled = true;
-            updateSendButtonState();
 
             showFlashMessage(t('loginSuccess'), 'success');
 
         } catch (error) {
+            // apiRequest might have already shown an error or called showLoginScreen
             if (!error.message.includes("Authentication failed") && !error.message.includes("Not authenticated")) {
                 loginError.textContent = t('loginFailedError');
                 loginError.classList.remove('hidden');
             }
-            currentAuth = null; 
+            currentAuth = null; // Ensure auth is cleared on any login phase error
+            showLoginScreen(); // Ensure user is returned to login on failure
         } finally {
-            loginButton.disabled = false; loginSpinner.classList.add('hidden');
+            // Ensure button/spinner state is reset regardless of outcome
+             loginButton.disabled = false; loginSpinner.classList.add('hidden');
         }
     });
 
     logoutBtn.addEventListener('click', showLoginScreen);
-    adminBtn.addEventListener('click', () => window.open('/admin', '_blank'));
 
+
+    // --- Discussion Management ---
     async function loadDiscussions(selectLastActive = false) {
         discussionListLoader.classList.remove('hidden');
         discussionList.innerHTML = '';
         try {
             const response = await apiRequest('/api/discussions');
-            if (!response.ok) { 
-                console.error("Failed to load discussions, status:", response.status); 
+            if (!response.ok) {
+                console.error("Failed to load discussions, status:", response.status);
                 discussionList.innerHTML = `<li class="text-center text-xs text-danger p-2">${t('discussionLoadError')}</li>`;
-                return; 
+                discussionsDataCache = []; // Clear cache on error
+                return;
             }
-            const discussions = await response.json();
-            if (discussions.length === 0) {
+            discussionsDataCache = await response.json(); // Store full data with is_starred
+
+            if (discussionsDataCache.length === 0) {
                 discussionList.innerHTML = `<li class="text-center text-xs text-secondary-400 p-2">${t('noDiscussionsFound')}</li>`;
             } else {
-                discussions.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-                discussions.forEach(disc => discussionList.appendChild(renderDiscussionListItem(disc)));
+                // Sort: Starred first (descending), then alphabetically by title
+                discussionsDataCache.sort((a, b) => {
+                    if (a.is_starred !== b.is_starred) {
+                        return b.is_starred - a.is_starred; // true (1) comes before false (0)
+                    }
+                    return (a.title || '').localeCompare(b.title || '');
+                });
+                discussionsDataCache.forEach(disc => discussionList.appendChild(renderDiscussionListItem(disc)));
             }
-            
+
             if (selectLastActive && currentDiscussionId) {
-                const stillExists = discussions.some(d => d.id === currentDiscussionId);
+                const stillExists = discussionsDataCache.some(d => d.id === currentDiscussionId);
                 if (stillExists) {
-                    await selectDiscussion(currentDiscussionId, false);
+                    await selectDiscussion(currentDiscussionId, false); // false to not force reload if already loaded
                 } else {
-                    currentDiscussionId = null; 
+                    currentDiscussionId = null; // Clear if it no longer exists
                 }
             }
-            if (!currentDiscussionId) { 
+            if (!currentDiscussionId) { // If no discussion is active or became inactive
                 clearChatArea();
             }
 
-        } catch (error) { 
-            console.error('Failed to load discussions:', error); 
+        } catch (error) {
+            console.error('Failed to load discussions:', error);
             discussionList.innerHTML = `<li class="text-center text-xs text-danger p-2">${t('discussionLoadError')}</li>`;
+            discussionsDataCache = []; // Clear cache on error
         } finally {
             discussionListLoader.classList.add('hidden');
         }
@@ -693,27 +685,146 @@
         const li = document.createElement('li');
         const isActive = disc.id === currentDiscussionId;
         li.className = `group p-2 rounded-lg cursor-pointer flex justify-between items-center text-sm transition-colors duration-150 ${
-            isActive ? 'bg-primary text-white font-medium' : 'text-secondary-300 hover:bg-secondary-700 hover:text-white'
-        }`;
+            isActive ? 'bg-primary text-white font-medium is-active' : 'text-secondary-300 hover:bg-secondary-700 hover:text-white'
+        } ${disc.is_starred ? 'is-starred' : ''}`; // Add is-starred class
         li.dataset.id = disc.id;
+        li.dataset.isStarred = disc.is_starred; // Store starred state
 
         const titleSpan = document.createElement('span');
         titleSpan.className = "truncate mr-2 flex-grow";
+        titleSpan.id = `disc-title-${disc.id}`; // ID for easy updating
         titleSpan.textContent = disc.title || t('untitledDiscussion', {id: disc.id.substring(0,8)});
         li.appendChild(titleSpan);
 
+        // Actions container
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = `sidebar-item-actions flex items-center space-x-1 shrink-0`;
+
+        // Star button
+        const starBtn = document.createElement('button');
+        starBtn.className = `star-icon p-0.5 rounded ${disc.is_starred ? 'starred' : 'unstarred'} ${isActive ? 'text-primary-light hover:text-yellow-300' : 'text-secondary-500 hover:text-star-DEFAULT'}`;
+        starBtn.innerHTML = `<svg class="w-4 h-4" fill="${disc.is_starred ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.539 1.118l-3.975-2.888a1 1 0 00-1.176 0l-3.975 2.888c-.783.57-1.838-.196-1.539-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>`;
+        starBtn.setAttribute('aria-label', disc.is_starred ? t('unstarDiscussionAriaLabel') : t('starDiscussionAriaLabel'));
+        starBtn.title = disc.is_starred ? t('unstarDiscussionAriaLabel') : t('starDiscussionAriaLabel');
+        starBtn.onclick = (e) => { e.stopPropagation(); toggleStarDiscussion(disc.id, disc.is_starred, starBtn); };
+        actionsDiv.appendChild(starBtn);
+
+        // Edit button
+        const editBtn = document.createElement('button');
+        editBtn.className = `p-1 rounded ${isActive ? 'text-primary-light hover:text-white' : 'text-secondary-500 hover:text-primary-light'}`;
+        editBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>`;
+        editBtn.setAttribute('aria-label', t('editDiscussionTitleSidebarAriaLabel'));
+        editBtn.title = t('editDiscussionTitleSidebarAriaLabel');
+        editBtn.onclick = async (e) => { e.stopPropagation(); editDiscussionTitleFromSidebar(disc.id, titleSpan); };
+        actionsDiv.appendChild(editBtn);
+
+        // Delete Button
         const deleteBtn = document.createElement('button');
-        deleteBtn.className = `shrink-0 text-secondary-500 hover:text-danger opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity p-1 rounded ${isActive ? 'text-primary-light hover:text-red-300' : ''}`;
+        deleteBtn.className = `p-1 rounded ${isActive ? 'text-red-300 hover:text-red-100' : 'text-secondary-500 hover:text-danger'}`;
         deleteBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`;
         deleteBtn.setAttribute('aria-label', t('deleteDiscussionAriaLabel'));
         deleteBtn.title = t('deleteDiscussionAriaLabel');
         deleteBtn.onclick = async (e) => { e.stopPropagation(); if (confirm(t('deleteDiscussionConfirm', {title: titleSpan.textContent}))) { await deleteDiscussionApi(disc.id); } };
-        li.appendChild(deleteBtn);
+        actionsDiv.appendChild(deleteBtn);
 
-        li.addEventListener('click', () => selectDiscussion(disc.id, true)); 
+        li.appendChild(actionsDiv);
+
+        li.addEventListener('click', () => selectDiscussion(disc.id, true)); // true to force load/reload
         return li;
     }
-    
+
+    async function toggleStarDiscussion(discussionId, isCurrentlyStarred, starButtonElement) {
+        const action = isCurrentlyStarred ? 'DELETE' : 'POST';
+        const endpoint = `/api/discussions/${discussionId}/star`;
+        const successMessage = isCurrentlyStarred ? t('unstarSuccess') : t('starSuccess');
+        const errorMessage = isCurrentlyStarred ? t('unstarError') : t('starError');
+        const optimisticStarredState = !isCurrentlyStarred;
+
+        // Optimistic UI update
+        starButtonElement.className = `star-icon p-0.5 rounded ${optimisticStarredState ? 'starred' : 'unstarred'} text-secondary-500 hover:text-star-DEFAULT`; // Adjust classes as needed
+        starButtonElement.innerHTML = `<svg class="w-4 h-4" fill="${optimisticStarredState ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.539 1.118l-3.975-2.888a1 1 0 00-1.176 0l-3.975 2.888c-.783.57-1.838-.196-1.539-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>`;
+        const listItem = starButtonElement.closest('li');
+        if (listItem) {
+             listItem.classList.toggle('is-starred', optimisticStarredState);
+             listItem.dataset.isStarred = optimisticStarredState;
+        }
+
+
+        try {
+            const response = await apiRequest(endpoint, { method: action });
+            if (!response.ok) {
+                throw new Error((await response.json()).detail || 'API request failed');
+            }
+            // API call successful, UI already updated optimistically
+            // Update cache (important for sorting on next load)
+            const cachedItem = discussionsDataCache.find(d => d.id === discussionId);
+            if (cachedItem) cachedItem.is_starred = optimisticStarredState;
+             // Re-sort and re-render list visually after successful star/unstar
+             discussionsDataCache.sort((a, b) => {
+                 if (a.is_starred !== b.is_starred) return b.is_starred - a.is_starred;
+                 return (a.title || '').localeCompare(b.title || '');
+             });
+             discussionList.innerHTML = '';
+             discussionsDataCache.forEach(disc => discussionList.appendChild(renderDiscussionListItem(disc)));
+             // Ensure the active item style is reapplied if it was the one starred/unstarred
+             const activeLi = discussionList.querySelector(`li[data-id='${currentDiscussionId}']`);
+             if(activeLi) {
+                 activeLi.classList.add('bg-primary', 'text-white', 'font-medium', 'is-active');
+                 activeLi.classList.remove('text-secondary-300', 'hover:bg-secondary-700', 'hover:text-white');
+             }
+
+        } catch (error) {
+            console.error(`Failed to ${action === 'POST' ? 'star' : 'unstar'} discussion:`, error);
+            showFlashMessage(`${errorMessage}: ${error.message}`, 'error');
+            // Revert optimistic UI update on error
+            starButtonElement.className = `star-icon p-0.5 rounded ${isCurrentlyStarred ? 'starred' : 'unstarred'} text-secondary-500 hover:text-star-DEFAULT`;
+            starButtonElement.innerHTML = `<svg class="w-4 h-4" fill="${isCurrentlyStarred ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.539 1.118l-3.975-2.888a1 1 0 00-1.176 0l-3.975 2.888c-.783.57-1.838-.196-1.539-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"></path></svg>`;
+            if (listItem) {
+                listItem.classList.toggle('is-starred', isCurrentlyStarred);
+                listItem.dataset.isStarred = isCurrentlyStarred;
+            }
+        }
+    }
+
+    async function editDiscussionTitleFromSidebar(discussionId, titleElement) {
+         const currentTitle = titleElement.textContent;
+         const newTitle = prompt(t('editTitlePrompt') || "Enter new discussion title:", currentTitle);
+         if (newTitle && newTitle.trim() !== "" && newTitle.trim() !== currentTitle) {
+             await updateDiscussionTitleApi(discussionId, newTitle.trim(), titleElement);
+         }
+    }
+
+    // Combined function to handle title update API call and UI update
+    async function updateDiscussionTitleApi(discussionId, newTitle, titleElementToUpdate = null) {
+        if (!discussionId) return;
+        try {
+            const response = await apiRequest(`/api/discussions/${discussionId}/title`, {
+                method: 'PUT', body: { title: newTitle }
+            });
+            if (!response.ok) throw new Error((await response.json()).detail || "Failed to update title.");
+
+            const updatedInfo = await response.json();
+            // Update main chat title if it's the current discussion
+            if (discussionId === currentDiscussionId) {
+                chatTitleText.textContent = updatedInfo.title;
+            }
+            // Update title in the sidebar list
+            const listItemTitle = titleElementToUpdate || $(`disc-title-${discussionId}`);
+            if (listItemTitle) {
+                listItemTitle.textContent = updatedInfo.title;
+            }
+            // Update cache
+            const cachedItem = discussionsDataCache.find(d => d.id === discussionId);
+            if (cachedItem) cachedItem.title = updatedInfo.title;
+
+            showFlashMessage(t('titleUpdateSuccess'), 'success');
+
+        } catch (error) {
+            showFlashMessage(t('titleUpdateError', { error: error.message }), 'error');
+        }
+    }
+
+
     function clearChatArea() {
         chatMessages.innerHTML = '';
         chatMessagesPlaceholder.textContent = t('noMessagesYet');
@@ -723,29 +834,68 @@
         messageInput.disabled = true;
         sendButton.disabled = true;
         messageInput.value = ''; messageInput.style.height = 'auto';
-        clearImagePreviews();
+        // Clear current ID state
+        currentDiscussionId = null;
+        // Remove active class from all sidebar items
+        document.querySelectorAll('#discussion-list li').forEach(item => {
+            item.classList.remove('bg-primary', 'text-white', 'font-medium', 'is-active');
+            item.classList.add('text-secondary-300', 'hover:bg-secondary-700', 'hover:text-white');
+             // Also reset action button colors if they depend on active state
+            const starBtn = item.querySelector('.star-icon');
+            const editBtn = item.querySelector('.sidebar-item-actions button:nth-child(2)'); // Assuming edit is second
+            const deleteBtn = item.querySelector('.sidebar-item-actions button:last-child');
+            if (starBtn) starBtn.classList.remove('text-primary-light', 'hover:text-yellow-300');
+            if (editBtn) editBtn.classList.remove('text-primary-light', 'hover:text-white');
+            if (deleteBtn) deleteBtn.classList.remove('text-red-300', 'hover:text-red-100');
+            if (starBtn) starBtn.classList.add('text-secondary-500', 'hover:text-star-DEFAULT');
+            if (editBtn) editBtn.classList.add('text-secondary-500', 'hover:text-primary-light');
+            if (deleteBtn) deleteBtn.classList.add('text-secondary-500', 'hover:text-danger');
+        });
     }
 
+
     async function selectDiscussion(discussionId, forceReload = false) {
-        if (currentDiscussionId === discussionId && !forceReload && chatMessages.children.length > (chatMessagesPlaceholder.classList.contains('hidden') ? 0:1) ) {
-            return;
+        if (currentDiscussionId === discussionId && !forceReload && chatMessages.children.length > 1) {
+            return; // Already selected, loaded, and not forced
         }
 
+        const previousDiscussionId = currentDiscussionId;
         currentDiscussionId = discussionId;
+
+        // Update sidebar item styles
         document.querySelectorAll('#discussion-list li').forEach(item => {
             const isSelected = item.dataset.id === discussionId;
             item.classList.toggle('bg-primary', isSelected); item.classList.toggle('text-white', isSelected);
-            item.classList.toggle('font-medium', isSelected); item.classList.toggle('text-secondary-300', !isSelected);
+            item.classList.toggle('font-medium', isSelected); item.classList.toggle('is-active', isSelected);
+            item.classList.toggle('text-secondary-300', !isSelected);
             item.classList.toggle('hover:bg-secondary-700', !isSelected); item.classList.toggle('hover:text-white', !isSelected);
+             // Adjust action button colors based on selection state
+            const starBtn = item.querySelector('.star-icon');
+            const editBtn = item.querySelector('.sidebar-item-actions button:nth-child(2)'); // Assuming edit is second
+            const deleteBtn = item.querySelector('.sidebar-item-actions button:last-child');
+            if (isSelected) {
+                if (starBtn) starBtn.classList.add('text-primary-light', 'hover:text-yellow-300');
+                if (editBtn) editBtn.classList.add('text-primary-light', 'hover:text-white');
+                if (deleteBtn) deleteBtn.classList.add('text-red-300', 'hover:text-red-100');
+                if (starBtn) starBtn.classList.remove('text-secondary-500', 'hover:text-star-DEFAULT');
+                if (editBtn) editBtn.classList.remove('text-secondary-500', 'hover:text-primary-light');
+                if (deleteBtn) deleteBtn.classList.remove('text-secondary-500', 'hover:text-danger');
+            } else {
+                if (starBtn) starBtn.classList.remove('text-primary-light', 'hover:text-yellow-300');
+                if (editBtn) editBtn.classList.remove('text-primary-light', 'hover:text-white');
+                if (deleteBtn) deleteBtn.classList.remove('text-red-300', 'hover:text-red-100');
+                if (starBtn) starBtn.classList.add('text-secondary-500', 'hover:text-star-DEFAULT');
+                if (editBtn) editBtn.classList.add('text-secondary-500', 'hover:text-primary-light');
+                if (deleteBtn) deleteBtn.classList.add('text-secondary-500', 'hover:text-danger');
+            }
         });
 
         chatMessages.innerHTML = `<p class="text-center text-secondary-500">${t('loadingDiscussion')}</p>`;
         chatMessagesPlaceholder.classList.add('hidden');
-        const activeLi = document.querySelector(`#discussion-list li[data-id='${discussionId}'] span`);
-        chatTitleText.textContent = activeLi ? activeLi.textContent : t('loadingDiscussion');
+        const activeLiTitle = $(`disc-title-${discussionId}`);
+        chatTitleText.textContent = activeLiTitle ? activeLiTitle.textContent : t('loadingDiscussion');
         editChatTitleBtn.classList.remove('hidden');
-        messageInput.disabled = false; 
-        clearImagePreviews(); 
+        messageInput.disabled = false; sendButton.disabled = false; // Enable input
 
         try {
             const response = await apiRequest(`/api/discussions/${discussionId}`);
@@ -754,7 +904,7 @@
                 throw new Error(errorData.detail || `Status: ${response.status}`);
             }
             const messages = await response.json();
-            chatMessages.innerHTML = ''; 
+            chatMessages.innerHTML = '';
             if (!Array.isArray(messages)) throw new Error('Messages data is not an array');
 
             if (messages.length === 0) {
@@ -762,18 +912,19 @@
                 chatMessagesPlaceholder.classList.remove('hidden');
             } else {
                 chatMessagesPlaceholder.classList.add('hidden');
-                messages.forEach(msg => renderMessage(msg.sender, msg.content, msg.id, false, msg.metadata));
+                messages.forEach(msg => renderMessage(msg.sender, msg.content, msg.id));
             }
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            // Debounced scroll to bottom
+            setTimeout(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }, 50);
         } catch (error) {
             console.error(`Failed to load messages for discussion ${discussionId}:`, error);
-            chatMessages.innerHTML = ''; 
+            chatMessages.innerHTML = '';
             renderMessage('system', t('errorLoadingDiscussion') + `: ${error.message}`);
             chatTitleText.textContent = t('errorLoadingDiscussion');
             editChatTitleBtn.classList.add('hidden');
-            messageInput.disabled = true; 
+            messageInput.disabled = true; sendButton.disabled = true; // Disable on error
+            currentDiscussionId = previousDiscussionId; // Revert ID on error
         }
-        updateSendButtonState();
     }
 
     newDiscussionBtn.addEventListener('click', async () => {
@@ -785,8 +936,9 @@
                 throw new Error(errorData.detail || response.statusText);
             }
             const newDiscussion = await response.json();
-            await loadDiscussions(); 
-            selectDiscussion(newDiscussion.id, true); 
+            // discussionDataCache is updated inside loadDiscussions
+            await loadDiscussions();
+            selectDiscussion(newDiscussion.id, true);
             showFlashMessage(t('newDiscussionCreated', { title: newDiscussion.title }), 'success');
         } catch (error) {
             console.error('Failed to create new discussion:', error);
@@ -803,85 +955,54 @@
             }
             showFlashMessage((await response.json()).message, 'success');
             if (currentDiscussionId === discussionIdToDelete) {
-                currentDiscussionId = null;
-                clearChatArea();
+                clearChatArea(); // Use helper to clear and reset UI state
             }
-            await loadDiscussions(); 
+             // discussionDataCache updated inside loadDiscussions
+            await loadDiscussions();
         } catch (error) {
             console.error('Failed to delete discussion:', error);
             showFlashMessage(error.message, 'error');
         }
     }
-    
+
     editChatTitleBtn.addEventListener('click', async () => {
         if (!currentDiscussionId) return;
         const currentTitle = chatTitleText.textContent;
         const newTitle = prompt(t('editTitleTooltip') || "Enter new discussion title:", currentTitle);
-        if (newTitle && newTitle.trim() !== "" && newTitle !== currentTitle) {
-            try {
-                const response = await apiRequest(`/api/discussions/${currentDiscussionId}/title`, {
-                    method: 'PUT', body: { title: newTitle.trim() }
-                });
-                if (!response.ok) throw new Error((await response.json()).detail || "Failed to update title.");
-                const updatedInfo = await response.json();
-                chatTitleText.textContent = updatedInfo.title;
-                const listItemTitle = document.querySelector(`#discussion-list li[data-id='${currentDiscussionId}'] span`);
-                if (listItemTitle) listItemTitle.textContent = updatedInfo.title;
-                showFlashMessage(t('messageUpdateSuccess'), 'success'); 
-            } catch (error) {
-                showFlashMessage(error.message, 'error');
-            }
+        if (newTitle && newTitle.trim() !== "" && newTitle.trim() !== currentTitle) {
+            await updateDiscussionTitleApi(currentDiscussionId, newTitle.trim());
         }
     });
 
-    function updateSendButtonState() {
-         const hasText = messageInput.value.trim().length > 0;
-         const hasImages = attachedImageFiles.length > 0;
-         sendButton.disabled = !currentDiscussionId || isSendingMessage || (!hasText && !hasImages);
-    }
-
-    messageInput.addEventListener('input', () => { 
+    // --- Message Sending & Rendering ---
+    messageInput.addEventListener('input', () => {
         messageInput.style.height = 'auto';
-        const maxHeight = 120; 
+        const maxHeight = 120; // Max height in pixels
         messageInput.style.height = `${Math.min(messageInput.scrollHeight, maxHeight)}px`;
-        updateSendButtonState();
     });
-    messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey && !sendButton.disabled) { e.preventDefault(); sendMessage(); }});
-    sendButton.addEventListener('click', () => { if(!sendButton.disabled) sendMessage(); });
+    messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey && !isSendingMessage) { e.preventDefault(); sendMessage(); }});
+    sendButton.addEventListener('click', () => { if(!isSendingMessage) sendMessage(); });
 
     async function sendMessage() {
         const prompt = messageInput.value.trim();
-        if (!currentDiscussionId || isSendingMessage || (prompt === "" && attachedImageFiles.length === 0)) return;
+        if (!prompt || !currentDiscussionId || isSendingMessage) return;
 
         isSendingMessage = true;
         const tempUserMessageId = 'temp-user-' + Date.now();
         chatMessagesPlaceholder.classList.add('hidden');
-
-        renderMessage(
-            (currentUserDetails?.username || 'user'),
-            prompt,
-            tempUserMessageId,
-            false, 
-            { 
-                filenames: attachedImageFiles.map(f => f.name),
-                image_count: attachedImageFiles.length,
-                image_previews: attachedImageFiles.map(f => f.previewUrl) 
-            }
-        );
+        // Render user message FIRST
+        renderMessage((currentUserDetails?.username || 'user'), prompt, tempUserMessageId);
+        const userMessageElement = $(`message-${tempUserMessageId}`); // Get reference
 
         messageInput.value = ''; messageInput.style.height = 'auto';
-        messageInput.disabled = true; 
-        sendButton.classList.add('send-button-loading'); 
-        updateSendButtonState();
+        messageInput.disabled = true; // Disable during send
+        sendButton.classList.add('send-button-loading'); // Enhanced loading
+        sendButton.disabled = true;
+        // sendLoader is handled by the class toggle
 
         const formData = new FormData();
         formData.append('prompt', prompt);
         formData.append('use_rag', useRagCheckbox.checked.toString());
-        attachedImageFiles.forEach(imgFile => {
-            formData.append('files', imgFile.fileObject, imgFile.name);
-        });
-
-        clearImagePreviews(); 
 
         let assistantMessageDiv = null;
         let accumulatedResponseText = "";
@@ -894,17 +1015,18 @@
                 body: formData
             });
 
+            // User's message is already rendered.
+
             if (!response.ok || !response.body) {
                 const errorData = await response.json().catch(() => ({ detail: "Unknown server error." }));
                 renderMessage('system', t('sendError', { error: errorData.detail || response.statusText }));
-                const tempUserMsgEl = $(`message-${tempUserMessageId}`); 
-                if (tempUserMsgEl) tempUserMsgEl.remove();
-                return;
+                // Remove the temporary user message on hard failure
+                if (userMessageElement) userMessageElement.remove();
+                return; // isSendingMessage will be reset in finally
             }
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
-            let cmUpdateDebounceTimer = null;
 
             while (true) {
                 const { value, done } = await reader.read();
@@ -918,116 +1040,92 @@
                         const data = JSON.parse(line);
                         if (data.type === "chunk") {
                             if (!assistantMessageDiv) {
-                                const assistantName = currentUserDetails?.lollms_client_ai_name || 'LoLLMs';
+                                const assistantName = currentUserDetails?.lollms_client_ai_name || 'assistant';
                                 chatMessagesPlaceholder.classList.add('hidden');
-                                assistantMessageDiv = renderMessage(assistantName, '', assistantStreamId, true);
+                                // Render assistant bubble initially empty or with '...'
+                                assistantMessageDiv = renderMessage(assistantName, '', assistantStreamId, true); // Pass isStreaming=true
                             }
                             accumulatedResponseText += data.content;
-                            
-                            if (cmUpdateDebounceTimer) clearTimeout(cmUpdateDebounceTimer);
-                            cmUpdateDebounceTimer = setTimeout(() => {
-                                if (assistantMessageDiv) { // Check if div still exists
-                                     renderMessageContent(assistantMessageDiv.querySelector('.message-text-content'), accumulatedResponseText, 'assistant');
-                                     chatMessages.scrollTop = chatMessages.scrollHeight;
-                                }
-                            }, 50); // Debounce CM updates slightly
+                            renderMessageContent(assistantMessageDiv, accumulatedResponseText, 'assistant');
+                            // Debounced scroll
+                            setTimeout(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }, 50);
 
                         } else if (data.type === "error") {
-                            if (cmUpdateDebounceTimer) clearTimeout(cmUpdateDebounceTimer);
                             if (assistantMessageDiv && $(`message-${assistantStreamId}`)) {
-                                $(`message-${assistantStreamId}`).remove();
+                                $(`message-${assistantStreamId}`).remove(); // Remove temp AI bubble
                             }
+                             // Render system error message instead
                             renderMessage('system', t('llmError', { error: data.content }));
-                            accumulatedResponseText = ""; 
-                            break; 
+                            accumulatedResponseText = ""; // Reset accumulated text
+                            break; // Stop processing stream on error
                         }
                     } catch (e) {
                         console.warn("Stream parsing error:", e, "Line:", line);
+                        // Optionally render a system message about stream corruption
                     }
                 }
             }
-            // Final update after loop if any pending
-            if (cmUpdateDebounceTimer) clearTimeout(cmUpdateDebounceTimer);
-            if (assistantMessageDiv && accumulatedResponseText) {
-                 renderMessageContent(assistantMessageDiv.querySelector('.message-text-content'), accumulatedResponseText, 'assistant');
-                 chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
-
+            // Stream finished normally or with an LLM error handled above
         } catch (error) {
             console.error('Failed to send message or process stream:', error);
             renderMessage('system', t('networkError', { error: error.message }));
-            const tempUserMsgElOnError = $(`message-${tempUserMessageId}`);
-            if (tempUserMsgElOnError) tempUserMsgElOnError.remove();
+             // Remove the temporary user message on network/fetch error
+            if (userMessageElement) userMessageElement.remove();
         } finally {
             isSendingMessage = false;
-            messageInput.disabled = !currentDiscussionId; 
+            messageInput.disabled = !currentDiscussionId; // Re-enable based on discussion selection
+            sendButton.disabled = !currentDiscussionId;
             sendButton.classList.remove('send-button-loading');
-            updateSendButtonState();
+            // sendLoader is handled by class toggle
 
+            // Reload the discussion to get permanent message IDs and ensure consistency
             if (currentDiscussionId) {
-                 setTimeout(async () => { 
-                    await selectDiscussion(currentDiscussionId, true); 
-                 }, 150);
+                 setTimeout(async () => { // Timeout to allow DOM updates to settle
+                    await selectDiscussion(currentDiscussionId, true); // Force reload
+                 }, 100);
             }
         }
     }
 
-    function renderMessage(sender, text, id, isStreaming = false, metadata = {}) {
+    function renderMessage(sender, text, id, isStreaming = false) {
         const msgOuterDiv = document.createElement('div');
-        const messageElementId = `message-${id}`;
+        const messageElementId = `message-${id}`; // Ensure IDs are unique
         const isUser = sender.toLowerCase() === (currentUserDetails?.username?.toLowerCase() || 'user');
-        const aiName = currentUserDetails?.lollms_client_ai_name || 'LoLLMs';
-
-        msgOuterDiv.className = `message-bubble-outer w-full mb-1 group ${isUser ? 'user-message flex flex-col items-end' : 'assistant-message flex flex-col items-start'}`;
+        msgOuterDiv.className = `message-bubble-outer flex w-full mb-3 items-end relative group ${isUser ? 'user-message justify-end' : 'assistant-message justify-start'}`;
         msgOuterDiv.id = messageElementId;
-
-        const senderNameDiv = document.createElement('div');
-        senderNameDiv.className = `sender-label px-3 ${isUser ? 'text-right' : 'text-left'}`;
-        senderNameDiv.textContent = isUser ? (currentUserDetails?.username || 'User') : aiName;
-        msgOuterDiv.appendChild(senderNameDiv);
 
         const msgBubble = document.createElement('div');
         msgBubble.className = `p-3 rounded-xl max-w-[85%] sm:max-w-[75%] lg:max-w-[70%] break-words shadow-md relative ${
-            isUser ? 'bg-primary text-white ml-auto rounded-br-lg' : 
+            isUser ? 'bg-primary text-white ml-auto rounded-br-none' :
             sender.toLowerCase() === 'system' ? 'bg-warning/20 dark:bg-warning/30 text-warning-dark dark:text-warning-light text-xs italic text-center max-w-md mx-auto px-2 py-1 shadow-none rounded-md' :
-            'bg-secondary-200 dark:bg-secondary-700 text-secondary-800 dark:text-secondary-100 prose dark:prose-invert max-w-none rounded-bl-lg'
+            // Use prose for assistant messages for better markdown rendering
+            'bg-secondary-200 dark:bg-secondary-700 text-secondary-800 dark:text-secondary-100 prose prose-sm dark:prose-invert max-w-none rounded-bl-none'
         }`;
         msgBubble.dataset.messageId = id;
         msgBubble.dataset.sender = sender;
-        
-        if(isUser || sender.toLowerCase() === 'system') {
+
+        // Store original UNPARSED content for editing user messages.
+        if(isUser) {
              msgBubble.dataset.originalContent = text;
         }
 
-        if (isUser && metadata && metadata.image_previews && metadata.image_previews.length > 0) {
-            const imgContainer = document.createElement('div');
-            imgContainer.className = 'flex flex-wrap gap-2 mb-2';
-            metadata.image_previews.forEach(srcUrl => {
-                const img = document.createElement('img');
-                img.src = srcUrl;
-                img.alt = 'Uploaded image';
-                img.className = 'max-h-24 max-w-32 rounded border border-primary-light/30 object-cover';
-                imgContainer.appendChild(img);
-            });
-            msgBubble.appendChild(imgContainer);
-        }
-        
-        const textContentDiv = document.createElement('div');
-        textContentDiv.className = 'message-text-content';
-        renderMessageContent(textContentDiv, text, sender);
-        msgBubble.appendChild(textContentDiv);
+        renderMessageContent(msgBubble, text, sender);
 
-        if (sender.toLowerCase() !== 'system' && !isStreaming && id && 
+        // Add edit/delete actions only for non-streaming, non-temporary, non-system messages
+        if (sender.toLowerCase() !== 'system' && !isStreaming && id &&
             !String(id).startsWith('temp-') && !String(id).startsWith('assistant-stream-')) {
             const actionsDiv = document.createElement('div');
-            actionsDiv.className = 'message-actions flex gap-1 p-0.5 bg-secondary-100/80 dark:bg-secondary-900/80 rounded-md shadow backdrop-blur-sm';
+            actionsDiv.className = 'message-actions flex gap-1 p-1 bg-secondary-100/70 dark:bg-secondary-900/70 rounded shadow';
 
-            const editBtn = document.createElement('button');
-            editBtn.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>`;
-            editBtn.className = 'message-action-btn p-1 rounded hover:bg-secondary-200 dark:hover:bg-secondary-700 text-secondary-600 dark:text-secondary-400';
-            editBtn.title = t('editMessage');
-            editBtn.onclick = (e) => { e.stopPropagation(); editMessage(id, sender, msgBubble); };
-            actionsDiv.appendChild(editBtn);
+             // Only add Edit button for user messages
+             if (isUser) {
+                const editBtn = document.createElement('button');
+                editBtn.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>`;
+                editBtn.className = 'message-action-btn p-1 rounded hover:bg-secondary-200 dark:hover:bg-secondary-700 text-secondary-600 dark:text-secondary-400';
+                editBtn.title = t('editMessage');
+                editBtn.onclick = (e) => { e.stopPropagation(); editMessage(id, msgBubble); };
+                actionsDiv.appendChild(editBtn);
+             }
 
             const deleteBtn = document.createElement('button');
             deleteBtn.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`;
@@ -1041,108 +1139,106 @@
 
         msgOuterDiv.appendChild(msgBubble);
         chatMessages.appendChild(msgOuterDiv);
-        
-        const isScrolledToBottom = chatMessages.scrollHeight - chatMessages.clientHeight <= chatMessages.scrollTop + 50; 
+
+        // Scroll to bottom logic
+        const isScrolledToBottom = chatMessages.scrollHeight - chatMessages.clientHeight <= chatMessages.scrollTop + 50; // Add tolerance
         if (isScrolledToBottom || isStreaming || isUser) {
-           chatMessages.scrollTop = chatMessages.scrollHeight;
+            // Use requestAnimationFrame for smoother scrolling after DOM update
+            requestAnimationFrame(() => {
+                 chatMessages.scrollTop = chatMessages.scrollHeight;
+            });
         }
-        return msgBubble; 
+
+        return msgBubble; // Return the inner bubble for content updates during streaming
     }
 
-    function renderMessageContent(targetElement, text, sender) {
-        targetElement.innerHTML = ''; 
+    function renderMessageContent(bubbleElement, text, sender) {
+        bubbleElement.innerHTML = ''; // Clear previous content
 
         const isUser = sender.toLowerCase() === (currentUserDetails?.username?.toLowerCase() || 'user');
+
         if (isUser || sender.toLowerCase() === 'system') {
-            if(text && text.trim() !== "") targetElement.textContent = text;
-        } else { 
+            // User and system messages are treated as plain text (no markdown parsing)
+            const textNode = document.createTextNode(text);
+            bubbleElement.appendChild(textNode);
+        } else { // Assistant message - parse Markdown and handle potential <think> blocks
             let mainContent = text;
             let thinkContent = null;
-            const thinkMatch = text.match(/<think>(.*?)<\/think>/is);
+            // More robust regex to handle potential attributes or whitespace in think tags
+            const thinkMatch = text.match(/<think.*?>([\s\S]*?)<\/think>/i);
             if (thinkMatch && thinkMatch[1]) {
                 thinkContent = thinkMatch[1].trim();
-                mainContent = text.replace(/<think>.*?<\/think>/is, '').trim();
+                // Remove the matched think block and any surrounding whitespace
+                mainContent = text.replace(/<think.*?>[\s\S]*?<\/think>/i, '').trim();
             }
 
+            // Render think block if present
             if (thinkContent) {
                 const details = document.createElement('details');
-                details.className = 'think-block';
+                details.className = 'think-block'; // Applied styles handle background etc.
                 const summary = document.createElement('summary');
                 summary.textContent = t('assistantThoughts');
                 const thinkDiv = document.createElement('div');
-                thinkDiv.textContent = thinkContent; 
+                // Render think content as pre-formatted text
+                const pre = document.createElement('pre');
+                pre.className = 'text-xs whitespace-pre-wrap'; // Basic styling
+                pre.textContent = thinkContent;
+                thinkDiv.appendChild(pre);
+
                 details.appendChild(summary);
                 details.appendChild(thinkDiv);
-                targetElement.appendChild(details);
+                bubbleElement.appendChild(details);
             }
-            
-            const contentDiv = document.createElement('div');
-            if (mainContent.trim() !== "") {
-                if (typeof marked !== 'undefined') {
-                    contentDiv.innerHTML = marked.parse(mainContent); 
-                } else {
-                    contentDiv.textContent = mainContent; 
-                }
-                targetElement.appendChild(contentDiv);
 
-                contentDiv.querySelectorAll('pre').forEach((preElement, preIndex) => {
-                    const codeElement = preElement.querySelector('code');
-                    if (!codeElement || preElement.classList.contains('cm-processed')) return;
-
-                    const langClass = Array.from(codeElement.classList).find(cls => cls.startsWith('language-'));
-                    const language = langClass ? langClass.substring('language-'.length) : 'plaintext';
-                    
-                    let cmMode = language;
-                    const modeInfo = CodeMirror.findModeByName(language) || CodeMirror.findModeByExtension(language) || CodeMirror.findModeByMIME(language);
-                    if(modeInfo) {
-                        cmMode = modeInfo.mode;
-                        // Ensure mode is loaded if found (may require dynamic script loading for less common modes)
-                        if (modeInfo.mode && !CodeMirror.modes[modeInfo.mode] && modeInfo.mime !== 'text/plain') { // Don't try to load 'null' mode
-                            // console.warn(`CodeMirror mode '${modeInfo.mode}' for language '${language}' not loaded. Attempting to load.`);
-                            // This is where dynamic script loading for CM modes would go if needed.
-                            // For now, we rely on pre-loaded common modes.
+            // Render main content (parsed markdown)
+            if (mainContent || !thinkContent) { // Render even if empty, unless only think exists
+                 if (typeof marked !== 'undefined') {
+                    // Use 'sanitize: false' cautiously if you trust the LLM output
+                    // or implement server-side sanitization.
+                    // For basic safety, allow common tags but strip scripts/dangerous handlers.
+                    // Marked's default behavior offers some protection, but review security needs.
+                    const unsafeHtml = marked.parse(mainContent || ' '); // Pass space if empty for div creation
+                    // Basic client-side sanitization example (very rudimentary):
+                    // This is NOT a substitute for a proper sanitizer library like DOMPurify if dealing with untrusted content.
+                    const tempDiv = document.createElement('div');
+                    tempDiv.innerHTML = unsafeHtml;
+                    // Remove script tags
+                    tempDiv.querySelectorAll('script').forEach(el => el.remove());
+                    // Remove common event handlers (add more as needed)
+                    tempDiv.querySelectorAll('*').forEach(el => {
+                        for (let i = el.attributes.length - 1; i >= 0; i--) {
+                            if (el.attributes[i].name.toLowerCase().startsWith('on')) {
+                                el.removeAttribute(el.attributes[i].name);
+                            }
                         }
-                    } else if (language === 'python' || language === 'py') cmMode = 'python';
-                    else if (language === 'javascript' || language === 'js') cmMode = 'javascript';
-                    else if (language === 'json') cmMode = {name: "javascript", json: true};
-                    else if (language === 'html' || language === 'xml') cmMode = 'xml';
-                    else if (language === 'css') cmMode = 'css';
-                    else if (language === 'markdown' || language === 'md') cmMode = 'markdown';
-                    else if (language === 'bash' || language === 'sh' || language === 'shell') cmMode = 'shell';
-                    else if (language === 'sql') cmMode = 'sql';
-                    else if (language === 'yaml' || language === 'yml') cmMode = 'yaml';
-                    else cmMode = 'null'; // Default to plain text like
-
-
-                    try {
-                        CodeMirror(function(elt) {
-                           preElement.parentNode.replaceChild(elt, preElement);
-                           elt.classList.add('cm-processed'); // Mark as processed
-                        }, {
-                            value: codeElement.textContent || '',
-                            mode: cmMode,
-                            theme: document.documentElement.classList.contains('dark') ? 'material-darker' : 'default',
-                            lineNumbers: true,
-                            readOnly: 'nocursor',
-                            scrollbarStyle: "null", 
-                            viewportMargin: Infinity 
-                        }).getWrapperElement().classList.add('cm-readonly-display', 'prose-code-block', 'max-w-full', 'overflow-x-auto');
-                    } catch (e) {
-                         console.warn(`CodeMirror init error for mode '${cmMode}':`, e);
+                    });
+                    // Append sanitized content
+                     while (tempDiv.firstChild) {
+                        bubbleElement.appendChild(tempDiv.firstChild);
                     }
-                });
-            } else if (!thinkContent && !mainContent.trim()) {
-                 targetElement.innerHTML = '<span class="italic opacity-75">...</span>';
+
+                } else {
+                    console.error("Marked library not loaded!");
+                     // Fallback to plain text if marked is missing
+                    const textNode = document.createTextNode(mainContent);
+                    bubbleElement.appendChild(textNode);
+                }
             }
         }
     }
 
-    async function editMessage(messageId, sender, bubbleElement) {
-        const textContentElement = bubbleElement.querySelector('.message-text-content');
-        const originalContent = textContentElement ? (bubbleElement.dataset.originalContent || textContentElement.textContent) : (bubbleElement.dataset.originalContent || '');
 
+    async function editMessage(messageId, bubbleElement) {
+         // Only allow editing user messages
+        const sender = bubbleElement.dataset.sender;
+         if (!sender || sender.toLowerCase() !== (currentUserDetails?.username?.toLowerCase() || 'user')) {
+             console.warn("Attempted to edit non-user message.");
+             return;
+         }
+
+        const originalContent = bubbleElement.dataset.originalContent || bubbleElement.textContent; // Get original text
         const newContent = prompt(t('editMessagePrompt'), originalContent);
-        if (newContent === null || newContent.trim() === "" || newContent.trim() === originalContent.trim()) return;
+        if (newContent === null || newContent.trim() === "" || newContent.trim() === originalContent.trim()) return; // No change or cancelled
 
         try {
             const response = await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}`, {
@@ -1152,11 +1248,16 @@
                  const errorData = await response.json().catch(() => ({detail: "Failed to update message"}));
                  throw new Error(errorData.detail);
             }
-            await selectDiscussion(currentDiscussionId, true); 
+             // Update UI directly instead of full reload for smoother experience
+            renderMessageContent(bubbleElement, newContent.trim(), sender);
+            bubbleElement.dataset.originalContent = newContent.trim(); // Update stored original content
             showFlashMessage(t('messageUpdateSuccess'), 'success');
+            // Optionally save discussion state locally if needed, or rely on next full load
         } catch (error) {
             console.error('Failed to edit message:', error);
             showFlashMessage(t('messageUpdateError', {error: error.message}), 'error');
+             // Optionally revert UI change here if needed
+            renderMessageContent(bubbleElement, originalContent, sender); // Revert UI
         }
     }
 
@@ -1170,7 +1271,7 @@
             }
             messageOuterDiv.remove();
             showFlashMessage(t('messageDeleteSuccess'), 'success');
-             if (chatMessages.children.length === 0 && chatMessagesPlaceholder) { 
+             if (chatMessages.children.length === 0) { // If all messages deleted, show placeholder
                 chatMessagesPlaceholder.classList.remove('hidden');
             }
         } catch (error) {
@@ -1179,59 +1280,8 @@
         }
     }
 
-    imageUploadBtn.addEventListener('click', () => imageUploadInput.click());
-    imageUploadInput.addEventListener('change', (event) => {
-        handleImageFiles(event.target.files);
-        imageUploadInput.value = ''; 
-    });
 
-    function handleImageFiles(files) {
-        imagePreviewArea.classList.remove('hidden');
-        for (const file of files) {
-            if (!file.type.startsWith('image/')) continue;
-            if (attachedImageFiles.length >= 5) { 
-                 showFlashMessage(t('maxImagesReached', {max: 5}), 'warning');
-                 break;
-            }
-
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const previewUrl = e.target.result;
-                const fileId = 'img-' + Date.now() + '-' + Math.random().toString(16).slice(2);
-                attachedImageFiles.push({ id: fileId, fileObject: file, previewUrl: previewUrl, name: file.name });
-
-                const previewItem = document.createElement('div');
-                previewItem.className = 'image-preview-item';
-                previewItem.dataset.fileId = fileId;
-                const img = document.createElement('img');
-                img.src = previewUrl; img.alt = file.name;
-                const removeBtn = document.createElement('button');
-                removeBtn.className = 'remove-image-btn'; removeBtn.innerHTML = '&times;';
-                removeBtn.title = t('removeImageTooltip');
-                removeBtn.onclick = () => removeImagePreview(fileId);
-                previewItem.appendChild(img); previewItem.appendChild(removeBtn);
-                imagePreviewArea.appendChild(previewItem);
-                updateSendButtonState(); 
-            }
-            reader.readAsDataURL(file);
-        }
-    }
-
-    function removeImagePreview(fileId) {
-        attachedImageFiles = attachedImageFiles.filter(f => f.id !== fileId);
-        const previewElement = imagePreviewArea.querySelector(`[data-file-id="${fileId}"]`);
-        if (previewElement) previewElement.remove();
-        if (attachedImageFiles.length === 0) imagePreviewArea.classList.add('hidden');
-        updateSendButtonState(); 
-    }
-
-    function clearImagePreviews() {
-        attachedImageFiles = [];
-        imagePreviewArea.innerHTML = '';
-        imagePreviewArea.classList.add('hidden');
-        updateSendButtonState(); 
-    }
-
+    // --- Settings Modal ---
     settingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
     closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
     settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
@@ -1250,8 +1300,6 @@
             });
             if (currentUserDetails && currentUserDetails.lollms_model_name) {
                 lollmsModelSelect.value = currentUserDetails.lollms_model_name;
-            } else {
-                 lollmsModelSelect.value = ""; 
             }
         } catch (error) {
             console.error('Failed to load LoLLMs models:', error);
@@ -1283,14 +1331,14 @@
         try {
             const response = await apiRequest('/api/store/vectorizers');
             if (!response.ok) { throw new Error((await response.json().catch(()=>({detail:"Failed to fetch vectorizers"}))).detail || 'Failed to fetch vectorizers'); }
-            const vectorizers = await response.json();
+            const vectorizers = await response.json(); // Expects list of {"name": "...", "method_name": "..."}
             vectorizers.forEach(vec => {
                 const option = document.createElement('option');
                 option.value = vec.name;
-                option.textContent = vec.method_name; 
+                option.textContent = vec.method_name; // Display text
                 vectorizerSelect.appendChild(option);
             });
-            await fetchActiveVectorizer(); 
+            await fetchActiveVectorizer(); // This will set the select.value and update currentUserDetails
         } catch (error) {
             console.error('Failed to load SafeStore vectorizers:', error);
             updateStatus('settings-status', t('vectorizerLoadError') + `: ${error.message}`, 'error');
@@ -1304,37 +1352,37 @@
             const data = await response.json();
             const activeVec = data.active_vectorizer;
             if (activeVec) {
-                 const exists = Array.from(vectorizerSelect.options).some(opt => opt.value === activeVec);
-                 vectorizerSelect.value = exists ? activeVec : "";
-                 if (currentUserDetails) currentUserDetails.safe_store_vectorizer = activeVec;
+                vectorizerSelect.value = activeVec; // This should match one of the option values (vec.name)
+                if (currentUserDetails) currentUserDetails.safe_store_vectorizer = activeVec;
             } else {
-                 vectorizerSelect.value = ""; 
                  if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null;
             }
+            // Update RAG toggle UI based on newly fetched/updated currentUserDetails
             ragToggleContainer.style.display = currentUserDetails?.safe_store_vectorizer ? 'flex' : 'none';
             useRagCheckbox.checked = !!currentUserDetails?.safe_store_vectorizer;
 
         } catch (error) {
             console.error('Failed to fetch active vectorizer:', error);
              if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null;
-            vectorizerSelect.value = "";
             ragToggleContainer.style.display = 'none';
             useRagCheckbox.checked = false;
+            // Optionally show error in settings status
+            updateStatus('settings-status', t('activeVectorizerFetchError', {error: error.message}), 'error');
         }
     }
 
     async function setActiveSessionVectorizer(vectorizerName) {
         if (!vectorizerName) {
+            // If trying to set to empty, effectively disable RAG for session
             if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null;
             ragToggleContainer.style.display = 'none';
             useRagCheckbox.checked = false;
+            // Send request to backend to clear server-side session vectorizer
             try {
-                const formData = new FormData(); formData.append('vectorizer_name', ''); 
-                await apiRequest('/api/store/active-vectorizer', { method: 'POST', body: formData });
-            } catch (error) {
-                console.error('Failed to clear active vectorizer on backend:', error);
-            }
-            return true; 
+                 await apiRequest('/api/store/active-vectorizer', { method: 'POST', body: new URLSearchParams({'vectorizer_name': ''}) });
+            } catch (e) { console.warn("Failed to clear vectorizer on backend:", e); }
+            updateStatus('settings-status', t('vectorizerDisabled'), 'info');
+            return true; // Consider disabling a success
         }
         updateStatus('settings-status', t('settingVectorizerStatus'), 'info', 0);
         try {
@@ -1343,8 +1391,12 @@
              if (!response.ok) {
                 const errorData = await response.json().catch(() => ({detail: t('vectorizerSetError')}));
                 updateStatus('settings-status', `${t('vectorizerSetError')}: ${errorData.detail}`, 'error');
+                if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null; // Revert on failure
+                ragToggleContainer.style.display = 'none';
+                useRagCheckbox.checked = false;
                 return false;
             }
+            // Success, update currentUserDetails and UI
             if (currentUserDetails) currentUserDetails.safe_store_vectorizer = vectorizerName;
             ragToggleContainer.style.display = 'flex';
             useRagCheckbox.checked = true;
@@ -1352,27 +1404,38 @@
         } catch (error) {
             console.error('Failed to set active vectorizer:', error);
             updateStatus('settings-status', `${t('vectorizerSetError')}: ${error.message}`, 'error');
+             if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null; // Revert on failure
+            ragToggleContainer.style.display = 'none';
+            useRagCheckbox.checked = false;
             return false;
         }
     }
 
     setVectorizerBtn.addEventListener('click', async () => {
         let vectorizerName = newVectorizerNameInput.value.trim() || vectorizerSelect.value;
-        if (!vectorizerName && vectorizerSelect.value === "") { 
-             vectorizerName = ""; 
+        if (!vectorizerName && vectorizerSelect.value === "") { // Check if trying to disable
+             if (confirm(t('confirmDisableVectorizer'))) {
+                 vectorizerName = ""; // Signal disabling
+             } else {
+                 updateStatus('settings-status', t('vectorizerChangeCancelled'), 'info');
+                 return;
+             }
         } else if (!vectorizerName) {
-             updateStatus('settings-status', t('selectOrEnterVectorizerError'), 'error'); return;
+             updateStatus('settings-status', t('selectOrEnterVectorizerError'), 'error');
+             return;
         }
 
         const success = await setActiveSessionVectorizer(vectorizerName);
         if (success) {
             newVectorizerNameInput.value = '';
-            await loadStoreVectorizers(); 
-            const statusMsg = vectorizerName ? t('vectorizerSetSuccess', {vectorizer: vectorizerName}) : t('vectorizerCleared');
-            updateStatus('settings-status', statusMsg, 'success');
+            await loadStoreVectorizers(); // Reloads options and calls fetchActiveVectorizer
+            if (vectorizerName) {
+                 updateStatus('settings-status', t('vectorizerSetSuccess', {vectorizer: vectorizerName}), 'success');
+            } // Disabled message handled in setActiveSessionVectorizer
         }
     });
 
+    // --- RAG File Management Modal ---
     fileManagerBtn.addEventListener('click', () => {
         fileManagerModal.classList.remove('hidden');
         loadRagFiles();
@@ -1382,16 +1445,16 @@
 
     uploadFolderBtn.addEventListener('click', () => folderUploadInput.click());
     folderUploadInput.addEventListener('change', handleFileUpload);
-    fileUploadInputFM.addEventListener('change', handleFileUpload); 
+    fileUploadInput.addEventListener('change', handleFileUpload);
     uploadDocumentBtn.addEventListener('click', () => {
-        if (fileUploadInputFM.files.length > 0) {
-             handleFileUpload({target: fileUploadInputFM});
+        if (fileUploadInput.files.length > 0) {
+             handleFileUpload({target: fileUploadInput}); // Trigger upload with file input's files
         } else {
             updateStatus('upload-status', t('selectFileError'), 'warning');
         }
     });
 
-    async function handleFileUpload(event) { 
+    async function handleFileUpload(event) {
         const filesToUpload = event.target.files;
         if (!filesToUpload || filesToUpload.length === 0) {
              updateStatus('upload-status', t('selectFileError'), 'warning'); return;
@@ -1408,38 +1471,45 @@
         formData.append('vectorizer_name', activeVectorizer);
 
         try {
+            // Reset status before new upload attempt
+            updateStatus('upload-status', t('uploadingStatus', {count: filesToUpload.length}), 'info', 0);
+
             const response = await apiRequest('/api/store/upload-files', { method: 'POST', body: formData });
-            const result = await response.json(); 
+            const result = await response.json();
 
             let message = result.message || '';
             let messageType = 'info';
 
-            if (response.ok) { 
+            if (response.ok) { // Status 200
                  messageType = 'success';
                  if (result.processed_files && result.processed_files.length > 0) {
                     message += ` (${t('processedFiles', {count: result.processed_files.length})})`;
-                 } else if (!result.processed_files || result.processed_files.length === 0){
-                    message = result.message || "Files checked, no new data indexed (possibly duplicates).";
+                 } else if ((!result.processed_files || result.processed_files.length === 0) && (!result.errors || result.errors.length === 0)){
+                    message = result.message || t('filesCheckedNoNewData'); // More specific message
                  }
-            } else if (response.status === 207) { 
+            } else if (response.status === 207) { // Multi-Status
                  messageType = 'warning';
-                 if (result.processed_files && result.processed_files.length > 0) message += ` (${t('processedFiles', {count: result.processed_files.length})})`;
+                 if (result.processed_files && result.processed_files.length > 0) {
+                     message += ` (${t('processedFiles', {count: result.processed_files.length})})`;
+                 }
                  if (result.errors && result.errors.length > 0) {
                       message += ` ${t('uploadErrorsEncountered', {count: result.errors.length})}`;
                       result.errors.forEach(err => console.warn(`Upload error for ${err.filename}: ${err.error}`));
                  }
-            } else { 
+                 if (!message) message = t('uploadAttemptFinished'); // Fallback message for 207
+            } else { // Other errors (4xx, 5xx)
                 messageType = 'error';
                 message = t('uploadError', {error: result.detail || response.statusText || "Unknown upload error" });
             }
-            updateStatus('upload-status', message || t('uploadAttemptFinished'), messageType);
-            await loadRagFiles();
+            updateStatus('upload-status', message, messageType); // Use persistent duration (0) for final status
+            await loadRagFiles(); // Refresh list after upload attempt
         } catch (error) {
             console.error('Upload failed:', error);
-            updateStatus('upload-status', t('uploadNetworkError') + `: ${error.message}`, 'error');
+            updateStatus('upload-status', t('uploadNetworkError', {error: error.message}), 'error');
         } finally {
-             if (event.target.id === 'file-upload-input-fm') { fileUploadInputFM.value = ''; }
-             else if (event.target.id === 'folder-upload-input') { folderUploadInput.value = ''; }
+             // Clear the file input regardless of which one triggered the upload
+             fileUploadInput.value = '';
+             folderUploadInput.value = '';
         }
     }
 
@@ -1456,17 +1526,18 @@
             if (files.length === 0) {
                 ragFileList.innerHTML = `<li class="p-2 text-center text-secondary-500 dark:text-secondary-400 text-xs">${t('noFilesFound')}</li>`;
             } else {
-                files.sort((a,b) => a.filename.localeCompare(b.filename)).forEach(file => {
+                // files should already be sorted by name from backend
+                files.forEach(file => {
                     const li = document.createElement('li');
                     li.className = 'flex justify-between items-center text-sm py-1 px-2 rounded hover:bg-secondary-100 dark:hover:bg-secondary-700';
                     const fileNameSpan = document.createElement('span');
                     fileNameSpan.textContent = file.filename;
-                    fileNameSpan.className = 'truncate text-secondary-700 dark:text-secondary-200 mr-2';
+                    fileNameSpan.className = 'truncate text-secondary-700 dark:text-secondary-200';
                     li.appendChild(fileNameSpan);
 
                     const deleteBtn = document.createElement('button');
                     deleteBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`;
-                    deleteBtn.className = 'p-1 text-danger/70 hover:text-danger rounded shrink-0';
+                    deleteBtn.className = 'p-1 text-danger/70 hover:text-danger rounded';
                     deleteBtn.title = t('deleteFileTooltip', {filename: file.filename});
                     deleteBtn.onclick = (e) => { e.stopPropagation(); deleteRagFile(file.filename); };
                     li.appendChild(deleteBtn);
@@ -1487,11 +1558,11 @@
         try {
             const encodedFilename = encodeURIComponent(filename);
             const response = await apiRequest(`/api/store/files/${encodedFilename}`, { method: 'DELETE' });
-            const result = await response.json(); 
+            const result = await response.json();
 
             if (response.ok) {
                 updateStatus('upload-status', result.message || t('fileDeletedSuccess', {filename: filename}), 'success');
-                await loadRagFiles(); 
+                await loadRagFiles();
             } else {
                 throw new Error(result.detail || `Server responded with status ${response.status}`);
             }
@@ -1501,20 +1572,21 @@
         }
     }
 
+    // --- Export Discussions Modal ---
     exportDiscussionsBtnModalTrigger.addEventListener('click', async () => {
         exportModal.classList.remove('hidden');
         exportDiscussionList.innerHTML = '';
         exportDiscussionListLoader.classList.remove('hidden');
-        updateStatus('export-status', '', 'info', 0); 
+        updateStatus('export-status', '', 'info', 0); // Clear previous status
         try {
-            const response = await apiRequest('/api/discussions');
-            if (!response.ok) throw new Error(t('discussionLoadError'));
-            const discussions = await response.json();
-            
+            // Use cached data if available
+            const discussions = discussionsDataCache.length > 0 ? discussionsDataCache : await fetchDiscussionsForExport();
+
             if (discussions.length === 0) {
                  exportDiscussionList.innerHTML = `<li class="text-center text-xs text-secondary-400 p-2">${t('noDiscussionsFound')}</li>`;
             } else {
-                discussions.sort((a, b) => (a.title || '').localeCompare(b.title || '')).forEach(disc => {
+                // discussionsDataCache is already sorted
+                discussions.forEach(disc => {
                     const li = document.createElement('li');
                     li.className = 'flex items-center p-1.5 rounded hover:bg-secondary-100 dark:hover:bg-secondary-700';
                     const checkbox = document.createElement('input');
@@ -1524,9 +1596,17 @@
                     checkbox.className = 'h-4 w-4 text-primary border-secondary-300 dark:border-secondary-600 rounded focus:ring-primary dark:bg-secondary-700 mr-2 shrink-0';
                     const label = document.createElement('label');
                     label.htmlFor = `export-disc-${disc.id}`;
-                    label.textContent = disc.title || t('untitledDiscussion', {id: disc.id.substring(0,8)});
+                    const titleText = disc.title || t('untitledDiscussion', {id: disc.id.substring(0,8)});
+                    label.textContent = titleText;
                     label.className = 'text-sm text-secondary-700 dark:text-secondary-200 cursor-pointer flex-grow truncate';
+                    label.title = titleText; // Add tooltip for long titles
                     li.appendChild(checkbox);
+                     // Add star icon if starred
+                     if (disc.is_starred) {
+                         const star = document.createElement('span');
+                         star.innerHTML = `<svg class="w-3 h-3 ml-1 text-star-DEFAULT fill-current shrink-0" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>`;
+                         li.appendChild(star);
+                     }
                     li.appendChild(label);
                     exportDiscussionList.appendChild(li);
                 });
@@ -1539,6 +1619,20 @@
             exportDiscussionListLoader.classList.add('hidden');
         }
     });
+
+    // Helper to fetch discussions if cache is empty
+    async function fetchDiscussionsForExport() {
+         const response = await apiRequest('/api/discussions');
+         if (!response.ok) throw new Error(t('discussionLoadError'));
+         const discussions = await response.json();
+         // Sort fetched discussions same way as loadDiscussions
+         discussions.sort((a, b) => {
+             if (a.is_starred !== b.is_starred) return b.is_starred - a.is_starred;
+             return (a.title || '').localeCompare(b.title || '');
+         });
+         return discussions;
+    }
+
 
     closeExportModalBtn.addEventListener('click', () => exportModal.classList.add('hidden'));
     exportModal.addEventListener('click', (e) => { if(e.target === exportModal) exportModal.classList.add('hidden'); });
@@ -1553,11 +1647,21 @@
     confirmExportBtn.addEventListener('click', async () => {
         const selectedIds = Array.from(exportDiscussionList.querySelectorAll('input[type="checkbox"]:checked'))
                                  .map(cb => cb.value);
+        if (selectedIds.length === 0) {
+            updateStatus('export-status', t('noDiscussionsSelectedError'), 'warning');
+            return;
+        }
         updateStatus('export-status', t('exportingDataStatus'), 'info', 0);
         try {
+            // Use null for discussion_ids to export all if that's the intended behavior
+            // Or send the list if specific ones are selected
+            const body = (selectedIds.length === exportDiscussionList.querySelectorAll('input[type="checkbox"]').length)
+                         ? { discussion_ids: null } // Signal export all if all are checked
+                         : { discussion_ids: selectedIds }; // Send specific list otherwise
+
             const response = await apiRequest('/api/discussions/export', {
                 method: 'POST',
-                body: { discussion_ids: selectedIds.length > 0 ? selectedIds : null }
+                body: body
             });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({detail: "Export failed."}));
@@ -1572,21 +1676,170 @@
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
             updateStatus('export-status', t('exportSuccess'), 'success');
-            setTimeout(() => exportModal.classList.add('hidden'), 1500); 
+            setTimeout(() => exportModal.classList.add('hidden'), 1500); // Close modal on success
         } catch (error) {
             updateStatus('export-status', t('exportError', {error: error.message}), 'error');
         }
     });
 
+    // --- Import Discussions Modal ---
+    importDiscussionsBtnModalTrigger.addEventListener('click', () => {
+         importModal.classList.remove('hidden');
+         // Reset state
+         importFileInput.value = '';
+         importPreviewList.innerHTML = '';
+         importPreviewSection.classList.add('hidden');
+         updateStatus('import-status', '', 'info', 0);
+         selectedImportFile = null; // Clear selected file cache
+    });
+
+    closeImportModalBtn.addEventListener('click', () => importModal.classList.add('hidden'));
+    importModal.addEventListener('click', (e) => { if(e.target === importModal) importModal.classList.add('hidden'); });
+
+    importFileInput.addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        if (!file) {
+            importPreviewList.innerHTML = '';
+            importPreviewSection.classList.add('hidden');
+            selectedImportFile = null;
+            return;
+        }
+        if (file.type !== 'application/json') {
+            updateStatus('import-status', t('importInvalidFileType'), 'error');
+            importPreviewList.innerHTML = '';
+            importPreviewSection.classList.add('hidden');
+            selectedImportFile = null;
+            return;
+        }
+
+        selectedImportFile = file; // Store the file object
+        importPreviewLoader.classList.remove('hidden');
+        importPreviewList.innerHTML = '';
+        importPreviewSection.classList.remove('hidden');
+        updateStatus('import-status', t('parsingFile'), 'info', 0);
+
+        try {
+            const fileContent = await file.text();
+            const data = JSON.parse(fileContent);
+
+            if (!data || typeof data !== 'object' || !Array.isArray(data.discussions)) {
+                 throw new Error(t('importInvalidFileFormat'));
+            }
+
+            const discussionsToImport = data.discussions;
+            if (discussionsToImport.length === 0) {
+                importPreviewList.innerHTML = `<li class="text-center text-xs text-secondary-400 p-2">${t('importNoDiscussionsInFile')}</li>`;
+            } else {
+                 discussionsToImport.sort((a, b) => (a.title || '').localeCompare(b.title || '')).forEach(disc => {
+                    const li = document.createElement('li');
+                    li.className = 'flex items-center p-1.5 rounded hover:bg-secondary-100 dark:hover:bg-secondary-700';
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.id = `import-disc-${disc.discussion_id}`;
+                    checkbox.value = disc.discussion_id; // Use original ID from file as value
+                    checkbox.className = 'import-checkbox h-4 w-4 text-primary border-secondary-300 dark:border-secondary-600 rounded focus:ring-primary dark:bg-secondary-700 mr-2 shrink-0';
+                    checkbox.checked = true; // Default to selected
+                    const label = document.createElement('label');
+                    label.htmlFor = `import-disc-${disc.discussion_id}`;
+                    const titleText = disc.title || t('untitledDiscussion', {id: disc.discussion_id.substring(0,8)});
+                    label.textContent = titleText;
+                    label.className = 'text-sm text-secondary-700 dark:text-secondary-200 cursor-pointer flex-grow truncate';
+                    label.title = titleText; // Tooltip
+                    li.appendChild(checkbox);
+                     // Show star if it was starred in the export file
+                     if (disc.is_starred) {
+                         const star = document.createElement('span');
+                         star.innerHTML = `<svg class="w-3 h-3 ml-1 text-star-DEFAULT fill-current shrink-0" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>`;
+                         li.appendChild(star);
+                     }
+                    li.appendChild(label);
+                    importPreviewList.appendChild(li);
+                });
+            }
+             updateStatus('import-status', t('selectDiscussionsPrompt'), 'info', 0); // Update status
+
+        } catch (error) {
+            console.error("Error parsing import file:", error);
+            updateStatus('import-status', `${t('importParseError')}: ${error.message}`, 'error');
+            importPreviewSection.classList.add('hidden'); // Hide preview on error
+            selectedImportFile = null;
+        } finally {
+            importPreviewLoader.classList.add('hidden');
+        }
+    });
+
+    importSelectAllBtn.addEventListener('click', () => {
+        importPreviewList.querySelectorAll('.import-checkbox').forEach(cb => cb.checked = true);
+    });
+    importSelectNoneBtn.addEventListener('click', () => {
+        importPreviewList.querySelectorAll('.import-checkbox').forEach(cb => cb.checked = false);
+    });
+
+    confirmImportBtn.addEventListener('click', async () => {
+        if (!selectedImportFile) {
+            updateStatus('import-status', t('selectImportFileLabel'), 'warning');
+            return;
+        }
+        const selectedIds = Array.from(importPreviewList.querySelectorAll('.import-checkbox:checked'))
+                                 .map(cb => cb.value); // These are original IDs from the file
+        if (selectedIds.length === 0) {
+            updateStatus('import-status', t('noImportDiscussionsSelectedError'), 'warning');
+            return;
+        }
+
+        updateStatus('import-status', t('importingDataStatus'), 'info', 0);
+        confirmImportBtn.disabled = true; // Disable button during import
+
+        try {
+            const formData = new FormData();
+            formData.append('import_file', selectedImportFile);
+            // Send the list of selected original IDs as a JSON string in the form data
+            formData.append('import_request_json', JSON.stringify({ discussion_ids_to_import: selectedIds }));
+
+            const response = await apiRequest('/api/discussions/import', {
+                method: 'POST',
+                body: formData
+                // Content-Type is set automatically for FormData
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+                 updateStatus('import-status', result.message || t('importSuccess'), 'success');
+                 showFlashMessage(result.message || t('importSuccess'), 'success');
+                 await loadDiscussions(true); // Reload discussion list in sidebar
+                 setTimeout(() => importModal.classList.add('hidden'), 1500); // Close modal
+            } else {
+                 updateStatus('import-status', result.detail || t('importErrorOccurred'), 'error');
+                 showFlashMessage(result.detail || t('importErrorOccurred'), 'error');
+                 // Display specific errors if available
+                 if (result.errors && result.errors.length > 0) {
+                     console.error("Import errors:", result.errors);
+                     // Optionally display these errors in the UI more prominently
+                 }
+            }
+        } catch (error) {
+            console.error("Import API call failed:", error);
+            updateStatus('import-status', t('importApiError', {error: error.message}), 'error');
+            showFlashMessage(t('importApiError', {error: error.message}), 'error');
+        } finally {
+             confirmImportBtn.disabled = false; // Re-enable button
+        }
+    });
+
+
+    // --- Initial Load ---
     document.addEventListener('DOMContentLoaded', async () => {
         const savedTheme = localStorage.getItem('theme');
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         applyTheme(savedTheme || (prefersDark ? 'dark' : 'light'));
-        
-        await loadTranslations(currentLanguage); 
-        showLoginScreen();
+
+        // Load translations before showing login to ensure login screen text is translated
+        await loadTranslations(currentLanguage);
+        showLoginScreen(); // Show login screen after initial setup
     });
 
 </script>
 </body>
 </html>
+
