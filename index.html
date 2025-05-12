@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title data-i18n="appTitle">LoLLMs Chat</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script>
       tailwind.config = {
@@ -31,8 +30,46 @@
             },
             fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', '"Noto Sans"', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'], },
             typography: ({ theme }) => ({
-                DEFAULT: { css: { '--tw-prose-body': theme('colors.secondary.700'), '--tw-prose-headings': theme('colors.secondary.900'), code: { color: theme('colors.primary.dark'), fontWeight: '500', backgroundColor: theme('colors.secondary.100'), padding: '0.1em 0.3em', borderRadius: '0.25rem', border: `1px solid ${theme('colors.secondary.200')}`}, pre: { backgroundColor: theme('colors.secondary.100')}, a: {color: theme('colors.primary.DEFAULT')} } },
-                invert: { css: { '--tw-prose-body': theme('colors.secondary.300'), '--tw-prose-headings': theme('colors.secondary.100'), code: { color: theme('colors.primary.light'), backgroundColor: theme('colors.secondary.800'), border: `1px solid ${theme('colors.secondary.700')}`}, pre: { backgroundColor: theme('colors.secondary.800')}, a: {color: theme('colors.primary.light')} } },
+                DEFAULT: { css: { 
+                    '--tw-prose-body': theme('colors.secondary.700'), '--tw-prose-headings': theme('colors.secondary.900'), 
+                    '--tw-prose-pre-bg': theme('colors.secondary.100'),
+                    '--tw-prose-code': theme('colors.primary.dark'), 
+                    'code': { 
+                        backgroundColor: theme('colors.secondary.100'), padding: '0.1em 0.3em', borderRadius: '0.25rem', border: `1px solid ${theme('colors.secondary.200')}`,
+                        fontWeight: '500', color: theme('colors.primary.dark'),
+                    },
+                    'pre': {
+                        backgroundColor: theme('colors.secondary.100') + '!important', // Override for CM parent
+                        padding: '0 !important', // Override for CM parent
+                        color: theme('colors.secondary.700'),
+                        border: `1px solid ${theme('colors.secondary.200')}`,
+                        borderRadius: '0.375rem',
+                    },
+                    'pre code': { // Styles for code inside pre, before CM takes over
+                        backgroundColor: 'transparent', padding: '0', border: 'none', color: 'inherit',
+                    },
+                    'a': {color: theme('colors.primary.DEFAULT')} 
+                }},
+                invert: { css: { 
+                    '--tw-prose-body': theme('colors.secondary.300'), '--tw-prose-headings': theme('colors.secondary.100'),
+                    '--tw-prose-pre-bg': theme('colors.secondary.800'),
+                    '--tw-prose-code': theme('colors.primary.light'),
+                     'code': { 
+                        backgroundColor: theme('colors.secondary.800'), border: `1px solid ${theme('colors.secondary.700')}`,
+                        fontWeight: '500', color: theme('colors.primary.light'),
+                    },
+                    'pre': {
+                        backgroundColor: theme('colors.secondary.800') + '!important',
+                        padding: '0 !important',
+                        color: theme('colors.secondary.300'),
+                        border: `1px solid ${theme('colors.secondary.700')}`,
+                        borderRadius: '0.375rem',
+                    },
+                    'pre code': {
+                         backgroundColor: 'transparent', padding: '0', border: 'none', color: 'inherit',
+                    },
+                    'a': {color: theme('colors.primary.light')}
+                }},
             }),
           }
         }
@@ -42,17 +79,20 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- CodeMirror -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/neo.min.css"> <!-- Dark theme -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/material-darker.min.css"> <!-- Alt Dark theme -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/neo.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/material-darker.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/meta.js"></script> <!-- For findModeByExtension -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/python/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/javascript/javascript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/xml/xml.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/css/css.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/markdown/markdown.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/runmode/runmode.min.js"></script> <!-- For non-editable highlighting -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/shell/shell.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/sql/sql.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/yaml/yaml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/runmode/runmode.min.js"></script>
 
 
     <style>
@@ -64,18 +104,35 @@
         ::-webkit-scrollbar-thumb:hover { background: theme('colors.secondary.500'); }
         .dark ::-webkit-scrollbar-thumb:hover { background: theme('colors.secondary.500'); }
         
-        /* Marked.js overrides for code blocks to prepare for CodeMirror */
-        .prose pre { background-color: transparent !important; padding: 0 !important; border-radius: 0.375rem; /* Tailwind md */ }
-        .prose pre code { display: block; } /* Ensure code fills pre for CM */
-        .prose code::before, .prose code::after { content: none; } /* Remove existing pseudo-elements */
+        .prose code::before, .prose code::after { content: none; }
         
-        /* CodeMirror Styling */
-        .cm-readonly-display .CodeMirror { border-radius: 0.375rem; font-size: 0.875rem; }
-        .cm-readonly-display .CodeMirror-gutters { background-color: theme('colors.secondary.100') !important; border-right: 1px solid theme('colors.secondary.300') !important;}
-        .dark .cm-readonly-display .CodeMirror-gutters { background-color: theme('colors.secondary.800') !important; border-right: 1px solid theme('colors.secondary.700') !important;}
-        .cm-readonly-display .CodeMirror-linenumber { color: theme('colors.secondary.500') !important; }
+        .cm-readonly-display .CodeMirror {
+            border-radius: 0.375rem; font-size: 0.875rem; line-height: 1.5;
+            height: auto; /* Allow CM to size based on content */
+        }
+        .cm-readonly-display .CodeMirror-gutters { 
+            background-color: theme('colors.secondary.100') !important; 
+            border-right: 1px solid theme('colors.secondary.300') !important;
+            border-top-left-radius: 0.375rem; border-bottom-left-radius: 0.375rem;
+        }
+        .dark .cm-readonly-display .CodeMirror-gutters { 
+            background-color: theme('colors.secondary.800') !important; 
+            border-right: 1px solid theme('colors.secondary.700') !important;
+        }
+        .cm-readonly-display .CodeMirror-linenumber { color: theme('colors.secondary.500') !important; padding: 0 3px 0 5px; }
         .dark .cm-readonly-display .CodeMirror-linenumber { color: theme('colors.secondary.400') !important; }
-        .cm-readonly-display .CodeMirror-scroll { overflow: auto !important; /* Allow scroll if content too long */ max-height: 400px; /* Example max height */ }
+        .cm-readonly-display .CodeMirror-scroll { 
+            overflow-y: hidden !important; /* Prevent double scrollbars */
+            overflow-x: auto !important; 
+        }
+        /* Ensure CodeMirror themes are applied */
+        .cm-s-default.CodeMirror { background-color: theme('colors.secondary.100'); color: theme('colors.secondary.800'); }
+        .cm-s-neo.CodeMirror, .cm-s-material-darker.CodeMirror { background-color: theme('colors.secondary.800'); color: theme('colors.secondary.200'); }
+        .cm-s-neo .CodeMirror-gutters { background: theme('colors.secondary.800'); border-right: 1px solid theme('colors.secondary.700');}
+        .cm-s-material-darker .CodeMirror-gutters { background: #31363f; border-right: 1px solid #444;}
+        .cm-s-neo .CodeMirror-cursor { border-left: 1px solid theme('colors.secondary.100'); }
+        .cm-s-material-darker .CodeMirror-cursor { border-left: 1px solid #f8f8f0; }
+
 
         .loader { border: 3px solid theme('colors.secondary.300'); border-top: 3px solid theme('colors.primary.DEFAULT'); border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; }
         .dark .loader { border-color: theme('colors.secondary.700'); border-top-color: theme('colors.primary.light');}
@@ -121,11 +178,21 @@
             cursor: pointer; border: 2px solid white; box-shadow: 0 1px 2px rgba(0,0,0,0.2); display: flex; justify-content: center; align-items: center;
         }
         .remove-image-btn:hover { background-color: theme('colors.danger.dark'); }
+
+        .sender-label {
+            font-size: 0.75rem; /* text-xs */
+            font-weight: 600; /* font-semibold */
+            margin-bottom: 0.25rem; /* mb-1 */
+            color: theme('colors.secondary.500');
+        }
+        .dark .sender-label { color: theme('colors.secondary.400'); }
+        .user-message .sender-label { text-align: right; margin-right: 0.5rem; /* Adjust as needed */ }
+        .assistant-message .sender-label { text-align: left; margin-left: 0.5rem; /* Adjust as needed */ }
+
     </style>
 </head>
 <body class="bg-secondary-100 dark:bg-secondary-900 text-secondary-900 dark:text-secondary-100 font-sans antialiased overflow-hidden">
 
-    <!-- Login Screen -->
     <div id="login-screen" class="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop">
         <div class="bg-white dark:bg-secondary-800 p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-sm animate-fade-in">
             <div class="text-center mb-6">
@@ -146,16 +213,12 @@
         </div>
     </div>
     
-    <!-- Initial Loading Overlay (after login, before app is ready) -->
     <div id="initial-loading-overlay" class="fixed inset-0 z-[60] flex flex-col items-center justify-center p-4 modal-backdrop hidden">
         <div class="initial-load-spinner loader animate-spin rounded-full"></div>
         <p class="mt-4 text-white text-lg" data-i18n="initializingApp">Initializing Application...</p>
     </div>
 
-
-    <!-- Main Application Container -->
-    <div id="app-container" class="flex h-screen hidden"> <!-- Initially hidden -->
-        <!-- Sidebar -->
+    <div id="app-container" class="flex h-screen hidden">
         <aside id="sidebar" class="w-64 sm:w-72 bg-secondary-800 dark:bg-secondary-950 text-secondary-300 flex flex-col p-3 sm:p-4 border-r border-secondary-700 dark:border-secondary-800 shadow-lg shrink-0">
             <img src="/logo.png" alt="Logo" class="mx-auto h-10 w-auto mb-4">
             <div id="user-info" class="p-2 text-center text-sm mb-3">
@@ -170,7 +233,6 @@
                  <ul id="discussion-list"></ul>
                  <p id="discussion-list-loader" class="text-center text-xs text-secondary-400 hidden" data-i18n="loadingDiscussions">Loading discussions...</p>
             </div>
-            <!-- Bottom Buttons -->
             <div class="mt-auto pt-4 space-y-2 border-t border-secondary-700 dark:border-secondary-800">
                  <button id="file-manager-btn" class="w-full flex items-center justify-start space-x-3 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-850 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
                     <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
@@ -200,24 +262,18 @@
             </div>
         </aside>
 
-        <!-- Main Chat Area -->
         <main id="main-content" class="flex-grow flex flex-col bg-white dark:bg-secondary-900 overflow-hidden">
-            <!-- Chat Header -->
             <div id="chat-header" class="p-3 sm:p-4 border-b border-secondary-200 dark:border-secondary-800 text-base sm:text-lg font-semibold text-secondary-700 dark:text-secondary-200 flex items-center justify-between shrink-0 shadow-sm">
                 <span id="chat-title-text" class="truncate mr-2" data-i18n="selectDiscussionPrompt">Select a discussion...</span>
                 <button id="edit-chat-title-btn" class="ml-2 p-1.5 text-secondary-500 hover:text-primary dark:hover:text-primary-light focus:outline-none rounded-md hidden transition-colors" data-i18n-title="editTitleTooltip">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                 </button>
             </div>
-            <!-- Chat Messages Area -->
             <div id="chat-messages" class="flex-grow p-3 sm:p-4 md:p-6 space-y-4 overflow-y-auto bg-secondary-50 dark:bg-secondary-850">
                  <p id="chat-messages-placeholder" class="text-center text-secondary-500 dark:text-secondary-400" data-i18n="noMessagesYet">No messages yet. Start the conversation!</p>
             </div>
-            <!-- Chat Input Area -->
             <div class="p-3 sm:p-4 border-t border-secondary-200 dark:border-secondary-800 bg-secondary-100 dark:bg-secondary-900 shrink-0">
-                <!-- Image Preview Area -->
                 <div id="image-preview-area" class="image-preview-container mb-2 hidden">
-                    <!-- Image previews will be added here -->
                 </div>
                 <div class="flex items-end space-x-2 sm:space-x-3">
                     <button id="image-upload-btn" title="Attach Images" class="p-2.5 text-secondary-500 hover:text-primary dark:hover:text-primary-light rounded-lg border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-700 hover:bg-secondary-50 dark:hover:bg-secondary-600 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary">
@@ -239,7 +295,6 @@
         </main>
     </div>
 
-    <!-- Settings Modal -->
     <div id="settings-modal" class="fixed inset-0 z-40 flex items-center justify-center p-4 hidden modal-backdrop animate-fade-in">
         <div class="bg-white dark:bg-secondary-800 p-5 sm:p-6 rounded-xl shadow-2xl w-full max-w-lg space-y-4 sm:space-y-5 transform transition-all max-h-[90vh] overflow-y-auto animate-slide-in">
             <div class="flex justify-between items-center pb-3 border-b border-secondary-200 dark:border-secondary-700">
@@ -271,7 +326,6 @@
         </div>
     </div>
 
-    <!-- File Manager Modal -->
      <div id="file-manager-modal" class="fixed inset-0 z-40 flex items-center justify-center p-4 hidden modal-backdrop animate-fade-in">
         <div class="bg-white dark:bg-secondary-800 p-5 sm:p-6 rounded-xl shadow-2xl w-full max-w-xl space-y-4 sm:space-y-5 transform transition-all max-h-[90vh] flex flex-col animate-slide-in">
             <div class="flex justify-between items-center pb-3 border-b border-secondary-200 dark:border-secondary-700 shrink-0">
@@ -303,7 +357,6 @@
         </div>
     </div>
 
-    <!-- Export Discussions Modal -->
     <div id="export-modal" class="fixed inset-0 z-40 flex items-center justify-center p-4 hidden modal-backdrop animate-fade-in">
         <div class="bg-white dark:bg-secondary-800 p-5 sm:p-6 rounded-xl shadow-2xl w-full max-w-lg space-y-4 sm:space-y-5 transform transition-all max-h-[90vh] flex flex-col animate-slide-in">
             <div class="flex justify-between items-center pb-3 border-b border-secondary-200 dark:border-secondary-700 shrink-0">
@@ -328,9 +381,7 @@
         </div>
     </div>
 
-
 <script>
-    // --- DOM Element References ---
     const $ = (selector) => document.getElementById(selector);
     const loginScreen = $('login-screen'), loginFormTag = $('login-form-tag'),
           loginButton = $('login-button'), loginSpinner = $('login-spinner'), loginError = $('login-error'),
@@ -338,11 +389,11 @@
     const initialLoadingOverlay = $('initial-loading-overlay');
     const appContainer = $('app-container'), sidebar = $('sidebar'),
           mainContent = $('main-content'), userDisplayName = $('user-display-name');
-    const discussionListContainer = $('discussion-list-container'),
+    const discussionListContainer = $('discussion-list-container'), 
           discussionList = $('discussion-list'), discussionListLoader = $('discussion-list-loader'),
           newDiscussionBtn = $('new-discussion-btn'),
-          exportDiscussionsBtnModalTrigger = $('export-discussions-btn-modal-trigger'),
-          settingsBtn = $('settings-btn'), fileManagerBtn = $('file-manager-btn'),
+          exportDiscussionsBtnModalTrigger = $('export-discussions-btn-modal-trigger'), 
+          settingsBtn = $('settings-btn'), fileManagerBtn = $('file-manager-btn'), 
           themeToggleBtn = $('theme-toggle-btn'), logoutBtn = $('logout-btn'), adminBtn = $('admin-btn');
     const chatHeader = $('chat-header'), chatTitleText = $('chat-title-text'),
           editChatTitleBtn = $('edit-chat-title-btn'), chatMessages = $('chat-messages'),
@@ -352,41 +403,37 @@
           ragToggleContainer = $('rag-toggle-container');
     const imageUploadBtn = $('image-upload-btn'), imageUploadInput = $('image-upload-input'),
           imagePreviewArea = $('image-preview-area');
-    // Settings Modal
     const settingsModal = $('settings-modal'), closeSettingsBtn = $('close-settings-btn'),
           languageSelect = $('language-select'), lollmsModelSelect = $('lollms-model-select'),
           setLollmsModelBtn = $('set-lollms-model-btn'), vectorizerSelect = $('vectorizer-select'),
           newVectorizerNameInput = $('new-vectorizer-name'), setVectorizerBtn = $('set-vectorizer-btn'),
           settingsStatus = $('settings-status');
-    // File Manager Modal
     const fileManagerModal = $('file-manager-modal'), closeFileManagerBtn = $('close-file-manager-btn'),
-          fileUploadInputFM = $('file-upload-input-fm'), // Note: ID changed from 'file-upload-input'
+          fileUploadInputFM = $('file-upload-input-fm'),
           folderUploadInput = $('folder-upload-input'),
           uploadFolderBtn = $('upload-folder-btn'), uploadDocumentBtn = $('upload-document-btn'),
           uploadStatus = $('upload-status'), ragFileList = $('rag-file-list'), ragListLoader = $('rag-list-loader');
-    // Export Modal
     const exportModal = $('export-modal'), closeExportModalBtn = $('close-export-modal-btn'),
           exportDiscussionListContainer = $('export-discussion-list-container'),
           exportDiscussionList = $('export-discussion-list'), exportDiscussionListLoader = $('export-discussion-list-loader'),
           exportSelectAllBtn = $('export-select-all-btn'), exportSelectNoneBtn = $('export-select-none-btn'),
           confirmExportBtn = $('confirm-export-btn'), exportStatus = $('export-status');
 
-
-    // --- Application State ---
     let currentAuth = null;
     let currentDiscussionId = null;
-    let currentUserDetails = null;
+    let currentUserDetails = null; 
     let currentLanguage = localStorage.getItem('preferredLanguage') || navigator.language.split('-')[0] || 'en';
     let translations = {};
     let isSendingMessage = false;
-    let attachedImageFiles = []; // Store {id, fileObject, previewUrl, name}
+    let attachedImageFiles = []; 
+    let codeMirrorInstances = {}; // To manage CM instances for debounce/updates
 
-    // --- API Request Helper ---
+
     async function apiRequest(url, options = {}) {
         if (!currentAuth && !url.startsWith('./locales/')) {
             console.error("Authentication token not set for API request to:", url);
             showFlashMessage(t('authError') || "Authentication error. Please log in again.", 'error');
-            showLoginScreen();
+            showLoginScreen(); 
             throw new Error("Not authenticated for API request.");
         }
 
@@ -420,7 +467,6 @@
         }
     }
 
-    // --- Translation Helpers ---
     async function loadTranslations(lang) {
         try {
             const response = await apiRequest(`./locales/${lang}.json`);
@@ -469,8 +515,6 @@
 
     languageSelect.addEventListener('change', (e) => loadTranslations(e.target.value));
 
-
-    // --- UI Helpers ---
     function showFlashMessage(message, type = 'info', duration = 5000) {
         const flashDiv = document.createElement('div');
         let bgColor = 'bg-primary text-white'; 
@@ -511,11 +555,10 @@
             document.documentElement.classList.remove('dark');
         }
         localStorage.setItem('theme', theme);
-        // Re-render CodeMirror blocks if any exist with new theme
         document.querySelectorAll('.CodeMirror').forEach(cmWrapper => {
             const cmInstance = cmWrapper.CodeMirror;
             if (cmInstance) {
-                cmInstance.setOption("theme", theme === 'dark' ? 'neo' : 'default');
+                cmInstance.setOption("theme", theme === 'dark' ? 'material-darker' : 'default');
             }
         });
     }
@@ -525,8 +568,6 @@
         applyTheme(isDark ? 'light' : 'dark');
     });
 
-
-    // --- Authentication ---
     function showLoginScreen() {
         currentAuth = null; currentUserDetails = null; currentDiscussionId = null;
         loginScreen.classList.remove('hidden');
@@ -550,12 +591,12 @@
         e.preventDefault(); 
         loginButton.disabled = true; loginSpinner.classList.remove('hidden');
         loginError.classList.add('hidden');
-        const username = usernameInput.value, password = passwordInput.value;
-        if (!username || !password) {
+        const usernameVal = usernameInput.value, passwordVal = passwordInput.value;
+        if (!usernameVal || !passwordVal) {
             loginError.textContent = t('credentialsRequiredError'); loginError.classList.remove('hidden');
             loginButton.disabled = false; loginSpinner.classList.add('hidden'); return;
         }
-        currentAuth = btoa(`${username}:${password}`);
+        currentAuth = btoa(`${usernameVal}:${passwordVal}`);
         try {
             const response = await apiRequest('/api/auth/me');
             if (!response.ok) {
@@ -610,8 +651,6 @@
     logoutBtn.addEventListener('click', showLoginScreen);
     adminBtn.addEventListener('click', () => window.open('/admin', '_blank'));
 
-
-    // --- Discussion Management ---
     async function loadDiscussions(selectLastActive = false) {
         discussionListLoader.classList.remove('hidden');
         discussionList.innerHTML = '';
@@ -687,9 +726,8 @@
         clearImagePreviews();
     }
 
-
     async function selectDiscussion(discussionId, forceReload = false) {
-        if (currentDiscussionId === discussionId && !forceReload && chatMessages.children.length > (chatMessagesPlaceholder.classList.contains('hidden') ? 0:1) ) { // check if messages are already loaded
+        if (currentDiscussionId === discussionId && !forceReload && chatMessages.children.length > (chatMessagesPlaceholder.classList.contains('hidden') ? 0:1) ) {
             return;
         }
 
@@ -796,7 +834,6 @@
         }
     });
 
-    // --- Message Sending & Rendering ---
     function updateSendButtonState() {
          const hasText = messageInput.value.trim().length > 0;
          const hasImages = attachedImageFiles.length > 0;
@@ -828,7 +865,6 @@
             { 
                 filenames: attachedImageFiles.map(f => f.name),
                 image_count: attachedImageFiles.length,
-                // For optimistic rendering, pass data URLs directly
                 image_previews: attachedImageFiles.map(f => f.previewUrl) 
             }
         );
@@ -836,7 +872,7 @@
         messageInput.value = ''; messageInput.style.height = 'auto';
         messageInput.disabled = true; 
         sendButton.classList.add('send-button-loading'); 
-        updateSendButtonState(); // sendButton.disabled will be true due to isSendingMessage
+        updateSendButtonState();
 
         const formData = new FormData();
         formData.append('prompt', prompt);
@@ -845,7 +881,7 @@
             formData.append('files', imgFile.fileObject, imgFile.name);
         });
 
-        clearImagePreviews(); // Clear UI previews after preparing FormData
+        clearImagePreviews(); 
 
         let assistantMessageDiv = null;
         let accumulatedResponseText = "";
@@ -868,6 +904,7 @@
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let cmUpdateDebounceTimer = null;
 
             while (true) {
                 const { value, done } = await reader.read();
@@ -881,14 +918,22 @@
                         const data = JSON.parse(line);
                         if (data.type === "chunk") {
                             if (!assistantMessageDiv) {
-                                const assistantName = currentUserDetails?.lollms_client_ai_name || 'assistant';
+                                const assistantName = currentUserDetails?.lollms_client_ai_name || 'LoLLMs';
                                 chatMessagesPlaceholder.classList.add('hidden');
                                 assistantMessageDiv = renderMessage(assistantName, '', assistantStreamId, true);
                             }
                             accumulatedResponseText += data.content;
-                            renderMessageContent(assistantMessageDiv.querySelector('.message-text-content'), accumulatedResponseText, 'assistant');
-                            chatMessages.scrollTop = chatMessages.scrollHeight;
+                            
+                            if (cmUpdateDebounceTimer) clearTimeout(cmUpdateDebounceTimer);
+                            cmUpdateDebounceTimer = setTimeout(() => {
+                                if (assistantMessageDiv) { // Check if div still exists
+                                     renderMessageContent(assistantMessageDiv.querySelector('.message-text-content'), accumulatedResponseText, 'assistant');
+                                     chatMessages.scrollTop = chatMessages.scrollHeight;
+                                }
+                            }, 50); // Debounce CM updates slightly
+
                         } else if (data.type === "error") {
+                            if (cmUpdateDebounceTimer) clearTimeout(cmUpdateDebounceTimer);
                             if (assistantMessageDiv && $(`message-${assistantStreamId}`)) {
                                 $(`message-${assistantStreamId}`).remove();
                             }
@@ -901,6 +946,13 @@
                     }
                 }
             }
+            // Final update after loop if any pending
+            if (cmUpdateDebounceTimer) clearTimeout(cmUpdateDebounceTimer);
+            if (assistantMessageDiv && accumulatedResponseText) {
+                 renderMessageContent(assistantMessageDiv.querySelector('.message-text-content'), accumulatedResponseText, 'assistant');
+                 chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+
         } catch (error) {
             console.error('Failed to send message or process stream:', error);
             renderMessage('system', t('networkError', { error: error.message }));
@@ -923,15 +975,22 @@
     function renderMessage(sender, text, id, isStreaming = false, metadata = {}) {
         const msgOuterDiv = document.createElement('div');
         const messageElementId = `message-${id}`;
-        msgOuterDiv.className = `message-bubble-outer flex w-full mb-3 items-end relative group ${sender.toLowerCase() === (currentUserDetails?.username?.toLowerCase() || 'user') ? 'user-message justify-end' : 'assistant-message justify-start'}`;
+        const isUser = sender.toLowerCase() === (currentUserDetails?.username?.toLowerCase() || 'user');
+        const aiName = currentUserDetails?.lollms_client_ai_name || 'LoLLMs';
+
+        msgOuterDiv.className = `message-bubble-outer w-full mb-1 group ${isUser ? 'user-message flex flex-col items-end' : 'assistant-message flex flex-col items-start'}`;
         msgOuterDiv.id = messageElementId;
 
+        const senderNameDiv = document.createElement('div');
+        senderNameDiv.className = `sender-label px-3 ${isUser ? 'text-right' : 'text-left'}`;
+        senderNameDiv.textContent = isUser ? (currentUserDetails?.username || 'User') : aiName;
+        msgOuterDiv.appendChild(senderNameDiv);
+
         const msgBubble = document.createElement('div');
-        const isUser = sender.toLowerCase() === (currentUserDetails?.username?.toLowerCase() || 'user');
         msgBubble.className = `p-3 rounded-xl max-w-[85%] sm:max-w-[75%] lg:max-w-[70%] break-words shadow-md relative ${
             isUser ? 'bg-primary text-white ml-auto rounded-br-lg' : 
             sender.toLowerCase() === 'system' ? 'bg-warning/20 dark:bg-warning/30 text-warning-dark dark:text-warning-light text-xs italic text-center max-w-md mx-auto px-2 py-1 shadow-none rounded-md' :
-            'bg-secondary-200 dark:bg-secondary-700 text-secondary-800 dark:text-secondary-100 prose dark:prose-invert max-w-none rounded-bl-lg' // Removed prose-sm for better CM fit
+            'bg-secondary-200 dark:bg-secondary-700 text-secondary-800 dark:text-secondary-100 prose dark:prose-invert max-w-none rounded-bl-lg'
         }`;
         msgBubble.dataset.messageId = id;
         msgBubble.dataset.sender = sender;
@@ -940,26 +999,23 @@
              msgBubble.dataset.originalContent = text;
         }
 
-        // Image previews for user messages
         if (isUser && metadata && metadata.image_previews && metadata.image_previews.length > 0) {
             const imgContainer = document.createElement('div');
             imgContainer.className = 'flex flex-wrap gap-2 mb-2';
-            metadata.image_previews.forEach(srcUrl => { // srcUrl is already data URL
+            metadata.image_previews.forEach(srcUrl => {
                 const img = document.createElement('img');
                 img.src = srcUrl;
-                img.alt = 'Uploaded image'; // Generic alt
+                img.alt = 'Uploaded image';
                 img.className = 'max-h-24 max-w-32 rounded border border-primary-light/30 object-cover';
                 imgContainer.appendChild(img);
             });
             msgBubble.appendChild(imgContainer);
         }
         
-        // Div to hold text content (and later CodeMirror for AI)
         const textContentDiv = document.createElement('div');
-        textContentDiv.className = 'message-text-content'; // Add class for easier targeting
+        textContentDiv.className = 'message-text-content';
         renderMessageContent(textContentDiv, text, sender);
         msgBubble.appendChild(textContentDiv);
-
 
         if (sender.toLowerCase() !== 'system' && !isStreaming && id && 
             !String(id).startsWith('temp-') && !String(id).startsWith('assistant-stream-')) {
@@ -1029,39 +1085,50 @@
                 }
                 targetElement.appendChild(contentDiv);
 
-                // Apply CodeMirror to code blocks within this new content
-                contentDiv.querySelectorAll('pre').forEach((preElement) => {
+                contentDiv.querySelectorAll('pre').forEach((preElement, preIndex) => {
                     const codeElement = preElement.querySelector('code');
-                    if (!codeElement) return;
+                    if (!codeElement || preElement.classList.contains('cm-processed')) return;
 
                     const langClass = Array.from(codeElement.classList).find(cls => cls.startsWith('language-'));
                     const language = langClass ? langClass.substring('language-'.length) : 'plaintext';
                     
                     let cmMode = language;
-                    if (language === 'python' || language === 'py') cmMode = 'python';
+                    const modeInfo = CodeMirror.findModeByName(language) || CodeMirror.findModeByExtension(language) || CodeMirror.findModeByMIME(language);
+                    if(modeInfo) {
+                        cmMode = modeInfo.mode;
+                        // Ensure mode is loaded if found (may require dynamic script loading for less common modes)
+                        if (modeInfo.mode && !CodeMirror.modes[modeInfo.mode] && modeInfo.mime !== 'text/plain') { // Don't try to load 'null' mode
+                            // console.warn(`CodeMirror mode '${modeInfo.mode}' for language '${language}' not loaded. Attempting to load.`);
+                            // This is where dynamic script loading for CM modes would go if needed.
+                            // For now, we rely on pre-loaded common modes.
+                        }
+                    } else if (language === 'python' || language === 'py') cmMode = 'python';
                     else if (language === 'javascript' || language === 'js') cmMode = 'javascript';
                     else if (language === 'json') cmMode = {name: "javascript", json: true};
                     else if (language === 'html' || language === 'xml') cmMode = 'xml';
                     else if (language === 'css') cmMode = 'css';
                     else if (language === 'markdown' || language === 'md') cmMode = 'markdown';
-                    // Add other mappings as needed
+                    else if (language === 'bash' || language === 'sh' || language === 'shell') cmMode = 'shell';
+                    else if (language === 'sql') cmMode = 'sql';
+                    else if (language === 'yaml' || language === 'yml') cmMode = 'yaml';
+                    else cmMode = 'null'; // Default to plain text like
+
 
                     try {
-                        const cmInstance = CodeMirror(function(elt) {
+                        CodeMirror(function(elt) {
                            preElement.parentNode.replaceChild(elt, preElement);
+                           elt.classList.add('cm-processed'); // Mark as processed
                         }, {
                             value: codeElement.textContent || '',
                             mode: cmMode,
-                            theme: document.documentElement.classList.contains('dark') ? 'neo' : 'default',
+                            theme: document.documentElement.classList.contains('dark') ? 'material-darker' : 'default',
                             lineNumbers: true,
                             readOnly: 'nocursor',
-                            scrollbarStyle: "null", // Hide CM's own scrollbar for small snippets
-                            viewportMargin: Infinity // To render all lines for copy-paste
-                        });
-                        cmInstance.getWrapperElement().classList.add('cm-readonly-display', 'prose-code-block', 'max-w-full', 'overflow-x-auto');
+                            scrollbarStyle: "null", 
+                            viewportMargin: Infinity 
+                        }).getWrapperElement().classList.add('cm-readonly-display', 'prose-code-block', 'max-w-full', 'overflow-x-auto');
                     } catch (e) {
-                         console.warn(`CodeMirror error for mode '${cmMode}':`, e, "Original text:", codeElement.textContent);
-                         // Keep Marked's output if CM fails
+                         console.warn(`CodeMirror init error for mode '${cmMode}':`, e);
                     }
                 });
             } else if (!thinkContent && !mainContent.trim()) {
@@ -1069,7 +1136,6 @@
             }
         }
     }
-
 
     async function editMessage(messageId, sender, bubbleElement) {
         const textContentElement = bubbleElement.querySelector('.message-text-content');
@@ -1113,9 +1179,7 @@
         }
     }
 
-    // --- Image Upload Handling ---
     imageUploadBtn.addEventListener('click', () => imageUploadInput.click());
-
     imageUploadInput.addEventListener('change', (event) => {
         handleImageFiles(event.target.files);
         imageUploadInput.value = ''; 
@@ -1168,8 +1232,6 @@
         updateSendButtonState(); 
     }
 
-
-    // --- Settings Modal ---
     settingsBtn.addEventListener('click', () => settingsModal.classList.remove('hidden'));
     closeSettingsBtn.addEventListener('click', () => settingsModal.classList.add('hidden'));
     settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) settingsModal.classList.add('hidden'); });
@@ -1311,7 +1373,6 @@
         }
     });
 
-    // --- RAG File Management Modal ---
     fileManagerBtn.addEventListener('click', () => {
         fileManagerModal.classList.remove('hidden');
         loadRagFiles();
@@ -1440,7 +1501,6 @@
         }
     }
 
-    // --- Export Discussions Modal ---
     exportDiscussionsBtnModalTrigger.addEventListener('click', async () => {
         exportModal.classList.remove('hidden');
         exportDiscussionList.innerHTML = '';
@@ -1493,19 +1553,11 @@
     confirmExportBtn.addEventListener('click', async () => {
         const selectedIds = Array.from(exportDiscussionList.querySelectorAll('input[type="checkbox"]:checked'))
                                  .map(cb => cb.value);
-        // If selectedIds is empty, backend interprets as "export all".
-        // So, no need to explicitly check for selectedIds.length === 0 here for functionality,
-        // but can keep for UI feedback if desired.
-        if (selectedIds.length === 0) {
-           // This path will mean backend exports all. If user selected none, and wants none, this behavior is fine.
-           // If user expects "nothing" for "none selected", then UI should prevent call or backend needs adjustment.
-           // For now, assume "none selected" -> "export all".
-        }
         updateStatus('export-status', t('exportingDataStatus'), 'info', 0);
         try {
             const response = await apiRequest('/api/discussions/export', {
                 method: 'POST',
-                body: { discussion_ids: selectedIds.length > 0 ? selectedIds : null } // Send null for "all"
+                body: { discussion_ids: selectedIds.length > 0 ? selectedIds : null }
             });
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({detail: "Export failed."}));
@@ -1526,7 +1578,6 @@
         }
     });
 
-    // --- Initial Load ---
     document.addEventListener('DOMContentLoaded', async () => {
         const savedTheme = localStorage.getItem('theme');
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
