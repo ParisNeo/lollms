@@ -73,12 +73,12 @@ update_config_secure() {
 # Server settings
 echo $'\n🔧 Configure [server] Settings'
 update_config "host" "\"0.0.0.0\""
-update_config_raw "port" 9602
+update_config_raw "port" 9642
 
 # App settings
 echo $'\n🔧 Configure [app_settings] Settings'
 update_config "data_dir" "\"data\""
-update_config "database_url" "\"sqlite:///./app_main.db\""
+update_config "database_url" "\"sqlite:///./data/app_main.db\""
 
 # Secret key generation
 read -p $'Generate new secret_key? (y/N) [N]: ' gen_secret
