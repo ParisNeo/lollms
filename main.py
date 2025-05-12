@@ -254,10 +254,10 @@ class AppLollmsDiscussion:
         # The format_discussion method in lollms-client v0.10 might only return string
         # Need to adapt based on whether the binding expects string or message list
         
-        binding_name = lc.binding.binding_name if lc.binding else "unknown"
-        is_chat_model_binding = "openai" in binding_name.lower() or "ollama" in binding_name.lower() # Common chat bindings
+        # binding_name = lc.binding.binding_name if lc.binding else "unknown"
+        # is_chat_model_binding = "openai" in binding_name.lower() or "ollama" in binding_name.lower() # Common chat bindings
 
-        if is_chat_model_binding or images_base64:
+        if images_base64:
             # Prepare messages list for chat completion format
             history_messages = client_discussion.get_messages_for_model(max_allowed_tokens=tokens_for_history) # Assuming this method exists & works
 
