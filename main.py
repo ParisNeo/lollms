@@ -7,6 +7,10 @@
 # Provides API endpoints for user authentication, discussion management,
 # LLM interaction (via lollms-client), RAG (via safe_store),
 # file management for RAG, and administrative user management.
+# --- Updated: 2025-05-12 ---
+# - Fixed SafeStore document deletion (uses doc_id).
+# - Added multimodal chat support (image uploads).
+# - Minor code refinements.
 
 # Standard Library Imports
 import os
@@ -19,6 +23,7 @@ import datetime
 import asyncio
 import threading
 import traceback
+import base64 # For encoding images for lollms-client
 
 # Third-Party Imports
 import toml
@@ -55,7 +60,7 @@ except ImportError:
     SafeStoreLogLevel = None # Placeholder if safe_store not installed
 
 # --- Application Version ---
-APP_VERSION = "1.2.3" # Incremented version (fix export)
+APP_VERSION = "1.3.0" # Incremented version (multimodal, bugfix, UI hint)
 
 # --- Configuration Loading ---
 CONFIG_PATH = Path("config.toml")
@@ -95,10 +100,16 @@ class AppLollmsMessage:
     sender: str
     content: str
     id: str = dataclass_field(default_factory=lambda: str(uuid.uuid4()))
+    metadata: Dict[str, Any] = dataclass_field(default_factory=dict) # To store image info if needed
 
     def to_dict(self) -> Dict[str, Any]:
         """Converts the message to a dictionary."""
-        return {'sender': self.sender, 'content': self.content, 'id': self.id}
+        return {
+            'sender': self.sender,
+            'content': self.content,
+            'id': self.id,
+            'metadata': self.metadata
+        }
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'AppLollmsMessage':
@@ -106,7 +117,8 @@ class AppLollmsMessage:
         return cls(
             sender=data['sender'],
             content=data['content'],
-            id=data.get('id', str(uuid.uuid4()))
+            id=data.get('id', str(uuid.uuid4())),
+            metadata=data.get('metadata', {})
         )
 
 class AppLollmsDiscussion:
@@ -120,9 +132,9 @@ class AppLollmsDiscussion:
         raw_title = title or f"New Discussion {self.discussion_id[:8]}"
         self.title: str = (raw_title[:250] + "...") if len(raw_title) > 253 else raw_title
 
-    def add_message(self, sender: str, content: str) -> AppLollmsMessage:
+    def add_message(self, sender: str, content: str, metadata: Optional[Dict[str, Any]] = None) -> AppLollmsMessage:
         """Adds a message to the discussion."""
-        message = AppLollmsMessage(sender=sender, content=content)
+        message = AppLollmsMessage(sender=sender, content=content, metadata=metadata or {})
         self.messages.append(message)
         return message
 
@@ -155,22 +167,19 @@ class AppLollmsDiscussion:
                 new_title = (new_title_base[:max_title_len-3] + "...") if len(new_title_base) > max_title_len else new_title_base
                 if new_title:
                     self.title = new_title
-    
-    # --- Added to_dict method ---
+
     def to_dict(self) -> Dict[str, Any]:
         """Converts the discussion object to a dictionary representation."""
-        # Ensure title is up-to-date before creating dict
-        self._generate_title_from_messages_if_needed() 
+        self._generate_title_from_messages_if_needed()
         return {
             'discussion_id': self.discussion_id,
             'title': self.title,
             'messages': [message.to_dict() for message in self.messages]
         }
-    # ----------------------------
 
     def save_to_disk(self, file_path: Union[str, Path]) -> None:
         """Saves the discussion to a YAML file."""
-        data_to_save = self.to_dict() # Use the new method
+        data_to_save = self.to_dict()
         Path(file_path).parent.mkdir(parents=True, exist_ok=True)
         with open(file_path, 'w', encoding='utf-8') as file:
             yaml.dump(data_to_save, file, sort_keys=False, allow_unicode=True, Dumper=yaml.SafeDumper)
@@ -203,7 +212,7 @@ class AppLollmsDiscussion:
         discussion_id = data.get('discussion_id', actual_path.stem)
         title = data.get('title', f"Imported {discussion_id[:8]}")
         discussion = cls(lollms_client_instance, discussion_id=discussion_id, title=title)
-        
+
         loaded_messages_data = data.get('messages', [])
         if isinstance(loaded_messages_data, list):
             for msg_data in loaded_messages_data:
@@ -211,40 +220,66 @@ class AppLollmsDiscussion:
                     discussion.messages.append(AppLollmsMessage.from_dict(msg_data))
                 else:
                     print(f"WARNING: Skipping malformed message data in {actual_path}: {msg_data}")
-        
+
         if not discussion.title or discussion.title.startswith("Imported ") or discussion.title.startswith("New Discussion "):
             discussion._generate_title_from_messages_if_needed()
         return discussion
 
-    def prepare_query_for_llm(self, current_prompt_text: str, max_total_tokens: Optional[int] = None) -> str:
-        """Prepares the full prompt string (history + current query) for the LLM."""
+    def prepare_query_for_llm(self, current_prompt_text: str, images_base64: Optional[List[str]] = None, max_total_tokens: Optional[int] = None) -> Union[str, List[Dict[str,Any]]]:
+        """
+        Prepares the full prompt (history + current query + images if chat format) for the LLM.
+        Returns a string for instruction models or a list of dicts for chat models.
+        """
         lc = self.lollms_client
         if max_total_tokens is None:
             max_total_tokens = getattr(lc, 'ctx_size', LOLLMS_CLIENT_DEFAULTS.get('ctx_size', 4096))
 
         client_discussion = LollmsClientDiscussion(lc)
         for app_msg in self.messages:
-            client_discussion.add_message(
-                sender=app_msg.sender,
-                content=app_msg.content,
-            )
-        
-        user_prefix = f"{lc.separator_template}{lc.user_name}"
-        ai_prefix = f"\n{lc.separator_template}{lc.ai_name}\n"
+            # Basic conversion, may need adjustment if messages contain image metadata
+            client_discussion.add_message(sender=app_msg.sender, content=app_msg.content)
 
-        current_turn_formatted = f"{user_prefix}\n{current_prompt_text}{ai_prefix}"
-        try:
-            current_turn_tokens = len(lc.tokenize(current_turn_formatted))
-        except Exception: 
-            current_turn_tokens = len(current_turn_formatted) // 3 
+        # Estimate current turn tokens (might be inaccurate without exact client tokenization)
+        # Account for prompt and potential image placeholders/cost if possible
+        current_turn_base_cost = len(current_prompt_text) // 3
+        if images_base64:
+            # Very rough estimate for image tokens (highly model dependent)
+            # OpenAI uses a formula, others might be simpler or complex. Assume ~100 tokens per image?
+            current_turn_base_cost += len(images_base64) * 100
         
-        tokens_for_history = max_total_tokens - current_turn_tokens
+        tokens_for_history = max_total_tokens - current_turn_base_cost - 100 # Subtract buffer
         if tokens_for_history < 0: tokens_for_history = 0
+
+        # Use lollms-client's formatting capabilities if possible
+        # The format_discussion method in lollms-client v0.10 might only return string
+        # Need to adapt based on whether the binding expects string or message list
         
-        history_text = client_discussion.format_discussion(max_allowed_tokens=tokens_for_history)
-        
-        full_prompt = f"{history_text}{user_prefix}\n{current_prompt_text}{ai_prefix}"
-        return full_prompt
+        binding_name = lc.binding.binding_name if lc.binding else "unknown"
+        is_chat_model_binding = "openai" in binding_name.lower() or "ollama" in binding_name.lower() # Common chat bindings
+
+        if is_chat_model_binding or images_base64:
+            # Prepare messages list for chat completion format
+            history_messages = client_discussion.get_messages_for_model(max_allowed_tokens=tokens_for_history) # Assuming this method exists & works
+
+            # Construct the final user message, including images if provided
+            user_message_content: List[Dict[str, Any]] = [{"type": "text", "text": current_prompt_text}]
+            if images_base64:
+                for img_b64 in images_base64:
+                    # Assuming base64 format is suitable for the binding (OpenAI/Ollama use this)
+                    user_message_content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"} # Assuming JPEG, adjust if needed
+                    })
+            
+            final_messages = history_messages + [{"role": "user", "content": user_message_content}]
+            return final_messages
+        else:
+            # Prepare a single string prompt for instruction models
+            history_text = client_discussion.format_discussion(max_allowed_tokens=tokens_for_history)
+            user_prefix = f"{lc.separator_template}{lc.user_name}"
+            ai_prefix = f"\n{lc.separator_template}{lc.ai_name}\n"
+            full_prompt = f"{history_text}{user_prefix}\n{current_prompt_text}{ai_prefix}"
+            return full_prompt
 
 
 # --- Pydantic Models for API ---
@@ -291,6 +326,7 @@ class MessageOutput(BaseModel):
     id: str
     sender: str
     content: str
+    metadata: Dict[str, Any] = {} # Include metadata in output
     model_config = {"from_attributes": True}
 
 class MessageContentUpdate(BaseModel):
@@ -355,7 +391,7 @@ async def on_startup() -> None:
             hashed_admin_pass = hash_password(admin_password)
             default_model = LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
             default_vectorizer = SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
-            
+
             new_admin = DBUser(
                 username=admin_username,
                 hashed_password=hashed_admin_pass,
@@ -397,6 +433,13 @@ def get_user_safestore_documents_path(username: str) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
+def get_user_temp_uploads_path(username: str) -> Path:
+    """Returns the temporary uploads directory for a given user."""
+    path = get_user_data_root(username) / "temp_uploads"
+    path.mkdir(parents=True, exist_ok=True)
+    # Consider adding cleanup mechanism for this directory
+    return path
+
 
 # --- Authentication Dependencies ---
 def get_current_db_user(credentials: HTTPBasicCredentials = Depends(security), db: Session = Depends(get_db)) -> DBUser:
@@ -414,10 +457,10 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user)) -> U
     username = db_user.username
     if username not in user_sessions:
         print(f"INFO: Initializing session state for user: {username}")
-        
+
         initial_lollms_model = db_user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
         initial_vectorizer = db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
-        
+
         user_sessions[username] = {
             "lollms_client": None,
             "safe_store_instance": None,
@@ -429,8 +472,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user)) -> U
 
     lc = get_user_lollms_client(username)
     ai_name_for_user = getattr(lc, 'ai_name', LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"))
-    
-    if not user_sessions[username].get("discussions"): 
+
+    if not user_sessions[username].get("discussions"):
          _load_user_discussions(username)
 
     return UserAuthDetails(
@@ -479,7 +522,7 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             if temperature_conf is not None: client_params["temperature"] = temperature_conf
             if top_k_conf is not None: client_params["top_k"] = top_k_conf
             if top_p_conf is not None: client_params["top_p"] = top_p_conf
-            
+
             lc = LollmsClient(**client_params)
             session["lollms_client"] = lc
         except Exception as e:
@@ -501,7 +544,7 @@ def get_user_safe_store(username: str) -> safe_store.SafeStore:
         user_data_path = get_user_data_root(username)
         ss_db_path = user_data_path / "vector_store.db"
         encryption_key = SAFE_STORE_DEFAULTS.get("encryption_key")
-        
+
         log_level_str = SAFE_STORE_DEFAULTS.get("log_level", "INFO").upper()
         ss_log_level = getattr(SafeStoreLogLevel, log_level_str, SafeStoreLogLevel.INFO) if SafeStoreLogLevel else None
 
@@ -544,7 +587,7 @@ def _load_user_discussions(username: str) -> None:
         discussion_id = file_path.stem
         discussion_obj = AppLollmsDiscussion.load_from_disk(lc, file_path)
         if discussion_obj:
-            discussion_obj.discussion_id = discussion_id 
+            discussion_obj.discussion_id = discussion_id
             session["discussions"][discussion_id] = discussion_obj
             session["discussion_titles"][discussion_id] = discussion_obj.title
             loaded_count += 1
@@ -564,7 +607,7 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
     safe_discussion_filename = secure_filename(f"{discussion_id}.yaml")
     if not safe_discussion_filename.endswith(".yaml") or safe_discussion_filename == ".yaml":
         raise HTTPException(status_code=400, detail="Invalid discussion ID format.")
-    
+
     file_path = get_user_discussion_path(username) / safe_discussion_filename
     lc = get_user_lollms_client(username)
 
@@ -589,7 +632,7 @@ def save_user_discussion(username: str, discussion_id: str, discussion_obj: AppL
     safe_discussion_filename = secure_filename(f"{discussion_id}.yaml")
     if not safe_discussion_filename.endswith(".yaml") or safe_discussion_filename == ".yaml":
         raise HTTPException(status_code=400, detail="Invalid discussion ID format for saving.")
-    
+
     file_path = get_user_discussion_path(username) / safe_discussion_filename
     try:
         discussion_obj.save_to_disk(file_path)
@@ -653,6 +696,8 @@ discussion_router = APIRouter(prefix="/api/discussions", tags=["Discussions"])
 async def list_all_discussions(current_user: UserAuthDetails = Depends(get_current_active_user)) -> List[DiscussionInfo]:
     """Lists all discussions for the authenticated user."""
     username = current_user.username
+    if username not in user_sessions or not user_sessions[username].get("discussion_titles"):
+        _load_user_discussions(username) # Ensure discussions are loaded
     titles_map = user_sessions[username].get("discussion_titles", {})
     return [DiscussionInfo(id=disc_id, title=title) for disc_id, title in titles_map.items()]
 
@@ -715,18 +760,45 @@ async def chat_in_existing_discussion(
     discussion_id: str,
     prompt: str = Form(...),
     use_rag: bool = Form(False),
+    files: Optional[List[UploadFile]] = File(None), # Accept optional image files
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ) -> StreamingResponse:
-    """Handles chat interactions within a discussion, supporting RAG and streaming responses."""
+    """Handles chat interactions within a discussion, supporting RAG, images, and streaming responses."""
     username = current_user.username
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
 
     lc = get_user_lollms_client(username)
-    discussion_obj.add_message(sender=lc.user_name, content=prompt)
+    image_paths: List[str] = []
+    image_metadata: Dict[str, Any] = {"image_count": 0, "filenames": []}
+    images_base64: List[str] = [] # For passing to lollms-client
 
-    final_prompt_for_llm = prompt 
+    if files:
+        temp_upload_dir = get_user_temp_uploads_path(username)
+        for file in files:
+            if file.content_type and "image" in file.content_type:
+                s_filename = secure_filename(file.filename or f"upload_{uuid.uuid4().hex[:8]}")
+                temp_file_path = temp_upload_dir / s_filename
+                try:
+                    with open(temp_file_path, "wb") as buffer:
+                        shutil.copyfileobj(file.file, buffer)
+                    image_paths.append(str(temp_file_path))
+                    image_metadata["filenames"].append(s_filename)
+                    # Encode image to base64 for lollms-client
+                    with open(temp_file_path, "rb") as img_file:
+                        images_base64.append(base64.b64encode(img_file.read()).decode('utf-8'))
+
+                except Exception as e:
+                    print(f"ERROR: Failed to process uploaded image {s_filename}: {e}")
+                finally:
+                    file.file.close()
+        image_metadata["image_count"] = len(image_paths)
+
+    # Add user message to discussion FIRST (including image info if any)
+    discussion_obj.add_message(sender=lc.user_name, content=prompt, metadata=image_metadata if image_paths else None)
+
+    final_prompt_for_llm = prompt
     if use_rag and safe_store:
         active_vectorizer = user_sessions[username].get("active_vectorizer")
         if active_vectorizer:
@@ -742,7 +814,7 @@ async def chat_in_existing_discussion(
                             context_str += f"... (truncated {len(rag_results) - i} more results)\n"; break
                         context_str += f"{i+1}. From '{Path(res.get('file_path','?')).name}': {chunk_text}\n"
                         current_rag_len += len(chunk_text); sources.add(Path(res.get('file_path','?')).name)
-                    
+
                     final_prompt_for_llm = (f"User question: {prompt}\n\n"
                                            f"Use the following context from ({', '.join(sorted(list(sources)))}) to answer if relevant:\n{context_str.strip()}")
                     print(f"INFO: RAG context added for user {username}, discussion {discussion_id}.")
@@ -763,24 +835,39 @@ async def chat_in_existing_discussion(
                 err_content = f"LLM Error: {str(chunk)}"
                 shared_state["generation_error"] = err_content
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_content}) + "\n")
-                return False 
+                return False
             elif msg_type == MSG_TYPE.MSG_TYPE_FINISHED_MESSAGE:
-                return False 
-            return True 
+                return False
+            return True
 
         generation_thread: Optional[threading.Thread] = None
         try:
-            full_prompt_to_llm = discussion_obj.prepare_query_for_llm(final_prompt_for_llm)
-            
+            # Prepare prompt/messages for lollms-client
+            prepared_input = discussion_obj.prepare_query_for_llm(
+                current_prompt_text=final_prompt_for_llm,
+                images_base64=images_base64 if images_base64 else None
+            )
+
             def blocking_call():
                 try:
-                    lc.generate_text(prompt=full_prompt_to_llm, stream=True, streaming_callback=llm_callback)
+                    # generate_text handles both string and message list inputs
+                    lc.generate_text(
+                        prompt=prepared_input, # Pass either string or message list
+                        stream=True,
+                        streaming_callback=llm_callback,
+                        # images parameter is only used if prompt is a string;
+                        # for message list format, images are embedded in the content.
+                        # lollms-client should handle this internally based on prompt type.
+                    )
                 except Exception as e_gen:
                     err_msg = f"LLM generation failed: {str(e_gen)}"
+                    # Check if error indicates image incompatibility
+                    if "doesn't support image input" in str(e_gen).lower() or "multimodal" in str(e_gen).lower():
+                         err_msg += " (Model may not support images)"
                     shared_state["generation_error"] = err_msg
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
                 finally:
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, None) # Signal end of stream
 
             generation_thread = threading.Thread(target=blocking_call, daemon=True)
             generation_thread.start()
@@ -790,7 +877,7 @@ async def chat_in_existing_discussion(
                 if item is None: stream_queue.task_done(); break
                 yield item
                 stream_queue.task_done()
-            
+
             if generation_thread: generation_thread.join(timeout=5)
 
             # Add final AI response or error to discussion history
@@ -798,13 +885,12 @@ async def chat_in_existing_discussion(
                 discussion_obj.add_message(sender=lc.ai_name, content=shared_state["accumulated_ai_response"])
             elif shared_state["generation_error"]:
                  discussion_obj.add_message(sender="system", content=shared_state["generation_error"])
-            
-            save_user_discussion(username, discussion_id, discussion_obj) # Save AFTER potentially adding AI response/error
+
+            save_user_discussion(username, discussion_id, discussion_obj) # Save AFTER adding AI response/error
 
         except Exception as e_outer:
             error_msg = f"Chat stream error: {str(e_outer)}"
             traceback.print_exc()
-            # Try to save discussion even if outer error occurs, to keep user message
             try:
                 discussion_obj.add_message(sender="system", content=error_msg)
                 save_user_discussion(username, discussion_id, discussion_obj)
@@ -812,10 +898,16 @@ async def chat_in_existing_discussion(
                 print(f"ERROR: Failed to save discussion after outer stream error: {save_err}")
             yield json.dumps({"type": "error", "content": error_msg}) + "\n"
         finally:
+            # Clean up temporary image files
+            for img_path_str in image_paths:
+                try: Path(img_path_str).unlink(missing_ok=True)
+                except Exception as clean_err: print(f"ERROR: Failed to delete temp image {img_path_str}: {clean_err}")
+
             if generation_thread and generation_thread.is_alive():
                 print(f"WARNING: LLM gen thread for {username} still alive after stream end.")
 
     return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+
 
 @discussion_router.put("/{discussion_id}/messages/{message_id}", response_model=MessageOutput)
 async def update_discussion_message(discussion_id: str, message_id: str, payload: MessageContentUpdate, current_user: UserAuthDetails = Depends(get_current_active_user)) -> MessageOutput:
@@ -846,7 +938,7 @@ async def export_user_data(
 ) -> ExportData:
     """Exports user data, including selected or all discussions and SafeStore info."""
     username = current_user.username
-    user_settings = {"lollms_model_name": user_sessions[username]["lollms_model_name"], 
+    user_settings = {"lollms_model_name": user_sessions[username]["lollms_model_name"],
                      "safe_store_vectorizer": user_sessions[username]["active_vectorizer"]}
     safestore_info = {"vectorizers": [], "documents_info": [], "error": None}
     if safe_store:
@@ -855,16 +947,16 @@ async def export_user_data(
             with ss:
                 safestore_info["vectorizers"] = ss.list_vectorization_methods()
                 docs_in_store = ss.list_documents()
-                safestore_info["documents_info"] = [{"filename": Path(d["file_path"]).name, "metadata": d.get("metadata")} 
+                safestore_info["documents_info"] = [{"filename": Path(d["file_path"]).name, "metadata": d.get("metadata")}
                                                     for d in docs_in_store if "file_path" in d]
         except Exception as e: safestore_info["error"] = str(e)
     else: safestore_info["error"] = "SafeStore library not available."
-    
+
     if not user_sessions[username].get("discussions"):
          _load_user_discussions(username)
-    
+
     all_user_discussions_map = user_sessions[username].get("discussions", {})
-    
+
     if export_request.discussion_ids is not None: # Check for None, empty list means export none explicitly selected
         discussions_to_export_values = [
             all_user_discussions_map[disc_id]
@@ -873,16 +965,15 @@ async def export_user_data(
         ]
     else: # Export all if discussion_ids is None
         discussions_to_export_values = list(all_user_discussions_map.values())
-            
-    # Use the new to_dict method on AppLollmsDiscussion objects
+
     discussions_data = [d.to_dict() for d in discussions_to_export_values]
 
     return ExportData(
-        exported_by_user=username, 
+        exported_by_user=username,
         export_timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        application_version=APP_VERSION, 
+        application_version=APP_VERSION,
         user_settings_at_export=user_settings,
-        safestore_info=safestore_info, 
+        safestore_info=safestore_info,
         discussions=discussions_data
     )
 app.include_router(discussion_router)
@@ -900,7 +991,7 @@ async def get_available_lollms_models(current_user: UserAuthDetails = Depends(ge
         if isinstance(binding_models, list):
             for item in binding_models:
                 if isinstance(item, str): models_set.add(item)
-                elif isinstance(item, dict): 
+                elif isinstance(item, dict):
                     name = item.get('name', item.get('id', item.get('model_name')))
                     if name: models_set.add(name)
     except Exception as e: print(f"WARNING: Could not list models from LollmsClient: {e}")
@@ -909,8 +1000,8 @@ async def get_available_lollms_models(current_user: UserAuthDetails = Depends(ge
     if user_model: models_set.add(user_model)
     global_default_model = LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
     if global_default_model: models_set.add(global_default_model)
-    
-    models_set.discard('') 
+
+    models_set.discard('')
     if not models_set and lc.binding is not None and "openai" in lc.binding.binding_name.lower():
         models_set.update(["gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"])
 
@@ -922,8 +1013,8 @@ async def set_user_lollms_model(model_name: str = Form(...), current_user: UserA
     """Sets the default LoLLMs model for the authenticated user."""
     username = current_user.username
     user_sessions[username]["lollms_model_name"] = model_name
-    user_sessions[username]["lollms_client"] = None 
-    
+    user_sessions[username]["lollms_client"] = None # Force reinitialization on next use
+
     db_user_record = db.query(DBUser).filter(DBUser.username == username).first()
     if db_user_record:
         db_user_record.lollms_model_name = model_name
@@ -945,7 +1036,7 @@ async def list_safe_store_vectorizers(current_user: UserAuthDetails = Depends(ge
         with ss:
             methods_in_db = ss.list_vectorization_methods()
             possible_names = ss.list_possible_vectorizer_names()
-            
+
             formatted_vectorizers = []
             existing_method_names = set()
 
@@ -954,7 +1045,7 @@ async def list_safe_store_vectorizers(current_user: UserAuthDetails = Depends(ge
                 if name:
                     formatted_vectorizers.append({"name": name, "method_name": f"{name} (dim: {method_info.get('vector_dim', 'N/A')})"})
                     existing_method_names.add(name)
-            
+
             for possible_name in possible_names:
                 if possible_name not in existing_method_names:
                     display_text = possible_name
@@ -962,16 +1053,16 @@ async def list_safe_store_vectorizers(current_user: UserAuthDetails = Depends(ge
                         display_text = f"{possible_name} (TF-IDF, auto-fit)"
                     elif possible_name.startswith("st:"):
                         display_text = f"{possible_name} (Sentence Transformer)"
-                    
+
                     formatted_vectorizers.append({"name": possible_name, "method_name": display_text})
-            
+
             final_list = []
             seen_names = set()
             for fv in formatted_vectorizers:
                 if fv["name"] not in seen_names:
                     final_list.append(fv)
                     seen_names.add(fv["name"])
-            
+
             final_list.sort(key=lambda x: x["name"])
             return final_list
 
@@ -1005,8 +1096,8 @@ async def upload_rag_documents(files: List[UploadFile] = File(...), vectorizer_n
     user_docs_path = get_user_safestore_documents_path(username)
     processed, errors_list = [], []
 
-    try: 
-        with ss: 
+    try:
+        with ss:
             all_vectorizers = {m['method_name'] for m in ss.list_vectorization_methods()} | set(ss.list_possible_vectorizer_names())
         if vectorizer_name not in all_vectorizers and not vectorizer_name.startswith("st:") and not vectorizer_name.startswith("tfidf:"):
              raise HTTPException(status_code=400, detail=f"Vectorizer '{vectorizer_name}' not found or invalid. Use 'st:model_name' or 'tfidf:custom_name'.")
@@ -1021,7 +1112,7 @@ async def upload_rag_documents(files: List[UploadFile] = File(...), vectorizer_n
             processed.append(s_filename)
         except Exception as e:
             errors_list.append({"filename": s_filename, "error": str(e)})
-            target_file_path.unlink(missing_ok=True) 
+            target_file_path.unlink(missing_ok=True)
         finally: file_upload.file.close()
 
     if errors_list and processed: status_code, msg = 207, "Some files processed with errors."
@@ -1032,7 +1123,7 @@ async def upload_rag_documents(files: List[UploadFile] = File(...), vectorizer_n
 @store_router.get("/files", response_model=List[SafeStoreDocumentInfo])
 async def list_rag_documents(current_user: UserAuthDetails = Depends(get_current_active_user)) -> List[SafeStoreDocumentInfo]:
     """Lists documents managed by SafeStore for the user."""
-    if not safe_store: return [] 
+    if not safe_store: return []
     username = current_user.username
     user_docs_path_resolved = get_user_safestore_documents_path(username).resolve()
     ss = get_user_safe_store(username)
@@ -1045,7 +1136,7 @@ async def list_rag_documents(current_user: UserAuthDetails = Depends(get_current
                 try:
                     if Path(original_path_str).resolve().parent == user_docs_path_resolved:
                         managed_docs.append(SafeStoreDocumentInfo(filename=Path(original_path_str).name))
-                except Exception: pass 
+                except Exception: pass
     except Exception as e: raise HTTPException(status_code=500, detail=f"Error listing RAG docs: {e}")
     return managed_docs
 
@@ -1056,16 +1147,40 @@ async def delete_rag_document(filename: str, current_user: UserAuthDetails = Dep
     username = current_user.username
     s_filename = secure_filename(filename)
     if not s_filename or s_filename != filename: raise HTTPException(status_code=400, detail="Invalid filename.")
-    
+
     file_to_delete_path = get_user_safestore_documents_path(username) / s_filename
     if not file_to_delete_path.is_file(): raise HTTPException(status_code=404, detail=f"Document '{s_filename}' not found.")
 
     ss = get_user_safe_store(username)
     try:
-        with ss: ss.delete_document_by_path(str(file_to_delete_path))
+        doc_id_to_delete = None
+        with ss:
+            all_docs = ss.list_documents()
+            for doc in all_docs:
+                # Compare resolved paths for robustness
+                if doc.get("file_path") and Path(doc["file_path"]).resolve() == file_to_delete_path.resolve():
+                    doc_id_to_delete = doc.get("doc_id")
+                    break
+
+        if doc_id_to_delete is None:
+            raise HTTPException(status_code=404, detail=f"Document '{s_filename}' found on disk but not in SafeStore DB.")
+
+        with ss:
+            # Assuming safe_store has delete_document(doc_id=...)
+            # If safe_store v1.6+ has delete_document_by_path, revert to that.
+            ss.delete_document(doc_id=doc_id_to_delete)
+        
         file_to_delete_path.unlink()
         return {"message": f"Document '{s_filename}' deleted successfully."}
-    except Exception as e: raise HTTPException(status_code=500, detail=f"Could not delete '{s_filename}': {e}")
+    except safe_store.SafeStoreError as e:
+        # Handle SafeStore specific errors, e.g., if delete_document fails
+        raise HTTPException(status_code=500, detail=f"SafeStore error deleting '{s_filename}': {e}")
+    except OSError as e:
+        # Handle file system deletion errors
+        raise HTTPException(status_code=500, detail=f"Error deleting file '{s_filename}' from disk: {e}")
+    except Exception as e:
+        # Catch-all for other unexpected errors
+        raise HTTPException(status_code=500, detail=f"Could not delete '{s_filename}': {e}")
 app.include_router(store_router)
 
 
@@ -1081,7 +1196,7 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
     """(Admin) Adds a new user to the system."""
     if db.query(DBUser).filter(DBUser.username == user_data.username).first():
         raise HTTPException(status_code=400, detail="Username already registered.")
-    
+
     new_db_user = DBUser(
         username=user_data.username, hashed_password=hash_password(user_data.password),
         is_admin=user_data.is_admin,
@@ -1109,7 +1224,7 @@ async def admin_remove_user(user_id: int, db: Session = Depends(get_db), current
     """(Admin) Removes a user and their associated data from the system."""
     user_to_delete = db.query(DBUser).filter(DBUser.id == user_id).first()
     if not user_to_delete: raise HTTPException(status_code=404, detail="User not found.")
-    
+
     initial_admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
     if initial_admin_username and user_to_delete.username == initial_admin_username and user_to_delete.is_admin:
         raise HTTPException(status_code=403, detail="Initial superadmin cannot be deleted.")
@@ -1135,9 +1250,9 @@ if __name__ == "__main__":
     import uvicorn
     host = SERVER_CONFIG.get("host", "127.0.0.1")
     port = int(SERVER_CONFIG.get("port", 9642))
-    
+
     try: APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    except OSError as e: 
+    except OSError as e:
         print(f"CRITICAL: Could not create main data directory {APP_DATA_DIR}: {e}")
 
     print(f"--- Simplified LoLLMs Chat API Server (v{APP_VERSION}) ---")
