@@ -1,0 +1,19 @@
+# Lollms Script
+$ErrorActionPreference = 'Stop'
+
+if (-Not (Test-Path -Path "venv")) {
+    Write-Error "❌ Error: Virtual environment not found!"
+    Write-Error "Please run './install.sh' first to set up the application."
+    exit 1
+}
+
+if (-Not (Test-Path -Path "main.py")) {
+    Write-Error "❌ Error: Main script 'main.py' not found in current directory!"
+    exit 1
+}
+
+Write-Host "🔌 Activating virtual environment..."
+. "venv/bin/activate"
+
+Write-Host "🚀 Starting Lollms Application..."
+python main.py $args
