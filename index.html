@@ -9,26 +9,80 @@
     <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
     <script>
       tailwind.config = {
-        darkMode: 'class',
+        darkMode: 'class', // Enable class-based dark mode
         theme: {
           extend: {
+             // Slightly refined color palette
             colors: {
               primary: { light: '#a5b4fc', DEFAULT: '#6366f1', dark: '#4f46e5' },
-              secondary: { 50: '#f9fafb', 100: '#f3f4f6', 200: '#e5e7eb', 300: '#d1d5db', 400: '#9ca3af', 500: '#6b7280', 600: '#4b5563', 700: '#374151', 800: '#1f2937', 900: '#111827', 950: '#030712', '850': '#161f2d' /* Custom for input bg */ },
+              secondary: {
+                50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 300: '#cbd5e1', 400: '#94a3b8',
+                500: '#64748b', 600: '#475569', 700: '#334155', 800: '#1e293b', 900: '#0f172a',
+                950: '#020617'
+              },
               accent: { light: '#6ee7b7', DEFAULT: '#10b981', dark: '#059669' },
               danger: { light: '#fca5a5', DEFAULT: '#ef4444', dark: '#dc2626' },
-              warning: { light: '#fcd34d', DEFAULT: '#f59e0b', dark: '#d97706' }
+              warning: { light: '#fcd34d', DEFAULT: '#f59e0b', dark: '#d97706' },
             },
-            animation: { 'spin-slow': 'spin 3s linear infinite', 'fade-in': 'fadeIn 0.3s ease-out', 'slide-in': 'slideIn 0.3s ease-out', 'pulse-bg': 'pulseBg 2s infinite ease-in-out' },
-            keyframes: { 
-                fadeIn: { '0%': { opacity: 0 }, '100%': { opacity: 1 } }, 
-                slideIn: { '0%': { transform: 'translateY(20px)', opacity: 0 }, '100%': { transform: 'translateY(0)', opacity: 1 } },
-                pulseBg: { '0%, 100%': { backgroundColor: 'theme("colors.primary.DEFAULT / 80%")' }, '50%': { backgroundColor: 'theme("colors.primary.DEFAULT")' } }
+            animation: {
+              'spin-slow': 'spin 3s linear infinite',
+              'fade-in': 'fadeIn 0.3s ease-out',
+              'slide-in': 'slideIn 0.3s ease-out',
+              'pulse-bg': 'pulseBg 2s infinite ease-in-out'
             },
-            fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', '"Noto Sans"', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'], },
+            keyframes: {
+              fadeIn: { '0%': { opacity: 0 }, '100%': { opacity: 1 } },
+              slideIn: { '0%': { transform: 'translateY(20px)', opacity: 0 }, '100%': { transform: 'translateY(0)', opacity: 1 } },
+              pulseBg: {
+                '0%, 100%': { backgroundColor: 'theme("colors.primary.DEFAULT / 80%")' },
+                '50%': { backgroundColor: 'theme("colors.primary.DEFAULT")' }
+              }
+            },
+            fontFamily: {
+              sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', '"Helvetica Neue"', 'Arial', '"Noto Sans"', 'sans-serif', '"Apple Color Emoji"', '"Segoe UI Emoji"', '"Segoe UI Symbol"', '"Noto Color Emoji"'],
+            },
+            // Adjusted typography for better readability
             typography: ({ theme }) => ({
-                DEFAULT: { css: { '--tw-prose-body': theme('colors.secondary.700'), '--tw-prose-headings': theme('colors.secondary.900'), code: { color: theme('colors.primary.dark'), fontWeight: '500'}, pre: { backgroundColor: theme('colors.secondary.100')}, a: {color: theme('colors.primary.DEFAULT')} } },
-                invert: { css: { '--tw-prose-body': theme('colors.secondary.300'), '--tw-prose-headings': theme('colors.secondary.100'), code: { color: theme('colors.primary.light')}, pre: { backgroundColor: theme('colors.secondary.800')}, a: {color: theme('colors.primary.light')} } },
+                DEFAULT: {
+                    css: {
+                        '--tw-prose-body': theme('colors.secondary.700'),
+                        '--tw-prose-headings': theme('colors.secondary.900'),
+                        '--tw-prose-lead': theme('colors.secondary.600'),
+                        '--tw-prose-links': theme('colors.primary.DEFAULT'),
+                        '--tw-prose-bold': theme('colors.secondary.900'),
+                        '--tw-prose-counters': theme('colors.secondary.500'),
+                        '--tw-prose-bullets': theme('colors.secondary.300'),
+                        '--tw-prose-hr': theme('colors.secondary.200'),
+                        '--tw-prose-quotes': theme('colors.secondary.900'),
+                        '--tw-prose-quote-borders': theme('colors.secondary.200'),
+                        '--tw-prose-captions': theme('colors.secondary.500'),
+                        '--tw-prose-code': theme('colors.primary.dark'), // Inline code
+                        '--tw-prose-pre-code': theme('colors.secondary.700'), // Code block text
+                        '--tw-prose-pre-bg': theme('colors.secondary.100'), // Code block bg
+                        '--tw-prose-th-borders': theme('colors.secondary.300'),
+                        '--tw-prose-td-borders': theme('colors.secondary.200'),
+                    },
+                },
+                invert: { // Dark mode prose
+                    css: {
+                        '--tw-prose-body': theme('colors.secondary.300'),
+                        '--tw-prose-headings': theme('colors.secondary.100'),
+                        '--tw-prose-lead': theme('colors.secondary.400'),
+                        '--tw-prose-links': theme('colors.primary.light'),
+                        '--tw-prose-bold': theme('colors.secondary.100'),
+                        '--tw-prose-counters': theme('colors.secondary.400'),
+                        '--tw-prose-bullets': theme('colors.secondary.600'),
+                        '--tw-prose-hr': theme('colors.secondary.700'),
+                        '--tw-prose-quotes': theme('colors.secondary.100'),
+                        '--tw-prose-quote-borders': theme('colors.secondary.700'),
+                        '--tw-prose-captions': theme('colors.secondary.400'),
+                        '--tw-prose-code': theme('colors.primary.light'), // Inline code dark
+                        '--tw-prose-pre-code': theme('colors.secondary.300'), // Code block text dark
+                        '--tw-prose-pre-bg': theme('colors.secondary.800'), // Code block bg dark
+                        '--tw-prose-th-borders': theme('colors.secondary.600'),
+                        '--tw-prose-td-borders': theme('colors.secondary.700'),
+                    },
+                },
             }),
           }
         }
@@ -39,38 +93,63 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: theme('colors.secondary.400'); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: theme('colors.secondary.500'); }
+        /* Refined Scrollbars */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: theme('colors.secondary.200'); border-radius: 3px; }
+        .dark ::-webkit-scrollbar-track { background: theme('colors.secondary.800'); }
+        ::-webkit-scrollbar-thumb { background: theme('colors.secondary.400'); border-radius: 3px; }
         .dark ::-webkit-scrollbar-thumb { background: theme('colors.secondary.600'); }
+        ::-webkit-scrollbar-thumb:hover { background: theme('colors.secondary.500'); }
         .dark ::-webkit-scrollbar-thumb:hover { background: theme('colors.secondary.500'); }
-        .prose code::before, .prose code::after { content: ""; }
-        .loader { border: 3px solid theme('colors.secondary.200'); border-top: 3px solid theme('colors.primary.DEFAULT'); border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; }
+
+        /* Reset Markdown code block markers */
+        .prose code::before, .prose code::after { content: none; }
+
+        /* Improved Loader */
+        .loader { border: 3px solid theme('colors.secondary.300'); border-top: 3px solid theme('colors.primary.DEFAULT'); border-radius: 50%; width: 16px; height: 16px; animation: spin 1s linear infinite; }
         .dark .loader { border-color: theme('colors.secondary.700'); border-top-color: theme('colors.primary.light');}
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Consistent Textarea scrollbar */
         textarea { scrollbar-width: thin; scrollbar-color: theme('colors.secondary.400') transparent; }
         .dark textarea { scrollbar-color: theme('colors.secondary.600') transparent; }
-        .think-block details { background-color: theme('colors.warning.DEFAULT / 10%'); border: 1px solid theme('colors.warning.DEFAULT / 30%'); border-radius: 4px; margin: 0.5em 0; }
+
+        /* Think block styling */
+        .think-block details { background-color: theme('colors.warning.DEFAULT / 10%'); border: 1px solid theme('colors.warning.DEFAULT / 30%'); border-radius: 6px; margin: 0.5em 0; }
         .dark .think-block details { background-color: theme('colors.warning.dark / 15%'); border-color: theme('colors.warning.dark / 40%');}
-        .think-block summary { cursor: pointer; padding: 0.25em 0.5em; font-style: italic; color: theme('colors.secondary.500'); list-style-position: inside; }
+        .think-block summary { cursor: pointer; padding: 0.35em 0.7em; font-style: italic; color: theme('colors.secondary.500'); list-style-position: inside; font-weight: 500; }
         .dark .think-block summary { color: theme('colors.secondary.400'); }
         .think-block summary::marker { font-size: 0.8em; }
         .think-block summary:focus { outline: none; box-shadow: 0 0 0 2px theme('colors.primary.DEFAULT / 50%'); }
-        .think-block div { padding: 0.5em; font-size: 0.9em; white-space: pre-wrap; color: theme('colors.secondary.600'); border-top: 1px dashed theme('colors.warning.DEFAULT / 30%'); margin-top: 0.25em; }
+        .think-block div { padding: 0.5em 0.7em; font-size: 0.9em; white-space: pre-wrap; color: theme('colors.secondary.600'); border-top: 1px dashed theme('colors.warning.DEFAULT / 30%'); margin-top: 0.25em; }
         .dark .think-block div { color: theme('colors.secondary.300'); border-top-color: theme('colors.warning.dark / 40%'); }
-        .message-actions { display: none; position: absolute; bottom: 2px; opacity: 0.8; transition: opacity 0.15s ease-in-out; z-index:10; }
-        .message-bubble-outer:hover .message-actions { display: flex; }
+
+        /* Improved Message Actions visibility */
+        .message-actions { display: none; position: absolute; bottom: 4px; opacity: 0; transition: opacity 0.2s ease-in-out, transform 0.2s ease-in-out; z-index: 10; transform: translateY(5px); }
+        .message-bubble-outer:hover .message-actions { display: flex; opacity: 0.9; transform: translateY(0); }
         .message-actions:hover { opacity: 1; }
-        .user-message .message-actions { right: -2px; }
-        .assistant-message .message-actions { left: -2px; }
-        .modal-backdrop { background-color: rgba(0, 0, 0, 0.5); backdrop-filter: blur(4px); }
-        *:focus-visible { outline: 2px solid theme('colors.primary.DEFAULT'); outline-offset: 2px; border-radius: 2px;}
+        .user-message .message-actions { right: 4px; }
+        .assistant-message .message-actions { left: 4px; }
+
+        /* General focus visibility */
+        *:focus-visible { outline: 2px solid theme('colors.primary.DEFAULT'); outline-offset: 2px; border-radius: 4px;}
         .dark *:focus-visible { outline-color: theme('colors.primary.light'); }
-        .prose :where(code):not(:where([class~="not-prose"] *)) { padding: 0.1em 0.3em; border-radius: 0.25rem; } /* Subtle padding for inline code */
+
+        /* Subtle inline code styling */
+        .prose :where(code):not(:where([class~="not-prose"] *)) {
+            padding: 0.15em 0.4em; border-radius: 0.25rem; font-size: 0.9em;
+            background-color: theme('colors.secondary.100'); border: 1px solid theme('colors.secondary.200');
+         }
+         .dark .prose :where(code):not(:where([class~="not-prose"] *)) {
+            background-color: theme('colors.secondary.800'); border-color: theme('colors.secondary.700');
+         }
+
+        /* Send button loading state */
         .send-button-loading { animation: pulseBg 1.5s infinite ease-in-out; cursor: not-allowed; }
         .send-button-loading svg:not(.loader) { display: none; }
-        .send-button-loading .loader { display: block !important; }
+        .send-button-loading .loader { display: inline-block !important; } /* Use inline-block for spinner */
+
+        /* Initial loading spinner */
         .initial-load-spinner {
             border: 4px solid theme('colors.secondary.300');
             border-top-color: theme('colors.primary.DEFAULT');
@@ -80,6 +159,21 @@
             border-color: theme('colors.secondary.600');
             border-top-color: theme('colors.primary.light');
         }
+
+        /* Modal backdrop */
+        .modal-backdrop { background-color: rgba(0, 0, 0, 0.6); backdrop-filter: blur(5px); }
+
+        /* Image Upload Preview */
+        .image-preview-container { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+        .image-preview-item { position: relative; }
+        .image-preview-item img { max-height: 60px; max-width: 80px; border-radius: 4px; border: 1px solid theme('colors.secondary.300'); }
+        .dark .image-preview-item img { border-color: theme('colors.secondary.600'); }
+        .remove-image-btn {
+            position: absolute; top: -5px; right: -5px; background-color: theme('colors.danger.DEFAULT'); color: white;
+            border-radius: 50%; width: 16px; height: 16px; font-size: 10px; line-height: 14px; text-align: center;
+            cursor: pointer; border: 1px solid white; box-shadow: 0 1px 2px rgba(0,0,0,0.2); display: flex; justify-content: center; align-items: center;
+        }
+        .remove-image-btn:hover { background-color: theme('colors.danger.dark'); }
     </style>
 </head>
 <body class="bg-secondary-100 dark:bg-secondary-900 text-secondary-900 dark:text-secondary-100 font-sans antialiased overflow-hidden">
@@ -104,7 +198,7 @@
             </form>
         </div>
     </div>
-    
+
     <!-- Initial Loading Overlay (after login, before app is ready) -->
     <div id="initial-loading-overlay" class="fixed inset-0 z-[60] flex flex-col items-center justify-center p-4 modal-backdrop hidden">
         <div class="initial-load-spinner loader animate-spin rounded-full"></div>
@@ -120,36 +214,41 @@
             <div id="user-info" class="p-2 text-center text-sm mb-3">
                 <span data-i18n="welcomeMessage">Welcome</span>, <span id="user-display-name" class="font-semibold text-primary-light">User</span>!
             </div>
-            <button id="new-discussion-btn" class="w-full flex items-center justify-center space-x-2 bg-primary hover:bg-primary-dark text-white font-medium py-2 px-3 rounded-lg transition duration-150 mb-3 text-sm">
+            <button id="new-discussion-btn" class="w-full flex items-center justify-center space-x-2 bg-primary hover:bg-primary-dark text-white font-medium py-2 px-3 rounded-lg transition duration-150 mb-3 text-sm shadow hover:shadow-md">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 <span data-i18n="newDiscussionButton">New Discussion</span>
             </button>
-            <h2 class="text-xs font-semibold uppercase text-secondary-500 dark:text-secondary-400 pt-2 pb-1 px-1" data-i18n="discussionsTitle">Discussions</h2>
+            <h2 class="text-xs font-semibold uppercase text-secondary-500 dark:text-secondary-400 pt-2 pb-1 px-1 tracking-wider" data-i18n="discussionsTitle">Discussions</h2>
             <div id="discussion-list-container" class="flex-grow overflow-y-auto space-y-1 -mr-2 pr-2">
                  <ul id="discussion-list"></ul>
                  <p id="discussion-list-loader" class="text-center text-xs text-secondary-400 hidden" data-i18n="loadingDiscussions">Loading discussions...</p>
             </div>
             <!-- Bottom Buttons -->
-            <div class="mt-auto pt-3 space-y-2 border-t border-secondary-700 dark:border-secondary-800">
-                 <button id="file-manager-btn" class="w-full flex items-center justify-center space-x-2 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-800 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
+            <div class="mt-auto pt-4 space-y-2 border-t border-secondary-700 dark:border-secondary-800">
+                 <button id="file-manager-btn" class="w-full flex items-center justify-start space-x-3 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-850 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                     <span data-i18n="fileManagerButton">File Manager</span>
                 </button>
-                 <button id="settings-btn" class="w-full flex items-center justify-center space-x-2 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-800 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                 <button id="settings-btn" class="w-full flex items-center justify-start space-x-3 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-850 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826 3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
                     <span data-i18n="settingsMenu">Settings</span>
                 </button>
-                <button id="export-discussions-btn-modal-trigger" class="w-full flex items-center justify-center space-x-2 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-800 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                <button id="export-discussions-btn-modal-trigger" class="w-full flex items-center justify-start space-x-3 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-850 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                     <span data-i18n="exportDiscussionsButton">Export Data</span>
                 </button>
-                 <button id="theme-toggle-btn" class="w-full flex items-center justify-center space-x-2 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-800 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
-                    <svg class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
-                    <svg class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
+                 <button id="theme-toggle-btn" class="w-full flex items-center justify-start space-x-3 bg-secondary-700 hover:bg-secondary-600 dark:bg-secondary-850 dark:hover:bg-secondary-700 text-secondary-300 dark:text-secondary-200 text-xs py-2 px-3 rounded-md transition duration-150">
+                    <svg class="w-4 h-4 block dark:hidden shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"></path></svg>
+                    <svg class="w-4 h-4 hidden dark:block shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"></path></svg>
                     <span data-i18n="toggleTheme">Toggle Theme</span>
                 </button>
-                <button id="logout-btn" class="w-full flex items-center justify-center space-x-2 bg-danger/80 hover:bg-danger text-white text-xs py-2 px-3 rounded-md transition duration-150">
-                   <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                 <!-- Admin Button - Initially hidden -->
+                 <button id="admin-btn" class="w-full flex items-center justify-start space-x-3 bg-yellow-600 hover:bg-yellow-700 text-white text-xs py-2 px-3 rounded-md transition duration-150 hidden">
+                    <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                    <span data-i18n="adminButton">Admin Panel</span>
+                </button>
+                <button id="logout-btn" class="w-full flex items-center justify-start space-x-3 bg-danger/80 hover:bg-danger text-white text-xs py-2 px-3 rounded-md transition duration-150 mt-2">
+                   <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                     <span data-i18n="logoutButton">Logout</span>
                 </button>
             </div>
@@ -158,28 +257,37 @@
         <!-- Main Chat Area -->
         <main id="main-content" class="flex-grow flex flex-col bg-white dark:bg-secondary-900 overflow-hidden">
             <!-- Chat Header -->
-            <div id="chat-header" class="p-3 sm:p-4 border-b border-secondary-200 dark:border-secondary-800 text-base sm:text-lg font-semibold text-secondary-700 dark:text-secondary-200 flex items-center justify-between shrink-0">
+            <div id="chat-header" class="p-3 sm:p-4 border-b border-secondary-200 dark:border-secondary-800 text-base sm:text-lg font-semibold text-secondary-700 dark:text-secondary-200 flex items-center justify-between shrink-0 shadow-sm">
                 <span id="chat-title-text" class="truncate mr-2" data-i18n="selectDiscussionPrompt">Select a discussion...</span>
-                <button id="edit-chat-title-btn" class="ml-2 p-1.5 text-secondary-500 hover:text-primary dark:hover:text-primary-light focus:outline-none rounded-md hidden" data-i18n-title="editTitleTooltip">
+                <button id="edit-chat-title-btn" class="ml-2 p-1.5 text-secondary-500 hover:text-primary dark:hover:text-primary-light focus:outline-none rounded-md hidden transition-colors" data-i18n-title="editTitleTooltip">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
                 </button>
             </div>
             <!-- Chat Messages Area -->
-            <div id="chat-messages" class="flex-grow p-3 sm:p-4 md:p-6 space-y-4 overflow-y-auto">
-                <!-- Messages will be rendered here -->
+            <div id="chat-messages" class="flex-grow p-3 sm:p-4 md:p-6 space-y-4 overflow-y-auto bg-secondary-50 dark:bg-secondary-850">
                  <p id="chat-messages-placeholder" class="text-center text-secondary-500 dark:text-secondary-400" data-i18n="noMessagesYet">No messages yet. Start the conversation!</p>
             </div>
             <!-- Chat Input Area -->
-            <div class="p-3 sm:p-4 border-t border-secondary-200 dark:border-secondary-800 bg-secondary-50 dark:bg-secondary-850 shrink-0">
+            <div class="p-3 sm:p-4 border-t border-secondary-200 dark:border-secondary-800 bg-secondary-100 dark:bg-secondary-900 shrink-0">
+                <!-- Image Preview Area -->
+                <div id="image-preview-area" class="image-preview-container mb-2 hidden">
+                    <!-- Image previews will be added here -->
+                </div>
                 <div class="flex items-end space-x-2 sm:space-x-3">
+                     <!-- Image Upload Button -->
+                    <button id="image-upload-btn" title="Attach Images" class="p-2.5 text-secondary-500 hover:text-primary dark:hover:text-primary-light rounded-lg border border-secondary-300 dark:border-secondary-600 bg-white dark:bg-secondary-700 hover:bg-secondary-50 dark:hover:bg-secondary-600 transition-colors">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                    </button>
+                    <input type="file" id="image-upload-input" accept="image/*" multiple class="hidden">
+                    
                     <textarea id="message-input" class="flex-grow p-2.5 sm:p-3 text-sm sm:text-base border border-secondary-300 dark:border-secondary-600 rounded-xl focus:ring-2 focus:ring-primary focus:border-transparent dark:bg-secondary-700 resize-none transition-shadow shadow-sm focus:shadow-md" rows="1" data-i18n-placeholder="typeYourMessage" disabled></textarea>
-                    <button id="send-button" class="bg-primary hover:bg-primary-dark text-white font-semibold p-2.5 sm:p-3 rounded-xl flex items-center justify-center transition duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary-light dark:focus-visible:ring-offset-secondary-850 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    <button id="send-button" class="bg-primary hover:bg-primary-dark text-white font-semibold p-2.5 sm:p-3 rounded-xl flex items-center justify-center transition duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-primary-light dark:focus-visible:ring-offset-secondary-900 disabled:opacity-50 disabled:cursor-not-allowed shadow hover:shadow-md" disabled>
                         <svg class="w-5 h-5 icon-send" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
-                        <svg id="send-loader" class="loader w-5 h-5 hidden" style="border-width: 2px;" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"></svg>
+                         <div class="loader w-5 h-5 hidden" style="border-width: 2px;"></div>
                     </button>
                 </div>
                 <div id="rag-toggle-container" class="mt-2.5 flex items-center" style="display: none;">
-                    <input type="checkbox" id="use-rag-checkbox" class="h-4 w-4 text-primary border-secondary-300 dark:border-secondary-600 rounded focus:ring-primary dark:bg-secondary-700 focus:ring-offset-0 dark:focus:ring-offset-secondary-850">
+                    <input type="checkbox" id="use-rag-checkbox" class="h-4 w-4 text-primary border-secondary-300 dark:border-secondary-600 rounded focus:ring-primary dark:bg-secondary-700 focus:ring-offset-0 dark:focus:ring-offset-secondary-900">
                     <label for="use-rag-checkbox" class="ml-2 text-xs sm:text-sm text-secondary-600 dark:text-secondary-300 select-none cursor-pointer" data-i18n="ragToggleLabel">Use RAG</label>
                 </div>
             </div>
@@ -205,13 +313,13 @@
                  <div>
                     <label for="lollms-model-select" class="block text-xs sm:text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1" data-i18n="lollmsModelLabel">LoLLMs Model:</label>
                     <select id="lollms-model-select" class="w-full p-2 text-sm border border-secondary-300 dark:border-secondary-600 rounded-md focus:ring-1 focus:ring-primary focus:border-primary dark:bg-secondary-700"></select>
-                    <button id="set-lollms-model-btn" class="mt-1.5 w-full bg-primary/80 hover:bg-primary text-white py-1.5 rounded-md text-xs" data-i18n="setModelButton">Set Model</button>
+                    <button id="set-lollms-model-btn" class="mt-1.5 w-full bg-primary/80 hover:bg-primary text-white py-1.5 rounded-md text-xs font-medium shadow-sm hover:shadow" data-i18n="setModelButton">Set Model</button>
                 </div>
                  <div>
                     <label for="vectorizer-select" class="block text-xs sm:text-sm font-medium text-secondary-700 dark:text-secondary-300 mb-1" data-i18n="activeVectorizerLabel">Active RAG Vectorizer:</label>
                     <select id="vectorizer-select" class="w-full p-2 text-sm border border-secondary-300 dark:border-secondary-600 rounded-md focus:ring-1 focus:ring-primary focus:border-primary dark:bg-secondary-700"></select>
                     <input type="text" id="new-vectorizer-name" data-i18n-placeholder="newVectorizerPlaceholder" class="mt-1.5 w-full p-2 text-sm border border-secondary-300 dark:border-secondary-600 rounded-md focus:ring-1 focus:ring-primary focus:border-primary dark:bg-secondary-700 placeholder-secondary-400 dark:placeholder-secondary-500">
-                    <button id="set-vectorizer-btn" class="mt-1.5 w-full bg-accent/80 hover:bg-accent text-white py-1.5 rounded-md text-xs" data-i18n="setVectorizerButton">Set Active Vectorizer</button>
+                    <button id="set-vectorizer-btn" class="mt-1.5 w-full bg-accent/80 hover:bg-accent text-white py-1.5 rounded-md text-xs font-medium shadow-sm hover:shadow" data-i18n="setVectorizerButton">Set Active Vectorizer</button>
                 </div>
                  <p id="settings-status" class="text-xs text-center text-secondary-600 dark:text-secondary-400 min-h-[1rem]"></p>
             </div>
@@ -236,12 +344,12 @@
                  <div class="flex flex-col sm:flex-row gap-2">
                     <input type="file" id="file-upload-input" multiple class="flex-grow text-xs sm:text-sm text-secondary-500 dark:text-secondary-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-primary/80 file:text-white hover:file:bg-primary file:cursor-pointer dark:file:bg-secondary-600 dark:file:text-secondary-200 dark:hover:file:bg-secondary-500 border border-secondary-300 dark:border-secondary-600 rounded-md">
                      <input type="file" id="folder-upload-input" webkitdirectory directory style="display:none;">
-                    <button id="upload-folder-btn" class="shrink-0 bg-blue-500 hover:bg-blue-600 text-white py-1.5 px-3 rounded-md text-xs flex items-center justify-center gap-1" data-i18n-title="uploadFolderTooltip">
+                    <button id="upload-folder-btn" class="shrink-0 bg-blue-500 hover:bg-blue-600 text-white py-1.5 px-3 rounded-md text-xs flex items-center justify-center gap-1 shadow-sm hover:shadow" data-i18n-title="uploadFolderTooltip">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"></path></svg>
                         <span data-i18n="uploadFolderButton">Folder</span>
                     </button>
                 </div>
-                <button id="upload-document-btn" class="w-full bg-accent hover:bg-accent-dark text-white py-1.5 rounded-md text-xs flex items-center justify-center gap-1" data-i18n="uploadDocumentButton">
+                <button id="upload-document-btn" class="w-full bg-accent hover:bg-accent-dark text-white py-1.5 rounded-md text-xs flex items-center justify-center gap-1 font-medium shadow hover:shadow-md" data-i18n="uploadDocumentButton">
                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
                     <span>Upload Selected File(s)</span>
                 </button>
@@ -269,7 +377,7 @@
                     <span class="mx-1 text-xs text-secondary-400">|</span>
                     <button id="export-select-none-btn" class="text-xs text-primary hover:underline" data-i18n="selectNone">Select None</button>
                 </div>
-                <button id="confirm-export-btn" class="bg-accent hover:bg-accent-dark text-white font-semibold py-2 px-4 rounded-lg text-sm" data-i18n="exportSelectedButton">Export Selected</button>
+                <button id="confirm-export-btn" class="bg-accent hover:bg-accent-dark text-white font-semibold py-2 px-4 rounded-lg text-sm shadow hover:shadow-md" data-i18n="exportSelectedButton">Export Selected</button>
             </div>
              <p id="export-status" class="text-xs text-center text-secondary-600 dark:text-secondary-400 min-h-[1rem]"></p>
         </div>
@@ -285,18 +393,20 @@
     const initialLoadingOverlay = $('initial-loading-overlay');
     const appContainer = $('app-container'), sidebar = $('sidebar'),
           mainContent = $('main-content'), userDisplayName = $('user-display-name');
-    const discussionListContainer = $('discussion-list-container'), 
+    const discussionListContainer = $('discussion-list-container'),
           discussionList = $('discussion-list'), discussionListLoader = $('discussion-list-loader'),
           newDiscussionBtn = $('new-discussion-btn'),
-          exportDiscussionsBtnModalTrigger = $('export-discussions-btn-modal-trigger'), 
-          settingsBtn = $('settings-btn'), fileManagerBtn = $('file-manager-btn'), 
-          themeToggleBtn = $('theme-toggle-btn'), logoutBtn = $('logout-btn');
+          exportDiscussionsBtnModalTrigger = $('export-discussions-btn-modal-trigger'),
+          settingsBtn = $('settings-btn'), fileManagerBtn = $('file-manager-btn'),
+          themeToggleBtn = $('theme-toggle-btn'), logoutBtn = $('logout-btn'), adminBtn = $('admin-btn'); // Added Admin Btn
     const chatHeader = $('chat-header'), chatTitleText = $('chat-title-text'),
           editChatTitleBtn = $('edit-chat-title-btn'), chatMessages = $('chat-messages'),
           chatMessagesPlaceholder = $('chat-messages-placeholder'),
           messageInput = $('message-input'), sendButton = $('send-button'),
           sendLoader = $('send-loader'), useRagCheckbox = $('use-rag-checkbox'),
           ragToggleContainer = $('rag-toggle-container');
+    const imageUploadBtn = $('image-upload-btn'), imageUploadInput = $('image-upload-input'), // Image Upload Elements
+          imagePreviewArea = $('image-preview-area');
     // Settings Modal
     const settingsModal = $('settings-modal'), closeSettingsBtn = $('close-settings-btn'),
           languageSelect = $('language-select'), lollmsModelSelect = $('lollms-model-select'),
@@ -305,7 +415,8 @@
           settingsStatus = $('settings-status');
     // File Manager Modal
     const fileManagerModal = $('file-manager-modal'), closeFileManagerBtn = $('close-file-manager-btn'),
-          fileUploadInput = $('file-upload-input'), folderUploadInput = $('folder-upload-input'),
+          fileUploadInputFM = $('file-upload-input'), // Renamed to avoid clash
+          folderUploadInput = $('folder-upload-input'),
           uploadFolderBtn = $('upload-folder-btn'), uploadDocumentBtn = $('upload-document-btn'),
           uploadStatus = $('upload-status'), ragFileList = $('rag-file-list'), ragListLoader = $('rag-list-loader');
     // Export Modal
@@ -319,21 +430,23 @@
     // --- Application State ---
     let currentAuth = null;
     let currentDiscussionId = null;
-    let currentUserDetails = null; 
+    let currentUserDetails = null;
     let currentLanguage = localStorage.getItem('preferredLanguage') || navigator.language.split('-')[0] || 'en';
     let translations = {};
     let isSendingMessage = false;
+    let attachedImageFiles = []; // Store files selected for upload
 
     // --- API Request Helper ---
     async function apiRequest(url, options = {}) {
         if (!currentAuth && !url.startsWith('./locales/')) {
             console.error("Authentication token not set for API request to:", url);
             showFlashMessage(t('authError') || "Authentication error. Please log in again.", 'error');
-            showLoginScreen(); 
+            showLoginScreen();
             throw new Error("Not authenticated for API request.");
         }
 
         const defaultHeaders = {};
+        // Don't set Content-Type for FormData, browser does it with boundary
         if (!(options.body instanceof FormData) && !url.startsWith('./locales/')) {
             defaultHeaders['Content-Type'] = 'application/json';
         }
@@ -342,10 +455,11 @@
         }
 
         const mergedOptions = { ...options, headers: { ...defaultHeaders, ...options.headers } };
+        // Only stringify if body exists, not FormData, and Content-Type is JSON
         if (mergedOptions.body && !(mergedOptions.body instanceof FormData) && mergedOptions.headers['Content-Type'] === 'application/json') {
             mergedOptions.body = JSON.stringify(mergedOptions.body);
         }
-        
+
         try {
             const response = await fetch(url, mergedOptions);
             if (response.status === 401 && !url.startsWith('./locales/')) {
@@ -372,14 +486,15 @@
             currentLanguage = lang;
             localStorage.setItem('preferredLanguage', lang);
             applyTranslations();
+            document.documentElement.lang = lang; // Set page language
         } catch (error) {
             console.error('Error loading translations:', error);
-            if (lang !== 'en') await loadTranslations('en'); 
+            if (lang !== 'en') await loadTranslations('en');
         }
     }
 
     function t(key, params = {}) {
-        let text = translations[key] || key; 
+        let text = translations[key] || key;
         for (const param in params) {
             text = text.replace(new RegExp(`{${param}}`, 'g'), params[param]);
         }
@@ -396,7 +511,7 @@
         document.querySelectorAll('[data-i18n-title]').forEach(el => {
             el.title = t(el.dataset.i18nTitle);
         });
-        document.title = t('appTitle'); 
+        document.title = t('appTitle');
 
         // Update dynamic elements
         if (chatTitleText && !currentDiscussionId) chatTitleText.textContent = t('selectDiscussionPrompt');
@@ -407,7 +522,7 @@
              discussionList.innerHTML = `<li class="text-center text-xs text-secondary-400 p-2">${t('noDiscussionsFound')}</li>`;
         }
         messageInput.disabled = !currentDiscussionId || isSendingMessage;
-        sendButton.disabled = !currentDiscussionId || isSendingMessage;
+        sendButton.disabled = !currentDiscussionId || isSendingMessage || (!messageInput.value.trim() && attachedImageFiles.length === 0); // Disable if no text AND no images
     }
 
     languageSelect.addEventListener('change', (e) => loadTranslations(e.target.value));
@@ -416,12 +531,12 @@
     // --- UI Helpers ---
     function showFlashMessage(message, type = 'info', duration = 5000) {
         const flashDiv = document.createElement('div');
-        let bgColor = 'bg-primary text-white'; 
+        let bgColor = 'bg-primary text-white';
         if (type === 'success') bgColor = 'bg-accent text-white';
         else if (type === 'error') bgColor = 'bg-danger text-white';
         else if (type === 'warning') bgColor = 'bg-warning text-secondary-900';
-        
-        flashDiv.className = `fixed bottom-4 right-4 p-3 rounded-lg shadow-md text-sm z-[100] animate-fade-in ${bgColor}`;
+
+        flashDiv.className = `fixed bottom-4 right-4 p-3 rounded-lg shadow-lg text-sm z-[100] animate-fade-in ${bgColor}`;
         flashDiv.textContent = message;
         document.body.appendChild(flashDiv);
         setTimeout(() => {
@@ -435,14 +550,14 @@
         const statusElement = $(elementId);
         if (!statusElement) return;
         statusElement.textContent = message;
-        let textColor = 'text-secondary-600 dark:text-secondary-400'; 
+        let textColor = 'text-secondary-600 dark:text-secondary-400';
         if (type === 'success') textColor = 'text-accent dark:text-accent-light';
         else if (type === 'error') textColor = 'text-danger dark:text-danger-light';
         else if (type === 'warning') textColor = 'text-warning dark:text-warning-light';
         statusElement.className = `text-xs text-center min-h-[1rem] ${textColor}`;
-        if (duration > 0 && message) { 
+        if (duration > 0 && message) {
             setTimeout(() => { if (statusElement.textContent === message) statusElement.textContent = ''; }, duration);
-        } else if (!message) { 
+        } else if (!message) {
             statusElement.textContent = '';
         }
     }
@@ -472,16 +587,18 @@
         fileManagerModal.classList.add('hidden');
         exportModal.classList.add('hidden');
         discussionList.innerHTML = ''; chatMessages.innerHTML = '';
-        chatTitleText.textContent = t('selectDiscussionPrompt'); 
+        chatTitleText.textContent = t('selectDiscussionPrompt');
         editChatTitleBtn.classList.add('hidden');
-        messageInput.disabled = true; sendButton.disabled = true; 
+        messageInput.disabled = true; sendButton.disabled = true;
         usernameInput.value = ''; passwordInput.value = '';
-        loginError.textContent = ''; loginError.classList.add('hidden'); 
+        loginError.textContent = ''; loginError.classList.add('hidden');
         loginButton.disabled = false; loginSpinner.classList.add('hidden');
+        adminBtn.classList.add('hidden'); // Hide admin button on logout
+        clearImagePreviews(); // Clear any lingering image previews
     }
 
     loginFormTag.addEventListener('submit', async (e) => {
-        e.preventDefault(); 
+        e.preventDefault();
         loginButton.disabled = true; loginSpinner.classList.remove('hidden');
         loginError.classList.add('hidden');
         const username = usernameInput.value, password = passwordInput.value;
@@ -497,54 +614,57 @@
                  const errorData = await response.json().catch(() => ({ detail: t('invalidCredentialsError') }));
                  loginError.textContent = errorData.detail || t('invalidCredentialsError');
                  loginError.classList.remove('hidden');
-                 currentAuth = null; 
+                 currentAuth = null;
                  loginButton.disabled = false; loginSpinner.classList.add('hidden');
                  return; // Stop further processing
             }
             currentUserDetails = await response.json();
             userDisplayName.textContent = currentUserDetails.username;
-            
+
+            // Show/Hide Admin button based on privileges
+            adminBtn.classList.toggle('hidden', !currentUserDetails.is_admin);
+
             loginScreen.classList.add('hidden');
             initialLoadingOverlay.classList.remove('hidden'); // Show app loading overlay
 
-            // Load translations first to ensure UI elements are correctly populated during initial load
-            languageSelect.value = localStorage.getItem('preferredLanguage') || currentUserDetails.language || currentLanguage; // Assuming language preference might come from user details
+            // Load translations first
+            languageSelect.value = localStorage.getItem('preferredLanguage') || currentUserDetails.language || currentLanguage;
             await loadTranslations(languageSelect.value);
-            
-            // Load all essential data in parallel
+
+            // Load essential data
             await Promise.all([
                 loadDiscussions(),
                 loadLollmsModels(),
-                loadStoreVectorizers() // This includes fetching active vectorizer
+                loadStoreVectorizers()
             ]);
-            
-            // Update RAG toggle based on loaded active vectorizer
+
+            // Update RAG toggle
             ragToggleContainer.style.display = currentUserDetails.safe_store_vectorizer ? 'flex' : 'none';
             useRagCheckbox.checked = !!currentUserDetails.safe_store_vectorizer;
 
-            initialLoadingOverlay.classList.add('hidden'); // Hide app loading overlay
-            appContainer.classList.remove('hidden');       // Show main app
+            initialLoadingOverlay.classList.add('hidden');
+            appContainer.classList.remove('hidden');
 
             chatTitleText.textContent = t('selectDiscussionPrompt');
             editChatTitleBtn.classList.add('hidden');
-            messageInput.disabled = true; // Keep disabled until a discussion is selected
+            messageInput.disabled = true;
             sendButton.disabled = true;
 
             showFlashMessage(t('loginSuccess'), 'success');
 
         } catch (error) {
-            // apiRequest might have already shown an error or called showLoginScreen
             if (!error.message.includes("Authentication failed") && !error.message.includes("Not authenticated")) {
                 loginError.textContent = t('loginFailedError');
                 loginError.classList.remove('hidden');
             }
-            currentAuth = null; // Ensure auth is cleared on any login phase error
+            currentAuth = null;
         } finally {
             loginButton.disabled = false; loginSpinner.classList.add('hidden');
         }
     });
 
     logoutBtn.addEventListener('click', showLoginScreen);
+    adminBtn.addEventListener('click', () => window.open('/admin', '_blank')); // Open admin panel in new tab
 
 
     // --- Discussion Management ---
@@ -553,10 +673,10 @@
         discussionList.innerHTML = '';
         try {
             const response = await apiRequest('/api/discussions');
-            if (!response.ok) { 
-                console.error("Failed to load discussions, status:", response.status); 
+            if (!response.ok) {
+                console.error("Failed to load discussions, status:", response.status);
                 discussionList.innerHTML = `<li class="text-center text-xs text-danger p-2">${t('discussionLoadError')}</li>`;
-                return; 
+                return;
             }
             const discussions = await response.json();
             if (discussions.length === 0) {
@@ -565,21 +685,21 @@
                 discussions.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
                 discussions.forEach(disc => discussionList.appendChild(renderDiscussionListItem(disc)));
             }
-            
+
             if (selectLastActive && currentDiscussionId) {
                 const stillExists = discussions.some(d => d.id === currentDiscussionId);
                 if (stillExists) {
-                    await selectDiscussion(currentDiscussionId, false); // false to not force reload if already loaded
+                    await selectDiscussion(currentDiscussionId, false);
                 } else {
-                    currentDiscussionId = null; // Clear if it no longer exists
+                    currentDiscussionId = null;
                 }
             }
-            if (!currentDiscussionId) { // If no discussion is active or became inactive
+            if (!currentDiscussionId) {
                 clearChatArea();
             }
 
-        } catch (error) { 
-            console.error('Failed to load discussions:', error); 
+        } catch (error) {
+            console.error('Failed to load discussions:', error);
             discussionList.innerHTML = `<li class="text-center text-xs text-danger p-2">${t('discussionLoadError')}</li>`;
         } finally {
             discussionListLoader.classList.add('hidden');
@@ -607,10 +727,10 @@
         deleteBtn.onclick = async (e) => { e.stopPropagation(); if (confirm(t('deleteDiscussionConfirm', {title: titleSpan.textContent}))) { await deleteDiscussionApi(disc.id); } };
         li.appendChild(deleteBtn);
 
-        li.addEventListener('click', () => selectDiscussion(disc.id, true)); // true to force load/reload
+        li.addEventListener('click', () => selectDiscussion(disc.id, true));
         return li;
     }
-    
+
     function clearChatArea() {
         chatMessages.innerHTML = '';
         chatMessagesPlaceholder.textContent = t('noMessagesYet');
@@ -620,13 +740,12 @@
         messageInput.disabled = true;
         sendButton.disabled = true;
         messageInput.value = ''; messageInput.style.height = 'auto';
+        clearImagePreviews(); // Clear images when chat clears
     }
 
 
     async function selectDiscussion(discussionId, forceReload = false) {
         if (currentDiscussionId === discussionId && !forceReload && chatMessages.children.length > 1) {
-             // If already selected and messages are present (more than just placeholder), and not forced, do nothing
-             // This prevents re-loading if user clicks an already active item unless forced
             return;
         }
 
@@ -643,7 +762,8 @@
         const activeLi = document.querySelector(`#discussion-list li[data-id='${discussionId}'] span`);
         chatTitleText.textContent = activeLi ? activeLi.textContent : t('loadingDiscussion');
         editChatTitleBtn.classList.remove('hidden');
-        messageInput.disabled = false; sendButton.disabled = false; // Enable input
+        messageInput.disabled = false; sendButton.disabled = false;
+        clearImagePreviews(); // Clear images when changing discussion
 
         try {
             const response = await apiRequest(`/api/discussions/${discussionId}`);
@@ -652,7 +772,7 @@
                 throw new Error(errorData.detail || `Status: ${response.status}`);
             }
             const messages = await response.json();
-            chatMessages.innerHTML = ''; 
+            chatMessages.innerHTML = '';
             if (!Array.isArray(messages)) throw new Error('Messages data is not an array');
 
             if (messages.length === 0) {
@@ -660,17 +780,18 @@
                 chatMessagesPlaceholder.classList.remove('hidden');
             } else {
                 chatMessagesPlaceholder.classList.add('hidden');
-                messages.forEach(msg => renderMessage(msg.sender, msg.content, msg.id));
+                messages.forEach(msg => renderMessage(msg.sender, msg.content, msg.id, false, msg.metadata)); // Pass metadata
             }
             chatMessages.scrollTop = chatMessages.scrollHeight;
         } catch (error) {
             console.error(`Failed to load messages for discussion ${discussionId}:`, error);
-            chatMessages.innerHTML = ''; 
+            chatMessages.innerHTML = '';
             renderMessage('system', t('errorLoadingDiscussion') + `: ${error.message}`);
             chatTitleText.textContent = t('errorLoadingDiscussion');
             editChatTitleBtn.classList.add('hidden');
-            messageInput.disabled = true; sendButton.disabled = true; // Disable on error
+            messageInput.disabled = true; sendButton.disabled = true;
         }
+         updateSendButtonState(); // Update send button state after loading
     }
 
     newDiscussionBtn.addEventListener('click', async () => {
@@ -682,8 +803,8 @@
                 throw new Error(errorData.detail || response.statusText);
             }
             const newDiscussion = await response.json();
-            await loadDiscussions(); 
-            selectDiscussion(newDiscussion.id, true); 
+            await loadDiscussions();
+            selectDiscussion(newDiscussion.id, true);
             showFlashMessage(t('newDiscussionCreated', { title: newDiscussion.title }), 'success');
         } catch (error) {
             console.error('Failed to create new discussion:', error);
@@ -703,13 +824,13 @@
                 currentDiscussionId = null;
                 clearChatArea();
             }
-            await loadDiscussions(); 
+            await loadDiscussions();
         } catch (error) {
             console.error('Failed to delete discussion:', error);
             showFlashMessage(error.message, 'error');
         }
     }
-    
+
     editChatTitleBtn.addEventListener('click', async () => {
         if (!currentDiscussionId) return;
         const currentTitle = chatTitleText.textContent;
@@ -724,7 +845,7 @@
                 chatTitleText.textContent = updatedInfo.title;
                 const listItemTitle = document.querySelector(`#discussion-list li[data-id='${currentDiscussionId}'] span`);
                 if (listItemTitle) listItemTitle.textContent = updatedInfo.title;
-                showFlashMessage(t('messageUpdateSuccess'), 'success'); 
+                showFlashMessage(t('messageUpdateSuccess'), 'success');
             } catch (error) {
                 showFlashMessage(error.message, 'error');
             }
@@ -732,52 +853,76 @@
     });
 
     // --- Message Sending & Rendering ---
-    messageInput.addEventListener('input', () => { 
+    function updateSendButtonState() {
+         const hasText = messageInput.value.trim().length > 0;
+         const hasImages = attachedImageFiles.length > 0;
+         sendButton.disabled = !currentDiscussionId || isSendingMessage || (!hasText && !hasImages);
+    }
+
+    messageInput.addEventListener('input', () => {
         messageInput.style.height = 'auto';
-        const maxHeight = 120; 
+        const maxHeight = 120;
         messageInput.style.height = `${Math.min(messageInput.scrollHeight, maxHeight)}px`;
+        updateSendButtonState(); // Update on text change
     });
-    messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey && !isSendingMessage) { e.preventDefault(); sendMessage(); }});
-    sendButton.addEventListener('click', () => { if(!isSendingMessage) sendMessage(); });
+    messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter' && !e.shiftKey && !sendButton.disabled) { e.preventDefault(); sendMessage(); }});
+    sendButton.addEventListener('click', () => { if(!sendButton.disabled) sendMessage(); });
 
     async function sendMessage() {
         const prompt = messageInput.value.trim();
-        if (!prompt || !currentDiscussionId || isSendingMessage) return;
+        if (!currentDiscussionId || isSendingMessage || (prompt === "" && attachedImageFiles.length === 0)) return;
 
         isSendingMessage = true;
         const tempUserMessageId = 'temp-user-' + Date.now();
         chatMessagesPlaceholder.classList.add('hidden');
-        renderMessage((currentUserDetails?.username || 'user'), prompt, tempUserMessageId);
+
+        // Render user message including previews of attached images
+        renderMessage(
+            (currentUserDetails?.username || 'user'),
+            prompt,
+            tempUserMessageId,
+            false, // Not streaming
+            { // Add metadata for images
+                filenames: attachedImageFiles.map(f => f.name),
+                image_count: attachedImageFiles.length,
+                image_previews: attachedImageFiles.map(f => f.previewUrl) // Include data URLs for rendering
+            }
+        );
+
         messageInput.value = ''; messageInput.style.height = 'auto';
-        messageInput.disabled = true; // Disable during send
-        sendButton.classList.add('send-button-loading'); // Enhanced loading
+        messageInput.disabled = true;
+        sendButton.classList.add('send-button-loading');
         sendButton.disabled = true;
-        sendLoader.classList.remove('hidden'); // Keep existing spinner as part of class if desired
+        //sendLoader.classList.remove('hidden'); // Loader handled by class toggle now
 
         const formData = new FormData();
         formData.append('prompt', prompt);
         formData.append('use_rag', useRagCheckbox.checked.toString());
+        // Append attached images
+        attachedImageFiles.forEach(file => {
+            formData.append('files', file.fileObject, file.name); // Send original File object
+        });
+
+        clearImagePreviews(); // Clear previews after sending
 
         let assistantMessageDiv = null;
         let accumulatedResponseText = "";
         const assistantStreamId = 'assistant-stream-' + Date.now();
 
         try {
+            // Use fetch directly for FormData streaming
             const response = await fetch(`/api/discussions/${currentDiscussionId}/chat`, {
                 method: 'POST',
-                headers: { 'Authorization': `Basic ${currentAuth}` },
+                headers: { 'Authorization': `Basic ${currentAuth}` }, // No Content-Type
                 body: formData
             });
-
-            // User's temporary message is already rendered. We won't remove it until after full AI response.
-            // Its ID will be updated later if backend provides it, or it'll be replaced by reloading discussion.
 
             if (!response.ok || !response.body) {
                 const errorData = await response.json().catch(() => ({ detail: "Unknown server error." }));
                 renderMessage('system', t('sendError', { error: errorData.detail || response.statusText }));
-                const tempUserMsgEl = $(`message-${tempUserMessageId}`); // Remove temp user message on hard failure
+                const tempUserMsgEl = $(`message-${tempUserMessageId}`);
                 if (tempUserMsgEl) tempUserMsgEl.remove();
-                return; // isSendingMessage will be reset in finally
+                return;
             }
 
             const reader = response.body.getReader();
@@ -803,15 +948,16 @@
                             renderMessageContent(assistantMessageDiv, accumulatedResponseText, 'assistant');
                             chatMessages.scrollTop = chatMessages.scrollHeight;
                         } else if (data.type === "error") {
-                            if (assistantMessageDiv && $(`message-${assistantStreamId}`)) {
-                                $(`message-${assistantStreamId}`).remove(); // Remove temp AI bubble
+                             if (assistantMessageDiv && $(`message-${assistantStreamId}`)) {
+                                $(`message-${assistantStreamId}`).remove(); // Remove temp AI bubble on error
                             }
                             renderMessage('system', t('llmError', { error: data.content }));
-                            accumulatedResponseText = ""; 
-                            break; 
+                            accumulatedResponseText = ""; // Clear accumulated text on error
+                            break; // Stop processing stream on error
                         }
                     } catch (e) {
                         console.warn("Stream parsing error:", e, "Line:", line);
+                        // Don't break the loop on single parse error, maybe next line is ok
                     }
                 }
             }
@@ -822,57 +968,72 @@
             if (tempUserMsgElOnError) tempUserMsgElOnError.remove();
         } finally {
             isSendingMessage = false;
-            messageInput.disabled = !currentDiscussionId; // Re-enable based on discussion selection
-            sendButton.disabled = !currentDiscussionId;
+            messageInput.disabled = !currentDiscussionId;
+            updateSendButtonState(); // Update button state based on text/images
             sendButton.classList.remove('send-button-loading');
-            sendLoader.classList.add('hidden');
+            //sendLoader.classList.add('hidden'); // Loader handled by class toggle
 
-            // Reload the discussion to get permanent message IDs and ensure consistency
-            // This also handles replacing the temp user message and streamed AI message.
+            // Reload discussion to get permanent IDs and sync state
             if (currentDiscussionId) {
-                 setTimeout(async () => { // Timeout to allow any final DOM updates from stream to settle
-                    await selectDiscussion(currentDiscussionId, true); // Force reload
-                 }, 100);
+                 setTimeout(async () => {
+                    await selectDiscussion(currentDiscussionId, true);
+                 }, 150); // Small delay
             }
         }
     }
 
-    function renderMessage(sender, text, id, isStreaming = false) {
+    // Modified renderMessage to include metadata and image previews
+    function renderMessage(sender, text, id, isStreaming = false, metadata = {}) {
         const msgOuterDiv = document.createElement('div');
-        const messageElementId = `message-${id}`; // Ensure IDs are unique
+        const messageElementId = `message-${id}`;
         msgOuterDiv.className = `message-bubble-outer flex w-full mb-3 items-end relative group ${sender.toLowerCase() === (currentUserDetails?.username?.toLowerCase() || 'user') ? 'user-message justify-end' : 'assistant-message justify-start'}`;
         msgOuterDiv.id = messageElementId;
 
         const msgBubble = document.createElement('div');
         const isUser = sender.toLowerCase() === (currentUserDetails?.username?.toLowerCase() || 'user');
         msgBubble.className = `p-3 rounded-xl max-w-[85%] sm:max-w-[75%] lg:max-w-[70%] break-words shadow-md relative ${
-            isUser ? 'bg-primary text-white ml-auto rounded-br-none' :
+            isUser ? 'bg-primary text-white ml-auto rounded-br-lg' : // Adjusted rounding for user
             sender.toLowerCase() === 'system' ? 'bg-warning/20 dark:bg-warning/30 text-warning-dark dark:text-warning-light text-xs italic text-center max-w-md mx-auto px-2 py-1 shadow-none rounded-md' :
-            'bg-secondary-200 dark:bg-secondary-700 text-secondary-800 dark:text-secondary-100 prose prose-sm dark:prose-invert max-w-none rounded-bl-none'
+            'bg-secondary-200 dark:bg-secondary-700 text-secondary-800 dark:text-secondary-100 prose prose-sm dark:prose-invert max-w-none rounded-bl-lg' // Adjusted rounding for assistant
         }`;
         msgBubble.dataset.messageId = id;
         msgBubble.dataset.sender = sender;
-        
-        // Store original UNPARSED content for editing if it's a user message or a simple system message.
-        // For AI messages, the 'text' here might be markdown. The backend will handle original content.
+
         if(isUser || sender.toLowerCase() === 'system') {
              msgBubble.dataset.originalContent = text;
         }
 
+        // Render image previews if provided in metadata (specifically for user messages)
+        if (isUser && metadata && metadata.image_previews && metadata.image_previews.length > 0) {
+            const imgContainer = document.createElement('div');
+            imgContainer.className = 'flex flex-wrap gap-2 mb-2'; // Add margin below images
+            metadata.image_previews.forEach(srcUrl => {
+                const img = document.createElement('img');
+                img.src = srcUrl;
+                img.alt = 'Uploaded image preview';
+                img.className = 'max-h-24 max-w-32 rounded border border-primary-light/30';
+                imgContainer.appendChild(img);
+            });
+            msgBubble.appendChild(imgContainer);
+        }
 
-        renderMessageContent(msgBubble, text, sender);
+        // Render text content below images or as primary content
+        const textContentDiv = document.createElement('div');
+        renderMessageContent(textContentDiv, text, sender); // Use helper for main content rendering
+        msgBubble.appendChild(textContentDiv);
 
-        // Add edit/delete actions only for non-streaming, non-temporary, non-system messages
-        if (sender.toLowerCase() !== 'system' && !isStreaming && id && 
+
+        // Add actions only for non-streaming, non-temporary, non-system messages
+        if (sender.toLowerCase() !== 'system' && !isStreaming && id &&
             !String(id).startsWith('temp-') && !String(id).startsWith('assistant-stream-')) {
             const actionsDiv = document.createElement('div');
-            actionsDiv.className = 'message-actions flex gap-1 p-1 bg-secondary-100/70 dark:bg-secondary-900/70 rounded shadow';
+             actionsDiv.className = 'message-actions flex gap-1 p-0.5 bg-secondary-100/80 dark:bg-secondary-900/80 rounded-md shadow backdrop-blur-sm';
 
             const editBtn = document.createElement('button');
             editBtn.innerHTML = `<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>`;
             editBtn.className = 'message-action-btn p-1 rounded hover:bg-secondary-200 dark:hover:bg-secondary-700 text-secondary-600 dark:text-secondary-400';
             editBtn.title = t('editMessage');
-            editBtn.onclick = (e) => { e.stopPropagation(); editMessage(id, sender, msgBubble); };
+            editBtn.onclick = (e) => { e.stopPropagation(); editMessage(id, sender, msgBubble); }; // Pass bubble to get original content
             actionsDiv.appendChild(editBtn);
 
             const deleteBtn = document.createElement('button');
@@ -887,23 +1048,27 @@
 
         msgOuterDiv.appendChild(msgBubble);
         chatMessages.appendChild(msgOuterDiv);
-        
-        const isScrolledToBottom = chatMessages.scrollHeight - chatMessages.clientHeight <= chatMessages.scrollTop + 50; 
+
+        const isScrolledToBottom = chatMessages.scrollHeight - chatMessages.clientHeight <= chatMessages.scrollTop + 50;
         if (isScrolledToBottom || isStreaming || isUser) {
            chatMessages.scrollTop = chatMessages.scrollHeight;
         }
 
-        return msgBubble; // Return the inner bubble for content updates during streaming
+        return msgBubble; // Return the inner bubble for streaming updates
     }
 
-    function renderMessageContent(bubbleElement, text, sender) {
-        bubbleElement.innerHTML = ''; 
+    // Helper to render main content (text, markdown, think blocks) into a target element
+    function renderMessageContent(targetElement, text, sender) {
+        targetElement.innerHTML = ''; // Clear previous content
 
         const isUser = sender.toLowerCase() === (currentUserDetails?.username?.toLowerCase() || 'user');
-        if (isUser) {
-            bubbleElement.textContent = text; // User messages are plain text
-        } else if (sender.toLowerCase() === 'system') {
-             bubbleElement.textContent = text; // System messages are plain text
+        if (isUser || sender.toLowerCase() === 'system') {
+             // For user/system, just set text content if text exists
+            if(text && text.trim() !== "") {
+                 targetElement.textContent = text;
+            } else {
+                // If text is empty (e.g., user sent only images), targetElement remains empty
+            }
         } else { // Assistant message - parse Markdown and think blocks
             let mainContent = text;
             let thinkContent = null;
@@ -919,29 +1084,39 @@
                 const summary = document.createElement('summary');
                 summary.textContent = t('assistantThoughts');
                 const thinkDiv = document.createElement('div');
-                thinkDiv.textContent = thinkContent; // Render think content as plain text
+                thinkDiv.textContent = thinkContent;
                 details.appendChild(summary);
                 details.appendChild(thinkDiv);
-                bubbleElement.appendChild(details);
+                targetElement.appendChild(details);
             }
 
-            if (mainContent || (thinkContent && !mainContent && bubbleElement.children.length > 0) ) {
-                const contentDiv = document.createElement('div');
-                if (typeof marked !== 'undefined') {
-                    contentDiv.innerHTML = marked.parse(mainContent); // Parse Markdown for main content
-                } else {
-                    console.error("Marked library not loaded!");
-                    contentDiv.textContent = mainContent; 
-                }
-                bubbleElement.appendChild(contentDiv);
+            if (mainContent || (thinkContent && !mainContent && targetElement.children.length > 0) ) {
+                 if (mainContent.trim() !== "") { // Only add content div if there is main content
+                    const contentDiv = document.createElement('div');
+                    // Ensure marked library is available
+                    if (typeof marked !== 'undefined') {
+                         contentDiv.innerHTML = marked.parse(mainContent);
+                    } else {
+                        console.error("Marked library not loaded!");
+                        contentDiv.textContent = mainContent; // Fallback to plain text
+                    }
+                    targetElement.appendChild(contentDiv);
+                 }
             } else if (!thinkContent && !mainContent) {
-                 bubbleElement.textContent = '...'; // Placeholder for empty or still-loading assistant message
+                 // Placeholder for empty or still-loading assistant message
+                 targetElement.innerHTML = '<span class="italic opacity-75">...</span>';
             }
         }
     }
 
+
     async function editMessage(messageId, sender, bubbleElement) {
-        const originalContent = bubbleElement.dataset.originalContent || bubbleElement.textContent; // Fallback to textContent
+        // Find the text content div within the bubble, excluding image previews or think blocks
+        const textContentDiv = Array.from(bubbleElement.children).find(
+            el => !el.classList.contains('flex') && !el.classList.contains('think-block') // Crude check, might need refinement
+        );
+        const originalContent = textContentDiv ? (bubbleElement.dataset.originalContent || textContentDiv.textContent) : (bubbleElement.dataset.originalContent || '');
+
         const newContent = prompt(t('editMessagePrompt'), originalContent);
         if (newContent === null || newContent.trim() === "" || newContent.trim() === originalContent.trim()) return;
 
@@ -953,7 +1128,7 @@
                  const errorData = await response.json().catch(() => ({detail: "Failed to update message"}));
                  throw new Error(errorData.detail);
             }
-            await selectDiscussion(currentDiscussionId, true); // Force reload discussion to show updated message
+            await selectDiscussion(currentDiscussionId, true); // Force reload
             showFlashMessage(t('messageUpdateSuccess'), 'success');
         } catch (error) {
             console.error('Failed to edit message:', error);
@@ -971,13 +1146,81 @@
             }
             messageOuterDiv.remove();
             showFlashMessage(t('messageDeleteSuccess'), 'success');
-             if (chatMessages.children.length === 0) { // If all messages deleted, show placeholder
+             if (chatMessages.children.length === 0) {
                 chatMessagesPlaceholder.classList.remove('hidden');
             }
         } catch (error) {
             console.error('Failed to delete message:', error);
              showFlashMessage(t('messageDeleteError', {error: error.message}), 'error');
         }
+    }
+
+    // --- Image Upload Handling ---
+    imageUploadBtn.addEventListener('click', () => imageUploadInput.click());
+
+    imageUploadInput.addEventListener('change', (event) => {
+        handleImageFiles(event.target.files);
+        imageUploadInput.value = ''; // Reset input to allow selecting same file again
+    });
+
+    function handleImageFiles(files) {
+        imagePreviewArea.classList.remove('hidden');
+        for (const file of files) {
+            if (!file.type.startsWith('image/')) continue;
+            if (attachedImageFiles.length >= 5) { // Limit number of attachments
+                 showFlashMessage(t('maxImagesReached', {max: 5}), 'warning');
+                 break;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const previewUrl = e.target.result;
+                const fileId = 'img-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+
+                // Store file object and preview URL
+                attachedImageFiles.push({ id: fileId, fileObject: file, previewUrl: previewUrl, name: file.name });
+
+                // Create preview element
+                const previewItem = document.createElement('div');
+                previewItem.className = 'image-preview-item';
+                previewItem.dataset.fileId = fileId;
+
+                const img = document.createElement('img');
+                img.src = previewUrl;
+                img.alt = file.name;
+
+                const removeBtn = document.createElement('button');
+                removeBtn.className = 'remove-image-btn';
+                removeBtn.innerHTML = '&times;'; // Simple 'x'
+                removeBtn.title = t('removeImageTooltip');
+                removeBtn.onclick = () => removeImagePreview(fileId);
+
+                previewItem.appendChild(img);
+                previewItem.appendChild(removeBtn);
+                imagePreviewArea.appendChild(previewItem);
+                updateSendButtonState(); // Update button state after adding image
+            }
+            reader.readAsDataURL(file);
+        }
+    }
+
+    function removeImagePreview(fileId) {
+        attachedImageFiles = attachedImageFiles.filter(f => f.id !== fileId);
+        const previewElement = imagePreviewArea.querySelector(`[data-file-id="${fileId}"]`);
+        if (previewElement) {
+            previewElement.remove();
+        }
+        if (attachedImageFiles.length === 0) {
+            imagePreviewArea.classList.add('hidden');
+        }
+        updateSendButtonState(); // Update button state after removing image
+    }
+
+    function clearImagePreviews() {
+        attachedImageFiles = [];
+        imagePreviewArea.innerHTML = '';
+        imagePreviewArea.classList.add('hidden');
+        updateSendButtonState(); // Update button state
     }
 
 
@@ -1000,6 +1243,8 @@
             });
             if (currentUserDetails && currentUserDetails.lollms_model_name) {
                 lollmsModelSelect.value = currentUserDetails.lollms_model_name;
+            } else {
+                 lollmsModelSelect.value = ""; // Ensure placeholder is selected if no user pref
             }
         } catch (error) {
             console.error('Failed to load LoLLMs models:', error);
@@ -1031,11 +1276,11 @@
         try {
             const response = await apiRequest('/api/store/vectorizers');
             if (!response.ok) { throw new Error((await response.json().catch(()=>({detail:"Failed to fetch vectorizers"}))).detail || 'Failed to fetch vectorizers'); }
-            const vectorizers = await response.json(); // Expects list of {"name": "...", "method_name": "..."}
+            const vectorizers = await response.json();
             vectorizers.forEach(vec => {
                 const option = document.createElement('option');
-                option.value = vec.name; 
-                option.textContent = vec.method_name; // Display text
+                option.value = vec.name;
+                option.textContent = vec.method_name; // Display text like "st:model (dim: 384)"
                 vectorizerSelect.appendChild(option);
             });
             await fetchActiveVectorizer(); // This will set the select.value and update currentUserDetails
@@ -1044,7 +1289,7 @@
             updateStatus('settings-status', t('vectorizerLoadError') + `: ${error.message}`, 'error');
         }
     }
-    
+
     async function fetchActiveVectorizer() {
         try {
             const response = await apiRequest('/api/store/active-vectorizer');
@@ -1052,32 +1297,41 @@
             const data = await response.json();
             const activeVec = data.active_vectorizer;
             if (activeVec) {
-                vectorizerSelect.value = activeVec; // This should match one of the option values (vec.name)
-                if (currentUserDetails) currentUserDetails.safe_store_vectorizer = activeVec;
+                 // Check if activeVec is among the options, otherwise leave empty
+                 const exists = Array.from(vectorizerSelect.options).some(opt => opt.value === activeVec);
+                 vectorizerSelect.value = exists ? activeVec : "";
+                 if (currentUserDetails) currentUserDetails.safe_store_vectorizer = activeVec;
             } else {
+                 vectorizerSelect.value = ""; // Set to placeholder if null
                  if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null;
             }
-            // Update RAG toggle UI based on newly fetched/updated currentUserDetails
+            // Update RAG toggle UI
             ragToggleContainer.style.display = currentUserDetails?.safe_store_vectorizer ? 'flex' : 'none';
             useRagCheckbox.checked = !!currentUserDetails?.safe_store_vectorizer;
 
         } catch (error) {
             console.error('Failed to fetch active vectorizer:', error);
              if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null;
+            vectorizerSelect.value = "";
             ragToggleContainer.style.display = 'none';
             useRagCheckbox.checked = false;
         }
     }
 
     async function setActiveSessionVectorizer(vectorizerName) {
-        if (!vectorizerName) { 
-            // If trying to set to empty, effectively disable RAG for session
+        if (!vectorizerName) {
             if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null;
             ragToggleContainer.style.display = 'none';
-            useRagCheckbox.checked = false; 
-            // Optionally, could also send a request to backend to clear server-side session vectorizer if desired.
-            // For now, just update client-side.
-            return false; 
+            useRagCheckbox.checked = false;
+            // Send request to backend to clear it too
+            try {
+                const formData = new FormData(); formData.append('vectorizer_name', ''); // Send empty string
+                await apiRequest('/api/store/active-vectorizer', { method: 'POST', body: formData });
+            } catch (error) {
+                console.error('Failed to clear active vectorizer on backend:', error);
+                // Proceed with client-side update anyway
+            }
+            return true; // Consider it success from UI perspective
         }
         updateStatus('settings-status', t('settingVectorizerStatus'), 'info', 0);
         try {
@@ -1086,35 +1340,35 @@
              if (!response.ok) {
                 const errorData = await response.json().catch(() => ({detail: t('vectorizerSetError')}));
                 updateStatus('settings-status', `${t('vectorizerSetError')}: ${errorData.detail}`, 'error');
-                if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null; // Revert on failure
-                ragToggleContainer.style.display = 'none';
-                useRagCheckbox.checked = false; 
+                // Don't revert optimistically, let fetchActiveVectorizer handle it after reload
                 return false;
             }
-            // Success, update currentUserDetails and UI
             if (currentUserDetails) currentUserDetails.safe_store_vectorizer = vectorizerName;
             ragToggleContainer.style.display = 'flex';
-            useRagCheckbox.checked = true; 
+            useRagCheckbox.checked = true;
             return true;
         } catch (error) {
             console.error('Failed to set active vectorizer:', error);
             updateStatus('settings-status', `${t('vectorizerSetError')}: ${error.message}`, 'error');
-             if (currentUserDetails) currentUserDetails.safe_store_vectorizer = null; // Revert on failure
-            ragToggleContainer.style.display = 'none';
-            useRagCheckbox.checked = false; 
             return false;
         }
     }
 
     setVectorizerBtn.addEventListener('click', async () => {
         let vectorizerName = newVectorizerNameInput.value.trim() || vectorizerSelect.value;
-        if (!vectorizerName) { updateStatus('settings-status', t('selectOrEnterVectorizerError'), 'error'); return; }
-        
+        if (!vectorizerName && vectorizerSelect.value === "") { // Handle deselecting via placeholder
+             vectorizerName = ""; // Explicitly clear
+        } else if (!vectorizerName) {
+             updateStatus('settings-status', t('selectOrEnterVectorizerError'), 'error'); return;
+        }
+
         const success = await setActiveSessionVectorizer(vectorizerName);
         if (success) {
-            newVectorizerNameInput.value = ''; 
-            await loadStoreVectorizers(); // Reloads options and calls fetchActiveVectorizer which updates select.value
-            updateStatus('settings-status', t('vectorizerSetSuccess', {vectorizer: vectorizerName}), 'success');
+            newVectorizerNameInput.value = '';
+            // Reload vectorizers to reflect potential new entry and set active
+            await loadStoreVectorizers();
+            const statusMsg = vectorizerName ? t('vectorizerSetSuccess', {vectorizer: vectorizerName}) : t('vectorizerCleared');
+            updateStatus('settings-status', statusMsg, 'success');
         }
     });
 
@@ -1127,17 +1381,17 @@
     fileManagerModal.addEventListener('click', (e) => { if (e.target === fileManagerModal) fileManagerModal.classList.add('hidden'); });
 
     uploadFolderBtn.addEventListener('click', () => folderUploadInput.click());
-    folderUploadInput.addEventListener('change', handleFileUpload); 
-    fileUploadInput.addEventListener('change', handleFileUpload);   
+    folderUploadInput.addEventListener('change', handleFileUpload);
+    fileUploadInputFM.addEventListener('change', handleFileUpload); // Use renamed ID
     uploadDocumentBtn.addEventListener('click', () => {
-        if (fileUploadInput.files.length > 0) {
-             handleFileUpload({target: fileUploadInput});
+        if (fileUploadInputFM.files.length > 0) {
+             handleFileUpload({target: fileUploadInputFM});
         } else {
             updateStatus('upload-status', t('selectFileError'), 'warning');
         }
     });
 
-    async function handleFileUpload(event) { 
+    async function handleFileUpload(event) {
         const filesToUpload = event.target.files;
         if (!filesToUpload || filesToUpload.length === 0) {
              updateStatus('upload-status', t('selectFileError'), 'warning'); return;
@@ -1155,26 +1409,26 @@
 
         try {
             const response = await apiRequest('/api/store/upload-files', { method: 'POST', body: formData });
-            const result = await response.json(); 
+            const result = await response.json();
 
             let message = result.message || '';
             let messageType = 'info';
 
-            if (response.ok) { 
+            if (response.ok) {
                  messageType = 'success';
                  if (result.processed_files && result.processed_files.length > 0) {
                     message += ` (${t('processedFiles', {count: result.processed_files.length})})`;
                  } else if (!result.processed_files || result.processed_files.length === 0){
                     message = result.message || "Files checked, no new data indexed (possibly duplicates).";
                  }
-            } else if (response.status === 207) { 
+            } else if (response.status === 207) {
                  messageType = 'warning';
-                 if (result.processed && result.processed.length > 0) message += ` (${t('processedFiles', {count: result.processed.length})})`;
+                 if (result.processed_files && result.processed_files.length > 0) message += ` (${t('processedFiles', {count: result.processed_files.length})})`; // Use processed_files key
                  if (result.errors && result.errors.length > 0) {
                       message += ` ${t('uploadErrorsEncountered', {count: result.errors.length})}`;
                       result.errors.forEach(err => console.warn(`Upload error for ${err.filename}: ${err.error}`));
                  }
-            } else { 
+            } else {
                 messageType = 'error';
                 message = t('uploadError', {error: result.detail || response.statusText || "Unknown upload error" });
             }
@@ -1184,8 +1438,9 @@
             console.error('Upload failed:', error);
             updateStatus('upload-status', t('uploadNetworkError') + `: ${error.message}`, 'error');
         } finally {
-             fileUploadInput.value = ''; // Clear file inputs
-             folderUploadInput.value = '';
+             // Clear file inputs after upload attempt
+             if (event.target.id === 'file-upload-input') { fileUploadInputFM.value = ''; }
+             else if (event.target.id === 'folder-upload-input') { folderUploadInput.value = ''; }
         }
     }
 
@@ -1207,12 +1462,12 @@
                     li.className = 'flex justify-between items-center text-sm py-1 px-2 rounded hover:bg-secondary-100 dark:hover:bg-secondary-700';
                     const fileNameSpan = document.createElement('span');
                     fileNameSpan.textContent = file.filename;
-                    fileNameSpan.className = 'truncate text-secondary-700 dark:text-secondary-200';
+                    fileNameSpan.className = 'truncate text-secondary-700 dark:text-secondary-200 mr-2'; // Added margin
                     li.appendChild(fileNameSpan);
 
                     const deleteBtn = document.createElement('button');
                     deleteBtn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>`;
-                    deleteBtn.className = 'p-1 text-danger/70 hover:text-danger rounded';
+                    deleteBtn.className = 'p-1 text-danger/70 hover:text-danger rounded shrink-0'; // Added shrink-0
                     deleteBtn.title = t('deleteFileTooltip', {filename: file.filename});
                     deleteBtn.onclick = (e) => { e.stopPropagation(); deleteRagFile(file.filename); };
                     li.appendChild(deleteBtn);
@@ -1233,11 +1488,11 @@
         try {
             const encodedFilename = encodeURIComponent(filename);
             const response = await apiRequest(`/api/store/files/${encodedFilename}`, { method: 'DELETE' });
-            const result = await response.json(); 
+            const result = await response.json();
 
             if (response.ok) {
                 updateStatus('upload-status', result.message || t('fileDeletedSuccess', {filename: filename}), 'success');
-                await loadRagFiles(); 
+                await loadRagFiles();
             } else {
                 throw new Error(result.detail || `Server responded with status ${response.status}`);
             }
@@ -1252,12 +1507,12 @@
         exportModal.classList.remove('hidden');
         exportDiscussionList.innerHTML = '';
         exportDiscussionListLoader.classList.remove('hidden');
-        updateStatus('export-status', '', 'info', 0); // Clear previous status
+        updateStatus('export-status', '', 'info', 0);
         try {
             const response = await apiRequest('/api/discussions');
             if (!response.ok) throw new Error(t('discussionLoadError'));
             const discussions = await response.json();
-            
+
             if (discussions.length === 0) {
                  exportDiscussionList.innerHTML = `<li class="text-center text-xs text-secondary-400 p-2">${t('noDiscussionsFound')}</li>`;
             } else {
@@ -1268,11 +1523,11 @@
                     checkbox.type = 'checkbox';
                     checkbox.id = `export-disc-${disc.id}`;
                     checkbox.value = disc.id;
-                    checkbox.className = 'h-4 w-4 text-primary border-secondary-300 dark:border-secondary-600 rounded focus:ring-primary dark:bg-secondary-700 mr-2';
+                    checkbox.className = 'h-4 w-4 text-primary border-secondary-300 dark:border-secondary-600 rounded focus:ring-primary dark:bg-secondary-700 mr-2 shrink-0';
                     const label = document.createElement('label');
                     label.htmlFor = `export-disc-${disc.id}`;
                     label.textContent = disc.title || t('untitledDiscussion', {id: disc.id.substring(0,8)});
-                    label.className = 'text-sm text-secondary-700 dark:text-secondary-200 cursor-pointer flex-grow';
+                    label.className = 'text-sm text-secondary-700 dark:text-secondary-200 cursor-pointer flex-grow truncate';
                     li.appendChild(checkbox);
                     li.appendChild(label);
                     exportDiscussionList.appendChild(li);
@@ -1306,10 +1561,13 @@
         }
         updateStatus('export-status', t('exportingDataStatus'), 'info', 0);
         try {
+            // Send selected IDs. If none selected, backend should handle exporting all.
+            const requestBody = selectedIds.length > 0 ? { discussion_ids: selectedIds } : {};
             const response = await apiRequest('/api/discussions/export', {
                 method: 'POST',
-                body: { discussion_ids: selectedIds } 
+                body: requestBody // Send empty object if no selection (implies export all)
             });
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({detail: "Export failed."}));
                 throw new Error(errorData.detail || "Failed to fetch export data.");
@@ -1323,9 +1581,9 @@
             document.body.appendChild(a); a.click(); document.body.removeChild(a);
             URL.revokeObjectURL(url);
             updateStatus('export-status', t('exportSuccess'), 'success');
-            setTimeout(() => exportModal.classList.add('hidden'), 1500); // Close modal on success
+            setTimeout(() => exportModal.classList.add('hidden'), 1500);
         } catch (error) {
-            updateStatus('export-status', t('exportError', {error: error.message}), 'error');
+             updateStatus('export-status', t('exportError', {error: error.message}), 'error');
         }
     });
 
@@ -1334,8 +1592,8 @@
         const savedTheme = localStorage.getItem('theme');
         const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
         applyTheme(savedTheme || (prefersDark ? 'dark' : 'light'));
-        
-        await loadTranslations(currentLanguage); 
+
+        await loadTranslations(currentLanguage);
         showLoginScreen();
     });
 
