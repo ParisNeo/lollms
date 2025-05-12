@@ -176,3 +176,6 @@ config.toml
 data/
 
 app_main.db
+
+# vscode
+.vscode
