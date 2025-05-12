@@ -47,3 +47,5 @@ lollmsvectordb
 # pypdf                 # For PDF parsing
 # python-docx           # For DOCX parsing
 # scikit-learn          # For TF-IDF vectorizers (if you plan to use them)
+
+python-multipart
