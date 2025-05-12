@@ -35,9 +35,9 @@ ollama # for ollama
 # - pypdf, python-docx, beautifulsoup4, lxml (for document parsing)
 # - cryptography (for encryption)
 # - filelock (core concurrency mechanism for safe_store)
-safe_store[all]>=1.6.1
+safe_store[all]>=1.6.2
 lollmsvectordb
-
+wcwidth
 # If you prefer to install safe_store features individually:
 # safe_store
 # sentence-transformers  # For 'st:' vectorizers like all-MiniLM-L6-v2

@@ -2,246 +2,316 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin - User Management</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <!-- Tailwind CSS via Play CDN -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
-        h1, h2 { color: #333; }
-        .container { background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 10px; text-align: left; }
-        th { background-color: #f0f0f0; }
-        button { padding: 8px 15px; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 5px; margin-top: 5px; }
-        button:hover { background-color: #0056b3; }
-        button.delete { background-color: #dc3545; }
-        button.delete:hover { background-color: #c82333; }
-        button.reset-pass { background-color: #ffc107; color: #212529; }
-        button.reset-pass:hover { background-color: #e0a800; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
-        .form-group input[type="text"], .form-group input[type="password"], .form-group input[type="checkbox"] {
-            width: calc(100% - 22px); padding: 10px; border: 1px solid #ccc; border-radius: 4px;
-        }
-        .form-group input[type="checkbox"] { width: auto; margin-right: 5px; vertical-align: middle; }
-        .status-message { margin-top: 15px; padding: 10px; border-radius: 4px; }
-        .status-message.success { background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .status-message.error { background-color: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        .status-message.info { background-color: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
-        #logo { max-height: 50px; margin-bottom: 10px;}
+        /* Optional: Add custom styles if needed */
+         body { background-color: #f9fafb; /* Lighter gray */ }
+         .status-message { transition: opacity 0.3s ease-in-out; }
     </style>
 </head>
-<body>
-    <div class="container">
-        <img src="/logo.png" alt="Logo" id="logo">
-        <h1>Admin - User Management</h1>
-        <p><em>Login with your admin credentials when prompted by the browser.</em></p>
+<body class="font-sans antialiased text-gray-800">
 
-        <h2>Add New User</h2>
-        <form id="addUserForm">
-            <div class="form-group">
-                <label for="newUsername">Username:</label>
-                <input type="text" id="newUsername" required minlength="3" maxlength="50">
-            </div>
-            <div class="form-group">
-                <label for="newPassword">Password (min 8 characters):</label>
-                <input type="password" id="newPassword" required minlength="8">
-            </div>
-            <div class="form-group">
-                <label for="newLollmsModel">Default LoLLMs Model (optional):</label>
-                <input type="text" id="newLollmsModel" placeholder="e.g., ollama/phi3:latest">
-            </div>
-            <div class="form-group">
-                <label for="newSafeStoreVectorizer">Default SafeStore Vectorizer (optional):</label>
-                <input type="text" id="newSafeStoreVectorizer" placeholder="e.g., st:all-MiniLM-L6-v2">
-            </div>
-            <div class="form-group">
-                <input type="checkbox" id="newUserIsAdmin" style="width: auto; margin-right: 5px; vertical-align: middle;">
-                <label for="newUserIsAdmin" style="display:inline; font-weight:normal;">Is Admin?</label>
-            </div>
-            <button type="submit">Add User</button>
-        </form>
-        <div id="actionStatus" class="status-message" style="display:none;"></div>
+    <div class="container mx-auto max-w-4xl p-4 sm:p-6 lg:p-8">
+        <header class="mb-8 text-center">
+             <img src="/logo.png" alt="Logo" class="h-12 mx-auto mb-4">
+             <h1 class="text-3xl font-bold text-gray-900">Admin Panel</h1>
+             <p class="text-md text-gray-600 mt-1">User Management</p>
+             <p class="text-sm text-gray-500 mt-2 italic">Use your admin credentials when prompted by the browser.</p>
+             <a href="/" class="text-sm text-blue-600 hover:underline mt-2 inline-block">← Back to Chat</a>
+        </header>
 
-        <h2>Manage Users</h2>
-        <button onclick="loadUsers()">Refresh User List</button>
-        <table id="userTable">
-            <thead>
-                <tr>
-                    <th>ID</th>
-                    <th>Username</th>
-                    <th>Is Admin</th>
-                    <th>LoLLMs Model</th>
-                    <th>SafeStore Vectorizer</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                <!-- User rows will be populated here -->
-            </tbody>
-        </table>
+        <!-- Status Message Area -->
+        <div id="actionStatus" class="status-message my-4 p-3 rounded-md text-sm" style="display:none;"></div>
+
+        <!-- Add User Form -->
+        <section class="bg-white p-6 rounded-lg shadow-md mb-8">
+            <h2 class="text-xl font-semibold mb-4 border-b pb-2">Add New User</h2>
+            <form id="addUserForm" class="space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="newUsername" class="block text-sm font-medium text-gray-700">Username</label>
+                        <input type="text" id="newUsername" required minlength="3" maxlength="50" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="newPassword" class="block text-sm font-medium text-gray-700">Password (min 8 chars)</label>
+                        <input type="password" id="newPassword" required minlength="8" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="newLollmsModel" class="block text-sm font-medium text-gray-700">Default LoLLMs Model (Optional)</label>
+                        <input type="text" id="newLollmsModel" placeholder="e.g., ollama/phi3:latest" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="newSafeStoreVectorizer" class="block text-sm font-medium text-gray-700">Default SafeStore Vectorizer (Optional)</label>
+                        <input type="text" id="newSafeStoreVectorizer" placeholder="e.g., st:all-MiniLM-L6-v2" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
+                    </div>
+                </div>
+                 <div class="flex items-center">
+                     <input type="checkbox" id="newUserIsAdmin" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                     <label for="newUserIsAdmin" class="ml-2 block text-sm text-gray-900">Grant Administrator Privileges</label>
+                 </div>
+                 <div class="text-right">
+                    <button type="submit" class="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                        Add User
+                    </button>
+                 </div>
+            </form>
+        </section>
+
+        <!-- Manage Users Table -->
+        <section class="bg-white p-6 rounded-lg shadow-md">
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                 <h2 class="text-xl font-semibold">Manage Existing Users</h2>
+                 <button onclick="loadUsers()" class="inline-flex items-center px-3 py-1.5 border border-gray-300 shadow-sm text-xs font-medium rounded text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="-ml-0.5 mr-1.5 h-4 w-4"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" /></svg>
+                     Refresh List
+                 </button>
+            </div>
+            <div class="overflow-x-auto">
+                <table id="userTable" class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
+                        <tr>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">ID</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Username</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Admin</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">LoLLMs Model</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vectorizer</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="userTableBody" class="bg-white divide-y divide-gray-200">
+                        <!-- User rows will be populated here -->
+                         <tr><td colspan="6" class="px-4 py-4 text-center text-sm text-gray-500 italic">Loading users...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
     </div>
 
-<script>
-    const addUserForm = document.getElementById('addUserForm');
-    const actionStatus = document.getElementById('actionStatus'); // Combined status message display
-    const userTableBody = document.querySelector('#userTable tbody');
-    
-    // Rely on browser's Basic Auth. No credentials stored in JS for admin panel.
+    <script>
+        const addUserForm = document.getElementById('addUserForm');
+        const actionStatus = document.getElementById('actionStatus');
+        const userTableBody = document.getElementById('userTableBody');
+        let currentAdminUsername = null; // To disable delete/reset for self
 
-    async function apiRequest(url, options = {}) {
-        const defaultOptions = { headers: { 'Content-Type': 'application/json' } };
-        const mergedOptions = { ...defaultOptions, ...options };
-        if (options.body && typeof options.body !== 'string') {
-            mergedOptions.body = JSON.stringify(options.body);
-        }
-        
-        try {
-            const response = await fetch(url, mergedOptions);
-            if (response.status === 401) {
-                alert("Authentication failed or required. Ensure you are logged in with admin credentials.");
-                throw new Error("Admin authentication failed.");
-            }
-            return response;
-        } catch (error) {
-            console.error("API Request Error:", error);
-            showStatus(`API Request Error: ${error.message}`, 'error');
-            throw error;
-        }
-    }
+        // API Helper (could be shared with index.html if using modules)
+        async function apiRequest(url, options = {}) {
+            showStatus('', 'info'); // Clear status initially
+            try {
+                const defaultOptions = { headers: {} };
+                if (options.body && !(options.body instanceof FormData)) {
+                     defaultOptions.headers['Content-Type'] = 'application/json';
+                     options.body = JSON.stringify(options.body);
+                 }
+                const mergedOptions = { ...defaultOptions, ...options };
 
-    async function loadUsers() {
-        showStatus('Loading users...', 'info');
-        try {
-            const response = await apiRequest('/api/admin/users');
-            if (!response.ok) {
-                const errorData = await response.json().catch(() => ({detail: "Unknown error."}));
-                showStatus(`Error loading users: ${errorData.detail}`, 'error');
-                return;
-            }
-            const users = await response.json();
-            userTableBody.innerHTML = ''; 
-            users.forEach(user => {
-                const row = userTableBody.insertRow();
-                row.insertCell().textContent = user.id;
-                row.insertCell().textContent = user.username;
-                row.insertCell().textContent = user.is_admin ? 'Yes' : 'No';
-                row.insertCell().textContent = user.lollms_model_name || 'N/A';
-                row.insertCell().textContent = user.safe_store_vectorizer || 'N/A';
-                
-                const actionsCell = row.insertCell();
-                
-                const deleteButton = document.createElement('button');
-                deleteButton.textContent = 'Delete';
-                deleteButton.className = 'delete';
-                deleteButton.onclick = () => deleteUser(user.id, user.username);
-                // Simplified check: UI might not know current admin's username if not passed explicitly.
-                // Backend enforces "cannot delete self" and "cannot delete initial superadmin".
-                // For initial_superadmin, could fetch config or hardcode, but backend is primary guard.
-                // Example of a simple client-side disable (adjust if 'superadmin' is not fixed)
-                if (user.username === "superadmin" && user.is_admin) { // Placeholder, better to rely on backend
-                     deleteButton.disabled = true;
-                     deleteButton.title = "Initial superadmin or self cannot be deleted easily from UI (backend enforced).";
+                const response = await fetch(url, mergedOptions);
+                if (response.status === 401) {
+                    alert("Authentication failed or required. Ensure you are logged in with admin credentials.");
+                     showStatus("Authentication failed. Please refresh and login.", "error");
+                    throw new Error("Admin authentication failed.");
                 }
-                actionsCell.appendChild(deleteButton);
-
-                const resetButton = document.createElement('button');
-                resetButton.textContent = 'Reset Password';
-                resetButton.className = 'reset-pass';
-                resetButton.onclick = () => resetUserPassword(user.id, user.username);
-                // Admin shouldn't need to reset their own password this way.
-                // if (user.username === "current_admin_username_from_somewhere") resetButton.disabled = true;
-                actionsCell.appendChild(resetButton);
-            });
-            if (users.length > 0) showStatus('Users loaded successfully.', 'success');
-            else showStatus('No users found or list is empty.', 'info');
-        } catch (error) {
-            // Error already handled by apiRequest or shown by its caller
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({ detail: `HTTP error ${response.status}` }));
+                    const errorMessage = `API Error: ${errorData.detail || response.statusText}`;
+                    console.error(errorMessage, errorData);
+                    showStatus(errorMessage, 'error');
+                    // Throw error so calling function knows request failed
+                     throw new Error(errorMessage);
+                }
+                return response;
+            } catch (error) {
+                 // Error already shown by status or alert, re-throw for caller
+                 console.error("API Request Error Catch:", error);
+                 throw error;
+            }
         }
-    }
 
-    addUserForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const username = document.getElementById('newUsername').value;
-        const password = document.getElementById('newPassword').value;
-        const lollms_model_name = document.getElementById('newLollmsModel').value || null;
-        const safe_store_vectorizer = document.getElementById('newSafeStoreVectorizer').value || null;
-        const is_admin = document.getElementById('newUserIsAdmin').checked;
+         // Fetch current admin username for UI logic
+         async function fetchCurrentAdminUser() {
+             try {
+                 const response = await fetch('/api/auth/me'); // Use the normal auth endpoint
+                 if (response.ok) {
+                     const user = await response.json();
+                     if (user.is_admin) {
+                         currentAdminUsername = user.username;
+                     }
+                 }
+             } catch (error) {
+                 console.warn("Could not fetch current admin user details:", error);
+             }
+         }
 
-        showStatus('Adding user...', 'info');
-        try {
-            const response = await apiRequest('/api/admin/users', {
-                method: 'POST',
-                body: { username, password, is_admin, lollms_model_name, safe_store_vectorizer }
-            });
-            const result = await response.json();
-            if (response.ok) {
+        async function loadUsers() {
+            showStatus('Loading users...', 'info');
+            userTableBody.innerHTML = '<tr><td colspan="6" class="px-4 py-4 text-center text-sm text-gray-500 italic">Loading users...</td></tr>';
+            try {
+                const response = await apiRequest('/api/admin/users');
+                // No need to check response.ok here, apiRequest throws on failure
+                const users = await response.json();
+                userTableBody.innerHTML = ''; // Clear loading state
+                if (users.length === 0) {
+                     userTableBody.innerHTML = '<tr><td colspan="6" class="px-4 py-4 text-center text-sm text-gray-500 italic">No users found.</td></tr>';
+                } else {
+                    users.forEach(user => {
+                        const row = userTableBody.insertRow();
+                        row.className = "text-sm text-gray-700";
+
+                        row.insertCell().textContent = user.id;
+                        row.insertCell().textContent = user.username;
+                        row.insertCell().innerHTML = user.is_admin
+                            ? '<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Yes</span>'
+                            : '<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-gray-100 text-gray-800">No</span>';
+                        row.insertCell().textContent = user.lollms_model_name || '-';
+                        row.insertCell().textContent = user.safe_store_vectorizer || '-';
+
+                        const actionsCell = row.insertCell();
+                        actionsCell.className = "space-x-1 whitespace-nowrap px-4 py-2"; // Adjust padding/spacing
+
+                        const resetButton = document.createElement('button');
+                        resetButton.textContent = 'Reset Pass';
+                        resetButton.className = 'px-2 py-1 text-xs font-medium rounded text-yellow-700 bg-yellow-100 hover:bg-yellow-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-500';
+                        resetButton.title = `Reset password for ${user.username}`;
+                        resetButton.onclick = () => resetUserPassword(user.id, user.username);
+                         // Disable resetting own password via admin panel
+                         if (user.username === currentAdminUsername) {
+                             resetButton.disabled = true;
+                             resetButton.classList.add("opacity-50", "cursor-not-allowed");
+                             resetButton.title = "Cannot reset your own password here.";
+                         }
+                        actionsCell.appendChild(resetButton);
+
+                        const deleteButton = document.createElement('button');
+                        deleteButton.textContent = 'Delete';
+                        deleteButton.className = 'px-2 py-1 text-xs font-medium rounded text-red-700 bg-red-100 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500';
+                        deleteButton.title = `Delete user ${user.username}`;
+                        deleteButton.onclick = () => deleteUser(user.id, user.username);
+                         // Disable deleting self or the initial superadmin (assuming 'superadmin' name, adjust if needed or rely solely on backend)
+                         // Backend check is the definitive one.
+                         if (user.username === currentAdminUsername || (user.username === "superadmin" && user.is_admin)) {
+                            deleteButton.disabled = true;
+                            deleteButton.classList.add("opacity-50", "cursor-not-allowed");
+                            deleteButton.title = user.username === currentAdminUsername ? "Cannot delete yourself." : "Initial superadmin cannot be deleted easily.";
+                         }
+                        actionsCell.appendChild(deleteButton);
+                    });
+                }
+                // Don't show success message on load, only on actions
+                showStatus('');
+            } catch (error) {
+                // Error status already shown by apiRequest
+                 userTableBody.innerHTML = `<tr><td colspan="6" class="px-4 py-4 text-center text-sm text-red-500">Failed to load users. ${error.message}</td></tr>`;
+            }
+        }
+
+        addUserForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('newUsername').value;
+            const password = document.getElementById('newPassword').value;
+            const lollms_model_name = document.getElementById('newLollmsModel').value || null;
+            const safe_store_vectorizer = document.getElementById('newSafeStoreVectorizer').value || null;
+            const is_admin = document.getElementById('newUserIsAdmin').checked;
+
+            showStatus('Adding user...', 'info');
+            try {
+                const response = await apiRequest('/api/admin/users', {
+                    method: 'POST',
+                    body: { username, password, is_admin, lollms_model_name, safe_store_vectorizer }
+                });
+                // No need to check response.ok, apiRequest throws on failure
+                const result = await response.json();
                 showStatus(`User '${result.username}' added successfully!`, 'success');
                 addUserForm.reset();
-                loadUsers();
-            } else {
-                showStatus(`Error adding user: ${result.detail || 'Failed.'}`, 'error');
+                loadUsers(); // Refresh the table
+            } catch (error) {
+                 // Error status handled by apiRequest
+                 console.error("Add user failed:", error);
             }
-        } catch (error) {
-             // Handled by apiRequest, but can add specific msg
-             showStatus('Request to add user failed. Check console.', 'error');
-        }
-    });
+        });
 
-    async function deleteUser(userId, username) {
-        if (!confirm(`Are you sure you want to delete user '${username}' (ID: ${userId}) and all their data? This cannot be undone.`)) {
-            return;
-        }
-        showStatus(`Deleting user ${username}...`, 'info');
-        try {
-            const response = await apiRequest(`/api/admin/users/${userId}`, { method: 'DELETE' });
-            const result = await response.json(); 
-            if (response.ok) {
+        async function deleteUser(userId, username) {
+            if (!confirm(`Are you sure you want to delete user '${username}' (ID: ${userId}) and all their data? This cannot be undone.`)) {
+                return;
+            }
+            showStatus(`Deleting user ${username}...`, 'info');
+            try {
+                const response = await apiRequest(`/api/admin/users/${userId}`, { method: 'DELETE' });
+                // No need to check response.ok, apiRequest throws on failure
+                const result = await response.json();
                 showStatus(result.message || `User '${username}' deleted successfully.`, 'success');
-                loadUsers();
-            } else {
-                showStatus(`Error deleting user: ${result.detail || 'Failed.'}`, 'error');
+                loadUsers(); // Refresh the table
+            } catch (error) {
+                // Error status handled by apiRequest
+                 console.error("Delete user failed:", error);
             }
-        } catch (error) {
-            showStatus(`Request to delete user failed. Check console.`, 'error');
-        }
-    }
-
-    async function resetUserPassword(userId, username) {
-        const newPassword = prompt(`Enter new password for user '${username}':\n(Minimum 8 characters)`);
-        if (!newPassword) {
-            showStatus('Password reset cancelled.', 'info');
-            return;
-        }
-        if (newPassword.length < 8) {
-            showStatus('Password too short. Minimum 8 characters required.', 'error');
-            return;
         }
 
-        showStatus(`Resetting password for ${username}...`, 'info');
-        try {
-            const response = await apiRequest(`/api/admin/users/${userId}/reset-password`, {
-                method: 'POST',
-                body: { new_password: newPassword }
-            });
-            const result = await response.json();
-            if (response.ok) {
+        async function resetUserPassword(userId, username) {
+            const newPassword = prompt(`Enter new password for user '${username}':\n(Minimum 8 characters)`);
+            if (!newPassword) {
+                showStatus('Password reset cancelled.', 'info');
+                return;
+            }
+            if (newPassword.length < 8) {
+                showStatus('Password too short. Minimum 8 characters required.', 'error');
+                return;
+            }
+
+            showStatus(`Resetting password for ${username}...`, 'info');
+            try {
+                const response = await apiRequest(`/api/admin/users/${userId}/reset-password`, {
+                    method: 'POST',
+                    body: { new_password: newPassword }
+                });
+                // No need to check response.ok, apiRequest throws on failure
+                const result = await response.json();
                 showStatus(result.message || `Password for '${username}' reset successfully.`, 'success');
-            } else {
-                showStatus(`Error resetting password: ${result.detail || 'Failed.'}`, 'error');
+            } catch (error) {
+                // Error status handled by apiRequest
+                 console.error("Reset password failed:", error);
             }
-        } catch (error) {
-            showStatus(`Request to reset password failed. Check console.`, 'error');
         }
-    }
 
-    function showStatus(message, type) {
-        actionStatus.textContent = message;
-        actionStatus.className = `status-message ${type}`;
-        actionStatus.style.display = 'block';
-        setTimeout(() => { actionStatus.style.display = 'none'; }, 5000); // Auto-hide after 5s
-    }
+        function showStatus(message, type = 'info') {
+            actionStatus.textContent = message;
+             // Tailwind classes for different types
+             actionStatus.classList.remove('bg-blue-100', 'text-blue-700', 'bg-green-100', 'text-green-700', 'bg-red-100', 'text-red-700', 'bg-yellow-100', 'text-yellow-700');
+            if (type === 'success') {
+                actionStatus.classList.add('bg-green-100', 'text-green-700');
+            } else if (type === 'error') {
+                actionStatus.classList.add('bg-red-100', 'text-red-700');
+            } else if (type === 'warning') {
+                 actionStatus.classList.add('bg-yellow-100', 'text-yellow-700');
+            } else { // info
+                actionStatus.classList.add('bg-blue-100', 'text-blue-700');
+            }
 
-    window.onload = loadUsers;
-</script>
+            if (message) {
+                actionStatus.style.display = 'block';
+                actionStatus.style.opacity = '1';
+                // Auto-hide after 5 seconds
+                setTimeout(() => {
+                     if (actionStatus.textContent === message) { // Only hide if message hasn't changed
+                         actionStatus.style.opacity = '0';
+                         setTimeout(() => { actionStatus.style.display = 'none'; }, 300); // Hide after fade
+                     }
+                 }, 5000);
+            } else {
+                 actionStatus.style.display = 'none';
+                 actionStatus.style.opacity = '0';
+            }
+        }
+
+        // Initial Load
+        window.onload = async () => {
+            await fetchCurrentAdminUser(); // Get admin username first
+            loadUsers(); // Then load the user list
+        };
+    </script>
+
 </body>
 </html>

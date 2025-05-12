@@ -1,19 +1,16 @@
 @echo off
-set ERRORLEVEL=0
+setlocal
 
-if not exist "venv" (
-    echo ❌ Error: Virtual environment not found!
-    echo Please run './install.sh' first to set up the application.
-    exit 1
+:: Check if venv exists
+if not exist "venv\Scripts\activate.bat" (
+    echo Virtual environment not found. Please run install.bat first.
+    exit /b 1
 )
 
-if not exist "main.py" (
-    echo ❌ Error: Main script 'main.py' not found in current directory!
-    exit 1
-)
+:: Activate virtual environment
+call venv\Scripts\activate.bat
 
-echo 🌠 Activating virtual environment...
-call venv\Scripts\activate
+:: Run the app
+python main.py
 
-echo 🚀 Starting Lollms Application...
-python main.py %*
+:: Deactivate is automatic on script end

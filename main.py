@@ -1164,9 +1164,13 @@ async def get_available_lollms_models(current_user: UserAuthDetails = Depends(ge
         binding_models = lc.listModels()
         if isinstance(binding_models, list):
             for item in binding_models:
-                if isinstance(item, str): models_set.add(item)
-                elif isinstance(item, dict): name = item.get("name", item.get("id", item.get("model_name")));_and_name and models_set.add(name)
-    except Exception as e: print(f"WARNING: Could not list models from LollmsClient: {e}")
+                if isinstance(item, str): 
+                    models_set.add(item)
+                elif isinstance(item, dict): 
+                    name = item.get("name", item.get("id", item.get("model_name")))
+                    models_set.add(name)
+    except Exception as e: 
+        print(f"WARNING: Could not list models from LollmsClient: {e}")
     user_model = user_sessions[current_user.username].get("lollms_model_name"); global_default_model = LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
     if user_model: models_set.add(user_model)
     if global_default_model: models_set.add(global_default_model)
