@@ -9,7 +9,7 @@ echo "🚀 Starting Lollms Installation Script"
 if [ ! -d "venv" ]; then
     echo "🔧 Creating Python Virtual Environment..."
     python3 -m venv venv
-    
+
     # Activate the virtual environment
     source ./venv/bin/activate
 
@@ -21,7 +21,7 @@ if [ ! -d "venv" ]; then
     else
         echo "⚠️ Warning: Requirements file not found. Please run 'pip freeze > requirements.txt' to create one."
     fi
-    
+
 else
     echo "✅ Virtual environment already exists"
 fi
@@ -36,7 +36,7 @@ update_config() {
     local key="$1"
     local default_value="$2"
     read -p "Enter value for $key [$default_value]: " new_val
-    
+
     # Use user input if provided, otherwise keep default
     [ ! -z "$new_val" ] && sed -i "/$key =/c\\$key = \"$new_val\"" config.toml
 }
@@ -46,7 +46,7 @@ update_config_raw() {
     local key="$1"
     local default_value="$2"
     read -p "Enter value for $key [$default_value]: " new_val
-    
+
     # Use user input if provided, otherwise keep default
     [ ! -z "$new_val" ] && sed -i "/$key =/c\\$key = $new_val" config.toml
 }
@@ -56,7 +56,7 @@ update_config_secure() {
     local key="$1"
     read -s -p "Enter value for $key [****]: " new_val
     echo
-    
+
     # Use user input if provided, otherwise keep default
     [ ! -z "$new_val" ] && sed -i "/$key =/c\\$key = \"$new_val\"" config.toml
 }
@@ -119,3 +119,46 @@ if [ -f "venv/bin/activate" ]; then
 fi
 
 echo "You can now start your application!"
+
+# Option to create a systemd service
+read -p $'Create a systemd service to run the server? (y/N) [N]: ' create_service
+if [[ "$create_service" == "Y" || "$create_service" == "y" ]]; then
+    echo "🔧 Creating systemd service..."
+
+    # Define the service file content
+    cat <<EOF > lollms.service
+[Unit]
+Description=Lollms Application
+After=network.target
+
+[Service]
+User=\$(whoami)
+WorkingDirectory=$(pwd)
+ExecStart=$(pwd)/venv/bin/python $(pwd)/main.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Move the service file to the systemd directory
+    sudo mv lollms.service /etc/systemd/system/
+
+    # Reload systemd to recognize the new service
+    sudo systemctl daemon-reload
+
+    # Enable the service to start on boot
+    sudo systemctl enable lollms.service
+
+    echo "🔧 Systemd service created and enabled. You can now manage the service with the following commands:"
+    echo "  - Start: sudo systemctl start lollms.service"
+    echo "  - Stop: sudo systemctl stop lollms.service"
+    echo "  - Restart: sudo systemctl restart lollms.service"
+    echo "  - Status: sudo systemctl status lollms.service"
+    echo "  - Enable (start on boot): sudo systemctl enable lollms.service"
+    echo "  - Disable (do not start on boot): sudo systemctl disable lollms.service"
+else
+    echo "Systemd service creation skipped."
+fi
+
+echo "🚀 Installation complete!"
