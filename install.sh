@@ -157,6 +157,11 @@ if [[ "$create_service" == "Y" || "$create_service" == "y" ]]; then
     fi
     sudo chown -R lollms:lollms data
 
+    # Create cache directory for the lollms user
+    echo "🔧 Creating cache directory for the lollms user..."
+    sudo mkdir -p /home/lollms/.cache
+    sudo chown -R lollms:lollms /home/lollms/.cache
+
     # Make run.sh executable
     echo "🔧 Making run.sh executable..."
     chmod +x run.sh
