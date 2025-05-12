@@ -39,7 +39,8 @@
         /* KaTeX display math */
         .katex-display { margin: 0.5em 0 !important; }
         /* Message Bubbles */
-        .message-bubble { max-width: 85%; padding: 10px 15px; border-radius: 15px; margin-bottom: 10px; word-wrap: break-word; }
+        .message-container { display: flex; flex-direction: column; position: relative; /* Needed for hover actions positioning */ }
+        .message-bubble { max-width: 85%; padding: 10px 15px; border-radius: 15px; margin-bottom: 10px; word-wrap: break-word; position: relative; } /* Relative for child absolute positioning */
         .user-bubble { background-color: #dbeafe; /* Lighter Blue */ align-self: flex-end; border-bottom-right-radius: 5px; }
         .ai-bubble { background-color: #f3f4f6; /* Lighter Gray */ align-self: flex-start; border-bottom-left-radius: 5px; }
         .system-bubble { background-color: #fef3c7; /* Lighter Yellow */ color: #78350f; /* Darker amber */ align-self: center; font-style: italic; font-size: 0.9em; text-align: center; width: 90%; border-radius: 8px; }
@@ -49,7 +50,11 @@
         .rag-toggle-off { background-color: #e5e7eb; color: #4b5563; border-color: #d1d5db; }
         .rag-toggle-on { background-color: #10b981; color: white; }
         .rag-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
-        /* Star Icon */
+        /* Star Icon & Discussion List Actions */
+        .discussion-item-actions { display: none; /* Hidden by default */ gap: 0.25rem; position: absolute; right: 2rem; top: 50%; transform: translateY(-50%); background-color: rgba(249, 250, 251, 0.8); padding: 2px 4px; border-radius: 4px; }
+        .discussion-item:hover .discussion-item-actions { display: flex; }
+        .discussion-action-btn { background: none; border: none; padding: 2px; cursor: pointer; color: #6b7280; } /* Gray-500 */
+        .discussion-action-btn:hover { color: #1f2937; } /* Gray-800 */
         .star-icon { cursor: pointer; color: #d1d5db; /* Gray-300 */ }
         .star-icon.starred { color: #facc15; /* Amber-400 */ }
         /* Grade Buttons */
@@ -58,7 +63,19 @@
         .grade-btn.selected-up { color: #10b981; opacity: 1; } /* Emerald-500 */
         .grade-btn.selected-down { color: #ef4444; opacity: 1; } /* Red-500 */
         .grade-score { font-size: 0.8em; margin: 0 5px; color: #6b7280; } /* Gray-500 */
-        /* Modal Styles */
+        /* Message Footer & Actions */
+        .message-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 0.75rem; color: #6b7280; /* Gray-500 */ padding-top: 4px; border-top: 1px solid rgba(0,0,0,0.05); }
+        .message-details span { margin-right: 8px; }
+        .message-actions { display: none; /* Hidden by default */ gap: 0.5rem; }
+        .message-bubble:hover .message-actions { display: inline-flex; } /* Show on bubble hover */
+        .message-action-btn { background: none; border: none; padding: 0; cursor: pointer; color: #9ca3af; /* Gray-400 */ }
+        .message-action-btn:hover { color: #374151; /* Gray-700 */ }
+        .message-action-btn svg { width: 0.875rem; height: 0.875rem; }
+        /* Think Block */
+        .think-block { background-color: #fffbeb; /* Light yellow */ border: 1px dashed #fcd34d; /* Amber-300 */ border-radius: 4px; margin: 8px 0; }
+        .think-block summary { cursor: pointer; padding: 4px 8px; font-size: 0.8em; font-style: italic; color: #92400e; /* Amber-800 */ user-select: none; }
+        .think-block .think-content { padding: 5px 10px; font-size: 0.9em; color: #57534e; /* Stone-600 */ max-height: 200px; overflow-y: auto; background-color: #fefce8; /* Lighter yellow */ border-top: 1px dashed #fcd34d; }
+        /* Modal Styles (Add EditMessageModal) */
         .modal { position: fixed; inset: 0; background-color: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 50; opacity: 0; pointer-events: none; transition: opacity 0.3s ease-in-out; padding: 1rem;}
         .modal.active { opacity: 1; pointer-events: auto; }
         .modal-content { background-color: white; padding: 1.5rem 2rem; border-radius: 0.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); max-width: 95vw; width: 600px; max-height: 90vh; display: flex; flex-direction: column; }
@@ -131,14 +148,8 @@
             <!-- Chat Header -->
             <header class="bg-white border-b border-gray-200 p-3 flex items-center justify-between min-h-[65px] shadow-sm">
                 <h3 id="discussionTitle" class="text-lg font-semibold text-gray-800 truncate px-2">Select or Create a Discussion</h3>
-                <div id="discussionActions" class="flex items-center space-x-2" style="display: none;">
-                     <button id="renameDiscussionBtn" title="Rename Discussion" class="p-1.5 rounded-full text-gray-500 hover:text-gray-700 hover:bg-gray-100">
-                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg>
-                     </button>
-                     <button id="deleteDiscussionBtn" title="Delete Discussion" class="p-1.5 rounded-full text-red-500 hover:text-red-700 hover:bg-red-50">
-                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg>
-                     </button>
-                </div>
+                 <!-- Actions moved to discussion list items -->
+                 <div id="discussionActionsPlaceholder"></div> <!-- Keep structure or remove -->
             </header>
 
             <!-- Messages Area -->
@@ -165,7 +176,7 @@
 
     <!-- Modals Container -->
     <div>
-        <!-- Rename Modal -->
+        <!-- Rename Modal (Used by inline rename) -->
         <div id="renameModal" class="modal">
             <div class="modal-content">
                 <button class="modal-close-btn" onclick="closeModal('renameModal')">×</button>
@@ -176,6 +187,7 @@
                     <label for="renameInput" class="block text-sm font-medium text-gray-700 mb-1">New discussion title:</label>
                     <input type="text" id="renameInput" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="Enter new title">
                     <div id="renameStatus" class="text-xs text-red-600 mt-1 h-4"></div>
+                    <input type="hidden" id="renameDiscussionIdInput"> <!-- Store ID to rename -->
                 </div>
                 <div class="modal-footer">
                     <button onclick="closeModal('renameModal')" class="px-4 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-300">Cancel</button>
@@ -183,6 +195,27 @@
                 </div>
             </div>
         </div>
+
+        <!-- Edit Message Modal -->
+        <div id="editMessageModal" class="modal">
+            <div class="modal-content">
+                <button class="modal-close-btn" onclick="closeModal('editMessageModal')">×</button>
+                <div class="modal-header">
+                    <h3 class="modal-title">Edit Message</h3>
+                </div>
+                <div class="modal-body">
+                    <label for="editMessageInput" class="block text-sm font-medium text-gray-700 mb-1">Message content:</label>
+                    <textarea id="editMessageInput" rows="5" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"></textarea>
+                    <div id="editMessageStatus" class="text-xs text-red-600 mt-1 h-4"></div>
+                    <input type="hidden" id="editMessageIdInput"> <!-- Store ID to edit -->
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeModal('editMessageModal')" class="px-4 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-300">Cancel</button>
+                    <button id="confirmEditMessageBtn" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">Save Changes</button>
+                </div>
+            </div>
+        </div>
+
 
         <!-- Export Modal -->
         <div id="exportModal" class="modal">
@@ -328,7 +361,7 @@
         let currentUser = null;
         let currentDiscussionId = null;
         let discussions = {}; // { id: { title: '...', is_starred: false } }
-        let currentMessages = []; // Array of message objects { id, sender, content, user_grade, ... }
+        let currentMessages = []; // Array of message objects { id, sender, content, user_grade, token_count, model_name, ... }
         let aiMessageStreaming = false;
         let currentAiMessageElement = null;
         let currentAiMessageContent = "";
@@ -361,9 +394,9 @@
         const messageInput = document.getElementById('messageInput');
         const sendMessageBtn = document.getElementById('sendMessageBtn');
         const discussionTitle = document.getElementById('discussionTitle');
-        const discussionActions = document.getElementById('discussionActions');
-        const renameDiscussionBtn = document.getElementById('renameDiscussionBtn');
-        const deleteDiscussionBtn = document.getElementById('deleteDiscussionBtn');
+        // Removed discussionActions from DOM
+        // const renameDiscussionBtn = document.getElementById('renameDiscussionBtn');
+        // const deleteDiscussionBtn = document.getElementById('deleteDiscussionBtn');
         const ragToggleBtn = document.getElementById('ragToggleBtn');
         const statusMessage = document.getElementById('statusMessage');
         const pyodideStatus = document.getElementById('pyodideStatus');
@@ -372,6 +405,12 @@
         const renameInput = document.getElementById('renameInput');
         const confirmRenameBtn = document.getElementById('confirmRenameBtn');
         const renameStatus = document.getElementById('renameStatus');
+        const renameDiscussionIdInput = document.getElementById('renameDiscussionIdInput'); // For inline rename
+        const editMessageModal = document.getElementById('editMessageModal'); // New Edit Modal
+        const editMessageInput = document.getElementById('editMessageInput');
+        const confirmEditMessageBtn = document.getElementById('confirmEditMessageBtn');
+        const editMessageStatus = document.getElementById('editMessageStatus');
+        const editMessageIdInput = document.getElementById('editMessageIdInput');
         const exportModal = document.getElementById('exportModal');
         const exportDiscussionList = document.getElementById('exportDiscussionList');
         const confirmExportBtn = document.getElementById('confirmExportBtn');
@@ -416,6 +455,11 @@
                      // Throw error so caller handling (e.g., in modals) knows it failed
                      throw new Error(errorMsg);
                 }
+                // Handle 204 No Content (common for DELETE)
+                if (response.status === 204) {
+                    return null; // Or return a specific indicator if needed
+                }
+                // Handle other success statuses (200, 201, 207)
                 return response;
             } catch (error) {
                 console.error("API Request Error:", url, options, error);
@@ -435,17 +479,17 @@
 
             showStatus('Initializing...', 'info');
             try {
-                // 1. Fetch User Info (includes default settings from DB)
+                // 1. Fetch User Info
                 const response = await apiRequest('/api/auth/me');
                 currentUser = await response.json();
                 usernameDisplay.textContent = currentUser.username;
                 userLollmsModel = currentUser.lollms_model_name;
                 userDefaultVectorizer = currentUser.safe_store_vectorizer;
-                 sessionActiveVectorizer = userDefaultVectorizer; // Start session active with user default
+                sessionActiveVectorizer = userDefaultVectorizer;
 
                 if (currentUser.is_admin) {
                     adminBadge.style.display = 'inline-block';
-                    adminLink.style.display = 'flex'; // Use flex for sidebar-btn style
+                    adminLink.style.display = 'flex';
                 }
 
                 // 2. Load Discussions
@@ -456,8 +500,13 @@
                 await loadAvailableVectorizers();
                 await loadIndexedRagFiles();
 
-                // 4. Update Initial UI states based on loaded data
-                updateRagToggleButtonState(); // Update based on initially loaded active vectorizer
+                // 4. Update Initial UI states
+                updateRagToggleButtonState();
+
+                // Add listener for the confirmation of inline rename
+                confirmRenameBtn.onclick = confirmInlineRename;
+                // Add listener for message edit confirmation
+                confirmEditMessageBtn.onclick = confirmMessageEdit;
 
 
                 showStatus('Ready.', 'success');
@@ -465,7 +514,6 @@
             } catch (error) {
                  showStatus('Initialization failed. Please refresh.', 'error');
                  console.error("Initialization error:", error)
-                 // Disable interactive elements if init fails?
                  sendMessageBtn.disabled = true;
                  newDiscussionBtn.disabled = true;
             }
@@ -482,8 +530,11 @@
                 } else if (modalId === 'fileManagementModal') {
                     populateFileManagementModal();
                 } else if (modalId === 'exportModal') {
-                    populateExportModal(); // Renamed from direct call
+                    populateExportModal();
                 }
+                // Auto-focus first input in rename/edit modals
+                if (modalId === 'renameModal') renameInput.focus();
+                if (modalId === 'editMessageModal') editMessageInput.focus();
             }
         }
 
@@ -497,6 +548,9 @@
              if (statusElement) {
                  showStatus('', 'info', statusElement);
              }
+             // Clear hidden ID inputs
+             if (modalId === 'renameModal') renameDiscussionIdInput.value = '';
+             if (modalId === 'editMessageModal') editMessageIdInput.value = '';
         }
 
         // Close modal if clicking outside the content area
@@ -531,7 +585,6 @@
         function renderDiscussionList() {
             discussionListContainer.innerHTML = '';
             const sortedIds = Object.keys(discussions).sort((a, b) => {
-                // Sort starred first, then by title
                 const starA = discussions[a].is_starred ? 0 : 1;
                 const starB = discussions[b].is_starred ? 0 : 1;
                 if (starA !== starB) return starA - starB;
@@ -546,25 +599,61 @@
             sortedIds.forEach(id => {
                 const d = discussions[id];
                 const item = document.createElement('div');
-                item.className = `p-2 rounded cursor-pointer hover:bg-gray-100 flex justify-between items-center text-sm transition-colors duration-150 ${id === currentDiscussionId ? 'bg-blue-100 font-medium text-blue-800' : 'text-gray-700'}`;
+                // Added 'relative' and 'discussion-item' class for hover actions
+                item.className = `relative discussion-item p-2 rounded cursor-pointer hover:bg-gray-100 flex justify-between items-center text-sm transition-colors duration-150 ${id === currentDiscussionId ? 'bg-blue-100 font-medium text-blue-800' : 'text-gray-700'}`;
                 item.dataset.id = id;
                 item.onclick = () => selectDiscussion(id);
 
                 const titleSpan = document.createElement('span');
                 titleSpan.textContent = d.title || `Discussion ${id.substring(0, 6)}`;
-                titleSpan.className = 'truncate mr-2 flex-1';
+                titleSpan.className = 'truncate mr-2 flex-1 pr-16'; // Added padding-right to avoid overlap with actions
 
+                // Container for star and hover actions
+                const controlsDiv = document.createElement('div');
+                controlsDiv.className = 'flex items-center flex-shrink-0';
+
+                // Star Icon
                 const starSpan = document.createElement('span');
                 starSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="none" class="w-4 h-4 star-icon ${d.is_starred ? 'starred' : ''} transition-colors duration-150"><path stroke-linecap="round" stroke-linejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 21.1a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" /></svg>`;
                 starSpan.title = d.is_starred ? 'Unstar Discussion' : 'Star Discussion';
-                starSpan.className = 'flex-shrink-0 p-1 hover:bg-gray-200 rounded-full';
+                starSpan.className = 'p-1 hover:bg-gray-200 rounded-full mr-1'; // Added margin-right
                 starSpan.onclick = (e) => {
                     e.stopPropagation(); // Prevent selecting discussion
                     toggleStarDiscussion(id, d.is_starred);
                 };
 
+                // Hover Actions Container
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'discussion-item-actions'; // Uses new CSS for hover display
+
+                // Rename Button (Inline)
+                const renameBtn = document.createElement('button');
+                renameBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg>`;
+                renameBtn.title = "Rename Discussion";
+                renameBtn.className = 'discussion-action-btn';
+                renameBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    initiateInlineRename(id);
+                };
+
+                // Delete Button (Inline)
+                const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-red-500"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg>`;
+                deleteBtn.title = "Delete Discussion";
+                deleteBtn.className = 'discussion-action-btn';
+                deleteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    deleteInlineDiscussion(id);
+                };
+
+                actionsDiv.appendChild(renameBtn);
+                actionsDiv.appendChild(deleteBtn);
+
+                controlsDiv.appendChild(starSpan); // Star is always visible
+                controlsDiv.appendChild(actionsDiv); // Actions appear on hover
+
                 item.appendChild(titleSpan);
-                item.appendChild(starSpan);
+                item.appendChild(controlsDiv);
                 discussionListContainer.appendChild(item);
             });
         }
@@ -580,16 +669,15 @@
                 showStatus('New discussion created.', 'success');
             } catch (error) {
                  console.error("Failed to create discussion:", error);
-                 // status shown by apiRequest
             }
         };
 
         async function selectDiscussion(id) {
-            if (!discussions[id] || aiMessageStreaming) return; // Ignore if discussion missing or busy
+            if (!discussions[id] || aiMessageStreaming) return;
 
             currentDiscussionId = id;
             discussionTitle.textContent = discussions[id].title;
-            discussionActions.style.display = 'flex';
+            // discussionActions are removed from header
             sendMessageBtn.disabled = false;
             renderDiscussionList(); // Update selection highlight
             clearChatArea(false); // Clear messages but keep header title etc.
@@ -603,20 +691,21 @@
             } catch (error) {
                  console.error(`Failed to load messages for ${id}:`, error);
                  chatMessages.innerHTML = '<p class="text-red-500 text-center mt-10">Error loading messages.</p>';
-                 // Keep discussion selected but show error
             }
         }
 
-        renameDiscussionBtn.onclick = () => {
-            if (!currentDiscussionId) return;
-            renameInput.value = discussions[currentDiscussionId].title;
-            showStatus('', 'info', renameStatus); // Clear previous status
+        function initiateInlineRename(id) {
+            if (!discussions[id]) return;
+            renameDiscussionIdInput.value = id; // Store the ID to rename
+            renameInput.value = discussions[id].title;
+            showStatus('', 'info', renameStatus);
             openModal('renameModal');
-            renameInput.focus();
-        };
+        }
 
-        confirmRenameBtn.onclick = async () => {
-             if (!currentDiscussionId) return;
+        async function confirmInlineRename() {
+             const idToRename = renameDiscussionIdInput.value;
+             if (!idToRename || !discussions[idToRename]) return;
+
              const newTitle = renameInput.value.trim();
              if (!newTitle) {
                  showStatus('Title cannot be empty.', 'error', renameStatus);
@@ -625,37 +714,40 @@
              showStatus('Renaming...', 'info', renameStatus);
 
              try {
-                 const response = await apiRequest(`/api/discussions/${currentDiscussionId}/title`, {
+                 const response = await apiRequest(`/api/discussions/${idToRename}/title`, {
                      method: 'PUT',
                      headers: { 'Content-Type': 'application/json' },
                      body: JSON.stringify({ title: newTitle }),
-                     statusElement: renameStatus // Target modal status
+                     statusElement: renameStatus
                  });
                  const updatedInfo = await response.json();
-                 discussions[currentDiscussionId].title = updatedInfo.title;
-                 discussionTitle.textContent = updatedInfo.title; // Update header
+                 discussions[idToRename].title = updatedInfo.title;
+                 if (idToRename === currentDiscussionId) {
+                     discussionTitle.textContent = updatedInfo.title; // Update header if current
+                 }
                  renderDiscussionList(); // Update list display
                  showStatus('Renamed successfully.', 'success', renameStatus);
-                 setTimeout(() => closeModal('renameModal'), 1000); // Close after success
+                 setTimeout(() => closeModal('renameModal'), 1000);
              } catch (error) {
                  console.error("Rename failed:", error);
-                 // Status already shown by apiRequest in modal status element
+                 // Status handled by apiRequest
              }
         };
 
 
-        deleteDiscussionBtn.onclick = async () => {
-             if (!currentDiscussionId) return;
-             const titleToDelete = discussions[currentDiscussionId].title;
+        async function deleteInlineDiscussion(id) {
+             if (!discussions[id]) return;
+             const titleToDelete = discussions[id].title;
              if (confirm(`Are you sure you want to delete discussion "${titleToDelete}"? This cannot be undone.`)) {
                  showStatus('Deleting discussion...', 'info');
                  try {
-                     await apiRequest(`/api/discussions/${currentDiscussionId}`, { method: 'DELETE' });
+                     await apiRequest(`/api/discussions/${id}`, { method: 'DELETE' });
 
-                     const deletedId = currentDiscussionId;
-                     delete discussions[deletedId];
-                     currentDiscussionId = null; // Deselect
-                     clearChatArea(true); // Clear everything
+                     delete discussions[id];
+                     if (id === currentDiscussionId) {
+                         currentDiscussionId = null; // Deselect
+                         clearChatArea(true); // Clear everything
+                     }
                      renderDiscussionList();
                      showStatus(`Discussion "${titleToDelete}" deleted.`, 'success');
 
@@ -669,7 +761,6 @@
         async function toggleStarDiscussion(id, isCurrentlyStarred) {
              const method = isCurrentlyStarred ? 'DELETE' : 'POST';
              const action = isCurrentlyStarred ? 'Unstarring' : 'Starring';
-             // No status message needed for quick action like starring
              try {
                 await apiRequest(`/api/discussions/${id}/star`, { method: method });
                 discussions[id].is_starred = !isCurrentlyStarred;
@@ -686,7 +777,7 @@
                 e.preventDefault();
                 sendMessage();
             }
-            autoGrowTextarea(messageInput); // Handle resize on keydown too
+            autoGrowTextarea(messageInput);
         });
 
         messageInput.addEventListener('input', () => autoGrowTextarea(messageInput));
@@ -694,10 +785,9 @@
         sendMessageBtn.onclick = sendMessage;
 
         function autoGrowTextarea(element) {
-            element.style.height = 'auto'; // Reset height to shrink if needed
-            const maxHeight = 200; // Max height in pixels (approx 8-10 lines)
+            element.style.height = 'auto';
+            const maxHeight = 200;
             element.style.height = Math.min(element.scrollHeight, maxHeight) + 'px';
-            // Enable scroll if content exceeds max height
             element.style.overflowY = element.scrollHeight > maxHeight ? 'auto' : 'hidden';
         }
 
@@ -708,33 +798,42 @@
             if (!prompt) return;
 
             // Add user message optimistically
+            const tempUserId = `temp-user-${Date.now()}`;
             const userMessage = {
-                id: `temp-user-${Date.now()}`,
+                id: tempUserId,
                 sender: currentUser.lollms_client_ai_name ? 'You' : (currentUser.username || 'User'),
                 content: prompt,
-                user_grade: 0
+                user_grade: 0,
+                token_count: null, // User token count maybe calculated later if needed
+                model_name: null
             };
-             // If the last message was also from the user, add spacing
-             const lastMessageElement = chatMessages.lastElementChild;
+             const lastMessageElement = chatMessages.lastElementChild?.querySelector('.message-bubble');
              if (lastMessageElement && lastMessageElement.classList.contains('user-bubble')) {
-                 userMessage.addSpacing = true; // Custom flag for renderMessage
+                 userMessage.addSpacing = true;
              }
             renderMessage(userMessage);
-            lastUserMessageId = userMessage.id;
+            // Note: Real user message ID comes back from backend after stream completes if we refresh
+            lastUserMessageId = tempUserId; // Use temp ID for potential parent ref
             messageInput.value = '';
-            autoGrowTextarea(messageInput); // Reset input height
+            autoGrowTextarea(messageInput);
             sendMessageBtn.disabled = true;
             scrollChatToBottom();
 
              const formData = new FormData();
              formData.append('prompt', prompt);
              formData.append('use_rag', isRagActive);
-             // Optional: formData.append('parent_message_id', lastUserMessageId); // If backend supports using it
+             if (lastUserMessageId && lastUserMessageId.startsWith('temp-user-')) {
+                 // If backend needs parent ID, find the *actual* last user message ID
+                 // from currentMessages array after a potential refresh, or pass null.
+                 // For simplicity now, we won't pass parent_message_id for optimistic user messages.
+             } else if (lastUserMessageId) {
+                 // formData.append('parent_message_id', lastUserMessageId); // Pass real ID if available
+             }
 
              aiMessageStreaming = true;
              currentAiMessageContent = "";
              currentAiMessageElement = null;
-             currentAiMessageId = `temp-ai-${Date.now()}`;
+             currentAiMessageId = `temp-ai-${Date.now()}`; // Temp ID for AI message during stream
 
              try {
                  const response = await fetch(`/api/discussions/${currentDiscussionId}/chat`, {
@@ -777,55 +876,46 @@
         function handleStreamChunk(data) {
              if (data.type === 'chunk') {
                  if (!currentAiMessageElement) {
+                     // Create the initial AI message bubble structure
                      const aiMessage = {
-                         id: currentAiMessageId,
+                         id: currentAiMessageId, // Use temp ID initially
                          sender: currentUser.lollms_client_ai_name || 'Assistant',
-                         content: "",
-                         user_grade: 0
+                         content: "", // Start empty, will be filled below
+                         user_grade: 0,
+                         token_count: null, // Will be set on stream end
+                         model_name: null   // Will be set on stream end
                      };
-                     // Add spacing if last message was user message
-                     const lastMessageElement = chatMessages.lastElementChild;
+                     const lastMessageElement = chatMessages.lastElementChild?.querySelector('.message-bubble');
                      if (lastMessageElement && lastMessageElement.classList.contains('user-bubble')) {
                         aiMessage.addSpacing = true;
                      }
-                     renderMessage(aiMessage);
+                     renderMessage(aiMessage); // Render the basic structure
                  }
                  currentAiMessageContent += data.content;
                  const contentDiv = currentAiMessageElement?.querySelector('.message-content');
                  if (contentDiv) {
-                     contentDiv.textContent = currentAiMessageContent; // Update plain text during stream
+                     // Simple text update during stream - no Markdown/Think tag processing yet
+                     contentDiv.textContent = currentAiMessageContent;
                  }
                  scrollChatToBottom();
              } else if (data.type === 'error') {
                  console.error("LLM Error:", data.content);
                  renderMessage({ id: `err-${Date.now()}`, sender: 'system', content: `LLM Error: ${data.content}` });
                  handleStreamEnd(true);
-             } else if (data.type === 'full_message_info' && currentAiMessageElement) {
-                 // Hypothetical: Update final ID if backend sends it
-                 if(data.id) {
-                    const oldId = currentAiMessageElement.id;
-                    currentAiMessageElement.id = `message-${data.id}`;
-                    currentAiMessageId = data.id; // Update state
-                    // Update grading button onclick handlers etc. if they depend on the ID
-                    updateMessageElementId(oldId, `message-${data.id}`);
-                 }
              }
+             // Backend doesn't currently send 'full_message_info' during stream
         }
 
         function handleStreamEnd(errorOccurred = false) {
             aiMessageStreaming = false;
             sendMessageBtn.disabled = false;
 
-            if (currentAiMessageElement && currentAiMessageContent && !errorOccurred) {
-                const contentDiv = currentAiMessageElement.querySelector('.message-content');
-                if (contentDiv) {
-                     renderMarkdownContent(contentDiv, currentAiMessageContent, currentAiMessageId);
-                }
-            }
-             // Always refresh messages from server after stream finishes to ensure consistency
-             if (currentDiscussionId) {
+            // Always refresh messages from server after stream finishes
+            // to get the final AI message with correct ID, token count, model, etc.
+            // and also the real ID for the user's message.
+            if (currentDiscussionId) {
                  refreshMessagesAfterStream();
-             }
+            }
 
             currentAiMessageElement = null;
             currentAiMessageContent = "";
@@ -834,40 +924,28 @@
         }
 
         async function refreshMessagesAfterStream() {
-            await new Promise(resolve => setTimeout(resolve, 300)); // Short delay
-             if (!currentDiscussionId || aiMessageStreaming) return; // Don't refresh if another stream started
+            // Give backend a moment to save the discussion fully
+            await new Promise(resolve => setTimeout(resolve, 500));
+            if (!currentDiscussionId || aiMessageStreaming) return;
+
             try {
                 const response = await apiRequest(`/api/discussions/${currentDiscussionId}`);
                 currentMessages = await response.json();
-                 // Smart update? Or full re-render? Full re-render is simpler for now.
-                 renderMessages(currentMessages);
+                // Full re-render to ensure all data (IDs, tokens, grades) is correct
+                renderMessages(currentMessages);
             } catch (error) {
                  console.error(`Failed to refresh messages for ${currentDiscussionId}:`, error);
-                 // Maybe show a subtle error?
+                 // Optionally show a subtle error in the chat
+                 renderMessage({ id: `err-refresh-${Date.now()}`, sender: 'system', content: `Failed to refresh message list.` });
             }
         }
-
-         // Helper to update IDs in DOM elements (e.g., for grading buttons after getting real ID)
-         function updateMessageElementId(oldDomId, newDomId) {
-             const element = document.getElementById(oldDomId);
-             if (element) {
-                 element.id = newDomId;
-                 // Find grade buttons and update their onclick messageId parameter
-                 element.querySelectorAll('.grade-btn').forEach(btn => {
-                    const onclickAttr = btn.getAttribute('onclick');
-                    if (onclickAttr && onclickAttr.includes(oldDomId.replace('message-', ''))) {
-                        btn.setAttribute('onclick', onclickAttr.replace(oldDomId.replace('message-', ''), newDomId.replace('message-', '')));
-                    }
-                });
-             }
-         }
 
         // --- Message Rendering ---
         function clearChatArea(clearHeader = true) {
             chatMessages.innerHTML = '';
              if (clearHeader) {
                 discussionTitle.textContent = 'Select or Create a Discussion';
-                discussionActions.style.display = 'none';
+                // discussionActions are removed
                 sendMessageBtn.disabled = true;
              }
             currentMessages = [];
@@ -876,7 +954,7 @@
 
         function renderMessages(messagesToRender) {
             chatMessages.innerHTML = ''; // Clear existing
-            codeMirrorInstances = {};
+            codeMirrorInstances = {}; // Clear CM instances
             messagesToRender.forEach((msg, index) => {
                  // Add spacing logic based on sender change
                  if (index > 0 && messagesToRender[index-1].sender !== msg.sender) {
@@ -890,14 +968,18 @@
         }
 
         function renderMessage(message) {
-             if (!message || !message.sender || typeof message.content !== 'string') {
+             if (!message || typeof message.sender === 'undefined' || typeof message.content === 'undefined') {
                  console.warn("Skipping invalid message:", message);
                  return;
              }
             const messageId = message.id || `temp-${Date.now()}`;
             const domId = `message-${messageId}`;
 
-            if (document.getElementById(domId)) return; // Avoid duplicates
+            // Avoid re-rendering if element exists and isn't the currently streaming AI message
+            if (document.getElementById(domId) && messageId !== currentAiMessageId) {
+                 // console.log("Skipping render, element exists:", domId);
+                 return;
+             }
 
             const messageContainer = document.createElement('div');
             messageContainer.className = 'message-container flex flex-col';
@@ -909,24 +991,25 @@
             let bubbleClass = 'ai-bubble';
             let senderName = message.sender;
             let showGrade = false;
-            const userNames = [currentUser.username, 'user', 'You']; // Include backend default 'user'
+            let isUserMsg = false;
+            const userNames = [currentUser.username, 'user', 'You']; // Include backend default 'user' and frontend 'You'
 
             if (userNames.includes(senderName)) {
                 bubbleClass = 'user-bubble';
                 senderName = ''; // Hide own name
+                isUserMsg = true;
             } else if (senderName.toLowerCase() === 'system' || senderName.toLowerCase() === 'error') {
                 bubbleClass = 'system-bubble';
                 senderName = '';
             } else {
                 bubbleClass = 'ai-bubble';
                 senderName = currentUser.lollms_client_ai_name || message.sender; // Use configured AI name
-                showGrade = true; // Grade AI messages
+                showGrade = !messageId.startsWith('temp-'); // Show grade for non-temp AI messages
             }
 
             const bubbleDiv = document.createElement('div');
             bubbleDiv.className = `message-bubble ${bubbleClass}`;
-             bubbleDiv.id = domId; // Set ID on the bubble itself for easier targeting
-
+            bubbleDiv.id = domId;
 
             if (senderName) {
                 const senderDiv = document.createElement('div');
@@ -939,57 +1022,152 @@
             contentDiv.className = 'message-content prose prose-sm max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-code:before:content-none prose-code:after:content-none prose-code:font-normal prose-code:bg-gray-100 prose-code:text-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded';
 
             if (aiMessageStreaming && messageId === currentAiMessageId) {
+                 // During stream, just show plain text
                  contentDiv.textContent = currentAiMessageContent;
-                 currentAiMessageElement = bubbleDiv; // Track the bubble element
+                 currentAiMessageElement = bubbleDiv; // Track the bubble element for stream updates
             } else {
-                 renderMarkdownContent(contentDiv, message.content, messageId);
+                 // After stream or for existing messages, render Markdown + Think tags
+                 renderProcessedContent(contentDiv, message.content || "", messageId);
             }
             bubbleDiv.appendChild(contentDiv);
 
-            // Add Grading buttons (only if not temporary ID)
-             if (showGrade && message.id && !message.id.startsWith('temp-')) {
-                const gradeDiv = document.createElement('div');
-                gradeDiv.className = 'flex items-center justify-end mt-1 text-xs';
+            // --- Footer for Details and Actions ---
+            const footerDiv = document.createElement('div');
+            footerDiv.className = 'message-footer';
 
-                const userGrade = message.user_grade || 0;
+            // Details Span
+            const detailsSpan = document.createElement('span');
+            detailsSpan.className = 'message-details';
+            let detailsContent = '';
+            if (message.token_count) detailsContent += `<span>Tokens: ${message.token_count}</span>`;
+            if (message.model_name) detailsContent += `<span>Model: ${message.model_name}</span>`;
+             // Add binding_name if different from model_name? Maybe too verbose.
+             // Generation speed: Not available from backend yet.
+             detailsSpan.innerHTML = detailsContent;
 
-                const upvoteBtn = document.createElement('button');
-                 upvoteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" /></svg>`;
-                 upvoteBtn.title = "Good response";
-                 upvoteBtn.className = `grade-btn ${userGrade > 0 ? 'selected-up' : ''} p-1 rounded hover:bg-gray-200`;
-                 upvoteBtn.onclick = () => gradeMessage(message.id, 1);
+            // Actions Span (Edit/Delete) - Shown on Hover
+            const actionsSpan = document.createElement('span');
+            actionsSpan.className = 'message-actions'; // Initially hidden via CSS
 
-                const gradeSpan = document.createElement('span');
-                gradeSpan.className = 'grade-score font-medium';
-                gradeSpan.textContent = userGrade;
-
-                const downvoteBtn = document.createElement('button');
-                 downvoteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>`;
-                 downvoteBtn.title = "Bad response";
-                 downvoteBtn.className = `grade-btn ${userGrade < 0 ? 'selected-down' : ''} p-1 rounded hover:bg-gray-200`;
-                 downvoteBtn.onclick = () => gradeMessage(message.id, -1);
-
-                gradeDiv.appendChild(upvoteBtn);
-                gradeDiv.appendChild(gradeSpan);
-                gradeDiv.appendChild(downvoteBtn);
-                bubbleDiv.appendChild(gradeDiv);
+             // Edit Button (for all non-temp messages)
+            if (!messageId.startsWith('temp-')) {
+                const editBtn = document.createElement('button');
+                editBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg>`;
+                editBtn.title = "Edit Message";
+                editBtn.className = 'message-action-btn';
+                editBtn.onclick = () => initiateEditMessage(messageId);
+                actionsSpan.appendChild(editBtn);
             }
 
-            messageContainer.appendChild(bubbleDiv);
-            chatMessages.appendChild(messageContainer);
+             // Delete Button (for all non-temp messages)
+            if (!messageId.startsWith('temp-')) {
+                const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="text-red-500"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg>`;
+                deleteBtn.title = "Delete Message";
+                deleteBtn.className = 'message-action-btn';
+                deleteBtn.onclick = () => deleteMessage(messageId);
+                actionsSpan.appendChild(deleteBtn);
+            }
+
+
+            // Grading Span (only for non-temp AI messages)
+            const gradeSpanContainer = document.createElement('span');
+            gradeSpanContainer.className = 'flex items-center justify-end'; // Align right
+            if (showGrade) {
+                const userGrade = message.user_grade || 0;
+                const upvoteBtn = document.createElement('button');
+                upvoteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" /></svg>`;
+                upvoteBtn.title = "Good response";
+                upvoteBtn.className = `grade-btn ${userGrade > 0 ? 'selected-up' : ''} p-1 rounded hover:bg-gray-200`;
+                upvoteBtn.onclick = () => gradeMessage(messageId, 1);
+
+                const gradeDisplaySpan = document.createElement('span');
+                gradeDisplaySpan.className = 'grade-score font-medium';
+                gradeDisplaySpan.textContent = userGrade;
+
+                const downvoteBtn = document.createElement('button');
+                downvoteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>`;
+                downvoteBtn.title = "Bad response";
+                downvoteBtn.className = `grade-btn ${userGrade < 0 ? 'selected-down' : ''} p-1 rounded hover:bg-gray-200`;
+                downvoteBtn.onclick = () => gradeMessage(messageId, -1);
+
+                gradeSpanContainer.appendChild(upvoteBtn);
+                gradeSpanContainer.appendChild(gradeDisplaySpan);
+                gradeSpanContainer.appendChild(downvoteBtn);
+            }
+
+
+            footerDiv.appendChild(detailsSpan); // Add details to left
+            footerDiv.appendChild(actionsSpan); // Add actions (initially hidden)
+            footerDiv.appendChild(gradeSpanContainer); // Add grading to right
+            bubbleDiv.appendChild(footerDiv); // Add footer to bubble
+
+            // Append the complete message bubble container
+            // Check if the element already exists (might happen during streaming init)
+            const existingElement = document.getElementById(domId);
+            if (existingElement) {
+                // If it's the streaming element, replace its content
+                if (messageId === currentAiMessageId) {
+                    existingElement.parentNode.replaceChild(bubbleDiv, existingElement);
+                    currentAiMessageElement = bubbleDiv; // Update tracked element
+                } // else: it's an old message, no need to replace
+            } else {
+                 messageContainer.appendChild(bubbleDiv);
+                 chatMessages.appendChild(messageContainer);
+                 if (messageId === currentAiMessageId) {
+                     currentAiMessageElement = bubbleDiv; // Track newly added streaming element
+                 }
+            }
         }
 
-        function renderMarkdownContent(element, markdownText, messageId) {
-            element.innerHTML = marked.parse(markdownText || "");
+        function renderProcessedContent(element, rawContent, messageId) {
+            // 1. Process <think> tags
+            let processedHtml = '';
+            const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+            let lastIndex = 0;
+            let match;
+
+            while ((match = thinkRegex.exec(rawContent)) !== null) {
+                // Part before the think tag
+                const before = rawContent.substring(lastIndex, match.index);
+                if (before.trim()) {
+                    processedHtml += marked.parse(before);
+                }
+
+                // The think tag content
+                const thinkContent = match[1];
+                processedHtml += `<details class="think-block"><summary>Assistant's Thoughts</summary><div class="think-content prose prose-sm max-w-none">${marked.parse(thinkContent)}</div></details>`; // Parse inner content too
+
+                lastIndex = thinkRegex.lastIndex;
+            }
+
+            // Part after the last think tag
+            const after = rawContent.substring(lastIndex);
+            if (after.trim()) {
+                processedHtml += marked.parse(after);
+            }
+
+            // Set the final HTML
+            element.innerHTML = processedHtml || '<p></p>'; // Ensure element isn't empty
+
+             // 2. Render Math
              try {
                 renderMathInElement(element, { delimiters: [ {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true} ], throwOnError: false });
              } catch(e) { console.warn("KaTeX rendering error:", e); }
 
+             // 3. Render Code blocks with CodeMirror
+            renderCodeMirrorBlocks(element, messageId);
+        }
+
+        function renderCodeMirrorBlocks(element, messageId) {
             element.querySelectorAll('pre > code').forEach((codeBlock, index) => {
                 const preElement = codeBlock.parentNode;
+                 // Avoid double-processing if CM already initialized for this block
+                 if (preElement.parentNode.querySelector('.cm-editor')) return;
+
                 const language = codeBlock.className.match(/language-(\w+)/)?.[1] || 'plaintext';
                 const code = codeBlock.textContent || '';
-                 const uniqueCmId = `${messageId}-${index}`; // Unique ID for CM instance
+                const uniqueCmId = `${messageId}-${index}`; // Unique ID for CM instance
 
                 const header = document.createElement('div');
                 header.className = 'code-block-header text-gray-600';
@@ -1002,26 +1180,28 @@
                  copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`;
                  copyBtn.onclick = () => {
                     navigator.clipboard.writeText(code)
-                        .then(() => { copyBtn.textContent = 'Copied!'; setTimeout(() => copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`); }, 1500)
+                        .then(() => { copyBtn.textContent = 'Copied!'; setTimeout(() => copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`, 1500) });
                 };
                 buttonsDiv.appendChild(copyBtn);
 
                 if (language === 'python') {
                     const execBtn = document.createElement('button');
-                     execBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Run`;
-                    execBtn.onclick = () => executePythonCode(code, preElement.parentNode); // Pass container of pre
+                    execBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Run`;
+                    execBtn.onclick = () => executePythonCode(code, preElement.parentNode);
                     buttonsDiv.appendChild(execBtn);
                 }
 
                 header.appendChild(langSpan);
                 header.appendChild(buttonsDiv);
+                // Insert header *before* the <pre> tag
                 preElement.parentNode.insertBefore(header, preElement);
 
                  const cmContainer = document.createElement('div');
+                 // Replace the <pre> element with the CM container
                  preElement.parentNode.replaceChild(cmContainer, preElement);
 
                  let modeInfo = CodeMirror.findModeByName(language) || CodeMirror.findModeByExtension(language);
-                 let mode = modeInfo ? modeInfo.mode : 'null'; // Fallback to plain text
+                 let mode = modeInfo ? modeInfo.mode : 'null';
 
                  try {
                     const cmInstance = CodeMirror(cmContainer, {
@@ -1029,51 +1209,32 @@
                          lineNumbers: true, readOnly: true, lineWrapping: true,
                      });
                      codeMirrorInstances[uniqueCmId] = cmInstance;
-                      // Refresh needed if dimensions change later, but usually okay on initial render
-                      // setTimeout(() => cmInstance.refresh(), 100);
                  } catch(e) {
                       console.error("CodeMirror initialization failed:", e);
-                      cmContainer.appendChild(preElement); // Fallback
+                      // Fallback: put the original <pre> back if CM fails
+                      cmContainer.parentNode.replaceChild(preElement, cmContainer);
                  }
             });
         }
 
         async function gradeMessage(messageId, change) {
              if (!currentDiscussionId || !messageId || messageId.startsWith('temp-')) return;
-             // Subtle UI update, no full status needed
              const messageElement = document.getElementById(`message-${messageId}`);
              if (!messageElement) return;
-
-             // Optimistic UI update (can be reverted on error)
-             const gradeSpan = messageElement.querySelector('.grade-score');
-             const upBtn = messageElement.querySelector('.grade-btn:nth-child(1)');
-             const downBtn = messageElement.querySelector('.grade-btn:nth-child(3)');
-             let currentGrade = parseInt(gradeSpan?.textContent || '0');
-             let newGrade = currentGrade;
-             // Logic: If clicking upvote and current is 0 or -1, new grade is 1. If current is 1, new grade is 0 (toggle off).
-             // If clicking downvote and current is 0 or 1, new grade is -1. If current is -1, new grade is 0.
-             // This differs from backend which just increments/decrements. Let's match backend.
-             // Backend seems to sum user changes. Let's assume the UI reflects the *next* state.
-             let requestedChange = change;
-             // If user clicks up (change=1) but it's already upvoted (currentGrade=1), the effective change is -1 to reset.
-             // If user clicks down (change=-1) but it's already downvoted (currentGrade=-1), the effective change is +1 to reset.
-             if (change === 1 && currentGrade === 1) requestedChange = -1; // Undo upvote
-             else if (change === -1 && currentGrade === -1) requestedChange = 1; // Undo downvote
-             else if (change === 1 && currentGrade === -1) requestedChange = 2; // Downvote to Upvote
-             else if (change === -1 && currentGrade === 1) requestedChange = -2; // Upvote to Downvote
-
-             // For simplicity, let's just send the intended +1 or -1 and let backend handle state.
-             // UI will update based on returned value.
 
              try {
                 const response = await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}/grade`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ change: change }) // Send the simple change intention
+                    body: JSON.stringify({ change: change })
                 });
                  const updatedMessage = await response.json();
 
                  // Update UI based on response
+                 const gradeSpan = messageElement.querySelector('.grade-score');
+                 const upBtn = messageElement.querySelector('.grade-btn.selected-up, .grade-btn:not(.selected-down):first-of-type'); // More robust selector
+                 const downBtn = messageElement.querySelector('.grade-btn.selected-down, .grade-btn:last-of-type');
+
                  if (gradeSpan) gradeSpan.textContent = updatedMessage.user_grade;
                  if (upBtn) upBtn.classList.toggle('selected-up', updatedMessage.user_grade > 0);
                  if (downBtn) downBtn.classList.toggle('selected-down', updatedMessage.user_grade < 0);
@@ -1087,18 +1248,125 @@
              } catch (error) {
                  console.error("Grading failed:", error);
                   showStatus('Failed to update grade.', 'error');
-                  // Revert optimistic UI? Too complex for now. Rely on refresh.
+             }
+        }
+
+        // --- Message Edit/Delete Functions ---
+        function initiateEditMessage(messageId) {
+            const messageData = currentMessages.find(m => m.id === messageId);
+            if (!messageData) {
+                showStatus("Cannot find message data to edit.", "error");
+                return;
+            }
+            editMessageIdInput.value = messageId;
+            editMessageInput.value = messageData.content;
+            showStatus('', 'info', editMessageStatus);
+            openModal('editMessageModal');
+        }
+
+        async function confirmMessageEdit() {
+            const messageId = editMessageIdInput.value;
+            const newContent = editMessageInput.value; // No trim, allow whitespace changes
+            if (!messageId || !currentDiscussionId) return;
+
+            showStatus('Saving changes...', 'info', editMessageStatus);
+            confirmEditMessageBtn.disabled = true;
+
+            try {
+                const response = await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: newContent }),
+                    statusElement: editMessageStatus
+                });
+                const updatedMessageData = await response.json();
+
+                // Update local cache
+                const msgIndex = currentMessages.findIndex(m => m.id === messageId);
+                if (msgIndex > -1) {
+                    currentMessages[msgIndex] = updatedMessageData; // Replace with full updated data
+                }
+
+                // Update DOM
+                const messageElement = document.getElementById(`message-${messageId}`);
+                if (messageElement) {
+                    const contentDiv = messageElement.querySelector('.message-content');
+                    if (contentDiv) {
+                        // Clear old CodeMirror instances within this message before re-rendering
+                         Object.keys(codeMirrorInstances).forEach(key => {
+                            if (key.startsWith(messageId + '-')) {
+                                delete codeMirrorInstances[key];
+                            }
+                        });
+                        // Re-render the content area with new markdown/code/math
+                        renderProcessedContent(contentDiv, updatedMessageData.content, messageId);
+                    }
+                    // Update details footer if needed (tokens might change)
+                     const detailsSpan = messageElement.querySelector('.message-details');
+                     if (detailsSpan) {
+                         let detailsContent = '';
+                         if (updatedMessageData.token_count) detailsContent += `<span>Tokens: ${updatedMessageData.token_count}</span>`;
+                         if (updatedMessageData.model_name) detailsContent += `<span>Model: ${updatedMessageData.model_name}</span>`;
+                         detailsSpan.innerHTML = detailsContent;
+                     }
+                }
+
+                showStatus('Message updated successfully.', 'success', editMessageStatus);
+                setTimeout(() => closeModal('editMessageModal'), 1000);
+
+            } catch (error) {
+                console.error("Message edit failed:", error);
+                // Status shown by apiRequest
+            } finally {
+                confirmEditMessageBtn.disabled = false;
+            }
+        }
+
+        async function deleteMessage(messageId) {
+             if (!currentDiscussionId || !messageId || messageId.startsWith('temp-')) return;
+
+             const messageElement = document.getElementById(`message-${messageId}`);
+             const messageContentPreview = messageElement ? (messageElement.querySelector('.message-content')?.textContent || '').substring(0, 50) + '...' : `message ${messageId}`;
+
+             if (confirm(`Are you sure you want to delete this message?\n\n"${messageContentPreview}"`)) {
+                 showStatus('Deleting message...', 'info');
+                 try {
+                     // API returns 200 or 204 on success for DELETE
+                     await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}`, {
+                         method: 'DELETE'
+                     });
+
+                     // Remove from local cache
+                     currentMessages = currentMessages.filter(m => m.id !== messageId);
+
+                     // Remove from DOM
+                     if (messageElement) {
+                         messageElement.closest('.message-container')?.remove(); // Remove the whole container
+                     }
+                      // Remove associated CodeMirror instances
+                      Object.keys(codeMirrorInstances).forEach(key => {
+                            if (key.startsWith(messageId + '-')) {
+                                delete codeMirrorInstances[key];
+                            }
+                      });
+
+                     showStatus('Message deleted successfully.', 'success');
+
+                 } catch (error) {
+                     console.error("Message deletion failed:", error);
+                     // Status shown by apiRequest
+                 }
              }
         }
 
 
-        // --- Pyodide Python Execution ---
+        // --- Pyodide Python Execution (Unchanged) ---
         async function loadPyodide() {
             if (pyodide || pyodideLoading) return;
             pyodideLoading = true;
             showPyodideStatus('Loading Python interpreter...');
             try {
-                pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.1/full/" });
+                pyodide = await window.loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.1/full/" });
                 await pyodide.loadPackage("micropip");
                 showPyodideStatus('Python ready.');
                 setTimeout(() => showPyodideStatus(''), 3000);
@@ -1110,33 +1378,26 @@
                 pyodideLoading = false;
             }
         }
-
         async function executePythonCode(code, codeContainerElement) {
              await loadPyodide();
              if (!pyodide) {
                  showPyodideStatus('Python interpreter not available.', true);
                  return;
              }
-
              const existingOutput = codeContainerElement.querySelector('.code-output');
              if (existingOutput) existingOutput.remove();
-
-             const outputDiv = document.createElement('pre'); // Use <pre> for better formatting
-             outputDiv.className = 'code-output mt-2 p-2 border-t border-gray-300 bg-gray-900 text-white text-xs font-mono overflow-x-auto max-h-40 rounded-b-md'; // Style as console output
+             const outputDiv = document.createElement('pre');
+             outputDiv.className = 'code-output mt-2 p-2 border-t border-gray-300 bg-gray-900 text-white text-xs font-mono overflow-x-auto max-h-40 rounded-b-md';
              outputDiv.textContent = 'Executing...\n';
-             codeContainerElement.appendChild(outputDiv); // Append directly after the code block header/CM
-
-            let stdout = '';
-            let stderr = '';
+             codeContainerElement.appendChild(outputDiv);
+            let stdout = ''; let stderr = '';
             pyodide.setStdout({ batched: (msg) => { stdout += msg + '\n'; outputDiv.textContent += msg + '\n'; }});
             pyodide.setStderr({ batched: (msg) => { stderr += msg + '\n'; outputDiv.textContent += `Error: ${msg}\n`; }});
-
              showPyodideStatus('Running Python code...');
              try {
                  const lines = code.split('\n');
                  const installCommands = lines.filter(line => line.trim().startsWith('%pip install') || line.trim().startsWith('!pip install'));
                  const codeToRun = lines.filter(line => !line.trim().startsWith('%pip install') && !line.trim().startsWith('!pip install')).join('\n');
-
                  if (installCommands.length > 0) {
                      outputDiv.textContent += 'Installing packages...\n';
                      const micropip = pyodide.pyimport("micropip");
@@ -1148,559 +1409,197 @@
                      }
                      outputDiv.textContent += 'Installation complete. Running code...\n';
                  }
-
                  let result = await pyodide.runPythonAsync(codeToRun);
-                 if (result !== undefined) {
-                    outputDiv.textContent += `\nResult: ${result}\n`;
-                 }
-                  if (!stderr) outputDiv.textContent += '\nExecution finished.';
-                  showPyodideStatus('Python execution finished.');
+                 if (result !== undefined) outputDiv.textContent += `\nResult: ${result}\n`;
+                 if (!stderr) outputDiv.textContent += '\nExecution finished.';
+                 showPyodideStatus('Python execution finished.');
              } catch (error) {
                  console.error("Python execution error:", error);
                  outputDiv.textContent += `\nExecution Error: ${error.message}\n`;
                  showPyodideStatus('Python execution failed.', true);
              } finally {
-                 pyodide.setStdout({}); // Reset stdout
-                 pyodide.setStderr({}); // Reset stderr
+                 pyodide.setStdout({}); pyodide.setStderr({});
                  setTimeout(() => showPyodideStatus(''), 3000);
              }
         }
-
          function showPyodideStatus(msg, isError = false) {
             pyodideStatus.textContent = msg;
             pyodideStatus.className = `text-xs mt-1 h-4 ${isError ? 'text-red-600' : 'text-blue-600'}`;
         }
 
-        // --- Settings Modal Logic ---
+        // --- Settings Modal Logic (Unchanged) ---
         settingsBtn.onclick = () => openModal('settingsModal');
-
-        async function loadAvailableLollmsModels() {
-            console.log("Attempting to load LoLLMs models..."); // DEBUG
+        async function loadAvailableLollmsModels() { /* ... no change ... */
              try {
-                console.log("here before")
                 const response = await apiRequest('/api/config/lollms-models');
-                 console.log("here")
-                 // Check if the request itself was okay before processing JSON
-                 if (!response.ok) {
-                     // apiRequest should throw, but double-check
-                     throw new Error(`API request failed with status ${response.status}`);
-                 }
+                 if (!response.ok) throw new Error(`API failed: ${response.status}`);
                  availableLollmsModels = await response.json();
-                 console.log("Received models data:", availableLollmsModels); // DEBUG
-                 // Update select in settings modal if it exists
                  populateDropdown(settingsLollmsModelSelect, availableLollmsModels, userLollmsModel, "No models found");
              } catch (error) {
                  console.error("Failed to load LoLLMs models:", error);
                  availableLollmsModels = [];
-                 // Make sure the dropdown explicitly shows the error
                  populateDropdown(settingsLollmsModelSelect, [], null, `Error: ${error.message || 'Failed to load'}`);
              }
          }
-
-         settingsLollmsModelSelect.onchange = () => {
-             saveLollmsModelBtn.disabled = settingsLollmsModelSelect.value === userLollmsModel;
-         };
-
-         saveLollmsModelBtn.onclick = async () => {
-             const selectedModel = settingsLollmsModelSelect.value;
-             if (!selectedModel || selectedModel === userLollmsModel) return;
-
-             showStatus('Saving model setting...', 'info', settingsStatus);
-             saveLollmsModelBtn.disabled = true;
-
+         settingsLollmsModelSelect.onchange = () => { saveLollmsModelBtn.disabled = settingsLollmsModelSelect.value === userLollmsModel; };
+         saveLollmsModelBtn.onclick = async () => { /* ... no change ... */
+             const selectedModel = settingsLollmsModelSelect.value; if (!selectedModel || selectedModel === userLollmsModel) return;
+             showStatus('Saving model setting...', 'info', settingsStatus); saveLollmsModelBtn.disabled = true;
              try {
-                const formData = new FormData();
-                formData.append('model_name', selectedModel);
-                await apiRequest('/api/config/lollms-model', {
-                     method: 'POST',
-                     body: formData,
-                     statusElement: settingsStatus
-                 });
-                 userLollmsModel = selectedModel; // Update local state
+                const formData = new FormData(); formData.append('model_name', selectedModel);
+                await apiRequest('/api/config/lollms-model', { method: 'POST', body: formData, statusElement: settingsStatus });
+                 userLollmsModel = selectedModel;
                  showStatus(`Default model set to ${selectedModel}. Client will re-init on next chat.`, 'success', settingsStatus);
-                 // No need to repopulate, just disable button again
-             } catch (error) {
-                 console.error("Failed to save model:", error);
-                  // Status shown by apiRequest
-                  saveLollmsModelBtn.disabled = false; // Re-enable on error
-             }
+             } catch (error) { console.error("Failed to save model:", error); saveLollmsModelBtn.disabled = false; }
          };
-
-         settingsVectorizerSelect.onchange = () => {
-             saveVectorizerBtn.disabled = settingsVectorizerSelect.value === userDefaultVectorizer;
-         };
-
-         saveVectorizerBtn.onclick = async () => {
-             const selectedVectorizer = settingsVectorizerSelect.value;
-             if (!selectedVectorizer || selectedVectorizer === userDefaultVectorizer) return;
-
-             showStatus('Saving vectorizer setting...', 'info', settingsStatus);
-             saveVectorizerBtn.disabled = true;
-
+         settingsVectorizerSelect.onchange = () => { saveVectorizerBtn.disabled = settingsVectorizerSelect.value === userDefaultVectorizer; };
+         saveVectorizerBtn.onclick = async () => { /* ... no change ... */
+             const selectedVectorizer = settingsVectorizerSelect.value; if (!selectedVectorizer || selectedVectorizer === userDefaultVectorizer) return;
+             showStatus('Saving vectorizer setting...', 'info', settingsStatus); saveVectorizerBtn.disabled = true;
              try {
-                const formData = new FormData();
-                formData.append('vectorizer_name', selectedVectorizer);
-                 await apiRequest('/api/store/active-vectorizer', { // This endpoint sets the user's default
-                     method: 'POST',
-                     body: formData,
-                     statusElement: settingsStatus
-                 });
-                 userDefaultVectorizer = selectedVectorizer; // Update local state for user default
-                 sessionActiveVectorizer = selectedVectorizer; // Also update session active
-                 updateRagToggleButtonState(); // Update chat toggle state
+                const formData = new FormData(); formData.append('vectorizer_name', selectedVectorizer);
+                 await apiRequest('/api/store/active-vectorizer', { method: 'POST', body: formData, statusElement: settingsStatus });
+                 userDefaultVectorizer = selectedVectorizer; sessionActiveVectorizer = selectedVectorizer;
+                 updateRagToggleButtonState();
                  showStatus(`Default vectorizer set to ${selectedVectorizer}.`, 'success', settingsStatus);
-             } catch (error) {
-                 console.error("Failed to save vectorizer:", error);
-                  saveVectorizerBtn.disabled = false;
-             }
+             } catch (error) { console.error("Failed to save vectorizer:", error); saveVectorizerBtn.disabled = false; }
          };
-
-
-         function populateSettingsModal() {
-             // Assumes lists are already loaded during init or refreshed if needed
+         function populateSettingsModal() { /* ... no change ... */
              populateDropdown(settingsLollmsModelSelect, availableLollmsModels, userLollmsModel, "No models found");
              populateDropdown(settingsVectorizerSelect, availableVectorizers, userDefaultVectorizer, "No vectorizers found");
-             saveLollmsModelBtn.disabled = true; // Disable save initially
-             saveVectorizerBtn.disabled = true;
-             showStatus('', 'info', settingsStatus); // Clear status
+             saveLollmsModelBtn.disabled = true; saveVectorizerBtn.disabled = true; showStatus('', 'info', settingsStatus);
          }
 
-
-        // --- File Management Modal Logic ---
+        // --- File Management Modal Logic (Unchanged) ---
         filesBtn.onclick = () => openModal('fileManagementModal');
-
-        async function loadAvailableVectorizers() {
+        async function loadAvailableVectorizers() { /* ... no change ... */
              try {
                  const response = await apiRequest('/api/store/vectorizers');
                  availableVectorizers = await response.json();
-                 // Update selects in Settings and File Management modals
                  populateDropdown(settingsVectorizerSelect, availableVectorizers, userDefaultVectorizer, "No vectorizers found");
-                 populateDropdown(fileVectorizerSelect, availableVectorizers, null, "Select Vectorizer", true); // Allow empty selection for upload
+                 populateDropdown(fileVectorizerSelect, availableVectorizers, null, "Select Vectorizer", true);
              } catch (error) {
-                 console.error("Failed to load vectorizers:", error);
-                 availableVectorizers = [];
+                 console.error("Failed to load vectorizers:", error); availableVectorizers = [];
                  populateDropdown(settingsVectorizerSelect, [], null, "Error loading vectorizers");
                  populateDropdown(fileVectorizerSelect, [], null, "Error loading vectorizers", true);
              }
          }
-
-         async function loadIndexedRagFiles() {
+         async function loadIndexedRagFiles() { /* ... no change ... */
              try {
                  const response = await apiRequest('/api/store/files');
-                 indexedRagFiles = await response.json();
-                 renderRagFileList(indexedRagFiles); // Update list in File modal
-             } catch (error) {
-                 console.error("Failed to load RAG files:", error);
-                 indexedRagFiles = [];
-                 renderRagFileList(null, "Error loading files."); // Show error in list
-             }
+                 indexedRagFiles = await response.json(); renderRagFileList(indexedRagFiles);
+             } catch (error) { console.error("Failed to load RAG files:", error); indexedRagFiles = []; renderRagFileList(null, "Error loading files."); }
          }
-
-        function populateFileManagementModal() {
-             // Assumes data (vectorizers, files) is loaded/up-to-date
-             populateDropdown(fileVectorizerSelect, availableVectorizers, null, "Select Vectorizer", true);
-             renderRagFileList(indexedRagFiles);
-             fileUploadInput.value = ''; // Clear file input
-             confirmUploadBtn.disabled = true; // Disable upload initially
-             showStatus('', 'info', uploadStatus); // Clear statuses
-             showStatus('', 'info', fileListStatus);
+        function populateFileManagementModal() { /* ... no change ... */
+             populateDropdown(fileVectorizerSelect, availableVectorizers, null, "Select Vectorizer", true); renderRagFileList(indexedRagFiles);
+             fileUploadInput.value = ''; confirmUploadBtn.disabled = true; showStatus('', 'info', uploadStatus); showStatus('', 'info', fileListStatus);
          }
-
-         fileVectorizerSelect.onchange = () => {
-             updateConfirmUploadBtnState();
-         };
-         fileUploadInput.onchange = () => {
-            updateConfirmUploadBtnState();
-         };
-
-         function updateConfirmUploadBtnState() {
+         fileVectorizerSelect.onchange = updateConfirmUploadBtnState;
+         fileUploadInput.onchange = updateConfirmUploadBtnState;
+         function updateConfirmUploadBtnState() { /* ... no change ... */
               const filesSelected = fileUploadInput.files && fileUploadInput.files.length > 0;
-              const vectorizerSelected = fileVectorizerSelect.value !== "";
-              confirmUploadBtn.disabled = !(filesSelected && vectorizerSelected);
+              const vectorizerSelected = fileVectorizerSelect.value !== ""; confirmUploadBtn.disabled = !(filesSelected && vectorizerSelected);
          }
-
-         confirmUploadBtn.onclick = async () => {
-            const files = fileUploadInput.files;
-            const vectorizer = fileVectorizerSelect.value;
-            if (!files || files.length === 0 || !vectorizer) return;
-
-            const formData = new FormData();
-            for (const file of files) {
-                formData.append('files', file);
-            }
-            formData.append('vectorizer_name', vectorizer);
-
-             showStatus(`Uploading ${files.length} file(s) using ${vectorizer}...`, 'info', uploadStatus);
-             confirmUploadBtn.disabled = true;
-
+         confirmUploadBtn.onclick = async () => { /* ... no change ... */
+            const files = fileUploadInput.files; const vectorizer = fileVectorizerSelect.value; if (!files || files.length === 0 || !vectorizer) return;
+            const formData = new FormData(); for (const file of files) formData.append('files', file); formData.append('vectorizer_name', vectorizer);
+             showStatus(`Uploading ${files.length} file(s) using ${vectorizer}...`, 'info', uploadStatus); confirmUploadBtn.disabled = true;
              try {
-                 const response = await apiRequest('/api/store/upload-files', {
-                     method: 'POST',
-                     body: formData,
-                     statusElement: uploadStatus // Target modal status
-                 });
-
-                 const result = await response.json();
-                 let message = result.message || "Upload completed.";
-                 let statusType = response.status === 207 ? 'warning' : 'success'; // 207 is partial success
-
-                 if (response.status === 207) {
-                     message = `Upload finished. Processed: ${result.processed_files?.length || 0}, Errors: ${result.errors?.length || 0}`;
-                     console.warn("Upload errors:", result.errors);
-                 }
-
-                 showStatus(message, statusType, uploadStatus);
-                 await loadIndexedRagFiles(); // Refresh file list
-                 fileUploadInput.value = ''; // Clear file input
-                 // Keep vectorizer selected, disable button again
-                 updateConfirmUploadBtnState();
-
-
-             } catch (error) {
-                 console.error("Upload failed:", error);
-                  // Status shown by apiRequest in modal status
-                  confirmUploadBtn.disabled = false; // Re-enable on error
-                  updateConfirmUploadBtnState(); // Check state again
-             }
+                 const response = await apiRequest('/api/store/upload-files', { method: 'POST', body: formData, statusElement: uploadStatus });
+                 const result = await response.json(); let message = result.message || "Upload completed."; let statusType = response.status === 207 ? 'warning' : 'success';
+                 if (response.status === 207) message = `Upload finished. Processed: ${result.processed_files?.length || 0}, Errors: ${result.errors?.length || 0}`;
+                 showStatus(message, statusType, uploadStatus); await loadIndexedRagFiles(); fileUploadInput.value = ''; updateConfirmUploadBtnState();
+             } catch (error) { console.error("Upload failed:", error); confirmUploadBtn.disabled = false; updateConfirmUploadBtnState(); }
          };
-
-         function renderRagFileList(files, message = null) {
-             indexedFileList.innerHTML = ''; // Clear current list
-             if (message) {
-                  const msgElement = document.createElement('p');
-                  msgElement.className = 'text-gray-500 italic px-1';
-                  if(message.toLowerCase().includes("error")) msgElement.classList.add('text-red-500');
-                  msgElement.textContent = message;
-                  indexedFileList.appendChild(msgElement);
-                  return;
-             }
-
-             if (!files || files.length === 0) {
-                 indexedFileList.innerHTML = '<p class="text-gray-500 italic px-1">No documents indexed yet.</p>';
-                 return;
-             }
-
+         function renderRagFileList(files, message = null) { /* ... no change ... */
+             indexedFileList.innerHTML = ''; if (message) { const msgElement = document.createElement('p'); msgElement.className = 'text-gray-500 italic px-1'; if(message.toLowerCase().includes("error")) msgElement.classList.add('text-red-500'); msgElement.textContent = message; indexedFileList.appendChild(msgElement); return; }
+             if (!files || files.length === 0) { indexedFileList.innerHTML = '<p class="text-gray-500 italic px-1">No documents indexed yet.</p>'; return; }
              files.forEach(file => {
-                 const fileDiv = document.createElement('div');
-                 fileDiv.className = 'flex justify-between items-center py-1 px-1 hover:bg-gray-100 rounded';
-                 const fileNameSpan = document.createElement('span');
-                 fileNameSpan.textContent = file.filename;
-                 fileNameSpan.className = 'truncate text-sm text-gray-700';
-                 fileNameSpan.title = file.filename; // Show full name on hover
-
+                 const fileDiv = document.createElement('div'); fileDiv.className = 'flex justify-between items-center py-1 px-1 hover:bg-gray-100 rounded';
+                 const fileNameSpan = document.createElement('span'); fileNameSpan.textContent = file.filename; fileNameSpan.className = 'truncate text-sm text-gray-700'; fileNameSpan.title = file.filename;
                  const deleteBtn = document.createElement('button');
                  deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>`;
-                 deleteBtn.className = 'flex-shrink-0 text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-100 ml-2';
-                 deleteBtn.title = `Delete ${file.filename}`;
-                 deleteBtn.onclick = () => deleteRagFileInModal(file.filename);
-
-                 fileDiv.appendChild(fileNameSpan);
-                 fileDiv.appendChild(deleteBtn);
-                 indexedFileList.appendChild(fileDiv);
+                 deleteBtn.className = 'flex-shrink-0 text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-100 ml-2'; deleteBtn.title = `Delete ${file.filename}`; deleteBtn.onclick = () => deleteRagFileInModal(file.filename);
+                 fileDiv.appendChild(fileNameSpan); fileDiv.appendChild(deleteBtn); indexedFileList.appendChild(fileDiv);
              });
          }
-
-          async function deleteRagFileInModal(filename) {
-             if (!confirm(`Are you sure you want to delete the RAG document "${filename}"?`)) return;
-             showStatus(`Deleting ${filename}...`, 'info', fileListStatus);
+          async function deleteRagFileInModal(filename) { /* ... no change ... */
+             if (!confirm(`Are you sure you want to delete the RAG document "${filename}"?`)) return; showStatus(`Deleting ${filename}...`, 'info', fileListStatus);
              try {
-                 const response = await apiRequest(`/api/store/files/${encodeURIComponent(filename)}`, {
-                     method: 'DELETE',
-                     statusElement: fileListStatus
-                 });
-                 const result = await response.json();
-                 showStatus(result.message || `Deleted ${filename}.`, 'success', fileListStatus);
-                 // Remove from local cache and re-render list
-                 indexedRagFiles = indexedRagFiles.filter(f => f.filename !== filename);
-                 renderRagFileList(indexedRagFiles);
-             } catch (error) {
-                 console.error(`Delete failed for ${filename}:`, error);
-                 // Status shown by apiRequest
-             }
+                 const response = await apiRequest(`/api/store/files/${encodeURIComponent(filename)}`, { method: 'DELETE', statusElement: fileListStatus });
+                 const result = await response.json(); showStatus(result.message || `Deleted ${filename}.`, 'success', fileListStatus);
+                 indexedRagFiles = indexedRagFiles.filter(f => f.filename !== filename); renderRagFileList(indexedRagFiles);
+             } catch (error) { console.error(`Delete failed for ${filename}:`, error); }
          }
 
-
-        // --- RAG Toggle Logic ---
-        ragToggleBtn.onclick = () => {
-             if (!sessionActiveVectorizer) {
-                 showStatus('Cannot enable RAG without an active vectorizer. Set one in Settings.', 'warning');
-                 return;
-             }
-             isRagActive = !isRagActive;
-             updateRagToggleButtonState();
-             showStatus(`RAG is now ${isRagActive ? 'ACTIVE' : 'INACTIVE'}.`, 'info');
+        // --- RAG Toggle Logic (Unchanged) ---
+        ragToggleBtn.onclick = () => { /* ... no change ... */
+             if (!sessionActiveVectorizer) { showStatus('Cannot enable RAG without an active vectorizer. Set one in Settings.', 'warning'); return; }
+             isRagActive = !isRagActive; updateRagToggleButtonState(); showStatus(`RAG is now ${isRagActive ? 'ACTIVE' : 'INACTIVE'}.`, 'info');
         };
-
-        function updateRagToggleButtonState() {
-            const hasVectorizer = !!sessionActiveVectorizer;
-            ragToggleBtn.disabled = !hasVectorizer;
-
-            if (!hasVectorizer) {
-                 ragToggleBtn.classList.remove('rag-toggle-on');
-                 ragToggleBtn.classList.add('rag-toggle-off');
-                 ragToggleBtn.title = "No active vectorizer (Set in Settings)";
-                 isRagActive = false; // Force off
-                 return;
-            }
-
-            if (isRagActive) {
-                ragToggleBtn.classList.remove('rag-toggle-off');
-                ragToggleBtn.classList.add('rag-toggle-on');
-                ragToggleBtn.title = `RAG Active (Using ${sessionActiveVectorizer}) - Click to disable`;
-            } else {
-                ragToggleBtn.classList.remove('rag-toggle-on');
-                ragToggleBtn.classList.add('rag-toggle-off');
-                ragToggleBtn.title = `RAG Inactive (Using ${sessionActiveVectorizer}) - Click to enable`;
-            }
+        function updateRagToggleButtonState() { /* ... no change ... */
+            const hasVectorizer = !!sessionActiveVectorizer; ragToggleBtn.disabled = !hasVectorizer;
+            if (!hasVectorizer) { ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off'); ragToggleBtn.title = "No active vectorizer (Set in Settings)"; isRagActive = false; return; }
+            if (isRagActive) { ragToggleBtn.classList.remove('rag-toggle-off'); ragToggleBtn.classList.add('rag-toggle-on'); ragToggleBtn.title = `RAG Active (Using ${sessionActiveVectorizer}) - Click to disable`; }
+            else { ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off'); ragToggleBtn.title = `RAG Inactive (Using ${sessionActiveVectorizer}) - Click to enable`; }
         }
 
-
-        // --- Export / Import Logic ---
-        function populateExportModal() {
-             const allIds = Object.keys(discussions);
-             exportDiscussionList.innerHTML = '';
-             if (allIds.length === 0) {
-                 exportDiscussionList.innerHTML = '<p class="text-gray-500 italic">No discussions to export.</p>';
-             } else {
-                 allIds.forEach(id => {
-                     const div = document.createElement('div');
-                     div.className = 'flex items-center';
-                     const checkbox = document.createElement('input');
-                     checkbox.type = 'checkbox';
-                     checkbox.id = `export-check-${id}`;
-                     checkbox.value = id;
-                     checkbox.className = 'h-4 w-4 mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-offset-0 focus:ring-blue-200 focus:ring-opacity-50';
-                     const label = document.createElement('label');
-                     label.htmlFor = `export-check-${id}`;
-                     label.textContent = discussions[id].title;
-                     label.className = 'text-sm text-gray-700';
-                     div.appendChild(checkbox);
-                     div.appendChild(label);
-                     exportDiscussionList.appendChild(div);
-                 });
-             }
+        // --- Export / Import Logic (Unchanged) ---
+        function populateExportModal() { /* ... no change ... */
+             const allIds = Object.keys(discussions); exportDiscussionList.innerHTML = ''; if (allIds.length === 0) { exportDiscussionList.innerHTML = '<p class="text-gray-500 italic">No discussions to export.</p>'; }
+             else { allIds.forEach(id => { const div = document.createElement('div'); div.className = 'flex items-center'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.id = `export-check-${id}`; checkbox.value = id; checkbox.className = 'h-4 w-4 mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-offset-0 focus:ring-blue-200 focus:ring-opacity-50'; const label = document.createElement('label'); label.htmlFor = `export-check-${id}`; label.textContent = discussions[id].title; label.className = 'text-sm text-gray-700'; div.appendChild(checkbox); div.appendChild(label); exportDiscussionList.appendChild(div); }); }
         }
-
         exportDataBtn.onclick = () => openModal('exportModal');
-
-        confirmExportBtn.onclick = async () => {
-            const selectedIds = Array.from(exportDiscussionList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
-             closeModal('exportModal');
-             showStatus('Exporting data...', 'info');
-
+        confirmExportBtn.onclick = async () => { /* ... no change ... */
+            const selectedIds = Array.from(exportDiscussionList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value); closeModal('exportModal'); showStatus('Exporting data...', 'info');
              try {
                  const requestBody = { discussion_ids: selectedIds.length > 0 ? selectedIds : null };
-                 const response = await apiRequest('/api/discussions/export', {
-                     method: 'POST',
-                     headers: { 'Content-Type': 'application/json' },
-                     body: JSON.stringify(requestBody)
-                 });
-
-                 const exportData = await response.json();
-                 const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
-                 const url = URL.createObjectURL(blob);
-                 const a = document.createElement('a');
-                 a.href = url;
-                 const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                 a.download = `simplified_lollms_export_${currentUser.username}_${timestamp}.json`;
-                 document.body.appendChild(a);
-                 a.click();
-                 document.body.removeChild(a);
-                 URL.revokeObjectURL(url);
+                 const response = await apiRequest('/api/discussions/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
+                 const exportData = await response.json(); const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob);
+                 const a = document.createElement('a'); a.href = url; const timestamp = new Date().toISOString().replace(/[:.]/g, '-'); a.download = `simplified_lollms_export_${currentUser.username}_${timestamp}.json`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
                  showStatus('Data exported successfully.', 'success');
-
-             } catch (error) {
-                 console.error("Export failed:", error);
-                 // Status shown by apiRequest
-             }
+             } catch (error) { console.error("Export failed:", error); }
         };
-
-        importDataBtn.onclick = () => {
-             importFile.value = '';
-             importPreviewArea.style.display = 'none';
-             importDiscussionList.innerHTML = '';
-             confirmImportBtn.disabled = true;
-             showStatus('', 'info', importStatus);
-             parsedImportData = null; // Reset parsed data
-             openModal('importModal');
+        importDataBtn.onclick = () => { /* ... no change ... */
+             importFile.value = ''; importPreviewArea.style.display = 'none'; importDiscussionList.innerHTML = ''; confirmImportBtn.disabled = true; showStatus('', 'info', importStatus); parsedImportData = null; openModal('importModal');
         };
-
          let parsedImportData = null;
-         importFile.onchange = async () => {
-            const file = importFile.files[0];
-            parsedImportData = null; // Reset on new file selection
-            importPreviewArea.style.display = 'none';
-            importDiscussionList.innerHTML = '';
-            confirmImportBtn.disabled = true;
-            showStatus('', 'info', importStatus);
-
-            if (!file) return;
-
-             if (file.type !== 'application/json') {
-                 showStatus('Error: Please select a valid JSON file.', 'error', importStatus);
-                 return;
-             }
-
+         importFile.onchange = async () => { /* ... no change ... */
+            const file = importFile.files[0]; parsedImportData = null; importPreviewArea.style.display = 'none'; importDiscussionList.innerHTML = ''; confirmImportBtn.disabled = true; showStatus('', 'info', importStatus); if (!file) return;
+             if (file.type !== 'application/json') { showStatus('Error: Please select a valid JSON file.', 'error', importStatus); return; }
             showStatus('Reading file...', 'info', importStatus);
             try {
-                const content = await file.text();
-                parsedImportData = JSON.parse(content);
-
-                if (!parsedImportData || !Array.isArray(parsedImportData.discussions)) {
-                    throw new Error("Invalid export file format (missing 'discussions' array).");
-                }
-
-                 if (parsedImportData.discussions.length === 0) {
-                     importDiscussionList.innerHTML = '<p class="text-gray-500 italic">No discussions found in the file.</p>';
-                     confirmImportBtn.disabled = true; // No discussions to select
-                 } else {
-                     parsedImportData.discussions.forEach((disc, index) => {
-                        if (!disc || typeof disc.discussion_id !== 'string') {
-                             console.warn("Skipping invalid discussion data in import file:", disc);
-                             return; // Skip malformed entries
-                        }
-                        const div = document.createElement('div');
-                        div.className = 'flex items-center';
-                        const checkbox = document.createElement('input');
-                        checkbox.type = 'checkbox';
-                        checkbox.id = `import-check-${disc.discussion_id}`; // Use original ID as value
-                        checkbox.value = disc.discussion_id;
-                        checkbox.checked = true; // Select all by default
-                        checkbox.className = 'h-4 w-4 mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-offset-0 focus:ring-blue-200 focus:ring-opacity-50';
-                        const label = document.createElement('label');
-                        label.htmlFor = `import-check-${disc.discussion_id}`;
-                        label.textContent = `${disc.title || 'Untitled'} (ID: ...${disc.discussion_id.slice(-6)})`;
-                        label.className = 'text-sm text-gray-700';
-                        div.appendChild(checkbox);
-                        div.appendChild(label);
-                        importDiscussionList.appendChild(div);
-                    });
-                     confirmImportBtn.disabled = importDiscussionList.childElementCount === 0; // Disable if all entries were invalid
-                 }
-                 importPreviewArea.style.display = 'block';
-                 showStatus('', 'info', importStatus); // Clear 'Reading file...'
-
-            } catch (error) {
-                console.error("Error reading import file:", error);
-                showStatus(`Error reading file: ${error.message}`, 'error', importStatus);
-                parsedImportData = null;
-                confirmImportBtn.disabled = true;
-            }
+                const content = await file.text(); parsedImportData = JSON.parse(content);
+                if (!parsedImportData || !Array.isArray(parsedImportData.discussions)) throw new Error("Invalid export file format (missing 'discussions' array).");
+                 if (parsedImportData.discussions.length === 0) { importDiscussionList.innerHTML = '<p class="text-gray-500 italic">No discussions found in the file.</p>'; confirmImportBtn.disabled = true; }
+                 else { parsedImportData.discussions.forEach((disc, index) => { if (!disc || typeof disc.discussion_id !== 'string') { console.warn("Skipping invalid discussion data:", disc); return; } const div = document.createElement('div'); div.className = 'flex items-center'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.id = `import-check-${disc.discussion_id}`; checkbox.value = disc.discussion_id; checkbox.checked = true; checkbox.className = 'h-4 w-4 mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-offset-0 focus:ring-blue-200 focus:ring-opacity-50'; const label = document.createElement('label'); label.htmlFor = `import-check-${disc.discussion_id}`; label.textContent = `${disc.title || 'Untitled'} (ID: ...${disc.discussion_id.slice(-6)})`; label.className = 'text-sm text-gray-700'; div.appendChild(checkbox); div.appendChild(label); importDiscussionList.appendChild(div); }); confirmImportBtn.disabled = importDiscussionList.childElementCount === 0; }
+                 importPreviewArea.style.display = 'block'; showStatus('', 'info', importStatus);
+            } catch (error) { console.error("Error reading import file:", error); showStatus(`Error reading file: ${error.message}`, 'error', importStatus); parsedImportData = null; confirmImportBtn.disabled = true; }
          };
-
-         confirmImportBtn.onclick = async () => {
+         confirmImportBtn.onclick = async () => { /* ... no change ... */
              if (!parsedImportData || !importFile.files[0]) return;
-
-             const selectedOriginalIds = Array.from(importDiscussionList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value);
-             if (selectedOriginalIds.length === 0) {
-                 showStatus('Please select at least one discussion to import.', 'error', importStatus);
-                 return;
-             }
-
-             showStatus('Importing discussions...', 'info', importStatus);
-             confirmImportBtn.disabled = true; // Prevent double-click
-
+             const selectedOriginalIds = Array.from(importDiscussionList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value); if (selectedOriginalIds.length === 0) { showStatus('Please select at least one discussion to import.', 'error', importStatus); return; }
+             showStatus('Importing discussions...', 'info', importStatus); confirmImportBtn.disabled = true;
              try {
-                const importRequest = { discussion_ids_to_import: selectedOriginalIds };
-                const formData = new FormData();
-                formData.append('import_file', importFile.files[0]);
-                formData.append('import_request_json', JSON.stringify(importRequest));
-
-                 const response = await apiRequest('/api/discussions/import', {
-                     method: 'POST',
-                     body: formData,
-                     statusElement: importStatus // Target modal status
-                 });
-
-                 const result = await response.json();
-                 showStatus(result.message || `Imported ${result.imported_count} discussions.`, 'success', importStatus);
-                 console.log("Import errors/skipped:", result.errors);
-                 await loadDiscussions(); // Refresh the discussion list
-                 setTimeout(() => closeModal('importModal'), 2000); // Close after success
-
-             } catch (error) {
-                 console.error("Import failed:", error);
-                 // Status shown by apiRequest in modal status
-                 confirmImportBtn.disabled = false; // Re-enable on error
-             }
+                const importRequest = { discussion_ids_to_import: selectedOriginalIds }; const formData = new FormData(); formData.append('import_file', importFile.files[0]); formData.append('import_request_json', JSON.stringify(importRequest));
+                 const response = await apiRequest('/api/discussions/import', { method: 'POST', body: formData, statusElement: importStatus });
+                 const result = await response.json(); showStatus(result.message || `Imported ${result.imported_count} discussions.`, 'success', importStatus); console.log("Import errors/skipped:", result.errors);
+                 await loadDiscussions(); setTimeout(() => closeModal('importModal'), 2000);
+             } catch (error) { console.error("Import failed:", error); confirmImportBtn.disabled = false; }
          };
 
 
-        // --- Utilities ---
-        function scrollChatToBottom() {
-            requestAnimationFrame(() => {
-                 chatMessages.scrollTop = chatMessages.scrollHeight;
-            });
+        // --- Utilities (Unchanged) ---
+        function scrollChatToBottom() { requestAnimationFrame(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }); }
+        function showStatus(msg, type = 'info', statusElement = statusMessage) { /* ... no change ... */
+            const targetElement = statusElement || statusMessage; if (targetElement) { targetElement.textContent = msg; let typeClass = 'text-gray-600'; if (type === 'error') typeClass = 'text-red-600'; else if (type === 'success') typeClass = 'text-green-600'; else if (type === 'warning') typeClass = 'text-yellow-600'; targetElement.className = targetElement.className.replace(/text-(gray|red|green|yellow)-600/g, ''); targetElement.classList.add(typeClass); if (targetElement === statusMessage && msg) { clearTimeout(targetElement.timer); targetElement.timer = setTimeout(() => { if (targetElement.textContent === msg) targetElement.textContent = ''; }, 5000); } } else { console.log(`Status [${type}]: ${msg}`); }
         }
-
-        function showStatus(msg, type = 'info', statusElement = statusMessage) {
-            const targetElement = statusElement || statusMessage; // Fallback to global status
-            if (targetElement) {
-                 targetElement.textContent = msg;
-                 let typeClass = 'text-gray-600'; // Default info
-                 if (type === 'error') typeClass = 'text-red-600';
-                 else if (type === 'success') typeClass = 'text-green-600';
-                 else if (type === 'warning') typeClass = 'text-yellow-600';
-                 // Reset classes then add the correct one
-                 targetElement.className = targetElement.className.replace(/text-(gray|red|green|yellow)-600/g, '');
-                 targetElement.classList.add(typeClass);
-
-                 // Auto-clear global status, but not modal statuses
-                 if (targetElement === statusMessage && msg) {
-                    clearTimeout(targetElement.timer); // Clear previous timer if any
-                    targetElement.timer = setTimeout(() => {
-                         if (targetElement.textContent === msg) { // Only clear if message hasn't changed
-                             targetElement.textContent = '';
-                         }
-                    }, 5000);
-                 }
-             } else {
-                 console.log(`Status [${type}]: ${msg}`);
-             }
+        function populateDropdown(selectElement, items, selectedValue, emptyText = "Nothing found", allowEmpty = false) { /* ... no change ... */
+            if (!selectElement) { console.error("populateDropdown: selectElement is null"); return; } selectElement.innerHTML = '';
+             if (allowEmpty) { const emptyOption = document.createElement('option'); emptyOption.value = ""; emptyOption.textContent = emptyText; selectElement.appendChild(emptyOption); }
+             if (!items || !Array.isArray(items) || items.length === 0) { if (!allowEmpty) { const placeholder = document.createElement('option'); placeholder.disabled = true; placeholder.selected = true; placeholder.textContent = emptyText; selectElement.appendChild(placeholder); } }
+             else { items.forEach(item => { if (!item || typeof item.name !== 'string') { console.warn(`Dropdown '${selectElement.id}': Skipping invalid item:`, item); return; } const option = document.createElement('option'); option.value = item.name; option.textContent = item.method_name || item.name; if (item.name === selectedValue) { option.selected = true; } selectElement.appendChild(option); }); }
         }
-
-        // Helper to populate select dropdowns
-        function populateDropdown(selectElement, items, selectedValue, emptyText = "Nothing found", allowEmpty = false) {
-            if (!selectElement) {
-                console.error("populateDropdown: selectElement is null or undefined"); // DEBUG
-                return;
-            }
-            console.log(`Populating dropdown '${selectElement.id}':`, { items, selectedValue, emptyText, allowEmpty }); // DEBUG
-            selectElement.innerHTML = ''; // Clear existing
-
-            if (allowEmpty) {
-                 const emptyOption = document.createElement('option');
-                 emptyOption.value = "";
-                 emptyOption.textContent = emptyText; // Use provided text for the empty option
-                 selectElement.appendChild(emptyOption);
-             }
-
-             if (!items || !Array.isArray(items) || items.length === 0) { // Add Array.isArray check
-                console.log(`Dropdown '${selectElement.id}': No items to populate.`); // DEBUG
-                if (!allowEmpty) { // Only add placeholder if empty selection isn't allowed
-                    const placeholder = document.createElement('option');
-                    placeholder.disabled = true;
-                    placeholder.selected = true;
-                    placeholder.textContent = emptyText;
-                    selectElement.appendChild(placeholder);
-                }
-             } else {
-                 items.forEach(item => {
-                     const option = document.createElement('option');
-                     if (!item || typeof item.name !== 'string') { // Add check for valid item structure
-                         console.warn(`Dropdown '${selectElement.id}': Skipping invalid item:`, item); // DEBUG
-                         return; // Skip this invalid item
-                     }
-                     option.value = item.name; // Assuming items have { name: 'value', method_name: 'Display Text' } or just {name: 'value'}
-                     option.textContent = item.method_name || item.name; // Use descriptive name if available
-                     if (item.name === selectedValue) {
-                         option.selected = true;
-                     }
-                     selectElement.appendChild(option);
-                 });
-             }
-        }
-
 
     </script>
 
