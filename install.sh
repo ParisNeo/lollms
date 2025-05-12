@@ -41,7 +41,11 @@ update_config() {
     if [ -z "$new_val" ]; then
         new_val="$default_value"
     fi
-    sed -i "/$key =/c\\$key = \"$new_val\"" config.toml
+    # Add quotes only if the value is not a number
+    if ! [[ "$new_val" =  ^-?[0-9]+([.][0-9]+)?$ ]]; then
+        new_val="\"$new_val\""
+    fi
+    sed -i "/$key =/c\\$key = $new_val" config.toml
 }
 
 # Function to update TOML values with user input (for non-string values)
@@ -72,13 +76,13 @@ update_config_secure() {
 
 # Server settings
 echo $'\n🔧 Configure [server] Settings'
-update_config "host" "\"0.0.0.0\""
+update_config "host" "0.0.0.0"
 update_config_raw "port" 9642
 
 # App settings
 echo $'\n🔧 Configure [app_settings] Settings'
-update_config "data_dir" "\"data\""
-update_config "database_url" "\"sqlite:///./data/app_main.db\""
+update_config "data_dir" "data"
+update_config "database_url" "sqlite:///./data/app_main.db"
 
 # Secret key generation
 read -p $'Generate new secret_key? (y/N) [N]: ' gen_secret
@@ -89,7 +93,7 @@ fi
 
 # Initial admin user
 echo $'\n🔧 Configure [initial_admin_user] Settings'
-update_config "username" "\"superadmin\""
+update_config "username" "superadmin"
 read -p $'Generate secure password? (y/N) [N]: ' gen_pass
 if [[ "$gen_pass" == "Y" || "$gen_pass" == "y" ]]; then
     new_password=$(openssl rand -base64 20)
@@ -100,10 +104,10 @@ fi
 
 # Lollms client defaults
 echo $'\n🔧 Configure [lollms_client_defaults] Settings'
-update_config "binding_name" "\"ollama\""
-update_config "default_model_name" "\"phi4:latest\""
-update_config "host_address" "\"http://localhost:11434\""
-update_config "service_key_env_var" "\"OPENAI_API_KEY\""
+update_config "binding_name" "ollama"
+update_config "default_model_name" "phi4:latest"
+update_config "host_address" "http://localhost:11434"
+update_config "service_key_env_var" "OPENAI_API_KEY"
 
 # Safe store defaults
 echo $'\n🔧 Configure [safe_store_defaults] Settings'
@@ -129,22 +133,33 @@ fi
 
 echo "You can now start your application!"
 
-# Create a new user and group named lollms
-echo "🔧 Creating user and group 'lollms'..."
-sudo groupadd lollms
-sudo useradd -r -s /bin/false -g lollms lollms
-
-# Create data directory if it doesn't exist and set permissions
-echo "🔧 Creating data directory and setting permissions..."
-if [ ! -d "data" ]; then
-    mkdir data
-fi
-sudo chown -R lollms:lollms data
-
 # Option to create a systemd service
 read -p $'Create a systemd service to run the server? (y/N) [N]: ' create_service
 if [[ "$create_service" == "Y" || "$create_service" == "y" ]]; then
     echo "🔧 Creating systemd service..."
+
+    # Check if the lollms group exists, if not, create it
+    if ! getent group lollms > /dev/null 2>&1; then
+        echo "🔧 Creating group 'lollms'..."
+        sudo groupadd lollms
+    fi
+
+    # Check if the lollms user exists, if not, create it
+    if ! getent passwd lollms > /dev/null 2>&1; then
+        echo "🔧 Creating user 'lollms'..."
+        sudo useradd -r -s /bin/false -g lollms lollms
+    fi
+
+    # Create data directory if it doesn't exist and set permissions
+    echo "🔧 Creating data directory and setting permissions..."
+    if [ ! -d "data" ]; then
+        mkdir data
+    fi
+    sudo chown -R lollms:lollms data
+
+    # Make run.sh executable
+    echo "🔧 Making run.sh executable..."
+    chmod +x run.sh
 
     # Define the service file content
     cat <<EOF > lollms.service
