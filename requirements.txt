@@ -36,6 +36,7 @@ ollama # for ollama
 # - cryptography (for encryption)
 # - filelock (core concurrency mechanism for safe_store)
 safe_store[all]>=1.6.1
+lollmsvectordb
 
 # If you prefer to install safe_store features individually:
 # safe_store
