@@ -101,7 +101,7 @@ fi
 # Lollms client defaults
 echo $'\n🔧 Configure [lollms_client_defaults] Settings'
 update_config "binding_name" "\"ollama\""
-update_config "default_model_name" "\"phi3:latest\""
+update_config "default_model_name" "\"phi4:latest\""
 update_config "host_address" "\"http://localhost:11434\""
 update_config "service_key_env_var" "\"OPENAI_API_KEY\""
 
