@@ -129,6 +129,18 @@ fi
 
 echo "You can now start your application!"
 
+# Create a new user and group named lollms
+echo "🔧 Creating user and group 'lollms'..."
+sudo groupadd lollms
+sudo useradd -r -s /bin/false -g lollms lollms
+
+# Create data directory if it doesn't exist and set permissions
+echo "🔧 Creating data directory and setting permissions..."
+if [ ! -d "data" ]; then
+    mkdir data
+fi
+sudo chown -R lollms:lollms data
+
 # Option to create a systemd service
 read -p $'Create a systemd service to run the server? (y/N) [N]: ' create_service
 if [[ "$create_service" == "Y" || "$create_service" == "y" ]]; then
@@ -141,9 +153,10 @@ Description=Lollms Application
 After=network.target
 
 [Service]
-User=\$(whoami)
+User=lollms
+Group=lollms
 WorkingDirectory=$(pwd)
-ExecStart=$(pwd)/venv/bin/python $(pwd)/main.py
+ExecStart=$(pwd)/run.sh
 Restart=always
 
 [Install]
