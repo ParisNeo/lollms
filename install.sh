@@ -38,7 +38,10 @@ update_config() {
     read -p "Enter value for $key [$default_value]: " new_val
 
     # Use user input if provided, otherwise keep default
-    [ ! -z "$new_val" ] && sed -i "/$key =/c\\$key = \"$new_val\"" config.toml
+    if [ -z "$new_val" ]; then
+        new_val="$default_value"
+    fi
+    sed -i "/$key =/c\\$key = \"$new_val\"" config.toml
 }
 
 # Function to update TOML values with user input (for non-string values)
@@ -48,7 +51,10 @@ update_config_raw() {
     read -p "Enter value for $key [$default_value]: " new_val
 
     # Use user input if provided, otherwise keep default
-    [ ! -z "$new_val" ] && sed -i "/$key =/c\\$key = $new_val" config.toml
+    if [ -z "$new_val" ]; then
+        new_val="$default_value"
+    fi
+    sed -i "/$key =/c\\$key = $new_val" config.toml
 }
 
 # Function to update TOML values with secure input (no echo)
@@ -58,7 +64,10 @@ update_config_secure() {
     echo
 
     # Use user input if provided, otherwise keep default
-    [ ! -z "$new_val" ] && sed -i "/$key =/c\\$key = \"$new_val\"" config.toml
+    if [ -z "$new_val" ]; then
+        new_val="CHANGE_ME_TO_A_STRONG_PASSWORD"
+    fi
+    sed -i "/$key =/c\\$key = \"$new_val\"" config.toml
 }
 
 # Server settings
