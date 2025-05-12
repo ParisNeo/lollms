@@ -1,4 +1,7 @@
 # config.toml
+[server]
+host = "0.0.0.0"
+port = "9602"
 
 [app_settings]
 data_dir = "data"  # For user-specific discussion files and SafeStore DBs
@@ -16,7 +19,7 @@ password = "CHANGE_ME_TO_A_STRONG_PASSWORD" # This will be hashed on first setup
 [lollms_client_defaults] # Global defaults, can be overridden by user settings in DB
 binding_name = "ollama" # Example: "ollama", "openai", "lollms", "transformers"
 default_model_name = "phi3:latest" # Example: "phi3:latest" for ollama, "gpt-4o-mini" for openai
-host_address = "" # e.g., "http://localhost:11434" for Ollama, "https://api.openai.com/v1" for OpenAI
+host_address = "http://localhost:11434" # e.g., "http://localhost:11434" for Ollama, "https://api.openai.com/v1" for OpenAI
 service_key_env_var = "OPENAI_API_KEY" # Environment variable name for API key (e.g., for OpenAI)
 ctx_size = 4096 # Default context size for LLM
 user_name = "user" # Default name for the user in prompts
