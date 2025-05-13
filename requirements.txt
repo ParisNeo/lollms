@@ -11,7 +11,7 @@ sqlalchemy
 passlib[bcrypt]  # For password hashing (bcrypt is a common and secure scheme)
 
 # --- LoLLMs Client Library and Common Backends ---
-lollms-client>=0.10.0
+lollms-client>=0.12.3
 ascii_colors>0.11.0
 pipmaster
 
