@@ -2693,6 +2693,70 @@
             }
         }
 
+            function populateDataStoresModal() {
+        // My Data Stores Tab
+        if(!ownedDataStoresList) return; // Ensure elements exist
+        ownedDataStoresList.innerHTML = '';
+        if (ownedDataStores.length === 0) {
+            ownedDataStoresList.innerHTML = `<p class="text-gray-500 dark:text-gray-400 italic">${translate("noDataStoresCreated")}</p>`;
+        } else {
+            ownedDataStores.forEach(ds => {
+                const div = document.createElement('div');
+                div.className = 'flex justify-between items-center py-1.5 px-2 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-sm';
+                // Sanitize names and descriptions for display and JS calls
+                const safeName = ds.name.replace(/'/g, "\\'").replace(/"/g, """);
+                const safeDescription = (ds.description || '').replace(/'/g, "\\'").replace(/"/g, """);
+
+                div.innerHTML = `
+                    <div class="flex-1">
+                        <strong class="text-gray-800 dark:text-gray-100">${ds.name}</strong>
+                        <span class="ml-2 text-xs ${ds.is_public_in_store ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'}">
+                            ${ds.is_public_in_store ? `(${translate("publicInStore")})` : `(${translate("private")})`}
+                        </span>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${ds.description || ''}">${ds.description || translate("noDescription")}</p>
+                    </div>
+                    <div class="space-x-1">
+                        <button title="${translate("manageFilesButtonTitle")}" onclick="openFileManagerForStore('${ds.id}', '${safeName}')" class="p-1 hover:bg-blue-100 dark:hover:bg-blue-700 rounded"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-blue-600 dark:text-blue-400"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776" /></svg></button>
+                        <button title="${translate("manageSharingButtonTitle")}" onclick="openManageDataStoreSharingModal('${ds.id}', '${safeName}')" class="p-1 hover:bg-green-100 dark:hover:bg-green-700 rounded"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-green-600 dark:text-green-400"><path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0-4.5 2.25 2.25 0 0 0 0 4.5Zm0 0v(.001M4.5 19.5h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Zm6-10.125a1.875 1.875 0 1 1-3.75 0 1.875 1.875 0 0 1 3.75 0Zm1.294 6.336a6.721 6.721 0 0 1-3.17.789 6.721 6.721 0 0 1-3.168-.789 3.376 3.376 0 0 1 6.338 0Z" /></svg></button>
+                        <button title="${translate("editButtonTitle")}" onclick="openEditDataStoreModal('${ds.id}', '${safeName}', '${safeDescription}', ${ds.is_public_in_store})" class="p-1 hover:bg-yellow-100 dark:hover:bg-yellow-600 rounded"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-yellow-600 dark:text-yellow-400"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg></button>
+                        <button title="${translate("deleteButtonTitle")}" onclick="deleteDataStore('${ds.id}', '${safeName}')" class="p-1 hover:bg-red-100 dark:hover:bg-red-700 rounded"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-red-600 dark:text-red-400"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg></button>
+                    </div>
+                `;
+                ownedDataStoresList.appendChild(div);
+            });
+        }
+
+        // Shared With Me Tab
+        if(!sharedDataStoresList) return;
+        sharedDataStoresList.innerHTML = '';
+        // Ensure we only show stores actually shared by others, not ones the user owns but might appear in a combined list
+        const actualSharedStores = sharedDataStores.filter(ds => ds.owner_username !== currentUser.username);
+        if (actualSharedStores.length === 0) {
+            sharedDataStoresList.innerHTML = `<p class="text-gray-500 dark:text-gray-400 italic">${translate("noStoresSharedWithYou")}</p>`;
+        } else {
+             actualSharedStores.forEach(ds => {
+                const div = document.createElement('div');
+                div.className = 'flex justify-between items-center py-1.5 px-2 text-sm';
+                div.innerHTML = `
+                    <div class="flex-1">
+                        <strong class="text-gray-800 dark:text-gray-100">${ds.name}</strong> <span class="text-xs text-gray-500 dark:text-gray-400"> (${translate("ownedBy", {username: ds.owner_username})})</span>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${ds.description || ''}">${ds.description || translate("noDescription")}</p>
+                    </div>
+                    <button title="${translate("useForRagButtonTitle")}" onclick="setDiscussionRagStore('${ds.id}')" class="p-1 text-xs bg-blue-100 dark:bg-blue-700 text-blue-700 dark:text-blue-100 rounded hover:bg-blue-200 dark:hover:bg-blue-600">${translate("useForRagButton")}</button>
+                `;
+                sharedDataStoresList.appendChild(div);
+            });
+        }
+
+        // Data Store Store Tab
+        populatePublicDataStoresList(); // This function will handle its own loading message and rendering
+
+        // Activate the first tab if no specific tab was requested to be active
+        if (dataStoresModalTabs && dataStoresModalTabs.length > 0 && !dataStoresModal.querySelector('.modal-tab-btn.active')) {
+             dataStoresModalTabs[0].click();
+        }
+    }
+
     </script>
 
 
