@@ -2704,8 +2704,8 @@
                 const div = document.createElement('div');
                 div.className = 'flex justify-between items-center py-1.5 px-2 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-sm';
                 // Sanitize names and descriptions for display and JS calls
-                const safeName = ds.name.replace(/'/g, "\\'").replace(/"/g, """);
-                const safeDescription = (ds.description || '').replace(/'/g, "\\'").replace(/"/g, """);
+                const safeName = ds.name.replace(/'/g, "\\'").replace(/"/g, "\"");
+                const safeDescription = (ds.description || '').replace(/'/g, "\\'").replace(/"/g, "\"");
 
                 div.innerHTML = `
                     <div class="flex-1">
