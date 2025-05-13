@@ -1239,59 +1239,27 @@
             
             updateRagToggleButtonState();
             
-            if(confirmRenameBtn) confirmRenameBtn.onclick = confirmInlineRename;
-            if(confirmSendDiscussionBtn) confirmSendDiscussionBtn.onclick = confirmSendDiscussion;
-            if(confirmEditMessageBtn) confirmEditMessageBtn.onclick = confirmMessageEdit;
-            if(logoutBtn) logoutBtn.onclick = handleLogout;
-            if(loginSubmitBtn) loginSubmitBtn.onclick = handleLoginAttempt;
-            if(loginPasswordInput) loginPasswordInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleLoginAttempt(); });
-            
-            if(settingsTabs) settingsTabs.forEach(button => {
-                button.addEventListener('click', () => {
-                    settingsTabs.forEach(btn => btn.classList.remove('active'));
-                    settingsContentPanes.forEach(pane => pane.classList.remove('active'));
-                    button.classList.add('active');
-                    document.getElementById(button.dataset.tab).classList.add('active');
-                });
-            });
-            document.querySelectorAll('.modal-tabs .modal-tab-btn').forEach(button => {
-                button.addEventListener('click', (e) => {
-                    const parentModal = e.target.closest('.modal');
-                    if(parentModal) switchModalTab(parentModal, e.target);
-                });
-            });
+            // --- Attach Event Listeners ---
 
-            if(promptsBtn) promptsBtn.onclick = () => openModal('promptsModal');
-            if(friendsBtn) friendsBtn.onclick = () => openModal('friendsModal');
+            // Sidebar Buttons
+            if(newDiscussionBtn) newDiscussionBtn.onclick = async () => {
+                showStatus(translate('creatingNewDiscussion'), 'info');
+                try {
+                    const response = await apiRequest('/api/discussions', { method: 'POST' });
+                    const newDiscussion = await response.json();
+                    discussions[newDiscussion.id] = { 
+                        id: newDiscussion.id, title: newDiscussion.title, is_starred: newDiscussion.is_starred,
+                        rag_datastore_id: newDiscussion.rag_datastore_id, messages_loaded_fully: true 
+                    };
+                    renderDiscussionList();
+                    selectDiscussion(newDiscussion.id);
+                    showStatus(translate('newDiscussionCreatedSuccess'), 'success');
+                } catch (error) { console.error("Failed to create discussion:", error); }
+            };
             if(settingsBtn) settingsBtn.onclick = () => openModal('settingsModal');
+            if(promptsBtn) promptsBtn.onclick = () => openModal('promptsModal');
             if(dataStoresBtn) dataStoresBtn.onclick = () => openModal('dataStoresModal');
-            
-            if(insertPromptBtn) insertPromptBtn.onclick = (event) => { event.stopPropagation(); toggleInsertPromptDropdown(); };
-            document.addEventListener('click', (event) => {
-                if (insertPromptDropdown && !insertPromptDropdown.contains(event.target) && event.target !== insertPromptBtn && insertPromptDropdown.style.display !== 'none') {
-                    insertPromptDropdown.style.display = 'none';
-                }
-            });
-            if(promptSearchInput) promptSearchInput.oninput = filterUserPromptsForInsertion;
-
-            if(promptCategoriesList) {
-                PROMPT_CATEGORIES_DEFAULT.forEach(cat => {
-                    const option = document.createElement('option'); option.value = cat;
-                    promptCategoriesList.appendChild(option);
-                });
-            }
-
-
-            if(createDataStoreForm) createDataStoreForm.addEventListener('submit', (e) => {e.preventDefault(); handleCreateOrUpdateDataStore();});
-            if(confirmCreateOrUpdateDataStoreBtn) confirmCreateOrUpdateDataStoreBtn.onclick = handleCreateOrUpdateDataStore;
-            if(openCreateDataStoreModalBtn) openCreateDataStoreModalBtn.onclick = () => openCreateDataStoreModal();
-
-            if(createEditPromptForm) createEditPromptForm.addEventListener('submit', (e) => {e.preventDefault(); handleSavePrompt(); });
-            if(confirmSavePromptBtn) confirmSavePromptBtn.onclick = handleSavePrompt;
-            if(openCreatePromptModalBtn) openCreatePromptModalBtn.onclick = () => openCreateEditPromptModal(); 
-
-            if(sendFriendRequestBtn) sendFriendRequestBtn.onclick = handleSendFriendRequest;
-
+            if(friendsBtn) friendsBtn.onclick = () => openModal('friendsModal');
             if(exportDataBtn) exportDataBtn.onclick = () => openModal('exportModal');
             if(importDataBtn) importDataBtn.onclick = () => { 
                 if(importFile) importFile.value = ''; 
@@ -1302,20 +1270,150 @@
                 parsedImportData = null; 
                 openModal('importModal');
             };
+            if(logoutBtn) logoutBtn.onclick = handleLogout;
+
+            // Chat Input Area
+            if(messageInput) messageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } autoGrowTextarea(messageInput); });
+            if(messageInput) messageInput.addEventListener('input', () => autoGrowTextarea(messageInput));
+            if(sendMessageBtn) sendMessageBtn.onclick = sendMessage;
+            if(imageUploadInput) imageUploadInput.addEventListener('change', handleImageFileSelection);
+            if(insertPromptBtn) insertPromptBtn.onclick = (event) => { event.stopPropagation(); toggleInsertPromptDropdown(); };
+            if(promptSearchInput) promptSearchInput.oninput = filterUserPromptsForInsertion;
+
+
+            // Login Modal
+            if(loginSubmitBtn) loginSubmitBtn.onclick = handleLoginAttempt;
+            if(loginPasswordInput) loginPasswordInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleLoginAttempt(); });
+
+            // Generic Modals (Rename, Send Discussion, Edit Message)
+            if(confirmRenameBtn) confirmRenameBtn.onclick = confirmInlineRename;
+            if(confirmSendDiscussionBtn) confirmSendDiscussionBtn.onclick = confirmSendDiscussion;
+            if(confirmEditMessageBtn) confirmEditMessageBtn.onclick = confirmMessageEdit;
+            
+            // Export/Import Modals
             if(confirmExportBtn) confirmExportBtn.onclick = handleExportData;
             if(importFile) importFile.onchange = handleImportFileSelect;
             if(confirmImportBtn) confirmImportBtn.onclick = handleConfirmImport;
 
+            // Settings Modal Tabs & Buttons
+            if(settingsTabs) settingsTabs.forEach(button => {
+                button.addEventListener('click', () => {
+                    settingsTabs.forEach(btn => btn.classList.remove('active'));
+                    settingsContentPanes.forEach(pane => pane.classList.remove('active'));
+                    button.classList.add('active');
+                    const targetPane = document.getElementById(button.dataset.tab)
+                    if(targetPane) targetPane.classList.add('active');
+                });
+            });
             if(savePasswordBtn) savePasswordBtn.onclick = handleSavePassword;
             if(saveModelSettingsBtn) saveModelSettingsBtn.onclick = handleSaveModelSettings;
             if(saveLLMParamsBtn) saveLLMParamsBtn.onclick = handleSaveLLMParams;
             if(saveRagSettingsBtn) saveRagSettingsBtn.onclick = handleSaveRagSettings;
             if(saveAppearanceSettingsBtn) saveAppearanceSettingsBtn.onclick = handleSaveAppearanceSettings;
-            
+            if(settingsLollmsModelSelect) settingsLollmsModelSelect.onchange = () => { if(saveModelSettingsBtn) saveModelSettingsBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name);};
+            [settingsTemperature, settingsTopK, settingsTopP, settingsRepeatPenalty, settingsRepeatLastN].forEach(el => {
+                if(el) el.oninput = () => { if(saveLLMParamsBtn) saveLLMParamsBtn.disabled = false; };
+            });
+            if(settingsVectorizerSelect) settingsVectorizerSelect.onchange = () => { if(saveRagSettingsBtn) saveRagSettingsBtn.disabled = false;};
+            if(settingsRagTopKInput) settingsRagTopKInput.oninput = () => { if(saveRagSettingsBtn) saveRagSettingsBtn.disabled = false;};
+
+
+            // Data Stores Modals
+            if(dataStoresModalTabs) dataStoresModalTabs.forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const parentModal = e.target.closest('.modal');
+                    if(parentModal) switchModalTab(parentModal, e.target);
+                });
+            });
+            if(openCreateDataStoreModalBtn) openCreateDataStoreModalBtn.onclick = () => openCreateDataStoreModal();
+            if(createDataStoreForm) createDataStoreForm.addEventListener('submit', (e) => {e.preventDefault(); handleCreateOrUpdateDataStore();});
+            if(confirmCreateOrUpdateDataStoreBtn) confirmCreateOrUpdateDataStoreBtn.onclick = handleCreateOrUpdateDataStore;
+            if(confirmShareDsWithFriendBtn) confirmShareDsWithFriendBtn.onclick = async () => { // Make it async
+                const friendUsername = shareDsWithFriendSelect.value;
+                if (!currentManageSharingDsId || !friendUsername) {
+                    showStatus(translate("selectFriendToShareWithError"), 'error', manageDataStoreSharingStatus); return;
+                }
+                showStatus(translate("sharingDataStoreWith", {username: friendUsername}), 'info', manageDataStoreSharingStatus);
+                try {
+                    await apiRequest(`/api/datastores/${currentManageSharingDsId}/share_with_friend`, { // Corrected endpoint from previous version of this func
+                        method: 'POST', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ target_username: friendUsername, permission_level: "read_query" }),
+                        statusElement: manageDataStoreSharingStatus
+                    });
+                    showStatus(translate("dataStoreSharedSuccess"), 'success', manageDataStoreSharingStatus);
+                    await loadDsSharedWithUsers(currentManageSharingDsId); 
+                    shareDsWithFriendSelect.value = ""; 
+                } catch (error) { console.error("Share DS with friend failed:", error); }
+            };
+
+
+            // File Management Modal Buttons
             if(fileVectorizerSelect) fileVectorizerSelect.onchange = updateConfirmUploadBtnState;
             if(fileUploadInput) fileUploadInput.onchange = updateConfirmUploadBtnState;
             if(confirmUploadBtn) confirmUploadBtn.onclick = handleConfirmFileUpload;
 
+            // Prompts Modal
+            if(promptsModalTabs) promptsModalTabs.forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const parentModal = e.target.closest('.modal');
+                    if(parentModal) switchModalTab(parentModal, e.target);
+                });
+            });
+            if(openCreatePromptModalBtn) openCreatePromptModalBtn.onclick = () => openCreateEditPromptModal();
+            if(createEditPromptForm) createEditPromptForm.addEventListener('submit', (e) => {e.preventDefault(); handleSavePrompt(); });
+            if(confirmSavePromptBtn) confirmSavePromptBtn.onclick = handleSavePrompt;
+            
+            // Friends Modal
+            if(friendsModalTabs) friendsModalTabs.forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const parentModal = e.target.closest('.modal');
+                    if(parentModal) switchModalTab(parentModal, e.target);
+                });
+            });
+            if(sendFriendRequestBtn) sendFriendRequestBtn.onclick = handleSendFriendRequest;
+
+
+            // RAG Toggle
+            if(ragToggleBtn) ragToggleBtn.onclick = () => {
+                 if (availableDataStoresForRag.length === 0) {
+                     showStatus(translate('cannotEnableRagNoStores'), 'warning'); return;
+                 }
+                 isRagActive = !isRagActive;
+                 updateRagToggleButtonState();
+                 if (isRagActive && ragDataStoreSelect && !ragDataStoreSelect.value && availableDataStoresForRag.length > 0) {
+                     ragDataStoreSelect.value = availableDataStoresForRag[0].id;
+                     ragDataStoreSelect.dispatchEvent(new Event('change')); 
+                 } else if (!isRagActive && currentDiscussionId && discussions[currentDiscussionId] && ragDataStoreSelect) {
+                     ragDataStoreSelect.value = "";
+                     ragDataStoreSelect.dispatchEvent(new Event('change'));
+                 }
+                 showStatus(translate(isRagActive ? 'ragActive' : 'ragInactive'), 'info');
+            };
+            if(ragDataStoreSelect) ragDataStoreSelect.onchange = async () => {
+                if (!currentDiscussionId) return;
+                const selectedDataStoreId = ragDataStoreSelect.value || null; 
+                try {
+                    await apiRequest(`/api/discussions/${currentDiscussionId}/rag_datastore`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rag_datastore_id: selectedDataStoreId })
+                    });
+                    if(discussions[currentDiscussionId]) discussions[currentDiscussionId].rag_datastore_id = selectedDataStoreId;
+                    showStatus(translate("ragDatastoreSetForDiscussion", {storeName: selectedDataStoreId ? availableDataStoresForRag.find(ds=>ds.id===selectedDataStoreId)?.name : translate('None')}), 'success');
+                } catch (error) {
+                    showStatus(translate('failedToSetRagDatastore'), 'error');
+                    if(discussions[currentDiscussionId] && ragDataStoreSelect) ragDataStoreSelect.value = discussions[currentDiscussionId].rag_datastore_id || "";
+                }
+            };
+
+
+            // Close dropdown if clicked outside (for prompt dropdown)
+            document.addEventListener('click', (event) => {
+                if (insertPromptDropdown && !insertPromptDropdown.contains(event.target) && event.target !== insertPromptBtn && insertPromptDropdown.style.display !== 'none') {
+                    insertPromptDropdown.style.display = 'none';
+                }
+            });
+            
             // Store the original default discussion title text for i18n updates
             if (discussionTitle) discussionTitle.dataset.i18nDefaultOriginal = discussionTitle.textContent;
 
