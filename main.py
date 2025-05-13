@@ -1650,10 +1650,10 @@ async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
 
-    owned_datastores_db = db.query(DBDataStore).filter(DBDataStore.owner_user_id == user_db_record.id).order_by(DBDataStore.name).all()
+    owned_datastores_db = db.query(DBDataStore).filter(DBDataStore.owner_user_id == user_db_record.id).order_by(DBSharedDataStoreLink.datastore.has.name).all()
     
     shared_links_db = db.query(DBSharedDataStoreLink).options(joinedload(DBSharedDataStoreLink.datastore).joinedload(DBDataStore.owner))\
-        .filter(DBSharedDataStoreLink.shared_with_user_id == user_db_record.id).order_by(DBDataStore.name).all()
+        .filter(DBSharedDataStoreLink.shared_with_user_id == user_db_record.id).order_by(DBSharedDataStoreLink.datastore.has.name).all()
 
     response_list = []
     for ds_db in owned_datastores_db:
