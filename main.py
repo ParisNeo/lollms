@@ -206,7 +206,7 @@ class AppLollmsDiscussion:
                 # Potentially re-calculate token_count if content changes
                 if msg.sender.lower() != self.lollms_client.user_name.lower(): # AI message
                     try:
-                        msg.token_count = len(self.lollms_client.tokenize(new_content))
+                        msg.token_count = self.lollms_client.count_tokens(new_content)
                     except Exception:
                         msg.token_count = len(new_content) // 3 # Fallback
                 return True
@@ -333,7 +333,7 @@ class AppLollmsDiscussion:
         ai_prefix = f"\n{lc.separator_template}{lc.ai_name}\n"
         current_turn_formatted = f"{user_prefix}\n{current_prompt_text}{ai_prefix}"
         try:
-            current_turn_tokens = len(lc.tokenize(current_turn_formatted))
+            current_turn_tokens = self.lollms_client.count_tokens(current_turn_formatted)
         except Exception:
             current_turn_tokens = len(current_turn_formatted) // 3
 
@@ -846,7 +846,7 @@ async def chat_in_existing_discussion(
     
     # Add user message with new metadata
     user_token_count = 0
-    try: user_token_count = len(lc.tokenize(prompt))
+    try: user_token_count =  lc.count_tokens(prompt)
     except: user_token_count = len(prompt) // 3
 
     discussion_obj.add_message(
@@ -926,7 +926,7 @@ async def chat_in_existing_discussion(
 
             ai_response_content = shared_state["accumulated_ai_response"]
             ai_token_count = 0
-            try: ai_token_count = len(lc.tokenize(ai_response_content))
+            try: ai_token_count = lc.count_tokens(ai_response_content)
             except: ai_token_count = len(ai_response_content) // 3
             
             # Determine parent ID for AI's response: the last user message
