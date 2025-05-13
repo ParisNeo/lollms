@@ -1647,13 +1647,25 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
 
 @datastore_router.get("", response_model=List[DataStorePublic])
 async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DataStorePublic]:
-    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
+    # Query for datastores shared with the user
+    # Step 1: Get the links and the datastore, order by the datastore's name
+    shared_links_query = db.query(
+        DBSharedDataStoreLink, DBDataStore
+    ).join(
+        DBDataStore, DBSharedDataStoreLink.datastore_id == DBDataStore.id
+    ).filter(
+        DBSharedDataStoreLink.shared_with_user_id == user_db_record.id
+    ).order_by(
+        DBDataStore.name  # Order by the name column of the joined DataStore table
+    )
 
-    owned_datastores_db = db.query(DBDataStore).filter(DBDataStore.owner_user_id == user_db_record.id).order_by(DBSharedDataStoreLink.datastore.has.name).all()
+    # Step 2: Eager load necessary relationships for the items fetched by the query
+    # This is done on the query object before .all()
+    shared_links_query = shared_links_query.options(
+        joinedload(DBSharedDataStoreLink.datastore).joinedload(DBDataStore.owner)
+    )
     
-    shared_links_db = db.query(DBSharedDataStoreLink).options(joinedload(DBSharedDataStoreLink.datastore).joinedload(DBDataStore.owner))\
-        .filter(DBSharedDataStoreLink.shared_with_user_id == user_db_record.id).order_by(DBSharedDataStoreLink.datastore.has.name).all()
+    shared_links_and_datastores_db = shared_links_query.all() # Execute the query
 
     response_list = []
     for ds_db in owned_datastores_db:
@@ -1662,13 +1674,13 @@ async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current
             owner_username=current_user.username, # It's owned by current_user
             created_at=ds_db.created_at, updated_at=ds_db.updated_at
         ))
-    for link in shared_links_db:
-        ds_db = link.datastore
-        # Avoid duplicates if a datastore is owned AND shared (shouldn't happen with current logic, but good practice)
+    for link, ds_db in shared_links_and_datastores_db: # Adjusted loop
+        # ds_db is the actual DataStore object
+        # link.datastore will also point to ds_db due to the relationship and eager loading
         if not any(r.id == ds_db.id for r in response_list):
              response_list.append(DataStorePublic(
                 id=ds_db.id, name=ds_db.name, description=ds_db.description,
-                owner_username=ds_db.owner.username, # Get owner from relation
+                owner_username=ds_db.owner.username, 
                 created_at=ds_db.created_at, updated_at=ds_db.updated_at
             ))
     return response_list
