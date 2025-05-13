@@ -418,20 +418,21 @@
             </div>
         </div>
 
-        <!-- Settings Modal (New Tabbed Layout) -->
+        <!-- Settings Modal (Revised Tab Structure Example) -->
         <div id="settingsModal" class="modal">
             <div class="modal-content"> <!-- Flex row applied here for tabs -->
-                <div class="settings-tabs">
+                <div class="settings-tabs"> <!-- Vertical tab bar -->
                     <h3 class="modal-title mb-4" data-i18n="userSettingsTitle">User Settings</h3>
-                    <button class="settings-tab-btn active" data-tab="userProfileTab" data-i18n="settingsTabUserProfile">User Profile</button>
-                    <button class="settings-tab-btn" data-tab="llmSettingsTab" data-i18n="settingsTabLLM">LLM</button>
-                    <button class="settings-tab-btn" data-tab="ragSettingsTab" data-i18n="settingsTabRAG">RAG</button>
-                    <button class="settings-tab-btn" data-tab="appearanceSettingsTab" data-i18n="settingsTabAppearance">Appearance</button>
+                    <button class="settings-tab-btn active" data-tab-target="#userProfileTab" data-i18n="settingsTabUserProfile">User Profile</button>
+                    <button class="settings-tab-btn" data-tab-target="#llmSettingsTab" data-i18n="settingsTabLLM">LLM</button>
+                    <button class="settings-tab-btn" data-tab-target="#ragSettingsTab" data-i18n="settingsTabRAG">RAG</button>
+                    <button class="settings-tab-btn" data-tab-target="#appearanceSettingsTab" data-i18n="settingsTabAppearance">Appearance</button>
                 </div>
-                <div class="settings-content-pane">
+                <div class="settings-content-container flex-grow overflow-y-auto relative"> <!-- Container for all panes -->
                     <button class="modal-close-btn" onclick="closeModal('settingsModal')">×</button>
+                    
                     <!-- User Profile Tab Content -->
-                    <div id="userProfileTab" class="settings-tab-content active space-y-5 divide-y divide-gray-200 dark:divide-gray-700">
+                    <div id="userProfileTab" class="settings-tab-content active absolute inset-0 p-6 space-y-5 divide-y divide-gray-200 dark:divide-gray-700">
                         <div class="pt-3">
                             <h4 class="text-md font-medium text-gray-800 dark:text-gray-100 mb-2" data-i18n="changePasswordTitle">Change Password</h4>
                             <div>
@@ -451,8 +452,9 @@
                             </div>
                         </div>
                     </div>
+
                     <!-- LLM Settings Tab Content -->
-                    <div id="llmSettingsTab" class="settings-tab-content space-y-5 divide-y divide-gray-200 dark:divide-gray-700">
+                    <div id="llmSettingsTab" class="settings-tab-content absolute inset-0 p-6 space-y-5 divide-y divide-gray-200 dark:divide-gray-700" style="display:none;">
                         <div class="pt-3">
                             <h4 class="text-md font-medium text-gray-800 dark:text-gray-100 mb-2" data-i18n="llmConfigurationTitle">LLM Configuration</h4>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -496,8 +498,9 @@
                             </div>
                         </div>
                     </div>
+
                      <!-- RAG Settings Tab Content -->
-                    <div id="ragSettingsTab" class="settings-tab-content space-y-5 divide-y divide-gray-200 dark:divide-gray-700">
+                    <div id="ragSettingsTab" class="settings-tab-content absolute inset-0 p-6 space-y-5 divide-y divide-gray-200 dark:divide-gray-700" style="display:none;">
                         <div class="pt-3">
                             <h4 class="text-md font-medium text-gray-800 dark:text-gray-100 mb-2" data-i18n="ragConfigurationTitle">RAG Configuration</h4>
                              <div>
@@ -515,8 +518,9 @@
                             </div>
                         </div>
                     </div>
+
                     <!-- Appearance Tab Content -->
-                    <div id="appearanceSettingsTab" class="settings-tab-content space-y-5 divide-y divide-gray-200 dark:divide-gray-700">
+                    <div id="appearanceSettingsTab" class="settings-tab-content absolute inset-0 p-6 space-y-5 divide-y divide-gray-200 dark:divide-gray-700" style="display:none;">
                         <div class="pt-3">
                             <h4 class="text-md font-medium text-gray-800 dark:text-gray-100 mb-2" data-i18n="languageSettingsTitle">Language</h4>
                             <div>
@@ -539,9 +543,9 @@
                             <button id="saveAppearanceSettingsBtn" class="btn-primary px-3 py-1.5 disabled:opacity-50" data-i18n="saveAppearanceButton">Save Appearance</button>
                         </div>
                     </div>
-                    <div id="settingsStatus" class="text-sm h-4 pt-3"></div>
-                </div> <!-- End content-pane -->
-                 <div class="modal-footer" style="width: calc(100% - 180px); position:absolute; bottom:0; right:0; background-color: white;" class="dark:bg-gray-800"> <!-- Footer outside content-pane for consistent position -->
+                    <div id="settingsStatus" class="text-sm h-4 absolute bottom-20 left-6 right-6"></div> <!-- Status message inside content area but above footer -->
+                </div> 
+                 <div class="modal-footer" style="width: calc(100% - 180px); position:absolute; bottom:0; right:0; background-color: white;" class="dark:bg-gray-800"> 
                     <button onclick="closeModal('settingsModal')" class="btn-secondary" data-i18n="closeButton">Close</button>
                 </div>
             </div>
