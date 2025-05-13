@@ -2106,13 +2106,13 @@
          }
         // --- Settings Modal Logic ---
         async function populateSettingsModal() {
-            if (!currentUser) return; // Ensure currentUser is loaded
+            if (!currentUser) return; 
 
             // User Profile Tab
             if(currentPasswordInput) currentPasswordInput.value = '';
             if(newPasswordInput) newPasswordInput.value = '';
             if(confirmNewPasswordInput) confirmNewPasswordInput.value = '';
-            if(savePasswordBtn) savePasswordBtn.disabled = true; // Initially disabled
+            if(savePasswordBtn) savePasswordBtn.disabled = true; 
             
             // LLM Settings Tab
             populateDropdown(settingsLollmsModelSelect, availableLollmsModels, currentUser.lollms_model_name, "noModelsFound");
@@ -2137,11 +2137,26 @@
 
             showStatus('', 'info', settingsStatus);
             
-            // Activate the first tab (or last opened if stored) if not already active
-            const activeTab = settingsModal.querySelector('.settings-tab-btn.active');
-            if(!activeTab && settingsTabs.length > 0) settingsTabs[0].click(); 
-        }
-        
+            // Ensure only the currently 'active' tab's content is visible, or default to the first.
+            let activeTabFound = false;
+            if (settingsTabs && settingsContentPanes) {
+                settingsTabs.forEach(button => {
+                    const pane = document.getElementById(button.dataset.tab);
+                    if (button.classList.contains('active')) {
+                        if(pane) pane.classList.add('active');
+                        activeTabFound = true;
+                    } else {
+                        if(pane) pane.classList.remove('active');
+                    }
+                });
+                // If no tab was explicitly active, activate the first one.
+                if (!activeTabFound && settingsTabs.length > 0) {
+                    settingsTabs[0].classList.add('active');
+                    const firstPane = document.getElementById(settingsTabs[0].dataset.tab);
+                    if(firstPane) firstPane.classList.add('active');
+                }
+            }
+        }        
         // Helper to check if LLM params changed
         function didLLMParamsChange() {
             if (!currentUser) return false;
