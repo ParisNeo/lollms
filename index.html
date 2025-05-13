@@ -1256,10 +1256,12 @@
                     showStatus(translate('newDiscussionCreatedSuccess'), 'success');
                 } catch (error) { console.error("Failed to create discussion:", error); }
             };
+            // ***** THIS IS THE CRITICAL FIX *****
             if(settingsBtn) settingsBtn.onclick = () => openModal('settingsModal');
             if(promptsBtn) promptsBtn.onclick = () => openModal('promptsModal');
             if(dataStoresBtn) dataStoresBtn.onclick = () => openModal('dataStoresModal');
             if(friendsBtn) friendsBtn.onclick = () => openModal('friendsModal');
+            // *************************************
             if(exportDataBtn) exportDataBtn.onclick = () => openModal('exportModal');
             if(importDataBtn) importDataBtn.onclick = () => { 
                 if(importFile) importFile.value = ''; 
@@ -1328,21 +1330,21 @@
             if(openCreateDataStoreModalBtn) openCreateDataStoreModalBtn.onclick = () => openCreateDataStoreModal();
             if(createDataStoreForm) createDataStoreForm.addEventListener('submit', (e) => {e.preventDefault(); handleCreateOrUpdateDataStore();});
             if(confirmCreateOrUpdateDataStoreBtn) confirmCreateOrUpdateDataStoreBtn.onclick = handleCreateOrUpdateDataStore;
-            if(confirmShareDsWithFriendBtn) confirmShareDsWithFriendBtn.onclick = async () => { // Make it async
+            if(confirmShareDsWithFriendBtn) confirmShareDsWithFriendBtn.onclick = async () => {
                 const friendUsername = shareDsWithFriendSelect.value;
                 if (!currentManageSharingDsId || !friendUsername) {
                     showStatus(translate("selectFriendToShareWithError"), 'error', manageDataStoreSharingStatus); return;
                 }
                 showStatus(translate("sharingDataStoreWith", {username: friendUsername}), 'info', manageDataStoreSharingStatus);
                 try {
-                    await apiRequest(`/api/datastores/${currentManageSharingDsId}/share_with_friend`, { // Corrected endpoint from previous version of this func
+                    await apiRequest(`/api/datastores/${currentManageSharingDsId}/share_with_friend`, { 
                         method: 'POST', headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({ target_username: friendUsername, permission_level: "read_query" }),
                         statusElement: manageDataStoreSharingStatus
                     });
                     showStatus(translate("dataStoreSharedSuccess"), 'success', manageDataStoreSharingStatus);
                     await loadDsSharedWithUsers(currentManageSharingDsId); 
-                    shareDsWithFriendSelect.value = ""; 
+                    if(shareDsWithFriendSelect) shareDsWithFriendSelect.value = ""; 
                 } catch (error) { console.error("Share DS with friend failed:", error); }
             };
 
@@ -1406,7 +1408,6 @@
                 }
             };
 
-
             // Close dropdown if clicked outside (for prompt dropdown)
             document.addEventListener('click', (event) => {
                 if (insertPromptDropdown && !insertPromptDropdown.contains(event.target) && event.target !== insertPromptBtn && insertPromptDropdown.style.display !== 'none') {
@@ -1416,7 +1417,6 @@
             
             // Store the original default discussion title text for i18n updates
             if (discussionTitle) discussionTitle.dataset.i18nDefaultOriginal = discussionTitle.textContent;
-
 
             showStatus(translate("readyStatus"), 'success');
         }
