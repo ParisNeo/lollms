@@ -2104,129 +2104,230 @@
                  populateDropdown(settingsVectorizerSelect, [], null, "errorLoadingVectorizers", true);
              }
          }
+        // --- Settings Modal Logic ---
         async function populateSettingsModal() {
-            currentPasswordInput.value = ''; newPasswordInput.value = ''; confirmNewPasswordInput.value = '';
-            savePasswordBtn.disabled = false; 
+            if (!currentUser) return; // Ensure currentUser is loaded
+
+            // User Profile Tab
+            if(currentPasswordInput) currentPasswordInput.value = '';
+            if(newPasswordInput) newPasswordInput.value = '';
+            if(confirmNewPasswordInput) confirmNewPasswordInput.value = '';
+            if(savePasswordBtn) savePasswordBtn.disabled = true; // Initially disabled
             
+            // LLM Settings Tab
             populateDropdown(settingsLollmsModelSelect, availableLollmsModels, currentUser.lollms_model_name, "noModelsFound");
-            saveModelSettingsBtn.disabled = true;
-            settingsTemperature.value = currentUser.llm_temperature ?? '';
-            settingsTopK.value = currentUser.llm_top_k ?? '';
-            settingsTopP.value = currentUser.llm_top_p ?? '';
-            settingsRepeatPenalty.value = currentUser.llm_repeat_penalty ?? '';
-            settingsRepeatLastN.value = currentUser.llm_repeat_last_n ?? '';
-            saveLLMParamsBtn.disabled = true;
+            if(saveModelSettingsBtn) saveModelSettingsBtn.disabled = true;
+            
+            if(settingsTemperature) settingsTemperature.value = currentUser.llm_temperature ?? '';
+            if(settingsTopK) settingsTopK.value = currentUser.llm_top_k ?? '';
+            if(settingsTopP) settingsTopP.value = currentUser.llm_top_p ?? '';
+            if(settingsRepeatPenalty) settingsRepeatPenalty.value = currentUser.llm_repeat_penalty ?? '';
+            if(settingsRepeatLastN) settingsRepeatLastN.value = currentUser.llm_repeat_last_n ?? '';
+            if(saveLLMParamsBtn) saveLLMParamsBtn.disabled = true;
 
+            // RAG Settings Tab
             populateDropdown(settingsVectorizerSelect, availableVectorizers, userDefaultVectorizer, "noVectorizersFound", true);
-            settingsRagTopKInput.value = currentUser.rag_top_k || userDefaultRagTopK;
-            saveRagSettingsBtn.disabled = true;
+            if(settingsRagTopKInput) settingsRagTopKInput.value = currentUser.rag_top_k || userDefaultRagTopK;
+            if(saveRagSettingsBtn) saveRagSettingsBtn.disabled = true;
 
-            languageSelect.value = currentLocale;
-            updateThemeButtonsState(localStorage.getItem('themePreference') || 'system');
-            saveAppearanceSettingsBtn.disabled = true;
+            // Appearance Tab
+            if(languageSelect) languageSelect.value = currentLocale;
+            updateThemeButtonsState(localStorage.getItem('themePreference') || currentUser.theme_preference || 'system');
+            if(saveAppearanceSettingsBtn) saveAppearanceSettingsBtn.disabled = true;
 
             showStatus('', 'info', settingsStatus);
+            
+            // Activate the first tab (or last opened if stored) if not already active
             const activeTab = settingsModal.querySelector('.settings-tab-btn.active');
-            if(!activeTab && settingsTabs.length > 0) settingsTabs[0].click(); // Activate first tab if none active
+            if(!activeTab && settingsTabs.length > 0) settingsTabs[0].click(); 
         }
+        
+        // Helper to check if LLM params changed
+        function didLLMParamsChange() {
+            if (!currentUser) return false;
+            const currentTemp = settingsTemperature.value !== '' ? parseFloat(settingsTemperature.value) : null;
+            const currentTopK = settingsTopK.value !== '' ? parseInt(settingsTopK.value) : null;
+            const currentTopP = settingsTopP.value !== '' ? parseFloat(settingsTopP.value) : null;
+            const currentRepPen = settingsRepeatPenalty.value !== '' ? parseFloat(settingsRepeatPenalty.value) : null;
+            const currentRepLastN = settingsRepeatLastN.value !== '' ? parseInt(settingsRepeatLastN.value) : null;
+
+            return (currentTemp !== (currentUser.llm_temperature ?? null) ||
+                    currentTopK !== (currentUser.llm_top_k ?? null) ||
+                    currentTopP !== (currentUser.llm_top_p ?? null) ||
+                    currentRepPen !== (currentUser.llm_repeat_penalty ?? null) ||
+                    currentRepLastN !== (currentUser.llm_repeat_last_n ?? null));
+        }
+
+        // Event listeners for enabling save buttons
+        if(currentPasswordInput) currentPasswordInput.oninput = () => { if(savePasswordBtn) savePasswordBtn.disabled = !(currentPasswordInput.value && newPasswordInput.value && confirmNewPasswordInput.value); };
+        if(newPasswordInput) newPasswordInput.oninput = () => { if(savePasswordBtn) savePasswordBtn.disabled = !(currentPasswordInput.value && newPasswordInput.value && confirmNewPasswordInput.value); };
+        if(confirmNewPasswordInput) confirmNewPasswordInput.oninput = () => { if(savePasswordBtn) savePasswordBtn.disabled = !(currentPasswordInput.value && newPasswordInput.value && confirmNewPasswordInput.value && newPasswordInput.value === confirmNewPasswordInput.value); };
+        
+        if(settingsLollmsModelSelect) settingsLollmsModelSelect.onchange = () => { if(saveModelSettingsBtn) saveModelSettingsBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name);};
+        
+        [settingsTemperature, settingsTopK, settingsTopP, settingsRepeatPenalty, settingsRepeatLastN].forEach(el => {
+            if(el) el.oninput = () => { if(saveLLMParamsBtn) saveLLMParamsBtn.disabled = !didLLMParamsChange(); };
+        });
+        
+        if(settingsVectorizerSelect) settingsVectorizerSelect.onchange = () => { 
+            if(saveRagSettingsBtn) saveRagSettingsBtn.disabled = (settingsVectorizerSelect.value === userDefaultVectorizer && parseInt(settingsRagTopKInput.value) === (currentUser.rag_top_k || userDefaultRagTopK));
+        };
+        if(settingsRagTopKInput) settingsRagTopKInput.oninput = () => { 
+            if(saveRagSettingsBtn) saveRagSettingsBtn.disabled = (settingsVectorizerSelect.value === userDefaultVectorizer && parseInt(settingsRagTopKInput.value) === (currentUser.rag_top_k || userDefaultRagTopK));
+        };
+        
+        if(languageSelect) languageSelect.onchange = () => { if(saveAppearanceSettingsBtn) saveAppearanceSettingsBtn.disabled = false; };
+        // Theme buttons already set saveAppearanceSettingsBtn.disabled = false in their direct onclicks in window.onload
+
         async function handleSavePassword() {
             const currentPass = currentPasswordInput.value;
             const newPass = newPasswordInput.value;
             const confirmPass = confirmNewPasswordInput.value;
-            if (!currentPass || !newPass || !confirmPass) { showStatus(translate("allPasswordFieldsRequired"), 'error', settingsStatus); return; }
-            if (newPass !== confirmPass) { showStatus(translate("newPasswordsDoNotMatch"), 'error', settingsStatus); return; }
-            if (newPass.length < 8) { showStatus(translate("passwordTooShort"), 'error', settingsStatus); return; }
+
+            if (!currentPass || !newPass || !confirmPass) {
+                showStatus(translate("allPasswordFieldsRequired"), 'error', settingsStatus); return;
+            }
+            if (newPass !== confirmPass) {
+                showStatus(translate("newPasswordsDoNotMatch"), 'error', settingsStatus); return;
+            }
+            if (newPass.length < 8) {
+                showStatus(translate("passwordTooShort"), 'error', settingsStatus); return;
+            }
+
             showStatus(translate("savingPassword"), 'info', settingsStatus); savePasswordBtn.disabled = true;
             try {
                 await apiRequest('/api/users/me/password', {
-                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ current_password: currentPass, new_password: newPass }), statusElement: settingsStatus
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ current_password: currentPass, new_password: newPass }),
+                    statusElement: settingsStatus
                 });
                 showStatus(translate("passwordSavedSuccess"), 'success', settingsStatus);
                 currentPasswordInput.value = ''; newPasswordInput.value = ''; confirmNewPasswordInput.value = '';
-            } catch (error) { console.error("Failed to save password:", error); }
-            finally { savePasswordBtn.disabled = false; }
+                // No need to disable again, it will be set by oninput if fields are cleared
+            } catch (error) { 
+                console.error("Failed to save password:", error); 
+                // Error status is shown by apiRequest
+            } finally { 
+                savePasswordBtn.disabled = !(currentPasswordInput.value && newPasswordInput.value && confirmNewPasswordInput.value); // Re-evaluate disabled state
+            }
         }
-        if(settingsLollmsModelSelect) settingsLollmsModelSelect.onchange = () => { saveModelSettingsBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name);};
+
         async function handleSaveModelSettings() {
             const selectedModel = settingsLollmsModelSelect.value;
             if (!selectedModel || selectedModel === currentUser.lollms_model_name) return;
+
             showStatus(translate("savingModel"), 'info', settingsStatus); saveModelSettingsBtn.disabled = true;
             try {
                 const formData = new FormData(); formData.append('model_name', selectedModel);
                 await apiRequest('/api/config/lollms-model', { method: 'POST', body: formData, statusElement: settingsStatus });
-                currentUser.lollms_model_name = selectedModel;
+                currentUser.lollms_model_name = selectedModel; // Update local state
                 showStatus(translate("modelSavedSuccess"), 'success', settingsStatus);
-                saveModelSettingsBtn.disabled = true;
-            } catch (error) { console.error("Failed to save model:", error); saveModelSettingsBtn.disabled = false; }
+                // saveModelSettingsBtn will be re-disabled by onchange if value matches currentUser
+            } catch (error) { 
+                console.error("Failed to save model:", error);
+                saveModelSettingsBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name); // Re-evaluate
+            }
         }
-        [settingsTemperature, settingsTopK, settingsTopP, settingsRepeatPenalty, settingsRepeatLastN].forEach(el => {
-            if(el) el.oninput = () => { if(saveLLMParamsBtn) saveLLMParamsBtn.disabled = false; };
-        });
+        
         async function handleSaveLLMParams() {
+            if (!didLLMParamsChange()) {
+                 showStatus(translate("noChangesToSave"), 'info', settingsStatus);
+                 saveLLMParamsBtn.disabled = true;
+                 return;
+            }
             const params = {
-                llm_temperature: parseFloat(settingsTemperature.value) || null,
-                llm_top_k: parseInt(settingsTopK.value) || null,
-                llm_top_p: parseFloat(settingsTopP.value) || null,
-                llm_repeat_penalty: parseFloat(settingsRepeatPenalty.value) || null,
-                llm_repeat_last_n: parseInt(settingsRepeatLastN.value) || null,
+                llm_temperature: settingsTemperature.value !== '' ? parseFloat(settingsTemperature.value) : null,
+                llm_top_k: settingsTopK.value !== '' ? parseInt(settingsTopK.value) : null,
+                llm_top_p: settingsTopP.value !== '' ? parseFloat(settingsTopP.value) : null,
+                llm_repeat_penalty: settingsRepeatPenalty.value !== '' ? parseFloat(settingsRepeatPenalty.value) : null,
+                llm_repeat_last_n: settingsRepeatLastN.value !== '' ? parseInt(settingsRepeatLastN.value) : null,
             };
-            const payload = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== null && !isNaN(v) && (typeof v !== 'number' || isFinite(v)) )); // Ensure finite numbers
+            const payload = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== null && !isNaN(v) && (typeof v !== 'number' || isFinite(v)) ));
+            
             showStatus(translate('savingLLMParams'), 'info', settingsStatus); saveLLMParamsBtn.disabled = true;
             try {
                 await apiRequest('/api/config/llm-params', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload), statusElement: settingsStatus
                 });
-                Object.assign(currentUser, payload);
+                // Update currentUser with successfully saved params
+                Object.keys(payload).forEach(key => {
+                    currentUser[key] = payload[key];
+                });
                 showStatus(translate('llmParamsSavedSuccess'), 'success', settingsStatus);
-                saveLLMParamsBtn.disabled = true;
-            } catch (error) { console.error("Failed to save LLM params:", error); saveLLMParamsBtn.disabled = false; }
+                saveLLMParamsBtn.disabled = !didLLMParamsChange(); // Should be true now
+            } catch (error) { 
+                console.error("Failed to save LLM params:", error); 
+                saveLLMParamsBtn.disabled = !didLLMParamsChange(); // Re-evaluate
+            }
         }
-        if(settingsVectorizerSelect) settingsVectorizerSelect.onchange = () => { if(saveRagSettingsBtn) saveRagSettingsBtn.disabled = false;};
-        if(settingsRagTopKInput) settingsRagTopKInput.oninput = () => { if(saveRagSettingsBtn) saveRagSettingsBtn.disabled = false;};
+        
         async function handleSaveRagSettings() {
             const selectedVectorizer = settingsVectorizerSelect.value;
-            const selectedRagTopK = parseInt(settingsRagTopKInput.value);
-            let vectorizerChanged = selectedVectorizer && selectedVectorizer !== userDefaultVectorizer;
-            let ragTopKChanged = selectedRagTopK && selectedRagTopK !== (currentUser.rag_top_k || userDefaultRagTopK);
+            const selectedRagTopK = settingsRagTopKInput.value !== '' ? parseInt(settingsRagTopKInput.value) : null;
 
-            if (!vectorizerChanged && !ragTopKChanged) { showStatus(translate("noChangesToSave"), "info", settingsStatus); return;}
+            let vectorizerChanged = selectedVectorizer !== (currentUser.safe_store_vectorizer || ""); // Compare with "" if null
+            let ragTopKChanged = selectedRagTopK !== (currentUser.rag_top_k || userDefaultRagTopK);
+
+            if (!vectorizerChanged && !ragTopKChanged) {
+                showStatus(translate("noChangesToSave"), "info", settingsStatus);
+                saveRagSettingsBtn.disabled = true;
+                return;
+            }
             showStatus(translate("savingRagSettings"), 'info', settingsStatus); saveRagSettingsBtn.disabled = true;
             try {
                 const payload = {};
-                if (vectorizerChanged) payload.safe_store_vectorizer = selectedVectorizer;
-                if (ragTopKChanged) payload.rag_top_k = selectedRagTopK;
+                if (vectorizerChanged) payload.safe_store_vectorizer = selectedVectorizer; else payload.safe_store_vectorizer = currentUser.safe_store_vectorizer; // Send current if not changed
+                if (ragTopKChanged) payload.rag_top_k = selectedRagTopK; else payload.rag_top_k = currentUser.rag_top_k; // Send current if not changed
 
-                await apiRequest('/api/users/me/preferences', { // Using the combined preferences endpoint
+                await apiRequest('/api/users/me/preferences', { 
                     method: 'PUT', headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(payload), statusElement: settingsStatus
                 });
                 if(vectorizerChanged) {userDefaultVectorizer = selectedVectorizer; currentUser.safe_store_vectorizer = selectedVectorizer;}
-                if(ragTopKChanged) {currentUser.rag_top_k = selectedRagTopK; userDefaultRagTopK = selectedRagTopK;}
+                if(ragTopKChanged) {currentUser.rag_top_k = selectedRagTopK; /* userDefaultRagTopK remains global default */}
 
                 showStatus(translate("ragSettingsSavedSuccess"), 'success', settingsStatus);
-                saveRagSettingsBtn.disabled = true;
-            } catch (error) { console.error("Failed to save RAG settings:", error); saveRagSettingsBtn.disabled = false; }
+                saveRagSettingsBtn.disabled = (settingsVectorizerSelect.value === userDefaultVectorizer && parseInt(settingsRagTopKInput.value) === (currentUser.rag_top_k || userDefaultRagTopK));
+            } catch (error) { 
+                console.error("Failed to save RAG settings:", error); 
+                saveRagSettingsBtn.disabled = (settingsVectorizerSelect.value === userDefaultVectorizer && parseInt(settingsRagTopKInput.value) === (currentUser.rag_top_k || userDefaultRagTopK));
+            }
         }
+        
         async function handleSaveAppearanceSettings() {
             const selectedLang = languageSelect.value;
             const selectedTheme = localStorage.getItem('themePreference') || 'system'; 
 
+            const langChanged = currentLocale !== selectedLang;
+            const themeChangedInDB = selectedTheme !== currentUser.theme_preference;
+
+            if (!langChanged && !themeChangedInDB) {
+                showStatus(translate("noChangesToSave"), "info", settingsStatus);
+                saveAppearanceSettingsBtn.disabled = true;
+                return;
+            }
+
             showStatus(translate("savingAppearanceSettings"), 'info', settingsStatus); saveAppearanceSettingsBtn.disabled = true;
             try {
-                await apiRequest('/api/users/me/preferences', {
-                    method: 'PUT', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ theme_preference: selectedTheme }), 
-                    statusElement: settingsStatus
-                });
-                currentUser.theme_preference = selectedTheme; 
-                if (currentLocale !== selectedLang) {
+                if (themeChangedInDB) { // Only send to backend if theme preference for DB needs update
+                    await apiRequest('/api/users/me/preferences', {
+                        method: 'PUT', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ theme_preference: selectedTheme }), 
+                        statusElement: settingsStatus
+                    });
+                    currentUser.theme_preference = selectedTheme; 
+                }
+                if (langChanged) { // Language change is client-side for now
                     await setLanguage(selectedLang); 
                 }
                 showStatus(translate("appearanceSettingsSavedSuccess"), 'success', settingsStatus);
                 saveAppearanceSettingsBtn.disabled = true; 
-            } catch (error) { console.error("Failed to save appearance settings:", error); saveAppearanceSettingsBtn.disabled = false; }
+            } catch (error) { 
+                console.error("Failed to save appearance settings:", error); 
+                saveAppearanceSettingsBtn.disabled = false; // Re-enable on error
+            }
         }
 
         // --- Data Store Management ---
