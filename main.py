@@ -1647,18 +1647,23 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
 
 @datastore_router.get("", response_model=List[DataStorePublic])
 async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DataStorePublic]:
-    # Query for datastores shared with the user
-    # Step 1: Get the links and the datastore, order by the datastore's name
+    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first() # DEFINED HERE
+    if not user_db_record: 
+        # This HTTPException should be raised if current_user.username doesn't match a DBUser.
+        # If get_current_active_user itself fails, it would raise a 401 earlier.
+        raise HTTPException(status_code=404, detail="User database record not found for authenticated user.") 
+
+    owned_datastores_db = db.query(DBDataStore).filter(DBDataStore.owner_user_id == user_db_record.id).order_by(DBDataStore.name).all()
+    
     shared_links_query = db.query(
         DBSharedDataStoreLink, DBDataStore
     ).join(
         DBDataStore, DBSharedDataStoreLink.datastore_id == DBDataStore.id
     ).filter(
-        DBSharedDataStoreLink.shared_with_user_id == user_db_record.id
+        DBSharedDataStoreLink.shared_with_user_id == user_db_record.id # USED HERE
     ).order_by(
-        DBDataStore.name  # Order by the name column of the joined DataStore table
+        DBDataStore.name
     )
-
     # Step 2: Eager load necessary relationships for the items fetched by the query
     # This is done on the query object before .all()
     shared_links_query = shared_links_query.options(
