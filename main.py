@@ -296,7 +296,6 @@ class AppLollmsDiscussion:
         self, current_prompt_text: str, image_paths_for_llm: Optional[List[str]], max_total_tokens: Optional[int] = None
     ) -> str: # Image paths are handled by lollms_client directly from its generate_text method
         lc = self.lollms_client
-        user_llm_params = user_sessions.get(lc.user_name_for_logs, {}).get("llm_params", {})
         
         if max_total_tokens is None:
             max_total_tokens = getattr(lc, "ctx_size", LOLLMS_CLIENT_DEFAULTS.get("ctx_size", 4096))
@@ -620,7 +619,6 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             "binding_name": binding_name, "model_name": model_name, "host_address": host_address,
             "ctx_size": ctx_size, "service_key": service_key, 
             "user_name": user_name_conf, "ai_name": ai_name_conf,
-            "user_name_for_logs": username # Add username for logging within lollms-client if supported
         })
         # Ensure ELF_COMPLETION_FORMAT is set if applicable, or remove if None
         completion_format_str = LOLLMS_CLIENT_DEFAULTS.get("completion_format")
