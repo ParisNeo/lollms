@@ -596,7 +596,7 @@ app.include_router(user_self_router)
 upload_router = APIRouter(prefix="/api/upload", tags=["Uploads"])
 MAX_IMAGE_SIZE_MB = 10; MAX_IMAGE_UPLOADS_PER_MESSAGE = 5
 @upload_router.post("/chat_image", response_model=List[Dict[str,str]])
-async def upload_chat_images(files: List[UploadFile] = File(...), current_user: UserAuthDetails = Depends(get_current_active_user))) -> List[Dict[str,str]]:
+async def upload_chat_images(files: List[UploadFile] = File(...), current_user: UserAuthDetails = Depends(get_current_active_user)) -> List[Dict[str,str]]:
     if len(files) > MAX_IMAGE_UPLOADS_PER_MESSAGE: raise HTTPException(status_code=400, detail=f"Max {MAX_IMAGE_UPLOADS_PER_MESSAGE} images.")
     username = current_user.username; temp_uploads_path = get_user_temp_uploads_path(username)
     uploaded_file_infos = []
