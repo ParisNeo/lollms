@@ -18,7 +18,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/material-darker.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/meta.min.js"></script>
-    <!-- Load common modes -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/python/python.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/javascript/javascript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/shell/shell.min.js"></script>
@@ -32,58 +31,71 @@
         ::-webkit-scrollbar-thumb { background: #888; border-radius: 10px; }
         ::-webkit-scrollbar-thumb:hover { background: #555; }
         /* CodeMirror styling adjustments */
-        .cm-editor { border: 1px solid #ddd; border-radius: 4px; font-size: 0.9em; }
+        .cm-editor { border: 1px solid #ddd; border-radius: 4px; font-size: 0.9em; width: 100%; box-sizing: border-box; }
+        .code-block-container .cm-editor { max-width: 100%; } /* Ensure CM respects container */
         .code-block-header { background-color: #f0f0f0; padding: 4px 8px; font-size: 0.8em; border-top-left-radius: 4px; border-top-right-radius: 4px; display: flex; justify-content: space-between; align-items: center;}
         .code-block-buttons button { background-color: #e0e0e0; border: none; padding: 2px 6px; font-size: 0.8em; cursor: pointer; border-radius: 3px; margin-left: 5px;}
         .code-block-buttons button:hover { background-color: #d0d0d0; }
         /* KaTeX display math */
         .katex-display { margin: 0.5em 0 !important; }
         /* Message Bubbles */
-        .message-container { display: flex; flex-direction: column; position: relative; /* Needed for hover actions positioning */ }
-        .message-bubble { max-width: 85%; padding: 10px 15px; border-radius: 15px; margin-bottom: 10px; word-wrap: break-word; position: relative; } /* Relative for child absolute positioning */
-        .user-bubble { background-color: #dbeafe; /* Lighter Blue */ align-self: flex-end; border-bottom-right-radius: 5px; }
-        .ai-bubble { background-color: #f3f4f6; /* Lighter Gray */ align-self: flex-start; border-bottom-left-radius: 5px; }
-        .system-bubble { background-color: #fef3c7; /* Lighter Yellow */ color: #78350f; /* Darker amber */ align-self: center; font-style: italic; font-size: 0.9em; text-align: center; width: 90%; border-radius: 8px; }
-        .sender-name { font-size: 0.8em; font-weight: bold; margin-bottom: 4px; color: #4b5563; } /* Gray-600 */
-        /* RAG Toggle Button */
+        .message-container { display: flex; flex-direction: column; position: relative; }
+        .message-bubble { max-width: 85%; padding: 10px 15px; border-radius: 15px; margin-bottom: 10px; word-wrap: break-word; position: relative; }
+        .user-bubble { background-color: #dbeafe; align-self: flex-end; border-bottom-right-radius: 5px; }
+        .ai-bubble { background-color: #f3f4f6; align-self: flex-start; border-bottom-left-radius: 5px; }
+        .system-bubble { background-color: #fef3c7; color: #78350f; align-self: center; font-style: italic; font-size: 0.9em; text-align: center; width: 90%; border-radius: 8px; }
+        .sender-name { font-size: 0.8em; font-weight: bold; margin-bottom: 4px; color: #4b5563; }
+        /* RAG Toggle & Datastore Selector */
+        .rag-controls { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
         .rag-toggle { padding: 6px 12px; border-radius: 20px; cursor: pointer; transition: background-color 0.3s, color 0.3s; font-weight: 500; border: 1px solid transparent; }
         .rag-toggle-off { background-color: #e5e7eb; color: #4b5563; border-color: #d1d5db; }
         .rag-toggle-on { background-color: #10b981; color: white; }
         .rag-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+        #ragDataStoreSelect { font-size: 0.8rem; padding: 4px 8px; border-radius: 6px; border-color: #d1d5db; background-color: white; }
         /* Star Icon & Discussion List Actions */
-        .discussion-item-actions { display: none; /* Hidden by default */ gap: 0.25rem; position: absolute; right: 2rem; top: 50%; transform: translateY(-50%); background-color: rgba(249, 250, 251, 0.8); padding: 2px 4px; border-radius: 4px; }
+        .discussion-item-actions { display: none; gap: 0.25rem; position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background-color: rgba(249, 250, 251, 0.8); padding: 2px 4px; border-radius: 4px; z-index: 10; /* Ensure actions are on top */}
         .discussion-item:hover .discussion-item-actions { display: flex; }
-        .discussion-action-btn { background: none; border: none; padding: 2px; cursor: pointer; color: #6b7280; } /* Gray-500 */
-        .discussion-action-btn:hover { color: #1f2937; } /* Gray-800 */
-        .star-icon { cursor: pointer; color: #d1d5db; /* Gray-300 */ }
-        .star-icon.starred { color: #facc15; /* Amber-400 */ }
+        .discussion-action-btn { background: none; border: none; padding: 2px; cursor: pointer; color: #6b7280; }
+        .discussion-action-btn:hover { color: #1f2937; }
+        .star-icon { cursor: pointer; color: #d1d5db; }
+        .star-icon.starred { color: #facc15; }
         /* Grade Buttons */
         .grade-btn { background: none; border: none; padding: 2px; cursor: pointer; opacity: 0.6; }
         .grade-btn:hover { opacity: 1; }
-        .grade-btn.selected-up { color: #10b981; opacity: 1; } /* Emerald-500 */
-        .grade-btn.selected-down { color: #ef4444; opacity: 1; } /* Red-500 */
-        .grade-score { font-size: 0.8em; margin: 0 5px; color: #6b7280; } /* Gray-500 */
+        .grade-btn.selected-up { color: #10b981; opacity: 1; }
+        .grade-btn.selected-down { color: #ef4444; opacity: 1; }
+        .grade-score { font-size: 0.8em; margin: 0 5px; color: #6b7280; }
         /* Message Footer & Actions */
-        .message-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 0.75rem; color: #6b7280; /* Gray-500 */ padding-top: 4px; border-top: 1px solid rgba(0,0,0,0.05); }
+        .message-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 0.75rem; color: #6b7280; padding-top: 4px; border-top: 1px solid rgba(0,0,0,0.05); }
         .message-details span { margin-right: 8px; }
-        .message-actions { display: none; /* Hidden by default */ gap: 0.5rem; }
-        .message-bubble:hover .message-actions { display: inline-flex; } /* Show on bubble hover */
-        .message-action-btn { background: none; border: none; padding: 0; cursor: pointer; color: #9ca3af; /* Gray-400 */ }
-        .message-action-btn:hover { color: #374151; /* Gray-700 */ }
+        .message-actions { display: none; gap: 0.5rem; }
+        .message-bubble:hover .message-actions { display: inline-flex; }
+        .message-action-btn { background: none; border: none; padding: 0; cursor: pointer; color: #9ca3af; }
+        .message-action-btn:hover { color: #374151; }
         .message-action-btn svg { width: 0.875rem; height: 0.875rem; }
         /* Think Block */
-        .think-block { background-color: #fffbeb; /* Light yellow */ border: 1px dashed #fcd34d; /* Amber-300 */ border-radius: 4px; margin: 8px 0; }
-        .think-block summary { cursor: pointer; padding: 4px 8px; font-size: 0.8em; font-style: italic; color: #92400e; /* Amber-800 */ user-select: none; }
-        .think-block .think-content { padding: 5px 10px; font-size: 0.9em; color: #57534e; /* Stone-600 */ max-height: 200px; overflow-y: auto; background-color: #fefce8; /* Lighter yellow */ border-top: 1px dashed #fcd34d; }
+        .think-block { background-color: #fffbeb; border: 1px dashed #fcd34d; border-radius: 4px; margin: 8px 0; }
+        .think-block summary { cursor: pointer; padding: 4px 8px; font-size: 0.8em; font-style: italic; color: #92400e; user-select: none; }
+        .think-block .think-content { padding: 5px 10px; font-size: 0.9em; color: #57534e; max-height: 200px; overflow-y: auto; background-color: #fefce8; border-top: 1px dashed #fcd34d; }
+        /* Image Previews for Upload */
+        #imageUploadPreviewContainer { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; max-height: 150px; overflow-y: auto; padding: 5px; border: 1px dashed #ccc; border-radius: 4px; }
+        .image-preview-item { position: relative; }
+        .image-preview-item img { width: 70px; height: 70px; object-fit: cover; border-radius: 4px; border: 1px solid #ddd; }
+        .remove-preview-btn { position: absolute; top: -5px; right: -5px; background-color: rgba(255,0,0,0.7); color: white; border: none; border-radius: 50%; width: 18px; height: 18px; font-size: 10px; line-height: 16px; text-align: center; cursor: pointer; font-weight: bold; }
+        .remove-preview-btn:hover { background-color: red; }
+        /* Images in Chat Bubbles */
+        .message-images-container { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+        .message-image-item { max-width: 150px; max-height: 150px; border-radius: 8px; overflow: hidden; cursor: pointer; } /* Make images clickable to view larger */
+        .message-image-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
         /* Modal Styles */
         .modal { position: fixed; inset: 0; background-color: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 50; opacity: 0; pointer-events: none; transition: opacity 0.3s ease-in-out; padding: 1rem;}
         .modal.active { opacity: 1; pointer-events: auto; }
         .modal-content { background-color: white; padding: 1.5rem 2rem; border-radius: 0.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); max-width: 95vw; width: 600px; max-height: 90vh; display: flex; flex-direction: column; }
-        /* Login modal specific width */
         #loginModal .modal-content { width: 400px; }
+        #dataStoresModal .modal-content, #fileManagementModal .modal-content { width: 700px; } /* Wider modals */
         .modal-header { border-bottom: 1px solid #e5e7eb; padding-bottom: 0.75rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;}
         .modal-title { font-size: 1.125rem; font-weight: 600; color: #1f2937; }
-        .modal-body { flex-grow: 1; overflow-y: auto; padding-right: 0.5rem; /* For scrollbar */}
+        .modal-body { flex-grow: 1; overflow-y: auto; padding-right: 0.5rem; }
         .modal-footer { border-top: 1px solid #e5e7eb; padding-top: 1rem; margin-top: 1rem; display: flex; justify-content: flex-end; gap: 0.75rem; }
         .modal-close-btn { position: absolute; top: 0.75rem; right: 0.75rem; color: #9ca3af; background: none; border: none; cursor: pointer; padding: 0.25rem;}
         .modal-close-btn:hover { color: #1f2937; }
@@ -103,30 +115,23 @@
         <p id="appLoadingStatus" class="text-gray-600">Please wait.</p>
     </div>
 
-    <div id="app-container" class="flex h-screen overflow-hidden" style="display: none;"> <!-- Initially hidden -->
+    <div id="app-container" class="flex h-screen overflow-hidden" style="display: none;">
 
         <!-- Sidebar -->
         <aside class="w-72 bg-white border-r border-gray-200 flex flex-col">
-            <!-- Logo/Header -->
             <div class="p-4 border-b border-gray-200">
                  <img src="/logo.png" alt="Logo" class="h-10 mx-auto mb-2">
                  <h2 class="text-xl font-semibold text-center text-gray-700">Lollms Chat</h2>
             </div>
-
-            <!-- New Discussion Button -->
             <div class="p-3 border-b border-gray-200">
                 <button id="newDiscussionBtn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md shadow-sm transition duration-150 ease-in-out flex items-center justify-center">
                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 mr-2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
                     New Discussion
                 </button>
             </div>
-
-            <!-- Discussion List -->
             <div id="discussionListContainer" class="flex-1 overflow-y-auto p-2 space-y-1">
                 <p class="text-gray-500 text-sm text-center italic p-4">Loading discussions...</p>
             </div>
-
-            <!-- User/Settings Footer -->
             <div class="p-3 border-t border-gray-200 bg-gray-50 space-y-3">
                 <div id="userInfo" class="text-sm text-center">
                     Logged in as: <span id="usernameDisplay" class="font-semibold">...</span>
@@ -137,9 +142,13 @@
                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 0 1 0 1.255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.063-.374-.313-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 0 1 0-1.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281Z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" /></svg>
                          Settings
                      </button>
+                     <button id="dataStoresBtn" class="sidebar-btn">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75m-16.5-3.75v3.75m16.5 0v3.75C20.25 16.153 16.556 18 12 18s-8.25-1.847-8.25-4.125v-3.75m16.5 0c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125" /></svg>
+                        Data Stores
+                     </button>
                      <button id="filesBtn" class="sidebar-btn">
                          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 0 1 4.5 9.75h15A2.25 2.25 0 0 1 21.75 12v.75m-8.69-6.44-2.12-2.12a1.5 1.5 0 0 0-1.061-.44H4.5A2.25 2.25 0 0 0 2.25 6v12a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9a2.25 2.25 0 0 0-2.25-2.25h-5.379a1.5 1.5 0 0 1-1.06-.44Z" /></svg>
-                         Files / RAG
+                         Manage Files in Store
                      </button>
                      <a href="/admin" id="adminLink" class="sidebar-btn" style="display: none;">
                           <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h9.75" /></svg>
@@ -159,33 +168,36 @@
 
         <!-- Main Chat Area -->
         <main class="flex-1 flex flex-col bg-gray-50">
-            <!-- Chat Header -->
             <header class="bg-white border-b border-gray-200 p-3 flex items-center justify-between min-h-[65px] shadow-sm">
                 <h3 id="discussionTitle" class="text-lg font-semibold text-gray-800 truncate px-2">Select or Create a Discussion</h3>
-                 <div id="discussionActionsPlaceholder"></div>
+                <div class="rag-controls">
+                    <button id="ragToggleBtn" class="rag-toggle rag-toggle-off self-center" title="Toggle RAG">RAG</button>
+                    <select id="ragDataStoreSelect" class="text-xs rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" style="display: none;">
+                        <option value="">Select RAG Data Store</option>
+                    </select>
+                </div>
             </header>
 
-            <!-- Messages Area -->
             <div id="chatMessages" class="flex-1 overflow-y-auto p-4 flex flex-col space-y-2">
                 <div class="text-center text-gray-500 italic mt-10">Select a discussion to start chatting.</div>
             </div>
 
-            <!-- Input Area -->
             <footer class="bg-white border-t border-gray-200 p-3 shadow-inner">
+                 <div id="imageUploadPreviewContainer" class="mb-2" style="display: none;"></div>
                 <div class="flex items-end space-x-3">
+                    <label for="imageUploadInput" class="p-2 rounded-md hover:bg-gray-100 cursor-pointer self-end">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 text-gray-500"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" /></svg>
+                    </label>
+                    <input type="file" id="imageUploadInput" multiple accept="image/*" class="hidden">
                     <textarea id="messageInput" rows="1" class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2 text-sm" placeholder="Type your message... (Shift+Enter for new line)" style="resize: none; overflow-y: hidden;"></textarea>
                     <button id="sendMessageBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md shadow-sm transition duration-150 ease-in-out self-end disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg>
                     </button>
                 </div>
                 <div id="statusMessage" class="text-xs text-red-600 mt-1 h-4"></div>
-                <button id="ragToggleBtn" class="rag-toggle rag-toggle-off self-center mb-1" title="Toggle RAG">RAG</button>
-                </div>
-                 <div id="statusMessage" class="text-xs text-red-600 mt-1 h-4"></div>
-                 <div id="pyodideStatus" class="text-xs text-blue-600 mt-1 h-4"></div>
+                <div id="pyodideStatus" class="text-xs text-blue-600 mt-1 h-4"></div>
             </footer>
         </main>
-
     </div>
 
     <!-- Modals Container -->
@@ -193,10 +205,7 @@
         <!-- Login Modal -->
         <div id="loginModal" class="modal">
             <div class="modal-content">
-                <!-- No close button for login modal if forced -->
-                <div class="modal-header">
-                    <h3 class="modal-title">Login Required</h3>
-                </div>
+                <div class="modal-header"><h3 class="modal-title">Login Required</h3></div>
                 <div class="modal-body space-y-4">
                     <img src="/logo.png" alt="Logo" class="h-16 mx-auto mb-4">
                     <div>
@@ -215,13 +224,11 @@
             </div>
         </div>
 
-        <!-- Rename Modal -->
+        <!-- Rename Discussion Modal -->
         <div id="renameModal" class="modal">
             <div class="modal-content">
                 <button class="modal-close-btn" onclick="closeModal('renameModal')">×</button>
-                <div class="modal-header">
-                    <h3 class="modal-title">Rename Discussion</h3>
-                </div>
+                <div class="modal-header"><h3 class="modal-title">Rename Discussion</h3></div>
                 <div class="modal-body">
                     <label for="renameInput" class="block text-sm font-medium text-gray-700 mb-1">New discussion title:</label>
                     <input type="text" id="renameInput" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="Enter new title">
@@ -234,14 +241,30 @@
                 </div>
             </div>
         </div>
+        
+        <!-- Send Discussion Modal -->
+        <div id="sendDiscussionModal" class="modal">
+            <div class="modal-content">
+                <button class="modal-close-btn" onclick="closeModal('sendDiscussionModal')">×</button>
+                <div class="modal-header"><h3 class="modal-title">Send Discussion</h3></div>
+                <div class="modal-body">
+                    <label for="sendTargetUsername" class="block text-sm font-medium text-gray-700 mb-1">Target Username:</label>
+                    <input type="text" id="sendTargetUsername" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="Enter username of recipient">
+                    <div id="sendDiscussionStatus" class="text-xs text-red-600 mt-1 h-4"></div>
+                    <input type="hidden" id="sendDiscussionIdInput">
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeModal('sendDiscussionModal')" class="px-4 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-300">Cancel</button>
+                    <button id="confirmSendDiscussionBtn" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">Send</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Edit Message Modal -->
         <div id="editMessageModal" class="modal">
             <div class="modal-content">
                 <button class="modal-close-btn" onclick="closeModal('editMessageModal')">×</button>
-                <div class="modal-header">
-                    <h3 class="modal-title">Edit Message</h3>
-                </div>
+                <div class="modal-header"><h3 class="modal-title">Edit Message</h3></div>
                 <div class="modal-body">
                     <label for="editMessageInput" class="block text-sm font-medium text-gray-700 mb-1">Message content:</label>
                     <textarea id="editMessageInput" rows="5" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"></textarea>
@@ -259,9 +282,7 @@
         <div id="exportModal" class="modal">
              <div class="modal-content">
                  <button class="modal-close-btn" onclick="closeModal('exportModal')">×</button>
-                 <div class="modal-header">
-                     <h3 class="modal-title">Export Discussions</h3>
-                 </div>
+                 <div class="modal-header"><h3 class="modal-title">Export Data</h3></div>
                  <div class="modal-body">
                      <p class="text-sm text-gray-600 mb-3">Select discussions to export (leave all unchecked to export all):</p>
                      <div id="exportDiscussionList" class="max-h-60 overflow-y-auto border border-gray-200 rounded p-3 space-y-2 bg-gray-50">
@@ -279,9 +300,7 @@
          <div id="importModal" class="modal">
             <div class="modal-content">
                 <button class="modal-close-btn" onclick="closeModal('importModal')">×</button>
-                <div class="modal-header">
-                    <h3 class="modal-title">Import Discussions</h3>
-                </div>
+                <div class="modal-header"><h3 class="modal-title">Import Discussions</h3></div>
                 <div class="modal-body">
                     <div class="mb-4">
                         <label for="importFile" class="block text-sm font-medium text-gray-700 mb-1">Select Exported JSON File (.json):</label>
@@ -289,8 +308,7 @@
                     </div>
                     <div id="importPreviewArea" class="mb-4" style="display: none;">
                         <p class="text-sm text-gray-600 mb-2">Select discussions to import from the file:</p>
-                         <div id="importDiscussionList" class="max-h-60 overflow-y-auto border border-gray-200 rounded p-3 space-y-2 bg-gray-50">
-                         </div>
+                         <div id="importDiscussionList" class="max-h-60 overflow-y-auto border border-gray-200 rounded p-3 space-y-2 bg-gray-50"></div>
                     </div>
                     <p id="importStatus" class="text-sm text-red-600 h-4"></p>
                 </div>
@@ -305,32 +323,57 @@
         <div id="settingsModal" class="modal">
             <div class="modal-content">
                 <button class="modal-close-btn" onclick="closeModal('settingsModal')">×</button>
-                <div class="modal-header">
-                    <h3 class="modal-title">User Settings</h3>
-                </div>
-                <div class="modal-body space-y-5">
-                    <div>
-                        <label for="settingsLollmsModelSelect" class="block text-sm font-medium text-gray-700 mb-1">Default LoLLMs Model</label>
-                        <select id="settingsLollmsModelSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
-                            <option>Loading models...</option>
-                        </select>
-                        <p class="text-xs text-gray-500 mt-1">Select the default model for new chat sessions.</p>
-                        <div class="text-right mt-2">
-                             <button id="saveLollmsModelBtn" class="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-md hover:bg-blue-700 disabled:opacity-50" disabled>Save Model</button>
+                <div class="modal-header"><h3 class="modal-title">User Settings</h3></div>
+                <div class="modal-body space-y-5 divide-y divide-gray-200">
+                    <div class="pt-3">
+                        <h4 class="text-md font-medium text-gray-800 mb-2">LLM Configuration</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="settingsLollmsModelSelect" class="block text-sm font-medium text-gray-700 mb-1">Default LLM Model</label>
+                                <select id="settingsLollmsModelSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
+                                    <option>Loading models...</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="settingsVectorizerSelect" class="block text-sm font-medium text-gray-700 mb-1">Default RAG Vectorizer</label>
+                                <select id="settingsVectorizerSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
+                                     <option>Loading vectorizers...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="text-right mt-3">
+                             <button id="saveModelAndVectorizerBtn" class="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50">Save Model & Vectorizer</button>
                         </div>
                     </div>
-                     <hr>
-                    <div>
-                        <label for="settingsVectorizerSelect" class="block text-sm font-medium text-gray-700 mb-1">Default SafeStore Vectorizer</label>
-                        <select id="settingsVectorizerSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
-                             <option>Loading vectorizers...</option>
-                        </select>
-                         <p class="text-xs text-gray-500 mt-1">Select the default vectorizer for RAG.</p>
-                        <div class="text-right mt-2">
-                            <button id="saveVectorizerBtn" class="px-3 py-1 bg-blue-600 text-white text-xs font-medium rounded-md hover:bg-blue-700 disabled:opacity-50" disabled>Save Vectorizer</button>
+                    <div class="pt-4">
+                        <h4 class="text-md font-medium text-gray-800 mb-2">LLM Generation Parameters</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                            <div>
+                                <label for="settingsTemperature" class="block text-sm font-medium text-gray-700">Temperature</label>
+                                <input type="number" id="settingsTemperature" step="0.01" min="0" max="2" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="e.g., 0.7">
+                            </div>
+                            <div>
+                                <label for="settingsTopK" class="block text-sm font-medium text-gray-700">Top K</label>
+                                <input type="number" id="settingsTopK" step="1" min="1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="e.g., 50">
+                            </div>
+                            <div>
+                                <label for="settingsTopP" class="block text-sm font-medium text-gray-700">Top P</label>
+                                <input type="number" id="settingsTopP" step="0.01" min="0" max="1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="e.g., 0.95">
+                            </div>
+                            <div>
+                                <label for="settingsRepeatPenalty" class="block text-sm font-medium text-gray-700">Repeat Penalty</label>
+                                <input type="number" id="settingsRepeatPenalty" step="0.01" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="e.g., 1.1">
+                            </div>
+                            <div>
+                                <label for="settingsRepeatLastN" class="block text-sm font-medium text-gray-700">Repeat Last N</label>
+                                <input type="number" id="settingsRepeatLastN" step="1" min="0" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="e.g., 64">
+                            </div>
+                        </div>
+                        <div class="text-right mt-3">
+                            <button id="saveLLMParamsBtn" class="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50">Save LLM Parameters</button>
                         </div>
                     </div>
-                    <div id="settingsStatus" class="text-sm h-4"></div>
+                    <div id="settingsStatus" class="text-sm h-4 pt-3"></div>
                 </div>
                 <div class="modal-footer">
                     <button onclick="closeModal('settingsModal')" class="px-4 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-300">Close</button>
@@ -338,14 +381,75 @@
             </div>
         </div>
 
-        <!-- File Management Modal -->
+        <!-- Data Stores Management Modal -->
+        <div id="dataStoresModal" class="modal">
+            <div class="modal-content">
+                <button class="modal-close-btn" onclick="closeModal('dataStoresModal')">×</button>
+                <div class="modal-header"><h3 class="modal-title">Manage Data Stores (RAG)</h3></div>
+                <div class="modal-body space-y-6">
+                    <section class="border border-gray-200 rounded-md p-4">
+                        <h4 class="text-md font-medium text-gray-800 mb-3">Create New Data Store</h4>
+                        <form id="createDataStoreForm" class="space-y-3">
+                            <div>
+                                <label for="newDataStoreName" class="block text-sm font-medium text-gray-700">Name</label>
+                                <input type="text" id="newDataStoreName" required minlength="3" maxlength="100" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
+                            </div>
+                            <div>
+                                <label for="newDataStoreDescription" class="block text-sm font-medium text-gray-700">Description (Optional)</label>
+                                <textarea id="newDataStoreDescription" rows="2" maxlength="500" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"></textarea>
+                            </div>
+                            <div class="text-right">
+                                <button type="submit" class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700">Create Store</button>
+                            </div>
+                        </form>
+                        <div id="createDataStoreStatus" class="text-sm h-4 mt-2"></div>
+                    </section>
+                    <section>
+                        <h4 class="text-md font-medium text-gray-800 mb-2">Your Data Stores</h4>
+                        <div id="ownedDataStoresList" class="max-h-48 overflow-y-auto space-y-2 bg-gray-50 border border-gray-100 rounded p-3">
+                            <p class="text-gray-500 italic">Loading your stores...</p>
+                        </div>
+                    </section>
+                    <section>
+                        <h4 class="text-md font-medium text-gray-800 mb-2">Data Stores Shared With You</h4>
+                        <div id="sharedDataStoresList" class="max-h-48 overflow-y-auto space-y-2 bg-gray-50 border border-gray-100 rounded p-3">
+                           <p class="text-gray-500 italic">Loading shared stores...</p>
+                        </div>
+                    </section>
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeModal('dataStoresModal')" class="px-4 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-300">Close</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Share Data Store Modal (Sub-modal) -->
+        <div id="shareDataStoreModal" class="modal">
+            <div class="modal-content" style="width: 450px;">
+                <button class="modal-close-btn" onclick="closeModal('shareDataStoreModal')">×</button>
+                <div class="modal-header"><h3 id="shareDataStoreTitle" class="modal-title">Share Data Store</h3></div>
+                <div class="modal-body">
+                    <label for="shareTargetUsernameDS" class="block text-sm font-medium text-gray-700 mb-1">Share with Username:</label>
+                    <input type="text" id="shareTargetUsernameDS" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="Enter username to share with">
+                    <!-- Permissions dropdown could be added here if more levels are supported -->
+                    <div id="shareDataStoreStatus" class="text-xs text-red-600 mt-1 h-4"></div>
+                    <input type="hidden" id="shareDataStoreIdInput">
+                </div>
+                <div class="modal-footer">
+                    <button onclick="closeModal('shareDataStoreModal')" class="px-4 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-300">Cancel</button>
+                    <button id="confirmShareDataStoreBtn" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">Share</button>
+                </div>
+            </div>
+        </div>
+
+
+        <!-- File Management Modal (for a selected DataStore) -->
         <div id="fileManagementModal" class="modal">
             <div class="modal-content">
                 <button class="modal-close-btn" onclick="closeModal('fileManagementModal')">×</button>
-                <div class="modal-header">
-                    <h3 class="modal-title">RAG File Management</h3>
-                </div>
+                <div class="modal-header"><h3 class="modal-title">Manage Files in Data Store: <span id="fileManagerDataStoreName" class="font-normal"></span></h3></div>
                 <div class="modal-body space-y-5">
+                    <input type="hidden" id="fileManagerCurrentDataStoreId">
                     <div class="border border-gray-200 rounded-md p-4">
                          <h4 class="text-md font-medium text-gray-800 mb-3">Upload New Documents</h4>
                          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -368,9 +472,8 @@
                          </div>
                          <div id="uploadStatus" class="text-sm h-4 mt-2"></div>
                     </div>
-
                      <div class="border border-gray-200 rounded-md p-4">
-                         <h4 class="text-md font-medium text-gray-800 mb-3">Indexed Documents</h4>
+                         <h4 class="text-md font-medium text-gray-800 mb-3">Indexed Documents in this Store</h4>
                          <div id="indexedFileList" class="max-h-60 overflow-y-auto space-y-2 bg-gray-50 border border-gray-100 rounded p-3">
                             <p class="text-gray-500 italic">Loading files...</p>
                          </div>
@@ -382,16 +485,25 @@
                 </div>
             </div>
         </div>
+        
+        <!-- Image Viewer Modal -->
+        <div id="imageViewerModal" class="modal">
+            <div class="modal-content p-2 relative" style="max-width: 90vw; max-height: 90vh; width: auto; height: auto;">
+                 <button class="modal-close-btn text-2xl font-bold text-white bg-black bg-opacity-50 rounded-full p-1 leading-none" style="top:10px; right:10px; width:30px; height:30px;" onclick="closeModal('imageViewerModal')">×</button>
+                <img id="imageViewerSrc" src="" alt="Enlarged Image" class="max-w-full max-h-full object-contain">
+            </div>
+        </div>
+
 
     </div> <!-- End Modals Container -->
 
 
     <script>
         // --- Global State ---
-        let currentUser = null;
+        let currentUser = null; // Will include LLM params like temperature, top_k, etc.
         let currentDiscussionId = null;
-        let discussions = {};
-        let currentMessages = [];
+        let discussions = {}; // Client-side cache: { id: {id, title, is_starred, rag_datastore_id, messages_loaded_fully (bool)} }
+        let currentMessages = []; // Full message objects for the currently selected discussion
         let aiMessageStreaming = false;
         let currentAiMessageElement = null;
         let currentAiMessageContent = "";
@@ -399,54 +511,61 @@
         let codeMirrorInstances = {};
         let pyodide = null;
         let pyodideLoading = false;
-        let isRagActive = false;
+        let isRagActive = false; // Global RAG toggle state for the current discussion view
         let availableLollmsModels = [];
-        let availableVectorizers = [];
-        let userLollmsModel = null;
-        let userDefaultVectorizer = null;
-        let sessionActiveVectorizer = null;
-        let indexedRagFiles = [];
-        let lastUserMessageId = null;
+        let availableVectorizers = []; // For a specific datastore, or global for user default
+        let userDefaultVectorizer = null; // User's global default
+        
+        let ownedDataStores = []; // List of {id, name, description, owner_username}
+        let sharedDataStores = []; // List of {id, name, description, owner_username}
+        let availableDataStoresForRag = []; // Combined list for RAG selector
+
+        let uploadedImageServerPaths = []; // For current message being composed [{filename, server_path}, ...]
 
         let tempLoginUsername = null;
         let tempLoginPassword = null;
 
         // --- DOM Elements ---
-        // App Loading
         const appLoadingMessage = document.getElementById('appLoadingMessage');
         const appLoadingStatus = document.getElementById('appLoadingStatus');
         const appContainer = document.getElementById('app-container');
-        // Login Modal
         const loginModal = document.getElementById('loginModal');
         const loginUsernameInput = document.getElementById('loginUsername');
         const loginPasswordInput = document.getElementById('loginPassword');
         const loginSubmitBtn = document.getElementById('loginSubmitBtn');
         const loginStatus = document.getElementById('loginStatus');
-        // Sidebar
         const discussionListContainer = document.getElementById('discussionListContainer');
         const newDiscussionBtn = document.getElementById('newDiscussionBtn');
         const usernameDisplay = document.getElementById('usernameDisplay');
         const adminBadge = document.getElementById('adminBadge');
         const adminLink = document.getElementById('adminLink');
         const settingsBtn = document.getElementById('settingsBtn');
-        const filesBtn = document.getElementById('filesBtn');
+        const dataStoresBtn = document.getElementById('dataStoresBtn'); // New
+        const filesBtn = document.getElementById('filesBtn'); // Now "Manage Files in Store"
         const exportDataBtn = document.getElementById('exportDataBtn');
         const importDataBtn = document.getElementById('importDataBtn');
         const logoutBtn = document.getElementById('logoutBtn');
-        // Chat Area
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendMessageBtn = document.getElementById('sendMessageBtn');
         const discussionTitle = document.getElementById('discussionTitle');
         const ragToggleBtn = document.getElementById('ragToggleBtn');
+        const ragDataStoreSelect = document.getElementById('ragDataStoreSelect'); // New
+        const imageUploadInput = document.getElementById('imageUploadInput'); // New
+        const imageUploadPreviewContainer = document.getElementById('imageUploadPreviewContainer'); // New
         const statusMessage = document.getElementById('statusMessage');
         const pyodideStatus = document.getElementById('pyodideStatus');
-        // Modals & Controls
+        // Modals
         const renameModal = document.getElementById('renameModal');
         const renameInput = document.getElementById('renameInput');
         const confirmRenameBtn = document.getElementById('confirmRenameBtn');
         const renameStatus = document.getElementById('renameStatus');
         const renameDiscussionIdInput = document.getElementById('renameDiscussionIdInput');
+        const sendDiscussionModal = document.getElementById('sendDiscussionModal'); // New
+        const sendTargetUsernameInput = document.getElementById('sendTargetUsername'); // New
+        const confirmSendDiscussionBtn = document.getElementById('confirmSendDiscussionBtn'); // New
+        const sendDiscussionStatus = document.getElementById('sendDiscussionStatus'); // New
+        const sendDiscussionIdInput = document.getElementById('sendDiscussionIdInput'); // New
         const editMessageModal = document.getElementById('editMessageModal');
         const editMessageInput = document.getElementById('editMessageInput');
         const confirmEditMessageBtn = document.getElementById('confirmEditMessageBtn');
@@ -463,104 +582,84 @@
         const importStatus = document.getElementById('importStatus');
         const settingsModal = document.getElementById('settingsModal');
         const settingsLollmsModelSelect = document.getElementById('settingsLollmsModelSelect');
-        const saveLollmsModelBtn = document.getElementById('saveLollmsModelBtn');
         const settingsVectorizerSelect = document.getElementById('settingsVectorizerSelect');
-        const saveVectorizerBtn = document.getElementById('saveVectorizerBtn');
+        const saveModelAndVectorizerBtn = document.getElementById('saveModelAndVectorizerBtn'); // Changed
+        const settingsTemperature = document.getElementById('settingsTemperature'); // New
+        const settingsTopK = document.getElementById('settingsTopK'); // New
+        const settingsTopP = document.getElementById('settingsTopP'); // New
+        const settingsRepeatPenalty = document.getElementById('settingsRepeatPenalty'); // New
+        const settingsRepeatLastN = document.getElementById('settingsRepeatLastN'); // New
+        const saveLLMParamsBtn = document.getElementById('saveLLMParamsBtn'); // New
         const settingsStatus = document.getElementById('settingsStatus');
+        const dataStoresModal = document.getElementById('dataStoresModal'); // New
+        const createDataStoreForm = document.getElementById('createDataStoreForm'); // New
+        const newDataStoreNameInput = document.getElementById('newDataStoreName'); // New
+        const newDataStoreDescriptionInput = document.getElementById('newDataStoreDescription'); // New
+        const createDataStoreStatus = document.getElementById('createDataStoreStatus'); // New
+        const ownedDataStoresList = document.getElementById('ownedDataStoresList'); // New
+        const sharedDataStoresList = document.getElementById('sharedDataStoresList'); // New
+        const shareDataStoreModal = document.getElementById('shareDataStoreModal'); // New
+        const shareDataStoreTitle = document.getElementById('shareDataStoreTitle'); // New
+        const shareTargetUsernameDSInput = document.getElementById('shareTargetUsernameDS'); // New
+        const confirmShareDataStoreBtn = document.getElementById('confirmShareDataStoreBtn'); // New
+        const shareDataStoreStatus = document.getElementById('shareDataStoreStatus'); // New
+        const shareDataStoreIdInput = document.getElementById('shareDataStoreIdInput'); // New
         const fileManagementModal = document.getElementById('fileManagementModal');
-        const fileVectorizerSelect = document.getElementById('fileVectorizerSelect');
+        const fileManagerDataStoreName = document.getElementById('fileManagerDataStoreName'); // New: display current DS name
+        const fileManagerCurrentDataStoreId = document.getElementById('fileManagerCurrentDataStoreId'); // New: hidden input
+        const fileVectorizerSelect = document.getElementById('fileVectorizerSelect'); // Now for selected datastore
         const fileUploadInput = document.getElementById('fileUploadInput');
         const confirmUploadBtn = document.getElementById('confirmUploadBtn');
         const uploadStatus = document.getElementById('uploadStatus');
         const indexedFileList = document.getElementById('indexedFileList');
         const fileListStatus = document.getElementById('fileListStatus');
+        const imageViewerModal = document.getElementById('imageViewerModal'); // New
+        const imageViewerSrc = document.getElementById('imageViewerSrc'); // New
 
 
-
-        // --- API Helper ---
+        // --- API Helper --- (largely unchanged, temp creds logic is fine)
         async function apiRequest(url, options = {}) {
-            if (!options.statusElement) showStatus(''); // Clear global status unless specific
-
+            if (!options.statusElement) showStatus('');
             const fetchOptions = { ...options };
-            fetchOptions.headers = { ...fetchOptions.headers }; // Ensure headers object exists
-
-            // If temporary login credentials are set (from our custom login modal),
-            // and no Authorization header is already set in options,
-            // construct and add the Basic Auth header for this request.
+            fetchOptions.headers = { ...fetchOptions.headers };
             if (tempLoginUsername && tempLoginPassword && !fetchOptions.headers['Authorization']) {
                 const basicAuth = btoa(`${tempLoginUsername}:${tempLoginPassword}`);
                 fetchOptions.headers['Authorization'] = `Basic ${basicAuth}`;
-                console.log("apiRequest: Using temporary credentials for Basic Auth.");
             }
-            // After using them for one request, clear them.
-            // The browser should then cache them if the request is successful.
-            // Or, if a different strategy is needed, this clearing logic might change.
-            // For now, we assume the /api/auth/me call will "set" the browser's cache.
-            // tempLoginUsername = null; // Let's clear them *after* the fetch call completes
-            // tempLoginPassword = null;
-
-
             try {
                 const response = await fetch(url, fetchOptions);
-                // If login was successful (200 on /me), subsequent browser requests should include auth
-                // If login failed (401), the browser won't cache, and we'll re-prompt.
-
                 if (!response.ok) {
                     let errorDetail = `HTTP error ${response.status}`;
-                    try {
-                        const errorData = await response.json();
-                        errorDetail = errorData.detail || errorDetail;
-                    } catch (e) { /* Ignore if response is not JSON */ }
-
+                    try { const errorData = await response.json(); errorDetail = errorData.detail || errorDetail; } catch (e) { /* Ignore */ }
                     const errorMsg = `API Error: ${errorDetail}`;
                     showStatus(errorMsg, "error", options.statusElement);
-                    const error = new Error(errorMsg);
-                    error.status = response.status;
-                    throw error;
+                    const error = new Error(errorMsg); error.status = response.status; throw error;
                 }
-                if (response.status === 204) {
-                    return null;
-                }
-                return response; // Return full response
+                if (response.status === 204) return null;
+                return response;
             } catch (error) {
                 console.error("API Request Error:", url, fetchOptions, error);
-                if (!error.status) { // Avoid double-logging
-                    showStatus(`Request failed: ${error.message}`, "error", options.statusElement || statusMessage);
-                }
+                if (!error.status) showStatus(`Request failed: ${error.message}`, "error", options.statusElement || statusMessage);
                 throw error;
             } finally {
-                // Clear temporary credentials after the attempt, regardless of success or failure.
-                // If successful, the browser will cache them. If failed, we don't want to keep retrying with bad creds.
                 if (url === '/api/auth/me' && fetchOptions.headers['Authorization'] && fetchOptions.headers['Authorization'].startsWith('Basic')) {
-                    // Only clear if we just used them for the /me call
-                    tempLoginUsername = null;
-                    tempLoginPassword = null;
-                    console.log("apiRequest: Cleared temporary credentials after /api/auth/me attempt.");
+                    tempLoginUsername = null; tempLoginPassword = null;
                 }
             }
         }
 
         // --- Initialization ---
         window.onload = async () => {
-            marked.setOptions({
-                highlight: (code, lang) => code,
-                gfm: true,
-                breaks: true,
-            });
-            // Initial call to /api/auth/me will not have tempLoginUsername/Password.
-            // If it gets a 401, login modal appears.
-            // After login modal submission, handleLoginAttempt sets temp creds,
-            // then calls attemptInitialAuthAndLoad again. This time, /api/auth/me will use them.
+            marked.setOptions({ highlight: (code, lang) => code, gfm: true, breaks: true });
             await attemptInitialAuthAndLoad();
+            imageUploadInput.addEventListener('change', handleImageFileSelection);
         };
 
         async function attemptInitialAuthAndLoad() {
             appLoadingStatus.textContent = "Authenticating...";
             try {
-                // apiRequest will now use tempLoginUsername/Password if they are set
-                const response = await apiRequest('/api/auth/me'); // This request will now carry the auth header if temp creds are set
+                const response = await apiRequest('/api/auth/me');
                 currentUser = await response.json();
-
                 loginModal.classList.remove('active');
                 appContainer.style.display = 'flex';
                 appLoadingMessage.style.display = 'none';
@@ -568,14 +667,12 @@
             } catch (error) {
                 if (error.status === 401) {
                     appLoadingMessage.style.display = 'none';
-                    // If called due to initial load (no temp creds) or if temp creds failed
-                    showStatus("Login failed or required.", "error", loginStatus); // Show error in login modal
+                    showStatus("Login failed or required.", "error", loginStatus);
                     openModal('loginModal', false);
                     loginUsernameInput.focus();
                 } else {
                     appLoadingStatus.textContent = `Initialization failed: ${error.message}. Please refresh.`;
                     appLoadingStatus.classList.add('text-red-600');
-                    console.error("Initialization error:", error);
                 }
             }
         }
@@ -583,166 +680,106 @@
         async function initializeAppContent() {
             appLoadingStatus.textContent = "Loading user data...";
             usernameDisplay.textContent = currentUser.username;
-            userLollmsModel = currentUser.lollms_model_name;
-            userDefaultVectorizer = currentUser.safe_store_vectorizer;
-            sessionActiveVectorizer = userDefaultVectorizer;
+            userDefaultVectorizer = currentUser.safe_store_vectorizer; // User's global default vectorizer preference
 
             if (currentUser.is_admin) {
                 adminBadge.style.display = 'inline-block';
                 adminLink.style.display = 'flex';
             }
 
-            appLoadingStatus.textContent = "Loading discussions...";
-            await loadDiscussions();
-
+            appLoadingStatus.textContent = "Loading discussions & data stores...";
+            await Promise.all([
+                loadDiscussions(),
+                loadDataStores() // Load owned and shared datastores
+            ]);
+            
             appLoadingStatus.textContent = "Loading models and vectorizers...";
-            await loadAvailableLollmsModels();
-            await loadAvailableVectorizers();
-            await loadIndexedRagFiles();
+            await loadAvailableLollmsModels(); // For settings
+            // Vectorizers for specific datastore file uploads are loaded when file manager is opened for that store
+            // User's default vectorizer (currentUser.safe_store_vectorizer) is for RAG settings
 
-            updateRagToggleButtonState();
+            updateRagToggleButtonState(); // Initial state based on currentDiscussion's RAG datastore
 
+            // Event listeners for modals and core actions
             confirmRenameBtn.onclick = confirmInlineRename;
+            confirmSendDiscussionBtn.onclick = confirmSendDiscussion;
             confirmEditMessageBtn.onclick = confirmMessageEdit;
             logoutBtn.onclick = handleLogout;
             loginSubmitBtn.onclick = handleLoginAttempt;
-            loginPasswordInput.addEventListener('keypress', (e) => {
-                if (e.key === 'Enter') handleLoginAttempt();
-            });
+            loginPasswordInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleLoginAttempt(); });
+            
+            createDataStoreForm.addEventListener('submit', handleCreateDataStore);
 
             showStatus('Ready.', 'success');
         }
 
-
-        // --- Login and Logout ---
+        // --- Login and Logout --- (largely unchanged, but clear more state on logout)
         async function handleLoginAttempt() {
-            const username = loginUsernameInput.value.trim();
-            const password = loginPasswordInput.value;
-
-            if (!username || !password) {
-                showStatus("Username and password are required.", "error", loginStatus);
-                return;
-            }
-            showStatus("Attempting login...", "info", loginStatus);
-            loginSubmitBtn.disabled = true;
-
-            // Store credentials temporarily for apiRequest to pick up
-            tempLoginUsername = username;
-            tempLoginPassword = password;
-
-            try {
-                // Now, call attemptInitialAuthAndLoad.
-                // The apiRequest for /api/auth/me inside it will use the temp credentials.
-                await attemptInitialAuthAndLoad();
-                // If attemptInitialAuthAndLoad is successful, it will hide the modal
-                // and initialize the app. If it fails (e.g., 401), it will show
-                // an error in loginStatus and keep the modal open.
-            } catch (error) {
-                // This catch might not be strictly necessary if attemptInitialAuthAndLoad handles its own errors regarding the modal
-                console.error("Login attempt via modal ultimately failed:", error);
-                // Ensure loginStatus shows the error if attemptInitialAuthAndLoad didn't already
-                if (error.status === 401) {
-                    showStatus("Invalid username or password.", "error", loginStatus);
-                } else {
-                    showStatus(`Login error: ${error.message}`, "error", loginStatus);
-                }
-            } finally {
-                loginSubmitBtn.disabled = false;
-                // tempLoginUsername and tempLoginPassword are cleared by apiRequest after /api/auth/me
-            }
+            const username = loginUsernameInput.value.trim(); const password = loginPasswordInput.value;
+            if (!username || !password) { showStatus("Username and password are required.", "error", loginStatus); return; }
+            showStatus("Attempting login...", "info", loginStatus); loginSubmitBtn.disabled = true;
+            tempLoginUsername = username; tempLoginPassword = password;
+            try { await attemptInitialAuthAndLoad(); }
+            catch (error) {
+                if (error.status === 401) showStatus("Invalid username or password.", "error", loginStatus);
+                else showStatus(`Login error: ${error.message}`, "error", loginStatus);
+            } finally { loginSubmitBtn.disabled = false; }
         }
 
         async function handleLogout() {
             showStatus("Logging out...", "info");
-            try {
-                await apiRequest('/api/auth/logout', { method: 'POST' });
-                console.info("Server-side session cleared.");
-            } catch (error) {
-                console.warn("Logout API call failed or returned an error, proceeding with client-side UI reset:", error);
-                showStatus("Logout from server failed, but resetting UI.", "warning");
-            } finally {
-                currentUser = null;
-                discussions = {};
-                currentMessages = [];
-                codeMirrorInstances = {};
-                currentDiscussionId = null;
-                lastUserMessageId = null;
-                aiMessageStreaming = false;
-                currentAiMessageElement = null;
-                currentAiMessageContent = "";
-                currentAiMessageId = null;
-                isRagActive = false;
+            try { await apiRequest('/api/auth/logout', { method: 'POST' }); }
+            catch (error) { console.warn("Logout API call failed:", error); showStatus("Logout from server failed, but resetting UI.", "warning"); }
+            finally {
+                currentUser = null; discussions = {}; currentMessages = []; codeMirrorInstances = {}; currentDiscussionId = null;
+                aiMessageStreaming = false; currentAiMessageElement = null; currentAiMessageContent = ""; currentAiMessageId = null;
+                isRagActive = false; uploadedImageServerPaths = [];
+                ownedDataStores = []; sharedDataStores = []; availableDataStoresForRag = [];
 
-                usernameDisplay.textContent = '...';
-                adminBadge.style.display = 'none';
-                adminLink.style.display = 'none';
-                discussionListContainer.innerHTML = '<p class="text-gray-500 text-sm text-center italic p-4">Please log in to view discussions.</p>';
-                clearChatArea(true);
-                sendMessageBtn.disabled = true;
-                messageInput.value = '';
-                autoGrowTextarea(messageInput);
-                ragToggleBtn.classList.remove('rag-toggle-on');
-                ragToggleBtn.classList.add('rag-toggle-off');
-                ragToggleBtn.disabled = true;
+                usernameDisplay.textContent = '...'; adminBadge.style.display = 'none'; adminLink.style.display = 'none';
+                discussionListContainer.innerHTML = '<p class="text-gray-500 text-sm text-center italic p-4">Please log in.</p>';
+                clearChatArea(true); sendMessageBtn.disabled = true; messageInput.value = ''; autoGrowTextarea(messageInput);
+                ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
+                ragDataStoreSelect.style.display = 'none'; ragDataStoreSelect.innerHTML = '<option value="">Select RAG Data Store</option>';
+                imageUploadPreviewContainer.innerHTML = ''; imageUploadPreviewContainer.style.display = 'none';
                 updateRagToggleButtonState();
 
-                appContainer.style.display = 'none';
-                appLoadingMessage.style.display = 'none';
-                showStatus('', 'info', statusMessage);
-                showStatus('', 'info', pyodideStatus);
-                
-                loginUsernameInput.value = '';
-                loginPasswordInput.value = '';
-                loginSubmitBtn.disabled = false;
-                showStatus("You have been logged out. Please login again.", "info", loginStatus);
-                
-                openModal('loginModal', false); 
-                loginUsernameInput.focus();
-                console.log("Client UI has been reset to logged-out state. Awaiting new login via modal.");
+                appContainer.style.display = 'none'; appLoadingMessage.style.display = 'none';
+                showStatus('', 'info', statusMessage); showStatus('', 'info', pyodideStatus);
+                loginUsernameInput.value = ''; loginPasswordInput.value = ''; loginSubmitBtn.disabled = false;
+                showStatus("You have been logged out.", "info", loginStatus);
+                openModal('loginModal', false); loginUsernameInput.focus();
             }
         }
 
-
-        // --- Modal Management ---
+        // --- Modal Management --- (largely unchanged, added new modals)
         function openModal(modalId, allowOverlayClose = true) {
             const modal = document.getElementById(modalId);
             if (modal) {
                 modal.classList.add('active');
-                if (modalId === 'loginModal') {
-                    modal.dataset.allowOverlayClose = allowOverlayClose.toString();
-                    loginUsernameInput.focus();
-                } else if (modalId === 'settingsModal') {
-                    populateSettingsModal();
-                } else if (modalId === 'fileManagementModal') {
-                    populateFileManagementModal();
-                } else if (modalId === 'exportModal') {
-                    populateExportModal();
-                }
-                if (modalId === 'renameModal') renameInput.focus();
-                if (modalId === 'editMessageModal') editMessageInput.focus();
+                if (modalId === 'loginModal') { modal.dataset.allowOverlayClose = allowOverlayClose.toString(); loginUsernameInput.focus(); }
+                else if (modalId === 'settingsModal') { populateSettingsModal(); }
+                else if (modalId === 'dataStoresModal') { populateDataStoresModal(); }
+                else if (modalId === 'fileManagementModal') { /* populated when specific DS is chosen */ }
+                else if (modalId === 'exportModal') { populateExportModal(); }
+                if (modalId === 'renameModal' && renameInput) renameInput.focus();
+                if (modalId === 'sendDiscussionModal' && sendTargetUsernameInput) sendTargetUsernameInput.focus();
+                if (modalId === 'editMessageModal' && editMessageInput) editMessageInput.focus();
+                if (modalId === 'shareDataStoreModal' && shareTargetUsernameDSInput) shareTargetUsernameDSInput.focus();
             }
         }
-
         function closeModal(modalId) {
-            const modal = document.getElementById(modalId);
-            if (modal) {
-                modal.classList.remove('active');
-            }
-             const statusElement = document.getElementById(modalId.replace('Modal', 'Status'));
-             if (statusElement) {
-                 showStatus('', 'info', statusElement);
-             }
-             if (modalId === 'renameModal') renameDiscussionIdInput.value = '';
-             if (modalId === 'editMessageModal') editMessageIdInput.value = '';
+            const modal = document.getElementById(modalId); if (modal) modal.classList.remove('active');
+            const statusElement = document.getElementById(modalId.replace('Modal', 'Status')); if (statusElement) showStatus('', 'info', statusElement);
+            if (modalId === 'renameModal') renameDiscussionIdInput.value = '';
+            if (modalId === 'sendDiscussionModal') { sendDiscussionIdInput.value = ''; sendTargetUsernameInput.value = ''; }
+            if (modalId === 'editMessageModal') editMessageIdInput.value = '';
+            if (modalId === 'shareDataStoreModal') { shareDataStoreIdInput.value = ''; shareTargetUsernameDSInput.value = '';}
         }
-
         document.querySelectorAll('.modal').forEach(modal => {
             modal.addEventListener('click', (event) => {
-                // Only close if clicked on overlay AND overlay close is allowed (for login modal)
                 const allowClose = modal.dataset.allowOverlayClose !== 'false';
-                if (event.target === modal && allowClose) {
-                    closeModal(modal.id);
-                }
+                if (event.target === modal && allowClose) closeModal(modal.id);
             });
         });
 
@@ -751,14 +788,18 @@
             try {
                 const response = await apiRequest('/api/discussions');
                 const loadedDiscussions = await response.json();
-                discussions = {};
-                loadedDiscussions.forEach(d => { discussions[d.id] = d; });
+                discussions = {}; // Reset client cache
+                loadedDiscussions.forEach(d => {
+                    discussions[d.id] = { // Store more info client-side
+                        id: d.id, title: d.title, is_starred: d.is_starred,
+                        rag_datastore_id: d.rag_datastore_id, messages_loaded_fully: false
+                    };
+                });
                 renderDiscussionList();
                 if (currentDiscussionId && discussions[currentDiscussionId]) {
-                    selectDiscussion(currentDiscussionId);
-                } else if (currentDiscussionId) {
-                    clearChatArea();
-                    currentDiscussionId = null;
+                    selectDiscussion(currentDiscussionId); // Reselect if still valid
+                } else if (currentDiscussionId) { // Was selected but no longer exists
+                    clearChatArea(); currentDiscussionId = null;
                 }
             } catch (error) {
                 console.error("Failed to load discussions:", error);
@@ -769,67 +810,57 @@
         function renderDiscussionList() {
             discussionListContainer.innerHTML = '';
             const sortedIds = Object.keys(discussions).sort((a, b) => {
-                const starA = discussions[a].is_starred ? 0 : 1;
-                const starB = discussions[b].is_starred ? 0 : 1;
+                const starA = discussions[a].is_starred ? 0 : 1; const starB = discussions[b].is_starred ? 0 : 1;
                 if (starA !== starB) return starA - starB;
                 return (discussions[a].title || '').localeCompare(discussions[b].title || '');
             });
 
             if (sortedIds.length === 0) {
-                 discussionListContainer.innerHTML = '<p class="text-gray-500 text-sm text-center italic p-4">No discussions yet.</p>';
-                 return;
+                 discussionListContainer.innerHTML = '<p class="text-gray-500 text-sm text-center italic p-4">No discussions yet.</p>'; return;
             }
 
             sortedIds.forEach(id => {
                 const d = discussions[id];
                 const item = document.createElement('div');
                 item.className = `relative discussion-item p-2 rounded cursor-pointer hover:bg-gray-100 flex justify-between items-center text-sm transition-colors duration-150 ${id === currentDiscussionId ? 'bg-blue-100 font-medium text-blue-800' : 'text-gray-700'}`;
-                item.dataset.id = id;
-                item.onclick = () => selectDiscussion(id);
+                item.dataset.id = id; item.onclick = () => selectDiscussion(id);
 
                 const titleSpan = document.createElement('span');
                 titleSpan.textContent = d.title || `Discussion ${id.substring(0, 6)}`;
-                titleSpan.className = 'truncate mr-2 flex-1 pr-16';
+                titleSpan.className = 'truncate mr-2 flex-1 pr-20'; // More space for actions
 
                 const controlsDiv = document.createElement('div');
                 controlsDiv.className = 'flex items-center flex-shrink-0';
 
                 const starSpan = document.createElement('span');
                 starSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="none" class="w-4 h-4 star-icon ${d.is_starred ? 'starred' : ''} transition-colors duration-150"><path stroke-linecap="round" stroke-linejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 21.1a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" /></svg>`;
-                starSpan.title = d.is_starred ? 'Unstar Discussion' : 'Star Discussion';
+                starSpan.title = d.is_starred ? 'Unstar' : 'Star';
                 starSpan.className = 'p-1 hover:bg-gray-200 rounded-full mr-1';
-                starSpan.onclick = (e) => {
-                    e.stopPropagation();
-                    toggleStarDiscussion(id, d.is_starred);
-                };
+                starSpan.onclick = (e) => { e.stopPropagation(); toggleStarDiscussion(id, d.is_starred); };
 
                 const actionsDiv = document.createElement('div');
-                actionsDiv.className = 'discussion-item-actions';
+                actionsDiv.className = 'discussion-item-actions'; // Hover to show
+                // Send button
+                const sendBtn = document.createElement('button');
+                sendBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg>`;
+                sendBtn.title = "Send Discussion to User"; sendBtn.className = 'discussion-action-btn';
+                sendBtn.onclick = (e) => { e.stopPropagation(); initiateSendDiscussion(id); };
+                actionsDiv.appendChild(sendBtn);
 
                 const renameBtn = document.createElement('button');
                 renameBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg>`;
-                renameBtn.title = "Rename Discussion";
-                renameBtn.className = 'discussion-action-btn';
-                renameBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    initiateInlineRename(id);
-                };
+                renameBtn.title = "Rename"; renameBtn.className = 'discussion-action-btn';
+                renameBtn.onclick = (e) => { e.stopPropagation(); initiateInlineRename(id); };
+                actionsDiv.appendChild(renameBtn);
 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-red-500"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg>`;
-                deleteBtn.title = "Delete Discussion";
-                deleteBtn.className = 'discussion-action-btn';
-                deleteBtn.onclick = (e) => {
-                    e.stopPropagation();
-                    deleteInlineDiscussion(id);
-                };
-
-                actionsDiv.appendChild(renameBtn);
+                deleteBtn.title = "Delete"; deleteBtn.className = 'discussion-action-btn';
+                deleteBtn.onclick = (e) => { e.stopPropagation(); deleteInlineDiscussion(id); };
                 actionsDiv.appendChild(deleteBtn);
-                controlsDiv.appendChild(starSpan);
-                controlsDiv.appendChild(actionsDiv);
-                item.appendChild(titleSpan);
-                item.appendChild(controlsDiv);
+                
+                controlsDiv.appendChild(starSpan); controlsDiv.appendChild(actionsDiv);
+                item.appendChild(titleSpan); item.appendChild(controlsDiv);
                 discussionListContainer.appendChild(item);
             });
         }
@@ -839,29 +870,40 @@
             try {
                 const response = await apiRequest('/api/discussions', { method: 'POST' });
                 const newDiscussion = await response.json();
-                discussions[newDiscussion.id] = newDiscussion;
+                discussions[newDiscussion.id] = { // Update client cache
+                    id: newDiscussion.id, title: newDiscussion.title, is_starred: newDiscussion.is_starred,
+                    rag_datastore_id: newDiscussion.rag_datastore_id, messages_loaded_fully: true // New discussion has no messages yet
+                };
                 renderDiscussionList();
                 selectDiscussion(newDiscussion.id);
                 showStatus('New discussion created.', 'success');
-            } catch (error) {
-                 console.error("Failed to create discussion:", error);
-            }
+            } catch (error) { console.error("Failed to create discussion:", error); }
         };
 
         async function selectDiscussion(id) {
             if (!discussions[id] || aiMessageStreaming) return;
-
             currentDiscussionId = id;
-            discussionTitle.textContent = discussions[id].title;
+            const discussionData = discussions[id];
+            discussionTitle.textContent = discussionData.title;
             sendMessageBtn.disabled = false;
-            renderDiscussionList();
+            renderDiscussionList(); // To highlight selection
             clearChatArea(false);
             chatMessages.innerHTML = '<p class="text-gray-500 text-center italic mt-10">Loading messages...</p>';
-            lastUserMessageId = null;
+            
+            // Update RAG toggle and datastore selector based on this discussion's settings
+            isRagActive = discussionData.rag_datastore_id !== null && discussionData.rag_datastore_id !== "";
+            updateRagToggleButtonState(); // This will also populate and set ragDataStoreSelect if RAG is active
+            if(isRagActive && discussionData.rag_datastore_id) {
+                ragDataStoreSelect.value = discussionData.rag_datastore_id;
+            } else if (availableDataStoresForRag.length > 0) { // If RAG not active but stores exist, set to default
+                ragDataStoreSelect.value = ""; // Or user's preferred default if implemented
+            }
+
 
             try {
                 const response = await apiRequest(`/api/discussions/${id}`);
-                currentMessages = await response.json();
+                currentMessages = await response.json(); // API returns full MessageOutput objects
+                discussions[id].messages_loaded_fully = true;
                 renderMessages(currentMessages);
             } catch (error) {
                  console.error(`Failed to load messages for ${id}:`, error);
@@ -871,90 +913,86 @@
 
         function initiateInlineRename(id) {
             if (!discussions[id]) return;
-            renameDiscussionIdInput.value = id;
-            renameInput.value = discussions[id].title;
-            showStatus('', 'info', renameStatus);
-            openModal('renameModal');
+            renameDiscussionIdInput.value = id; renameInput.value = discussions[id].title;
+            showStatus('', 'info', renameStatus); openModal('renameModal');
         }
-
         async function confirmInlineRename() {
-             const idToRename = renameDiscussionIdInput.value;
-             if (!idToRename || !discussions[idToRename]) return;
-
-             const newTitle = renameInput.value.trim();
-             if (!newTitle) {
-                 showStatus('Title cannot be empty.', 'error', renameStatus);
-                 return;
-             }
+             const idToRename = renameDiscussionIdInput.value; if (!idToRename || !discussions[idToRename]) return;
+             const newTitle = renameInput.value.trim(); if (!newTitle) { showStatus('Title cannot be empty.', 'error', renameStatus); return; }
              showStatus('Renaming...', 'info', renameStatus);
-
              try {
                  const response = await apiRequest(`/api/discussions/${idToRename}/title`, {
-                     method: 'PUT',
-                     headers: { 'Content-Type': 'application/json' },
-                     body: JSON.stringify({ title: newTitle }),
-                     statusElement: renameStatus
+                     method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({ title: newTitle }), statusElement: renameStatus
                  });
                  const updatedInfo = await response.json();
                  discussions[idToRename].title = updatedInfo.title;
-                 if (idToRename === currentDiscussionId) {
-                     discussionTitle.textContent = updatedInfo.title;
-                 }
-                 renderDiscussionList();
-                 showStatus('Renamed successfully.', 'success', renameStatus);
+                 if (idToRename === currentDiscussionId) discussionTitle.textContent = updatedInfo.title;
+                 renderDiscussionList(); showStatus('Renamed successfully.', 'success', renameStatus);
                  setTimeout(() => closeModal('renameModal'), 1000);
-             } catch (error) {
-                 console.error("Rename failed:", error);
-             }
-        };
+             } catch (error) { console.error("Rename failed:", error); }
+        }
+        function initiateSendDiscussion(id) {
+            if (!discussions[id]) return;
+            sendDiscussionIdInput.value = id;
+            document.getElementById('sendDiscussionModal').querySelector('.modal-title').textContent = `Send Discussion: "${discussions[id].title}"`;
+            sendTargetUsernameInput.value = '';
+            showStatus('', 'info', sendDiscussionStatus);
+            openModal('sendDiscussionModal');
+        }
+        async function confirmSendDiscussion() {
+            const discussionId = sendDiscussionIdInput.value;
+            const targetUsername = sendTargetUsernameInput.value.trim();
+            if (!discussionId || !targetUsername) {
+                showStatus('Target username is required.', 'error', sendDiscussionStatus);
+                return;
+            }
+            showStatus(`Sending discussion to ${targetUsername}...`, 'info', sendDiscussionStatus);
+            try {
+                await apiRequest(`/api/discussions/${discussionId}/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_username: targetUsername }),
+                    statusElement: sendDiscussionStatus
+                });
+                showStatus('Discussion sent successfully!', 'success', sendDiscussionStatus);
+                setTimeout(() => closeModal('sendDiscussionModal'), 1500);
+            } catch (error) {
+                console.error("Send discussion failed:", error);
+                // Error message already shown by apiRequest
+            }
+        }
 
         async function deleteInlineDiscussion(id) {
              if (!discussions[id]) return;
-             const titleToDelete = discussions[id].title;
-             if (confirm(`Are you sure you want to delete discussion "${titleToDelete}"? This cannot be undone.`)) {
+             if (confirm(`Are you sure you want to delete discussion "${discussions[id].title}"? This cannot be undone.`)) {
                  showStatus('Deleting discussion...', 'info');
                  try {
                      await apiRequest(`/api/discussions/${id}`, { method: 'DELETE' });
                      delete discussions[id];
-                     if (id === currentDiscussionId) {
-                         currentDiscussionId = null;
-                         clearChatArea(true);
-                     }
-                     renderDiscussionList();
-                     showStatus(`Discussion "${titleToDelete}" deleted.`, 'success');
-                 } catch (error) {
-                     console.error("Delete failed:", error);
-                 }
+                     if (id === currentDiscussionId) { currentDiscussionId = null; clearChatArea(true); }
+                     renderDiscussionList(); showStatus(`Discussion deleted.`, 'success');
+                 } catch (error) { console.error("Delete failed:", error); }
              }
-        };
-
+        }
         async function toggleStarDiscussion(id, isCurrentlyStarred) {
              const method = isCurrentlyStarred ? 'DELETE' : 'POST';
-             const action = isCurrentlyStarred ? 'Unstarring' : 'Starring';
              try {
                 await apiRequest(`/api/discussions/${id}/star`, { method: method });
-                discussions[id].is_starred = !isCurrentlyStarred;
-                renderDiscussionList();
-             } catch (error) {
-                  console.error(`${action} failed:`, error);
-                  showStatus(`Failed to ${action.toLowerCase()} discussion.`, 'error');
-             }
+                discussions[id].is_starred = !isCurrentlyStarred; renderDiscussionList();
+             } catch (error) { showStatus(`Failed to ${isCurrentlyStarred ? 'unstar' : 'star'} discussion.`, 'error'); }
         }
 
         // --- Chat Interaction ---
         messageInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
             autoGrowTextarea(messageInput);
         });
         messageInput.addEventListener('input', () => autoGrowTextarea(messageInput));
         sendMessageBtn.onclick = sendMessage;
 
-        function autoGrowTextarea(element) {
-            element.style.height = 'auto';
-            const maxHeight = 200;
+        function autoGrowTextarea(element) { /* Unchanged */
+            element.style.height = 'auto'; const maxHeight = 200;
             element.style.height = Math.min(element.scrollHeight, maxHeight) + 'px';
             element.style.overflowY = element.scrollHeight > maxHeight ? 'auto' : 'hidden';
         }
@@ -962,82 +1000,62 @@
         async function sendMessage() {
             if (aiMessageStreaming || !currentDiscussionId) return;
             const prompt = messageInput.value.trim();
-            if (!prompt) return;
+            if (!prompt && uploadedImageServerPaths.length === 0) return; // Need either text or image
 
-            const tempUserId = `temp-user-${Date.now()}`;
-            const userMessage = {
-                id: tempUserId,
-                sender: currentUser.lollms_client_ai_name ? 'You' : (currentUser.username || 'User'),
-                content: prompt, user_grade: 0, token_count: null, model_name: null
+            const userMessageData = {
+                id: `temp-user-${Date.now()}`, sender: currentUser.lollms_client_ai_name ? 'You' : (currentUser.username || 'User'),
+                content: prompt, user_grade: 0, token_count: null, model_name: null,
+                image_references: uploadedImageServerPaths.map(img => URL.createObjectURL(img.file_obj)) // For temp display
             };
-            const lastMessageElement = chatMessages.lastElementChild?.querySelector('.message-bubble');
-            if (lastMessageElement && lastMessageElement.classList.contains('user-bubble')) {
-                 userMessage.addSpacing = true;
-            }
-            renderMessage(userMessage);
-            lastUserMessageId = tempUserId;
-            messageInput.value = '';
-            autoGrowTextarea(messageInput);
-            sendMessageBtn.disabled = true;
-            scrollChatToBottom();
-
+            renderMessage(userMessageData); // Render immediately with local blob URLs
+            
             const formData = new FormData();
             formData.append('prompt', prompt);
+            formData.append('image_server_paths_json', JSON.stringify(uploadedImageServerPaths.map(img => img.server_path)));
             formData.append('use_rag', isRagActive);
+            if(isRagActive && discussions[currentDiscussionId] && discussions[currentDiscussionId].rag_datastore_id) {
+                formData.append('rag_datastore_id', discussions[currentDiscussionId].rag_datastore_id);
+            }
+            // parent_message_id could be added if implementing threading
 
-            aiMessageStreaming = true;
-            currentAiMessageContent = "";
-            currentAiMessageElement = null;
-            currentAiMessageId = `temp-ai-${Date.now()}`;
+            messageInput.value = ''; uploadedImageServerPaths = [];
+            imageUploadPreviewContainer.innerHTML = ''; imageUploadPreviewContainer.style.display = 'none';
+            autoGrowTextarea(messageInput); sendMessageBtn.disabled = true; scrollChatToBottom();
+
+            aiMessageStreaming = true; currentAiMessageContent = ""; currentAiMessageElement = null; currentAiMessageId = `temp-ai-${Date.now()}`;
 
             try {
-                 const response = await fetch(`/api/discussions/${currentDiscussionId}/chat`, {
-                     method: 'POST', body: formData
-                 });
-
+                 const response = await fetch(`/api/discussions/${currentDiscussionId}/chat`, { method: 'POST', body: formData });
                  if (!response.ok || !response.body) {
                      const errorData = await response.json().catch(() => ({ detail: `HTTP error ${response.status}` }));
                      throw new Error(`Error starting chat stream: ${errorData.detail || response.statusText}`);
                  }
-                 const reader = response.body.getReader();
-                 const decoder = new TextDecoder();
+                 const reader = response.body.getReader(); const decoder = new TextDecoder();
                  while (true) {
-                     const { done, value } = await reader.read();
-                     if (done) break;
+                     const { done, value } = await reader.read(); if (done) break;
                      const textChunk = decoder.decode(value, { stream: true });
                      const lines = textChunk.split('\n').filter(line => line.trim() !== '');
                      lines.forEach(line => {
                          try { handleStreamChunk(JSON.parse(line)); }
-                         catch (e) { console.warn("Error parsing stream chunk:", line, e); renderMessage({ id: `warn-${Date.now()}`, sender: 'system', content: `Warning: Received malformed data chunk.` }); }
+                         catch (e) { console.warn("Error parsing stream chunk:", line, e); renderMessage({ id: `warn-${Date.now()}`, sender: 'system', content: `Malformed data chunk.` }); }
                      });
                  }
                  handleStreamEnd();
              } catch (error) {
-                 console.error("Chat stream error:", error);
-                 showStatus(`Chat stream failed: ${error.message}`, "error");
+                 console.error("Chat stream error:", error); showStatus(`Chat stream failed: ${error.message}`, "error");
                  renderMessage({ id: `err-${Date.now()}`, sender: 'system', content: `Stream Error: ${error.message}` });
                  handleStreamEnd(true);
              }
         }
-
-        function handleStreamChunk(data) {
+        function handleStreamChunk(data) { /* Unchanged from original structure for chunk/error */
              if (data.type === 'chunk') {
                  if (!currentAiMessageElement) {
-                     const aiMessage = {
-                         id: currentAiMessageId, sender: currentUser.lollms_client_ai_name || 'Assistant',
-                         content: "", user_grade: 0, token_count: null, model_name: null
-                     };
-                     const lastMessageElement = chatMessages.lastElementChild?.querySelector('.message-bubble');
-                     if (lastMessageElement && lastMessageElement.classList.contains('user-bubble')) {
-                        aiMessage.addSpacing = true;
-                     }
+                     const aiMessage = { id: currentAiMessageId, sender: currentUser.lollms_client_ai_name || 'Assistant', content: "", user_grade: 0, token_count: null, model_name: null, image_references: [] };
                      renderMessage(aiMessage);
                  }
                  currentAiMessageContent += data.content;
                  const contentDiv = currentAiMessageElement?.querySelector('.message-content');
-                 if (contentDiv) {
-                     contentDiv.textContent = currentAiMessageContent;
-                 }
+                 if (contentDiv) contentDiv.textContent = currentAiMessageContent; // Simple update, full re-render on end
                  scrollChatToBottom();
              } else if (data.type === 'error') {
                  console.error("LLM Error:", data.content);
@@ -1045,26 +1063,17 @@
                  handleStreamEnd(true);
              }
         }
-
-        function handleStreamEnd(errorOccurred = false) {
-            aiMessageStreaming = false;
-            sendMessageBtn.disabled = false;
-            if (currentDiscussionId) {
-                 refreshMessagesAfterStream();
-            }
-            currentAiMessageElement = null;
-            currentAiMessageContent = "";
-            currentAiMessageId = null;
-            scrollChatToBottom();
+        function handleStreamEnd(errorOccurred = false) { /* Unchanged, triggers refresh */
+            aiMessageStreaming = false; sendMessageBtn.disabled = false;
+            if (currentDiscussionId) refreshMessagesAfterStream();
+            currentAiMessageElement = null; currentAiMessageContent = ""; currentAiMessageId = null; scrollChatToBottom();
         }
-
         async function refreshMessagesAfterStream() {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 500)); // Small delay for server to save
             if (!currentDiscussionId || aiMessageStreaming) return;
             try {
                 const response = await apiRequest(`/api/discussions/${currentDiscussionId}`);
-                currentMessages = await response.json();
-                renderMessages(currentMessages);
+                currentMessages = await response.json(); renderMessages(currentMessages);
             } catch (error) {
                  console.error(`Failed to refresh messages for ${currentDiscussionId}:`, error);
                  renderMessage({ id: `err-refresh-${Date.now()}`, sender: 'system', content: `Failed to refresh message list.` });
@@ -1077,167 +1086,162 @@
              if (clearHeader) {
                 discussionTitle.textContent = 'Select or Create a Discussion';
                 sendMessageBtn.disabled = true;
+                ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
+                ragDataStoreSelect.style.display = 'none'; ragDataStoreSelect.value = '';
+                isRagActive = false; updateRagToggleButtonState();
              }
-            currentMessages = [];
-            codeMirrorInstances = {};
+            currentMessages = []; codeMirrorInstances = {};
         }
 
         function renderMessages(messagesToRender) {
-            chatMessages.innerHTML = '';
-            codeMirrorInstances = {};
+            chatMessages.innerHTML = ''; codeMirrorInstances = {};
             messagesToRender.forEach((msg, index) => {
-                 if (index > 0 && messagesToRender[index-1].sender !== msg.sender) {
-                     msg.addSpacing = true;
-                 } else {
-                     msg.addSpacing = false;
-                 }
+                 msg.addSpacing = (index > 0 && messagesToRender[index-1].sender !== msg.sender);
                  renderMessage(msg);
             });
             scrollChatToBottom();
         }
 
-        function renderMessage(message) {
+        function renderMessage(message) { // Updated for images and copy button
              if (!message || typeof message.sender === 'undefined' || typeof message.content === 'undefined') {
-                 console.warn("Skipping invalid message:", message);
-                 return;
+                 console.warn("Skipping invalid message:", message); return;
              }
-            const messageId = message.id || `temp-${Date.now()}`;
-            const domId = `message-${messageId}`;
-
-            if (document.getElementById(domId) && messageId !== currentAiMessageId) {
-                 return;
-            }
+            const messageId = message.id || `temp-${Date.now()}`; const domId = `message-${messageId}`;
+            if (document.getElementById(domId) && messageId !== currentAiMessageId) return;
 
             const messageContainer = document.createElement('div');
             messageContainer.className = 'message-container flex flex-col';
             if (message.addSpacing) messageContainer.classList.add('mt-3');
 
-            let bubbleClass = 'ai-bubble'; let senderName = message.sender;
-            let showGrade = false; let isUserMsg = false;
-            const userNames = [currentUser.username, 'user', 'You'];
+            let bubbleClass = 'ai-bubble'; let senderName = message.sender; let showGrade = false;
+            const userNames = [currentUser.username, 'user', 'You', currentUser.lollms_client_ai_name ? null : currentUser.username];
 
-            if (userNames.includes(senderName)) {
-                bubbleClass = 'user-bubble'; senderName = ''; isUserMsg = true;
+            if (userNames.includes(senderName) || (message.sender === "User" && currentUser.username === "user")) { // Simplified user check
+                bubbleClass = 'user-bubble'; senderName = '';
             } else if (senderName.toLowerCase() === 'system' || senderName.toLowerCase() === 'error') {
                 bubbleClass = 'system-bubble'; senderName = '';
             } else {
-                bubbleClass = 'ai-bubble';
-                senderName = currentUser.lollms_client_ai_name || message.sender;
+                bubbleClass = 'ai-bubble'; senderName = currentUser.lollms_client_ai_name || message.sender;
                 showGrade = !messageId.startsWith('temp-');
             }
 
             const bubbleDiv = document.createElement('div');
-            bubbleDiv.className = `message-bubble ${bubbleClass}`;
-            bubbleDiv.id = domId;
+            bubbleDiv.className = `message-bubble ${bubbleClass}`; bubbleDiv.id = domId;
 
-            if (senderName) {
+            if (senderName) { /* Sender name unchanged */
                 const senderDiv = document.createElement('div');
                 senderDiv.className = 'sender-name'; senderDiv.textContent = senderName;
                 bubbleDiv.appendChild(senderDiv);
             }
 
+            // Image display for the message
+            if (message.image_references && message.image_references.length > 0) {
+                const imagesContainer = document.createElement('div');
+                imagesContainer.className = 'message-images-container';
+                message.image_references.forEach(imgSrc => {
+                    const imgItem = document.createElement('div');
+                    imgItem.className = 'message-image-item';
+                    const imgTag = document.createElement('img');
+                    imgTag.src = imgSrc; // This will be a blob URL for previews, or /user_assets/... for persisted
+                    imgTag.alt = 'Chat Image';
+                    imgTag.onclick = () => viewImage(imgSrc);
+                    imgItem.appendChild(imgTag);
+                    imagesContainer.appendChild(imgItem);
+                });
+                bubbleDiv.appendChild(imagesContainer);
+            }
+
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content prose prose-sm max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-code:before:content-none prose-code:after:content-none prose-code:font-normal prose-code:bg-gray-100 prose-code:text-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded';
-
-            if (aiMessageStreaming && messageId === currentAiMessageId) {
-                 contentDiv.textContent = currentAiMessageContent;
-                 currentAiMessageElement = bubbleDiv;
-            } else {
-                 renderProcessedContent(contentDiv, message.content || "", messageId);
+            if (message.content || (aiMessageStreaming && messageId === currentAiMessageId)) { // Only render if content exists
+                if (aiMessageStreaming && messageId === currentAiMessageId) {
+                     contentDiv.textContent = currentAiMessageContent; currentAiMessageElement = bubbleDiv;
+                } else {
+                     renderProcessedContent(contentDiv, message.content || "", messageId);
+                }
+                bubbleDiv.appendChild(contentDiv);
+            } else if (!message.image_references || message.image_references.length === 0) {
+                // If no content AND no images, add a placeholder or skip this part of the bubble
+                contentDiv.innerHTML = '<p class="italic text-gray-500">[Empty message]</p>';
+                bubbleDiv.appendChild(contentDiv);
             }
-            bubbleDiv.appendChild(contentDiv);
 
-            const footerDiv = document.createElement('div');
-            footerDiv.className = 'message-footer';
-            const detailsSpan = document.createElement('span');
-            detailsSpan.className = 'message-details';
+
+            const footerDiv = document.createElement('div'); footerDiv.className = 'message-footer';
+            const detailsSpan = document.createElement('span'); detailsSpan.className = 'message-details';
             let detailsContent = '';
             if (message.token_count) detailsContent += `<span>Tokens: ${message.token_count}</span>`;
             if (message.model_name) detailsContent += `<span>Model: ${message.model_name}</span>`;
             detailsSpan.innerHTML = detailsContent;
 
-            const actionsSpan = document.createElement('span');
-            actionsSpan.className = 'message-actions';
+            const actionsSpan = document.createElement('span'); actionsSpan.className = 'message-actions items-center'; // Ensure items-center
             if (!messageId.startsWith('temp-')) {
+                // Copy button
+                const copyBtn = document.createElement('button');
+                copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" /></svg>`;
+                copyBtn.title = "Copy Content"; copyBtn.className = 'message-action-btn';
+                copyBtn.onclick = () => {
+                    navigator.clipboard.writeText(message.content || "").then(() => {
+                        showStatus("Content copied!", "success");
+                    }).catch(err => showStatus("Copy failed.", "error"));
+                };
+                actionsSpan.appendChild(copyBtn);
+
                 const editBtn = document.createElement('button');
                 editBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg>`;
-                editBtn.title = "Edit Message"; editBtn.className = 'message-action-btn';
+                editBtn.title = "Edit"; editBtn.className = 'message-action-btn';
                 editBtn.onclick = () => initiateEditMessage(messageId);
                 actionsSpan.appendChild(editBtn);
 
                 const deleteBtn = document.createElement('button');
                 deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="text-red-500"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg>`;
-                deleteBtn.title = "Delete Message"; deleteBtn.className = 'message-action-btn';
+                deleteBtn.title = "Delete"; deleteBtn.className = 'message-action-btn';
                 deleteBtn.onclick = () => deleteMessage(messageId);
                 actionsSpan.appendChild(deleteBtn);
             }
 
-            const gradeSpanContainer = document.createElement('span');
-            gradeSpanContainer.className = 'flex items-center justify-end';
-            if (showGrade) {
+            const gradeSpanContainer = document.createElement('span'); gradeSpanContainer.className = 'flex items-center justify-end ml-auto'; // ml-auto to push to right
+            if (showGrade) { /* Grade buttons unchanged */
                 const userGrade = message.user_grade || 0;
-                const upvoteBtn = document.createElement('button');
-                upvoteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" /></svg>`;
-                upvoteBtn.title = "Good response";
-                upvoteBtn.className = `grade-btn ${userGrade > 0 ? 'selected-up' : ''} p-1 rounded hover:bg-gray-200`;
+                const upvoteBtn = document.createElement('button'); upvoteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" /></svg>`;
+                upvoteBtn.title = "Good"; upvoteBtn.className = `grade-btn ${userGrade > 0 ? 'selected-up' : ''} p-1 rounded hover:bg-gray-200`;
                 upvoteBtn.onclick = () => gradeMessage(messageId, 1);
-
-                const gradeDisplaySpan = document.createElement('span');
-                gradeDisplaySpan.className = 'grade-score font-medium'; gradeDisplaySpan.textContent = userGrade;
-
-                const downvoteBtn = document.createElement('button');
-                downvoteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>`;
-                downvoteBtn.title = "Bad response";
-                downvoteBtn.className = `grade-btn ${userGrade < 0 ? 'selected-down' : ''} p-1 rounded hover:bg-gray-200`;
+                const gradeDisplaySpan = document.createElement('span'); gradeDisplaySpan.className = 'grade-score font-medium'; gradeDisplaySpan.textContent = userGrade;
+                const downvoteBtn = document.createElement('button'); downvoteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>`;
+                downvoteBtn.title = "Bad"; downvoteBtn.className = `grade-btn ${userGrade < 0 ? 'selected-down' : ''} p-1 rounded hover:bg-gray-200`;
                 downvoteBtn.onclick = () => gradeMessage(messageId, -1);
-
-                gradeSpanContainer.appendChild(upvoteBtn);
-                gradeSpanContainer.appendChild(gradeDisplaySpan);
-                gradeSpanContainer.appendChild(downvoteBtn);
+                gradeSpanContainer.appendChild(upvoteBtn); gradeSpanContainer.appendChild(gradeDisplaySpan); gradeSpanContainer.appendChild(downvoteBtn);
             }
 
-            footerDiv.appendChild(detailsSpan);
-            footerDiv.appendChild(actionsSpan);
-            footerDiv.appendChild(gradeSpanContainer);
+            footerDiv.appendChild(detailsSpan); footerDiv.appendChild(actionsSpan); footerDiv.appendChild(gradeSpanContainer);
             bubbleDiv.appendChild(footerDiv);
 
             const existingElement = document.getElementById(domId);
             if (existingElement) {
-                if (messageId === currentAiMessageId) {
-                    existingElement.parentNode.replaceChild(bubbleDiv, existingElement);
-                    currentAiMessageElement = bubbleDiv;
-                }
-            } else {
-                 messageContainer.appendChild(bubbleDiv);
-                 chatMessages.appendChild(messageContainer);
-                 if (messageId === currentAiMessageId) {
-                     currentAiMessageElement = bubbleDiv;
-                 }
-            }
+                if (messageId === currentAiMessageId) { existingElement.parentNode.replaceChild(bubbleDiv, existingElement); currentAiMessageElement = bubbleDiv; }
+            } else { messageContainer.appendChild(bubbleDiv); chatMessages.appendChild(messageContainer); if (messageId === currentAiMessageId) currentAiMessageElement = bubbleDiv; }
         }
 
-        function renderProcessedContent(element, rawContent, messageId) {
+        function renderProcessedContent(element, rawContent, messageId) { /* Unchanged */
             let processedHtml = ''; const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
             let lastIndex = 0; let match;
             while ((match = thinkRegex.exec(rawContent)) !== null) {
                 const before = rawContent.substring(lastIndex, match.index);
                 if (before.trim()) processedHtml += marked.parse(before);
-                const thinkContent = match[1];
-                processedHtml += `<details class="think-block"><summary>Assistant's Thoughts</summary><div class="think-content prose prose-sm max-w-none">${marked.parse(thinkContent)}</div></details>`;
+                processedHtml += `<details class="think-block"><summary>Assistant's Thoughts</summary><div class="think-content prose prose-sm max-w-none">${marked.parse(match[1])}</div></details>`;
                 lastIndex = thinkRegex.lastIndex;
             }
-            const after = rawContent.substring(lastIndex);
-            if (after.trim()) processedHtml += marked.parse(after);
+            const after = rawContent.substring(lastIndex); if (after.trim()) processedHtml += marked.parse(after);
             element.innerHTML = processedHtml || '<p></p>';
             try { renderMathInElement(element, { delimiters: [ {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true} ], throwOnError: false }); }
             catch(e) { console.warn("KaTeX rendering error:", e); }
             renderCodeMirrorBlocks(element, messageId);
         }
 
-        function renderCodeMirrorBlocks(element, messageId) {
+        function renderCodeMirrorBlocks(element, messageId) { /* Unchanged */
             element.querySelectorAll('pre > code').forEach((codeBlock, index) => {
                 const preElement = codeBlock.parentNode;
-                if (preElement.parentNode.querySelector('.cm-editor')) return;
+                if (preElement.parentNode.querySelector('.cm-editor')) return; // Already rendered
                 const language = codeBlock.className.match(/language-(\w+)/)?.[1] || 'plaintext';
                 const code = codeBlock.textContent || '';
                 const uniqueCmId = `${messageId}-${index}`;
@@ -1246,62 +1250,63 @@
                 const langSpan = document.createElement('span'); langSpan.textContent = language;
                 const buttonsDiv = document.createElement('div'); buttonsDiv.className = 'code-block-buttons';
 
-                const copyBtn = document.createElement('button');
-                copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`;
+                const copyBtn = document.createElement('button'); copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`;
                 copyBtn.onclick = () => { navigator.clipboard.writeText(code).then(() => { copyBtn.textContent = 'Copied!'; setTimeout(() => copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`, 1500) }); };
                 buttonsDiv.appendChild(copyBtn);
 
                 if (language === 'python') {
-                    const execBtn = document.createElement('button');
-                    execBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Run`;
+                    const execBtn = document.createElement('button'); execBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Run`;
                     execBtn.onclick = () => executePythonCode(code, preElement.parentNode);
                     buttonsDiv.appendChild(execBtn);
                 }
                 header.appendChild(langSpan); header.appendChild(buttonsDiv);
-                preElement.parentNode.insertBefore(header, preElement);
+                
+                const codeBlockContainer = document.createElement('div'); // New container
+                codeBlockContainer.className = 'code-block-container'; // For potential specific styling
+                preElement.parentNode.insertBefore(codeBlockContainer, preElement);
+                codeBlockContainer.appendChild(header); // Header inside container
+                
                 const cmContainer = document.createElement('div');
-                preElement.parentNode.replaceChild(cmContainer, preElement);
+                codeBlockContainer.appendChild(cmContainer); // CM instance also inside container
+                preElement.remove(); // Remove original <pre>
+
                 let modeInfo = CodeMirror.findModeByName(language) || CodeMirror.findModeByExtension(language);
                 let mode = modeInfo ? modeInfo.mode : 'null';
                 try {
                     const cmInstance = CodeMirror(cmContainer, { value: code, mode: mode, theme: "material-darker", lineNumbers: true, readOnly: true, lineWrapping: true });
                     codeMirrorInstances[uniqueCmId] = cmInstance;
-                } catch(e) { console.error("CodeMirror initialization failed:", e); cmContainer.parentNode.replaceChild(preElement, cmContainer); }
+                    setTimeout(() => cmInstance.refresh(), 50); // Try a refresh
+                } catch(e) { console.error("CodeMirror initialization failed:", e); codeBlockContainer.replaceWith(preElement); } // Revert if CM fails
             });
         }
 
-        async function gradeMessage(messageId, change) {
+        async function gradeMessage(messageId, change) { /* Unchanged */
              if (!currentDiscussionId || !messageId || messageId.startsWith('temp-')) return;
-             const messageElement = document.getElementById(`message-${messageId}`);
-             if (!messageElement) return;
+             const messageElement = document.getElementById(`message-${messageId}`); if (!messageElement) return;
              try {
                 const response = await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}/grade`, {
-                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ change: change })
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ change: change })
                 });
                  const updatedMessage = await response.json();
                  const gradeSpan = messageElement.querySelector('.grade-score');
-                 const upBtn = messageElement.querySelector('.grade-btn.selected-up, .grade-btn:not(.selected-down):first-of-type');
-                 const downBtn = messageElement.querySelector('.grade-btn.selected-down, .grade-btn:last-of-type');
+                 const upBtn = messageElement.querySelector('.grade-btn:first-of-type'); // Simpler selector
+                 const downBtn = messageElement.querySelector('.grade-btn:last-of-type');
                  if (gradeSpan) gradeSpan.textContent = updatedMessage.user_grade;
-                 if (upBtn) upBtn.classList.toggle('selected-up', updatedMessage.user_grade > 0);
-                 if (downBtn) downBtn.classList.toggle('selected-down', updatedMessage.user_grade < 0);
+                 if (upBtn) upBtn.classList.toggle('selected-up', updatedMessage.user_grade > 0); else if (upBtn) upBtn.classList.remove('selected-up');
+                 if (downBtn) downBtn.classList.toggle('selected-down', updatedMessage.user_grade < 0); else if (downBtn) downBtn.classList.remove('selected-down');
                  const msgIndex = currentMessages.findIndex(m => m.id === messageId);
                  if (msgIndex > -1) currentMessages[msgIndex].user_grade = updatedMessage.user_grade;
              } catch (error) { console.error("Grading failed:", error); showStatus('Failed to update grade.', 'error'); }
         }
 
-        // --- Message Edit/Delete Functions ---
-        function initiateEditMessage(messageId) {
+        // --- Message Edit/Delete --- (Unchanged logic, MessageOutput includes grade and images)
+        function initiateEditMessage(messageId) { /* Unchanged */
             const messageData = currentMessages.find(m => m.id === messageId);
             if (!messageData) { showStatus("Cannot find message data to edit.", "error"); return; }
-            editMessageIdInput.value = messageId;
-            editMessageInput.value = messageData.content;
-            showStatus('', 'info', editMessageStatus);
-            openModal('editMessageModal');
+            editMessageIdInput.value = messageId; editMessageInput.value = messageData.content;
+            showStatus('', 'info', editMessageStatus); openModal('editMessageModal');
         }
-
-        async function confirmMessageEdit() {
+        async function confirmMessageEdit() { /* Unchanged, but re-render will handle images */
             const messageId = editMessageIdInput.value; const newContent = editMessageInput.value;
             if (!messageId || !currentDiscussionId) return;
             showStatus('Saving changes...', 'info', editMessageStatus); confirmEditMessageBtn.disabled = true;
@@ -1310,47 +1315,43 @@
                     method: 'PUT', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ content: newContent }), statusElement: editMessageStatus
                 });
-                const updatedMessageData = await response.json();
+                const updatedMessageData = await response.json(); // This is MessageOutput
                 const msgIndex = currentMessages.findIndex(m => m.id === messageId);
-                if (msgIndex > -1) currentMessages[msgIndex] = updatedMessageData;
-                const messageElement = document.getElementById(`message-${messageId}`);
-                if (messageElement) {
-                    const contentDiv = messageElement.querySelector('.message-content');
-                    if (contentDiv) {
-                         Object.keys(codeMirrorInstances).forEach(key => { if (key.startsWith(messageId + '-')) delete codeMirrorInstances[key]; });
-                        renderProcessedContent(contentDiv, updatedMessageData.content, messageId);
-                    }
-                     const detailsSpan = messageElement.querySelector('.message-details');
-                     if (detailsSpan) {
-                         let detailsContent = '';
-                         if (updatedMessageData.token_count) detailsContent += `<span>Tokens: ${updatedMessageData.token_count}</span>`;
-                         if (updatedMessageData.model_name) detailsContent += `<span>Model: ${updatedMessageData.model_name}</span>`;
-                         detailsSpan.innerHTML = detailsContent;
-                     }
+                if (msgIndex > -1) currentMessages[msgIndex] = updatedMessageData; // Replace with full new data
+                
+                const messageElementContainer = document.getElementById(`message-${messageId}`)?.closest('.message-container');
+                if (messageElementContainer) { // Re-render the specific message
+                    const tempMsg = { ...updatedMessageData, addSpacing: messageElementContainer.classList.contains('mt-3') };
+                    const oldScroll = chatMessages.scrollTop; // Preserve scroll
+                    renderMessage(tempMsg); // This will replace the old element by ID
+                    chatMessages.scrollTop = oldScroll;
                 }
                 showStatus('Message updated successfully.', 'success', editMessageStatus);
                 setTimeout(() => closeModal('editMessageModal'), 1000);
             } catch (error) { console.error("Message edit failed:", error); }
             finally { confirmEditMessageBtn.disabled = false; }
         }
-
-        async function deleteMessage(messageId) {
+        async function deleteMessage(messageId) { /* Unchanged */
              if (!currentDiscussionId || !messageId || messageId.startsWith('temp-')) return;
              const messageElement = document.getElementById(`message-${messageId}`);
-             const messageContentPreview = messageElement ? (messageElement.querySelector('.message-content')?.textContent || '').substring(0, 50) + '...' : `message ${messageId}`;
-             if (confirm(`Are you sure you want to delete this message?\n\n"${messageContentPreview}"`)) {
+             const msgPreview = messageElement ? (messageElement.querySelector('.message-content')?.textContent || 'Image message').substring(0,50)+'...' : `message ${messageId}`;
+             if (confirm(`Are you sure you want to delete this message?\n\n"${msgPreview}"`)) {
                  showStatus('Deleting message...', 'info');
                  try {
                      await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}`, { method: 'DELETE' });
                      currentMessages = currentMessages.filter(m => m.id !== messageId);
-                     if (messageElement) messageElement.closest('.message-container')?.remove();
+                     messageElement?.closest('.message-container')?.remove();
                      Object.keys(codeMirrorInstances).forEach(key => { if (key.startsWith(messageId + '-')) delete codeMirrorInstances[key]; });
                      showStatus('Message deleted successfully.', 'success');
                  } catch (error) { console.error("Message deletion failed:", error); }
              }
         }
 
-        // --- Pyodide Python Execution ---
+        // --- Pyodide Python Execution --- (Unchanged)
+        async function loadPyodide() { /* ... */ }
+        async function executePythonCode(code, codeContainerElement) { /* ... */ }
+        function showPyodideStatus(msg, isError = false) { /* ... */ }
+        // Copied from provided snippet
         async function loadPyodide() {
             if (pyodide || pyodideLoading) return;
             pyodideLoading = true; showPyodideStatus('Loading Python interpreter...');
@@ -1398,129 +1399,475 @@
             pyodideStatus.className = `text-xs mt-1 h-4 ${isError ? 'text-red-600' : 'text-blue-600'}`;
         }
 
-        // --- Settings Modal Logic ---
+
+        // --- Settings Modal Logic --- (Updated for LLM params)
         settingsBtn.onclick = () => openModal('settingsModal');
-        async function loadAvailableLollmsModels() {
+        async function loadAvailableLollmsModels() { /* Unchanged */
              try {
                 const response = await apiRequest('/api/config/lollms-models');
                 if (!response.ok) throw new Error(`API failed: ${response.status}`);
                 availableLollmsModels = await response.json();
-                populateDropdown(settingsLollmsModelSelect, availableLollmsModels, userLollmsModel, "No models found");
+                populateDropdown(settingsLollmsModelSelect, availableLollmsModels, currentUser.lollms_model_name, "No models found");
              } catch (error) {
                  console.error("Failed to load LoLLMs models:", error); availableLollmsModels = [];
                  populateDropdown(settingsLollmsModelSelect, [], null, `Error: ${error.message || 'Failed to load'}`);
              }
          }
-         settingsLollmsModelSelect.onchange = () => { saveLollmsModelBtn.disabled = settingsLollmsModelSelect.value === userLollmsModel; };
-         saveLollmsModelBtn.onclick = async () => {
-             const selectedModel = settingsLollmsModelSelect.value; if (!selectedModel || selectedModel === userLollmsModel) return;
-             showStatus('Saving model setting...', 'info', settingsStatus); saveLollmsModelBtn.disabled = true;
-             try {
-                const formData = new FormData(); formData.append('model_name', selectedModel);
-                await apiRequest('/api/config/lollms-model', { method: 'POST', body: formData, statusElement: settingsStatus });
-                userLollmsModel = selectedModel;
-                showStatus(`Default model set to ${selectedModel}. Client will re-init on next chat.`, 'success', settingsStatus);
-             } catch (error) { console.error("Failed to save model:", error); saveLollmsModelBtn.disabled = false; }
-         };
-         settingsVectorizerSelect.onchange = () => { saveVectorizerBtn.disabled = settingsVectorizerSelect.value === userDefaultVectorizer; };
-         saveVectorizerBtn.onclick = async () => {
-             const selectedVectorizer = settingsVectorizerSelect.value; if (!selectedVectorizer || selectedVectorizer === userDefaultVectorizer) return;
-             showStatus('Saving vectorizer setting...', 'info', settingsStatus); saveVectorizerBtn.disabled = true;
-             try {
-                const formData = new FormData(); formData.append('vectorizer_name', selectedVectorizer);
-                await apiRequest('/api/store/active-vectorizer', { method: 'POST', body: formData, statusElement: settingsStatus });
-                userDefaultVectorizer = selectedVectorizer; sessionActiveVectorizer = selectedVectorizer;
-                updateRagToggleButtonState();
-                showStatus(`Default vectorizer set to ${selectedVectorizer}.`, 'success', settingsStatus);
-             } catch (error) { console.error("Failed to save vectorizer:", error); saveVectorizerBtn.disabled = false; }
-         };
-         function populateSettingsModal() {
-             populateDropdown(settingsLollmsModelSelect, availableLollmsModels, userLollmsModel, "No models found");
-             populateDropdown(settingsVectorizerSelect, availableVectorizers, userDefaultVectorizer, "No vectorizers found");
-             saveLollmsModelBtn.disabled = true; saveVectorizerBtn.disabled = true; showStatus('', 'info', settingsStatus);
-         }
+        
+        settingsLollmsModelSelect.onchange = () => { saveModelAndVectorizerBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name && settingsVectorizerSelect.value === userDefaultVectorizer); };
+        settingsVectorizerSelect.onchange = () => { saveModelAndVectorizerBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name && settingsVectorizerSelect.value === userDefaultVectorizer);};
 
-        // --- File Management Modal Logic ---
-        filesBtn.onclick = () => openModal('fileManagementModal');
-        async function loadAvailableVectorizers() {
+        saveModelAndVectorizerBtn.onclick = async () => {
+            const selectedModel = settingsLollmsModelSelect.value;
+            const selectedVectorizer = settingsVectorizerSelect.value;
+            let modelChanged = selectedModel && selectedModel !== currentUser.lollms_model_name;
+            let vectorizerChanged = selectedVectorizer && selectedVectorizer !== userDefaultVectorizer;
+
+            if (!modelChanged && !vectorizerChanged) return;
+
+            showStatus('Saving settings...', 'info', settingsStatus); saveModelAndVectorizerBtn.disabled = true;
+            try {
+                if (modelChanged) {
+                    const formData = new FormData(); formData.append('model_name', selectedModel);
+                    await apiRequest('/api/config/lollms-model', { method: 'POST', body: formData, statusElement: settingsStatus });
+                    currentUser.lollms_model_name = selectedModel;
+                }
+                if (vectorizerChanged) { // This endpoint in main.py might need to be renamed/repurposed for default user vectorizer
+                    const formData = new FormData(); formData.append('vectorizer_name', selectedVectorizer);
+                    await apiRequest('/api/config/default-vectorizer', { method: 'POST', body: formData, statusElement: settingsStatus }); // NEW ENDPOINT
+                    userDefaultVectorizer = selectedVectorizer;
+                    currentUser.safe_store_vectorizer = selectedVectorizer;
+                    // Update RAG UI if datastore selection logic depends on this default
+                }
+                showStatus('Settings saved. LLM Client will re-init if model changed.', 'success', settingsStatus);
+            } catch (error) {
+                console.error("Failed to save settings:", error); saveModelAndVectorizerBtn.disabled = false;
+            }
+        };
+
+        // LLM Params Save Logic
+        [settingsTemperature, settingsTopK, settingsTopP, settingsRepeatPenalty, settingsRepeatLastN].forEach(el => {
+            el.oninput = () => { saveLLMParamsBtn.disabled = false; };
+        });
+
+        saveLLMParamsBtn.onclick = async () => {
+            const params = {
+                llm_temperature: parseFloat(settingsTemperature.value) || null,
+                llm_top_k: parseInt(settingsTopK.value) || null,
+                llm_top_p: parseFloat(settingsTopP.value) || null,
+                llm_repeat_penalty: parseFloat(settingsRepeatPenalty.value) || null,
+                llm_repeat_last_n: parseInt(settingsRepeatLastN.value) || null,
+            };
+            // Filter out nulls if API expects only provided fields, or ensure API handles nulls as "use default"
+            const payload = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== null && !isNaN(v)));
+
+            showStatus('Saving LLM parameters...', 'info', settingsStatus); saveLLMParamsBtn.disabled = true;
+            try {
+                await apiRequest('/api/config/llm-params', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    statusElement: settingsStatus
+                });
+                // Update currentUser object with new params
+                Object.assign(currentUser, payload);
+                showStatus('LLM parameters saved. Client will use on next generation.', 'success', settingsStatus);
+            } catch (error) {
+                console.error("Failed to save LLM params:", error); saveLLMParamsBtn.disabled = false;
+            }
+        };
+
+        function populateSettingsModal() {
+             populateDropdown(settingsLollmsModelSelect, availableLollmsModels, currentUser.lollms_model_name, "No models found");
+             populateDropdown(settingsVectorizerSelect, availableVectorizers, userDefaultVectorizer, "No vectorizers found"); // availableVectorizers needs to be populated from a global list
+             saveModelAndVectorizerBtn.disabled = true;
+             
+             settingsTemperature.value = currentUser.llm_temperature ?? '';
+             settingsTopK.value = currentUser.llm_top_k ?? '';
+             settingsTopP.value = currentUser.llm_top_p ?? '';
+             settingsRepeatPenalty.value = currentUser.llm_repeat_penalty ?? '';
+             settingsRepeatLastN.value = currentUser.llm_repeat_last_n ?? '';
+             saveLLMParamsBtn.disabled = true;
+
+             showStatus('', 'info', settingsStatus);
+        }
+
+
+        // --- Data Store Management ---
+        dataStoresBtn.onclick = () => openModal('dataStoresModal');
+
+        async function loadDataStores() { // Loads both owned and shared
+            try {
+                const response = await apiRequest('/api/datastores');
+                const allStores = await response.json();
+                ownedDataStores = allStores.filter(ds => ds.owner_username === currentUser.username);
+                sharedDataStores = allStores.filter(ds => ds.owner_username !== currentUser.username);
+                
+                availableDataStoresForRag = [...ownedDataStores, ...sharedDataStores].sort((a,b) => a.name.localeCompare(b.name));
+                
+                populateDataStoresModal(); // Render lists in the modal
+                populateRagDataStoreSelect(); // Populate the RAG selector in chat header
+            } catch (error) {
+                console.error("Failed to load data stores:", error);
+                if(ownedDataStoresList) ownedDataStoresList.innerHTML = '<p class="text-red-500 italic">Error loading stores.</p>';
+                if(sharedDataStoresList) sharedDataStoresList.innerHTML = '<p class="text-red-500 italic">Error loading stores.</p>';
+            }
+        }
+        
+        function populateRagDataStoreSelect() {
+            ragDataStoreSelect.innerHTML = '<option value="">Select RAG Data Store</option>';
+            availableDataStoresForRag.forEach(ds => {
+                const option = document.createElement('option');
+                option.value = ds.id;
+                option.textContent = `${ds.name} (${ds.owner_username === currentUser.username ? 'Owned' : 'Shared by ' + ds.owner_username})`;
+                ragDataStoreSelect.appendChild(option);
+            });
+            // Set selected based on current discussion, if any
+            if (currentDiscussionId && discussions[currentDiscussionId] && discussions[currentDiscussionId].rag_datastore_id) {
+                ragDataStoreSelect.value = discussions[currentDiscussionId].rag_datastore_id;
+            }
+        }
+        
+        ragDataStoreSelect.onchange = async () => {
+            if (!currentDiscussionId) return;
+            const selectedDataStoreId = ragDataStoreSelect.value || null; // Send null to clear
+            try {
+                await apiRequest(`/api/discussions/${currentDiscussionId}/rag_datastore`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ rag_datastore_id: selectedDataStoreId })
+                });
+                discussions[currentDiscussionId].rag_datastore_id = selectedDataStoreId;
+                showStatus(`RAG datastore for this discussion set to: ${selectedDataStoreId ? availableDataStoresForRag.find(ds=>ds.id===selectedDataStoreId)?.name : 'None'}.`, 'success');
+            } catch (error) {
+                showStatus('Failed to set RAG datastore for discussion.', 'error');
+                // Revert UI if needed
+                ragDataStoreSelect.value = discussions[currentDiscussionId].rag_datastore_id || "";
+            }
+        };
+
+
+        function populateDataStoresModal() {
+            // Populate Owned Stores
+            ownedDataStoresList.innerHTML = '';
+            if (ownedDataStores.length === 0) {
+                ownedDataStoresList.innerHTML = '<p class="text-gray-500 italic">No data stores created yet.</p>';
+            } else {
+                ownedDataStores.forEach(ds => {
+                    const div = document.createElement('div');
+                    div.className = 'flex justify-between items-center py-1.5 px-2 hover:bg-gray-100 rounded text-sm';
+                    div.innerHTML = `
+                        <div class="flex-1">
+                            <strong class="text-gray-800">${ds.name}</strong>
+                            <p class="text-xs text-gray-500 truncate">${ds.description || 'No description'}</p>
+                        </div>
+                        <div class="space-x-1">
+                            <button title="Manage Files" onclick="openFileManagerForStore('${ds.id}', '${ds.name}')" class="p-1 hover:bg-blue-100 rounded"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-blue-600"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 0 0-1.883 2.542l.857 6a2.25 2.25 0 0 0 2.227 1.932H19.05a2.25 2.25 0 0 0 2.227-1.932l.857-6a2.25 2.25 0 0 0-1.883-2.542m-16.5 0V6A2.25 2.25 0 0 1 6 3.75h3.879a1.5 1.5 0 0 1 1.06.44l2.122 2.12a1.5 1.5 0 0 0 1.06.44H18A2.25 2.25 0 0 1 20.25 9v.776" /></svg></button>
+                            <button title="Share" onclick="initiateShareDataStore('${ds.id}', '${ds.name}')" class="p-1 hover:bg-green-100 rounded"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-green-600"><path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 1 0 0-4.5 2.25 2.25 0 0 0 0 4.5Zm0 0v(.001M4.5 19.5h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 19.5Zm6-10.125a1.875 1.875 0 1 1-3.75 0 1.875 1.875 0 0 1 3.75 0Zm1.294 6.336a6.721 6.721 0 0 1-3.17.789 6.721 6.721 0 0 1-3.168-.789 3.376 3.376 0 0 1 6.338 0Z" /></svg></button>
+                            <button title="Rename/Edit" onclick="initiateEditDataStore('${ds.id}', '${ds.name}', '${ds.description || ''}')" class="p-1 hover:bg-yellow-100 rounded"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-yellow-600"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg></button>
+                            <button title="Delete" onclick="deleteDataStore('${ds.id}', '${ds.name}')" class="p-1 hover:bg-red-100 rounded"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-red-600"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg></button>
+                        </div>
+                    `;
+                    ownedDataStoresList.appendChild(div);
+                });
+            }
+            // Populate Shared Stores
+            sharedDataStoresList.innerHTML = '';
+            if (sharedDataStores.length === 0) {
+                sharedDataStoresList.innerHTML = '<p class="text-gray-500 italic">No data stores shared with you.</p>';
+            } else {
+                 sharedDataStores.forEach(ds => {
+                    const div = document.createElement('div');
+                    div.className = 'flex justify-between items-center py-1.5 px-2 text-sm'; // No hover actions for shared
+                    div.innerHTML = `
+                        <div class="flex-1">
+                            <strong class="text-gray-800">${ds.name}</strong> (Owned by: ${ds.owner_username})
+                            <p class="text-xs text-gray-500 truncate">${ds.description || 'No description'}</p>
+                        </div>
+                        <button title="Use for RAG" onclick="setDiscussionRagStore('${ds.id}')" class="p-1 text-xs bg-blue-100 text-blue-700 rounded hover:bg-blue-200">Use for RAG</button>
+                    `;
+                    sharedDataStoresList.appendChild(div);
+                });
+            }
+        }
+        
+        async function handleCreateDataStore(event) {
+            event.preventDefault();
+            const name = newDataStoreNameInput.value.trim();
+            const description = newDataStoreDescriptionInput.value.trim();
+            if (!name) { showStatus("Data Store name is required.", "error", createDataStoreStatus); return; }
+            showStatus("Creating data store...", "info", createDataStoreStatus);
+            try {
+                await apiRequest('/api/datastores', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description }),
+                    statusElement: createDataStoreStatus
+                });
+                showStatus(`Data Store "${name}" created.`, "success", createDataStoreStatus);
+                createDataStoreForm.reset();
+                await loadDataStores(); // Refresh lists
+            } catch (error) { console.error("Create Data Store failed:", error); }
+        }
+
+        // Placeholder for edit datastore
+        function initiateEditDataStore(id, name, description) {
+            // Would typically open a form similar to create, pre-filled with id, name, description
+            // For now, let's just use the create form for renaming by example.
+            newDataStoreNameInput.value = name;
+            newDataStoreDescriptionInput.value = description;
+            // Logic to change form submit to PUT /api/datastores/{id}
+            showStatus(`Editing store: ${name}. Save functionality not fully wired in this example.`, 'info', createDataStoreStatus);
+        }
+
+        async function deleteDataStore(id, name) {
+            if (!confirm(`Are you sure you want to delete data store "${name}" and all its indexed files? This cannot be undone.`)) return;
+            showStatus(`Deleting data store ${name}...`, 'info', createDataStoreStatus); // Use same status for now
+            try {
+                await apiRequest(`/api/datastores/${id}`, { method: 'DELETE', statusElement: createDataStoreStatus });
+                showStatus(`Data Store "${name}" deleted.`, 'success', createDataStoreStatus);
+                await loadDataStores(); // Refresh lists
+            } catch (error) { console.error("Delete Data Store failed:", error); }
+        }
+        
+        function initiateShareDataStore(id, name) {
+            shareDataStoreIdInput.value = id;
+            shareDataStoreTitle.textContent = `Share Data Store: "${name}"`;
+            shareTargetUsernameDSInput.value = '';
+            showStatus('', 'info', shareDataStoreStatus);
+            openModal('shareDataStoreModal');
+        }
+
+        confirmShareDataStoreBtn.onclick = async () => {
+            const datastoreId = shareDataStoreIdInput.value;
+            const targetUsername = shareTargetUsernameDSInput.value.trim();
+            if (!datastoreId || !targetUsername) {
+                showStatus('Target username is required.', 'error', shareDataStoreStatus);
+                return;
+            }
+            showStatus(`Sharing data store with ${targetUsername}...`, 'info', shareDataStoreStatus);
+            try {
+                await apiRequest(`/api/datastores/${datastoreId}/share`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ target_username: targetUsername, permission_level: "read_query" }), // Default permission
+                    statusElement: shareDataStoreStatus
+                });
+                showStatus('Data Store shared successfully!', 'success', shareDataStoreStatus);
+                setTimeout(() => closeModal('shareDataStoreModal'), 1500);
+                // No need to reload all datastores, as only owner sees sharing status directly.
+            } catch (error) {
+                console.error("Share Data Store failed:", error);
+            }
+        };
+        
+        function setDiscussionRagStore(datastoreId) {
+            // This function is called from the "Shared Stores" list.
+            // It should set the RAG datastore for the *currently selected discussion*.
+            if (!currentDiscussionId) {
+                showStatus("Please select a discussion first.", "warning");
+                closeModal('dataStoresModal'); // Close this modal too
+                return;
+            }
+            ragDataStoreSelect.value = datastoreId;
+            ragDataStoreSelect.dispatchEvent(new Event('change')); // Trigger onchange to save
+            closeModal('dataStoresModal');
+        }
+
+
+        // --- File Management Modal Logic (Now Per-DataStore) ---
+        filesBtn.onclick = () => { // This button now just indicates intent. Actual store selection happens in DataStores modal.
+             showStatus("Select a Data Store from the 'Data Stores' menu to manage its files.", "info");
+             openModal('dataStoresModal'); // Guide user to data stores modal
+        };
+        
+        async function openFileManagerForStore(datastoreId, datastoreName) {
+            closeModal('dataStoresModal'); // Close the parent modal
+            fileManagerCurrentDataStoreId.value = datastoreId;
+            fileManagerDataStoreName.textContent = datastoreName;
+            
+            showStatus('', 'info', uploadStatus); showStatus('', 'info', fileListStatus);
+            fileUploadInput.value = ''; confirmUploadBtn.disabled = true;
+            
+            // Load vectorizers available *within this specific SafeStore instance*
+            try {
+                const response = await apiRequest(`/api/store/${datastoreId}/vectorizers`);
+                const storeVectorizers = await response.json();
+                populateDropdown(fileVectorizerSelect, storeVectorizers, null, "Select Vectorizer", true);
+            } catch (error) {
+                console.error(`Failed to load vectorizers for store ${datastoreId}:`, error);
+                populateDropdown(fileVectorizerSelect, [], null, "Error loading vectorizers", true);
+            }
+            
+            await loadIndexedRagFilesInStore(datastoreId);
+            openModal('fileManagementModal');
+        }
+
+        async function loadIndexedRagFilesInStore(datastoreId) {
+             indexedFileList.innerHTML = '<p class="text-gray-500 italic px-1">Loading files...</p>';
              try {
-                 const response = await apiRequest('/api/store/vectorizers');
-                 availableVectorizers = await response.json();
-                 populateDropdown(settingsVectorizerSelect, availableVectorizers, userDefaultVectorizer, "No vectorizers found");
-                 populateDropdown(fileVectorizerSelect, availableVectorizers, null, "Select Vectorizer", true);
-             } catch (error) {
-                 console.error("Failed to load vectorizers:", error); availableVectorizers = [];
-                 populateDropdown(settingsVectorizerSelect, [], null, "Error loading vectorizers");
-                 populateDropdown(fileVectorizerSelect, [], null, "Error loading vectorizers", true);
-             }
-         }
-         async function loadIndexedRagFiles() {
-             try {
-                 const response = await apiRequest('/api/store/files');
-                 indexedRagFiles = await response.json(); renderRagFileList(indexedRagFiles);
-             } catch (error) { console.error("Failed to load RAG files:", error); indexedRagFiles = []; renderRagFileList(null, "Error loading files."); }
-         }
-        function populateFileManagementModal() {
-             populateDropdown(fileVectorizerSelect, availableVectorizers, null, "Select Vectorizer", true); renderRagFileList(indexedRagFiles);
-             fileUploadInput.value = ''; confirmUploadBtn.disabled = true; showStatus('', 'info', uploadStatus); showStatus('', 'info', fileListStatus);
-         }
-         fileVectorizerSelect.onchange = updateConfirmUploadBtnState;
-         fileUploadInput.onchange = updateConfirmUploadBtnState;
-         function updateConfirmUploadBtnState() {
+                 const response = await apiRequest(`/api/store/${datastoreId}/files`);
+                 const files = await response.json(); renderRagFileList(files);
+             } catch (error) { console.error("Failed to load RAG files:", error); renderRagFileList(null, "Error loading files."); }
+        }
+
+        fileVectorizerSelect.onchange = updateConfirmUploadBtnState;
+        fileUploadInput.onchange = updateConfirmUploadBtnState;
+        function updateConfirmUploadBtnState() {
               const filesSelected = fileUploadInput.files && fileUploadInput.files.length > 0;
               const vectorizerSelected = fileVectorizerSelect.value !== ""; confirmUploadBtn.disabled = !(filesSelected && vectorizerSelected);
-         }
-         confirmUploadBtn.onclick = async () => {
-            const files = fileUploadInput.files; const vectorizer = fileVectorizerSelect.value; if (!files || files.length === 0 || !vectorizer) return;
-            const formData = new FormData(); for (const file of files) formData.append('files', file); formData.append('vectorizer_name', vectorizer);
-            showStatus(`Uploading ${files.length} file(s) using ${vectorizer}...`, 'info', uploadStatus); confirmUploadBtn.disabled = true;
+        }
+        confirmUploadBtn.onclick = async () => {
+            const datastoreId = fileManagerCurrentDataStoreId.value;
+            if (!datastoreId) { showStatus("Error: No datastore selected for upload.", "error", uploadStatus); return; }
+
+            const files = fileUploadInput.files; const vectorizer = fileVectorizerSelect.value;
+            if (!files || files.length === 0 || !vectorizer) return;
+
+            const formData = new FormData();
+            for (const file of files) formData.append('files', file);
+            formData.append('vectorizer_name', vectorizer);
+
+            showStatus(`Uploading ${files.length} file(s) to store using ${vectorizer}...`, 'info', uploadStatus);
+            confirmUploadBtn.disabled = true;
             try {
-                 const response = await apiRequest('/api/store/upload-files', { method: 'POST', body: formData, statusElement: uploadStatus });
-                 const result = await response.json(); let message = result.message || "Upload completed."; let statusType = response.status === 207 ? 'warning' : 'success';
+                 const response = await apiRequest(`/api/store/${datastoreId}/upload-files`, { method: 'POST', body: formData, statusElement: uploadStatus });
+                 const result = await response.json();
+                 let message = result.message || "Upload completed.";
+                 let statusType = response.status === 207 ? 'warning' : 'success';
                  if (response.status === 207) message = `Upload finished. Processed: ${result.processed_files?.length || 0}, Errors: ${result.errors?.length || 0}`;
-                 showStatus(message, statusType, uploadStatus); await loadIndexedRagFiles(); fileUploadInput.value = ''; updateConfirmUploadBtnState();
+                 showStatus(message, statusType, uploadStatus);
+                 await loadIndexedRagFilesInStore(datastoreId);
+                 fileUploadInput.value = ''; updateConfirmUploadBtnState();
             } catch (error) { console.error("Upload failed:", error); confirmUploadBtn.disabled = false; updateConfirmUploadBtnState(); }
-         };
-         function renderRagFileList(files, message = null) {
+        };
+
+        function renderRagFileList(files, message = null) { /* Unchanged, but actions now call deleteRagFileInModal */
              indexedFileList.innerHTML = ''; if (message) { const msgElement = document.createElement('p'); msgElement.className = 'text-gray-500 italic px-1'; if(message.toLowerCase().includes("error")) msgElement.classList.add('text-red-500'); msgElement.textContent = message; indexedFileList.appendChild(msgElement); return; }
-             if (!files || files.length === 0) { indexedFileList.innerHTML = '<p class="text-gray-500 italic px-1">No documents indexed yet.</p>'; return; }
+             if (!files || files.length === 0) { indexedFileList.innerHTML = '<p class="text-gray-500 italic px-1">No documents indexed in this store yet.</p>'; return; }
              files.forEach(file => {
                  const fileDiv = document.createElement('div'); fileDiv.className = 'flex justify-between items-center py-1 px-1 hover:bg-gray-100 rounded';
                  const fileNameSpan = document.createElement('span'); fileNameSpan.textContent = file.filename; fileNameSpan.className = 'truncate text-sm text-gray-700'; fileNameSpan.title = file.filename;
                  const deleteBtn = document.createElement('button');
                  deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>`;
-                 deleteBtn.className = 'flex-shrink-0 text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-100 ml-2'; deleteBtn.title = `Delete ${file.filename}`; deleteBtn.onclick = () => deleteRagFileInModal(file.filename);
+                 deleteBtn.className = 'flex-shrink-0 text-red-500 hover:text-red-700 p-1 rounded hover:bg-red-100 ml-2'; deleteBtn.title = `Delete ${file.filename}`;
+                 deleteBtn.onclick = () => deleteRagFileInModal(file.filename);
                  fileDiv.appendChild(fileNameSpan); fileDiv.appendChild(deleteBtn); indexedFileList.appendChild(fileDiv);
              });
-         }
+        }
         async function deleteRagFileInModal(filename) {
-             if (!confirm(`Are you sure you want to delete the RAG document "${filename}"?`)) return; showStatus(`Deleting ${filename}...`, 'info', fileListStatus);
+             const datastoreId = fileManagerCurrentDataStoreId.value;
+             if (!datastoreId) { showStatus("Error: No datastore selected for file deletion.", "error", fileListStatus); return; }
+             if (!confirm(`Are you sure you want to delete RAG document "${filename}" from this store?`)) return;
+             showStatus(`Deleting ${filename}...`, 'info', fileListStatus);
              try {
-                 const response = await apiRequest(`/api/store/files/${encodeURIComponent(filename)}`, { method: 'DELETE', statusElement: fileListStatus });
-                 const result = await response.json(); showStatus(result.message || `Deleted ${filename}.`, 'success', fileListStatus);
-                 indexedRagFiles = indexedRagFiles.filter(f => f.filename !== filename); renderRagFileList(indexedRagFiles);
+                 await apiRequest(`/api/store/${datastoreId}/files/${encodeURIComponent(filename)}`, { method: 'DELETE', statusElement: fileListStatus });
+                 showStatus(`Deleted ${filename}.`, 'success', fileListStatus);
+                 await loadIndexedRagFilesInStore(datastoreId); // Refresh list
              } catch (error) { console.error(`Delete failed for ${filename}:`, error); }
-         }
+        }
 
-        // --- RAG Toggle Logic ---
+        // --- RAG Toggle Logic (Updated for datastore selection) ---
         ragToggleBtn.onclick = () => {
-             if (!sessionActiveVectorizer) { showStatus('Cannot enable RAG without an active vectorizer. Set one in Settings.', 'warning'); return; }
-             isRagActive = !isRagActive; updateRagToggleButtonState(); showStatus(`RAG is now ${isRagActive ? 'ACTIVE' : 'INACTIVE'}.`, 'info');
+             if (availableDataStoresForRag.length === 0) {
+                 showStatus('Cannot enable RAG: No Data Stores available. Create or get one shared with you.', 'warning');
+                 return;
+             }
+             isRagActive = !isRagActive;
+             updateRagToggleButtonState();
+             if (isRagActive && !ragDataStoreSelect.value && availableDataStoresForRag.length > 0) {
+                 // If RAG turned on and no store selected, auto-select first available for convenience
+                 ragDataStoreSelect.value = availableDataStoresForRag[0].id;
+                 ragDataStoreSelect.dispatchEvent(new Event('change')); // Trigger save for discussion
+             } else if (!isRagActive && currentDiscussionId && discussions[currentDiscussionId]) {
+                 // If RAG turned OFF, clear datastore selection for this discussion
+                 ragDataStoreSelect.value = "";
+                 ragDataStoreSelect.dispatchEvent(new Event('change'));
+             }
+             showStatus(`RAG is now ${isRagActive ? 'ACTIVE' : 'INACTIVE'}.`, 'info');
         };
+
         function updateRagToggleButtonState() {
-            const hasVectorizer = !!sessionActiveVectorizer; ragToggleBtn.disabled = !hasVectorizer;
-            if (!hasVectorizer) { ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off'); ragToggleBtn.title = "No active vectorizer (Set in Settings)"; isRagActive = false; return; }
-            if (isRagActive) { ragToggleBtn.classList.remove('rag-toggle-off'); ragToggleBtn.classList.add('rag-toggle-on'); ragToggleBtn.title = `RAG Active (Using ${sessionActiveVectorizer}) - Click to disable`; }
-            else { ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off'); ragToggleBtn.title = `RAG Inactive (Using ${sessionActiveVectorizer}) - Click to enable`; }
+            const hasDataStores = availableDataStoresForRag.length > 0;
+            ragToggleBtn.disabled = !hasDataStores;
+            ragDataStoreSelect.style.display = (isRagActive && hasDataStores) ? 'inline-block' : 'none';
+
+            if (!hasDataStores) {
+                ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
+                ragToggleBtn.title = "No Data Stores available (Create one or have one shared)"; isRagActive = false; return;
+            }
+            if (isRagActive) {
+                ragToggleBtn.classList.remove('rag-toggle-off'); ragToggleBtn.classList.add('rag-toggle-on');
+                const selectedDS = availableDataStoresForRag.find(ds => ds.id === ragDataStoreSelect.value);
+                ragToggleBtn.title = `RAG Active ${selectedDS ? `(Using: ${selectedDS.name})` : '(Select Store)'} - Click to disable`;
+            } else {
+                ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
+                ragToggleBtn.title = `RAG Inactive - Click to enable`;
+            }
+        }
+        
+        // Image Upload Handling
+        async function handleImageFileSelection(event) {
+            const files = Array.from(event.target.files);
+            if (files.length === 0) return;
+            if (uploadedImageServerPaths.length + files.length > 5) { // MAX_IMAGE_UPLOADS_PER_MESSAGE
+                showStatus("Max 5 images allowed per message.", "warning"); return;
+            }
+
+            imageUploadPreviewContainer.style.display = 'flex';
+            const formData = new FormData();
+            files.forEach(file => formData.append('files', file));
+
+            showStatus("Uploading images...", "info");
+            try {
+                const response = await apiRequest('/api/upload/chat_image', { method: 'POST', body: formData });
+                const newUploadedImages = await response.json(); // [{filename, server_path}, ...]
+                
+                newUploadedImages.forEach(imgInfo => {
+                    const originalFile = files.find(f => f.name === imgInfo.filename);
+                    if (originalFile) {
+                        uploadedImageServerPaths.push({ ...imgInfo, file_obj: originalFile }); // Store original file for blob URL
+                        renderImagePreview(originalFile, imgInfo.server_path);
+                    }
+                });
+                showStatus("Images ready to send.", "success");
+            } catch (error) {
+                showStatus("Image upload failed.", "error");
+                console.error("Image upload error:", error);
+            } finally {
+                imageUploadInput.value = ''; // Reset file input
+            }
         }
 
-        // --- Export / Import Logic ---
-        function populateExportModal() {
-             const allIds = Object.keys(discussions); exportDiscussionList.innerHTML = ''; if (allIds.length === 0) { exportDiscussionList.innerHTML = '<p class="text-gray-500 italic">No discussions to export.</p>'; }
-             else { allIds.forEach(id => { const div = document.createElement('div'); div.className = 'flex items-center'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.id = `export-check-${id}`; checkbox.value = id; checkbox.className = 'h-4 w-4 mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-offset-0 focus:ring-blue-200 focus:ring-opacity-50'; const label = document.createElement('label'); label.htmlFor = `export-check-${id}`; label.textContent = discussions[id].title; label.className = 'text-sm text-gray-700'; div.appendChild(checkbox); div.appendChild(label); exportDiscussionList.appendChild(div); }); }
+        function renderImagePreview(file, serverPath) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                const itemDiv = document.createElement('div'); itemDiv.className = 'image-preview-item';
+                itemDiv.dataset.serverPath = serverPath; // Store serverPath for removal
+                const img = document.createElement('img'); img.src = e.target.result;
+                const removeBtn = document.createElement('button'); removeBtn.className = 'remove-preview-btn';
+                removeBtn.textContent = '×';
+                removeBtn.onclick = () => {
+                    uploadedImageServerPaths = uploadedImageServerPaths.filter(p => p.server_path !== serverPath);
+                    itemDiv.remove();
+                    if (imageUploadPreviewContainer.children.length === 0) imageUploadPreviewContainer.style.display = 'none';
+                };
+                itemDiv.appendChild(img); itemDiv.appendChild(removeBtn);
+                imageUploadPreviewContainer.appendChild(itemDiv);
+            };
+            reader.readAsDataURL(file);
         }
+        
+        function viewImage(src) {
+            imageViewerSrc.src = src;
+            openModal('imageViewerModal');
+        }
+
+
+        // --- Export / Import Logic --- (Largely unchanged, but ExportData has datastores_info)
+        function populateExportModal() { /* Unchanged */ }
         exportDataBtn.onclick = () => openModal('exportModal');
-        confirmExportBtn.onclick = async () => {
+        confirmExportBtn.onclick = async () => { /* Unchanged */
             const selectedIds = Array.from(exportDiscussionList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value); closeModal('exportModal'); showStatus('Exporting data...', 'info');
             try {
                  const requestBody = { discussion_ids: selectedIds.length > 0 ? selectedIds : null };
@@ -1530,11 +1877,11 @@
                  showStatus('Data exported successfully.', 'success');
             } catch (error) { console.error("Export failed:", error); }
         };
-        importDataBtn.onclick = () => {
+        importDataBtn.onclick = () => { /* Unchanged */
              importFile.value = ''; importPreviewArea.style.display = 'none'; importDiscussionList.innerHTML = ''; confirmImportBtn.disabled = true; showStatus('', 'info', importStatus); parsedImportData = null; openModal('importModal');
         };
-         let parsedImportData = null;
-         importFile.onchange = async () => {
+        let parsedImportData = null;
+        importFile.onchange = async () => { /* Unchanged */
             const file = importFile.files[0]; parsedImportData = null; importPreviewArea.style.display = 'none'; importDiscussionList.innerHTML = ''; confirmImportBtn.disabled = true; showStatus('', 'info', importStatus); if (!file) return;
             if (file.type !== 'application/json') { showStatus('Error: Please select a valid JSON file.', 'error', importStatus); return; }
             showStatus('Reading file...', 'info', importStatus);
@@ -1545,8 +1892,8 @@
                  else { parsedImportData.discussions.forEach((disc, index) => { if (!disc || typeof disc.discussion_id !== 'string') { console.warn("Skipping invalid discussion data:", disc); return; } const div = document.createElement('div'); div.className = 'flex items-center'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.id = `import-check-${disc.discussion_id}`; checkbox.value = disc.discussion_id; checkbox.checked = true; checkbox.className = 'h-4 w-4 mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-offset-0 focus:ring-blue-200 focus:ring-opacity-50'; const label = document.createElement('label'); label.htmlFor = `import-check-${disc.discussion_id}`; label.textContent = `${disc.title || 'Untitled'} (ID: ...${disc.discussion_id.slice(-6)})`; label.className = 'text-sm text-gray-700'; div.appendChild(checkbox); div.appendChild(label); importDiscussionList.appendChild(div); }); confirmImportBtn.disabled = importDiscussionList.childElementCount === 0; }
                  importPreviewArea.style.display = 'block'; showStatus('', 'info', importStatus);
             } catch (error) { console.error("Error reading import file:", error); showStatus(`Error reading file: ${error.message}`, 'error', importStatus); parsedImportData = null; confirmImportBtn.disabled = true; }
-         };
-         confirmImportBtn.onclick = async () => {
+        };
+        confirmImportBtn.onclick = async () => { /* Unchanged */
              if (!parsedImportData || !importFile.files[0]) return;
              const selectedOriginalIds = Array.from(importDiscussionList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value); if (selectedOriginalIds.length === 0) { showStatus('Please select at least one discussion to import.', 'error', importStatus); return; }
              showStatus('Importing discussions...', 'info', importStatus); confirmImportBtn.disabled = true;
@@ -1556,9 +1903,9 @@
                  const result = await response.json(); showStatus(result.message || `Imported ${result.imported_count} discussions.`, 'success', importStatus); console.log("Import errors/skipped:", result.errors);
                  await loadDiscussions(); setTimeout(() => closeModal('importModal'), 2000);
              } catch (error) { console.error("Import failed:", error); confirmImportBtn.disabled = false; }
-         };
+        };
 
-        // --- Utilities ---
+        // --- Utilities --- (Unchanged)
         function scrollChatToBottom() { requestAnimationFrame(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }); }
         function showStatus(msg, type = 'info', statusElement = statusMessage) {
             const targetElement = statusElement || statusMessage; if (targetElement) { targetElement.textContent = msg; let typeClass = 'text-gray-600'; if (type === 'error') typeClass = 'text-red-600'; else if (type === 'success') typeClass = 'text-green-600'; else if (type === 'warning') typeClass = 'text-yellow-600'; targetElement.className = targetElement.className.replace(/text-(gray|red|green|yellow)-600/g, ''); targetElement.classList.add(typeClass); if (targetElement === statusMessage && msg) { clearTimeout(targetElement.timer); targetElement.timer = setTimeout(() => { if (targetElement.textContent === msg) targetElement.textContent = ''; }, 5000); } } else { console.log(`Status [${type}]: ${msg}`); }
