@@ -1265,6 +1265,13 @@
             if(promptsBtn) promptsBtn.onclick = () => openModal('promptsModal');
             if(dataStoresBtn) dataStoresBtn.onclick = () => openModal('dataStoresModal');
             if(friendsBtn) friendsBtn.onclick = () => openModal('friendsModal');
+
+            // Settings Save Buttons - Ensure these are correctly assigned
+            if(savePasswordBtn) savePasswordBtn.onclick = handleSavePassword;
+            if(saveModelSettingsBtn) saveModelSettingsBtn.onclick = handleSaveModelSettings;
+            if(saveLLMParamsBtn) saveLLMParamsBtn.onclick = handleSaveLLMParams;
+            if(saveRagSettingsBtn) saveRagSettingsBtn.onclick = handleSaveRagSettings;
+            if(saveAppearanceSettingsBtn) saveAppearanceSettingsBtn.onclick = handleSaveAppearanceSettings;
             // *************************************
             if(exportDataBtn) exportDataBtn.onclick = () => openModal('exportModal');
             if(importDataBtn) importDataBtn.onclick = () => { 
@@ -1311,6 +1318,10 @@
                     if(targetPane) targetPane.classList.add('active');
                 });
             });
+            // Initialize Tab Functionality
+            initializeSettingsTabs();       // For the main settings modal
+            initializeGenericModalTabs(); // For other modals like Prompts, Data Stores, Friends
+            
             if(savePasswordBtn) savePasswordBtn.onclick = handleSavePassword;
             if(saveModelSettingsBtn) saveModelSettingsBtn.onclick = handleSaveModelSettings;
             if(saveLLMParamsBtn) saveLLMParamsBtn.onclick = handleSaveLLMParams;
@@ -3019,6 +3030,124 @@
             }
         }
 
+
+
+        // --- Tab Switching Logic ---
+
+        // For the main settings modal with a vertical tab bar
+        function initializeSettingsTabs() {
+            const settingsModalElement = document.getElementById('settingsModal');
+            if (!settingsModalElement) return;
+
+            const tabButtons = settingsModalElement.querySelectorAll('.settings-tabs .settings-tab-btn');
+            const contentPanesContainer = settingsModalElement.querySelector('.settings-content-container');
+            if (!contentPanesContainer) return;
+
+            tabButtons.forEach(button => {
+                button.addEventListener('click', () => {
+                    // Deactivate all buttons and hide all panes first
+                    tabButtons.forEach(btn => btn.classList.remove('active'));
+                    contentPanesContainer.querySelectorAll('.settings-tab-content').forEach(pane => {
+                        pane.classList.remove('active');
+                        pane.style.display = 'none'; // Explicitly hide
+                    });
+
+                    // Activate the clicked button and its target pane
+                    button.classList.add('active');
+                    const targetPaneId = button.dataset.tabTarget;
+                    const targetPane = contentPanesContainer.querySelector(targetPaneId);
+                    if (targetPane) {
+                        targetPane.classList.add('active');
+                        targetPane.style.display = 'block'; // Explicitly show
+                    }
+                });
+            });
+
+            // Ensure initial state is correct (first tab active by default if none are)
+            const initiallyActiveButton = settingsModalElement.querySelector('.settings-tabs .settings-tab-btn.active');
+            if (initiallyActiveButton) {
+                const targetPane = contentPanesContainer.querySelector(initiallyActiveButton.dataset.tabTarget);
+                if(targetPane) {
+                    contentPanesContainer.querySelectorAll('.settings-tab-content').forEach(pane => {pane.style.display = 'none'; pane.classList.remove('active');}); // Hide all first
+                    targetPane.style.display = 'block'; // Show active
+                    targetPane.classList.add('active');
+                }
+            } else if (tabButtons.length > 0) {
+                tabButtons[0].click(); // Activate the first tab if none are marked active
+            }
+        }
+
+        // For other modals with horizontal tabs (Prompts, Data Stores, Friends)
+        function initializeGenericModalTabs() {
+            document.querySelectorAll('.modal').forEach(modalElement => {
+                const tabButtons = modalElement.querySelectorAll('.modal-tabs .modal-tab-btn');
+                const contentPanes = modalElement.querySelectorAll('.modal-body .modal-tab-content');
+
+                if (tabButtons.length > 0 && contentPanes.length > 0) {
+                    tabButtons.forEach(button => {
+                        button.addEventListener('click', () => {
+                            // Deactivate all buttons and hide all panes within this specific modal
+                            tabButtons.forEach(btn => btn.classList.remove('active'));
+                            contentPanes.forEach(pane => {
+                                pane.classList.remove('active');
+                                // pane.style.display = 'none'; // Already handled by .active class
+                            });
+
+                            // Activate the clicked button and its target pane
+                            button.classList.add('active');
+                            const targetPaneId = button.dataset.tab; // Assumes data-tab="paneId"
+                            const targetPane = modalElement.querySelector(`#${targetPaneId}`);
+                            if (targetPane) {
+                                targetPane.classList.add('active');
+                                // targetPane.style.display = 'block'; // Handled by .active class
+                            }
+                        });
+                    });
+
+                    // Ensure initial state for these modals too
+                    const initiallyActiveButton = modalElement.querySelector('.modal-tabs .modal-tab-btn.active');
+                    if (initiallyActiveButton) {
+                        const targetPane = modalElement.querySelector(`#${initiallyActiveButton.dataset.tab}`);
+                        if(targetPane) {
+                             contentPanes.forEach(pane => pane.classList.remove('active')); // Ensure only one active
+                             targetPane.classList.add('active');
+                        }
+                    } else if (tabButtons.length > 0) {
+                         // If no tab is active, activate the first one by default for generic modals
+                        tabButtons[0].classList.add('active');
+                        const firstPane = modalElement.querySelector(`#${tabButtons[0].dataset.tab}`);
+                        if(firstPane) firstPane.classList.add('active');
+                        else if(contentPanes.length > 0) contentPanes[0].classList.add('active'); // Fallback if data-tab is missing
+                    }
+                }
+            });
+        }
+
+
+        // The openModal function might need a slight adjustment for settings if we rely on JS to show the first tab.
+        function openModal(modalId, allowOverlayClose = true) {
+            const modal = document.getElementById(modalId);
+            if (modal) {
+                modal.classList.add('active');
+                if (modalId === 'loginModal') { /* ... */ }
+                else if (modalId === 'settingsModal') { 
+                    populateSettingsModal(); 
+                    // The initializeSettingsTabs called in initializeAppContent should handle initial tab display.
+                    // If settingsModal might be opened before initializeAppContent fully runs (unlikely),
+                    // or if you want to ensure the first tab is active every time it's opened:
+                    const activeTab = modal.querySelector('.settings-tabs .settings-tab-btn.active');
+                    if (!activeTab && modal.querySelectorAll('.settings-tabs .settings-tab-btn').length > 0) {
+                        modal.querySelectorAll('.settings-tabs .settings-tab-btn')[0].click();
+                    }
+                }
+                // ... (other else if conditions for other modals) ...
+                const firstInput = modal.querySelector('input[type="text"]:not([readonly]):not([disabled]), input[type="password"], textarea, select');
+                 if (firstInput && modalId !== 'loginModal' && !firstInput.closest('#insertPromptDropdown')) {
+                     setTimeout(() => firstInput.focus(), 50);
+                 }
+            }
+        }
+        
     </script>
 
 
