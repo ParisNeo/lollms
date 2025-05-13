@@ -205,7 +205,7 @@ class AppLollmsDiscussion:
             if msg.id == message_id:
                 msg.content = new_content
                 if msg.sender.lower() != self.lollms_client.user_name.lower():
-                    try: msg.token_count = self.lollms_client.count_tokens(new_content)
+                    try: msg.token_count = self.lollms_client.binding.count_tokens(new_content)
                     except Exception: msg.token_count = len(new_content) // 3
                 return True
         return False
@@ -312,7 +312,7 @@ class AppLollmsDiscussion:
         # For simplicity, we'll count tokens for text only for history calculation.
         # The lollms-client's generate_text handles the actual image passing.
         try:
-            current_turn_tokens = self.lollms_client.count_tokens(current_turn_formatted_text_only)
+            current_turn_tokens = self.lollms_client.binding.count_tokens(current_turn_formatted_text_only)
         except Exception:
             current_turn_tokens = len(current_turn_formatted_text_only) // 3 # Fallback
 
@@ -1085,7 +1085,7 @@ async def chat_in_existing_discussion(
             else:
                 print(f"WARNING: Temporary image file not found: {temp_abs_path}")
     
-    user_token_count = lc.count_tokens(prompt) if prompt else 0
+    user_token_count = lc.binding.count_tokens(prompt) if prompt else 0
     discussion_obj.add_message(
         sender=lc.user_name, content=prompt, parent_message_id=parent_message_id,
         token_count=user_token_count, image_references=final_image_references_for_message
@@ -1173,7 +1173,7 @@ async def chat_in_existing_discussion(
             if generation_thread: generation_thread.join(timeout=10) # Increased timeout
 
             ai_response_content = shared_state["accumulated_ai_response"]
-            ai_token_count = lc.count_tokens(ai_response_content) if ai_response_content else 0
+            ai_token_count = lc.binding.count_tokens(ai_response_content) if ai_response_content else 0
             ai_parent_id = discussion_obj.messages[-1].id if discussion_obj.messages and discussion_obj.messages[-1].sender == lc.user_name else None
 
             if ai_response_content and not shared_state["generation_error"]:
