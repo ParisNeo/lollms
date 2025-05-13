@@ -695,6 +695,18 @@ auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 @auth_router.get("/me", response_model=UserAuthDetails)
 async def get_my_details(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
     return current_user
+@auth_router.post("/logout") # Can be POST or GET, POST is slightly more conventional for actions
+async def logout(response: Response, current_user: UserAuthDetails = Depends(get_current_active_user)) -> Dict[str, str]:
+    """
+    Logs out the current user by clearing their server-side session data.
+    The client is expected to handle redirection or page reload.
+    """
+    username = current_user.username
+    if username in user_sessions:
+        del user_sessions[username]
+        print(f"INFO: User '{username}' session cleared (logged out).")
+       
+    return {"message": "Logout successful. Session cleared."}
 app.include_router(auth_router)
 
 # --- Discussion API ---

@@ -15,7 +15,7 @@
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
     <!-- CodeMirror 6 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/material-darker.min.css"> <!-- Example theme -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/theme/material-darker.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/codemirror.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/6.65.7/mode/meta.min.js"></script>
     <!-- Load common modes -->
@@ -75,10 +75,12 @@
         .think-block { background-color: #fffbeb; /* Light yellow */ border: 1px dashed #fcd34d; /* Amber-300 */ border-radius: 4px; margin: 8px 0; }
         .think-block summary { cursor: pointer; padding: 4px 8px; font-size: 0.8em; font-style: italic; color: #92400e; /* Amber-800 */ user-select: none; }
         .think-block .think-content { padding: 5px 10px; font-size: 0.9em; color: #57534e; /* Stone-600 */ max-height: 200px; overflow-y: auto; background-color: #fefce8; /* Lighter yellow */ border-top: 1px dashed #fcd34d; }
-        /* Modal Styles (Add EditMessageModal) */
+        /* Modal Styles */
         .modal { position: fixed; inset: 0; background-color: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 50; opacity: 0; pointer-events: none; transition: opacity 0.3s ease-in-out; padding: 1rem;}
         .modal.active { opacity: 1; pointer-events: auto; }
         .modal-content { background-color: white; padding: 1.5rem 2rem; border-radius: 0.5rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05); max-width: 95vw; width: 600px; max-height: 90vh; display: flex; flex-direction: column; }
+        /* Login modal specific width */
+        #loginModal .modal-content { width: 400px; }
         .modal-header { border-bottom: 1px solid #e5e7eb; padding-bottom: 0.75rem; margin-bottom: 1rem; display: flex; justify-content: space-between; align-items: center;}
         .modal-title { font-size: 1.125rem; font-weight: 600; color: #1f2937; }
         .modal-body { flex-grow: 1; overflow-y: auto; padding-right: 0.5rem; /* For scrollbar */}
@@ -89,10 +91,19 @@
         .sidebar-btn { display: flex; align-items: center; width: 100%; text-align: left; padding: 0.5rem 0.75rem; font-size: 0.875rem; color: #4b5563; border-radius: 0.375rem; background-color: #f9fafb; border: 1px solid #e5e7eb; }
         .sidebar-btn:hover { background-color: #f3f4f6; }
         .sidebar-btn svg { margin-right: 0.5rem; width: 1rem; height: 1rem; color: #6b7280; }
+        /* Initial App Loading / Error Message */
+        #appLoadingMessage { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(255,255,255,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 100; text-align: center; }
     </style>
 </head>
 <body class="bg-gray-100 text-gray-900">
-    <div id="app-container" class="flex h-screen overflow-hidden">
+
+    <div id="appLoadingMessage">
+        <img src="/logo.png" alt="Loading LoLLMs" class="h-20 mx-auto mb-4">
+        <p class="text-xl font-semibold text-gray-700 mb-2">Loading Application...</p>
+        <p id="appLoadingStatus" class="text-gray-600">Please wait.</p>
+    </div>
+
+    <div id="app-container" class="flex h-screen overflow-hidden" style="display: none;"> <!-- Initially hidden -->
 
         <!-- Sidebar -->
         <aside class="w-72 bg-white border-r border-gray-200 flex flex-col">
@@ -112,7 +123,6 @@
 
             <!-- Discussion List -->
             <div id="discussionListContainer" class="flex-1 overflow-y-auto p-2 space-y-1">
-                <!-- Discussions will be loaded here -->
                 <p class="text-gray-500 text-sm text-center italic p-4">Loading discussions...</p>
             </div>
 
@@ -139,6 +149,10 @@
                          <button id="exportDataBtn" class="flex-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 py-1 px-2 rounded border border-gray-300">Export Data</button>
                          <button id="importDataBtn" class="flex-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 py-1 px-2 rounded border border-gray-300">Import Data</button>
                      </div>
+                     <button id="logoutBtn" class="sidebar-btn text-red-600 hover:bg-red-50 border-red-200">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" /></svg>
+                        Logout
+                    </button>
                  </div>
             </div>
         </aside>
@@ -148,13 +162,11 @@
             <!-- Chat Header -->
             <header class="bg-white border-b border-gray-200 p-3 flex items-center justify-between min-h-[65px] shadow-sm">
                 <h3 id="discussionTitle" class="text-lg font-semibold text-gray-800 truncate px-2">Select or Create a Discussion</h3>
-                 <!-- Actions moved to discussion list items -->
-                 <div id="discussionActionsPlaceholder"></div> <!-- Keep structure or remove -->
+                 <div id="discussionActionsPlaceholder"></div>
             </header>
 
             <!-- Messages Area -->
             <div id="chatMessages" class="flex-1 overflow-y-auto p-4 flex flex-col space-y-2">
-                <!-- Messages will appear here -->
                 <div class="text-center text-gray-500 italic mt-10">Select a discussion to start chatting.</div>
             </div>
 
@@ -162,10 +174,12 @@
             <footer class="bg-white border-t border-gray-200 p-3 shadow-inner">
                 <div class="flex items-end space-x-3">
                     <textarea id="messageInput" rows="1" class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2 text-sm" placeholder="Type your message... (Shift+Enter for new line)" style="resize: none; overflow-y: hidden;"></textarea>
-                    <button id="ragToggleBtn" class="rag-toggle rag-toggle-off self-center mb-1" title="Toggle RAG">RAG</button>
                     <button id="sendMessageBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md shadow-sm transition duration-150 ease-in-out self-end disabled:opacity-50 disabled:cursor-not-allowed" disabled>
                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg>
                     </button>
+                </div>
+                <div id="statusMessage" class="text-xs text-red-600 mt-1 h-4"></div>
+                <button id="ragToggleBtn" class="rag-toggle rag-toggle-off self-center mb-1" title="Toggle RAG">RAG</button>
                 </div>
                  <div id="statusMessage" class="text-xs text-red-600 mt-1 h-4"></div>
                  <div id="pyodideStatus" class="text-xs text-blue-600 mt-1 h-4"></div>
@@ -176,7 +190,32 @@
 
     <!-- Modals Container -->
     <div>
-        <!-- Rename Modal (Used by inline rename) -->
+        <!-- Login Modal -->
+        <div id="loginModal" class="modal">
+            <div class="modal-content">
+                <!-- No close button for login modal if forced -->
+                <div class="modal-header">
+                    <h3 class="modal-title">Login Required</h3>
+                </div>
+                <div class="modal-body space-y-4">
+                    <img src="/logo.png" alt="Logo" class="h-16 mx-auto mb-4">
+                    <div>
+                        <label for="loginUsername" class="block text-sm font-medium text-gray-700 mb-1">Username</label>
+                        <input type="text" id="loginUsername" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="Enter your username">
+                    </div>
+                    <div>
+                        <label for="loginPassword" class="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                        <input type="password" id="loginPassword" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="Enter your password">
+                    </div>
+                    <div id="loginStatus" class="text-xs text-red-600 mt-1 h-4"></div>
+                </div>
+                <div class="modal-footer">
+                    <button id="loginSubmitBtn" class="w-full px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">Login</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Rename Modal -->
         <div id="renameModal" class="modal">
             <div class="modal-content">
                 <button class="modal-close-btn" onclick="closeModal('renameModal')">×</button>
@@ -187,7 +226,7 @@
                     <label for="renameInput" class="block text-sm font-medium text-gray-700 mb-1">New discussion title:</label>
                     <input type="text" id="renameInput" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" placeholder="Enter new title">
                     <div id="renameStatus" class="text-xs text-red-600 mt-1 h-4"></div>
-                    <input type="hidden" id="renameDiscussionIdInput"> <!-- Store ID to rename -->
+                    <input type="hidden" id="renameDiscussionIdInput">
                 </div>
                 <div class="modal-footer">
                     <button onclick="closeModal('renameModal')" class="px-4 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-300">Cancel</button>
@@ -207,7 +246,7 @@
                     <label for="editMessageInput" class="block text-sm font-medium text-gray-700 mb-1">Message content:</label>
                     <textarea id="editMessageInput" rows="5" class="w-full border-gray-300 rounded-md shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"></textarea>
                     <div id="editMessageStatus" class="text-xs text-red-600 mt-1 h-4"></div>
-                    <input type="hidden" id="editMessageIdInput"> <!-- Store ID to edit -->
+                    <input type="hidden" id="editMessageIdInput">
                 </div>
                 <div class="modal-footer">
                     <button onclick="closeModal('editMessageModal')" class="px-4 py-2 bg-gray-200 text-gray-800 text-sm font-medium rounded-md hover:bg-gray-300">Cancel</button>
@@ -215,7 +254,6 @@
                 </div>
             </div>
         </div>
-
 
         <!-- Export Modal -->
         <div id="exportModal" class="modal">
@@ -227,7 +265,6 @@
                  <div class="modal-body">
                      <p class="text-sm text-gray-600 mb-3">Select discussions to export (leave all unchecked to export all):</p>
                      <div id="exportDiscussionList" class="max-h-60 overflow-y-auto border border-gray-200 rounded p-3 space-y-2 bg-gray-50">
-                         <!-- Checkboxes will be loaded here -->
                          <p class="text-gray-500 italic">Loading discussions...</p>
                      </div>
                  </div>
@@ -253,7 +290,6 @@
                     <div id="importPreviewArea" class="mb-4" style="display: none;">
                         <p class="text-sm text-gray-600 mb-2">Select discussions to import from the file:</p>
                          <div id="importDiscussionList" class="max-h-60 overflow-y-auto border border-gray-200 rounded p-3 space-y-2 bg-gray-50">
-                             <!-- Checkboxes will be loaded here -->
                          </div>
                     </div>
                     <p id="importStatus" class="text-sm text-red-600 h-4"></p>
@@ -276,7 +312,6 @@
                     <div>
                         <label for="settingsLollmsModelSelect" class="block text-sm font-medium text-gray-700 mb-1">Default LoLLMs Model</label>
                         <select id="settingsLollmsModelSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
-                            <!-- Options loaded dynamically -->
                             <option>Loading models...</option>
                         </select>
                         <p class="text-xs text-gray-500 mt-1">Select the default model for new chat sessions.</p>
@@ -288,7 +323,6 @@
                     <div>
                         <label for="settingsVectorizerSelect" class="block text-sm font-medium text-gray-700 mb-1">Default SafeStore Vectorizer</label>
                         <select id="settingsVectorizerSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
-                            <!-- Options loaded dynamically -->
                              <option>Loading vectorizers...</option>
                         </select>
                          <p class="text-xs text-gray-500 mt-1">Select the default vectorizer for RAG.</p>
@@ -312,7 +346,6 @@
                     <h3 class="modal-title">RAG File Management</h3>
                 </div>
                 <div class="modal-body space-y-5">
-                    <!-- Upload Section -->
                     <div class="border border-gray-200 rounded-md p-4">
                          <h4 class="text-md font-medium text-gray-800 mb-3">Upload New Documents</h4>
                          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -320,7 +353,6 @@
                                  <label for="fileVectorizerSelect" class="block text-sm font-medium text-gray-700 mb-1">Vectorizer for Upload</label>
                                  <select id="fileVectorizerSelect" class="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm">
                                      <option value="">Select Vectorizer</option>
-                                      <!-- Options loaded dynamically -->
                                  </select>
                              </div>
                              <div>
@@ -337,12 +369,10 @@
                          <div id="uploadStatus" class="text-sm h-4 mt-2"></div>
                     </div>
 
-                    <!-- File List Section -->
                      <div class="border border-gray-200 rounded-md p-4">
                          <h4 class="text-md font-medium text-gray-800 mb-3">Indexed Documents</h4>
                          <div id="indexedFileList" class="max-h-60 overflow-y-auto space-y-2 bg-gray-50 border border-gray-100 rounded p-3">
                             <p class="text-gray-500 italic">Loading files...</p>
-                            <!-- File list loaded dynamically -->
                          </div>
                           <div id="fileListStatus" class="text-sm h-4 mt-2"></div>
                     </div>
@@ -360,25 +390,38 @@
         // --- Global State ---
         let currentUser = null;
         let currentDiscussionId = null;
-        let discussions = {}; // { id: { title: '...', is_starred: false } }
-        let currentMessages = []; // Array of message objects { id, sender, content, user_grade, token_count, model_name, ... }
+        let discussions = {};
+        let currentMessages = [];
         let aiMessageStreaming = false;
         let currentAiMessageElement = null;
         let currentAiMessageContent = "";
         let currentAiMessageId = null;
-        let codeMirrorInstances = {}; // { messageId-index: instance }
+        let codeMirrorInstances = {};
         let pyodide = null;
         let pyodideLoading = false;
         let isRagActive = false;
-        let availableLollmsModels = []; // For settings [{name: 'model1'}]
-        let availableVectorizers = []; // For settings & file management [{name: 'vec1', method_name: 'Vectorizer 1 (dim: 128)'}]
-        let userLollmsModel = null; // User's default model setting
-        let userDefaultVectorizer = null; // User's default vectorizer setting
-        let sessionActiveVectorizer = null; // Vectorizer currently active for RAG toggle
-        let indexedRagFiles = []; // [{filename: 'doc1.txt'}]
+        let availableLollmsModels = [];
+        let availableVectorizers = [];
+        let userLollmsModel = null;
+        let userDefaultVectorizer = null;
+        let sessionActiveVectorizer = null;
+        let indexedRagFiles = [];
         let lastUserMessageId = null;
 
+        let tempLoginUsername = null;
+        let tempLoginPassword = null;
+
         // --- DOM Elements ---
+        // App Loading
+        const appLoadingMessage = document.getElementById('appLoadingMessage');
+        const appLoadingStatus = document.getElementById('appLoadingStatus');
+        const appContainer = document.getElementById('app-container');
+        // Login Modal
+        const loginModal = document.getElementById('loginModal');
+        const loginUsernameInput = document.getElementById('loginUsername');
+        const loginPasswordInput = document.getElementById('loginPassword');
+        const loginSubmitBtn = document.getElementById('loginSubmitBtn');
+        const loginStatus = document.getElementById('loginStatus');
         // Sidebar
         const discussionListContainer = document.getElementById('discussionListContainer');
         const newDiscussionBtn = document.getElementById('newDiscussionBtn');
@@ -389,14 +432,12 @@
         const filesBtn = document.getElementById('filesBtn');
         const exportDataBtn = document.getElementById('exportDataBtn');
         const importDataBtn = document.getElementById('importDataBtn');
+        const logoutBtn = document.getElementById('logoutBtn');
         // Chat Area
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendMessageBtn = document.getElementById('sendMessageBtn');
         const discussionTitle = document.getElementById('discussionTitle');
-        // Removed discussionActions from DOM
-        // const renameDiscussionBtn = document.getElementById('renameDiscussionBtn');
-        // const deleteDiscussionBtn = document.getElementById('deleteDiscussionBtn');
         const ragToggleBtn = document.getElementById('ragToggleBtn');
         const statusMessage = document.getElementById('statusMessage');
         const pyodideStatus = document.getElementById('pyodideStatus');
@@ -405,8 +446,8 @@
         const renameInput = document.getElementById('renameInput');
         const confirmRenameBtn = document.getElementById('confirmRenameBtn');
         const renameStatus = document.getElementById('renameStatus');
-        const renameDiscussionIdInput = document.getElementById('renameDiscussionIdInput'); // For inline rename
-        const editMessageModal = document.getElementById('editMessageModal'); // New Edit Modal
+        const renameDiscussionIdInput = document.getElementById('renameDiscussionIdInput');
+        const editMessageModal = document.getElementById('editMessageModal');
         const editMessageInput = document.getElementById('editMessageInput');
         const confirmEditMessageBtn = document.getElementById('confirmEditMessageBtn');
         const editMessageStatus = document.getElementById('editMessageStatus');
@@ -435,104 +476,248 @@
         const fileListStatus = document.getElementById('fileListStatus');
 
 
+
         // --- API Helper ---
         async function apiRequest(url, options = {}) {
-            // Clear general status unless a modal status is targeted
-            if (!options.statusElement) showStatus('');
+            if (!options.statusElement) showStatus(''); // Clear global status unless specific
+
+            const fetchOptions = { ...options };
+            fetchOptions.headers = { ...fetchOptions.headers }; // Ensure headers object exists
+
+            // If temporary login credentials are set (from our custom login modal),
+            // and no Authorization header is already set in options,
+            // construct and add the Basic Auth header for this request.
+            if (tempLoginUsername && tempLoginPassword && !fetchOptions.headers['Authorization']) {
+                const basicAuth = btoa(`${tempLoginUsername}:${tempLoginPassword}`);
+                fetchOptions.headers['Authorization'] = `Basic ${basicAuth}`;
+                console.log("apiRequest: Using temporary credentials for Basic Auth.");
+            }
+            // After using them for one request, clear them.
+            // The browser should then cache them if the request is successful.
+            // Or, if a different strategy is needed, this clearing logic might change.
+            // For now, we assume the /api/auth/me call will "set" the browser's cache.
+            // tempLoginUsername = null; // Let's clear them *after* the fetch call completes
+            // tempLoginPassword = null;
+
 
             try {
-                const response = await fetch(url, options);
-                if (response.status === 401) {
-                    const msg = "Authentication failed. Please login.";
-                    showStatus(msg, "error", options.statusElement);
-                    alert("Authentication required. Please refresh and login.");
-                    throw new Error(msg);
-                }
+                const response = await fetch(url, fetchOptions);
+                // If login was successful (200 on /me), subsequent browser requests should include auth
+                // If login failed (401), the browser won't cache, and we'll re-prompt.
+
                 if (!response.ok) {
-                     const errorData = await response.json().catch(() => ({ detail: `HTTP error ${response.status}` }));
-                     const errorMsg = `API Error: ${errorData.detail || response.statusText}`;
-                     showStatus(errorMsg, "error", options.statusElement);
-                     // Throw error so caller handling (e.g., in modals) knows it failed
-                     throw new Error(errorMsg);
+                    let errorDetail = `HTTP error ${response.status}`;
+                    try {
+                        const errorData = await response.json();
+                        errorDetail = errorData.detail || errorDetail;
+                    } catch (e) { /* Ignore if response is not JSON */ }
+
+                    const errorMsg = `API Error: ${errorDetail}`;
+                    showStatus(errorMsg, "error", options.statusElement);
+                    const error = new Error(errorMsg);
+                    error.status = response.status;
+                    throw error;
                 }
-                // Handle 204 No Content (common for DELETE)
                 if (response.status === 204) {
-                    return null; // Or return a specific indicator if needed
+                    return null;
                 }
-                // Handle other success statuses (200, 201, 207)
-                return response;
+                return response; // Return full response
             } catch (error) {
-                console.error("API Request Error:", url, options, error);
-                // Use provided status element or global one
-                showStatus(`Request failed: ${error.message}`, "error", options.statusElement || statusMessage);
-                throw error; // Re-throw for caller handling if needed
+                console.error("API Request Error:", url, fetchOptions, error);
+                if (!error.status) { // Avoid double-logging
+                    showStatus(`Request failed: ${error.message}`, "error", options.statusElement || statusMessage);
+                }
+                throw error;
+            } finally {
+                // Clear temporary credentials after the attempt, regardless of success or failure.
+                // If successful, the browser will cache them. If failed, we don't want to keep retrying with bad creds.
+                if (url === '/api/auth/me' && fetchOptions.headers['Authorization'] && fetchOptions.headers['Authorization'].startsWith('Basic')) {
+                    // Only clear if we just used them for the /me call
+                    tempLoginUsername = null;
+                    tempLoginPassword = null;
+                    console.log("apiRequest: Cleared temporary credentials after /api/auth/me attempt.");
+                }
             }
         }
 
         // --- Initialization ---
         window.onload = async () => {
             marked.setOptions({
-                highlight: (code, lang) => code, // Rely on CodeMirror
+                highlight: (code, lang) => code,
                 gfm: true,
                 breaks: true,
             });
-
-            showStatus('Initializing...', 'info');
-            try {
-                // 1. Fetch User Info
-                const response = await apiRequest('/api/auth/me');
-                currentUser = await response.json();
-                usernameDisplay.textContent = currentUser.username;
-                userLollmsModel = currentUser.lollms_model_name;
-                userDefaultVectorizer = currentUser.safe_store_vectorizer;
-                sessionActiveVectorizer = userDefaultVectorizer;
-
-                if (currentUser.is_admin) {
-                    adminBadge.style.display = 'inline-block';
-                    adminLink.style.display = 'flex';
-                }
-
-                // 2. Load Discussions
-                await loadDiscussions();
-
-                // 3. Load Initial RAG / Settings Data
-                await loadAvailableLollmsModels();
-                await loadAvailableVectorizers();
-                await loadIndexedRagFiles();
-
-                // 4. Update Initial UI states
-                updateRagToggleButtonState();
-
-                // Add listener for the confirmation of inline rename
-                confirmRenameBtn.onclick = confirmInlineRename;
-                // Add listener for message edit confirmation
-                confirmEditMessageBtn.onclick = confirmMessageEdit;
-
-
-                showStatus('Ready.', 'success');
-
-            } catch (error) {
-                 showStatus('Initialization failed. Please refresh.', 'error');
-                 console.error("Initialization error:", error)
-                 sendMessageBtn.disabled = true;
-                 newDiscussionBtn.disabled = true;
-            }
+            // Initial call to /api/auth/me will not have tempLoginUsername/Password.
+            // If it gets a 401, login modal appears.
+            // After login modal submission, handleLoginAttempt sets temp creds,
+            // then calls attemptInitialAuthAndLoad again. This time, /api/auth/me will use them.
+            await attemptInitialAuthAndLoad();
         };
 
+        async function attemptInitialAuthAndLoad() {
+            appLoadingStatus.textContent = "Authenticating...";
+            try {
+                // apiRequest will now use tempLoginUsername/Password if they are set
+                const response = await apiRequest('/api/auth/me'); // This request will now carry the auth header if temp creds are set
+                currentUser = await response.json();
+
+                loginModal.classList.remove('active');
+                appContainer.style.display = 'flex';
+                appLoadingMessage.style.display = 'none';
+                await initializeAppContent();
+            } catch (error) {
+                if (error.status === 401) {
+                    appLoadingMessage.style.display = 'none';
+                    // If called due to initial load (no temp creds) or if temp creds failed
+                    showStatus("Login failed or required.", "error", loginStatus); // Show error in login modal
+                    openModal('loginModal', false);
+                    loginUsernameInput.focus();
+                } else {
+                    appLoadingStatus.textContent = `Initialization failed: ${error.message}. Please refresh.`;
+                    appLoadingStatus.classList.add('text-red-600');
+                    console.error("Initialization error:", error);
+                }
+            }
+        }
+
+        async function initializeAppContent() {
+            appLoadingStatus.textContent = "Loading user data...";
+            usernameDisplay.textContent = currentUser.username;
+            userLollmsModel = currentUser.lollms_model_name;
+            userDefaultVectorizer = currentUser.safe_store_vectorizer;
+            sessionActiveVectorizer = userDefaultVectorizer;
+
+            if (currentUser.is_admin) {
+                adminBadge.style.display = 'inline-block';
+                adminLink.style.display = 'flex';
+            }
+
+            appLoadingStatus.textContent = "Loading discussions...";
+            await loadDiscussions();
+
+            appLoadingStatus.textContent = "Loading models and vectorizers...";
+            await loadAvailableLollmsModels();
+            await loadAvailableVectorizers();
+            await loadIndexedRagFiles();
+
+            updateRagToggleButtonState();
+
+            confirmRenameBtn.onclick = confirmInlineRename;
+            confirmEditMessageBtn.onclick = confirmMessageEdit;
+            logoutBtn.onclick = handleLogout;
+            loginSubmitBtn.onclick = handleLoginAttempt;
+            loginPasswordInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') handleLoginAttempt();
+            });
+
+            showStatus('Ready.', 'success');
+        }
+
+
+        // --- Login and Logout ---
+        async function handleLoginAttempt() {
+            const username = loginUsernameInput.value.trim();
+            const password = loginPasswordInput.value;
+
+            if (!username || !password) {
+                showStatus("Username and password are required.", "error", loginStatus);
+                return;
+            }
+            showStatus("Attempting login...", "info", loginStatus);
+            loginSubmitBtn.disabled = true;
+
+            // Store credentials temporarily for apiRequest to pick up
+            tempLoginUsername = username;
+            tempLoginPassword = password;
+
+            try {
+                // Now, call attemptInitialAuthAndLoad.
+                // The apiRequest for /api/auth/me inside it will use the temp credentials.
+                await attemptInitialAuthAndLoad();
+                // If attemptInitialAuthAndLoad is successful, it will hide the modal
+                // and initialize the app. If it fails (e.g., 401), it will show
+                // an error in loginStatus and keep the modal open.
+            } catch (error) {
+                // This catch might not be strictly necessary if attemptInitialAuthAndLoad handles its own errors regarding the modal
+                console.error("Login attempt via modal ultimately failed:", error);
+                // Ensure loginStatus shows the error if attemptInitialAuthAndLoad didn't already
+                if (error.status === 401) {
+                    showStatus("Invalid username or password.", "error", loginStatus);
+                } else {
+                    showStatus(`Login error: ${error.message}`, "error", loginStatus);
+                }
+            } finally {
+                loginSubmitBtn.disabled = false;
+                // tempLoginUsername and tempLoginPassword are cleared by apiRequest after /api/auth/me
+            }
+        }
+
+        async function handleLogout() {
+            showStatus("Logging out...", "info");
+            try {
+                await apiRequest('/api/auth/logout', { method: 'POST' });
+                console.info("Server-side session cleared.");
+            } catch (error) {
+                console.warn("Logout API call failed or returned an error, proceeding with client-side UI reset:", error);
+                showStatus("Logout from server failed, but resetting UI.", "warning");
+            } finally {
+                currentUser = null;
+                discussions = {};
+                currentMessages = [];
+                codeMirrorInstances = {};
+                currentDiscussionId = null;
+                lastUserMessageId = null;
+                aiMessageStreaming = false;
+                currentAiMessageElement = null;
+                currentAiMessageContent = "";
+                currentAiMessageId = null;
+                isRagActive = false;
+
+                usernameDisplay.textContent = '...';
+                adminBadge.style.display = 'none';
+                adminLink.style.display = 'none';
+                discussionListContainer.innerHTML = '<p class="text-gray-500 text-sm text-center italic p-4">Please log in to view discussions.</p>';
+                clearChatArea(true);
+                sendMessageBtn.disabled = true;
+                messageInput.value = '';
+                autoGrowTextarea(messageInput);
+                ragToggleBtn.classList.remove('rag-toggle-on');
+                ragToggleBtn.classList.add('rag-toggle-off');
+                ragToggleBtn.disabled = true;
+                updateRagToggleButtonState();
+
+                appContainer.style.display = 'none';
+                appLoadingMessage.style.display = 'none';
+                showStatus('', 'info', statusMessage);
+                showStatus('', 'info', pyodideStatus);
+                
+                loginUsernameInput.value = '';
+                loginPasswordInput.value = '';
+                loginSubmitBtn.disabled = false;
+                showStatus("You have been logged out. Please login again.", "info", loginStatus);
+                
+                openModal('loginModal', false); 
+                loginUsernameInput.focus();
+                console.log("Client UI has been reset to logged-out state. Awaiting new login via modal.");
+            }
+        }
+
+
         // --- Modal Management ---
-        function openModal(modalId) {
+        function openModal(modalId, allowOverlayClose = true) {
             const modal = document.getElementById(modalId);
             if (modal) {
                 modal.classList.add('active');
-                // Trigger specific loading/refresh logic when opening
-                if (modalId === 'settingsModal') {
+                if (modalId === 'loginModal') {
+                    modal.dataset.allowOverlayClose = allowOverlayClose.toString();
+                    loginUsernameInput.focus();
+                } else if (modalId === 'settingsModal') {
                     populateSettingsModal();
                 } else if (modalId === 'fileManagementModal') {
                     populateFileManagementModal();
                 } else if (modalId === 'exportModal') {
                     populateExportModal();
                 }
-                // Auto-focus first input in rename/edit modals
                 if (modalId === 'renameModal') renameInput.focus();
                 if (modalId === 'editMessageModal') editMessageInput.focus();
             }
@@ -543,20 +728,19 @@
             if (modal) {
                 modal.classList.remove('active');
             }
-             // Clear modal-specific status messages on close
              const statusElement = document.getElementById(modalId.replace('Modal', 'Status'));
              if (statusElement) {
                  showStatus('', 'info', statusElement);
              }
-             // Clear hidden ID inputs
              if (modalId === 'renameModal') renameDiscussionIdInput.value = '';
              if (modalId === 'editMessageModal') editMessageIdInput.value = '';
         }
 
-        // Close modal if clicking outside the content area
         document.querySelectorAll('.modal').forEach(modal => {
             modal.addEventListener('click', (event) => {
-                if (event.target === modal) { // Check if the click is on the background overlay
+                // Only close if clicked on overlay AND overlay close is allowed (for login modal)
+                const allowClose = modal.dataset.allowOverlayClose !== 'false';
+                if (event.target === modal && allowClose) {
                     closeModal(modal.id);
                 }
             });
@@ -571,9 +755,9 @@
                 loadedDiscussions.forEach(d => { discussions[d.id] = d; });
                 renderDiscussionList();
                 if (currentDiscussionId && discussions[currentDiscussionId]) {
-                    selectDiscussion(currentDiscussionId); // Re-select if possible
+                    selectDiscussion(currentDiscussionId);
                 } else if (currentDiscussionId) {
-                    clearChatArea(); // Clear chat if previous discussion gone
+                    clearChatArea();
                     currentDiscussionId = null;
                 }
             } catch (error) {
@@ -599,34 +783,29 @@
             sortedIds.forEach(id => {
                 const d = discussions[id];
                 const item = document.createElement('div');
-                // Added 'relative' and 'discussion-item' class for hover actions
                 item.className = `relative discussion-item p-2 rounded cursor-pointer hover:bg-gray-100 flex justify-between items-center text-sm transition-colors duration-150 ${id === currentDiscussionId ? 'bg-blue-100 font-medium text-blue-800' : 'text-gray-700'}`;
                 item.dataset.id = id;
                 item.onclick = () => selectDiscussion(id);
 
                 const titleSpan = document.createElement('span');
                 titleSpan.textContent = d.title || `Discussion ${id.substring(0, 6)}`;
-                titleSpan.className = 'truncate mr-2 flex-1 pr-16'; // Added padding-right to avoid overlap with actions
+                titleSpan.className = 'truncate mr-2 flex-1 pr-16';
 
-                // Container for star and hover actions
                 const controlsDiv = document.createElement('div');
                 controlsDiv.className = 'flex items-center flex-shrink-0';
 
-                // Star Icon
                 const starSpan = document.createElement('span');
                 starSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 24 24" stroke-width="1.5" stroke="none" class="w-4 h-4 star-icon ${d.is_starred ? 'starred' : ''} transition-colors duration-150"><path stroke-linecap="round" stroke-linejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 21.1a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" /></svg>`;
                 starSpan.title = d.is_starred ? 'Unstar Discussion' : 'Star Discussion';
-                starSpan.className = 'p-1 hover:bg-gray-200 rounded-full mr-1'; // Added margin-right
+                starSpan.className = 'p-1 hover:bg-gray-200 rounded-full mr-1';
                 starSpan.onclick = (e) => {
-                    e.stopPropagation(); // Prevent selecting discussion
+                    e.stopPropagation();
                     toggleStarDiscussion(id, d.is_starred);
                 };
 
-                // Hover Actions Container
                 const actionsDiv = document.createElement('div');
-                actionsDiv.className = 'discussion-item-actions'; // Uses new CSS for hover display
+                actionsDiv.className = 'discussion-item-actions';
 
-                // Rename Button (Inline)
                 const renameBtn = document.createElement('button');
                 renameBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg>`;
                 renameBtn.title = "Rename Discussion";
@@ -636,7 +815,6 @@
                     initiateInlineRename(id);
                 };
 
-                // Delete Button (Inline)
                 const deleteBtn = document.createElement('button');
                 deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4 text-red-500"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg>`;
                 deleteBtn.title = "Delete Discussion";
@@ -648,10 +826,8 @@
 
                 actionsDiv.appendChild(renameBtn);
                 actionsDiv.appendChild(deleteBtn);
-
-                controlsDiv.appendChild(starSpan); // Star is always visible
-                controlsDiv.appendChild(actionsDiv); // Actions appear on hover
-
+                controlsDiv.appendChild(starSpan);
+                controlsDiv.appendChild(actionsDiv);
                 item.appendChild(titleSpan);
                 item.appendChild(controlsDiv);
                 discussionListContainer.appendChild(item);
@@ -663,7 +839,7 @@
             try {
                 const response = await apiRequest('/api/discussions', { method: 'POST' });
                 const newDiscussion = await response.json();
-                discussions[newDiscussion.id] = newDiscussion; // Add to local cache
+                discussions[newDiscussion.id] = newDiscussion;
                 renderDiscussionList();
                 selectDiscussion(newDiscussion.id);
                 showStatus('New discussion created.', 'success');
@@ -677,12 +853,11 @@
 
             currentDiscussionId = id;
             discussionTitle.textContent = discussions[id].title;
-            // discussionActions are removed from header
             sendMessageBtn.disabled = false;
-            renderDiscussionList(); // Update selection highlight
-            clearChatArea(false); // Clear messages but keep header title etc.
+            renderDiscussionList();
+            clearChatArea(false);
             chatMessages.innerHTML = '<p class="text-gray-500 text-center italic mt-10">Loading messages...</p>';
-            lastUserMessageId = null; // Reset parent tracking
+            lastUserMessageId = null;
 
             try {
                 const response = await apiRequest(`/api/discussions/${id}`);
@@ -696,7 +871,7 @@
 
         function initiateInlineRename(id) {
             if (!discussions[id]) return;
-            renameDiscussionIdInput.value = id; // Store the ID to rename
+            renameDiscussionIdInput.value = id;
             renameInput.value = discussions[id].title;
             showStatus('', 'info', renameStatus);
             openModal('renameModal');
@@ -723,17 +898,15 @@
                  const updatedInfo = await response.json();
                  discussions[idToRename].title = updatedInfo.title;
                  if (idToRename === currentDiscussionId) {
-                     discussionTitle.textContent = updatedInfo.title; // Update header if current
+                     discussionTitle.textContent = updatedInfo.title;
                  }
-                 renderDiscussionList(); // Update list display
+                 renderDiscussionList();
                  showStatus('Renamed successfully.', 'success', renameStatus);
                  setTimeout(() => closeModal('renameModal'), 1000);
              } catch (error) {
                  console.error("Rename failed:", error);
-                 // Status handled by apiRequest
              }
         };
-
 
         async function deleteInlineDiscussion(id) {
              if (!discussions[id]) return;
@@ -742,18 +915,15 @@
                  showStatus('Deleting discussion...', 'info');
                  try {
                      await apiRequest(`/api/discussions/${id}`, { method: 'DELETE' });
-
                      delete discussions[id];
                      if (id === currentDiscussionId) {
-                         currentDiscussionId = null; // Deselect
-                         clearChatArea(true); // Clear everything
+                         currentDiscussionId = null;
+                         clearChatArea(true);
                      }
                      renderDiscussionList();
                      showStatus(`Discussion "${titleToDelete}" deleted.`, 'success');
-
                  } catch (error) {
                      console.error("Delete failed:", error);
-                     // Status shown by apiRequest
                  }
              }
         };
@@ -764,7 +934,7 @@
              try {
                 await apiRequest(`/api/discussions/${id}/star`, { method: method });
                 discussions[id].is_starred = !isCurrentlyStarred;
-                renderDiscussionList(); // Re-render to update star and order
+                renderDiscussionList();
              } catch (error) {
                   console.error(`${action} failed:`, error);
                   showStatus(`Failed to ${action.toLowerCase()} discussion.`, 'error');
@@ -779,9 +949,7 @@
             }
             autoGrowTextarea(messageInput);
         });
-
         messageInput.addEventListener('input', () => autoGrowTextarea(messageInput));
-
         sendMessageBtn.onclick = sendMessage;
 
         function autoGrowTextarea(element) {
@@ -791,110 +959,83 @@
             element.style.overflowY = element.scrollHeight > maxHeight ? 'auto' : 'hidden';
         }
 
-
         async function sendMessage() {
             if (aiMessageStreaming || !currentDiscussionId) return;
             const prompt = messageInput.value.trim();
             if (!prompt) return;
 
-            // Add user message optimistically
             const tempUserId = `temp-user-${Date.now()}`;
             const userMessage = {
                 id: tempUserId,
                 sender: currentUser.lollms_client_ai_name ? 'You' : (currentUser.username || 'User'),
-                content: prompt,
-                user_grade: 0,
-                token_count: null, // User token count maybe calculated later if needed
-                model_name: null
+                content: prompt, user_grade: 0, token_count: null, model_name: null
             };
-             const lastMessageElement = chatMessages.lastElementChild?.querySelector('.message-bubble');
-             if (lastMessageElement && lastMessageElement.classList.contains('user-bubble')) {
+            const lastMessageElement = chatMessages.lastElementChild?.querySelector('.message-bubble');
+            if (lastMessageElement && lastMessageElement.classList.contains('user-bubble')) {
                  userMessage.addSpacing = true;
-             }
+            }
             renderMessage(userMessage);
-            // Note: Real user message ID comes back from backend after stream completes if we refresh
-            lastUserMessageId = tempUserId; // Use temp ID for potential parent ref
+            lastUserMessageId = tempUserId;
             messageInput.value = '';
             autoGrowTextarea(messageInput);
             sendMessageBtn.disabled = true;
             scrollChatToBottom();
 
-             const formData = new FormData();
-             formData.append('prompt', prompt);
-             formData.append('use_rag', isRagActive);
-             if (lastUserMessageId && lastUserMessageId.startsWith('temp-user-')) {
-                 // If backend needs parent ID, find the *actual* last user message ID
-                 // from currentMessages array after a potential refresh, or pass null.
-                 // For simplicity now, we won't pass parent_message_id for optimistic user messages.
-             } else if (lastUserMessageId) {
-                 // formData.append('parent_message_id', lastUserMessageId); // Pass real ID if available
-             }
+            const formData = new FormData();
+            formData.append('prompt', prompt);
+            formData.append('use_rag', isRagActive);
 
-             aiMessageStreaming = true;
-             currentAiMessageContent = "";
-             currentAiMessageElement = null;
-             currentAiMessageId = `temp-ai-${Date.now()}`; // Temp ID for AI message during stream
+            aiMessageStreaming = true;
+            currentAiMessageContent = "";
+            currentAiMessageElement = null;
+            currentAiMessageId = `temp-ai-${Date.now()}`;
 
-             try {
+            try {
                  const response = await fetch(`/api/discussions/${currentDiscussionId}/chat`, {
-                     method: 'POST',
-                     body: formData
+                     method: 'POST', body: formData
                  });
 
                  if (!response.ok || !response.body) {
                      const errorData = await response.json().catch(() => ({ detail: `HTTP error ${response.status}` }));
                      throw new Error(`Error starting chat stream: ${errorData.detail || response.statusText}`);
                  }
-
                  const reader = response.body.getReader();
                  const decoder = new TextDecoder();
-
                  while (true) {
                      const { done, value } = await reader.read();
                      if (done) break;
                      const textChunk = decoder.decode(value, { stream: true });
                      const lines = textChunk.split('\n').filter(line => line.trim() !== '');
                      lines.forEach(line => {
-                         try {
-                             handleStreamChunk(JSON.parse(line));
-                         } catch (e) {
-                             console.warn("Error parsing stream chunk:", line, e);
-                             renderMessage({ id: `warn-${Date.now()}`, sender: 'system', content: `Warning: Received malformed data chunk.` });
-                         }
+                         try { handleStreamChunk(JSON.parse(line)); }
+                         catch (e) { console.warn("Error parsing stream chunk:", line, e); renderMessage({ id: `warn-${Date.now()}`, sender: 'system', content: `Warning: Received malformed data chunk.` }); }
                      });
                  }
                  handleStreamEnd();
-
              } catch (error) {
                  console.error("Chat stream error:", error);
                  showStatus(`Chat stream failed: ${error.message}`, "error");
                  renderMessage({ id: `err-${Date.now()}`, sender: 'system', content: `Stream Error: ${error.message}` });
-                 handleStreamEnd(true); // Pass error flag
+                 handleStreamEnd(true);
              }
         }
 
         function handleStreamChunk(data) {
              if (data.type === 'chunk') {
                  if (!currentAiMessageElement) {
-                     // Create the initial AI message bubble structure
                      const aiMessage = {
-                         id: currentAiMessageId, // Use temp ID initially
-                         sender: currentUser.lollms_client_ai_name || 'Assistant',
-                         content: "", // Start empty, will be filled below
-                         user_grade: 0,
-                         token_count: null, // Will be set on stream end
-                         model_name: null   // Will be set on stream end
+                         id: currentAiMessageId, sender: currentUser.lollms_client_ai_name || 'Assistant',
+                         content: "", user_grade: 0, token_count: null, model_name: null
                      };
                      const lastMessageElement = chatMessages.lastElementChild?.querySelector('.message-bubble');
                      if (lastMessageElement && lastMessageElement.classList.contains('user-bubble')) {
                         aiMessage.addSpacing = true;
                      }
-                     renderMessage(aiMessage); // Render the basic structure
+                     renderMessage(aiMessage);
                  }
                  currentAiMessageContent += data.content;
                  const contentDiv = currentAiMessageElement?.querySelector('.message-content');
                  if (contentDiv) {
-                     // Simple text update during stream - no Markdown/Think tag processing yet
                      contentDiv.textContent = currentAiMessageContent;
                  }
                  scrollChatToBottom();
@@ -903,20 +1044,14 @@
                  renderMessage({ id: `err-${Date.now()}`, sender: 'system', content: `LLM Error: ${data.content}` });
                  handleStreamEnd(true);
              }
-             // Backend doesn't currently send 'full_message_info' during stream
         }
 
         function handleStreamEnd(errorOccurred = false) {
             aiMessageStreaming = false;
             sendMessageBtn.disabled = false;
-
-            // Always refresh messages from server after stream finishes
-            // to get the final AI message with correct ID, token count, model, etc.
-            // and also the real ID for the user's message.
             if (currentDiscussionId) {
                  refreshMessagesAfterStream();
             }
-
             currentAiMessageElement = null;
             currentAiMessageContent = "";
             currentAiMessageId = null;
@@ -924,18 +1059,14 @@
         }
 
         async function refreshMessagesAfterStream() {
-            // Give backend a moment to save the discussion fully
             await new Promise(resolve => setTimeout(resolve, 500));
             if (!currentDiscussionId || aiMessageStreaming) return;
-
             try {
                 const response = await apiRequest(`/api/discussions/${currentDiscussionId}`);
                 currentMessages = await response.json();
-                // Full re-render to ensure all data (IDs, tokens, grades) is correct
                 renderMessages(currentMessages);
             } catch (error) {
                  console.error(`Failed to refresh messages for ${currentDiscussionId}:`, error);
-                 // Optionally show a subtle error in the chat
                  renderMessage({ id: `err-refresh-${Date.now()}`, sender: 'system', content: `Failed to refresh message list.` });
             }
         }
@@ -945,7 +1076,6 @@
             chatMessages.innerHTML = '';
              if (clearHeader) {
                 discussionTitle.textContent = 'Select or Create a Discussion';
-                // discussionActions are removed
                 sendMessageBtn.disabled = true;
              }
             currentMessages = [];
@@ -953,10 +1083,9 @@
         }
 
         function renderMessages(messagesToRender) {
-            chatMessages.innerHTML = ''; // Clear existing
-            codeMirrorInstances = {}; // Clear CM instances
+            chatMessages.innerHTML = '';
+            codeMirrorInstances = {};
             messagesToRender.forEach((msg, index) => {
-                 // Add spacing logic based on sender change
                  if (index > 0 && messagesToRender[index-1].sender !== msg.sender) {
                      msg.addSpacing = true;
                  } else {
@@ -975,36 +1104,26 @@
             const messageId = message.id || `temp-${Date.now()}`;
             const domId = `message-${messageId}`;
 
-            // Avoid re-rendering if element exists and isn't the currently streaming AI message
             if (document.getElementById(domId) && messageId !== currentAiMessageId) {
-                 // console.log("Skipping render, element exists:", domId);
                  return;
-             }
+            }
 
             const messageContainer = document.createElement('div');
             messageContainer.className = 'message-container flex flex-col';
-             if (message.addSpacing) {
-                 messageContainer.classList.add('mt-3'); // Add margin-top for spacing
-             }
+            if (message.addSpacing) messageContainer.classList.add('mt-3');
 
-
-            let bubbleClass = 'ai-bubble';
-            let senderName = message.sender;
-            let showGrade = false;
-            let isUserMsg = false;
-            const userNames = [currentUser.username, 'user', 'You']; // Include backend default 'user' and frontend 'You'
+            let bubbleClass = 'ai-bubble'; let senderName = message.sender;
+            let showGrade = false; let isUserMsg = false;
+            const userNames = [currentUser.username, 'user', 'You'];
 
             if (userNames.includes(senderName)) {
-                bubbleClass = 'user-bubble';
-                senderName = ''; // Hide own name
-                isUserMsg = true;
+                bubbleClass = 'user-bubble'; senderName = ''; isUserMsg = true;
             } else if (senderName.toLowerCase() === 'system' || senderName.toLowerCase() === 'error') {
-                bubbleClass = 'system-bubble';
-                senderName = '';
+                bubbleClass = 'system-bubble'; senderName = '';
             } else {
                 bubbleClass = 'ai-bubble';
-                senderName = currentUser.lollms_client_ai_name || message.sender; // Use configured AI name
-                showGrade = !messageId.startsWith('temp-'); // Show grade for non-temp AI messages
+                senderName = currentUser.lollms_client_ai_name || message.sender;
+                showGrade = !messageId.startsWith('temp-');
             }
 
             const bubbleDiv = document.createElement('div');
@@ -1013,8 +1132,7 @@
 
             if (senderName) {
                 const senderDiv = document.createElement('div');
-                senderDiv.className = 'sender-name';
-                senderDiv.textContent = senderName;
+                senderDiv.className = 'sender-name'; senderDiv.textContent = senderName;
                 bubbleDiv.appendChild(senderDiv);
             }
 
@@ -1022,57 +1140,40 @@
             contentDiv.className = 'message-content prose prose-sm max-w-none prose-pre:bg-gray-800 prose-pre:text-gray-100 prose-code:before:content-none prose-code:after:content-none prose-code:font-normal prose-code:bg-gray-100 prose-code:text-gray-800 prose-code:px-1 prose-code:py-0.5 prose-code:rounded';
 
             if (aiMessageStreaming && messageId === currentAiMessageId) {
-                 // During stream, just show plain text
                  contentDiv.textContent = currentAiMessageContent;
-                 currentAiMessageElement = bubbleDiv; // Track the bubble element for stream updates
+                 currentAiMessageElement = bubbleDiv;
             } else {
-                 // After stream or for existing messages, render Markdown + Think tags
                  renderProcessedContent(contentDiv, message.content || "", messageId);
             }
             bubbleDiv.appendChild(contentDiv);
 
-            // --- Footer for Details and Actions ---
             const footerDiv = document.createElement('div');
             footerDiv.className = 'message-footer';
-
-            // Details Span
             const detailsSpan = document.createElement('span');
             detailsSpan.className = 'message-details';
             let detailsContent = '';
             if (message.token_count) detailsContent += `<span>Tokens: ${message.token_count}</span>`;
             if (message.model_name) detailsContent += `<span>Model: ${message.model_name}</span>`;
-             // Add binding_name if different from model_name? Maybe too verbose.
-             // Generation speed: Not available from backend yet.
-             detailsSpan.innerHTML = detailsContent;
+            detailsSpan.innerHTML = detailsContent;
 
-            // Actions Span (Edit/Delete) - Shown on Hover
             const actionsSpan = document.createElement('span');
-            actionsSpan.className = 'message-actions'; // Initially hidden via CSS
-
-             // Edit Button (for all non-temp messages)
+            actionsSpan.className = 'message-actions';
             if (!messageId.startsWith('temp-')) {
                 const editBtn = document.createElement('button');
                 editBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg>`;
-                editBtn.title = "Edit Message";
-                editBtn.className = 'message-action-btn';
+                editBtn.title = "Edit Message"; editBtn.className = 'message-action-btn';
                 editBtn.onclick = () => initiateEditMessage(messageId);
                 actionsSpan.appendChild(editBtn);
-            }
 
-             // Delete Button (for all non-temp messages)
-            if (!messageId.startsWith('temp-')) {
                 const deleteBtn = document.createElement('button');
                 deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="text-red-500"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg>`;
-                deleteBtn.title = "Delete Message";
-                deleteBtn.className = 'message-action-btn';
+                deleteBtn.title = "Delete Message"; deleteBtn.className = 'message-action-btn';
                 deleteBtn.onclick = () => deleteMessage(messageId);
                 actionsSpan.appendChild(deleteBtn);
             }
 
-
-            // Grading Span (only for non-temp AI messages)
             const gradeSpanContainer = document.createElement('span');
-            gradeSpanContainer.className = 'flex items-center justify-end'; // Align right
+            gradeSpanContainer.className = 'flex items-center justify-end';
             if (showGrade) {
                 const userGrade = message.user_grade || 0;
                 const upvoteBtn = document.createElement('button');
@@ -1082,8 +1183,7 @@
                 upvoteBtn.onclick = () => gradeMessage(messageId, 1);
 
                 const gradeDisplaySpan = document.createElement('span');
-                gradeDisplaySpan.className = 'grade-score font-medium';
-                gradeDisplaySpan.textContent = userGrade;
+                gradeDisplaySpan.className = 'grade-score font-medium'; gradeDisplaySpan.textContent = userGrade;
 
                 const downvoteBtn = document.createElement('button');
                 downvoteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>`;
@@ -1096,92 +1196,59 @@
                 gradeSpanContainer.appendChild(downvoteBtn);
             }
 
+            footerDiv.appendChild(detailsSpan);
+            footerDiv.appendChild(actionsSpan);
+            footerDiv.appendChild(gradeSpanContainer);
+            bubbleDiv.appendChild(footerDiv);
 
-            footerDiv.appendChild(detailsSpan); // Add details to left
-            footerDiv.appendChild(actionsSpan); // Add actions (initially hidden)
-            footerDiv.appendChild(gradeSpanContainer); // Add grading to right
-            bubbleDiv.appendChild(footerDiv); // Add footer to bubble
-
-            // Append the complete message bubble container
-            // Check if the element already exists (might happen during streaming init)
             const existingElement = document.getElementById(domId);
             if (existingElement) {
-                // If it's the streaming element, replace its content
                 if (messageId === currentAiMessageId) {
                     existingElement.parentNode.replaceChild(bubbleDiv, existingElement);
-                    currentAiMessageElement = bubbleDiv; // Update tracked element
-                } // else: it's an old message, no need to replace
+                    currentAiMessageElement = bubbleDiv;
+                }
             } else {
                  messageContainer.appendChild(bubbleDiv);
                  chatMessages.appendChild(messageContainer);
                  if (messageId === currentAiMessageId) {
-                     currentAiMessageElement = bubbleDiv; // Track newly added streaming element
+                     currentAiMessageElement = bubbleDiv;
                  }
             }
         }
 
         function renderProcessedContent(element, rawContent, messageId) {
-            // 1. Process <think> tags
-            let processedHtml = '';
-            const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
-            let lastIndex = 0;
-            let match;
-
+            let processedHtml = ''; const thinkRegex = /<think>([\s\S]*?)<\/think>/g;
+            let lastIndex = 0; let match;
             while ((match = thinkRegex.exec(rawContent)) !== null) {
-                // Part before the think tag
                 const before = rawContent.substring(lastIndex, match.index);
-                if (before.trim()) {
-                    processedHtml += marked.parse(before);
-                }
-
-                // The think tag content
+                if (before.trim()) processedHtml += marked.parse(before);
                 const thinkContent = match[1];
-                processedHtml += `<details class="think-block"><summary>Assistant's Thoughts</summary><div class="think-content prose prose-sm max-w-none">${marked.parse(thinkContent)}</div></details>`; // Parse inner content too
-
+                processedHtml += `<details class="think-block"><summary>Assistant's Thoughts</summary><div class="think-content prose prose-sm max-w-none">${marked.parse(thinkContent)}</div></details>`;
                 lastIndex = thinkRegex.lastIndex;
             }
-
-            // Part after the last think tag
             const after = rawContent.substring(lastIndex);
-            if (after.trim()) {
-                processedHtml += marked.parse(after);
-            }
-
-            // Set the final HTML
-            element.innerHTML = processedHtml || '<p></p>'; // Ensure element isn't empty
-
-             // 2. Render Math
-             try {
-                renderMathInElement(element, { delimiters: [ {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true} ], throwOnError: false });
-             } catch(e) { console.warn("KaTeX rendering error:", e); }
-
-             // 3. Render Code blocks with CodeMirror
+            if (after.trim()) processedHtml += marked.parse(after);
+            element.innerHTML = processedHtml || '<p></p>';
+            try { renderMathInElement(element, { delimiters: [ {left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}, {left: '\\(', right: '\\)', display: false}, {left: '\\[', right: '\\]', display: true} ], throwOnError: false }); }
+            catch(e) { console.warn("KaTeX rendering error:", e); }
             renderCodeMirrorBlocks(element, messageId);
         }
 
         function renderCodeMirrorBlocks(element, messageId) {
             element.querySelectorAll('pre > code').forEach((codeBlock, index) => {
                 const preElement = codeBlock.parentNode;
-                 // Avoid double-processing if CM already initialized for this block
-                 if (preElement.parentNode.querySelector('.cm-editor')) return;
-
+                if (preElement.parentNode.querySelector('.cm-editor')) return;
                 const language = codeBlock.className.match(/language-(\w+)/)?.[1] || 'plaintext';
                 const code = codeBlock.textContent || '';
-                const uniqueCmId = `${messageId}-${index}`; // Unique ID for CM instance
+                const uniqueCmId = `${messageId}-${index}`;
 
-                const header = document.createElement('div');
-                header.className = 'code-block-header text-gray-600';
-                const langSpan = document.createElement('span');
-                langSpan.textContent = language;
-                const buttonsDiv = document.createElement('div');
-                buttonsDiv.className = 'code-block-buttons';
+                const header = document.createElement('div'); header.className = 'code-block-header text-gray-600';
+                const langSpan = document.createElement('span'); langSpan.textContent = language;
+                const buttonsDiv = document.createElement('div'); buttonsDiv.className = 'code-block-buttons';
 
                 const copyBtn = document.createElement('button');
-                 copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`;
-                 copyBtn.onclick = () => {
-                    navigator.clipboard.writeText(code)
-                        .then(() => { copyBtn.textContent = 'Copied!'; setTimeout(() => copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`, 1500) });
-                };
+                copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`;
+                copyBtn.onclick = () => { navigator.clipboard.writeText(code).then(() => { copyBtn.textContent = 'Copied!'; setTimeout(() => copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>Copy`, 1500) }); };
                 buttonsDiv.appendChild(copyBtn);
 
                 if (language === 'python') {
@@ -1190,30 +1257,16 @@
                     execBtn.onclick = () => executePythonCode(code, preElement.parentNode);
                     buttonsDiv.appendChild(execBtn);
                 }
-
-                header.appendChild(langSpan);
-                header.appendChild(buttonsDiv);
-                // Insert header *before* the <pre> tag
+                header.appendChild(langSpan); header.appendChild(buttonsDiv);
                 preElement.parentNode.insertBefore(header, preElement);
-
-                 const cmContainer = document.createElement('div');
-                 // Replace the <pre> element with the CM container
-                 preElement.parentNode.replaceChild(cmContainer, preElement);
-
-                 let modeInfo = CodeMirror.findModeByName(language) || CodeMirror.findModeByExtension(language);
-                 let mode = modeInfo ? modeInfo.mode : 'null';
-
-                 try {
-                    const cmInstance = CodeMirror(cmContainer, {
-                         value: code, mode: mode, theme: "material-darker",
-                         lineNumbers: true, readOnly: true, lineWrapping: true,
-                     });
-                     codeMirrorInstances[uniqueCmId] = cmInstance;
-                 } catch(e) {
-                      console.error("CodeMirror initialization failed:", e);
-                      // Fallback: put the original <pre> back if CM fails
-                      cmContainer.parentNode.replaceChild(preElement, cmContainer);
-                 }
+                const cmContainer = document.createElement('div');
+                preElement.parentNode.replaceChild(cmContainer, preElement);
+                let modeInfo = CodeMirror.findModeByName(language) || CodeMirror.findModeByExtension(language);
+                let mode = modeInfo ? modeInfo.mode : 'null';
+                try {
+                    const cmInstance = CodeMirror(cmContainer, { value: code, mode: mode, theme: "material-darker", lineNumbers: true, readOnly: true, lineWrapping: true });
+                    codeMirrorInstances[uniqueCmId] = cmInstance;
+                } catch(e) { console.error("CodeMirror initialization failed:", e); cmContainer.parentNode.replaceChild(preElement, cmContainer); }
             });
         }
 
@@ -1221,43 +1274,27 @@
              if (!currentDiscussionId || !messageId || messageId.startsWith('temp-')) return;
              const messageElement = document.getElementById(`message-${messageId}`);
              if (!messageElement) return;
-
              try {
                 const response = await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}/grade`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ change: change })
                 });
                  const updatedMessage = await response.json();
-
-                 // Update UI based on response
                  const gradeSpan = messageElement.querySelector('.grade-score');
-                 const upBtn = messageElement.querySelector('.grade-btn.selected-up, .grade-btn:not(.selected-down):first-of-type'); // More robust selector
+                 const upBtn = messageElement.querySelector('.grade-btn.selected-up, .grade-btn:not(.selected-down):first-of-type');
                  const downBtn = messageElement.querySelector('.grade-btn.selected-down, .grade-btn:last-of-type');
-
                  if (gradeSpan) gradeSpan.textContent = updatedMessage.user_grade;
                  if (upBtn) upBtn.classList.toggle('selected-up', updatedMessage.user_grade > 0);
                  if (downBtn) downBtn.classList.toggle('selected-down', updatedMessage.user_grade < 0);
-
-                 // Update local cache
                  const msgIndex = currentMessages.findIndex(m => m.id === messageId);
-                 if (msgIndex > -1) {
-                     currentMessages[msgIndex].user_grade = updatedMessage.user_grade;
-                 }
-
-             } catch (error) {
-                 console.error("Grading failed:", error);
-                  showStatus('Failed to update grade.', 'error');
-             }
+                 if (msgIndex > -1) currentMessages[msgIndex].user_grade = updatedMessage.user_grade;
+             } catch (error) { console.error("Grading failed:", error); showStatus('Failed to update grade.', 'error'); }
         }
 
         // --- Message Edit/Delete Functions ---
         function initiateEditMessage(messageId) {
             const messageData = currentMessages.find(m => m.id === messageId);
-            if (!messageData) {
-                showStatus("Cannot find message data to edit.", "error");
-                return;
-            }
+            if (!messageData) { showStatus("Cannot find message data to edit.", "error"); return; }
             editMessageIdInput.value = messageId;
             editMessageInput.value = messageData.content;
             showStatus('', 'info', editMessageStatus);
@@ -1265,43 +1302,24 @@
         }
 
         async function confirmMessageEdit() {
-            const messageId = editMessageIdInput.value;
-            const newContent = editMessageInput.value; // No trim, allow whitespace changes
+            const messageId = editMessageIdInput.value; const newContent = editMessageInput.value;
             if (!messageId || !currentDiscussionId) return;
-
-            showStatus('Saving changes...', 'info', editMessageStatus);
-            confirmEditMessageBtn.disabled = true;
-
+            showStatus('Saving changes...', 'info', editMessageStatus); confirmEditMessageBtn.disabled = true;
             try {
                 const response = await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ content: newContent }),
-                    statusElement: editMessageStatus
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: newContent }), statusElement: editMessageStatus
                 });
                 const updatedMessageData = await response.json();
-
-                // Update local cache
                 const msgIndex = currentMessages.findIndex(m => m.id === messageId);
-                if (msgIndex > -1) {
-                    currentMessages[msgIndex] = updatedMessageData; // Replace with full updated data
-                }
-
-                // Update DOM
+                if (msgIndex > -1) currentMessages[msgIndex] = updatedMessageData;
                 const messageElement = document.getElementById(`message-${messageId}`);
                 if (messageElement) {
                     const contentDiv = messageElement.querySelector('.message-content');
                     if (contentDiv) {
-                        // Clear old CodeMirror instances within this message before re-rendering
-                         Object.keys(codeMirrorInstances).forEach(key => {
-                            if (key.startsWith(messageId + '-')) {
-                                delete codeMirrorInstances[key];
-                            }
-                        });
-                        // Re-render the content area with new markdown/code/math
+                         Object.keys(codeMirrorInstances).forEach(key => { if (key.startsWith(messageId + '-')) delete codeMirrorInstances[key]; });
                         renderProcessedContent(contentDiv, updatedMessageData.content, messageId);
                     }
-                    // Update details footer if needed (tokens might change)
                      const detailsSpan = messageElement.querySelector('.message-details');
                      if (detailsSpan) {
                          let detailsContent = '';
@@ -1310,89 +1328,49 @@
                          detailsSpan.innerHTML = detailsContent;
                      }
                 }
-
                 showStatus('Message updated successfully.', 'success', editMessageStatus);
                 setTimeout(() => closeModal('editMessageModal'), 1000);
-
-            } catch (error) {
-                console.error("Message edit failed:", error);
-                // Status shown by apiRequest
-            } finally {
-                confirmEditMessageBtn.disabled = false;
-            }
+            } catch (error) { console.error("Message edit failed:", error); }
+            finally { confirmEditMessageBtn.disabled = false; }
         }
 
         async function deleteMessage(messageId) {
              if (!currentDiscussionId || !messageId || messageId.startsWith('temp-')) return;
-
              const messageElement = document.getElementById(`message-${messageId}`);
              const messageContentPreview = messageElement ? (messageElement.querySelector('.message-content')?.textContent || '').substring(0, 50) + '...' : `message ${messageId}`;
-
              if (confirm(`Are you sure you want to delete this message?\n\n"${messageContentPreview}"`)) {
                  showStatus('Deleting message...', 'info');
                  try {
-                     // API returns 200 or 204 on success for DELETE
-                     await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}`, {
-                         method: 'DELETE'
-                     });
-
-                     // Remove from local cache
+                     await apiRequest(`/api/discussions/${currentDiscussionId}/messages/${messageId}`, { method: 'DELETE' });
                      currentMessages = currentMessages.filter(m => m.id !== messageId);
-
-                     // Remove from DOM
-                     if (messageElement) {
-                         messageElement.closest('.message-container')?.remove(); // Remove the whole container
-                     }
-                      // Remove associated CodeMirror instances
-                      Object.keys(codeMirrorInstances).forEach(key => {
-                            if (key.startsWith(messageId + '-')) {
-                                delete codeMirrorInstances[key];
-                            }
-                      });
-
+                     if (messageElement) messageElement.closest('.message-container')?.remove();
+                     Object.keys(codeMirrorInstances).forEach(key => { if (key.startsWith(messageId + '-')) delete codeMirrorInstances[key]; });
                      showStatus('Message deleted successfully.', 'success');
-
-                 } catch (error) {
-                     console.error("Message deletion failed:", error);
-                     // Status shown by apiRequest
-                 }
+                 } catch (error) { console.error("Message deletion failed:", error); }
              }
         }
 
-
-        // --- Pyodide Python Execution (Unchanged) ---
+        // --- Pyodide Python Execution ---
         async function loadPyodide() {
             if (pyodide || pyodideLoading) return;
-            pyodideLoading = true;
-            showPyodideStatus('Loading Python interpreter...');
+            pyodideLoading = true; showPyodideStatus('Loading Python interpreter...');
             try {
                 pyodide = await window.loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.25.1/full/" });
                 await pyodide.loadPackage("micropip");
-                showPyodideStatus('Python ready.');
-                setTimeout(() => showPyodideStatus(''), 3000);
-            } catch (error) {
-                console.error("Pyodide loading failed:", error);
-                showPyodideStatus('Error loading Python interpreter.', true);
-                pyodide = null;
-            } finally {
-                pyodideLoading = false;
-            }
+                showPyodideStatus('Python ready.'); setTimeout(() => showPyodideStatus(''), 3000);
+            } catch (error) { console.error("Pyodide loading failed:", error); showPyodideStatus('Error loading Python interpreter.', true); pyodide = null; }
+            finally { pyodideLoading = false; }
         }
         async function executePythonCode(code, codeContainerElement) {
-             await loadPyodide();
-             if (!pyodide) {
-                 showPyodideStatus('Python interpreter not available.', true);
-                 return;
-             }
+             await loadPyodide(); if (!pyodide) { showPyodideStatus('Python interpreter not available.', true); return; }
              const existingOutput = codeContainerElement.querySelector('.code-output');
              if (existingOutput) existingOutput.remove();
              const outputDiv = document.createElement('pre');
              outputDiv.className = 'code-output mt-2 p-2 border-t border-gray-300 bg-gray-900 text-white text-xs font-mono overflow-x-auto max-h-40 rounded-b-md';
-             outputDiv.textContent = 'Executing...\n';
-             codeContainerElement.appendChild(outputDiv);
-            let stdout = ''; let stderr = '';
-            pyodide.setStdout({ batched: (msg) => { stdout += msg + '\n'; outputDiv.textContent += msg + '\n'; }});
-            pyodide.setStderr({ batched: (msg) => { stderr += msg + '\n'; outputDiv.textContent += `Error: ${msg}\n`; }});
+             outputDiv.textContent = 'Executing...\n'; codeContainerElement.appendChild(outputDiv);
+             let stdout = ''; let stderr = '';
+             pyodide.setStdout({ batched: (msg) => { stdout += msg + '\n'; outputDiv.textContent += msg + '\n'; }});
+             pyodide.setStderr({ batched: (msg) => { stderr += msg + '\n'; outputDiv.textContent += `Error: ${msg}\n`; }});
              showPyodideStatus('Running Python code...');
              try {
                  const lines = code.split('\n');
@@ -1403,8 +1381,7 @@
                      const micropip = pyodide.pyimport("micropip");
                      for (const cmd of installCommands) {
                          const packages = cmd.split('install')[1].trim().split(' ');
-                         outputDiv.textContent += `> ${cmd}\n`;
-                         await micropip.install(packages);
+                         outputDiv.textContent += `> ${cmd}\n`; await micropip.install(packages);
                          outputDiv.textContent += `Packages installed: ${packages.join(', ')}\n`;
                      }
                      outputDiv.textContent += 'Installation complete. Running code...\n';
@@ -1413,66 +1390,59 @@
                  if (result !== undefined) outputDiv.textContent += `\nResult: ${result}\n`;
                  if (!stderr) outputDiv.textContent += '\nExecution finished.';
                  showPyodideStatus('Python execution finished.');
-             } catch (error) {
-                 console.error("Python execution error:", error);
-                 outputDiv.textContent += `\nExecution Error: ${error.message}\n`;
-                 showPyodideStatus('Python execution failed.', true);
-             } finally {
-                 pyodide.setStdout({}); pyodide.setStderr({});
-                 setTimeout(() => showPyodideStatus(''), 3000);
-             }
+             } catch (error) { console.error("Python execution error:", error); outputDiv.textContent += `\nExecution Error: ${error.message}\n`; showPyodideStatus('Python execution failed.', true); }
+             finally { pyodide.setStdout({}); pyodide.setStderr({}); setTimeout(() => showPyodideStatus(''), 3000); }
         }
          function showPyodideStatus(msg, isError = false) {
             pyodideStatus.textContent = msg;
             pyodideStatus.className = `text-xs mt-1 h-4 ${isError ? 'text-red-600' : 'text-blue-600'}`;
         }
 
-        // --- Settings Modal Logic (Unchanged) ---
+        // --- Settings Modal Logic ---
         settingsBtn.onclick = () => openModal('settingsModal');
-        async function loadAvailableLollmsModels() { /* ... no change ... */
+        async function loadAvailableLollmsModels() {
              try {
                 const response = await apiRequest('/api/config/lollms-models');
-                 if (!response.ok) throw new Error(`API failed: ${response.status}`);
-                 availableLollmsModels = await response.json();
-                 populateDropdown(settingsLollmsModelSelect, availableLollmsModels, userLollmsModel, "No models found");
+                if (!response.ok) throw new Error(`API failed: ${response.status}`);
+                availableLollmsModels = await response.json();
+                populateDropdown(settingsLollmsModelSelect, availableLollmsModels, userLollmsModel, "No models found");
              } catch (error) {
-                 console.error("Failed to load LoLLMs models:", error);
-                 availableLollmsModels = [];
+                 console.error("Failed to load LoLLMs models:", error); availableLollmsModels = [];
                  populateDropdown(settingsLollmsModelSelect, [], null, `Error: ${error.message || 'Failed to load'}`);
              }
          }
          settingsLollmsModelSelect.onchange = () => { saveLollmsModelBtn.disabled = settingsLollmsModelSelect.value === userLollmsModel; };
-         saveLollmsModelBtn.onclick = async () => { /* ... no change ... */
+         saveLollmsModelBtn.onclick = async () => {
              const selectedModel = settingsLollmsModelSelect.value; if (!selectedModel || selectedModel === userLollmsModel) return;
              showStatus('Saving model setting...', 'info', settingsStatus); saveLollmsModelBtn.disabled = true;
              try {
                 const formData = new FormData(); formData.append('model_name', selectedModel);
                 await apiRequest('/api/config/lollms-model', { method: 'POST', body: formData, statusElement: settingsStatus });
-                 userLollmsModel = selectedModel;
-                 showStatus(`Default model set to ${selectedModel}. Client will re-init on next chat.`, 'success', settingsStatus);
+                userLollmsModel = selectedModel;
+                showStatus(`Default model set to ${selectedModel}. Client will re-init on next chat.`, 'success', settingsStatus);
              } catch (error) { console.error("Failed to save model:", error); saveLollmsModelBtn.disabled = false; }
          };
          settingsVectorizerSelect.onchange = () => { saveVectorizerBtn.disabled = settingsVectorizerSelect.value === userDefaultVectorizer; };
-         saveVectorizerBtn.onclick = async () => { /* ... no change ... */
+         saveVectorizerBtn.onclick = async () => {
              const selectedVectorizer = settingsVectorizerSelect.value; if (!selectedVectorizer || selectedVectorizer === userDefaultVectorizer) return;
              showStatus('Saving vectorizer setting...', 'info', settingsStatus); saveVectorizerBtn.disabled = true;
              try {
                 const formData = new FormData(); formData.append('vectorizer_name', selectedVectorizer);
-                 await apiRequest('/api/store/active-vectorizer', { method: 'POST', body: formData, statusElement: settingsStatus });
-                 userDefaultVectorizer = selectedVectorizer; sessionActiveVectorizer = selectedVectorizer;
-                 updateRagToggleButtonState();
-                 showStatus(`Default vectorizer set to ${selectedVectorizer}.`, 'success', settingsStatus);
+                await apiRequest('/api/store/active-vectorizer', { method: 'POST', body: formData, statusElement: settingsStatus });
+                userDefaultVectorizer = selectedVectorizer; sessionActiveVectorizer = selectedVectorizer;
+                updateRagToggleButtonState();
+                showStatus(`Default vectorizer set to ${selectedVectorizer}.`, 'success', settingsStatus);
              } catch (error) { console.error("Failed to save vectorizer:", error); saveVectorizerBtn.disabled = false; }
          };
-         function populateSettingsModal() { /* ... no change ... */
+         function populateSettingsModal() {
              populateDropdown(settingsLollmsModelSelect, availableLollmsModels, userLollmsModel, "No models found");
              populateDropdown(settingsVectorizerSelect, availableVectorizers, userDefaultVectorizer, "No vectorizers found");
              saveLollmsModelBtn.disabled = true; saveVectorizerBtn.disabled = true; showStatus('', 'info', settingsStatus);
          }
 
-        // --- File Management Modal Logic (Unchanged) ---
+        // --- File Management Modal Logic ---
         filesBtn.onclick = () => openModal('fileManagementModal');
-        async function loadAvailableVectorizers() { /* ... no change ... */
+        async function loadAvailableVectorizers() {
              try {
                  const response = await apiRequest('/api/store/vectorizers');
                  availableVectorizers = await response.json();
@@ -1484,34 +1454,34 @@
                  populateDropdown(fileVectorizerSelect, [], null, "Error loading vectorizers", true);
              }
          }
-         async function loadIndexedRagFiles() { /* ... no change ... */
+         async function loadIndexedRagFiles() {
              try {
                  const response = await apiRequest('/api/store/files');
                  indexedRagFiles = await response.json(); renderRagFileList(indexedRagFiles);
              } catch (error) { console.error("Failed to load RAG files:", error); indexedRagFiles = []; renderRagFileList(null, "Error loading files."); }
          }
-        function populateFileManagementModal() { /* ... no change ... */
+        function populateFileManagementModal() {
              populateDropdown(fileVectorizerSelect, availableVectorizers, null, "Select Vectorizer", true); renderRagFileList(indexedRagFiles);
              fileUploadInput.value = ''; confirmUploadBtn.disabled = true; showStatus('', 'info', uploadStatus); showStatus('', 'info', fileListStatus);
          }
          fileVectorizerSelect.onchange = updateConfirmUploadBtnState;
          fileUploadInput.onchange = updateConfirmUploadBtnState;
-         function updateConfirmUploadBtnState() { /* ... no change ... */
+         function updateConfirmUploadBtnState() {
               const filesSelected = fileUploadInput.files && fileUploadInput.files.length > 0;
               const vectorizerSelected = fileVectorizerSelect.value !== ""; confirmUploadBtn.disabled = !(filesSelected && vectorizerSelected);
          }
-         confirmUploadBtn.onclick = async () => { /* ... no change ... */
+         confirmUploadBtn.onclick = async () => {
             const files = fileUploadInput.files; const vectorizer = fileVectorizerSelect.value; if (!files || files.length === 0 || !vectorizer) return;
             const formData = new FormData(); for (const file of files) formData.append('files', file); formData.append('vectorizer_name', vectorizer);
-             showStatus(`Uploading ${files.length} file(s) using ${vectorizer}...`, 'info', uploadStatus); confirmUploadBtn.disabled = true;
-             try {
+            showStatus(`Uploading ${files.length} file(s) using ${vectorizer}...`, 'info', uploadStatus); confirmUploadBtn.disabled = true;
+            try {
                  const response = await apiRequest('/api/store/upload-files', { method: 'POST', body: formData, statusElement: uploadStatus });
                  const result = await response.json(); let message = result.message || "Upload completed."; let statusType = response.status === 207 ? 'warning' : 'success';
                  if (response.status === 207) message = `Upload finished. Processed: ${result.processed_files?.length || 0}, Errors: ${result.errors?.length || 0}`;
                  showStatus(message, statusType, uploadStatus); await loadIndexedRagFiles(); fileUploadInput.value = ''; updateConfirmUploadBtnState();
-             } catch (error) { console.error("Upload failed:", error); confirmUploadBtn.disabled = false; updateConfirmUploadBtnState(); }
+            } catch (error) { console.error("Upload failed:", error); confirmUploadBtn.disabled = false; updateConfirmUploadBtnState(); }
          };
-         function renderRagFileList(files, message = null) { /* ... no change ... */
+         function renderRagFileList(files, message = null) {
              indexedFileList.innerHTML = ''; if (message) { const msgElement = document.createElement('p'); msgElement.className = 'text-gray-500 italic px-1'; if(message.toLowerCase().includes("error")) msgElement.classList.add('text-red-500'); msgElement.textContent = message; indexedFileList.appendChild(msgElement); return; }
              if (!files || files.length === 0) { indexedFileList.innerHTML = '<p class="text-gray-500 italic px-1">No documents indexed yet.</p>'; return; }
              files.forEach(file => {
@@ -1523,7 +1493,7 @@
                  fileDiv.appendChild(fileNameSpan); fileDiv.appendChild(deleteBtn); indexedFileList.appendChild(fileDiv);
              });
          }
-          async function deleteRagFileInModal(filename) { /* ... no change ... */
+        async function deleteRagFileInModal(filename) {
              if (!confirm(`Are you sure you want to delete the RAG document "${filename}"?`)) return; showStatus(`Deleting ${filename}...`, 'info', fileListStatus);
              try {
                  const response = await apiRequest(`/api/store/files/${encodeURIComponent(filename)}`, { method: 'DELETE', statusElement: fileListStatus });
@@ -1532,41 +1502,41 @@
              } catch (error) { console.error(`Delete failed for ${filename}:`, error); }
          }
 
-        // --- RAG Toggle Logic (Unchanged) ---
-        ragToggleBtn.onclick = () => { /* ... no change ... */
+        // --- RAG Toggle Logic ---
+        ragToggleBtn.onclick = () => {
              if (!sessionActiveVectorizer) { showStatus('Cannot enable RAG without an active vectorizer. Set one in Settings.', 'warning'); return; }
              isRagActive = !isRagActive; updateRagToggleButtonState(); showStatus(`RAG is now ${isRagActive ? 'ACTIVE' : 'INACTIVE'}.`, 'info');
         };
-        function updateRagToggleButtonState() { /* ... no change ... */
+        function updateRagToggleButtonState() {
             const hasVectorizer = !!sessionActiveVectorizer; ragToggleBtn.disabled = !hasVectorizer;
             if (!hasVectorizer) { ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off'); ragToggleBtn.title = "No active vectorizer (Set in Settings)"; isRagActive = false; return; }
             if (isRagActive) { ragToggleBtn.classList.remove('rag-toggle-off'); ragToggleBtn.classList.add('rag-toggle-on'); ragToggleBtn.title = `RAG Active (Using ${sessionActiveVectorizer}) - Click to disable`; }
             else { ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off'); ragToggleBtn.title = `RAG Inactive (Using ${sessionActiveVectorizer}) - Click to enable`; }
         }
 
-        // --- Export / Import Logic (Unchanged) ---
-        function populateExportModal() { /* ... no change ... */
+        // --- Export / Import Logic ---
+        function populateExportModal() {
              const allIds = Object.keys(discussions); exportDiscussionList.innerHTML = ''; if (allIds.length === 0) { exportDiscussionList.innerHTML = '<p class="text-gray-500 italic">No discussions to export.</p>'; }
              else { allIds.forEach(id => { const div = document.createElement('div'); div.className = 'flex items-center'; const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.id = `export-check-${id}`; checkbox.value = id; checkbox.className = 'h-4 w-4 mr-2 rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-300 focus:ring focus:ring-offset-0 focus:ring-blue-200 focus:ring-opacity-50'; const label = document.createElement('label'); label.htmlFor = `export-check-${id}`; label.textContent = discussions[id].title; label.className = 'text-sm text-gray-700'; div.appendChild(checkbox); div.appendChild(label); exportDiscussionList.appendChild(div); }); }
         }
         exportDataBtn.onclick = () => openModal('exportModal');
-        confirmExportBtn.onclick = async () => { /* ... no change ... */
+        confirmExportBtn.onclick = async () => {
             const selectedIds = Array.from(exportDiscussionList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value); closeModal('exportModal'); showStatus('Exporting data...', 'info');
-             try {
+            try {
                  const requestBody = { discussion_ids: selectedIds.length > 0 ? selectedIds : null };
                  const response = await apiRequest('/api/discussions/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(requestBody) });
                  const exportData = await response.json(); const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' }); const url = URL.createObjectURL(blob);
                  const a = document.createElement('a'); a.href = url; const timestamp = new Date().toISOString().replace(/[:.]/g, '-'); a.download = `simplified_lollms_export_${currentUser.username}_${timestamp}.json`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
                  showStatus('Data exported successfully.', 'success');
-             } catch (error) { console.error("Export failed:", error); }
+            } catch (error) { console.error("Export failed:", error); }
         };
-        importDataBtn.onclick = () => { /* ... no change ... */
+        importDataBtn.onclick = () => {
              importFile.value = ''; importPreviewArea.style.display = 'none'; importDiscussionList.innerHTML = ''; confirmImportBtn.disabled = true; showStatus('', 'info', importStatus); parsedImportData = null; openModal('importModal');
         };
          let parsedImportData = null;
-         importFile.onchange = async () => { /* ... no change ... */
+         importFile.onchange = async () => {
             const file = importFile.files[0]; parsedImportData = null; importPreviewArea.style.display = 'none'; importDiscussionList.innerHTML = ''; confirmImportBtn.disabled = true; showStatus('', 'info', importStatus); if (!file) return;
-             if (file.type !== 'application/json') { showStatus('Error: Please select a valid JSON file.', 'error', importStatus); return; }
+            if (file.type !== 'application/json') { showStatus('Error: Please select a valid JSON file.', 'error', importStatus); return; }
             showStatus('Reading file...', 'info', importStatus);
             try {
                 const content = await file.text(); parsedImportData = JSON.parse(content);
@@ -1576,7 +1546,7 @@
                  importPreviewArea.style.display = 'block'; showStatus('', 'info', importStatus);
             } catch (error) { console.error("Error reading import file:", error); showStatus(`Error reading file: ${error.message}`, 'error', importStatus); parsedImportData = null; confirmImportBtn.disabled = true; }
          };
-         confirmImportBtn.onclick = async () => { /* ... no change ... */
+         confirmImportBtn.onclick = async () => {
              if (!parsedImportData || !importFile.files[0]) return;
              const selectedOriginalIds = Array.from(importDiscussionList.querySelectorAll('input[type="checkbox"]:checked')).map(cb => cb.value); if (selectedOriginalIds.length === 0) { showStatus('Please select at least one discussion to import.', 'error', importStatus); return; }
              showStatus('Importing discussions...', 'info', importStatus); confirmImportBtn.disabled = true;
@@ -1588,20 +1558,17 @@
              } catch (error) { console.error("Import failed:", error); confirmImportBtn.disabled = false; }
          };
 
-
-        // --- Utilities (Unchanged) ---
+        // --- Utilities ---
         function scrollChatToBottom() { requestAnimationFrame(() => { chatMessages.scrollTop = chatMessages.scrollHeight; }); }
-        function showStatus(msg, type = 'info', statusElement = statusMessage) { /* ... no change ... */
+        function showStatus(msg, type = 'info', statusElement = statusMessage) {
             const targetElement = statusElement || statusMessage; if (targetElement) { targetElement.textContent = msg; let typeClass = 'text-gray-600'; if (type === 'error') typeClass = 'text-red-600'; else if (type === 'success') typeClass = 'text-green-600'; else if (type === 'warning') typeClass = 'text-yellow-600'; targetElement.className = targetElement.className.replace(/text-(gray|red|green|yellow)-600/g, ''); targetElement.classList.add(typeClass); if (targetElement === statusMessage && msg) { clearTimeout(targetElement.timer); targetElement.timer = setTimeout(() => { if (targetElement.textContent === msg) targetElement.textContent = ''; }, 5000); } } else { console.log(`Status [${type}]: ${msg}`); }
         }
-        function populateDropdown(selectElement, items, selectedValue, emptyText = "Nothing found", allowEmpty = false) { /* ... no change ... */
+        function populateDropdown(selectElement, items, selectedValue, emptyText = "Nothing found", allowEmpty = false) {
             if (!selectElement) { console.error("populateDropdown: selectElement is null"); return; } selectElement.innerHTML = '';
-             if (allowEmpty) { const emptyOption = document.createElement('option'); emptyOption.value = ""; emptyOption.textContent = emptyText; selectElement.appendChild(emptyOption); }
-             if (!items || !Array.isArray(items) || items.length === 0) { if (!allowEmpty) { const placeholder = document.createElement('option'); placeholder.disabled = true; placeholder.selected = true; placeholder.textContent = emptyText; selectElement.appendChild(placeholder); } }
-             else { items.forEach(item => { if (!item || typeof item.name !== 'string') { console.warn(`Dropdown '${selectElement.id}': Skipping invalid item:`, item); return; } const option = document.createElement('option'); option.value = item.name; option.textContent = item.method_name || item.name; if (item.name === selectedValue) { option.selected = true; } selectElement.appendChild(option); }); }
+            if (allowEmpty) { const emptyOption = document.createElement('option'); emptyOption.value = ""; emptyOption.textContent = emptyText; selectElement.appendChild(emptyOption); }
+            if (!items || !Array.isArray(items) || items.length === 0) { if (!allowEmpty) { const placeholder = document.createElement('option'); placeholder.disabled = true; placeholder.selected = true; placeholder.textContent = emptyText; selectElement.appendChild(placeholder); } }
+            else { items.forEach(item => { if (!item || typeof item.name !== 'string') { console.warn(`Dropdown '${selectElement.id}': Skipping invalid item:`, item); return; } const option = document.createElement('option'); option.value = item.name; option.textContent = item.method_name || item.name; if (item.name === selectedValue) { option.selected = true; } selectElement.appendChild(option); }); }
         }
-
     </script>
-
 </body>
 </html>
