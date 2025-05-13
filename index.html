@@ -2756,6 +2756,50 @@
              dataStoresModalTabs[0].click();
         }
     }
+        async function populatePublicDataStoresList() {
+            if(!publicDataStoresList) return;
+            publicDataStoresList.innerHTML = `<p class="italic text-gray-500 dark:text-gray-400">${translate("loadingPublicStores")}</p>`;
+            try {
+                const response = await apiRequest('/api/datastores/store');
+                const stores = await response.json();
+                publicDataStoresList.innerHTML = ''; // Clear loading message
+                if (stores.length === 0) {
+                    publicDataStoresList.innerHTML = `<p class="italic text-gray-500 dark:text-gray-400">${translate("noPublicStoresAvailable")}</p>`;
+                } else {
+                    stores.forEach(ds => {
+                        const div = document.createElement('div');
+                        div.className = 'flex justify-between items-center py-1.5 px-2 text-sm border-b dark:border-gray-700 last:border-b-0';
+                        const isOwnedByCurrentUser = ds.owner_username === currentUser.username;
+                        
+                        let addButtonHtml = '';
+                        if (!isOwnedByCurrentUser) {
+                            // Check if already added to user's interface (is present in sharedDataStores or ownedDataStores)
+                            const alreadyAdded = availableDataStoresForRag.some(myDs => myDs.id === ds.id);
+                            if (alreadyAdded) {
+                                addButtonHtml = `<span class="text-xs text-green-600 dark:text-green-400 italic">(${translate("alreadyAddedToInterface")})</span>`;
+                            } else {
+                                addButtonHtml = `<button onclick="addPublicStoreToInterface('${ds.id}')" class="p-1 text-xs bg-green-100 dark:bg-green-700 text-green-700 dark:text-green-100 rounded hover:bg-green-200 dark:hover:bg-green-600">${translate("addToMyInterfaceButton")}</button>`;
+                            }
+                        } else {
+                             addButtonHtml = `<span class="text-xs text-gray-400 dark:text-gray-500 italic">(${translate("ownedByYou")})</span>`;
+                        }
+
+                        div.innerHTML = `
+                            <div>
+                                <strong class="text-gray-800 dark:text-gray-100">${ds.name}</strong>
+                                <span class="text-xs text-gray-500 dark:text-gray-400"> (${translate("ownedBy", {username: ds.owner_username})})</span>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" title="${ds.description || ''}">${ds.description || translate("noDescription")}</p>
+                            </div>
+                            ${addButtonHtml}
+                        `;
+                        publicDataStoresList.appendChild(div);
+                    });
+                }
+            } catch (error) {
+                console.error("Failed to load public data stores:", error);
+                publicDataStoresList.innerHTML = `<p class="text-red-500 dark:text-red-400 italic">${translate("errorLoadingPublicStores")}</p>`;
+            }
+        }
 
     </script>
 
