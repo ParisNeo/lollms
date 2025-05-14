@@ -1115,7 +1115,7 @@ async def chat_in_existing_discussion(
                 # A more advanced RAG query might allow specifying vectorizer for the given store.
                 active_vectorizer_for_store = user_sessions[username].get("active_vectorizer") # User's general default vectorizer
 
-                with ss: rag_results = ss.query(prompt, vectorizer_name=active_vectorizer_for_store, top_k=3) # Consider making vectorizer_name configurable per query/datastore
+                with ss: rag_results = ss.query(prompt, vectorizer_name=active_vectorizer_for_store, top_k=10) # Consider making vectorizer_name configurable per query/datastore
                 if rag_results:
                     context_str = "\n\nRelevant context from documents:\n"; max_rag_len, current_rag_len, sources = 2000, 0, set()
                     for i, res in enumerate(rag_results):
