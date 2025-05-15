@@ -1114,16 +1114,23 @@ async def chat_in_existing_discussion(
                 # For now, let SafeStore pick its default or the only one available in that store.
                 # A more advanced RAG query might allow specifying vectorizer for the given store.
                 active_vectorizer_for_store = user_sessions[username].get("active_vectorizer") # User's general default vectorizer
-
-                with ss: rag_results = ss.query(prompt, vectorizer_name=active_vectorizer_for_store, top_k=10) # Consider making vectorizer_name configurable per query/datastore
+                query = lc.generate_code("In english, generate a rag query out of this prompt: "+prompt+"\nOnly answer with the query without any comments.")
+                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=10) # Consider making vectorizer_name configurable per query/datastore
                 if rag_results:
-                    context_str = "\n\nRelevant context from documents:\n"; max_rag_len, current_rag_len, sources = 2000, 0, set()
+                    context_str = "\n\nRelevant context from documents:\n"; 
+                    max_rag_len, current_rag_len, sources = 80000, 0, set()
                     for i, res in enumerate(rag_results):
                         chunk_text = res.get('chunk_text',''); file_name = Path(res.get('file_path','?')).name
                         if current_rag_len + len(chunk_text) > max_rag_len and i > 0: context_str += f"... (truncated {len(rag_results) - i} more results)\n"; break
                         context_str += f"{i+1}. From '{file_name}': {chunk_text}\n"; current_rag_len += len(chunk_text); sources.add(file_name)
                     final_prompt_for_llm = (f"User question: {prompt}\n\n"
-                                           f"Use the following context from ({', '.join(sorted(list(sources)))}) to answer if relevant:\n{context_str.strip()}")
+                                           f"Use the following context from ({', '.join(sorted(list(sources)))}) to answer if relevant:\n{context_str.strip()}\n\n"
+                                           "1. Primary Directive: Your answer must be solely derived from the provided documents. No external knowledge or invention is permitted."
+                                           "2. Factual Grounding: Ensure every piece of information you provide is directly and explicitly supported by the text in the documents."
+                                           "3. Mandatory Referencing: Clearly cite the source document (e.g., Document A, Section 2.1) for each factual claim."
+                                           "4. Handling Missing Information: If the requested information is not found in the documents, clearly state that it is not available within the provided context."
+                                           )
+                    print(final_prompt_for_llm)
             except HTTPException as e_rag_access: # e.g. datastore not found or access denied
                 print(f"INFO: RAG query skipped for {username} on datastore {rag_datastore_id}: {e_rag_access.detail}")
             except Exception as e: print(f"ERROR: RAG query failed for {username} on datastore {rag_datastore_id}: {e}")
