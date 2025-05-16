@@ -87,6 +87,8 @@ except ImportError:
 
 # --- Application Version ---
 APP_VERSION = "1.5.0"  # Updated version for multimodal, datastores, LLM params, discussion sharing
+PROJECT_ROOT = Path(__file__).resolve().parent # If this file is in a subdirectory like 'routers'
+LOCALS_DIR = PROJECT_ROOT / "locals"
 
 # --- Configuration Loading ---
 CONFIG_PATH = Path("config.toml")
@@ -298,7 +300,7 @@ class AppLollmsDiscussion:
         lc = self.lollms_client
         
         if max_total_tokens is None:
-            max_total_tokens = getattr(lc, "ctx_size", LOLLMS_CLIENT_DEFAULTS.get("ctx_size", 4096))
+            max_total_tokens = getattr(lc, "default_ctx_size", LOLLMS_CLIENT_DEFAULTS.get("ctx_size", 32000))
 
         client_discussion = LollmsClientDiscussion(lc)
         for app_msg in self.messages:
@@ -792,10 +794,10 @@ async def get_discussion_asset(
 
 
 try:
-    locales_path = Path("locales").resolve()
-    if locales_path.is_dir(): app.mount("/locales", StaticFiles(directory=locales_path, html=False), name="locales")
-    else: print("WARNING: 'locales' directory not found. Localization files will not be served.")
-except Exception as e: print(f"ERROR: Failed to mount locales directory: {e}")
+    locales_path = Path("locals").resolve()
+    if locales_path.is_dir(): app.mount("/locals", StaticFiles(directory=locales_path, html=False), name="locals")
+    else: print("WARNING: 'locals' directory not found. Localization files will not be served.")
+except Exception as e: print(f"ERROR: Failed to mount locals directory: {e}")
 
 # --- Authentication API ---
 auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -1406,11 +1408,11 @@ async def export_user_data(export_request: DiscussionExportRequest, current_user
     user_settings = {
         "lollms_model_name": user_db_record.lollms_model_name,
         "safe_store_vectorizer": user_db_record.safe_store_vectorizer,
-        "llm_temperature": user_db_record.llm_temperature,
-        "llm_top_k": user_db_record.llm_top_k,
-        "llm_top_p": user_db_record.llm_top_p,
-        "llm_repeat_penalty": user_db_record.llm_repeat_penalty,
-        "llm_repeat_last_n": user_db_record.llm_repeat_last_n,
+        "temperature": user_db_record.llm_temperature,
+        "top_k": user_db_record.llm_top_k,
+        "top_p": user_db_record.llm_top_p,
+        "repeat_penalty": user_db_record.llm_repeat_penalty,
+        "repeat_last_n": user_db_record.llm_repeat_last_n,
     }
     
     # Datastores info
@@ -1944,6 +1946,10 @@ async def delete_rag_document_from_datastore(datastore_id: str, filename: str, c
         if file_to_delete_path.exists(): raise HTTPException(status_code=500, detail=f"Could not delete '{s_filename}' from datastore {datastore_id}: {e}")
         else: return {"message": f"Document '{s_filename}' file deleted, potential DB cleanup issue in datastore {datastore_id}."}
 
+
+
+
+
 app.include_router(store_files_router)
 
 # --- Admin API ---
@@ -2008,6 +2014,98 @@ async def admin_remove_user(user_id: int, db: Session = Depends(get_db), current
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error or file system error during user deletion: {e}")
 
 app.include_router(admin_router)
+
+languages_router = APIRouter(prefix="/api/languages", tags=["Languages router"])
+@languages_router.get("/", response_class=JSONResponse)
+async def get_languages():
+    """
+    Lists available languages by scanning the 'locals' directory for .json files.
+    Returns a dictionary of {language_code: display_name}.
+    """
+    languages = {}
+    if not LOCALS_DIR.is_dir():
+        print(f"Warning: Locals directory not found at {LOCALS_DIR}")
+        # Fallback or error, depending on how critical this is.
+        # For now, let's return English as a default if the dir is missing.
+        return {"en": "English"}
+
+    try:
+        for filepath in LOCALS_DIR.glob("*.json"):
+            lang_code = filepath.stem  # Gets filename without extension (e.g., "en", "fr")
+            
+            # Attempt to get a more user-friendly display name.
+            # This is a simple approach. You might store display names
+            # inside the JSON files themselves or have a separate mapping.
+            display_name = lang_code.upper()
+            if lang_code == "en":
+                display_name = "English"
+            elif lang_code == "fr":
+                display_name = "Français"
+            elif lang_code == "es":
+                display_name = "Español"
+            elif lang_code == "de":
+                display_name = "Deutsch"
+            # Add more specific display names as needed
+
+            languages[lang_code] = display_name
+    except Exception as e:
+        print(f"Error scanning locals directory: {e}")
+        raise HTTPException(status_code=500, detail="Could not retrieve language list.")
+
+    if not languages: # If directory exists but is empty or no JSON files
+        print(f"Warning: No JSON language files found in {LOCALS_DIR}")
+        return {"en": "English"} # Fallback
+
+    return languages
+
+# Inside get_locale_file function
+@languages_router.get("/locals/{lang_code}.json")
+async def get_locale_file(lang_code: str):
+    """
+    Serves a specific language JSON file.
+    """
+    if not LOCALS_DIR.is_dir():
+        raise HTTPException(status_code=404, detail=f"Locals directory not found.")
+
+    # Sanitize lang_code to prevent directory traversal
+    # Allow only alphanumeric characters and hyphen
+    if not lang_code.replace('-', '').isalnum():
+        raise HTTPException(status_code=400, detail="Invalid language code format.")
+
+    file_path = LOCALS_DIR / f"{lang_code}.json"
+
+    if not file_path.is_file():
+        # Try to serve the base language if a regional variant was requested and not found
+        # e.g., if "en-US.json" not found, try "en.json"
+        base_lang_code = lang_code.split('-')[0]
+        if base_lang_code != lang_code:
+            base_file_path = LOCALS_DIR / f"{base_lang_code}.json"
+            if base_file_path.is_file():
+                print(f"Serving base language file {base_file_path} for requested {file_path}")
+                # Directly return the content as JSON to avoid FileResponse issues with content-type if needed
+                try:
+                    with open(base_file_path, "r", encoding="utf-8") as f:
+                        content = json.load(f)
+                    return JSONResponse(content=content)
+                except Exception as e:
+                    print(f"Error reading base locale file {base_file_path}: {e}")
+                    raise HTTPException(status_code=500, detail="Error reading locale file.")
+        
+        raise HTTPException(status_code=404, detail=f"Locale file for '{lang_code}' not found.")
+
+    # It's generally better to return JSONResponse for .json files
+    # to ensure correct Content-Type and allow FastAPI to handle serialization.
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            content = json.load(f)
+        return JSONResponse(content=content)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail=f"Locale file '{lang_code}.json' is not valid JSON.")
+    except Exception as e:
+        print(f"Error reading locale file {file_path}: {e}")
+        raise HTTPException(status_code=500, detail="Error reading locale file.")
+
+app.include_router(languages_router)
 
 # --- Main Execution ---
 if __name__ == "__main__":
