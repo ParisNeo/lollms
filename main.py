@@ -1598,7 +1598,7 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
     if not db_user_record: raise HTTPException(status_code=404, detail="User not found.")
 
     updated_params = False
-    if params.temperature is not None and db_user_record.temperature != params.llm_temperature:
+    if params.llm_temperature is not None and db_user_record.temperature != params.llm_temperature:
         db_user_record.temperature = params.llm_temperature; updated_params = True
     if params.top_k is not None and db_user_record.llm_top_k != params.llm_top_k:
         db_user_record.top_k = params.llm_top_k; updated_params = True
