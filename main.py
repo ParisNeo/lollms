@@ -350,7 +350,10 @@ class UserCreateAdmin(UserLLMParams):
 
 class UserPasswordResetAdmin(BaseModel):
     new_password: constr(min_length=8)
-
+    
+class UserPasswordChange(BaseModel):
+    current_password: str
+    new_password: constr(min_length=8)
 class UserPublic(UserLLMParams):
     id: int
     username: str
@@ -814,6 +817,7 @@ auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 @auth_router.get("/me", response_model=UserAuthDetails)
 async def get_my_details(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails: return current_user
 @auth_router.post("/logout")
+
 async def logout(response: Response, current_user: UserAuthDetails = Depends(get_current_active_user), background_tasks: BackgroundTasks = BackgroundTasks()) -> Dict[str, str]:
     username = current_user.username
     if username in user_sessions:
@@ -834,6 +838,31 @@ async def logout(response: Response, current_user: UserAuthDetails = Depends(get
         del user_sessions[username]
         print(f"INFO: User '{username}' session cleared (logged out). Temp files scheduled for cleanup.")
     return {"message": "Logout successful. Session cleared."}
+app.include_router(auth_router)
+
+@auth_router.post("/change-password")
+async def change_user_password(
+    payload: UserPasswordChange,
+    db_user_record: DBUser = Depends(get_current_db_user), # Directly get the DBUser object
+    db: Session = Depends(get_db) # Still need the session for commit
+) -> Dict[str, str]:
+    if not db_user_record.verify_password(payload.current_password):
+        raise HTTPException(status_code=400, detail="Incorrect current password.")
+
+    if payload.current_password == payload.new_password: # Check if new pass is same as old
+        raise HTTPException(status_code=400, detail="New password cannot be the same as the current password.")
+        
+    db_user_record.hashed_password = hash_password(payload.new_password)
+
+    try:
+        # db.add(db_user_record) # Not strictly necessary if object is already session-managed
+        db.commit()
+        return {"message": "Password changed successfully."}
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 app.include_router(auth_router)
 
 # --- Image Upload API ---
