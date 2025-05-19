@@ -276,20 +276,24 @@
             </div>
 
             <footer class="bg-white border-t border-gray-200 p-3 shadow-inner">
-                 <div id="imageUploadPreviewContainer" class="mb-2" style="display: none;"></div>
-                <div class="flex items-end space-x-3">
-                    <label for="imageUploadInput" class="p-2 rounded-md hover:bg-gray-100 cursor-pointer self-end">
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 text-gray-500"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" /></svg>
-                    </label>
-                    <input type="file" id="imageUploadInput" multiple accept="image/*" class="hidden">
-                    <textarea id="messageInput" rows="1" class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2 text-sm" data-translate-placeholder="message_input_placeholder" placeholder="Type your message... (Shift+Enter for new line)" style="resize: none; overflow-y: hidden;"></textarea>
-                    <button id="sendMessageBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md shadow-sm transition duration-150 ease-in-out self-end disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg>
-                    </button>
-                </div>
-                <div id="statusMessage" class="text-xs text-red-600 mt-1 h-4"></div>
-                <div id="pyodideStatus" class="text-xs text-blue-600 mt-1 h-4"></div>
-            </footer>
+                <div id="imageUploadPreviewContainer" class="mb-2" style="display: none;"></div>
+               <div class="flex items-end space-x-3">
+                   <label for="imageUploadInput" class="p-2 rounded-md hover:bg-gray-100 cursor-pointer self-end">
+                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6 text-gray-500"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" /></svg>
+                   </label>
+                   <input type="file" id="imageUploadInput" multiple accept="image/*" class="hidden">
+                   <textarea id="messageInput" rows="1" class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-200 focus:ring-opacity-50 p-2 text-sm" data-translate-placeholder="message_input_placeholder" placeholder="Type your message... (Shift+Enter for new line)" style="resize: none; overflow-y: hidden;"></textarea>
+                   <button id="sendMessageBtn" class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-4 rounded-md shadow-sm transition duration-150 ease-in-out self-end disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg>
+                   </button>
+                   <!-- Add this button -->
+                   <button id="stopGenerationBtn" class="bg-red-600 hover:bg-red-700 text-white font-medium py-2 px-4 rounded-md shadow-sm transition duration-150 ease-in-out self-end" style="display: none;">
+                       <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 7.5A2.25 2.25 0 0 1 7.5 5.25h9a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25h-9a2.25 2.25 0 0 1-2.25-2.25v-9Z" /></svg>
+                   </button>
+               </div>
+               <div id="statusMessage" class="text-xs text-red-600 mt-1 h-4"></div>
+               <div id="pyodideStatus" class="text-xs text-blue-600 mt-1 h-4"></div>
+           </footer>
         </main>
     </div>
 
@@ -648,6 +652,9 @@
         let tempLoginUsername = null;
         let tempLoginPassword = null;
 
+        let currentAbortController = null; // For aborting fetch if needed, though stop_generation endpoint is primary
+        let generationInProgress = false; // More explicit flag for generation
+
         // --- DOM Elements ---
         const languageSelector = document.getElementById('languageSelector');
         const appLoadingMessage = document.getElementById('appLoadingMessage');
@@ -750,6 +757,7 @@
         const fileListStatus = document.getElementById('fileListStatus');
         const imageViewerModal = document.getElementById('imageViewerModal');
         const imageViewerSrc = document.getElementById('imageViewerSrc');
+        const stopGenerationBtn = document.getElementById('stopGenerationBtn');
 
         // --- Localization Functions ---
         function translate(key, fallback = null, vars = {}) {
@@ -1427,10 +1435,17 @@
             element.style.height = Math.min(element.scrollHeight, maxHeight) + 'px';
             element.style.overflowY = element.scrollHeight > maxHeight ? 'auto' : 'hidden';
         }
+        stopGenerationBtn.onclick = stopGeneration;        
         async function sendMessage() {
-            if (aiMessageStreaming || !currentDiscussionId) return;
+            if (generationInProgress || !currentDiscussionId) return; // Use generationInProgress
             const prompt = messageInput.value.trim();
             if (!prompt && uploadedImageServerPaths.length === 0) return; 
+
+            generationInProgress = true; // Set flag
+            sendMessageBtn.style.display = 'none'; // Hide send button
+            stopGenerationBtn.style.display = 'inline-flex'; // Show stop button
+            stopGenerationBtn.disabled = false;
+
 
             const userMessageData = {
                 id: `temp-user-${Date.now()}`, sender: translate(currentUser.lollms_client_ai_name ? 'sender_you' : (currentUser.username || 'sender_user'), 'User'),
@@ -1449,7 +1464,9 @@
             
             messageInput.value = ''; uploadedImageServerPaths = [];
             imageUploadPreviewContainer.innerHTML = ''; imageUploadPreviewContainer.style.display = 'none';
-            autoGrowTextarea(messageInput); sendMessageBtn.disabled = true; scrollChatToBottom();
+            autoGrowTextarea(messageInput); 
+            // sendMessageBtn.disabled = true; // Already handled by generationInProgress and style change
+            scrollChatToBottom();
 
             aiMessageStreaming = true; currentAiMessageContent = ""; currentAiMessageElement = null; currentAiMessageId = `temp-ai-${Date.now()}`;
             discussions[currentDiscussionId].last_activity_at = new Date().toISOString();
@@ -1463,7 +1480,17 @@
                  }
                  const reader = response.body.getReader(); const decoder = new TextDecoder();
                  while (true) {
-                     const { done, value } = await reader.read(); if (done) break;
+                     const { done, value } = await reader.read(); 
+                     if (done) break;
+                     // Check generationInProgress here too, in case stop was called and fetch hasn't fully aborted
+                     if (!generationInProgress) { 
+                        console.log("Stream reading stopped because generationInProgress is false.");
+                        // Attempt to cancel the reader if possible (browser specific)
+                        if (reader.cancel) {
+                            await reader.cancel('User requested stop');
+                        }
+                        break; 
+                     }
                      const textChunk = decoder.decode(value, { stream: true });
                      const lines = textChunk.split('\n').filter(line => line.trim() !== '');
                      lines.forEach(line => {
@@ -1471,14 +1498,58 @@
                          catch (e) { console.warn("Error parsing stream chunk:", line, e); renderMessage({ id: `warn-${Date.now()}`, sender: 'system', content: translate('malformed_data_chunk_error') }); }
                      });
                  }
-                 handleStreamEnd();
+                 // Only call handleStreamEnd if generation wasn't explicitly stopped by the user 
+                 // and resulted in stream termination from this loop.
+                 // If stopGeneration was called, it will handle its own cleanup.
+                 if (generationInProgress) { 
+                    handleStreamEnd();
+                 }
              } catch (error) {
-                 console.error("Chat stream error:", error); showStatus(translate('chat_stream_failed_error', `Chat stream failed: ${error.message}`, {message: error.message}), "error");
-                 renderMessage({ id: `err-${Date.now()}`, sender: 'system', content: translate('stream_error_prefix', `Stream Error: ${error.message}`, {message: error.message}) });
-                 handleStreamEnd(true);
+                 console.error("Chat stream error:", error); 
+                 if (error.name === 'AbortError') {
+                    showStatus(translate('status_generation_cancelled', 'Generation cancelled.'), 'info');
+                 } else {
+                    showStatus(translate('chat_stream_failed_error', `Chat stream failed: ${error.message}`, {message: error.message}), "error");
+                    renderMessage({ id: `err-${Date.now()}`, sender: 'system', content: translate('stream_error_prefix', `Stream Error: ${error.message}`, {message: error.message}) });
+                 }
+                 // Always ensure UI is reset if an error occurs during streaming
+                 if (generationInProgress) {
+                    handleStreamEnd(true); 
+                 }
              }
         }
+
+        async function stopGeneration() {
+            if (!generationInProgress || !currentDiscussionId) return;
+            
+            stopGenerationBtn.disabled = true; // Prevent multiple clicks
+            showStatus(translate('status_stopping_generation', 'Attempting to stop generation...'), 'info');
+
+            try {
+                const response = await apiRequest(`/api/discussions/${currentDiscussionId}/stop_generation`, {
+                    method: 'POST'
+                });
+                const result = await response.json();
+                showStatus(result.message, 'info'); // Display message from backend
+                sendMessageBtn.style.display = 'inline-flex'; // Show send button
+                stopGenerationBtn.style.display = 'none'; // Hide stop button
+                stopGenerationBtn.disabled = false; // Re-enable for next time
+                // UI update will be handled by handleStreamEnd or error handler in sendMessage
+            } catch (error) {
+                console.error("Failed to send stop signal:", error);
+                showStatus(translate('status_stop_signal_failed', `Failed to send stop signal: ${error.message}`, {message: error.message}), 'error');
+                stopGenerationBtn.disabled = false; // Re-enable if API call failed
+
+            }
+            // Do not call handleStreamEnd here directly. Let the stream naturally terminate
+            // or the llm_callback in the backend trigger the end of the stream.
+            // The `sendMessage` function's `while` loop will break if `generationInProgress` becomes false.
+        }
+
+
         function handleStreamChunk(data) {
+             if (!generationInProgress) return; // Extra check
+
              if (data.type === 'chunk') {
                  if (!currentAiMessageElement) {
                      const aiMessage = { id: currentAiMessageId, sender: currentUser.lollms_client_ai_name || translate('sender_assistant', 'Assistant'), content: "", user_grade: 0, token_count: null, model_name: null, image_references: [] };
@@ -1494,16 +1565,45 @@
                  console.error("LLM Error:", data.content);
                  renderMessage({ id: `err-${Date.now()}`, sender: 'system', content: translate('llm_error_prefix', `LLM Error: ${data.content}`, {content: data.content}) });
                  handleStreamEnd(true);
+             } else if (data.type === 'info' && data.content === "Generation stopped by user.") {
+                 // This message comes from the backend's llm_callback when it detects the stop_event
+                 showStatus(translate('status_generation_stopped_by_user', 'Generation stopped by user.'), 'info');
+                 // Stream will terminate soon after this.
+                 // We can already reset parts of the UI here.
+                 generationInProgress = false; // Mark as stopped
+                 // handleStreamEnd will be called when the stream officially closes
              }
         }
         function handleStreamEnd(errorOccurred = false) { 
+            // This function is called when the stream naturally ends or an error occurs.
+            // If stopGeneration was successful, generationInProgress might already be false.
+            
+            const wasManuallyStopped = !generationInProgress && !errorOccurred; // Check if it was a manual stop without an error
+
             aiMessageStreaming = false; 
+            generationInProgress = false; // Ensure this is reset
+
+            sendMessageBtn.style.display = 'inline-flex'; // Show send button
+            stopGenerationBtn.style.display = 'none'; // Hide stop button
+            stopGenerationBtn.disabled = false; // Re-enable for next time
+
             sendMessageBtn.disabled = !(messageInput.value.trim() || uploadedImageServerPaths.length > 0);
+            
             if (currentDiscussionId) {
-                refreshMessagesAfterStream();
+                // If it wasn't a manual stop that already displayed a message, refresh.
+                // Or if there was an error, still refresh to get latest state.
+                if (!wasManuallyStopped || errorOccurred) {
+                    refreshMessagesAfterStream();
+                }
             }
             scrollChatToBottom();
-        }
+
+            if (wasManuallyStopped) {
+                showStatus(translate('status_generation_process_halted', 'Generation process halted.'), 'info');
+            } else if (!errorOccurred) {
+                 // Potentially show a "Generation complete" message if desired, though not strictly necessary
+            }
+        }        
         async function refreshMessagesAfterStream() {
             await new Promise(resolve => setTimeout(resolve, 500)); 
             if (!currentDiscussionId || aiMessageStreaming) return;
