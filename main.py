@@ -616,7 +616,17 @@ def get_user_lollms_client(username: str) -> LollmsClient:
         
         # Get user-specific or default LLM parameters from session
         client_init_params = session.get("llm_params", {}).copy() # Start with user/default params
-
+        # patch for v 0.1.2
+        try: del client_init_params["llm_temperature"]
+        except: pass
+        try: del client_init_params["llm_top_p"]
+        except: pass
+        try: del client_init_params["llm_top_k"]
+        except: pass
+        try: del client_init_params["llm_repeat_penalty"]
+        except: pass
+        try: del client_init_params["llm_repeat_last_n"]
+        except: pass
         client_init_params.update({
             "binding_name": binding_name, "model_name": model_name, "host_address": host_address,
             "ctx_size": ctx_size, "service_key": service_key, 
@@ -1598,15 +1608,15 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
     if not db_user_record: raise HTTPException(status_code=404, detail="User not found.")
 
     updated_params = False
-    if params.llm_temperature is not None and db_user_record.temperature != params.llm_temperature:
+    if not hasattr(db_user_record,"temperature") or (params.llm_temperature is not None and db_user_record.temperature != params.llm_temperature):
         db_user_record.temperature = params.llm_temperature; updated_params = True
-    if params.llm_top_k is not None and db_user_record.top_k != params.llm_top_k:
+    if not hasattr(db_user_record,"top_k") or (params.llm_top_k is not None and db_user_record.top_k != params.llm_top_k):
         db_user_record.top_k = params.llm_top_k; updated_params = True
-    if params.llm_top_p is not None and db_user_record.top_p != params.llm_top_p:
+    if not hasattr(db_user_record,"top_p") or (params.llm_top_p is not None and db_user_record.top_p != params.llm_top_p):
         db_user_record.top_p = params.llm_top_p; updated_params = True
-    if params.llm_repeat_penalty is not None and db_user_record.repeat_penalty != params.llm_repeat_penalty:
+    if not hasattr(db_user_record,"repeat_penalty") or (params.llm_repeat_penalty is not None and db_user_record.repeat_penalty != params.llm_repeat_penalty):
         db_user_record.repeat_penalty = params.llm_repeat_penalty; updated_params = True
-    if params.llm_repeat_last_n is not None and db_user_record.repeat_last_n != params.llm_repeat_last_n:
+    if not hasattr(db_user_record,"repeat_last_n") or (params.llm_repeat_last_n is not None and db_user_record.repeat_last_n != params.llm_repeat_last_n):
         db_user_record.repeat_last_n = params.llm_repeat_last_n; updated_params = True
 
     if updated_params:
