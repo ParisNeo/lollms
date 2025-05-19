@@ -1118,7 +1118,6 @@ async def chat_in_existing_discussion(
                 persistent_abs_path = discussion_assets_path / persistent_filename
                 try:
                     shutil.move(str(temp_abs_path), str(persistent_abs_path))
-                    # Store path relative to discussion_assets/<discussion_id>
                     final_image_references_for_message.append(persistent_filename)
                     llm_image_paths.append(str(persistent_abs_path))
                 except Exception as e_move:
@@ -1135,28 +1134,18 @@ async def chat_in_existing_discussion(
     final_prompt_for_llm = prompt
     if use_rag and safe_store:
         if not rag_datastore_id:
-            # If discussion_obj has a default RAG datastore, use it.
             rag_datastore_id = discussion_obj.rag_datastore_id
             if not rag_datastore_id:
-                # Fallback to user's default if discussion has no specific datastore set
-                rag_datastore_id = user_sessions[username].get("active_vectorizer") # This seems like a misnomer, should be default_datastore_id
-                                                                                 # For now, assume active_vectorizer means a concept of user's primary choice.
-                                                                                 # This needs refinement if active_vectorizer is purely for choosing *which* vectorizer method,
-                                                                                 # not *which* store. Let's assume the client UI has a way to set discussion_obj.rag_datastore_id
+                rag_datastore_id = user_sessions[username].get("active_vectorizer") 
                 if not rag_datastore_id:
                     print(f"WARNING: RAG requested by {username} but no datastore specified for discussion or user default.")
-
 
         if rag_datastore_id:
             try:
                 ss = get_safe_store_instance(username, rag_datastore_id, db)
-                # Determine which vectorizer to use. If datastore has only one, use it.
-                # Otherwise, client might need to specify, or use user's default `safe_store_vectorizer`.
-                # For now, let SafeStore pick its default or the only one available in that store.
-                # A more advanced RAG query might allow specifying vectorizer for the given store.
-                active_vectorizer_for_store = user_sessions[username].get("active_vectorizer") # User's general default vectorizer
+                active_vectorizer_for_store = user_sessions[username].get("active_vectorizer")
                 query = lc.generate_code("In english, generate a rag query out of this prompt: "+prompt+"\nOnly answer with the query without any comments.")
-                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=10) # Consider making vectorizer_name configurable per query/datastore
+                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=10)
                 if rag_results:
                     context_str = "\n\nRelevant context from documents:\n"; 
                     max_rag_len, current_rag_len, sources = 80000, 0, set()
@@ -1172,18 +1161,53 @@ async def chat_in_existing_discussion(
                                            "4. Handling Missing Information: If the requested information is not found in the documents, clearly state that it is not available within the provided context."
                                            )
                     print(final_prompt_for_llm)
-            except HTTPException as e_rag_access: # e.g. datastore not found or access denied
+            except HTTPException as e_rag_access: 
                 print(f"INFO: RAG query skipped for {username} on datastore {rag_datastore_id}: {e_rag_access.detail}")
             except Exception as e: print(f"ERROR: RAG query failed for {username} on datastore {rag_datastore_id}: {e}")
         else: print(f"WARNING: RAG requested by {username} but no RAG datastore selected for this discussion or as user default.")
     elif use_rag and not safe_store: print(f"WARNING: RAG requested by {username} but safe_store is not available.")
 
+
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
-    shared_state = {"accumulated_ai_response": "", "generation_error": None, "final_message_id": None, "binding_name": None, "model_name": None}
+
+    # --- MODIFICATION START ---
+    # Create a stop event for this specific generation attempt
+    stop_event = threading.Event()
+    shared_state = {
+        "accumulated_ai_response": "", 
+        "generation_error": None, 
+        "final_message_id": None, 
+        "binding_name": None, 
+        "model_name": None,
+        "stop_event": stop_event # Store the event in shared_state for the callback
+    }
+
+    # Store the stop_event in user_sessions, keyed by discussion_id, to allow external cancellation
+    # Ensure the "active_generation_control" dict exists for the user
+    if username not in user_sessions: # Should be initialized by get_current_active_user
+        user_sessions[username] = {} 
+    user_sessions[username].setdefault("active_generation_control", {})[discussion_id] = stop_event
+    # --- MODIFICATION END ---
 
     async def stream_generator() -> AsyncGenerator[str, None]:
+        generation_thread: Optional[threading.Thread] = None # Moved here for broader scope in finally
+        
         def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict[str, Any]] = None) -> bool:
+            # --- MODIFICATION START ---
+            # Check for stop signal at the beginning of each callback
+            if shared_state["stop_event"].is_set():
+                # Send a message to the client stream indicating generation was stopped
+                stop_message_payload = json.dumps({"type": "info", "content": "Generation stopped by user."}) + "\n"
+                if main_loop.is_running(): # Check if the loop is still running
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, stop_message_payload)
+                else:
+                    print(f"WARNING: asyncio loop not running when trying to send stop message for {username}/{discussion_id}")
+                
+                print(f"INFO: LLM Callback for {username}/{discussion_id} detected stop signal. Halting generation.")
+                return False # Signal LollmsClient to stop generation
+            # --- MODIFICATION END ---
+
             if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
                 shared_state["accumulated_ai_response"] += chunk
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "chunk", "content": chunk}) + "\n")
@@ -1197,34 +1221,46 @@ async def chat_in_existing_discussion(
             elif msg_type == MSG_TYPE.MSG_TYPE_FINISHED_MESSAGE: return False
             return True
 
-        generation_thread: Optional[threading.Thread] = None
-        try:
+        try: # Outer try for stream_generator setup
             full_prompt_to_llm = discussion_obj.prepare_query_for_llm(final_prompt_for_llm, llm_image_paths)
+            
             def blocking_call():
                 try:
                     shared_state["binding_name"] = lc.binding.binding_name if lc.binding else "unknown_binding"
-                    shared_state["model_name"] = lc.binding.model_name if lc.binding and hasattr(lc.binding, "model_name") else session.get("lollms_model_name", "unknown_model")
+                    shared_state["model_name"] = lc.binding.model_name if lc.binding and hasattr(lc.binding, "model_name") else user_sessions[username].get("lollms_model_name", "unknown_model")
                     lc.generate_text(prompt=full_prompt_to_llm, images=llm_image_paths, stream=True, streaming_callback=llm_callback)
                 except Exception as e_gen:
                     err_msg = f"LLM generation failed: {str(e_gen)}"
                     shared_state["generation_error"] = err_msg
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
-                finally: main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
+                    if main_loop.is_running():
+                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
+                finally: 
+                    if main_loop.is_running():
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, None) # Signal end of stream
             
             generation_thread = threading.Thread(target=blocking_call, daemon=True)
             generation_thread.start()
+
             while True:
                 item = await stream_queue.get()
                 if item is None: stream_queue.task_done(); break
                 yield item; stream_queue.task_done()
             
-            if generation_thread: generation_thread.join(timeout=10) # Increased timeout
+            # Wait for the generation thread to finish, but with a timeout
+            if generation_thread: generation_thread.join(timeout=10) 
 
+            # Process AI response (this part happens after streaming is complete or thread joined)
             ai_response_content = shared_state["accumulated_ai_response"]
             ai_token_count = lc.binding.count_tokens(ai_response_content) if ai_response_content else 0
             ai_parent_id = discussion_obj.messages[-1].id if discussion_obj.messages and discussion_obj.messages[-1].sender == lc.user_name else None
 
             if ai_response_content and not shared_state["generation_error"]:
+                # Check if generation was stopped by user; if so, the content might be partial.
+                # The 'info' message about stoppage is already sent by the callback.
+                # Here, we just save what was accumulated.
+                if shared_state["stop_event"].is_set():
+                    print(f"INFO: Saving partial AI response for {username}/{discussion_id} as generation was stopped.")
+                
                 ai_message = discussion_obj.add_message(
                     sender=lc.ai_name, content=ai_response_content, parent_message_id=ai_parent_id,
                     binding_name=shared_state.get("binding_name"), model_name=shared_state.get("model_name"),
@@ -1233,14 +1269,34 @@ async def chat_in_existing_discussion(
                 if shared_state.get("final_message_id"): ai_message.id = shared_state["final_message_id"]
             elif shared_state["generation_error"]:
                  discussion_obj.add_message(sender="system", content=shared_state["generation_error"], parent_message_id=ai_parent_id)
+            
             save_user_discussion(username, discussion_id, discussion_obj)
+
         except Exception as e_outer:
             error_msg = f"Chat stream error: {str(e_outer)}"; traceback.print_exc()
             try: discussion_obj.add_message(sender="system", content=error_msg); save_user_discussion(username, discussion_id, discussion_obj)
             except Exception as save_err: print(f"ERROR: Failed to save discussion after outer stream error: {save_err}")
             yield json.dumps({"type": "error", "content": error_msg}) + "\n"
         finally:
-            if generation_thread and generation_thread.is_alive(): print(f"WARNING: LLM gen thread for {username} still alive after timeout.")
+            # --- MODIFICATION START: Cleanup stop_event ---
+            if username in user_sessions and "active_generation_control" in user_sessions[username]:
+                active_gen_control = user_sessions[username]["active_generation_control"]
+                # Important: Only delete if the event being cleaned up is the one for *this* generation instance.
+                # This protects against race conditions if a new generation started very quickly for the same discussion_id.
+                if discussion_id in active_gen_control and active_gen_control.get(discussion_id) == stop_event:
+                    del active_gen_control[discussion_id]
+                if not active_gen_control: # If the dictionary for this user becomes empty
+                    del user_sessions[username]["active_generation_control"]
+            # --- MODIFICATION END ---
+            
+            if generation_thread and generation_thread.is_alive(): 
+                print(f"WARNING: LLM gen thread for {username}/{discussion_id} still alive after stream_generator's main loop. Signaling stop forcefully.")
+                if not shared_state["stop_event"].is_set():
+                    shared_state["stop_event"].set() # Ensure stop is signaled
+                generation_thread.join(timeout=5) # Give it a bit more time
+                if generation_thread.is_alive():
+                    print(f"CRITICAL: LLM gen thread for {username}/{discussion_id} did not terminate after stop signal and extended wait.")
+
             # Cleanup temporary original (non-moved) images that were not successfully moved
             if image_server_paths:
                 user_temp_uploads_path = get_user_temp_uploads_path(username)
@@ -1250,8 +1306,41 @@ async def chat_in_existing_discussion(
                     if temp_abs_path.exists(): # If it wasn't moved
                         background_tasks.add_task(temp_abs_path.unlink, missing_ok=True)
 
-
     return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+
+@discussion_router.post("/{discussion_id}/stop_generation", status_code=200)
+async def stop_discussion_generation(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+) -> Dict[str, str]:
+    username = current_user.username
+    
+    session_data = user_sessions.get(username)
+    if not session_data:
+        # This should ideally not happen if get_current_active_user ensures session validity
+        raise HTTPException(status_code=404, detail="User session not found. Cannot process stop generation request.")
+
+    active_gen_control_map = session_data.get("active_generation_control", {})
+    stop_event = active_gen_control_map.get(discussion_id)
+    
+    if stop_event and isinstance(stop_event, threading.Event):
+        if not stop_event.is_set():
+            stop_event.set()
+            # The generation thread's callback will detect this and signal the LLM to stop.
+            # The 'finally' block within the 'stream_generator' (in chat_in_existing_discussion)
+            # will handle the cleanup of this event from 'active_gen_control_map'.
+            print(f"INFO: Stop signal sent for generation in discussion '{discussion_id}' for user '{username}'.")
+            return {"message": "Stop signal sent. Generation will attempt to halt."}
+        else:
+            # The event was already set, meaning a stop was previously requested or
+            # the generation is already in the process of stopping/has stopped.
+            print(f"INFO: Stop signal for discussion '{discussion_id}' user '{username}' was already set, or generation is completing.")
+            return {"message": "Generation is already stopping or has completed."}
+    else:
+        # No valid stop_event found. This implies no generation was active for this discussion,
+        # or it has already completed and its control event has been cleaned up.
+        print(f"INFO: No active generation found to stop for discussion '{discussion_id}' user '{username}'.")
+        raise HTTPException(status_code=404, detail="No active generation found for this discussion, or it has already completed and cleaned up.")
 
 @discussion_router.put("/{discussion_id}/messages/{message_id}/grade", response_model=MessageOutput)
 async def grade_discussion_message(discussion_id: str, message_id: str, grade_update: MessageGradeUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> MessageOutput:
