@@ -1600,13 +1600,13 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
     updated_params = False
     if params.llm_temperature is not None and db_user_record.temperature != params.llm_temperature:
         db_user_record.temperature = params.llm_temperature; updated_params = True
-    if params.top_k is not None and db_user_record.llm_top_k != params.llm_top_k:
+    if params.llm_top_k is not None and db_user_record.top_k != params.llm_top_k:
         db_user_record.top_k = params.llm_top_k; updated_params = True
-    if params.top_p is not None and db_user_record.llm_top_p != params.llm_top_p:
+    if params.llm_top_p is not None and db_user_record.top_p != params.llm_top_p:
         db_user_record.top_p = params.llm_top_p; updated_params = True
-    if params.repeat_penalty is not None and db_user_record.llm_repeat_penalty != params.llm_repeat_penalty:
+    if params.llm_repeat_penalty is not None and db_user_record.repeat_penalty != params.llm_repeat_penalty:
         db_user_record.repeat_penalty = params.llm_repeat_penalty; updated_params = True
-    if params.repeat_last_n is not None and db_user_record.llm_repeat_last_n != params.llm_repeat_last_n:
+    if params.llm_repeat_last_n is not None and db_user_record.repeat_last_n != params.llm_repeat_last_n:
         db_user_record.repeat_last_n = params.llm_repeat_last_n; updated_params = True
 
     if updated_params:
