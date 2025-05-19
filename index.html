@@ -255,15 +255,15 @@
             <header class="bg-white border-b border-gray-200 p-3 flex items-center justify-between min-h-[65px] shadow-sm">
                 <h3 id="discussionTitle" class="text-lg font-semibold text-gray-800 truncate px-2" data-translate-key="default_discussion_title">Select or Create a Discussion</h3>
                 <div class="rag-controls">
-                    <label for="languageSelector" class="sr-only" data-translate-key="language_selector_label_sr">Select Language</label>
-                    <select id="languageSelector" class="text-xs rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
-                        <!-- Options populated by JS -->
-                    </select>
-                </div>
-                <div class="rag-controls">
                     <button id="ragToggleBtn" class="rag-toggle rag-toggle-off self-center" data-translate-key="rag_toggle_btn_text" data-translate-title="rag_toggle_btn_title_off">RAG</button>
                     <select id="ragDataStoreSelect" class="text-xs rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500" style="display: none;">
                         <option value="" data-translate-key="rag_select_default_option">Select RAG Data Store</option>
+                    </select>
+                </div>
+                <div class="rag-controls">
+                    <label for="languageSelector" class="sr-only" data-translate-key="language_selector_label_sr">Select Language</label>
+                    <select id="languageSelector" class="text-xs rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500">
+                        <!-- Options populated by JS -->
                     </select>
                 </div>
             </header>
