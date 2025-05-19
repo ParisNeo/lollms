@@ -1337,7 +1337,10 @@ async def send_discussion_to_user(
         initial_lollms_model_target = target_user_db.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
         llm_params_target = {
             "temperature": target_user_db.llm_temperature if target_user_db.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
-            # ... other params ...
+            "top_k": target_user_db.llm_top_k if target_user_db.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
+            "top_p": target_user_db.llm_top_p if target_user_db.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
+            "repeat_penalty": target_user_db.llm_repeat_penalty if target_user_db.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
+            "repeat_last_n": target_user_db.llm_repeat_last_n if target_user_db.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),            
         }
         llm_params_target = {k: v for k, v in llm_params_target.items() if v is not None}
         user_sessions[target_username] = {
@@ -1595,16 +1598,16 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
     if not db_user_record: raise HTTPException(status_code=404, detail="User not found.")
 
     updated_params = False
-    if params.llm_temperature is not None and db_user_record.llm_temperature != params.llm_temperature:
-        db_user_record.llm_temperature = params.llm_temperature; updated_params = True
-    if params.llm_top_k is not None and db_user_record.llm_top_k != params.llm_top_k:
-        db_user_record.llm_top_k = params.llm_top_k; updated_params = True
-    if params.llm_top_p is not None and db_user_record.llm_top_p != params.llm_top_p:
-        db_user_record.llm_top_p = params.llm_top_p; updated_params = True
-    if params.llm_repeat_penalty is not None and db_user_record.llm_repeat_penalty != params.llm_repeat_penalty:
-        db_user_record.llm_repeat_penalty = params.llm_repeat_penalty; updated_params = True
-    if params.llm_repeat_last_n is not None and db_user_record.llm_repeat_last_n != params.llm_repeat_last_n:
-        db_user_record.llm_repeat_last_n = params.llm_repeat_last_n; updated_params = True
+    if params.temperature is not None and db_user_record.llm_temperature != params.llm_temperature:
+        db_user_record.temperature = params.llm_temperature; updated_params = True
+    if params.top_k is not None and db_user_record.llm_top_k != params.llm_top_k:
+        db_user_record.top_k = params.llm_top_k; updated_params = True
+    if params.top_p is not None and db_user_record.llm_top_p != params.llm_top_p:
+        db_user_record.top_p = params.llm_top_p; updated_params = True
+    if params.repeat_penalty is not None and db_user_record.llm_repeat_penalty != params.llm_repeat_penalty:
+        db_user_record.repeat_penalty = params.llm_repeat_penalty; updated_params = True
+    if params.repeat_last_n is not None and db_user_record.llm_repeat_last_n != params.llm_repeat_last_n:
+        db_user_record.repeat_last_n = params.llm_repeat_last_n; updated_params = True
 
     if updated_params:
         try: db.commit()
