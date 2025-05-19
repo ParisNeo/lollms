@@ -1534,6 +1534,23 @@
                 sendMessageBtn.style.display = 'inline-flex'; // Show send button
                 stopGenerationBtn.style.display = 'none'; // Hide stop button
                 stopGenerationBtn.disabled = false; // Re-enable for next time
+                aiMessageStreaming = false; 
+                generationInProgress = false; // Ensure this is reset
+    
+                sendMessageBtn.style.display = 'inline-flex'; // Show send button
+                stopGenerationBtn.style.display = 'none'; // Hide stop button
+                stopGenerationBtn.disabled = false; // Re-enable for next time
+                sendMessageBtn.disabled = false;
+                
+                if (currentDiscussionId) {
+                    // If it wasn't a manual stop that already displayed a message, refresh.
+                    // Or if there was an error, still refresh to get latest state.
+                    if (!wasManuallyStopped || errorOccurred) {
+                        refreshMessagesAfterStream();
+                    }
+                }
+                scrollChatToBottom();
+    
                 // UI update will be handled by handleStreamEnd or error handler in sendMessage
             } catch (error) {
                 console.error("Failed to send stop signal:", error);
