@@ -86,8 +86,8 @@ except ImportError:
     SafeStoreLogLevel = None
 
 # --- Application Version ---
-APP_VERSION = "1.5.0"  # Updated version for multimodal, datastores, LLM params, discussion sharing
-PROJECT_ROOT = Path(__file__).resolve().parent # If this file is in a subdirectory like 'routers'
+APP_VERSION = "1.5.1"  # Updated version for LLM param name fix
+PROJECT_ROOT = Path(__file__).resolve().parent 
 LOCALS_DIR = PROJECT_ROOT / "locals"
 
 # --- Configuration Loading ---
@@ -477,17 +477,22 @@ async def on_startup() -> None:
             hashed_admin_pass = hash_password(admin_password)
             def_model = LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
             def_vec = SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
-            # Get default LLM params from config or use None
+            
+            # Get default LLM params from config (non-prefixed) and store in DB (prefixed)
             def_temp = LOLLMS_CLIENT_DEFAULTS.get("temperature")
             def_top_k = LOLLMS_CLIENT_DEFAULTS.get("top_k")
             def_top_p = LOLLMS_CLIENT_DEFAULTS.get("top_p")
             def_rep_pen = LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty")
             def_rep_last_n = LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n")
+            
             new_admin = DBUser(
                 username=admin_username, hashed_password=hashed_admin_pass, is_admin=True,
                 lollms_model_name=def_model, safe_store_vectorizer=def_vec,
-                llm_temperature=def_temp, llm_top_k=def_top_k, llm_top_p=def_top_p,
-                llm_repeat_penalty=def_rep_pen, llm_repeat_last_n=def_rep_last_n
+                llm_temperature=def_temp, 
+                llm_top_k=def_top_k, 
+                llm_top_p=def_top_p,
+                llm_repeat_penalty=def_rep_pen, 
+                llm_repeat_last_n=def_rep_last_n
             )
             db.add(new_admin); db.commit()
             print(f"INFO: Initial admin user '{admin_username}' created successfully.")
@@ -550,39 +555,42 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user)) -> U
         initial_lollms_model = db_user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
         initial_vectorizer = db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
         
-        llm_params = {
+        # Populate session llm_params with non-prefixed keys for LollmsClient
+        # Values from DB (llm_prefixed) or defaults (non-prefixed)
+        session_llm_params = {
             "temperature": db_user.llm_temperature if db_user.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
             "top_k": db_user.llm_top_k if db_user.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
             "top_p": db_user.llm_top_p if db_user.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
             "repeat_penalty": db_user.llm_repeat_penalty if db_user.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
             "repeat_last_n": db_user.llm_repeat_last_n if db_user.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),
         }
-        # Filter out None values from llm_params as LollmsClient expects actual values or omission
-        llm_params = {k: v for k, v in llm_params.items() if v is not None}
+        # Filter out None values from session_llm_params as LollmsClient expects actual values or omission
+        session_llm_params = {k: v for k, v in session_llm_params.items() if v is not None}
 
         user_sessions[username] = {
-            "lollms_client": None, "safe_store_instances": {}, # Now a dict of datastore_id -> SafeStore instance
+            "lollms_client": None, "safe_store_instances": {}, 
             "discussions": {}, "discussion_titles": {},
-            "active_vectorizer": initial_vectorizer, # User's default, can be overridden per RAG use
+            "active_vectorizer": initial_vectorizer, 
             "lollms_model_name": initial_lollms_model,
-            "llm_params": llm_params, # Store resolved LLM parameters
+            "llm_params": session_llm_params, # Store resolved LLM parameters with non-prefixed keys
         }
+
     lc = get_user_lollms_client(username) # Ensures client is initialized with current params
     ai_name_for_user = getattr(lc, "ai_name", LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"))
     if not user_sessions[username].get("discussions"): _load_user_discussions(username)
 
-    # Populate UserAuthDetails with current LLM params from session
-    session_llm_params = user_sessions[username].get("llm_params", {})
+    # Populate UserAuthDetails (which uses llm_prefixed names) from session_llm_params (non-prefixed)
+    current_session_llm_params = user_sessions[username].get("llm_params", {})
     return UserAuthDetails(
         username=username, is_admin=db_user.is_admin,
         lollms_model_name=user_sessions[username]["lollms_model_name"],
         safe_store_vectorizer=user_sessions[username]["active_vectorizer"],
         lollms_client_ai_name=ai_name_for_user,
-        llm_temperature=session_llm_params.get("temperature"),
-        llm_top_k=session_llm_params.get("top_k"),
-        llm_top_p=session_llm_params.get("top_p"),
-        llm_repeat_penalty=session_llm_params.get("repeat_penalty"),
-        llm_repeat_last_n=session_llm_params.get("repeat_last_n"),
+        llm_temperature=current_session_llm_params.get("temperature"),
+        llm_top_k=current_session_llm_params.get("top_k"),
+        llm_top_p=current_session_llm_params.get("top_p"),
+        llm_repeat_penalty=current_session_llm_params.get("repeat_penalty"),
+        llm_repeat_last_n=current_session_llm_params.get("repeat_last_n"),
     )
 
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
@@ -595,17 +603,16 @@ def get_user_lollms_client(username: str) -> LollmsClient:
     session = user_sessions.get(username)
     if not session: raise HTTPException(status_code=500, detail="User session not found for LollmsClient.")
     
-    # Check if client needs re-initialization due to changed params
-    # This simplistic check re-initializes if any core param differs or if client is None.
-    # More sophisticated would be to compare all relevant params.
     force_reinit = session.get("lollms_client") is None
     
     current_model_name = session["lollms_model_name"]
     if not force_reinit and hasattr(session["lollms_client"], "model_name") and session["lollms_client"].model_name != current_model_name:
         force_reinit = True
     
-    # TODO: Add checks for other LLM parameters if they changed
-    # For now, model_name change is a primary trigger.
+    # Check if other LLM parameters relevant to LollmsClient init have changed
+    # For instance, if session["llm_params"] differs from what the client was last initialized with.
+    # This simple check is for model_name, a more robust check would compare all relevant init params.
+    # For now, we assume if llm_params in session change, the lollms_client is set to None by set_user_llm_params
     
     if force_reinit:
         model_name = session["lollms_model_name"]
@@ -617,24 +624,17 @@ def get_user_lollms_client(username: str) -> LollmsClient:
         user_name_conf = LOLLMS_CLIENT_DEFAULTS.get("user_name", "user")
         ai_name_conf = LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant")
         
-        # Get user-specific or default LLM parameters from session
-        client_init_params = session.get("llm_params", {}).copy() # Start with user/default params
-        # patch for v 0.1.2
-        try: del client_init_params["llm_temperature"]
-        except: pass
-        try: del client_init_params["llm_top_p"]
-        except: pass
-        try: del client_init_params["llm_top_k"]
-        except: pass
-        try: del client_init_params["llm_repeat_penalty"]
-        except: pass
-        try: del client_init_params["llm_repeat_last_n"]
-        except: pass
+        # Get user-specific or default LLM parameters from session.
+        # These are already stored with non-prefixed keys (e.g., "temperature")
+        client_init_params = session.get("llm_params", {}).copy() 
+        
+        # Add other LollmsClient constructor parameters
         client_init_params.update({
             "binding_name": binding_name, "model_name": model_name, "host_address": host_address,
             "ctx_size": ctx_size, "service_key": service_key, 
             "user_name": user_name_conf, "ai_name": ai_name_conf,
         })
+        
         # Ensure ELF_COMPLETION_FORMAT is set if applicable, or remove if None
         completion_format_str = LOLLMS_CLIENT_DEFAULTS.get("completion_format")
         if completion_format_str:
@@ -642,7 +642,9 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             except ValueError: print(f"WARN: Invalid completion_format '{completion_format_str}' in config.")
         
         try:
-            lc = LollmsClient(**client_init_params)
+            # Filter out None values before passing to LollmsClient constructor
+            final_client_init_params = {k: v for k, v in client_init_params.items() if v is not None}
+            lc = LollmsClient(**final_client_init_params)
             session["lollms_client"] = lc
         except Exception as e:
             traceback.print_exc()
@@ -765,6 +767,17 @@ async def serve_index_html(request: Request) -> FileResponse:
     if not index_path.is_file(): raise HTTPException(status_code=404, detail="index.html not found.")
     return FileResponse(index_path)
 
+@app.get("/main.js", include_in_schema=False)
+async def serve_main_js(request: Request) -> FileResponse:
+    main_js_path = Path("main.js").resolve()
+    if not main_js_path.is_file(): raise HTTPException(status_code=404, detail="main.js not found.")
+    return FileResponse(main_js_path, media_type="application/javascript")
+@app.get("/style.css", include_in_schema=False)
+async def serve_style_css(request: Request) -> FileResponse:
+    style_css_path = Path("style.css").resolve()
+    if not style_css_path.is_file(): raise HTTPException(status_code=404, detail="style.css not found.")
+    return FileResponse(style_css_path, media_type="text/css")
+
 @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
 async def serve_admin_panel_page(admin_user: UserAuthDetails = Depends(get_current_admin_user)) -> FileResponse:
     admin_html_path = Path("admin.html").resolve()
@@ -838,7 +851,7 @@ async def logout(response: Response, current_user: UserAuthDetails = Depends(get
         del user_sessions[username]
         print(f"INFO: User '{username}' session cleared (logged out). Temp files scheduled for cleanup.")
     return {"message": "Logout successful. Session cleared."}
-app.include_router(auth_router)
+
 
 @auth_router.post("/change-password")
 async def change_user_password(
@@ -1136,43 +1149,66 @@ async def chat_in_existing_discussion(
         if not rag_datastore_id:
             rag_datastore_id = discussion_obj.rag_datastore_id
             if not rag_datastore_id:
-                rag_datastore_id = user_sessions[username].get("active_vectorizer") 
-                if not rag_datastore_id:
-                    print(f"WARNING: RAG requested by {username} but no datastore specified for discussion or user default.")
+                # Fallback to user's default datastore is not implemented here,
+                # user_sessions[username].get("active_vectorizer") is actually the default vectorizer name, not datastore_id.
+                # For RAG, a datastore must be selected for the discussion or explicitly passed.
+                print(f"WARNING: RAG requested by {username} but no datastore specified for discussion.")
+
 
         if rag_datastore_id:
             try:
                 ss = get_safe_store_instance(username, rag_datastore_id, db)
-                active_vectorizer_for_store = user_sessions[username].get("active_vectorizer")
-                query = lc.generate_code("In english, generate a rag query out of this prompt: "+prompt+"\nOnly answer with the query without any comments.")
-                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=10)
+                # User's default vectorizer from their settings or global default.
+                # This is for querying; documents are added with a specific vectorizer.
+                # SafeStore can query using any vectorizer it has embeddings for.
+                # If not specified, SafeStore might use its own default or the one most docs are vectorized with.
+                # For now, let's rely on SafeStore's internal logic if vectorizer_name is None for query.
+                # Or, use the user's preferred one IF the datastore has it.
+                active_vectorizer_for_store = user_sessions[username].get("active_vectorizer") # This is the name of vectorizer model, not datastore
+                
+                # Let's generate a more focused RAG query
+                rag_query_prompt = f"Based on the user's question: '{prompt}', formulate a concise search query to find relevant information in a document database. The query should be a few keywords or a short natural language question. Output only the search query itself."
+                try:
+                    # Note: LollmsClient.generate_text might be better than generate_code for this type of query generation
+                    # For simplicity, using existing structure. Revisit if query generation is poor.
+                    # This call needs to be non-streaming.
+                    query = lc.generate_text(prompt=rag_query_prompt, stream=False, max_new_tokens=50) # Assuming generate_text is available and non-streaming works
+                    if isinstance(query, dict) and "generated_text" in query: # Adjust if LollmsClient non-stream returns differently
+                        query = query["generated_text"].strip()
+                    elif not isinstance(query, str): # Fallback if generate_text returns something unexpected
+                         query = prompt # Use original prompt as fallback query
+                    print(f"INFO: Generated RAG query: '{query}'")
+                except Exception as e_query_gen:
+                    print(f"ERROR: Failed to generate RAG query: {e_query_gen}. Using original prompt as query.")
+                    query = prompt
+
+
+                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=10) # Use user's default vectorizer for querying
                 if rag_results:
                     context_str = "\n\nRelevant context from documents:\n"; 
-                    max_rag_len, current_rag_len, sources = 80000, 0, set()
+                    max_rag_len, current_rag_len, sources = 80000, 0, set() # TODO: Make max_rag_len configurable
                     for i, res in enumerate(rag_results):
                         chunk_text = res.get('chunk_text',''); file_name = Path(res.get('file_path','?')).name
                         if current_rag_len + len(chunk_text) > max_rag_len and i > 0: context_str += f"... (truncated {len(rag_results) - i} more results)\n"; break
                         context_str += f"{i+1}. From '{file_name}': {chunk_text}\n"; current_rag_len += len(chunk_text); sources.add(file_name)
                     final_prompt_for_llm = (f"User question: {prompt}\n\n"
                                            f"Use the following context from ({', '.join(sorted(list(sources)))}) to answer if relevant:\n{context_str.strip()}\n\n"
-                                           "1. Primary Directive: Your answer must be solely derived from the provided documents. No external knowledge or invention is permitted."
-                                           "2. Factual Grounding: Ensure every piece of information you provide is directly and explicitly supported by the text in the documents."
-                                           "3. Mandatory Referencing: Clearly cite the source document (e.g., Document A, Section 2.1) for each factual claim."
-                                           "4. Handling Missing Information: If the requested information is not found in the documents, clearly state that it is not available within the provided context."
-                                           )
-                    print(final_prompt_for_llm)
+                                           "Answer the user's question based *only* on the provided context. If the context does not contain the answer, state that. Cite sources by filename if multiple are present."
+                                           ) # Simplified RAG instruction
+                else:
+                     print(f"INFO: RAG query for '{query}' on datastore {rag_datastore_id} yielded no results.")
             except HTTPException as e_rag_access: 
                 print(f"INFO: RAG query skipped for {username} on datastore {rag_datastore_id}: {e_rag_access.detail}")
-            except Exception as e: print(f"ERROR: RAG query failed for {username} on datastore {rag_datastore_id}: {e}")
-        else: print(f"WARNING: RAG requested by {username} but no RAG datastore selected for this discussion or as user default.")
+            except Exception as e: 
+                print(f"ERROR: RAG query failed for {username} on datastore {rag_datastore_id}: {e}")
+                traceback.print_exc()
+        else: print(f"WARNING: RAG requested by {username} but no RAG datastore selected for this discussion.")
     elif use_rag and not safe_store: print(f"WARNING: RAG requested by {username} but safe_store is not available.")
 
 
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
 
-    # --- MODIFICATION START ---
-    # Create a stop event for this specific generation attempt
     stop_event = threading.Event()
     shared_state = {
         "accumulated_ai_response": "", 
@@ -1180,33 +1216,24 @@ async def chat_in_existing_discussion(
         "final_message_id": None, 
         "binding_name": None, 
         "model_name": None,
-        "stop_event": stop_event # Store the event in shared_state for the callback
+        "stop_event": stop_event 
     }
 
-    # Store the stop_event in user_sessions, keyed by discussion_id, to allow external cancellation
-    # Ensure the "active_generation_control" dict exists for the user
-    if username not in user_sessions: # Should be initialized by get_current_active_user
-        user_sessions[username] = {} 
+    if username not in user_sessions: user_sessions[username] = {} 
     user_sessions[username].setdefault("active_generation_control", {})[discussion_id] = stop_event
-    # --- MODIFICATION END ---
 
     async def stream_generator() -> AsyncGenerator[str, None]:
-        generation_thread: Optional[threading.Thread] = None # Moved here for broader scope in finally
+        generation_thread: Optional[threading.Thread] = None 
         
         def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict[str, Any]] = None) -> bool:
-            # --- MODIFICATION START ---
-            # Check for stop signal at the beginning of each callback
             if shared_state["stop_event"].is_set():
-                # Send a message to the client stream indicating generation was stopped
                 stop_message_payload = json.dumps({"type": "info", "content": "Generation stopped by user."}) + "\n"
-                if main_loop.is_running(): # Check if the loop is still running
+                if main_loop.is_running(): 
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, stop_message_payload)
                 else:
                     print(f"WARNING: asyncio loop not running when trying to send stop message for {username}/{discussion_id}")
-                
                 print(f"INFO: LLM Callback for {username}/{discussion_id} detected stop signal. Halting generation.")
-                return False # Signal LollmsClient to stop generation
-            # --- MODIFICATION END ---
+                return False 
 
             if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
                 shared_state["accumulated_ai_response"] += chunk
@@ -1221,22 +1248,28 @@ async def chat_in_existing_discussion(
             elif msg_type == MSG_TYPE.MSG_TYPE_FINISHED_MESSAGE: return False
             return True
 
-        try: # Outer try for stream_generator setup
+        try: 
             full_prompt_to_llm = discussion_obj.prepare_query_for_llm(final_prompt_for_llm, llm_image_paths)
             
             def blocking_call():
                 try:
                     shared_state["binding_name"] = lc.binding.binding_name if lc.binding else "unknown_binding"
                     shared_state["model_name"] = lc.binding.model_name if lc.binding and hasattr(lc.binding, "model_name") else user_sessions[username].get("lollms_model_name", "unknown_model")
+                    
+                    # LollmsClient is initialized with temperature, top_k etc. from session["llm_params"]
+                    # These are already non-prefixed.
+                    # The generate_text call itself can also take these as overrides if needed.
+                    # For now, relying on client's initialized params.
                     lc.generate_text(prompt=full_prompt_to_llm, images=llm_image_paths, stream=True, streaming_callback=llm_callback)
                 except Exception as e_gen:
                     err_msg = f"LLM generation failed: {str(e_gen)}"
                     shared_state["generation_error"] = err_msg
                     if main_loop.is_running():
                          main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
+                    traceback.print_exc() # Print full traceback for server logs
                 finally: 
                     if main_loop.is_running():
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, None) # Signal end of stream
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, None) 
             
             generation_thread = threading.Thread(target=blocking_call, daemon=True)
             generation_thread.start()
@@ -1246,18 +1279,13 @@ async def chat_in_existing_discussion(
                 if item is None: stream_queue.task_done(); break
                 yield item; stream_queue.task_done()
             
-            # Wait for the generation thread to finish, but with a timeout
             if generation_thread: generation_thread.join(timeout=10) 
 
-            # Process AI response (this part happens after streaming is complete or thread joined)
             ai_response_content = shared_state["accumulated_ai_response"]
             ai_token_count = lc.binding.count_tokens(ai_response_content) if ai_response_content else 0
             ai_parent_id = discussion_obj.messages[-1].id if discussion_obj.messages and discussion_obj.messages[-1].sender == lc.user_name else None
 
             if ai_response_content and not shared_state["generation_error"]:
-                # Check if generation was stopped by user; if so, the content might be partial.
-                # The 'info' message about stoppage is already sent by the callback.
-                # Here, we just save what was accumulated.
                 if shared_state["stop_event"].is_set():
                     print(f"INFO: Saving partial AI response for {username}/{discussion_id} as generation was stopped.")
                 
@@ -1278,32 +1306,27 @@ async def chat_in_existing_discussion(
             except Exception as save_err: print(f"ERROR: Failed to save discussion after outer stream error: {save_err}")
             yield json.dumps({"type": "error", "content": error_msg}) + "\n"
         finally:
-            # --- MODIFICATION START: Cleanup stop_event ---
             if username in user_sessions and "active_generation_control" in user_sessions[username]:
                 active_gen_control = user_sessions[username]["active_generation_control"]
-                # Important: Only delete if the event being cleaned up is the one for *this* generation instance.
-                # This protects against race conditions if a new generation started very quickly for the same discussion_id.
                 if discussion_id in active_gen_control and active_gen_control.get(discussion_id) == stop_event:
                     del active_gen_control[discussion_id]
-                if not active_gen_control: # If the dictionary for this user becomes empty
+                if not active_gen_control: 
                     del user_sessions[username]["active_generation_control"]
-            # --- MODIFICATION END ---
             
             if generation_thread and generation_thread.is_alive(): 
                 print(f"WARNING: LLM gen thread for {username}/{discussion_id} still alive after stream_generator's main loop. Signaling stop forcefully.")
                 if not shared_state["stop_event"].is_set():
-                    shared_state["stop_event"].set() # Ensure stop is signaled
-                generation_thread.join(timeout=5) # Give it a bit more time
+                    shared_state["stop_event"].set() 
+                generation_thread.join(timeout=5) 
                 if generation_thread.is_alive():
                     print(f"CRITICAL: LLM gen thread for {username}/{discussion_id} did not terminate after stop signal and extended wait.")
 
-            # Cleanup temporary original (non-moved) images that were not successfully moved
             if image_server_paths:
                 user_temp_uploads_path = get_user_temp_uploads_path(username)
                 for temp_rel_path in image_server_paths:
                     image_filename = Path(temp_rel_path).name
                     temp_abs_path = user_temp_uploads_path / image_filename
-                    if temp_abs_path.exists(): # If it wasn't moved
+                    if temp_abs_path.exists(): 
                         background_tasks.add_task(temp_abs_path.unlink, missing_ok=True)
 
     return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
@@ -1317,7 +1340,6 @@ async def stop_discussion_generation(
     
     session_data = user_sessions.get(username)
     if not session_data:
-        # This should ideally not happen if get_current_active_user ensures session validity
         raise HTTPException(status_code=404, detail="User session not found. Cannot process stop generation request.")
 
     active_gen_control_map = session_data.get("active_generation_control", {})
@@ -1326,19 +1348,12 @@ async def stop_discussion_generation(
     if stop_event and isinstance(stop_event, threading.Event):
         if not stop_event.is_set():
             stop_event.set()
-            # The generation thread's callback will detect this and signal the LLM to stop.
-            # The 'finally' block within the 'stream_generator' (in chat_in_existing_discussion)
-            # will handle the cleanup of this event from 'active_gen_control_map'.
             print(f"INFO: Stop signal sent for generation in discussion '{discussion_id}' for user '{username}'.")
             return {"message": "Stop signal sent. Generation will attempt to halt."}
         else:
-            # The event was already set, meaning a stop was previously requested or
-            # the generation is already in the process of stopping/has stopped.
             print(f"INFO: Stop signal for discussion '{discussion_id}' user '{username}' was already set, or generation is completing.")
             return {"message": "Generation is already stopping or has completed."}
     else:
-        # No valid stop_event found. This implies no generation was active for this discussion,
-        # or it has already completed and its control event has been cleaned up.
         print(f"INFO: No active generation found to stop for discussion '{discussion_id}' user '{username}'.")
         raise HTTPException(status_code=404, detail="No active generation found for this discussion, or it has already completed and cleaned up.")
 
@@ -1410,7 +1425,6 @@ async def delete_discussion_message(discussion_id: str, message_id: str, current
     message_to_delete = next((msg for msg in discussion_obj.messages if msg.id == message_id), None)
     if not message_to_delete: raise HTTPException(status_code=404, detail="Message not found.")
 
-    # Collect image assets to delete
     image_assets_to_delete = []
     if message_to_delete.image_references:
         disc_assets_path = get_user_discussion_assets_path(username) / discussion_id
@@ -1418,12 +1432,11 @@ async def delete_discussion_message(discussion_id: str, message_id: str, current
             asset_path = disc_assets_path / Path(ref).name
             if asset_path.is_file(): image_assets_to_delete.append(asset_path)
 
-    if not discussion_obj.delete_message(message_id): # delete_message internal logic might change
-        raise HTTPException(status_code=404, detail="Message deletion failed internally.") # Should be caught by earlier check
+    if not discussion_obj.delete_message(message_id): 
+        raise HTTPException(status_code=404, detail="Message deletion failed internally.") 
     
     save_user_discussion(username, discussion_id, discussion_obj)
     
-    # Delete image assets from disk
     for asset_path in image_assets_to_delete:
         try: asset_path.unlink()
         except OSError as e: print(f"WARN: Could not delete asset file {asset_path}: {e}")
@@ -1455,30 +1468,24 @@ async def send_discussion_to_user(
     if not original_discussion_obj:
         raise HTTPException(status_code=404, detail=f"Original discussion '{discussion_id}' not found for sender.")
 
-    # Ensure target user session is loaded (important for get_user_lollms_client)
-    # This is a bit of a hack; ideally, operations on other users shouldn't directly manipulate their live session
-    # But for AppLollmsDiscussion, it needs a LollmsClient.
-    # A better way would be to have a "system" LollmsClient or pass necessary configs.
-    # For now, ensure target user session is primed if it's not there (won't persist past this request if target isn't logged in)
     if target_username not in user_sessions:
-        # Prime with DB data
         initial_lollms_model_target = target_user_db.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
-        llm_params_target = {
+        llm_params_target_session = { # non-prefixed for session
             "temperature": target_user_db.llm_temperature if target_user_db.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
             "top_k": target_user_db.llm_top_k if target_user_db.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
             "top_p": target_user_db.llm_top_p if target_user_db.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
             "repeat_penalty": target_user_db.llm_repeat_penalty if target_user_db.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
             "repeat_last_n": target_user_db.llm_repeat_last_n if target_user_db.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),            
         }
-        llm_params_target = {k: v for k, v in llm_params_target.items() if v is not None}
+        llm_params_target_session = {k: v for k, v in llm_params_target_session.items() if v is not None}
         user_sessions[target_username] = {
             "lollms_client": None, "safe_store_instances": {}, "discussions": {}, "discussion_titles": {},
-            "lollms_model_name": initial_lollms_model_target, "llm_params": llm_params_target,
+            "lollms_model_name": initial_lollms_model_target, "llm_params": llm_params_target_session,
             "active_vectorizer": target_user_db.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
         }
-        _load_user_discussions(target_username) # Load target's existing discussions into their session cache
+        _load_user_discussions(target_username) 
 
-    target_lc = get_user_lollms_client(target_username) # Get (or init) LC for target user
+    target_lc = get_user_lollms_client(target_username) 
     new_discussion_id_for_target = str(uuid.uuid4())
     
     copied_discussion_obj = AppLollmsDiscussion(
@@ -1486,9 +1493,8 @@ async def send_discussion_to_user(
         discussion_id=new_discussion_id_for_target,
         title=f"Sent: {original_discussion_obj.title}"
     )
-    copied_discussion_obj.rag_datastore_id = None # RAG datastore selection is per-user/per-discussion
+    copied_discussion_obj.rag_datastore_id = None 
 
-    # Copy messages and their assets
     sender_assets_path = get_user_discussion_assets_path(sender_username) / discussion_id
     target_assets_path = get_user_discussion_assets_path(target_username) / new_discussion_id_for_target
     
@@ -1499,15 +1505,14 @@ async def send_discussion_to_user(
     for msg in original_discussion_obj.messages:
         new_image_refs = []
         if msg.image_references:
-            for img_ref_filename in msg.image_references: # img_ref is just filename.ext
+            for img_ref_filename in msg.image_references: 
                 original_asset_file = sender_assets_path / img_ref_filename
                 if original_asset_file.exists():
-                    # Copy asset to target user's discussion assets
-                    new_asset_filename = f"{uuid.uuid4().hex[:8]}_{img_ref_filename}" # Ensure unique name in target
+                    new_asset_filename = f"{uuid.uuid4().hex[:8]}_{img_ref_filename}" 
                     target_asset_file = target_assets_path / new_asset_filename
                     try:
                         shutil.copy2(str(original_asset_file), str(target_asset_file))
-                        new_image_refs.append(new_asset_filename) # Store new filename
+                        new_image_refs.append(new_asset_filename) 
                     except Exception as e_copy_asset:
                         print(f"ERROR copying asset {original_asset_file} for discussion send: {e_copy_asset}")
                 else:
@@ -1515,14 +1520,12 @@ async def send_discussion_to_user(
         
         copied_discussion_obj.add_message(
             sender=msg.sender, content=msg.content,
-            parent_message_id=msg.parent_message_id, # Keep parent IDs if meaningful structure
+            parent_message_id=msg.parent_message_id, 
             binding_name=msg.binding_name, model_name=msg.model_name,
             token_count=msg.token_count, image_references=new_image_refs
         )
-        # Note: Grades are NOT copied as they are user-specific.
 
     save_user_discussion(target_username, new_discussion_id_for_target, copied_discussion_obj)
-    # Update target user's session cache if they are online
     if target_username in user_sessions:
          user_sessions[target_username]["discussions"][new_discussion_id_for_target] = copied_discussion_obj
          user_sessions[target_username]["discussion_titles"][new_discussion_id_for_target] = copied_discussion_obj.title
@@ -1536,17 +1539,17 @@ async def export_user_data(export_request: DiscussionExportRequest, current_user
     user_db_record = db.query(DBUser).filter(DBUser.username == username).first()
     if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
 
+    # User settings are stored with llm_ prefix in DB, export them as is.
     user_settings = {
         "lollms_model_name": user_db_record.lollms_model_name,
         "safe_store_vectorizer": user_db_record.safe_store_vectorizer,
-        "temperature": user_db_record.llm_temperature,
-        "top_k": user_db_record.llm_top_k,
-        "top_p": user_db_record.llm_top_p,
-        "repeat_penalty": user_db_record.llm_repeat_penalty,
-        "repeat_last_n": user_db_record.llm_repeat_last_n,
+        "llm_temperature": user_db_record.llm_temperature,
+        "llm_top_k": user_db_record.llm_top_k,
+        "llm_top_p": user_db_record.llm_top_p,
+        "llm_repeat_penalty": user_db_record.llm_repeat_penalty,
+        "llm_repeat_last_n": user_db_record.llm_repeat_last_n,
     }
     
-    # Datastores info
     owned_datastores_db = db.query(DBDataStore).filter(DBDataStore.owner_user_id == user_db_record.id).all()
     owned_ds_info = [{"id": ds.id, "name": ds.name, "description": ds.description} for ds in owned_datastores_db]
     
@@ -1614,19 +1617,11 @@ async def import_user_data(import_file: UploadFile = File(...), import_request_j
     imported_count, skipped_count, errors = 0, 0, []
     if not session.get("discussions"): _load_user_discussions(username)
 
-    # Handle imported user settings (e.g., apply if current user's settings are null)
-    # This part is optional and depends on desired behavior.
-    # For now, we just log them or display them.
     imported_user_settings = import_data.get("user_settings_at_export")
     if imported_user_settings:
         print(f"INFO: User settings from import file for user {import_data.get('exported_by_user', 'unknown')}: {imported_user_settings}")
-        # Optionally, update current_user's settings if they are None
-        # db_user_record = db.query(DBUser).filter(DBUser.id == user_id).first()
-        # if db_user_record:
-        # for key, value in imported_user_settings.items():
-        # if hasattr(db_user_record, key) and getattr(db_user_record, key) is None and value is not None:
-        # setattr(db_user_record, key, value)
-        # db.commit() ... then re-init lollms_client if model changed.
+        # Note: Applying imported settings is not done automatically here. 
+        # User can set them manually via UI if desired.
 
     for disc_data_from_file in imported_discussions_data:
         if not isinstance(disc_data_from_file, dict) or "discussion_id" not in disc_data_from_file:
@@ -1639,9 +1634,7 @@ async def import_user_data(import_file: UploadFile = File(...), import_request_j
                 lollms_client_instance=lc, discussion_id=new_discussion_id,
                 title=disc_data_from_file.get("title", f"Imported {original_id[:8]}")
             )
-            imported_discussion_obj.rag_datastore_id = disc_data_from_file.get("rag_datastore_id") # Import RAG datastore ID
-                                                                                              # This ID might not be valid for the current user.
-                                                                                              # Client UI should allow user to re-select a valid one.
+            imported_discussion_obj.rag_datastore_id = disc_data_from_file.get("rag_datastore_id") 
 
             messages_from_file = disc_data_from_file.get("messages", [])
             target_assets_path = get_user_discussion_assets_path(username) / new_discussion_id
@@ -1650,12 +1643,7 @@ async def import_user_data(import_file: UploadFile = File(...), import_request_j
                 for msg_data_from_file in messages_from_file:
                     if isinstance(msg_data_from_file, dict) and "sender" in msg_data_from_file and "content" in msg_data_from_file:
                         imported_message_obj = AppLollmsMessage.from_dict(msg_data_from_file)
-                        
-                        # Image references in export are relative to that export's structure or original owner.
-                        # For import, we don't automatically import assets. User would need to re-upload.
-                        # So, clear image_references on import unless a more complex asset import is done.
-                        imported_message_obj.image_references = [] # Simplification for now
-
+                        imported_message_obj.image_references = [] 
                         imported_discussion_obj.messages.append(imported_message_obj)
                         imported_grade = msg_data_from_file.get("user_grade")
                         if imported_grade is not None and isinstance(imported_grade, int):
@@ -1710,7 +1698,7 @@ async def set_user_lollms_model(model_name: str = Form(...), current_user: UserA
 
 @lollms_config_router.get("/llm-params", response_model=UserLLMParams)
 async def get_user_llm_params(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserLLMParams:
-    # UserAuthDetails already contains these from the session
+    # UserAuthDetails already contains llm_prefixed params, sourced from session's non-prefixed params
     return UserLLMParams(
         llm_temperature=current_user.llm_temperature,
         llm_top_k=current_user.llm_top_k,
@@ -1725,27 +1713,45 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
     db_user_record = db.query(DBUser).filter(DBUser.username == username).first()
     if not db_user_record: raise HTTPException(status_code=404, detail="User not found.")
 
-    updated_params = False
-    if not hasattr(db_user_record,"temperature") or (params.llm_temperature is not None and db_user_record.temperature != params.llm_temperature):
-        db_user_record.temperature = params.llm_temperature; updated_params = True
-    if not hasattr(db_user_record,"top_k") or (params.llm_top_k is not None and db_user_record.top_k != params.llm_top_k):
-        db_user_record.top_k = params.llm_top_k; updated_params = True
-    if not hasattr(db_user_record,"top_p") or (params.llm_top_p is not None and db_user_record.top_p != params.llm_top_p):
-        db_user_record.top_p = params.llm_top_p; updated_params = True
-    if not hasattr(db_user_record,"repeat_penalty") or (params.llm_repeat_penalty is not None and db_user_record.repeat_penalty != params.llm_repeat_penalty):
-        db_user_record.repeat_penalty = params.llm_repeat_penalty; updated_params = True
-    if not hasattr(db_user_record,"repeat_last_n") or (params.llm_repeat_last_n is not None and db_user_record.repeat_last_n != params.llm_repeat_last_n):
-        db_user_record.repeat_last_n = params.llm_repeat_last_n; updated_params = True
+    updated_params_in_db = False
+    # Update DBUser record with llm_prefixed fields
+    if params.llm_temperature is not None and db_user_record.llm_temperature != params.llm_temperature:
+        db_user_record.llm_temperature = params.llm_temperature; updated_params_in_db = True
+    if params.llm_top_k is not None and db_user_record.llm_top_k != params.llm_top_k:
+        db_user_record.llm_top_k = params.llm_top_k; updated_params_in_db = True
+    if params.llm_top_p is not None and db_user_record.llm_top_p != params.llm_top_p:
+        db_user_record.llm_top_p = params.llm_top_p; updated_params_in_db = True
+    if params.llm_repeat_penalty is not None and db_user_record.llm_repeat_penalty != params.llm_repeat_penalty:
+        db_user_record.llm_repeat_penalty = params.llm_repeat_penalty; updated_params_in_db = True
+    if params.llm_repeat_last_n is not None and db_user_record.llm_repeat_last_n != params.llm_repeat_last_n:
+        db_user_record.llm_repeat_last_n = params.llm_repeat_last_n; updated_params_in_db = True
 
-    if updated_params:
+    if updated_params_in_db:
         try: db.commit()
         except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"DB error: {e}")
-        # Update session and force LollmsClient re-init
-        session_llm_params = user_sessions[username].get("llm_params", {})
-        session_llm_params.update(params.model_dump(exclude_unset=True))
-        user_sessions[username]["llm_params"] = session_llm_params
-        user_sessions[username]["lollms_client"] = None 
+    
+    # Update session llm_params with non-prefixed keys
+    session_llm_params = user_sessions[username].get("llm_params", {})
+    updated_params_in_session = False
+
+    if params.llm_temperature is not None and session_llm_params.get("temperature") != params.llm_temperature:
+        session_llm_params["temperature"] = params.llm_temperature; updated_params_in_session = True
+    if params.llm_top_k is not None and session_llm_params.get("top_k") != params.llm_top_k:
+        session_llm_params["top_k"] = params.llm_top_k; updated_params_in_session = True
+    if params.llm_top_p is not None and session_llm_params.get("top_p") != params.llm_top_p:
+        session_llm_params["top_p"] = params.llm_top_p; updated_params_in_session = True
+    if params.llm_repeat_penalty is not None and session_llm_params.get("repeat_penalty") != params.llm_repeat_penalty:
+        session_llm_params["repeat_penalty"] = params.llm_repeat_penalty; updated_params_in_session = True
+    if params.llm_repeat_last_n is not None and session_llm_params.get("repeat_last_n") != params.llm_repeat_last_n:
+        session_llm_params["repeat_last_n"] = params.llm_repeat_last_n; updated_params_in_session = True
+    
+    # Filter out None values from session_llm_params after update
+    user_sessions[username]["llm_params"] = {k: v for k, v in session_llm_params.items() if v is not None}
+
+    if updated_params_in_session or updated_params_in_db: # If any change happened
+        user_sessions[username]["lollms_client"] = None # Force LollmsClient re-init
         return {"message": "LLM parameters updated. Client will re-initialize."}
+        
     return {"message": "No changes to LLM parameters."}
 
 app.include_router(lollms_config_router)
@@ -1759,7 +1765,6 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
     
-    # Check for unique name per user
     existing_ds = db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_create.name).first()
     if existing_ds: raise HTTPException(status_code=400, detail=f"DataStore with name '{ds_create.name}' already exists for this user.")
 
@@ -1770,16 +1775,13 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
     )
     try:
         db.add(new_ds_db_obj); db.commit(); db.refresh(new_ds_db_obj)
-        # Initialize the SafeStore file by calling get_safe_store_instance once
-        # This will create the .db file on disk.
         get_safe_store_instance(current_user.username, new_ds_db_obj.id, db)
         
-        # Construct public response model
         return DataStorePublic(
             id=new_ds_db_obj.id, name=new_ds_db_obj.name, description=new_ds_db_obj.description,
             owner_username=current_user.username, created_at=new_ds_db_obj.created_at, updated_at=new_ds_db_obj.updated_at
         )
-    except IntegrityError: # Should be caught by earlier check, but as a safeguard
+    except IntegrityError: 
         db.rollback(); raise HTTPException(status_code=400, detail="DataStore name conflict (race condition).")
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error creating datastore: {e}")
@@ -1787,10 +1789,8 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
 
 @datastore_router.get("", response_model=List[DataStorePublic])
 async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DataStorePublic]:
-    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first() # DEFINED HERE
+    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first() 
     if not user_db_record: 
-        # This HTTPException should be raised if current_user.username doesn't match a DBUser.
-        # If get_current_active_user itself fails, it would raise a 401 earlier.
         raise HTTPException(status_code=404, detail="User database record not found for authenticated user.") 
 
     owned_datastores_db = db.query(DBDataStore).filter(DBDataStore.owner_user_id == user_db_record.id).order_by(DBDataStore.name).all()
@@ -1800,28 +1800,24 @@ async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current
     ).join(
         DBDataStore, DBSharedDataStoreLink.datastore_id == DBDataStore.id
     ).filter(
-        DBSharedDataStoreLink.shared_with_user_id == user_db_record.id # USED HERE
+        DBSharedDataStoreLink.shared_with_user_id == user_db_record.id 
     ).order_by(
         DBDataStore.name
     )
-    # Step 2: Eager load necessary relationships for the items fetched by the query
-    # This is done on the query object before .all()
     shared_links_query = shared_links_query.options(
         joinedload(DBSharedDataStoreLink.datastore).joinedload(DBDataStore.owner)
     )
     
-    shared_links_and_datastores_db = shared_links_query.all() # Execute the query
+    shared_links_and_datastores_db = shared_links_query.all() 
 
     response_list = []
     for ds_db in owned_datastores_db:
         response_list.append(DataStorePublic(
             id=ds_db.id, name=ds_db.name, description=ds_db.description,
-            owner_username=current_user.username, # It's owned by current_user
+            owner_username=current_user.username, 
             created_at=ds_db.created_at, updated_at=ds_db.updated_at
         ))
-    for link, ds_db in shared_links_and_datastores_db: # Adjusted loop
-        # ds_db is the actual DataStore object
-        # link.datastore will also point to ds_db due to the relationship and eager loading
+    for link, ds_db in shared_links_and_datastores_db: 
         if not any(r.id == ds_db.id for r in response_list):
              response_list.append(DataStorePublic(
                 id=ds_db.id, name=ds_db.name, description=ds_db.description,
@@ -1841,7 +1837,6 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreBase, current_
     if ds_db_obj.owner_user_id != user_db_record.id:
         raise HTTPException(status_code=403, detail="Only the owner can update a DataStore.")
 
-    # Check for name conflict if name is being changed
     if ds_update.name != ds_db_obj.name:
         existing_ds = db.query(DBDataStore).filter(DBDataStore.owner_user_id == user_db_record.id, DBDataStore.name == ds_update.name, DBDataStore.id != datastore_id).first()
         if existing_ds: raise HTTPException(status_code=400, detail=f"DataStore with name '{ds_update.name}' already exists.")
@@ -1868,21 +1863,17 @@ async def delete_datastore(datastore_id: str, current_user: UserAuthDetails = De
     if ds_db_obj.owner_user_id != user_db_record.id:
         raise HTTPException(status_code=403, detail="Only the owner can delete a DataStore.")
     
-    # Get path before deleting DB record
     ds_file_path = get_datastore_db_path(current_user.username, datastore_id)
     ds_lock_file_path = Path(f"{ds_file_path}.lock")
 
     try:
-        # Delete associated shared links first (or rely on cascade if configured strongly)
         db.query(DBSharedDataStoreLink).filter_by(datastore_id=datastore_id).delete(synchronize_session=False)
         db.delete(ds_db_obj)
         db.commit()
         
-        # Remove from user session cache if present
         if current_user.username in user_sessions and datastore_id in user_sessions[current_user.username]["safe_store_instances"]:
             del user_sessions[current_user.username]["safe_store_instances"][datastore_id]
 
-        # Delete the .db file and .lock file asynchronously
         if ds_file_path.exists(): background_tasks.add_task(ds_file_path.unlink, missing_ok=True)
         if ds_lock_file_path.exists(): background_tasks.add_task(ds_lock_file_path.unlink, missing_ok=True)
             
@@ -1906,7 +1897,6 @@ async def share_datastore(datastore_id: str, share_request: DataStoreShareReques
 
     existing_link = db.query(DBSharedDataStoreLink).filter_by(datastore_id=datastore_id, shared_with_user_id=target_user_db.id).first()
     if existing_link:
-        # Update permission if different, or just confirm it's already shared
         if existing_link.permission_level != share_request.permission_level:
             existing_link.permission_level = share_request.permission_level
             db.commit()
@@ -1921,7 +1911,7 @@ async def share_datastore(datastore_id: str, share_request: DataStoreShareReques
     try:
         db.add(new_link); db.commit()
         return {"message": f"DataStore '{ds_to_share.name}' shared successfully with user '{target_user_db.username}'."}
-    except IntegrityError: # Should be caught by earlier check
+    except IntegrityError: 
         db.rollback(); raise HTTPException(status_code=400, detail="Sharing conflict (race condition).")
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error sharing datastore: {e}")
@@ -1938,7 +1928,7 @@ async def unshare_datastore(datastore_id: str, target_user_id_or_username: str, 
     try:
         target_user_id = int(target_user_id_or_username)
         target_user_db = db.query(DBUser).filter(DBUser.id == target_user_id).first()
-    except ValueError: # Not an int, assume username
+    except ValueError: 
         target_user_db = db.query(DBUser).filter(DBUser.username == target_user_id_or_username).first()
         
     if not target_user_db: raise HTTPException(status_code=404, detail=f"Target user '{target_user_id_or_username}' not found.")
@@ -1962,7 +1952,7 @@ store_files_router = APIRouter(prefix="/api/store/{datastore_id}", tags=["SafeSt
 @store_files_router.get("/vectorizers", response_model=List[Dict[str,str]])
 async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[Dict[str,str]]:
     if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
-    ss = get_safe_store_instance(current_user.username, datastore_id, db) # Verifies access
+    ss = get_safe_store_instance(current_user.username, datastore_id, db) 
     try:
         with ss: methods_in_db = ss.list_vectorization_methods(); possible_names = ss.list_possible_vectorizer_names()
         formatted = []; existing_names = set()
@@ -1982,24 +1972,20 @@ async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDe
     except Exception as e: raise HTTPException(status_code=500, detail=f"Error listing vectorizers for datastore {datastore_id}: {e}")
 
 
-@store_files_router.post("/upload-files") # User must be owner
+@store_files_router.post("/upload-files") 
 async def upload_rag_documents_to_datastore(
     datastore_id: str, files: List[UploadFile] = File(...), vectorizer_name: str = Form(...),
     current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)
 ) -> JSONResponse:
     if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
     
-    # Verify ownership for upload
     ds_record = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not ds_record or not user_db_record or ds_record.owner_user_id != user_db_record.id:
         raise HTTPException(status_code=403, detail="Only the owner can upload files to this DataStore.")
 
-    ss = get_safe_store_instance(current_user.username, datastore_id, db) # Gets instance for owner
+    ss = get_safe_store_instance(current_user.username, datastore_id, db) 
     
-    # Store uploaded files within a subfolder for this datastore for clarity
-    # e.g., data/<owner_username>/safestores_docs/<datastore_id>/<filename>
-    # SafeStore itself will store the full path.
     datastore_docs_path = get_user_datastore_root_path(current_user.username) / "safestore_docs" / datastore_id
     datastore_docs_path.mkdir(parents=True, exist_ok=True)
 
@@ -2028,13 +2014,10 @@ async def upload_rag_documents_to_datastore(
 @store_files_router.get("/files", response_model=List[SafeStoreDocumentInfo])
 async def list_rag_documents_in_datastore(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[SafeStoreDocumentInfo]:
     if not safe_store: return []
-    ss = get_safe_store_instance(current_user.username, datastore_id, db) # Verifies access
+    ss = get_safe_store_instance(current_user.username, datastore_id, db) 
     managed_docs = []
     try:
         with ss: stored_meta = ss.list_documents()
-        # Filter to show only files that are within this datastore's expected document storage area
-        # This logic might need adjustment based on how SafeStore stores file_path if multiple sources are added to one SafeStore DB.
-        # Assuming add_document uses absolute paths from datastore_docs_path.
         ds_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
         if not ds_record: raise HTTPException(status_code=404, detail="Datastore metadata not found in main DB.")
         
@@ -2047,12 +2030,12 @@ async def list_rag_documents_in_datastore(datastore_id: str, current_user: UserA
                 try:
                     if Path(original_path_str).resolve().parent == expected_docs_root_resolved:
                         managed_docs.append(SafeStoreDocumentInfo(filename=Path(original_path_str).name))
-                except Exception: pass # Path resolution error
+                except Exception: pass 
     except Exception as e: raise HTTPException(status_code=500, detail=f"Error listing RAG docs for datastore {datastore_id}: {e}")
     managed_docs.sort(key=lambda x: x.filename); return managed_docs
 
 
-@store_files_router.delete("/files/{filename}") # User must be owner
+@store_files_router.delete("/files/{filename}") 
 async def delete_rag_document_from_datastore(datastore_id: str, filename: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:
     if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
     
@@ -2077,10 +2060,6 @@ async def delete_rag_document_from_datastore(datastore_id: str, filename: str, c
         if file_to_delete_path.exists(): raise HTTPException(status_code=500, detail=f"Could not delete '{s_filename}' from datastore {datastore_id}: {e}")
         else: return {"message": f"Document '{s_filename}' file deleted, potential DB cleanup issue in datastore {datastore_id}."}
 
-
-
-
-
 app.include_router(store_files_router)
 
 # --- Admin API ---
@@ -2091,6 +2070,9 @@ async def admin_get_all_users(db: Session = Depends(get_db)) -> List[DBUser]: re
 @admin_router.post("/users", response_model=UserPublic, status_code=201)
 async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(get_db)) -> DBUser:
     if db.query(DBUser).filter(DBUser.username == user_data.username).first(): raise HTTPException(status_code=400, detail="Username already registered.")
+    
+    # user_data has llm_prefixed params. DBUser also expects llm_prefixed params.
+    # Default values from LOLLMS_CLIENT_DEFAULTS are non-prefixed.
     new_db_user = DBUser(
         username=user_data.username, hashed_password=hash_password(user_data.password), 
         is_admin=user_data.is_admin, 
@@ -2121,22 +2103,15 @@ async def admin_remove_user(user_id: int, db: Session = Depends(get_db), current
     if initial_admin_username and user_to_delete.username == initial_admin_username and user_to_delete.is_admin: raise HTTPException(status_code=403, detail="Initial superadmin cannot be deleted.")
     if user_to_delete.username == current_admin.username: raise HTTPException(status_code=403, detail="Administrators cannot delete themselves.")
     
-    user_data_dir_to_delete = get_user_data_root(user_to_delete.username) # Get path before DB delete
+    user_data_dir_to_delete = get_user_data_root(user_to_delete.username) 
 
     try:
-        # Delete owned datastores first (this will also delete their files via cascade or separate logic)
-        # This is important because datastore files are outside the main user_data_dir if we mean to only delete APP_DATA_DIR / username
-        # Actual datastore files are at APP_DATA_DIR / username / DATASTORES_DIR_NAME / <datastore_id>.db
-        # The get_user_data_root will encompass these.
-        
-        # Remove user's session data
         if user_to_delete.username in user_sessions:
             del user_sessions[user_to_delete.username]
 
-        db.delete(user_to_delete) # This should cascade to UserStarredDiscussion, UserMessageGrade, DataStore (owned), SharedDataStoreLink
+        db.delete(user_to_delete) 
         db.commit()
         
-        # Asynchronously delete user's entire data directory
         if user_data_dir_to_delete.exists():
             background_tasks.add_task(shutil.rmtree, user_data_dir_to_delete, ignore_errors=True)
             
@@ -2149,86 +2124,56 @@ app.include_router(admin_router)
 languages_router = APIRouter(prefix="/api/languages", tags=["Languages router"])
 @languages_router.get("/", response_class=JSONResponse)
 async def get_languages():
-    """
-    Lists available languages by scanning the 'locals' directory for .json files.
-    Returns a dictionary of {language_code: display_name}.
-    """
     languages = {}
     if not LOCALS_DIR.is_dir():
         print(f"Warning: Locals directory not found at {LOCALS_DIR}")
-        # Fallback or error, depending on how critical this is.
-        # For now, let's return English as a default if the dir is missing.
         return {"en": "English"}
 
     try:
         for filepath in LOCALS_DIR.glob("*.json"):
-            lang_code = filepath.stem  # Gets filename without extension (e.g., "en", "fr")
-            
-            # Attempt to get a more user-friendly display name.
-            # This is a simple approach. You might store display names
-            # inside the JSON files themselves or have a separate mapping.
+            lang_code = filepath.stem  
             display_name = lang_code.upper()
-            if lang_code == "en":
-                display_name = "English"
-            elif lang_code == "fr":
-                display_name = "Français"
-            elif lang_code == "es":
-                display_name = "Español"
-            elif lang_code == "de":
-                display_name = "Deutsch"
-            # Add more specific display names as needed
-
+            if lang_code == "en": display_name = "English"
+            elif lang_code == "fr": display_name = "Français"
+            elif lang_code == "es": display_name = "Español"
+            elif lang_code == "de": display_name = "Deutsch"
             languages[lang_code] = display_name
     except Exception as e:
         print(f"Error scanning locals directory: {e}")
         raise HTTPException(status_code=500, detail="Could not retrieve language list.")
 
-    if not languages: # If directory exists but is empty or no JSON files
+    if not languages: 
         print(f"Warning: No JSON language files found in {LOCALS_DIR}")
-        return {"en": "English"} # Fallback
+        return {"en": "English"} 
 
     return languages
 
-# Inside get_locale_file function
 @languages_router.get("/locals/{lang_code}.json")
 async def get_locale_file(lang_code: str):
-    """
-    Serves a specific language JSON file.
-    """
     if not LOCALS_DIR.is_dir():
         raise HTTPException(status_code=404, detail=f"Locals directory not found.")
 
-    # Sanitize lang_code to prevent directory traversal
-    # Allow only alphanumeric characters and hyphen
     if not lang_code.replace('-', '').isalnum():
         raise HTTPException(status_code=400, detail="Invalid language code format.")
 
     file_path = LOCALS_DIR / f"{lang_code}.json"
 
     if not file_path.is_file():
-        # Try to serve the base language if a regional variant was requested and not found
-        # e.g., if "en-US.json" not found, try "en.json"
         base_lang_code = lang_code.split('-')[0]
         if base_lang_code != lang_code:
             base_file_path = LOCALS_DIR / f"{base_lang_code}.json"
             if base_file_path.is_file():
                 print(f"Serving base language file {base_file_path} for requested {file_path}")
-                # Directly return the content as JSON to avoid FileResponse issues with content-type if needed
                 try:
-                    with open(base_file_path, "r", encoding="utf-8") as f:
-                        content = json.load(f)
+                    with open(base_file_path, "r", encoding="utf-8") as f: content = json.load(f)
                     return JSONResponse(content=content)
                 except Exception as e:
                     print(f"Error reading base locale file {base_file_path}: {e}")
                     raise HTTPException(status_code=500, detail="Error reading locale file.")
-        
         raise HTTPException(status_code=404, detail=f"Locale file for '{lang_code}' not found.")
 
-    # It's generally better to return JSONResponse for .json files
-    # to ensure correct Content-Type and allow FastAPI to handle serialization.
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = json.load(f)
+        with open(file_path, "r", encoding="utf-8") as f: content = json.load(f)
         return JSONResponse(content=content)
     except json.JSONDecodeError:
         raise HTTPException(status_code=500, detail=f"Locale file '{lang_code}.json' is not valid JSON.")
@@ -2248,4 +2193,4 @@ if __name__ == "__main__":
     print(f"Access UI at: http://{host}:{port}/")
     print(f"Access Admin Panel at: http://{host}:{port}/admin (requires admin login)")
     print("--------------------------------------------------------------------")
-    uvicorn.run("main:app", host=host, port=port, reload=False) # reload=True for dev
+    uvicorn.run("main:app", host=host, port=port, reload=False) 
