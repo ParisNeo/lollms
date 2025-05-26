@@ -2993,211 +2993,67 @@ function applySyntaxHighlighting(container) {
     });
 }
 
-// Basic syntax highlighting fallback
 function applyBasicSyntaxHighlighting(codeElement, language) {
-    let code = codeElement.textContent;
-    
-    switch (language.toLowerCase()) {
-        case 'javascript':
-        case 'js':
-            code = highlightJavaScript(code);
-            break;
-        case 'python':
-        case 'py':
-            code = highlightPython(code);
-            break;
-        case 'html':
-            code = highlightHTML(code);
-            break;
-        case 'css':
-            code = highlightCSS(code);
-            break;
-        case 'json':
-            code = highlightJSON(code);
-            break;
-        case 'sql':
-            code = highlightSQL(code);
-            break;
-        case 'bash':
-        case 'shell':
-            code = highlightBash(code);
-            break;
-        default:
-            // Basic highlighting for unknown languages
-            code = highlightGeneric(code);
+    if (!hljs) {
+        console.error("Highlight.js not loaded!");
+        // Fallback: just display plain text, ensuring HTML entities are escaped
+        const plainText = document.createTextNode(codeElement.textContent || "");
+        codeElement.innerHTML = ''; // Clear existing content
+        codeElement.appendChild(plainText);
+        return;
     }
-    
-    codeElement.innerHTML = code;
+
+    // Highlight.js uses CSS classes to determine the language.
+    // It's good practice to clear any previous language classes
+    // and set the new one.
+    // Example: if codeElement has class="language-python", hljs will use python.
+    // If no language class is present, it will try to auto-detect.
+
+    let langClass = '';
+    if (language) {
+        const lang = language.toLowerCase();
+        // Normalize common aliases to what Highlight.js expects
+        switch (lang) {
+            case 'js':
+                langClass = 'language-javascript';
+                break;
+            case 'py':
+                langClass = 'language-python';
+                break;
+            case 'shell':
+                langClass = 'language-bash'; // 'bash' is a common alias for shell scripts
+                break;
+            // Add other common aliases if your input `language` might use them
+            // e.g., 'txt' -> 'language-plaintext'
+            // default: use the language name directly if it's a valid hljs identifier
+            default:
+                // Check if hljs supports the language directly
+                if (hljs.getLanguage(lang)) {
+                    langClass = `language-${lang}`;
+                } else {
+                    // If language is unknown to hljs, let it auto-detect or treat as plain text
+                    console.warn(`Highlight.js: Unknown language "${lang}", attempting auto-detection or plaintext.`);
+                    // You might want to explicitly set 'language-plaintext' if auto-detection is not desired
+                    // langClass = 'language-plaintext';
+                }
+        }
+    }
+
+    // Clear any existing language-xxxx classes and add the new one
+    // This regex finds classes like "language-javascript", "lang-js" etc.
+    const existingLangClassRegex = /\blang(?:uage)?-[a-zA-Z0-9_.-]+\b/g;
+    codeElement.className = codeElement.className.replace(existingLangClassRegex, '').trim();
+
+    if (langClass) {
+        codeElement.classList.add(langClass);
+    }
+    // Else, if no specific language or langClass determined, hljs will auto-detect.
+
+    // The highlightElement function takes care of reading textContent,
+    // highlighting, and setting innerHTML.
+    // It also adds the 'hljs' class to the element for general styling.
+    hljs.highlightElement(codeElement);
 }
-// Language-specific highlighting functions
-function highlightJavaScript(code) {
-    const keywords = ['function', 'const', 'let', 'var', 'if', 'else', 'for', 'while', 'return', 'class', 'extends', 'import', 'export', 'async', 'await', 'try', 'catch', 'finally', 'new', 'this', 'super', 'delete', 'typeof', 'instanceof', 'void', 'yield', 'debugger', 'get', 'set', 'static', 'null', 'true', 'false', 'undefined'];
-    const builtins = ['console', 'document', 'window', 'Array', 'Object', 'String', 'Number', 'Boolean', 'Date', 'Math', 'JSON', 'Promise', 'RegExp', 'Map', 'Set', 'Symbol', 'Error', 'parseInt', 'parseFloat'];
-
-    // Escape HTML characters first to prevent them from being interpreted as tags
-    let highlightedCode = code
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>');
-
-    // Order of replacement matters: comments and strings first, then keywords/builtins, then numbers.
-    highlightedCode = highlightedCode
-        .replace(/(\/\/.*$)/gm, '<span class="syntax-comment">$1</span>') // Single line comments
-        .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="syntax-comment">$1</span>') // Multi-line comments
-        .replace(/"([^"\\]|\\.)*"/g, '<span class="syntax-string">$&</span>') // Double-quoted strings
-        .replace(/'([^'\\]|\\.)*'/g, '<span class="syntax-string">$&</span>') // Single-quoted strings
-        .replace(/`([^`\\]|\\.)*`/g, '<span class="syntax-template">$&</span>') // Template literals
-        .replace(new RegExp(`\\b(${keywords.join('|')})\\b`, 'g'), '<span class="syntax-keyword">$1</span>')
-        .replace(new RegExp(`\\b(${builtins.join('|')})\\b`, 'g'), '<span class="syntax-builtin">$1</span>')
-        .replace(/\b\d+\.?\d*\b/g, '<span class="syntax-number">$&</span>'); // Numbers
-    
-    return highlightedCode;
-}
-
-function highlightPython(code) {
-    const keywords = ['def', 'class', 'if', 'elif', 'else', 'for', 'while', 'try', 'except', 'finally', 'with', 'as', 'import', 'from', 'return', 'yield', 'lambda', 'and', 'or', 'not', 'in', 'is', 'pass', 'break', 'continue', 'global', 'nonlocal', 'assert', 'del', 'async', 'await'];
-    const builtins = ['print', 'len', 'range', 'str', 'int', 'float', 'list', 'dict', 'tuple', 'set', 'bool', 'type', 'isinstance', 'hasattr', 'getattr', 'setattr', 'super', 'True', 'False', 'None', 'open', 'sum', 'min', 'max', 'abs', 'round', 'sorted', 'zip', 'enumerate', 'map', 'filter', 'input'];
-    
-    let highlightedCode = code
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>');
-
-    highlightedCode = highlightedCode
-        .replace(/(#.*$)/gm, '<span class="syntax-comment">$1</span>') // Comments
-        .replace(/("""[\s\S]*?"""|'''[\s\S]*?''')/g, '<span class="syntax-docstring">$&</span>') // Docstrings
-        .replace(/f"([^"\\]|\\.)*"/g, '<span class="syntax-fstring">$&</span>') // F-strings (before regular strings)
-        .replace(/"([^"\\]|\\.)*"/g, '<span class="syntax-string">$&</span>') // Double-quoted strings
-        .replace(/'([^'\\]|\\.)*'/g, '<span class="syntax-string">$&</span>') // Single-quoted strings
-        .replace(new RegExp(`\\b(${keywords.join('|')})\\b`, 'g'), '<span class="syntax-keyword">$1</span>')
-        .replace(new RegExp(`\\b(${builtins.join('|')})\\b`, 'g'), '<span class="syntax-builtin">$1</span>')
-        .replace(/\b\d+\.?\d*\b/g, '<span class="syntax-number">$&</span>'); // Numbers
-        
-    return highlightedCode;
-}
-
-function highlightHTML(code) {
-    // Must escape HTML entities first to display HTML as code
-    let escapedCode = code
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>');
-
-    return escapedCode
-        .replace(/(<!--[\s\S]*?-->)/g, '<span class="syntax-comment">$1</span>') // Comments
-        .replace(/(<\/?)([\w-]+)([^>]*)(>)/g, (match, opening, tag, attrs, closing) => {
-            // Highlight attributes within the already escaped string
-            const highlightedAttrs = attrs.replace(/([\w-]+)=(".*?"|'.*?')/g, 
-                (attrMatch, attrName, attrValue) => 
-                    `<span class="syntax-attr-name">${attrName}</span>=<span class="syntax-attr-value">${attrValue}</span>`
-            );
-            return `${opening}<span class="syntax-tag">${tag}</span>${highlightedAttrs}${closing}`;
-        });
-}
-
-function highlightCSS(code) {
-    let highlightedCode = code
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>');
-
-    highlightedCode = highlightedCode
-        .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="syntax-comment">$1</span>') // Comments
-        // Selectors (more robust to handle various cases like pseudo-classes, attribute selectors)
-        .replace(/(^|[\s{};])([.#&]?[a-zA-Z][\w-]*(?:\s*[:.([]\w\s"'-]+[)\]])?)(?=\s*[{,])/gm, '$1<span class="syntax-selector">$2</span>')
-        .replace(/([\w-]+)\s*:/g, '<span class="syntax-property">$1</span>:') // Property names
-        .replace(/:\s*([^;\}]+)(?=[;\}])/g, (match, value) => { // Values
-            // Highlight strings within values
-            let highlightedValue = value
-                .replace(/"([^"\\]|\\.)*"/g, '<span class="syntax-string">$&</span>')
-                .replace(/'([^'\\]|\\.)*'/g, '<span class="syntax-string">$&</span>')
-                .replace(/\b(rgb|rgba|hsl|hsla)\([^)]+\)/g, '<span class="syntax-builtin">$&</span>') // Color functions
-                .replace(/\b\d+(\.\d+)?(px|em|rem|%|vh|vw|s|ms)\b/g, '<span class="syntax-number">$&</span>'); // Numbers with units
-            return `: <span class="syntax-value">${highlightedValue}</span>`;
-        });
-        
-    return highlightedCode;
-}
-
-function highlightJSON(code) {
-    let highlightedCode = code
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>');
-
-    // This regex approach for JSON is basic and can be fragile.
-    // For robust JSON highlighting, a proper parser is better.
-    highlightedCode = highlightedCode
-        .replace(/"([^"\\]|\\.)*"\s*:/g, (match) => `<span class="syntax-key">${match}</span>`) // Keys
-        .replace(/:\s*"([^"\\]|\\.)*"/g, (match, strContent) => `: <span class="syntax-string">"${strContent}"</span>`) // String values
-        .replace(/:\s*(true|false|null)\b/g, (match, literal) => `: <span class="syntax-literal">${literal}</span>`) // Literals
-        .replace(/:\s*(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b/g, (match, num) => `: <span class="syntax-number">${num}</span>`); // Numbers
-        
-    return highlightedCode;
-}
-
-function highlightSQL(code) {
-    const keywords = ['SELECT', 'FROM', 'WHERE', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'OUTER', 'ON', 'GROUP', 'BY', 'ORDER', 'HAVING', 'INSERT', 'INTO', 'VALUES', 'UPDATE', 'SET', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TABLE', 'INDEX', 'VIEW', 'AS', 'DISTINCT', 'COUNT', 'SUM', 'AVG', 'MAX', 'MIN', 'AND', 'OR', 'NOT', 'BETWEEN', 'LIKE', 'IS', 'NULL', 'LIMIT', 'OFFSET', 'UNION', 'ALL', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END'];
-    const dataTypes = ['INT', 'VARCHAR', 'CHAR', 'TEXT', 'DATE', 'DATETIME', 'TIMESTAMP', 'BOOLEAN', 'FLOAT', 'DECIMAL', 'NUMERIC'];
-    
-    let highlightedCode = code
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>');
-
-    highlightedCode = highlightedCode
-        .replace(/(--.*$)/gm, '<span class="syntax-comment">$1</span>') // Single line comments
-        .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="syntax-comment">$1</span>') // Multi-line comments
-        .replace(/'([^'\\]|\\.)*'/g, '<span class="syntax-string">$&</span>') // Strings
-        .replace(new RegExp(`\\b(${keywords.join('|')})\\b`, 'gi'), '<span class="syntax-keyword">$1</span>')
-        .replace(new RegExp(`\\b(${dataTypes.join('|')})\\b`, 'gi'), '<span class="syntax-builtin">$1</span>') // Treat data types as built-ins
-        .replace(/\b\d+\.?\d*\b/g, '<span class="syntax-number">$&</span>'); // Numbers
-        
-    return highlightedCode;
-}
-
-function highlightBash(code) {
-    // This is a very simplified bash highlighter
-    const commands = ['ls', 'cd', 'pwd', 'mkdir', 'rmdir', 'rm', 'cp', 'mv', 'cat', 'grep', 'find', 'chmod', 'chown', 'sudo', 'apt', 'yum', 'dnf', 'pacman', 'git', 'docker', 'kubectl', 'npm', 'pip', 'python', 'node', 'echo', 'export', 'source', 'alias', 'unalias', 'exit', 'kill', 'man', 'ssh', 'scp', 'wget', 'curl'];
-    const builtins = ['if', 'then', 'else', 'fi', 'for', 'in', 'do', 'done', 'while', 'case', 'esac', 'function', 'select']; // some shell keywords
-
-    let highlightedCode = code
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>');
-
-    highlightedCode = highlightedCode
-        .replace(/(#.*$)/gm, '<span class="syntax-comment">$1</span>') // Comments
-        .replace(/"([^"\\]|\\.)*"/g, '<span class="syntax-string">$&</span>') // Double-quoted strings
-        .replace(/'([^'\\]|\\.)*'/g, '<span class="syntax-string">$&</span>') // Single-quoted strings
-        .replace(/`([^`\\]|\\.)*`/g, '<span class="syntax-template">$&</span>') // Backticks (command substitution)
-        .replace(/\$\{[^}]+\}/g, '<span class="syntax-template">$&</span>') // Variable expansion ${VAR}
-        .replace(/\$[a-zA-Z_]\w*/g, '<span class="syntax-template">$&</span>') // Variable expansion $VAR
-        .replace(new RegExp(`\\b(${commands.join('|')})\\b`, 'g'), '<span class="syntax-command">$1</span>')
-        .replace(new RegExp(`\\b(${builtins.join('|')})\\b`, 'g'), '<span class="syntax-keyword">$1</span>') // Shell keywords
-        .replace(/--?[\w-]+/g, '<span class="syntax-option">$&</span>') // Options
-        .replace(/\b\d+\b/g, '<span class="syntax-number">$&</span>'); // Numbers (e.g. in file permissions)
-        
-    return highlightedCode;
-}
-
-function highlightGeneric(code) {
-    // A very basic fallback for unknown languages
-    let highlightedCode = code
-        .replace(/&/g, '&')
-        .replace(/</g, '<')
-        .replace(/>/g, '>');
-
-    highlightedCode = highlightedCode
-        .replace(/"([^"\\]|\\.)*"/g, '<span class="syntax-string">$&</span>')
-        .replace(/'([^'\\]|\\.)*'/g, '<span class="syntax-string">$&</span>')
-        .replace(/\b\d+\.?\d*\b/g, '<span class="syntax-number">$&</span>')
-        .replace(/(#.*$)/gm, '<span class="syntax-comment">$1</span>') // Common comment style
-        .replace(/(\/\/.*$)/gm, '<span class="syntax-comment">$1</span>'); // Another common comment style
-        
-    return highlightedCode;
-}
-
 // --- Pyodide Python Execution ---
 async function loadPyodide() {
     if (pyodide || pyodideLoading) return;

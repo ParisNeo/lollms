@@ -27,46 +27,6 @@
     /* --code-copy-btn-copied-bg-dark: #22c55e; (Hardcoded below) */
     /* --code-copy-btn-copied-border-dark: #16a34a; (Hardcoded below) */
     /* --code-copy-btn-copied-text-dark: #ffffff; (Hardcoded below) */
-
-    /* Syntax Highlighting - Light Theme (example, can be expanded) */
-    --syntax-keyword-light: #0077aa;
-    --syntax-builtin-light: #228855;
-    --syntax-string-light: #dd1144;
-    --syntax-template-light: #dd1144;
-    --syntax-fstring-light: #dd1144;
-    --syntax-comment-light: #777777;
-    --syntax-docstring-light: #777777;
-    --syntax-number-light: #116611;
-    --syntax-tag-light: #0077aa;
-    --syntax-attr-name-light: #6699cc;
-    --syntax-attr-value-light: #dd1144;
-    --syntax-selector-light: #aa33aa;
-    --syntax-property-light: #993333;
-    --syntax-value-light: #dd1144;
-    --syntax-key-light: #993333;
-    --syntax-literal-light: #0077aa;
-    --syntax-command-light: #0077aa;
-    --syntax-option-light: #228855;
-
-    /* Syntax Highlighting - Dark Theme (from original "enhanced" styles) */
-    --syntax-keyword-dark: #569cd6;
-    --syntax-builtin-dark: #4ec9b0;
-    --syntax-string-dark: #ce9178;
-    --syntax-template-dark: #d7ba7d;
-    --syntax-fstring-dark: #d7ba7d;
-    --syntax-comment-dark: #6a9955;
-    --syntax-docstring-dark: #6a9955;
-    --syntax-number-dark: #b5cea8;
-    --syntax-tag-dark: #569cd6;
-    --syntax-attr-name-dark: #92c5f8;
-    --syntax-attr-value-dark: #ce9178;
-    --syntax-selector-dark: #d7ba7d;
-    --syntax-property-dark: #9cdcfe;
-    --syntax-value-dark: #ce9178;
-    --syntax-key-dark: #9cdcfe;
-    --syntax-literal-dark: #569cd6;
-    --syntax-command-dark: #569cd6;
-    --syntax-option-dark: #4ec9b0;
 }
 
 /* Custom scrollbar for webkit browsers */
@@ -541,45 +501,6 @@ body {
     color: var(--code-text-dark);
     background: var(--code-bg-dark);
 }
-
-/* Syntax highlighting using CSS Variables */
-.syntax-keyword   { color: var(--syntax-keyword-light); font-weight: 600; }
-.syntax-builtin   { color: var(--syntax-builtin-light); }
-.syntax-string    { color: var(--syntax-string-light); }
-.syntax-template  { color: var(--syntax-template-light); }
-.syntax-fstring   { color: var(--syntax-fstring-light); }
-.syntax-comment   { color: var(--syntax-comment-light); font-style: italic; }
-.syntax-docstring { color: var(--syntax-docstring-light); font-style: italic; }
-.syntax-number    { color: var(--syntax-number-light); }
-.syntax-tag       { color: var(--syntax-tag-light); }
-.syntax-attr-name { color: var(--syntax-attr-name-light); }
-.syntax-attr-value{ color: var(--syntax-attr-value-light); }
-.syntax-selector  { color: var(--syntax-selector-light); }
-.syntax-property  { color: var(--syntax-property-light); }
-.syntax-value     { color: var(--syntax-value-light); }
-.syntax-key       { color: var(--syntax-key-light); }
-.syntax-literal   { color: var(--syntax-literal-light); }
-.syntax-command   { color: var(--syntax-command-light); font-weight: 600; }
-.syntax-option    { color: var(--syntax-option-light); }
-
-.dark .syntax-keyword   { color: var(--syntax-keyword-dark); }
-.dark .syntax-builtin   { color: var(--syntax-builtin-dark); }
-.dark .syntax-string    { color: var(--syntax-string-dark); }
-.dark .syntax-template  { color: var(--syntax-template-dark); }
-.dark .syntax-fstring   { color: var(--syntax-fstring-dark); }
-.dark .syntax-comment   { color: var(--syntax-comment-dark); }
-.dark .syntax-docstring { color: var(--syntax-docstring-dark); }
-.dark .syntax-number    { color: var(--syntax-number-dark); }
-.dark .syntax-tag       { color: var(--syntax-tag-dark); }
-.dark .syntax-attr-name { color: var(--syntax-attr-name-dark); }
-.dark .syntax-attr-value{ color: var(--syntax-attr-value-dark); }
-.dark .syntax-selector  { color: var(--syntax-selector-dark); }
-.dark .syntax-property  { color: var(--syntax-property-dark); }
-.dark .syntax-value     { color: var(--syntax-value-dark); }
-.dark .syntax-key       { color: var(--syntax-key-dark); }
-.dark .syntax-literal   { color: var(--syntax-literal-dark); }
-.dark .syntax-command   { color: var(--syntax-command-dark); }
-.dark .syntax-option    { color: var(--syntax-option-dark); }
 
 
 /* Message Images Styling */
