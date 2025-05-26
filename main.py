@@ -1172,7 +1172,7 @@ async def chat_in_existing_discussion(
                     # Note: LollmsClient.generate_text might be better than generate_code for this type of query generation
                     # For simplicity, using existing structure. Revisit if query generation is poor.
                     # This call needs to be non-streaming.
-                    query = lc.generate_text(prompt=rag_query_prompt, stream=False, max_new_tokens=50) # Assuming generate_text is available and non-streaming works
+                    query = lc.generate_text(prompt=rag_query_prompt, stream=False, n_predict=250) # Assuming generate_text is available and non-streaming works
                     if isinstance(query, dict) and "generated_text" in query: # Adjust if LollmsClient non-stream returns differently
                         query = query["generated_text"].strip()
                     elif not isinstance(query, str): # Fallback if generate_text returns something unexpected
