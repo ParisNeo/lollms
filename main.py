@@ -351,7 +351,7 @@ class AppLollmsDiscussion:
         return discussion
 
     def prepare_query_for_llm(
-        self, current_prompt_text: str, 
+        self, extra_content: str, 
         # image_paths_for_llm: Optional[List[str]], # This is handled by LollmsClient.generate_text directly
         max_total_tokens: Optional[int] = None
         # active_personality_system_prompt is no longer needed here
@@ -376,7 +376,7 @@ class AppLollmsDiscussion:
 
         # Calculate tokens for the current turn's text to determine history budget
         # The system_prompt tokens will be handled separately by the caller of generate_text
-        current_turn_formatted_text_only = f"{user_prefix}\n{current_prompt_text}{ai_prefix}"
+        current_turn_formatted_text_only = f"{user_prefix}\n{extra_content}{ai_prefix}"
         try:
             current_turn_tokens = self.lollms_client.binding.count_tokens(current_turn_formatted_text_only)
         except Exception:
@@ -396,7 +396,7 @@ class AppLollmsDiscussion:
         
         # The prompt to return is the history + current user turn, ready for the AI.
         # The system prompt will be passed as a separate argument to generate_text.
-        full_user_facing_prompt = f"{history_text}{ai_prefix}"
+        full_user_facing_prompt = f"{extra_content}{history_text}{ai_prefix}"
         
         return full_user_facing_prompt
 
@@ -1531,7 +1531,7 @@ async def chat_in_existing_discussion(
         token_count=user_token_count, image_references=final_image_references_for_message
     )
 
-    final_prompt_for_llm = prompt
+    extra_content = ""
     if use_rag and safe_store:
         if not rag_datastore_id:
             rag_datastore_id = discussion_obj.rag_datastore_id
@@ -1559,7 +1559,7 @@ async def chat_in_existing_discussion(
                     # Note: LollmsClient.generate_text might be better than generate_code for this type of query generation
                     # For simplicity, using existing structure. Revisit if query generation is poor.
                     # This call needs to be non-streaming.
-                    query = lc.generate_text(prompt=rag_query_prompt, stream=False, n_predict=250) # Assuming generate_text is available and non-streaming works
+                    query = lc.remove_thinking_blocks(lc.generate_text(prompt=rag_query_prompt,system_prompt="/no_think", stream=False, n_predict=250)) # Assuming generate_text is available and non-streaming works
                     if isinstance(query, dict) and "generated_text" in query: # Adjust if LollmsClient non-stream returns differently
                         query = query["generated_text"].strip()
                     elif not isinstance(query, str): # Fallback if generate_text returns something unexpected
@@ -1575,13 +1575,17 @@ async def chat_in_existing_discussion(
                     context_str = "\n\nRelevant context from documents:\n"; 
                     max_rag_len, current_rag_len, sources = 80000, 0, set() # TODO: Make max_rag_len configurable
                     for i, res in enumerate(rag_results):
-                        chunk_text = res.get('chunk_text',''); file_name = Path(res.get('file_path','?')).name
-                        if current_rag_len + len(chunk_text) > max_rag_len and i > 0: context_str += f"... (truncated {len(rag_results) - i} more results)\n"; break
-                        context_str += f"{i+1}. From '{file_name}': {chunk_text}\n"; current_rag_len += len(chunk_text); sources.add(file_name)
-                    final_prompt_for_llm = (f"User question: {prompt}\n\n"
-                                           f"Use the following context from ({', '.join(sorted(list(sources)))}) to answer if relevant:\n{context_str.strip()}\n\n"
-                                           "Answer the user's question based *only* on the provided context. If the context does not contain the answer, state that. Cite sources by filename if multiple are present."
-                                           ) # Simplified RAG instruction
+                        chunk_text = res.get('chunk_text','');
+                        file_name = Path(res.get('file_path','?')).name
+                        if current_rag_len + len(chunk_text) > max_rag_len and i > 0: 
+                            context_str += f"... (truncated {len(rag_results) - i} more results)\n"; break
+                        context_str += f"{i+1}. From '{file_name}': {chunk_text}\n"; 
+                        current_rag_len += len(chunk_text); sources.add(file_name)
+                    extra_content = (f"User question: {prompt}\n\n"
+                                       f"Answer the user's question based *only* on the following context:\n{context_str.strip()}\n\n"
+                                       "Cite sources by filename if multiple are present."
+                                      ) # Simplified RAG instruction
+
                 else:
                      print(f"INFO: RAG query for '{query}' on datastore {rag_datastore_id} yielded no results.")
             except HTTPException as e_rag_access: 
@@ -1649,7 +1653,7 @@ async def chat_in_existing_discussion(
                     
                     # Prepare the main prompt (history + current user input)
                     main_prompt_content = discussion_obj.prepare_query_for_llm(
-                        final_prompt_for_llm # This is the user's current text input, possibly augmented by RAG
+                        extra_content # This is the user's current text input, possibly augmented by RAG
                         # max_total_tokens can be passed if needed, or rely on LollmsClient defaults
                     )
                     if not user_puts_thoughts_in_context:
