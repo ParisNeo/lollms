@@ -2,72 +2,83 @@
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
-![Version](https://img.shields.io/badge/Version-1.3.0-brightgreen) <!-- Updated Version -->
+![Version](https://img.shields.io/badge/Version-1.6.0-brightgreen) <!-- Updated Version -->
 <!-- Add build status badge if CI is set up -->
 <!-- [![Build Status](https://img.shields.io/your_ci_badge_url)](your_ci_link) -->
 
-A simple, multi-user FastAPI backend and responsive HTML/Tailwind CSS frontend application designed to provide a chat interface powered by the [`lollms-client`](https://github.com/ParisNeo/lollms-client) library, with integrated Retrieval-Augmented Generation (RAG) capabilities using [`safe_store`](https://github.com/ParisNeo/safe_store). Now with multimodal chat support!
+A multi-user FastAPI backend and responsive HTML/Tailwind CSS frontend application designed to provide a chat interface powered by the [`lollms-client`](https://github.com/ParisNeo/lollms-client) library. It features integrated Retrieval-Augmented Generation (RAG) using [`safe_store`](https://github.com/ParisNeo/safe_store), multimodal chat, user personalities, a friend system, direct messaging, and enhanced sharing capabilities.
 
 **Live Project:** [https://github.com/ParisNeo/simplified_lollms](https://github.com/ParisNeo/simplified_lollms)
 
 ## Overview
 
-This project aims to provide a self-hostable, user-friendly chat interface that can connect to various Large Language Models (LLMs) supported by `lollms-client` (like Ollama, OpenAI, native LoLLMs). It features multi-user support with basic authentication, persistent discussions, RAG functionality for chatting with your documents, **multimodal chat (image input)**, and an administrative interface for user management.
+This project aims to provide a self-hostable, user-friendly chat interface that can connect to various Large Language Models (LLMs) supported by `lollms-client`. It features multi-user support with basic authentication, persistent discussions, RAG functionality, multimodal chat (image input), customizable user personalities, a friend system with direct messaging, administrative user management, and sharing of datastores and personalities.
 
 ## ✨ Features
 
-*   **Multi-User Support:** Secure login via HTTP Basic Authentication. Each user has their own isolated discussions and RAG document store.
-*   **Persistent Discussions:** Chat histories are saved per user and can be revisited. Discussions are stored as YAML files.
-*   **LLM Integration:** Uses `lollms-client` to interact with various LLM backends (configurable).
-*   **Streaming Responses:** AI responses are streamed back to the user interface for a real-time experience.
-*   **Multimodal Chat:** Upload images along with your text prompts to interact with vision-capable models (like LLaVA via Ollama, GPT-4 Vision via OpenAI). The backend handles passing image data appropriately.
+*   **Multi-User Support:** Secure login via HTTP Basic Authentication. Each user has their own isolated data.
+*   **Persistent Discussions:** Chat histories are saved per user (YAML files) and can be revisited, renamed, starred, and deleted.
+*   **LLM Integration:** Uses `lollms-client` to interact with various LLM backends.
+*   **Streaming Responses:** AI responses are streamed for a real-time experience.
+*   **Multimodal Chat:** Upload images with text prompts for vision-capable models.
+*   **User Personalities (System Prompts):**
+    *   Create, edit, and delete custom personalities (system prompts with name, category, author, icon, etc.).
+    *   Select an active personality to guide LLM responses.
+    *   View and use public (system-provided) personalities.
+    *   Share (send a copy of) owned personalities with friends.
 *   **Retrieval-Augmented Generation (RAG):**
-    *   Upload documents (`.txt`, `.pdf`, `.docx`, `.html`, entire folders) via the UI.
-    *   Documents are processed, chunked, and vectorized using `safe_store`.
-    *   Toggle RAG usage during chat to inject relevant context from your documents into the LLM prompt.
-    *   Manage uploaded RAG documents (list, delete).
-*   **Configurable Models & Vectorizers:**
-    *   Set global default LLM models and RAG vectorizers in `config.toml`.
-    *   Users can override these defaults via the Settings UI (settings stored in the user database).
-    *   Supports Sentence Transformer (`st:`) and TF-IDF (`tfidf:`) vectorizers via `safe_store`.
+    *   Multiple **DataStores** per user for organizing RAG documents.
+    *   Upload documents (`.txt`, `.pdf`, `.docx`, `.html`, etc.) to specific DataStores.
+    *   Toggle RAG usage per discussion, selecting a specific DataStore.
+    *   Manage DataStores (create, rename, delete) and their indexed documents.
+    *   **Share DataStores with friends** (read-only query access).
+*   **Friend System & Direct Messaging (DM):**
+    *   Send, accept, and reject friend requests.
+    *   View friends list and manage friendships (unfriend, block/unblock - *block/unblock WIP*).
+    *   **Send and receive direct messages** with accepted friends.
+    *   View conversation history with friends.
+*   **Configurable Settings:**
+    *   Users can set their default LLM model, RAG vectorizer, LLM generation parameters (temperature, top_k, etc.), RAG parameters, and personal profile information.
 *   **Admin Panel:**
-    *   Manage users (Add, List, Delete, Reset Password). Accessible via `/admin`.
+    *   Manage users (Add, List, Delete, Reset Password).
     *   Initial superadmin user created from `config.toml`.
-    *   **Admin button in sidebar** visible only to logged-in administrators.
-*   **Data Export:** Users can export their discussions and SafeStore metadata as a JSON file.
-*   **Responsive UI:** Refined interface built with Tailwind CSS, suitable for desktop and mobile. Includes image upload previews.
-*   **Dark/Light Theme:** Toggle between themes.
-*   **Internationalization (i18n):** Basic support for English (`en`) and French (`fr`). Easily extensible.
-*   **SQLite Backend:** User accounts and settings are stored in a central SQLite database (`app_main.db`). SafeStore uses its own SQLite DB per user (`vector_store.db`).
-*   **Bug Fixes:** Corrected SafeStore document deletion logic.
+*   **Data Export/Import:** Users can export/import their discussions, settings, and metadata.
+*   **Responsive UI:** Built with Tailwind CSS, including image previews, Markdown rendering with code highlighting (Highlight.js) and math (KaTeX).
+*   **Dark/Light Theme & Internationalization (i18n).**
+*   **SQLite Backend:** Central database for users, settings, personalities, friendships, DMs. SafeStore uses its own DBs per DataStore.
 
 ## 🏗️ Architecture
 
-*   **Backend:** FastAPI (Python web framework)
-*   **LLM Communication:** `lollms-client` library (handles text and image data)
-*   **RAG/Vector Store:** `safe_store` library (SQLite based)
-*   **User Database:** SQLAlchemy with SQLite
-*   **Authentication:** HTTP Basic Auth + Passlib for password hashing
-*   **Frontend:** Plain HTML, Tailwind CSS, Vanilla JavaScript (with Marked.js for Markdown rendering)
+*   **Backend:** FastAPI (Python)
+*   **LLM Communication:** `lollms-client`
+*   **RAG/Vector Store:** `safe_store` (SQLite based per DataStore)
+*   **Main Database:** SQLAlchemy with SQLite (users, personalities, friendships, DMs, etc.)
+*   **Authentication:** HTTP Basic Auth + Passlib
+*   **Frontend:** HTML, Tailwind CSS, Vanilla JavaScript
 *   **Configuration:** TOML (`config.toml`)
 *   **Discussion Storage:** YAML files per user
-*   **Concurrency:** `filelock` used by `safe_store` for process-safe writes.
 
 ## 📸 Screenshots
 
-*(Add updated screenshots showing the image upload button, image previews in chat, and the admin button)*
+*(Add updated screenshots showing the new Friends & Messages modal, DM interface, personality editor, and sharing options)*
 
 **Login Screen:**
 `![Login Screen](placeholder_login.png)`
 
-**Main Chat UI (with Image Upload):**
-`![Chat UI](placeholder_chat_multimodal.png)`
+**Main Chat UI (with Personality Selector & RAG):**
+`![Chat UI](placeholder_chat_main.png)`
 
-**Settings Modal:**
-`![Settings Modal](placeholder_settings.png)`
+**Friends & Messages Modal:**
+`![Friends & Messages Modal](placeholder_friends_dm.png)`
 
-**RAG File Manager:**
-`![RAG File Manager](placeholder_rag.png)`
+**Personality Editor Modal:**
+`![Personality Editor](placeholder_personality_editor.png)`
+
+**Settings Modal (User Profile, LLM/RAG Params):**
+`![Settings Modal](placeholder_settings_new.png)`
+
+**DataStore Management & Sharing:**
+`![DataStore Management](placeholder_datastore_manage.png)`
 
 **Admin Panel:**
 `![Admin Panel](placeholder_admin.png)`
@@ -76,112 +87,85 @@ This project aims to provide a self-hostable, user-friendly chat interface that 
 
 ### Prerequisites
 
-*   Python 3.8 or higher
-*   Git
-*   Pip (Python package installer)
-*   An LLM backend accessible via `lollms-client` (e.g., Ollama running locally, OpenAI API key). **For image input, ensure the configured model supports vision.**
+*   Python 3.8+
+*   Git, Pip
+*   An LLM backend accessible via `lollms-client`.
 
 ### Installation
 
-1.  **Clone the repository:**
+1.  **Clone:**
     ```bash
     git clone https://github.com/ParisNeo/simplified_lollms.git
     cd simplified_lollms
     ```
-
-2.  **Set up a virtual environment (Recommended):**
+2.  **Virtual Environment (Recommended):**
     ```bash
     python -m venv venv
-    # Activate the environment
-    # On Windows: venv\Scripts\activate
-    # On macOS/Linux: source venv/bin/activate
+    # Windows: venv\Scripts\activate
+    # macOS/Linux: source venv/bin/activate
     ```
-
-3.  **Install dependencies:**
+3.  **Install Dependencies:**
     ```bash
     pip install -r requirements.txt
     ```
-    *(This installs FastAPI, Uvicorn, lollms-client, safe_store[all], SQLAlchemy, Passlib, etc.)*
-
-4.  **Configure the application:**
-    *   Copy the example configuration file:
-        ```bash
-        cp config_example.toml config.toml
-        ```
-    *   **Edit `config.toml`:**
-        *   **Crucially:** Change the `password` under `[initial_admin_user]` to a strong password.
-        *   Review `[lollms_client_defaults]` and set the `binding_name` (e.g., `"ollama"`, `"openai"`) and `default_model_name`. **Choose a model that supports image input if you want to use the image upload feature** (e.g., `"llava:latest"` for Ollama, `"gpt-4-turbo"` or `"gpt-4o-mini"` for OpenAI).
-        *   Set API keys/environment variables as needed for your chosen binding.
-        *   Review `[safe_store_defaults]` and other sections.
-
-5.  **Run the application:**
+4.  **Configure `config.toml`:**
+    *   Copy `config_example.toml` to `config.toml`.
+    *   **Crucially:** Change `password` under `[initial_admin_user]`.
+    *   Set `binding_name` and `default_model_name` in `[lollms_client_defaults]`.
+    *   Review other settings.
+5.  **Run:**
     ```bash
     uvicorn main:app --host 0.0.0.0 --port 9642
     ```
-    *(Adjust host/port as needed.)*
 
 ### Usage
 
-1.  **Access the UI:** `http://localhost:9642` (or your host/port).
-2.  **Login:** Use the initial admin credentials or credentials for other users created via the admin panel.
-3.  **Chat:**
-    *   Click "New Discussion".
-    *   Select a discussion from the sidebar.
-    *   **(New)** Click the image icon next to the text input to attach images (up to 5). Previews are shown.
-    *   Type your message.
-    *   Use the "Use RAG" checkbox if desired.
-    *   Click Send or press Enter.
-4.  **Settings:** Configure Language, LLM Model, RAG Vectorizer.
-5.  **RAG File Manager:** Upload/manage documents for RAG.
-6.  **Admin Panel (Admins Only):**
-    *   Access via the "Admin Panel" button in the sidebar (visible only if logged in as admin) or go to `/admin`.
-    *   Manage users.
-7.  **Data Export:** Export discussions and metadata.
+1.  **Access UI:** `http://localhost:9642`
+2.  **Login:** Use initial admin or created user credentials.
+3.  **Chat:** Create/select discussions, use RAG, upload images.
+4.  **Personalities:** Manage and select active personalities via Settings.
+5.  **Friends & DMs:** Access via user menu to manage friends and send messages.
+6.  **DataStores:** Manage RAG DataStores and share them via user menu.
+7.  **Settings:** Configure user profile, LLM/RAG parameters, active personality.
+8.  **Admin Panel:** `/admin` for user management (admins only).
 
 ## ⚙️ Configuration (`config.toml`)
 
-*(No changes to the structure, but ensure `default_model_name` under `[lollms_client_defaults]` is set to a model appropriate for your needs, including vision capabilities if desired.)*
-
-*   **`[app_settings]`**: `data_dir`, `database_url`, `secret_key`.
-*   **`[initial_admin_user]`**: `username`, `password` (**hashed** after first run).
-*   **`[lollms_client_defaults]`**: `binding_name`, `default_model_name` (choose vision model for image support), `host_address`, `service_key_env_var`, etc.
-*   **`[safe_store_defaults]`**: `chunk_size`, `chunk_overlap`, `global_default_vectorizer`, `encryption_key`.
+*   **`[app_settings]`**: `data_dir`, `database_url`.
+*   **`[initial_admin_user]`**: `username`, `password`, optional `first_name`, `email`.
+*   **`[lollms_client_defaults]`**: `binding_name`, `default_model_name`, LLM parameters, `put_thoughts_in_context`.
+*   **`[safe_store_defaults]`**: RAG chunking, `global_default_vectorizer`.
 *   **`[server]`**: `host`, `port`.
 
 ## 📚 API Documentation
-
-Access interactive API docs via the running server:
 
 *   **Swagger UI:** `http://localhost:9642/docs`
 *   **ReDoc:** `http://localhost:9642/redoc`
 
 ## 📁 Folder Structure
 
-*(No significant changes to the folder structure itself)*
-
 ```text
 📁 simplified_lollms/
-├─ 📁 data/                  # User data (created automatically)
-│  ├─ 📁 user1/
-│  │  ├─ 📁 discussions/
-│  │  ├─ 📁 safestore_documents/
-│  │  ├─ 📁 temp_uploads/      # Temporary image storage
-│  │  └─ 📄 vector_store.db
-│  └─ ...
-├─ 📁 locales/
-│  └─ ...
+├─ 📁 data/                  # User data, DBs (created automatically)
+│  ├─ 📄 app_main.db         # Central SQLite DB
+│  └─ 📁 <username>/         # Per-user data
+│     ├─ 📁 discussions/
+│     ├─ 📁 discussion_assets/
+│     ├─ 📁 safestores/       # RAG DataStore DBs
+│     └─ 📁 temp_uploads/
+├─ 📁 locales/               # i18n JSON files
 ├─ 📄 .gitignore
 ├─ 📄 admin.html
 ├─ 📄 config.toml
 ├─ 📄 config_example.toml
-├─ 📄 database_setup.py
-├─ 📄 index.html             # Main chat UI (updated)
+├─ 📄 database_setup.py      # SQLAlchemy models & DB init
+├─ 📄 index.html             # Main chat UI
 ├─ 📄 LICENSE
-├─ 📄 LOLLMS_CLIENT_DOC.md
-├─ 📄 main.py                # FastAPI app (updated)
-├─ 📄 README.md              # This file (updated)
+├─ 📄 main.js                # Frontend JavaScript
+├─ 📄 main.py                # FastAPI application
+├─ 📄 README.md              # This file
 ├─ 📄 requirements.txt
-└─ 📄 SAFESTORE_DOC.md
+└─ 📄 style.css              # Custom CSS
 ```
 
 ## 🤝 Contributing

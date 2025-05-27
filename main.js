@@ -144,11 +144,93 @@ const themeIconSun = document.getElementById('themeIconSun');
 const themeIconMoon = document.getElementById('themeIconMoon');
 
 
+const settingsFirstName = document.getElementById('settingsFirstName');
+const settingsFamilyName = document.getElementById('settingsFamilyName');
+const settingsEmail = document.getElementById('settingsEmail');
+const settingsBirthDate = document.getElementById('settingsBirthDate');
+const saveProfileBtn = document.getElementById('saveProfileBtn');
+const settingsStatus_profile = document.getElementById('settingsStatus_profile');
+
+const settingsActivePersonality = document.getElementById('settingsActivePersonality');
+const userPersonalitiesList = document.getElementById('userPersonalitiesList');
+const createNewPersonalityBtn = document.getElementById('createNewPersonalityBtn');
+const publicPersonalitiesList = document.getElementById('publicPersonalitiesList');
+const saveActivePersonalityBtn = document.getElementById('saveActivePersonalityBtn');
+const settingsStatus_personalities = document.getElementById('settingsStatus_personalities');
+
+const personalityEditorModal = document.getElementById('personalityEditorModal');
+const personalityEditorTitle = document.getElementById('personalityEditorTitle');
+const personalityEditorId = document.getElementById('personalityEditorId');
+const personalityName = document.getElementById('personalityName');
+const personalityCategory = document.getElementById('personalityCategory');
+const personalityAuthor = document.getElementById('personalityAuthor');
+const personalityDescription = document.getElementById('personalityDescription');
+const personalityPromptText = document.getElementById('personalityPromptText');
+const personalityDisclaimer = document.getElementById('personalityDisclaimer');
+const personalityScriptCode = document.getElementById('personalityScriptCode');
+const personalityIconUpload = document.getElementById('personalityIconUpload');
+const personalityIconPreview = document.getElementById('personalityIconPreview');
+const personalityIconBase64 = document.getElementById('personalityIconBase64');
+const savePersonalityBtn = document.getElementById('savePersonalityBtn');
+const personalityEditorStatus = document.getElementById('personalityEditorStatus');
+
+
+const settingsPutThoughts = document.getElementById('settingsPutThoughts'); // For LLM Params
+
+const settingsRagTopK = document.getElementById('settingsRagTopK');
+const settingsRagUseGraph = document.getElementById('settingsRagUseGraph');
+const settingsRagGraphResponseType = document.getElementById('settingsRagGraphResponseType');
+const saveRagParamsBtn = document.getElementById('saveRagParamsBtn');
+const settingsStatus_ragParams = document.getElementById('settingsStatus_ragParams');
+const settingsDefaultVectorizer = document.getElementById('settingsDefaultVectorizer');
+const ragGraphResponseTypeContainer = document.getElementById('ragGraphResponseTypeContainer');
+
+const friendsMessagesBtn = document.getElementById('friendsMessagesBtn');
+const friendsMessagesModal = document.getElementById('friendsMessagesModal');
+const addFriendInput = document.getElementById('addFriendInput');
+const sendFriendRequestBtn = document.getElementById('sendFriendRequestBtn');
+const addFriendStatus = document.getElementById('addFriendStatus');
+const friendsListContainerFM = document.getElementById('friendsListContainerFM');
+const pendingRequestsContainer = document.getElementById('pendingRequestsContainer');
+const friendRequestsBadge = document.getElementById('friendRequestsBadge');
+// directMessagesContainer (if you add specific elements for it later)
+
+
+// Add to DOM constants
+const dmSearchUsersInput = document.getElementById('dmSearchUsersInput');
+const dmSearchResults = document.getElementById('dmSearchResults');
+const dmConversationsList = document.getElementById('dmConversationsList');
+const dmChatArea = document.getElementById('dmChatArea');
+const dmChatHeader = document.getElementById('dmChatHeader');
+const dmChatMessages = document.getElementById('dmChatMessages');
+const dmChatInputContainer = document.getElementById('dmChatInputContainer');
+const directMessageInput = document.getElementById('directMessageInput');
+const sendDirectMessageBtn = document.getElementById('sendDirectMessageBtn');
+const dmSendStatus = document.getElementById('dmSendStatus');
+const dmNoConversationSelected = document.getElementById('dmNoConversationSelected');
+
+// DOM Constants
+const sendPersonalityModal = document.getElementById('sendPersonalityModal');
+const sendPersonalityModalTitle = document.getElementById('sendPersonalityModalTitle');
+const sendPersonalityTargetUsername = document.getElementById('sendPersonalityTargetUsername');
+const sendPersonalityStatus = document.getElementById('sendPersonalityStatus');
+const sendPersonalityIdInput = document.getElementById('sendPersonalityIdInput');
+const confirmSendPersonalityBtn = document.getElementById('confirmSendPersonalityBtn');
+
+
+let currentDmPartner = null; // { userId, username }
+let dmConversationsCache = [];
+
 // --- Helper: Check if element is in DOM ---
 function isElementInDocument(element) {
     return element && document.body.contains(element);
 }
 
+function toggleRagGraphResponseTypeVisibility() {
+    if (settingsRagUseGraph && ragGraphResponseTypeContainer) {
+        ragGraphResponseTypeContainer.style.display = settingsRagUseGraph.checked ? 'block' : 'none';
+    }
+}
 // --- Localization Functions (translate, updateUIText, etc.) ---
 // These functions are assumed to be mostly correct from your existing code.
 // Ensure `translate` is robust for missing keys and uses fallbacks.
@@ -376,7 +458,8 @@ window.onload = async () => {
     if (userMenuToggleBtn) userMenuToggleBtn.addEventListener('click', toggleUserMenu);
     document.addEventListener('click', handleClickOutsideUserMenu);
     if (discussionSearchInput) discussionSearchInput.addEventListener('input', renderDiscussionList);
-
+    if (friendsMessagesBtn) friendsMessagesBtn.onclick = () => openFriendsMessagesModal();
+    
     // Event listeners from your original code
     if (confirmRenameBtn) confirmRenameBtn.onclick = confirmInlineRename;
     if (confirmSendDiscussionBtn) confirmSendDiscussionBtn.onclick = confirmSendDiscussion;
@@ -386,6 +469,37 @@ window.onload = async () => {
     if (loginPasswordInput) loginPasswordInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleLoginAttempt(); });
     if (createDataStoreForm) createDataStoreForm.addEventListener('submit', handleCreateDataStore);
     if (changePasswordBtn) changePasswordBtn.onclick = handleChangePassword;
+
+    // For Profile Tab
+    if (settingsFirstName) settingsFirstName.oninput = () => { if(saveProfileBtn) saveProfileBtn.disabled = false; };
+    if (settingsFamilyName) settingsFamilyName.oninput = () => { if(saveProfileBtn) saveProfileBtn.disabled = false; };
+    if (settingsEmail) settingsEmail.oninput = () => { if(saveProfileBtn) saveProfileBtn.disabled = false; };
+    if (settingsBirthDate) settingsBirthDate.oninput = () => { if(saveProfileBtn) saveProfileBtn.disabled = false; };
+    if (saveProfileBtn) saveProfileBtn.onclick = handleSaveProfile;
+
+    // For Personalities Tab
+    if (settingsActivePersonality) settingsActivePersonality.onchange = () => { if(saveActivePersonalityBtn) saveActivePersonalityBtn.disabled = false; };
+    if (saveActivePersonalityBtn) saveActivePersonalityBtn.onclick = handleSaveActivePersonality;
+    if (createNewPersonalityBtn) createNewPersonalityBtn.onclick = () => openPersonalityEditor(null); // null for new
+    if (savePersonalityBtn) savePersonalityBtn.onclick = handleSavePersonality;
+    if (personalityIconUpload) personalityIconUpload.onchange = handlePersonalityIconChange;
+
+
+    // For LLM Params Tab (put_thoughts_in_context)
+    if (settingsPutThoughts) settingsPutThoughts.onchange = () => { if(saveLLMParamsBtn) saveLLMParamsBtn.disabled = false; };
+    if (confirmSendPersonalityBtn) confirmSendPersonalityBtn.onclick = handleConfirmSendPersonality;
+
+    // For RAG Params Tab
+    if (settingsRagTopK) settingsRagTopK.oninput = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
+    if (settingsRagUseGraph) {
+        settingsRagUseGraph.onchange = () => { 
+            if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; 
+            toggleRagGraphResponseTypeVisibility(); // Call on change
+        };
+    }
+    if (settingsRagGraphResponseType) settingsRagGraphResponseType.onchange = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
+    if (settingsDefaultVectorizer) settingsDefaultVectorizer.onchange = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
+    if (saveRagParamsBtn) saveRagParamsBtn.onclick = handleSaveRagParams;  
     
     const sidebarLogoutBtn = document.getElementById('sidebarLogoutBtn');
     if (sidebarLogoutBtn) sidebarLogoutBtn.onclick = handleLogout;
@@ -403,7 +517,242 @@ window.onload = async () => {
     }
     if (sendMessageBtn) sendMessageBtn.onclick = () => sendMessage(); // Ensure it calls with no args for new message
     if (stopGenerationBtn) stopGenerationBtn.onclick = stopGeneration;
+    
+    document.querySelectorAll('#friendsMessagesModal .friends-messages-tab-btn').forEach(button => {
+        button.addEventListener('click', () => handleFriendsMessagesTabSwitch(button.dataset.tab));
+    });
+    if (sendFriendRequestBtn) sendFriendRequestBtn.onclick = handleSendFriendRequest;
+    if (dmSearchUsersInput) {
+        dmSearchUsersInput.addEventListener('input', debounce(handleDmUserSearch, 300));
+        dmSearchUsersInput.addEventListener('focus', () => { if(dmSearchResults.children.length > 0) dmSearchResults.classList.remove('hidden'); });
+    }
+    // Hide search results when clicking outside
+    document.addEventListener('click', (event) => {
+        if (dmSearchUsersInput && dmSearchResults && !dmSearchUsersInput.contains(event.target) && !dmSearchResults.contains(event.target)) {
+            dmSearchResults.classList.add('hidden');
+        }
+    });
+    if (sendDirectMessageBtn) sendDirectMessageBtn.onclick = handleSendDirectMessage;
+    if (directMessageInput) directMessageInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSendDirectMessage();
+        }
+    });
 
+    function debounce(func, delay) {
+    let timeout;
+    return function(...args) {
+        const context = this;
+        clearTimeout(timeout);
+        timeout = setTimeout(() => func.apply(context, args), delay);
+    };
+}
+
+async function handleDmUserSearch() {
+    const query = dmSearchUsersInput.value.trim().toLowerCase();
+    if (query.length < 2) { // Minimum characters to search
+        dmSearchResults.innerHTML = '';
+        dmSearchResults.classList.add('hidden');
+        return;
+    }
+
+    // For now, search within existing friends list.
+    // A proper backend search endpoint /api/users/search?q=... would be better.
+    const matchingFriends = availableDataStoresForRag // Re-using this for now, should be actual friends list
+        .filter(user => user.username.toLowerCase().includes(query) && user.username !== currentUser.username)
+        .slice(0, 5); // Limit results
+
+    dmSearchResults.innerHTML = '';
+    if (matchingFriends.length > 0) {
+        matchingFriends.forEach(user => {
+            const item = document.createElement('div');
+            item.className = 'p-2 hover:bg-gray-600 cursor-pointer text-sm';
+            item.textContent = user.username;
+            item.onclick = () => {
+                openDmChatWithUser(user.id, user.username); // Pass ID and username
+                dmSearchUsersInput.value = '';
+                dmSearchResults.classList.add('hidden');
+            };
+            dmSearchResults.appendChild(item);
+        });
+        dmSearchResults.classList.remove('hidden');
+    } else {
+        dmSearchResults.innerHTML = `<div class="p-2 text-xs text-gray-400">${translate('dm_no_users_found_search', 'No users found.')}</div>`;
+        dmSearchResults.classList.remove('hidden'); // Show "no users found"
+    }
+}
+
+
+async function loadDmConversations() {
+    if (!dmConversationsList) return;
+    dmConversationsList.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="dm_loading_conversations">Loading conversations...</p>`;
+    try {
+        const response = await apiRequest('/api/dm/conversations');
+        dmConversationsCache = await response.json(); // Expects List of conversation summaries
+        renderDmConversationsList();
+    } catch (error) {
+        dmConversationsList.innerHTML = `<p class="italic text-sm text-red-400">${translate('dm_error_loading_conversations', 'Failed to load conversations.')}</p>`;
+    }
+}
+
+function renderDmConversationsList() {
+    dmConversationsList.innerHTML = '';
+    if (dmConversationsCache.length === 0) {
+        dmConversationsList.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="dm_no_conversations_placeholder">No active conversations. Search for a user to start one.</p>`;
+        return;
+    }
+    dmConversationsCache.forEach(convo => {
+        const convoDiv = document.createElement('div');
+        convoDiv.className = `p-2 rounded-md cursor-pointer hover:bg-gray-700 transition-colors ${currentDmPartner && currentDmPartner.userId === convo.partner_user_id ? 'bg-gray-700' : 'bg-gray-750'}`;
+        convoDiv.onclick = () => openDmChatWithUser(convo.partner_user_id, convo.partner_username);
+
+        const header = document.createElement('div');
+        header.className = 'flex justify-between items-center mb-1';
+        const partnerName = document.createElement('span');
+        partnerName.className = 'font-semibold text-sm';
+        partnerName.textContent = convo.partner_username;
+        const lastMsgTime = document.createElement('span');
+        lastMsgTime.className = 'text-xs text-gray-400';
+        lastMsgTime.textContent = convo.last_message_sent_at ? formatTimestamp(new Date(convo.last_message_sent_at)) : '';
+        header.appendChild(partnerName);
+        header.appendChild(lastMsgTime);
+
+        const preview = document.createElement('p');
+        preview.className = 'text-xs text-gray-300 truncate';
+        preview.textContent = convo.last_message_content || translate('dm_no_messages_yet_preview', 'No messages yet.');
+        
+        if (convo.unread_count > 0) {
+            const unreadBadge = document.createElement('span');
+            unreadBadge.className = 'ml-2 bg-red-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5';
+            unreadBadge.textContent = convo.unread_count > 9 ? '9+' : convo.unread_count;
+            partnerName.appendChild(unreadBadge); // Append to name for visibility
+        }
+
+        convoDiv.appendChild(header);
+        convoDiv.appendChild(preview);
+        dmConversationsList.appendChild(convoDiv);
+    });
+    updateUIText();
+}
+
+async function openDmChatWithUser(partnerUserId, partnerUsername) {
+    currentDmPartner = { userId: partnerUserId, username: partnerUsername };
+    
+    dmChatArea.classList.remove('hidden');
+    dmNoConversationSelected.classList.add('hidden');
+    dmNoConversationSelected.style.display = 'none';
+
+
+    if(dmChatHeader) dmChatHeader.textContent = translate('dm_chatting_with_header', `Chat with ${partnerUsername}`, {username: partnerUsername});
+    if(dmChatMessages) dmChatMessages.innerHTML = `<p class="italic text-sm text-gray-500 text-center py-10" data-translate-key="dm_loading_messages_placeholder">Loading messages...</p>`;
+    if(directMessageInput) directMessageInput.value = '';
+    showStatus('', 'info', dmSendStatus);
+
+    // Highlight selected conversation in the list
+    renderDmConversationsList(); // Re-render to highlight
+
+    try {
+        // Mark conversation as read on the backend when opening
+        await apiRequest(`/api/dm/conversation/${partnerUserId}/mark_read`, { method: 'POST' });
+        // Update unread count in cache and re-render list
+        const convoInCache = dmConversationsCache.find(c => c.partner_user_id === partnerUserId);
+        if (convoInCache) {
+            convoInCache.unread_count = 0;
+            renderDmConversationsList(); // Re-render to remove badge
+        }
+
+
+        const response = await apiRequest(`/api/dm/conversation/${partnerUserId}`);
+        const messages = await response.json(); // Expects List[DirectMessagePublic]
+        renderDirectMessages(messages);
+    } catch (error) {
+        if(dmChatMessages) dmChatMessages.innerHTML = `<p class="italic text-sm text-red-400 text-center py-10">${translate('dm_error_loading_messages', 'Failed to load messages.')}</p>`;
+    }
+}
+
+function renderDirectMessages(messages) {
+    dmChatMessages.innerHTML = '';
+    if (messages.length === 0) {
+        dmChatMessages.innerHTML = `<p class="italic text-sm text-gray-400 text-center py-10" data-translate-key="dm_no_messages_in_conversation">No messages in this conversation yet. Say hello!</p>`;
+        updateUIText();
+        return;
+    }
+    messages.forEach(msg => {
+        const msgDiv = document.createElement('div');
+        const isSender = msg.sender_id === currentUser.id;
+        msgDiv.className = `dm-message-bubble ${isSender ? 'sent' : 'received'}`;
+        
+        const contentP = document.createElement('p');
+        contentP.textContent = msg.content; // Add Markdown parsing later if needed
+        
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'dm-message-timestamp';
+        timeSpan.textContent = formatTimestamp(new Date(msg.sent_at));
+        
+        msgDiv.appendChild(contentP);
+        msgDiv.appendChild(timeSpan);
+        dmChatMessages.appendChild(msgDiv);
+    });
+    dmChatMessages.scrollTop = dmChatMessages.scrollHeight; // Scroll to bottom
+}
+
+async function handleSendDirectMessage() {
+    if (!currentDmPartner || !directMessageInput || !sendDirectMessageBtn) return;
+    const content = directMessageInput.value.trim();
+    if (!content) return;
+
+    sendDirectMessageBtn.disabled = true;
+    directMessageInput.disabled = true;
+    showStatus(translate('dm_sending_message_status', 'Sending...'), 'info', dmSendStatus);
+
+    try {
+        const payload = {
+            receiver_user_id: currentDmPartner.userId,
+            content: content
+        };
+        const response = await apiRequest('/api/dm/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            statusElement: dmSendStatus
+        });
+        const newDm = await response.json(); // DirectMessagePublic
+
+        // Add to local messages and re-render
+        const currentChatMessages = Array.from(dmChatMessages.querySelectorAll('.dm-message-bubble')).map(el => ({
+            // This is a simplification; ideally, you'd have a proper local cache of DMs
+            // For now, just append and re-render this message
+        }));
+         // A bit hacky, ideally fetch full conversation or have a proper local store
+        const tempMessagesForRender = [];
+        dmChatMessages.querySelectorAll('.dm-message-bubble').forEach(bubble => {
+            // This is not ideal, we don't have the full message objects here.
+            // For a quick append, we'll just add the new one.
+            // A robust solution would fetch the conversation again or manage a local array.
+        });
+        renderDirectMessages([...tempMessagesForRender, newDm]); // This will clear and re-render, not ideal for just one new message
+        
+        // Better: Append directly
+        // const msgForRender = { // Construct object similar to what renderDirectMessages expects
+        //    id: newDm.id, sender_id: newDm.sender_id, content: newDm.content, sent_at: newDm.sent_at
+        // };
+        // appendSingleDirectMessage(msgForRender); // You'd need this helper
+
+        directMessageInput.value = '';
+        showStatus('', 'info', dmSendStatus);
+
+        // Refresh conversation list to update last message preview
+        await loadDmConversations();
+
+    } catch (error) {
+        // apiRequest shows error in dmSendStatus
+    } finally {
+        sendDirectMessageBtn.disabled = false;
+        directMessageInput.disabled = false;
+    }
+}
+    
     // RAG Toggle
     if (ragToggleBtn) ragToggleBtn.onclick = () => {
         if (availableDataStoresForRag.length === 0) {
@@ -1675,20 +2024,45 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     // Action Buttons (Copy, Edit, Delete, Resend)
     if (!messageId.startsWith('temp-')) { // Don't show for temporary messages
         const actionsGroup = document.createElement('div');
-        actionsGroup.className = 'message-actions'; // Group for standard buttons
+        actionsGroup.className = 'message-actions'; 
 
         actionsGroup.appendChild(createActionButton('copy', translate('copy_content_tooltip'), () => {
             navigator.clipboard.writeText(message.content || "").then(() => showStatus(translate('status_content_copied', "Content copied!"), "success")).catch(err => showStatus(translate('status_copy_failed', "Copy failed."), "error"));
         }));
-        actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip'), () => initiateEditMessage(messageId, message.branch_id)));
         
-        if (bubbleClass === 'user-bubble') { // Resend/Branch button specific to user messages
-            actionsGroup.appendChild(createActionButton('refresh', translate('resend_branch_tooltip', 'Resend/Branch'), () => initiateBranch(message.discussion_id, messageId)));
-        } else if (bubbleClass === 'ai-bubble') { // Regenerate for AI messages
-            actionsGroup.appendChild(createActionButton('refresh', translate('regenerate_message_tooltip'), () => regenerateMessage(messageId, message.branch_id)));
+        // Ensure message.branch_id is available. If messages are loaded from an older backend without it,
+        // default to 'main' or handle appropriately.
+        actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip'), () => initiateEditMessage(messageId, currentMessageBranchId)));
+        
+        const currentMessageBranchId = message.branch_id || activeBranchId || 'main'; // Ensure we have a branch_id
+
+        if (bubbleClass === 'user-bubble') { 
+            actionsGroup.appendChild(
+                createActionButton(
+                    'refresh', 
+                    translate('resend_branch_tooltip', 'Resend/Branch from this message'), 
+                    (e) => { // Add event arg
+                        e.stopPropagation(); // Prevent event bubbling
+                        console.log('Resend/Branch clicked for user message:', message.id, 'in discussion:', message.discussion_id);
+                        initiateBranch(message.discussion_id, message.id); 
+                    }
+                )
+            );
+        } else if (bubbleClass === 'ai-bubble') { 
+            actionsGroup.appendChild(
+                createActionButton(
+                    'refresh', 
+                    translate('regenerate_message_tooltip', 'Regenerate this AI response'),
+                    (e) => { // Add event arg
+                        e.stopPropagation();
+                        console.log('Regenerate clicked for AI message:', message.id, 'on branch:', currentMessageBranchId);
+                        regenerateMessage(message.id, currentMessageBranchId);
+                    }
+                )
+            );
         }
 
-        actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip'), () => deleteMessage(messageId, message.branch_id), 'destructive'));
+        actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip'), () => deleteMessage(messageId, currentMessageBranchId), 'destructive'));
         actionsAndRatingContainer.appendChild(actionsGroup);
     }
 
@@ -2282,61 +2656,78 @@ async function updateDiscussionRagStoreOnBackend(discussionId, ragDatastoreId) {
 
 // --- Branching Logic ---
 async function initiateBranch(discussionId, userMessageIdToBranchFrom) {
+    console.log(`initiateBranch called for discussion: ${discussionId}, branching from message: ${userMessageIdToBranchFrom}, current activeBranchId: ${activeBranchId}`);
     if (!discussionId || !userMessageIdToBranchFrom || generationInProgress) return;
+    
     const disc = discussions[discussionId];
-    if (!disc || !disc.branches || !disc.branches[activeBranchId]) { // Branch from current active branch
-        console.error("initiateBranch: Discussion or current active branch not found."); return;
+    if (!disc) {
+        console.error("initiateBranch: Discussion not found:", discussionId); return;
     }
 
+    // We need to find the message in its original branch to get its content and history.
+    // This assumes userMessageIdToBranchFrom is globally unique or we know its original branch.
+    // For simplicity, let's assume we branch from the currently active branch.
+    if (!disc.branches || !disc.branches[activeBranchId]) {
+        console.error("initiateBranch: Active branch not found in discussion:", activeBranchId, disc); return;
+    }
     const sourceBranchMessages = disc.branches[activeBranchId];
     const userMessageIndex = sourceBranchMessages.findIndex(msg => msg.id === userMessageIdToBranchFrom);
-
+    console.log("Source branch messages:", JSON.parse(JSON.stringify(sourceBranchMessages))); // Log a copy
+    console.log(`User message index for branching: ${userMessageIndex}`);
     if (userMessageIndex === -1) {
-        console.error("initiateBranch: User message to branch from not found in active branch."); return;
+        console.error("initiateBranch: User message to branch from not found in active branch:", userMessageIdToBranchFrom); return;
     }
     const userMessageToResend = sourceBranchMessages[userMessageIndex];
-     if (!userMessageToResend || (userMessageToResend.sender !== currentUser.username && userMessageToResend.sender !== "User" && userMessageToResend.sender !== translate('sender_you', 'You'))) { // Simple check
-        showStatus(translate('status_can_only_branch_from_user_prompts', "Can only branch from your own prompts."), "warning"); return;
+
+    // Ensure it's a user message
+    const userNamesForCheck = [currentUser.username, 'User', 'user', translate('sender_you', 'You')];
+    if (!userNamesForCheck.includes(userMessageToResend.sender)) {
+        showStatus(translate('status_can_only_branch_from_user_prompts', "Can only branch/resend from your own prompts."), "warning");
+        return;
     }
 
+    // 1. Create a new client-side branch ID
     const newBranchId = `branch-${Date.now()}`;
-    showStatus(translate('status_creating_branch', `Creating new branch "${newBranchId}"...`, { branch_id: newBranchId }), 'info');
+    showStatus(translate('status_creating_branch', `Creating new branch "${newBranchId.substring(7,12)}"...`), 'info');
 
-    // Create new branch with messages up to and including the user message
+    // 2. Copy messages from the source branch up to (and including) the message being branched from
+    //    into the new branch. These messages in the new branch should get the newBranchId.
     disc.branches[newBranchId] = sourceBranchMessages.slice(0, userMessageIndex + 1).map(msg => ({
-        ...msg,
-        branch_id: newBranchId // Ensure all messages in the new branch have the new branch_id
+        ...msg, // Copy all properties
+        branch_id: newBranchId, // Assign to the new branch
+        // Reset grades or other per-branch states if necessary
+        user_grade: 0, 
+        // Steps and metadata might also need to be cleared or re-evaluated for a new branch
+        steps: [], 
+        metadata: [] 
     }));
 
-    // If backend supports branches, tell it to switch. Otherwise, it's client-side only.
-    if (backendCapabilities.supportsBranches) {
-        try {
-            await apiRequest(`/api/discussions/${discussionId}/active_branch`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ active_branch_id: newBranchId })
-            });
-            disc.activeBranchId = newBranchId;
-        } catch (error) {
-            showStatus(translate('status_failed_to_set_active_branch_backend', "Failed to set active branch on server. Branching client-side only."), "warning");
-            // Proceed with client-side branching even if backend fails to set active
-            disc.activeBranchId = newBranchId; // Still set locally
-        }
-    } else {
-        disc.activeBranchId = newBranchId; // Client-side switch
-    }
-    activeBranchId = newBranchId; // Update global
-    currentMessages = disc.branches[newBranchId];
+    // 3. Set the new branch as active (client-side)
+    disc.activeBranchId = newBranchId;
+    activeBranchId = newBranchId; // Update global active branch
+    currentMessages = disc.branches[newBranchId]; // Point to the new branch's messages
 
-    renderMessages(currentMessages);
+    // 4. Update UI: Render the messages of the new branch and update tabs
+    renderMessages(currentMessages); // Shows history up to the resent message
     renderBranchTabsUI(discussionId);
+    scrollChatToBottom(false); // Scroll to the (now last) user message
 
+    // 5. Prepare payload for sendMessage to "resend" the user's prompt on this new branch
     const resendPayload = {
         prompt: userMessageToResend.content,
-        image_server_paths: userMessageToResend.server_image_paths || userMessageToResend.image_references || [] // Prefer server_image_paths
+        // If the original user message had images, include their server_paths
+        image_server_paths: userMessageToResend.server_image_paths || 
+                            (userMessageToResend.image_references && userMessageToResend.image_references.length > 0 ? 
+                                userMessageToResend.image_references.map(ref => {
+                                    // Convert client-side display URL back to server_path if possible
+                                    // This is tricky if only display URLs are stored.
+                                    // Assume server_image_paths was stored on the original message object.
+                                    // If not, this part needs a robust way to get original server paths.
+                                    // For now, if server_image_paths isn't there, we can't easily resend images.
+                                    return ref; // This might be a display URL, backend might not handle it.
+                                }) : []) 
     };
-    // Call sendMessage, it will use the new `activeBranchId`
-    await sendMessage(userMessageIdToBranchFrom, resendPayload);
+    await sendMessage(userMessageIdToBranchFrom, resendPayload, true /* isBranchingAction */);
 }
 
 function renderBranchTabsUI(discussionId) {
@@ -3283,6 +3674,7 @@ async function handleSaveLLMParams() {
         llm_top_p: parseFloat(settingsTopP.value) || null,
         llm_repeat_penalty: parseFloat(settingsRepeatPenalty.value) || null,
         llm_repeat_last_n: parseInt(settingsRepeatLastN.value) || null,
+        put_thoughts_in_context: settingsPutThoughts.checked,
     };
     // Filter out null/NaN values before sending, backend might expect only present values
     const payload = Object.fromEntries(Object.entries(params).filter(([_, v]) => v !== null && !isNaN(v)));
@@ -3373,26 +3765,58 @@ async function handleChangePassword() {
     }
 }
 
-function populateSettingsModal() {
-        populateDropdown(settingsLollmsModelSelect, availableLollmsModels, currentUser.lollms_model_name, translate('settings_no_models_found'));
-        saveModelAndVectorizerBtn.disabled = true;
-        showStatus('', 'info', settingsStatus_llmConfig);
-        
-        settingsTemperature.value = currentUser.llm_temperature ?? '';
-        settingsTopK.value = currentUser.llm_top_k ?? '';
-        settingsTopP.value = currentUser.llm_top_p ?? '';
-        settingsRepeatPenalty.value = currentUser.llm_repeat_penalty ?? '';
-        settingsRepeatLastN.value = currentUser.llm_repeat_last_n ?? '';
-        saveLLMParamsBtn.disabled = true;
-        showStatus('', 'info', settingsStatus_llmParams);
+async function populateSettingsModal() {
+    if (!currentUser) return;
+    populateDropdown(settingsLollmsModelSelect, availableLollmsModels, currentUser.lollms_model_name, translate('settings_no_models_found'));
+    saveModelAndVectorizerBtn.disabled = true;
+    showStatus('', 'info', settingsStatus_llmConfig);
+    
+    // LLM Parameters Tab
+    if(settingsTemperature) settingsTemperature.value = currentUser.llm_temperature ?? '';
+    if(settingsTopK) settingsTopK.value = currentUser.llm_top_k ?? '';
+    if(settingsTopP) settingsTopP.value = currentUser.llm_top_p ?? '';
+    if(settingsRepeatPenalty) settingsRepeatPenalty.value = currentUser.llm_repeat_penalty ?? '';
+    if(settingsRepeatLastN) settingsRepeatLastN.value = currentUser.llm_repeat_last_n ?? '';
+    if(settingsPutThoughts) settingsPutThoughts.checked = currentUser.put_thoughts_in_context || false; // New
+    if(saveLLMParamsBtn) saveLLMParamsBtn.disabled = true;
+    showStatus('', 'info', settingsStatus_llmParams);
 
-        settingsCurrentPassword.value = '';
-        settingsNewPassword.value = '';
-        settingsConfirmPassword.value = '';
-        changePasswordBtn.disabled = true;
-        showStatus('', 'info', passwordChangeStatus);
-        
-        handleSettingsTabSwitch('llmConfigTab');
+    // Profile Tab
+    if(settingsFirstName) settingsFirstName.value = currentUser.first_name || '';
+    if(settingsFamilyName) settingsFamilyName.value = currentUser.family_name || '';
+    if(settingsEmail) settingsEmail.value = currentUser.email || '';
+    if(settingsBirthDate) settingsBirthDate.value = currentUser.birth_date || ''; // Format: YYYY-MM-DD
+    if(saveProfileBtn) saveProfileBtn.disabled = true;
+    showStatus('', 'info', settingsStatus_profile);
+
+    // Personalities Tab
+    await loadAndPopulatePersonalitiesTab(); // New function
+    if(saveActivePersonalityBtn) saveActivePersonalityBtn.disabled = true;
+    showStatus('', 'info', settingsStatus_personalities);
+
+
+    // RAG Parameters Tab
+    if(settingsRagTopK) settingsRagTopK.value = currentUser.rag_top_k ?? '';
+    if(settingsRagUseGraph) settingsRagUseGraph.checked = currentUser.rag_use_graph || false;
+    if(settingsRagGraphResponseType) settingsRagGraphResponseType.value = currentUser.rag_graph_response_type || 'chunks_summary';
+
+    toggleRagGraphResponseTypeVisibility();
+
+    if(settingsDefaultVectorizer) { // NEW check and element
+        populateDropdown(settingsDefaultVectorizer, availableVectorizers, currentUser.safe_store_vectorizer, translate('settings_vectorizer_loading')); // Changed placeholder
+    }
+    if(saveRagParamsBtn) saveRagParamsBtn.disabled = true;
+    showStatus('', 'info', settingsStatus_ragParams);
+
+
+    // Account Tab (Password)
+    if(settingsCurrentPassword) settingsCurrentPassword.value = '';
+    if(settingsNewPassword) settingsNewPassword.value = '';
+    if(settingsConfirmPassword) settingsConfirmPassword.value = '';
+    if(changePasswordBtn) changePasswordBtn.disabled = true;
+    showStatus('', 'info', passwordChangeStatus);
+    
+    handleSettingsTabSwitch('llmConfigTab'); // Default to first tab or a preferred one
 }
 
 
@@ -3516,3 +3940,909 @@ function populateDropdown(selectElement, items, selectedValue, emptyText = "Noth
     else { items.forEach(item => { if (!item || typeof item.name !== 'string') { return; } const option = document.createElement('option'); option.value = item.name; option.textContent = item.method_name || item.name; if (item.name === selectedValue) { option.selected = true; } selectElement.appendChild(option); }); }
 }
 
+async function handleSaveProfile() {
+    if (!currentUser || !saveProfileBtn) return;
+    const payload = {
+        first_name: settingsFirstName.value || null,
+        family_name: settingsFamilyName.value || null,
+        email: settingsEmail.value || null,
+        birth_date: settingsBirthDate.value || null,
+    };
+    showStatus(translate('status_saving_profile', 'Saving profile...'), 'info', settingsStatus_profile);
+    saveProfileBtn.disabled = true;
+    try {
+        // API endpoint: PUT /api/users/me/profile (or similar)
+        const response = await apiRequest('/api/auth/me', { // CORRECTED URL
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            statusElement: settingsStatus_profile // Or the relevant status element
+        });
+        const updatedUser = await response.json(); // Backend should return updated UserAuthDetails or UserPublic
+        Object.assign(currentUser, updatedUser); // Update local currentUser
+        // Update usernameDisplay if first/last name is used there
+        if (usernameDisplay && currentUser.first_name) usernameDisplay.textContent = `${currentUser.first_name} (${currentUser.username})`;
+        else if (usernameDisplay) usernameDisplay.textContent = currentUser.username;
+
+        showStatus(translate('status_profile_saved_success', 'Profile saved successfully.'), 'success', settingsStatus_profile);
+    } catch (error) { /* apiRequest handles status */
+    } finally {
+        saveProfileBtn.disabled = true; // Disable again after attempt
+    }
+}
+
+async function handleSaveActivePersonality() {
+    if (!currentUser || !saveActivePersonalityBtn) return;
+    const selectedPersonalityId = settingsActivePersonality.value || null;
+    
+    showStatus(translate('status_saving_active_personality', 'Saving active personality...'), 'info', settingsStatus_personalities);
+    saveActivePersonalityBtn.disabled = true;
+    try {
+        const response = await apiRequest('/api/auth/me', { // CORRECTED URL
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ active_personality_id: selectedPersonalityId }),
+            statusElement: settingsStatus_personalities
+        });
+        const updatedUser = await response.json();
+        currentUser.active_personality_id = updatedUser.active_personality_id;
+        // If the active personality changed, you might need to update the session prompt in JS too
+        // or rely on the backend to have updated it and the next /me call to reflect it.
+        // For immediate effect:
+        if (updatedUser.active_personality_id) {
+            const activePers = [...userPersonalitiesCache, ...publicPersonalitiesCache].find(p => p.id === updatedUser.active_personality_id);
+            if (activePers) {
+                // This assumes the full personality object is cached client-side
+                // A more robust way would be to fetch the prompt if not already available
+                // Or the backend could return the new prompt text as part of UserAuthDetails
+                // For now, let's assume the frontend needs to manage this if not returned by /api/auth/me
+            }
+        } else {
+            // Clear active personality prompt if it was unset
+        }
+
+        showStatus(translate('status_active_personality_saved_success', 'Active personality saved.'), 'success', settingsStatus_personalities);
+    } catch (error) { /* apiRequest handles status */
+    } finally {
+        saveActivePersonalityBtn.disabled = true;
+    }
+}
+
+async function handleSaveRagParams() {
+    if (!currentUser || !saveRagParamsBtn) return;
+    const payload = {
+        rag_top_k: parseInt(settingsRagTopK.value) || null,
+        rag_use_graph: settingsRagUseGraph.checked,
+        rag_graph_response_type: settingsRagGraphResponseType.value,
+        safe_store_vectorizer: settingsDefaultVectorizer ? settingsDefaultVectorizer.value : currentUser.safe_store_vectorizer 
+    };
+    showStatus(translate('status_saving_rag_params', 'Saving RAG parameters...'), 'info', settingsStatus_ragParams);
+    saveRagParamsBtn.disabled = true;
+    try {
+        // API endpoint: PUT /api/users/me/settings (or similar)
+        const response = await apiRequest('/api/users/me', { // Assuming general update endpoint
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            statusElement: settingsStatus_ragParams
+        });
+        const updatedUser = await response.json();
+        Object.assign(currentUser, updatedUser); // Update local currentUser
+        userDefaultVectorizer = currentUser.safe_store_vectorizer; // Update global if changed
+        showStatus(translate('status_rag_params_saved_success', 'RAG parameters saved.'), 'success', settingsStatus_ragParams);
+    } catch (error) { /* apiRequest handles status */
+    } finally {
+        saveRagParamsBtn.disabled = true;
+    }
+}
+
+// --- Personality Management Functions (Stubs) ---
+let userPersonalitiesCache = [];
+let publicPersonalitiesCache = [];
+
+
+async function loadAndPopulatePersonalitiesTab() {
+    if (!settingsActivePersonality || !userPersonalitiesList || !publicPersonalitiesList) {
+        console.error("Personality tab elements not found.");
+        return;
+    }
+    
+    // Clear previous content and show loading state
+    settingsActivePersonality.innerHTML = `<option value="">${translate('settings_personalities_none_active', 'None (Default)')}</option>`;
+    userPersonalitiesList.innerHTML = `<p class="italic text-sm text-gray-400">${translate('loading_personalities_placeholder', 'Loading your personalities...')}</p>`;
+    publicPersonalitiesList.innerHTML = `<p class="italic text-sm text-gray-400">${translate('loading_personalities_placeholder', 'Loading public personalities...')}</p>`;
+    if(saveActivePersonalityBtn) saveActivePersonalityBtn.disabled = true; // Disable save until populated
+
+    try {
+        // Fetch user's owned personalities
+        const ownedResponse = await apiRequest('/api/personalities/my');
+        userPersonalitiesCache = await ownedResponse.json();
+        
+        // Fetch public personalities
+        const publicResponse = await apiRequest('/api/personalities/public');
+        publicPersonalitiesCache = await publicResponse.json();
+
+        // Populate active personality dropdown
+        // Combine owned and public, ensuring public ones are only added if not already "owned" by the user
+        // (though with UUIDs, an owned one shouldn't have the same ID as a system public one unless cloned with same ID, which is unlikely here)
+        
+        const activePersonalityOptions = [];
+        // Add user's personalities first
+        userPersonalitiesCache.forEach(p => {
+            activePersonalityOptions.push({ id: p.id, name: p.name, author: p.author || currentUser.username, is_owned: true });
+        });
+
+        // Add public personalities, avoiding duplicates by name if an owned one has the same name (user might have cloned)
+        // A better approach for "using" public ones might be just referencing their ID, not cloning by default.
+        publicPersonalitiesCache.forEach(pp => {
+            if (!userPersonalitiesCache.some(up => up.id === pp.id)) { // Check by ID for system personalities
+                 activePersonalityOptions.push({ id: pp.id, name: pp.name, author: pp.author || 'System', is_owned: false });
+            }
+        });
+        
+        activePersonalityOptions.sort((a, b) => a.name.localeCompare(b.name));
+
+        activePersonalityOptions.forEach(p => {
+            const option = document.createElement('option');
+            option.value = p.id;
+            let displayName = p.name;
+            if (!p.is_owned && p.author && p.author.toLowerCase() !== 'system') {
+                displayName += ` (${translate('personality_author_prefix', 'by')} ${p.author})`;
+            } else if (!p.is_owned) {
+                displayName += ` (${translate('personality_public_suffix', 'Public')})`;
+            }
+            option.textContent = displayName;
+            settingsActivePersonality.appendChild(option);
+        });
+
+        if (currentUser.active_personality_id) {
+            settingsActivePersonality.value = currentUser.active_personality_id;
+        } else {
+            settingsActivePersonality.value = ""; // Ensure "None" is selected if no active ID
+        }
+
+        renderUserPersonalitiesList(); // Uses userPersonalitiesCache
+        renderPublicPersonalitiesList(); // Uses publicPersonalitiesCache
+
+    } catch (error) {
+        console.error("Error loading personalities for tab:", error);
+        showStatus(translate('error_loading_personalities', 'Error loading personalities.'), 'error', settingsStatus_personalities);
+        userPersonalitiesList.innerHTML = `<p class="italic text-sm text-red-400">${translate('error_loading_personalities')}</p>`;
+        publicPersonalitiesList.innerHTML = `<p class="italic text-sm text-red-400">${translate('error_loading_personalities')}</p>`;
+    }
+}
+
+function renderUserPersonalitiesList() {
+    userPersonalitiesList.innerHTML = '';
+    if (userPersonalitiesCache.length === 0) {
+        userPersonalitiesList.innerHTML = `<p class="italic text-sm text-gray-400">${translate('no_user_personalities_placeholder', 'You have not created any personalities yet.')}</p>`;
+        return;
+    }
+    userPersonalitiesCache.sort((a,b) => a.name.localeCompare(b.name)).forEach(p => {
+        const item = createPersonalityListItem(p, true); // true for owned
+        userPersonalitiesList.appendChild(item);
+    });
+    updateUIText();
+}
+
+function renderPublicPersonalitiesList() {
+    publicPersonalitiesList.innerHTML = '';
+    if (publicPersonalitiesCache.length === 0) {
+        publicPersonalitiesList.innerHTML = `<p class="italic text-sm text-gray-400">${translate('no_public_personalities_placeholder', 'No public personalities available.')}</p>`;
+        return;
+    }
+    publicPersonalitiesCache.sort((a,b) => (a.category || '').localeCompare(b.category || '') || a.name.localeCompare(b.name)).forEach(p => {
+        // Only show public personalities that the user doesn't "own" (i.e., doesn't have a private copy with the same ID)
+        // System personalities have owner_user_id = null. If a user "clones" one, it gets their owner_user_id.
+        // The check `!userPersonalitiesCache.some(up => up.id === p.id)` is good if IDs are truly unique.
+        // For display, we just list all from publicPersonalitiesCache.
+        const item = createPersonalityListItem(p, false); // false for public
+        publicPersonalitiesList.appendChild(item);
+    });
+    updateUIText();
+}
+
+// Ensure createPersonalityListItem is robust for public personalities
+function createPersonalityListItem(p, isOwned) {
+    const div = document.createElement('div');
+    div.className = 'flex justify-between items-center py-1.5 px-2 hover:bg-gray-750 rounded text-sm transition-colors duration-150';
+    
+    const infoDiv = document.createElement('div');
+    infoDiv.className = 'flex items-center space-x-2 flex-grow min-w-0'; // min-w-0 for truncate
+
+    if (p.icon_base64) {
+        const iconImg = document.createElement('img');
+        iconImg.src = p.icon_base64;
+        iconImg.alt = ''; // Decorative
+        iconImg.className = 'w-6 h-6 rounded-sm flex-shrink-0 object-cover';
+        infoDiv.appendChild(iconImg);
+    } else {
+        // Placeholder icon if none provided
+        const placeholderIcon = document.createElement('div');
+        placeholderIcon.className = 'w-6 h-6 rounded-sm flex-shrink-0 bg-gray-600 flex items-center justify-center text-xs';
+        placeholderIcon.textContent = p.name.charAt(0).toUpperCase();
+        infoDiv.appendChild(placeholderIcon);
+    }
+
+    const textDiv = document.createElement('div');
+    textDiv.className = 'flex flex-col min-w-0'; // min-w-0 for truncate
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = p.name;
+    nameSpan.className = 'font-medium truncate';
+    nameSpan.title = p.name;
+    textDiv.appendChild(nameSpan);
+
+    if (p.category) {
+        const categorySpan = document.createElement('span');
+        categorySpan.textContent = p.category;
+        categorySpan.className = 'text-xs text-gray-400 truncate';
+        categorySpan.title = p.category;
+        textDiv.appendChild(categorySpan);
+    }
+    infoDiv.appendChild(textDiv);
+
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'space-x-1 flex-shrink-0 ml-2';
+
+    if (isOwned) {
+        const editBtn = createActionButton('edit', translate('edit_personality_tooltip'), () => openPersonalityEditor(p.id));
+        actionsDiv.appendChild(editBtn);
+        
+        const sendBtn = createActionButton('send', translate('send_personality_tooltip', 'Send to Friend'), () => openSendPersonalityModal(p.id, p.name));
+        actionsDiv.appendChild(sendBtn);
+
+        const deleteBtn = createActionButton('delete', translate('delete_personality_tooltip'), () => deletePersonality(p.id, p.name), 'destructive');
+        actionsDiv.appendChild(deleteBtn);
+    } else { // Public personality
+        const useBtn = document.createElement('button');
+        useBtn.textContent = translate('use_personality_btn', 'Use');
+        useBtn.className = 'btn btn-xs btn-secondary'; // Use secondary style
+        useBtn.title = translate('use_public_personality_tooltip', `Set "${p.name}" as active personality`);
+        useBtn.onclick = (e) => { 
+            e.stopPropagation();
+            settingsActivePersonality.value = p.id;
+            if(saveActivePersonalityBtn) saveActivePersonalityBtn.disabled = (settingsActivePersonality.value === (currentUser.active_personality_id || ""));
+            showStatus(translate('status_personality_selected_save_prompt', `Selected "${p.name}". Click "Save Active Personality" to apply.`), 'info', settingsStatus_personalities);
+        };
+        actionsDiv.appendChild(useBtn);
+        // Optional: "Clone to My Personalities" button
+        const cloneBtn = document.createElement('button');
+        cloneBtn.textContent = translate('clone_personality_btn', 'Clone');
+        cloneBtn.className = 'btn btn-xs btn-outline'; // Define btn-outline
+        cloneBtn.onclick = () => clonePublicPersonality(p.id);
+        actionsDiv.appendChild(cloneBtn);
+    }
+    div.appendChild(infoDiv);
+    div.appendChild(actionsDiv);
+    return div;
+}
+
+function openPersonalityEditor(personalityId) {
+    // Reset form
+    personalityEditorId.value = personalityId || '';
+    personalityName.value = '';
+    personalityCategory.value = '';
+    personalityAuthor.value = '';
+    personalityDescription.value = '';
+    personalityPromptText.value = '';
+    personalityDisclaimer.value = '';
+    personalityScriptCode.value = '';
+    personalityIconUpload.value = '';
+    personalityIconPreview.src = '#';
+    personalityIconPreview.classList.add('hidden');
+    personalityIconBase64.value = '';
+    showStatus('', 'info', personalityEditorStatus);
+
+    if (personalityId) {
+        personalityEditorTitle.textContent = translate('edit_personality_modal_title', 'Edit Personality');
+        const personality = userPersonalitiesCache.find(p => p.id === personalityId);
+        if (personality) {
+            personalityName.value = personality.name;
+            personalityCategory.value = personality.category || '';
+            personalityAuthor.value = personality.author || '';
+            personalityDescription.value = personality.description || '';
+            personalityPromptText.value = personality.prompt_text;
+            personalityDisclaimer.value = personality.disclaimer || '';
+            personalityScriptCode.value = personality.script_code || '';
+            if (personality.icon_base64) {
+                personalityIconPreview.src = personality.icon_base64;
+                personalityIconPreview.classList.remove('hidden');
+                personalityIconBase64.value = personality.icon_base64;
+            }
+        } else {
+            showStatus(translate('error_personality_not_found_for_edit', 'Error: Personality not found for editing.'), 'error', personalityEditorStatus);
+            return; // Don't open modal if data not found
+        }
+    } else {
+        personalityEditorTitle.textContent = translate('create_personality_modal_title', 'Create New Personality');
+    }
+    openModal('personalityEditorModal');
+}
+
+function handlePersonalityIconChange(event) {
+    const file = event.target.files[0];
+    if (file) {
+        if (file.size > 256 * 1024) { // Max 256KB for icon
+            showStatus(translate('error_icon_too_large', 'Icon image too large (max 256KB).'), 'error', personalityEditorStatus);
+            personalityIconUpload.value = ''; return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            personalityIconPreview.src = e.target.result;
+            personalityIconPreview.classList.remove('hidden');
+            personalityIconBase64.value = e.target.result; // This is data URL
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+async function handleSavePersonality() {
+    const id = personalityEditorId.value;
+    const payload = {
+        name: personalityName.value.trim(),
+        category: personalityCategory.value.trim() || null,
+        author: personalityAuthor.value.trim() || currentUser.username, // Default to current user
+        description: personalityDescription.value.trim() || null,
+        prompt_text: personalityPromptText.value.trim(),
+        disclaimer: personalityDisclaimer.value.trim() || null,
+        script_code: personalityScriptCode.value.trim() || null,
+        icon_base64: personalityIconBase64.value || null,
+        is_public: false // User created personalities are private by default
+    };
+
+    if (!payload.name || !payload.prompt_text) {
+        showStatus(translate('error_personality_name_prompt_required', 'Name and System Prompt are required.'), 'error', personalityEditorStatus);
+        return;
+    }
+
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? `/api/personalities/${id}` : '/api/personalities';
+
+    showStatus(translate(id ? 'status_saving_personality' : 'status_creating_personality', id ? 'Saving personality...' : 'Creating personality...'), 'info', personalityEditorStatus);
+    savePersonalityBtn.disabled = true;
+
+    try {
+        await apiRequest(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            statusElement: personalityEditorStatus
+        });
+        showStatus(translate(id ? 'status_personality_saved_success' : 'status_personality_created_success', id ? 'Personality saved.' : 'Personality created.'), 'success', personalityEditorStatus);
+        await loadAndPopulatePersonalitiesTab(); // Refresh lists
+        setTimeout(() => closeModal('personalityEditorModal'), 1000);
+    } catch (error) { /* apiRequest handles status */
+    } finally {
+        savePersonalityBtn.disabled = false;
+    }
+}
+
+async function deletePersonality(id, name) {
+    if (!confirm(translate('confirm_delete_personality', `Are you sure you want to delete personality "${name}"?`, { name: name }))) return;
+    
+    showStatus(translate('status_deleting_personality', `Deleting personality "${name}"...`, { name: name }), 'info', settingsStatus_personalities);
+    try {
+        await apiRequest(`/api/personalities/${id}`, { method: 'DELETE', statusElement: settingsStatus_personalities });
+        showStatus(translate('status_personality_deleted_success', 'Personality deleted.'), 'success', settingsStatus_personalities);
+        if (currentUser.active_personality_id === id) { // If deleted personality was active
+            currentUser.active_personality_id = null;
+            // Optionally, call backend to update user's active_personality_id to null
+            await apiRequest('/api/users/me', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ active_personality_id: null })
+            });
+        }
+        await loadAndPopulatePersonalitiesTab(); // Refresh lists
+    } catch (error) { /* apiRequest handles status */ }
+}
+
+// Function to load vectorizers (call this in initializeAppContent)
+async function loadAvailableVectorizers() {
+    if (!settingsDefaultVectorizer && !fileVectorizerSelect) return; 
+    
+    try {
+        const response = await apiRequest('/api/config/global-vectorizers'); // Call the new endpoint
+        availableVectorizers = await response.json();
+        console.log("Loaded available global vectorizers:", availableVectorizers);
+
+        if (settingsDefaultVectorizer) {
+            populateDropdown(settingsDefaultVectorizer, availableVectorizers, currentUser?.safe_store_vectorizer, translate('settings_vectorizer_select_default'));
+        }
+    } catch (error) {
+        console.error("Failed to load global vectorizers:", error);
+        availableVectorizers = [ // Provide a fallback list for UI
+            { name: "st:all-MiniLM-L6-v2", method_name: "all-MiniLM-L6-v2 (ST)" },
+            { name: "tfidf:default", method_name: "TF-IDF" }
+        ];
+        if (settingsDefaultVectorizer) {
+            populateDropdown(settingsDefaultVectorizer, availableVectorizers, currentUser?.safe_store_vectorizer, translate('settings_error_loading_vectorizers'));
+        }
+    }
+}
+
+function openFriendsMessagesModal() {
+    if (!currentUser) return;
+    userMenuDropdown.style.display = 'none'; // Close user menu
+    userMenuArrow.classList.remove('rotate-180');
+    
+    // Reset status messages
+    showStatus('', 'info', addFriendStatus);
+    
+    // Load initial data for the default tab (e.g., Friends List)
+    handleFriendsMessagesTabSwitch('friendsListTab'); // Switch to default tab
+    loadFriendsList();
+    loadPendingFriendRequests(); // Load requests to update badge even if not default tab
+
+    openModal('friendsMessagesModal');
+}
+
+function handleFriendsMessagesTabSwitch(tabId) {
+    document.querySelectorAll('#friendsMessagesModal .friends-messages-tab-content').forEach(content => {
+        content.style.display = 'none';
+    });
+    document.querySelectorAll('#friendsMessagesModal .friends-messages-tab-btn').forEach(button => {
+        button.classList.remove('active-tab');
+    });
+
+    const tabContent = document.getElementById(tabId);
+    const tabButton = document.querySelector(`#friendsMessagesModal .friends-messages-tab-btn[data-tab="${tabId}"]`);
+    
+    if(tabContent) tabContent.style.display = 'block';
+    if(tabButton) tabButton.classList.add('active-tab');
+
+    // Load data for the selected tab if not already loaded or needs refresh
+    if (tabId === 'friendsListTab') {
+        loadFriendsList();
+    } else if (tabId === 'friendRequestsTab') {
+        loadPendingFriendRequests();
+    } else if (tabId === 'directMessagesTab') {
+        dmChatArea.classList.add('hidden'); // Hide chat area initially
+        dmNoConversationSelected.classList.remove('hidden'); // Show placeholder
+        dmNoConversationSelected.style.display = 'flex'; // Ensure it's flex for centering
+        loadDmConversations();
+        if(dmSearchUsersInput) dmSearchUsersInput.value = '';
+        if(dmSearchResults) dmSearchResults.innerHTML = ''; dmSearchResults.classList.add('hidden');
+    }
+}
+
+
+
+
+async function handleSendFriendRequest() {
+    const targetUsername = addFriendInput.value.trim();
+    if (!targetUsername) {
+        showStatus(translate('error_friend_username_required', 'Username is required.'), 'error', addFriendStatus);
+        return;
+    }
+    showStatus(translate('status_sending_friend_request', `Sending request to ${targetUsername}...`, {username: targetUsername}), 'info', addFriendStatus);
+    sendFriendRequestBtn.disabled = true;
+    try {
+        await apiRequest('/api/friends/request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_username: targetUsername }),
+            statusElement: addFriendStatus
+        });
+        showStatus(translate('status_friend_request_sent_success', `Friend request sent to ${targetUsername}.`, {username: targetUsername}), 'success', addFriendStatus);
+        addFriendInput.value = '';
+        // Optionally, refresh pending sent requests if you display them
+    } catch (error) {
+        // apiRequest will show the error in addFriendStatus
+    } finally {
+        sendFriendRequestBtn.disabled = false;
+    }
+}
+
+async function loadFriendsList() {
+    if (!friendsListContainerFM) return;
+    friendsListContainerFM.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="loading_friends_list">Loading friends...</p>`;
+    try {
+        const response = await apiRequest('/api/friends');
+        const friends = await response.json(); // Expects List[FriendPublic]
+        renderFriendsList(friends);
+    } catch (error) {
+        friendsListContainerFM.innerHTML = `<p class="italic text-sm text-red-400">${translate('error_loading_friends_list', 'Failed to load friends list.')}</p>`;
+    }
+}
+
+function renderFriendsList(friends) {
+    friendsListContainerFM.innerHTML = '';
+    if (friends.length === 0) {
+        friendsListContainerFM.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="no_friends_yet_placeholder">You haven't added any friends yet.</p>`;
+        return;
+    }
+    friends.forEach(friend => {
+        const friendDiv = document.createElement('div');
+        friendDiv.className = 'flex items-center justify-between p-2 bg-gray-750 rounded-md hover:bg-gray-700 transition-colors';
+        
+        const friendInfo = document.createElement('div');
+        friendInfo.className = 'flex items-center space-x-2';
+        // Placeholder for avatar - you can generate one like in messages
+        const avatarPlaceholder = document.createElement('div');
+        avatarPlaceholder.className = 'w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-sm font-semibold';
+        avatarPlaceholder.textContent = friend.username.charAt(0).toUpperCase();
+        friendInfo.appendChild(avatarPlaceholder);
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = friend.username;
+        nameSpan.className = 'font-medium';
+        friendInfo.appendChild(nameSpan);
+        
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'space-x-2';
+
+        const messageBtn = createActionButton('chat_bubble', translate('message_friend_tooltip', `Message ${friend.username}`), () => openDirectMessage(friend.id, friend.username));
+        actionsDiv.appendChild(messageBtn);
+        
+        const unfriendBtn = createActionButton('person_remove', translate('unfriend_tooltip', `Unfriend ${friend.username}`), () => unfriendUser(friend.id, friend.username), 'destructive');
+        actionsDiv.appendChild(unfriendBtn);
+
+        // Optional: Block button directly in friend list
+        // const blockBtn = createActionButton('block', `Block ${friend.username}`, () => blockUser(friend.id, friend.username), 'destructive');
+        // actionsDiv.appendChild(blockBtn);
+
+        friendDiv.appendChild(friendInfo);
+        friendDiv.appendChild(actionsDiv);
+        friendsListContainerFM.appendChild(friendDiv);
+    });
+    updateUIText(); // Translate any new elements
+}
+
+// Modify createActionButton to include more icons if needed
+// e.g., 'chat_bubble', 'person_remove', 'block'
+
+async function loadPendingFriendRequests() {
+    if (!pendingRequestsContainer || !friendRequestsBadge) return;
+    pendingRequestsContainer.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="loading_pending_requests">Loading requests...</p>`;
+    try {
+        const response = await apiRequest('/api/friends/requests/pending');
+        const requests = await response.json(); // Expects List[FriendshipRequestPublic]
+        
+        if (requests.length > 0) {
+            friendRequestsBadge.textContent = requests.length > 9 ? '9+' : requests.length.toString();
+            friendRequestsBadge.classList.remove('hidden');
+        } else {
+            friendRequestsBadge.classList.add('hidden');
+        }
+        renderPendingRequests(requests);
+    } catch (error) {
+        pendingRequestsContainer.innerHTML = `<p class="italic text-sm text-red-400">${translate('error_loading_pending_requests', 'Failed to load friend requests.')}</p>`;
+        friendRequestsBadge.classList.add('hidden');
+    }
+}
+
+function renderPendingRequests(requests) {
+    pendingRequestsContainer.innerHTML = '';
+    if (requests.length === 0) {
+        pendingRequestsContainer.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="no_pending_friend_requests">No pending friend requests.</p>`;
+        return;
+    }
+    requests.forEach(req => {
+        const reqDiv = document.createElement('div');
+        reqDiv.className = 'flex items-center justify-between p-2 bg-gray-750 rounded-md';
+        
+        const reqInfo = document.createElement('span');
+        reqInfo.innerHTML = translate('friend_request_from_user', `Request from <strong class="font-semibold">${req.requesting_username}</strong>`, {username: req.requesting_username});
+        
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'space-x-2';
+        
+        const acceptBtn = document.createElement('button');
+        acceptBtn.className = 'btn btn-xs btn-success'; // Define btn-xs, btn-success
+        acceptBtn.textContent = translate('accept_btn', 'Accept');
+        acceptBtn.onclick = () => respondToFriendRequest(req.friendship_id, 'accept');
+        
+        const rejectBtn = document.createElement('button');
+        rejectBtn.className = 'btn btn-xs btn-danger'; // Define btn-xs, btn-danger
+        rejectBtn.textContent = translate('reject_btn', 'Reject');
+        rejectBtn.onclick = () => respondToFriendRequest(req.friendship_id, 'reject');
+        
+        actionsDiv.appendChild(acceptBtn);
+        actionsDiv.appendChild(rejectBtn);
+        
+        reqDiv.appendChild(reqInfo);
+        reqDiv.appendChild(actionsDiv);
+        pendingRequestsContainer.appendChild(reqDiv);
+    });
+    updateUIText(); // Translate any new elements
+}
+
+async function respondToFriendRequest(friendshipId, action) {
+    showStatus(translate(`status_responding_to_request_${action}`, `Responding to request (${action})...`), 'info', addFriendStatus); // Use a relevant status element
+    try {
+        await apiRequest(`/api/friends/requests/${friendshipId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: action })
+        });
+        showStatus(translate(`status_friend_request_${action}_success`, `Friend request ${action}ed.`), 'success', addFriendStatus);
+        loadPendingFriendRequests(); // Refresh pending list
+        if (action === 'accept') {
+            loadFriendsList(); // Refresh friends list if accepted
+        }
+    } catch (error) {
+        // apiRequest shows error
+    }
+}
+
+async function unfriendUser(friendUserId, friendUsername) {
+    if (!confirm(translate('confirm_unfriend_user', `Are you sure you want to unfriend ${friendUsername}?`, {username: friendUsername}))) return;
+    showStatus(translate('status_unfriending_user', `Unfriending ${friendUsername}...`, {username: friendUsername}), 'info', addFriendStatus); // Or a status within friends list
+    try {
+        await apiRequest(`/api/friends/${friendUserId}`, { method: 'DELETE' }); // Use friendUserId
+        showStatus(translate('status_user_unfriended_success', `${friendUsername} has been unfriended.`, {username: friendUsername}), 'success', addFriendStatus);
+        loadFriendsList();
+    } catch (error) {
+        // apiRequest shows error
+    }
+}
+
+function openDirectMessage(friendUserId, friendUsername) {
+    // This is a placeholder for opening a DM chat interface
+    // For now, just switch to the messages tab and log
+    handleFriendsMessagesTabSwitch('directMessagesTab');
+    const dmContent = document.getElementById('directMessagesTab');
+    if (dmContent) {
+        dmContent.innerHTML = `
+            <h4 class="text-md font-semibold mb-2">${translate('chatting_with_user_header', `Chat with ${friendUsername}`, {username: friendUsername})}</h4>
+            <div class="border border-gray-700 rounded-md p-4 h-64 overflow-y-auto mb-2 bg-gray-850">
+                <!-- Messages will go here -->
+                <p class="italic text-sm text-gray-500">${translate('dm_loading_messages_placeholder', 'Loading messages...')}</p>
+            </div>
+            <div class="flex space-x-2">
+                <input type="text" id="directMessageInput" class="input-field flex-grow" placeholder="${translate('dm_type_message_placeholder', 'Type a message...')}" />
+                <button id="sendDirectMessageBtn" class="btn btn-primary">${translate('send_btn', 'Send')}</button>
+            </div>
+        `;
+        // Add event listener for sendDirectMessageBtn here
+        const sendDmBtn = document.getElementById('sendDirectMessageBtn');
+        if (sendDmBtn) {
+            sendDmBtn.onclick = () => {
+                const dmInput = document.getElementById('directMessageInput');
+                if (dmInput && dmInput.value.trim()) {
+                    sendDirectMessageToServer(friendUserId, dmInput.value.trim()); // Implement this
+                    dmInput.value = '';
+                }
+            };
+        }
+        // TODO: Implement loadDirectMessagesForUser(friendUserId);
+    }
+    console.log(`Open DM with user ID: ${friendUserId}, Username: ${friendUsername}`);
+}
+
+async function sendDirectMessageToServer(receiverUserId, content) {
+    if (!currentDmPartner || currentDmPartner.userId !== receiverUserId || !content.trim()) {
+        console.error("DM send conditions not met:", currentDmPartner, receiverUserId, content);
+        return;
+    }
+
+    // Disable input while sending
+    if(directMessageInput) directMessageInput.disabled = true;
+    if(sendDirectMessageBtn) sendDirectMessageBtn.disabled = true;
+    showStatus(translate('dm_sending_message_status', 'Sending...'), 'info', dmSendStatus);
+
+    try {
+        const payload = {
+            receiver_user_id: receiverUserId,
+            content: content.trim()
+            // Add image_references_json here if you implement image DMs
+        };
+
+        const response = await apiRequest('/api/dm/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            statusElement: dmSendStatus // Show status in the DM input area
+        });
+        const newSentDm = await response.json(); // Expects DirectMessagePublic
+
+        // 1. Add the new message to the currently displayed chat
+        if (dmChatMessages && currentDmPartner && currentDmPartner.userId === newSentDm.receiver_id || currentDmPartner.userId === newSentDm.sender_id) {
+            // Construct a message object similar to what renderDirectMessages expects
+            // Note: newSentDm already has sender_username and receiver_username from the backend
+            appendSingleDirectMessage(newSentDm); // New helper function
+        }
+
+        // 2. Clear the input field
+        if(directMessageInput) directMessageInput.value = '';
+
+        // 3. Clear sending status
+        showStatus('', 'info', dmSendStatus);
+
+        // 4. Refresh the main conversations list to update previews
+        //    and potentially move this conversation to the top.
+        await loadDmConversations();
+
+    } catch (error) {
+        // apiRequest should have already shown an error in dmSendStatus
+        console.error("Failed to send DM:", error);
+        // Optionally, provide a more specific error message here if needed
+        showStatus(translate('dm_send_failed_error', 'Failed to send message. Please try again.'), 'error', dmSendStatus);
+    } finally {
+        // Re-enable input
+        if(directMessageInput) directMessageInput.disabled = false;
+        if(sendDirectMessageBtn) sendDirectMessageBtn.disabled = false;
+        if(directMessageInput) directMessageInput.focus(); // Focus back on input
+    }
+}
+
+// New helper function to append a single DM to the chat area
+function appendSingleDirectMessage(msg) {
+    if (!dmChatMessages || !currentUser) return;
+
+    // If it's the first message in an empty chat, clear the placeholder
+    const placeholder = dmChatMessages.querySelector('p.italic');
+    if (placeholder) {
+        placeholder.remove();
+    }
+
+    const msgDiv = document.createElement('div');
+    const isSender = msg.sender_id === currentUser.id; // currentUser.id should be the user's integer ID
+    msgDiv.className = `dm-message-bubble ${isSender ? 'sent' : 'received'}`;
+    
+    const contentP = document.createElement('p');
+    // For DMs, let's assume plain text for now. If you want Markdown:
+    // contentP.innerHTML = marked.parse(msg.content);
+    contentP.textContent = msg.content; 
+    
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'dm-message-timestamp';
+    timeSpan.textContent = formatTimestamp(new Date(msg.sent_at));
+    
+    msgDiv.appendChild(contentP);
+    msgDiv.appendChild(timeSpan);
+    dmChatMessages.appendChild(msgDiv);
+
+    // Scroll to the new message
+    dmChatMessages.scrollTop = dmChatMessages.scrollHeight;
+}
+
+
+function openSendPersonalityModal(personalityId, personalityName) {
+    if (!personalityId || !personalityName) return;
+    sendPersonalityIdInput.value = personalityId;
+    sendPersonalityModalTitle.textContent = translate('send_personality_modal_title_prefix', `Send Personality: "${personalityName}"`, {name: personalityName});
+    sendPersonalityTargetUsername.value = '';
+    showStatus('', 'info', sendPersonalityStatus);
+    openModal('sendPersonalityModal');
+}
+
+async function handleConfirmSendPersonality() {
+    const personalityId = sendPersonalityIdInput.value;
+    const targetUsername = sendPersonalityTargetUsername.value.trim();
+    if (!personalityId || !targetUsername) {
+        showStatus(translate('error_target_username_required', 'Target username is required.'), 'error', sendPersonalityStatus);
+        return;
+    }
+    showStatus(translate('status_sending_personality_to_user', `Sending personality to ${targetUsername}...`, {username: targetUsername}), 'info', sendPersonalityStatus);
+    confirmSendPersonalityBtn.disabled = true;
+    try {
+        await apiRequest(`/api/personalities/${personalityId}/send`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_username: targetUsername }),
+            statusElement: sendPersonalityStatus
+        });
+        showStatus(translate('status_personality_sent_success', 'Personality sent successfully!'), 'success', sendPersonalityStatus);
+        setTimeout(() => closeModal('sendPersonalityModal'), 1500);
+    } catch (error) {
+        // API request shows error
+    } finally {
+        confirmSendPersonalityBtn.disabled = false;
+    }
+}
+
+// Helper to create action buttons with icons (extend if needed)
+// function createActionButton(iconName, tooltip, onClick, variant = 'default') {
+//     const button = document.createElement('button');
+//     button.className = `action-btn p-1.5 hover:bg-gray-600 rounded-full transition-colors ${variant === 'destructive' ? 'text-red-400 hover:text-red-300' : 'text-gray-400 hover:text-gray-100'}`;
+//     button.title = tooltip;
+//     button.onclick = (e) => { e.stopPropagation(); onClick(); };
+//     // Add SVG icons based on iconName
+//     // This part needs to be filled with actual SVG strings for 'chat_bubble', 'person_remove', 'block'
+//     const icons = {
+//         edit: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>`,
+//         delete: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>`,
+//         chat_bubble: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>`,
+//         person_remove: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m-.243-3.72a9.094 9.094 0 0 1-3.741-.479 3 3 0 0 1-4.682-2.72M12 12.75a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm-7.5 3.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm0 0h.01M12 12.75a9.094 9.094 0 0 0-3.741-.479 3 3 0 0 0-4.682-2.72m0 0a9.094 9.094 0 0 1 3.741-.479m0 0a3 3 0 1 0-4.682-2.72m4.682 2.72M3.055 11.676A9.094 9.094 0 0 1 6.795 11.2a3 3 0 0 1 4.682 2.719m0 0a3 3 0 0 1-4.682 2.72m4.682-2.72m6.945-5.438A9.094 9.094 0 0 1 17.205 11.2a3 3 0 0 1 4.682 2.719m0 0a3 3 0 0 1-4.682 2.72m4.682-2.72M12 12.75a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z" /></svg>`, // This is a complex group icon, find simpler ones
+//         block: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" /></svg>`
+//     };
+//     button.innerHTML = icons[iconName] || iconName; // Fallback to text if icon not found
+//     return button;
+// }
+
+async function loadDmConversations() {
+    if (!dmConversationsList) {
+        console.error("DM Conversations List element not found.");
+        return;
+    }
+    dmConversationsList.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="dm_loading_conversations">${translate('dm_loading_conversations', 'Loading conversations...')}</p>`;
+    updateUIText(); // Translate the loading message
+
+    try {
+        const response = await apiRequest('/api/dm/conversations');
+        if (!response.ok) { // apiRequest should throw, but as a safeguard
+            throw new Error(`Failed to fetch conversations: ${response.status}`);
+        }
+        dmConversationsCache = await response.json(); // Expects List of conversation summaries
+        renderDmConversationsList();
+    } catch (error) {
+        console.error("Error loading DM conversations:", error);
+        dmConversationsList.innerHTML = `<p class="italic text-sm text-red-400">${translate('dm_error_loading_conversations', 'Failed to load conversations.')}</p>`;
+        updateUIText(); // Translate the error message
+    }
+}
+
+function renderDmConversationsList() {
+    if (!dmConversationsList) return;
+    dmConversationsList.innerHTML = '';
+
+    if (dmConversationsCache.length === 0) {
+        dmConversationsList.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="dm_no_conversations_placeholder">${translate('dm_no_conversations_placeholder', 'No active conversations. Search for a user to start one.')}</p>`;
+        updateUIText();
+        return;
+    }
+
+    // Sort conversations by last message time, most recent first
+    dmConversationsCache.sort((a, b) => {
+        const dateA = a.last_message_sent_at ? new Date(a.last_message_sent_at) : new Date(0);
+        const dateB = b.last_message_sent_at ? new Date(b.last_message_sent_at) : new Date(0);
+        return dateB - dateA;
+    });
+
+    dmConversationsCache.forEach(convo => {
+        const convoDiv = document.createElement('div');
+        // Highlight if this conversation is currently active in the chat view
+        const isActiveConvo = currentDmPartner && currentDmPartner.userId === convo.partner_user_id;
+        convoDiv.className = `p-2.5 rounded-lg cursor-pointer hover:bg-gray-700 transition-colors duration-150 flex items-center space-x-3 ${isActiveConvo ? 'bg-gray-700 shadow-md' : 'bg-gray-750'}`;
+        convoDiv.onclick = () => openDmChatWithUser(convo.partner_user_id, convo.partner_username);
+
+        // Simple Avatar Placeholder
+        const avatarPlaceholder = document.createElement('div');
+        avatarPlaceholder.className = 'w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center text-sm font-semibold flex-shrink-0';
+        avatarPlaceholder.textContent = convo.partner_username.charAt(0).toUpperCase();
+        
+        const textContentDiv = document.createElement('div');
+        textContentDiv.className = 'flex-grow min-w-0'; // For truncation
+
+        const header = document.createElement('div');
+        header.className = 'flex justify-between items-baseline mb-0.5';
+        
+        const partnerName = document.createElement('span');
+        partnerName.className = 'font-semibold text-sm text-gray-100 truncate';
+        partnerName.textContent = convo.partner_username;
+        partnerName.title = convo.partner_username;
+
+        if (convo.unread_count > 0) {
+            const unreadBadge = document.createElement('span');
+            unreadBadge.className = 'ml-1.5 bg-red-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5 leading-none';
+            unreadBadge.textContent = convo.unread_count > 9 ? '9+' : convo.unread_count;
+            partnerName.appendChild(unreadBadge);
+        }
+        
+        const lastMsgTime = document.createElement('span');
+        lastMsgTime.className = 'text-xs text-gray-400 flex-shrink-0';
+        lastMsgTime.textContent = convo.last_message_sent_at ? formatTimestamp(new Date(convo.last_message_sent_at)) : '';
+        
+        header.appendChild(partnerName);
+        header.appendChild(lastMsgTime);
+
+        const preview = document.createElement('p');
+        preview.className = 'text-xs text-gray-300 truncate';
+        let previewText = convo.last_message_content || translate('dm_no_messages_yet_preview', 'No messages yet.');
+        if (convo.last_message_sender_id === currentUser.id && previewText !== translate('dm_no_messages_yet_preview', 'No messages yet.')) {
+            previewText = `${translate('dm_you_prefix', 'You:')} ${previewText}`;
+        }
+        preview.textContent = previewText;
+        preview.title = previewText;
+        
+        textContentDiv.appendChild(header);
+        textContentDiv.appendChild(preview);
+
+        convoDiv.appendChild(avatarPlaceholder);
+        convoDiv.appendChild(textContentDiv);
+        dmConversationsList.appendChild(convoDiv);
+    });
+    updateUIText(); // Translate any new elements if they use data-translate-key
+}

@@ -1762,3 +1762,77 @@ main > footer #pyodideStatus {
     /* Ensure sufficient contrast for text on various backgrounds */
     .detail-badge { border: 1px solid currentColor; }
 }
+
+/* Add to your style.css or Tailwind custom CSS */
+.input-field {
+    @apply block w-full rounded-md border-gray-600 bg-gray-700 text-gray-200 shadow-sm focus:border-blue-500 focus:ring focus:ring-blue-500 focus:ring-opacity-50 placeholder-gray-500 text-sm;
+}
+
+.input-file {
+    @apply block w-full text-sm text-gray-400
+           file:mr-4 file:py-2 file:px-4
+           file:rounded-md file:border-0
+           file:text-sm file:font-semibold
+           file:bg-gray-600 file:text-gray-200
+           hover:file:bg-gray-500 cursor-pointer;
+}
+
+.btn {
+    @apply px-4 py-2 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 transition-colors duration-150;
+}
+
+.btn-primary {
+    @apply bg-blue-600 text-white hover:bg-blue-700 focus:ring-blue-500 disabled:opacity-50;
+}
+
+.btn-secondary {
+    @apply bg-gray-600 text-gray-200 hover:bg-gray-500 focus:ring-gray-500;
+}
+
+/* Ensure modal content has good padding if not already handled */
+.modal-content .modal-body {
+    padding-left: 1.5rem; /* px-6 */
+    padding-right: 1.5rem; /* px-6 */
+}
+.modal-content .modal-footer {
+    padding: 1rem 1.5rem; /* py-4 px-6 */
+}
+
+/* For Friends & Messages Modal Tabs */
+.friends-messages-tab-btn {
+    @apply border-b-2 border-transparent text-gray-400 hover:text-gray-200 hover:border-gray-500;
+    transition: color 0.2s, border-color 0.2s;
+}
+.friends-messages-tab-btn.active-tab {
+    @apply text-blue-400 border-blue-500 font-semibold;
+}
+
+.dm-message-bubble {
+    padding: 0.5rem 0.75rem;
+    border-radius: 0.75rem;
+    margin-bottom: 0.25rem;
+    max-width: 75%;
+    word-wrap: break-word;
+}
+.dm-message-bubble.sent {
+    background-color: #2563eb; /* theme.colors.blue[600] */
+    color: white;
+    margin-left: auto;
+    border-bottom-right-radius: 0.25rem;
+}
+.dm-message-bubble.received {
+    background-color: #4b5563; /* theme.colors.gray[600] */
+    color: #e5e7eb; /* theme.colors.gray[200] */
+    margin-right: auto;
+    border-bottom-left-radius: 0.25rem;
+}
+.dm-message-timestamp {
+    display: block;
+    font-size: 0.65rem; /* text-xs */
+    color: #9ca3af; /* theme.colors.gray[400] */
+    margin-top: 0.25rem;
+    text-align: right;
+}
+.dm-message-bubble.sent .dm-message-timestamp {
+    color: #d1d5db; /* theme.colors.gray[300] */
+}

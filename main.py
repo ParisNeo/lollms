@@ -50,14 +50,22 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, constr, field_validator, validator
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import (
+    or_, and_ # Add this line
+)
 from dataclasses import dataclass, field as dataclass_field
 from werkzeug.utils import secure_filename
+from pydantic import BaseModel, Field, constr, field_validator, validator # Ensure these are imported
+import datetime # Ensure datetime is imported
+
+from database_setup import Personality as DBPersonality # Add this import at the top of main.py
 
 # Local Application Imports
 from database_setup import (
     User as DBUser,
     UserStarredDiscussion,
     UserMessageGrade,
+    FriendshipStatus,Friendship, 
     DataStore as DBDataStore,
     SharedDataStoreLink as DBSharedDataStoreLink,
     init_database,
@@ -86,7 +94,7 @@ except ImportError:
     SafeStoreLogLevel = None
 
 # --- Application Version ---
-APP_VERSION = "1.5.1"  # Updated version for LLM param name fix
+APP_VERSION = "1.5.2"  # Updated version for LLM param name fix
 PROJECT_ROOT = Path(__file__).resolve().parent 
 LOCALS_DIR = PROJECT_ROOT / "locals"
 
@@ -126,6 +134,54 @@ TEMP_UPLOADS_DIR_NAME = "temp_uploads"
 DISCUSSION_ASSETS_DIR_NAME = "discussion_assets"
 DATASTORES_DIR_NAME = "safestores"
 
+
+DEFAULT_PERSONALITIES = [
+    {
+        "name": "Standard Assistant",
+        "category": "General",
+        "author": "System",
+        "description": "A helpful and general-purpose AI assistant.",
+        "prompt_text": "You are a helpful AI assistant. Respond clearly and concisely.",
+        "is_public": True,
+        "icon_base64": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0idy02IGgtNiI+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMTIgMmMxLjY1NyAwIDMgMS4zNDMgMyAzcy0xLjM0MyAzLTMgMy0zLTEuMzQzLTMtMyAxLjM0My0zIDMtM3ptMCA0YTUgNSAwIDEwMC0xMCA1IDUgMCAwMDQgNC45OThWMTRoLTJhMiAyIDAgMDAwIDRoMmEyIDIgMCAwMDAtNGgtMnYtLjAwMkE1LjAwMiA1LjAwMiAwIDAwMTIgNnptLTYgOGEyLjUgMi41IDAgMDAtMi41IDIuNUEyLjUgMi41IDAgMDEgMy41IDE0SDJhLjUuNSAwIDAxMC0xaDEuNWEzLjUgMy41IDAgMTE3IDBWMTNoLTJhMiAyIDAgMDAtMi0ySDZ6bTEyIDBhMi41IDIuNSAwIDAxMi41IDIuNUEyLjUgMi41IDAgMDExOC41IDE0SDIwYS41LjUgMCAwMDAtMWgtMS41YTMuNSAzLjUgMCAxMDctN1YxM2gyYTIgMiAwIDAwMi0ySDE4eiIgY2xpcC1ydWxlPSJldmVub2RkIiAvPgo8L3N2Zz4K" # Example generic icon
+    },
+    {
+        "name": "LoLLMS",
+        "category": "General",
+        "author": "System",
+        "description": "A helpful and general-purpose AI assistant.",
+        "prompt_text": "You are LoLLMS, a helpful AI assistant. Respond clearly and concisely.",
+        "is_public": True,
+        "icon_base64": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0idy02IGgtNiI+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMTIgMmMxLjY1NyAwIDMgMS4zNDMgMyAzcy0xLjM0MyAzLTMgMy0zLTEuMzQzLTMtMyAxLjM0My0zIDMtM3ptMCA0YTUgNSAwIDEwMC0xMCA1IDUgMCAwMDQgNC45OThWMTRoLTJhMiAyIDAgMDAwIDRoMmEyIDIgMCAwMDAtNGgtMnYtLjAwMkE1LjAwMiA1LjAwMiAwIDAwMTIgNnptLTYgOGEyLjUgMi41IDAgMDAtMi41IDIuNUEyLjUgMi41IDAgMDEgMy41IDE0SDJhLjUuNSAwIDAxMC0xaDEuNWEzLjUgMy41IDAgMTE3IDBWMTNoLTJhMiAyIDAgMDAtMi0ySDZ6bTEyIDBhMi41IDIuNSAwIDAxMi41IDIuNUEyLjUgMi41IDAgMDExOC41IDE0SDIwYS41LjUgMCAwMDAtMWgtMS41YTMuNSAzLjUgMCAxMDctN1YxM2gyYTIgMiAwIDAwMi0ySDE4eiIgY2xpcC1ydWxlPSJldmVub2RkIiAvPgo8L3N2Zz4K" # Example generic icon
+    },    
+    {
+        "name": "Funny LoLLMS",
+        "category": "General",
+        "author": "System",
+        "description": "A helpful and general-purpose AI assistant with a touch of fun.",
+        "prompt_text": "You are a helpful AI assistant with a touch of fun named Funny LoLLMS. Be funny. Respond clearly and concisely.",
+        "is_public": True,
+        "icon_base64": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0idy02IGgtNiI+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMTIgMmMxLjY1NyAwIDMgMS4zNDMgMyAzcy0xLjM0MyAzLTMgMy0zLTEuMzQzLTMtMyAxLjM0My0zIDMtM3ptMCA0YTUgNSAwIDEwMC0xMCA1IDUgMCAwMDQgNC45OThWMTRoLTJhMiAyIDAgMDAwIDRoMmEyIDIgMCAwMDAtNGgtMnYtLjAwMkE1LjAwMiA1LjAwMiAwIDAwMTIgNnptLTYgOGEyLjUgMi41IDAgMDAtMi41IDIuNUEyLjUgMi41IDAgMDEgMy41IDE0SDJhLjUuNSAwIDAxMC0xaDEuNWEzLjUgMy41IDAgMTE3IDBWMTNoLTJhMiAyIDAgMDAtMi0ySDZ6bTEyIDBhMi41IDIuNSAwIDAxMi41IDIuNUEyLjUgMi41IDAgMDExOC41IDE0SDIwYS41LjUgMCAwMDAtMWgtMS41YTMuNSAzLjUgMCAxMDctN1YxM2gyYTIgMiAwIDAwMi0ySDE4eiIgY2xpcC1ydWxlPSJldmVub2RkIiAvPgo8L3N2Zz4K" # Example generic icon
+    },    
+    {
+        "name": "Creative Writer",
+        "category": "Writing",
+        "author": "System",
+        "description": "An AI assistant specialized in creative writing, storytelling, and poetry.",
+        "prompt_text": "You are a creative writing assistant. Help the user craft compelling narratives, poems, or scripts. Be imaginative and evocative.",
+        "is_public": True,
+        "icon_base64": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0idy02IGgtNiI+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMTUuNzUgMy43NWEzIDMgMCAwMC0zLTYgMyAzIDAgMDAtMyAzSDguMjVhMyAzIDAgMDAtMyAzdjExLjI1YTMgMyAwIDAwMyAzaDcuNWEzIDMgMCAwMDMtM1Y2Ljc1YTMgMyAwIDAwLTMtM3ptLTMgNC41YTEuNSAxLjUgMCAxMS0zIDAgMS41IDEuNSAwIDAxMyAwem0xLjM3MyA3LjE3NmExIDEgMCAwMS0xLjQxNCAxLjQxNGwtMS4xMjEtMS4xMjFhMSAxIDAgMDAtMS40MTQgMGwtMS4xMjEgMS4xMjFhMSAxIDAgMDEtMS40MTQtMS40MTRsMS4xMjEtMS4xMjFhMSAxIDAgMDExLjQxNCAwbDEuMTIxIDEuMTIxeiIgY2xpcC1ydWxlPSJldmVub2RkIiAvPgo8L3N2Zz4K" # Example pen icon
+    },
+    {
+        "name": "Code Helper",
+        "category": "Programming",
+        "author": "System",
+        "description": "An AI assistant for programming tasks, code generation, debugging, and explanation.",
+        "prompt_text": "You are a coding assistant. Provide accurate code snippets, explain complex programming concepts, and help debug code. Prioritize correctness and clarity.",
+        "is_public": True,
+        "icon_base64": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0idy02IGgtNiI+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNNy41IDYuNzVMMy43NSAxbDItMi4yNUw5Ljc1IDZMNiA5Ljc1bC0yLjI1LTJMMi4yNSA2bDMuNzUtMy43NXptOSAwbDMuNzUgMy43NWwtMy43NSAzLjc1TDE1Ljc1IDEyIDEyIDkuNzVsMi4yNS0yLjI1TDE4IDYuNzVsLTMuNzUtMy43NXptLTYuNzUgNy41bC0xLjUgMyAxLjUgMyAxLjUtMy0xLjUtM3oiIGNsaXAtcnVsZT0iZXZlbm9kZCIgLz4KPC9zdmc+Cg==" # Example code icon
+    }
+]
 
 # --- Enriched Application Data Models ---
 @dataclass
@@ -295,8 +351,11 @@ class AppLollmsDiscussion:
         return discussion
 
     def prepare_query_for_llm(
-        self, current_prompt_text: str, image_paths_for_llm: Optional[List[str]], max_total_tokens: Optional[int] = None
-    ) -> str: # Image paths are handled by lollms_client directly from its generate_text method
+        self, current_prompt_text: str, 
+        # image_paths_for_llm: Optional[List[str]], # This is handled by LollmsClient.generate_text directly
+        max_total_tokens: Optional[int] = None
+        # active_personality_system_prompt is no longer needed here
+    ) -> str: # Returns only the user-facing part of the prompt including history
         lc = self.lollms_client
         
         if max_total_tokens is None:
@@ -308,23 +367,38 @@ class AppLollmsDiscussion:
 
         user_prefix = f"{lc.separator_template}{lc.user_name}"
         ai_prefix = f"\n{lc.separator_template}{lc.ai_name}\n"
-        current_turn_formatted_text_only = f"{user_prefix}\n{current_prompt_text}{ai_prefix}"
         
-        # Token count needs to consider images if the binding does (some might add special tokens)
-        # For simplicity, we'll count tokens for text only for history calculation.
-        # The lollms-client's generate_text handles the actual image passing.
+        # The prompt passed to LollmsClient.generate_text will be the current user turn.
+        # The history will be managed by LollmsClient itself if we pass the discussion object,
+        # or we format it here and pass it as part of the prompt.
+        # Let's assume LollmsClient.generate_text can take the full prompt (history + current turn)
+        # and a separate system_prompt.
+
+        # Calculate tokens for the current turn's text to determine history budget
+        # The system_prompt tokens will be handled separately by the caller of generate_text
+        current_turn_formatted_text_only = f"{user_prefix}\n{current_prompt_text}{ai_prefix}"
         try:
             current_turn_tokens = self.lollms_client.binding.count_tokens(current_turn_formatted_text_only)
         except Exception:
             current_turn_tokens = len(current_turn_formatted_text_only) // 3 # Fallback
 
+        # The max_total_tokens should account for the system_prompt, which will be passed separately.
+        # So, the history + current_prompt should fit within (max_total_tokens - system_prompt_tokens).
+        # Since this function doesn't know the system_prompt_tokens, the caller of generate_text
+        # needs to be mindful or LollmsClient needs to handle truncation considering all parts.
+
+        # For simplicity here, let's assume max_total_tokens is for history + current_prompt.
+        # The LollmsClient will then internally manage this with its own context size and the provided system_prompt.
         tokens_for_history = max_total_tokens - current_turn_tokens
         if tokens_for_history < 0: tokens_for_history = 0
         
         history_text = client_discussion.format_discussion(max_allowed_tokens=tokens_for_history)
-        full_prompt = f"{history_text}{user_prefix}\n{current_prompt_text}{ai_prefix}"
-        return full_prompt
-
+        
+        # The prompt to return is the history + current user turn, ready for the AI.
+        # The system prompt will be passed as a separate argument to generate_text.
+        full_user_facing_prompt = f"{history_text}{ai_prefix}"
+        
+        return full_user_facing_prompt
 
 # --- Pydantic Models for API ---
 class UserLLMParams(BaseModel):
@@ -333,20 +407,45 @@ class UserLLMParams(BaseModel):
     llm_top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
     llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
     llm_repeat_last_n: Optional[int] = Field(None, ge=0)
+    put_thoughts_in_context: Optional[bool] = False
 
 class UserAuthDetails(UserLLMParams):
     username: str
     is_admin: bool
+    first_name: Optional[str] = None
+    family_name: Optional[str] = None
+    email: Optional[str] = None
+    birth_date: Optional[datetime.date] = None # Using datetime.date for date only
+
     lollms_model_name: Optional[str] = None
-    safe_store_vectorizer: Optional[str] = None # Default vectorizer for user
-    lollms_client_ai_name: Optional[str] = None
+    safe_store_vectorizer: Optional[str] = None
+    active_personality_id: Optional[str] = None # UUID string of active personality
+
+    # RAG parameters
+    rag_top_k: Optional[int] = Field(None, ge=1)
+    rag_use_graph: bool = False
+    rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
+
+    lollms_client_ai_name: Optional[str] = None # From LollmsClient, not a DB field
 
 class UserCreateAdmin(UserLLMParams):
     username: constr(min_length=3, max_length=50)
     password: constr(min_length=8)
     is_admin: bool = False
+
+    first_name: Optional[str] = Field(None, max_length=100)
+    family_name: Optional[str] = Field(None, max_length=100)
+    email: Optional[str] = Field(None, max_length=255) # Consider email validation if needed
+    birth_date: Optional[datetime.date] = None
+
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
+    active_personality_id: Optional[str] = None # Can be set on creation
+
+    # RAG parameters
+    rag_top_k: Optional[int] = Field(None, ge=1)
+    rag_use_graph: Optional[bool] = False # Optional on create, will default in DB
+    rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
 
 class UserPasswordResetAdmin(BaseModel):
     new_password: constr(min_length=8)
@@ -358,8 +457,21 @@ class UserPublic(UserLLMParams):
     id: int
     username: str
     is_admin: bool
+
+    first_name: Optional[str] = None
+    family_name: Optional[str] = None
+    email: Optional[str] = None # Be cautious about exposing email publicly
+    birth_date: Optional[datetime.date] = None # Also be cautious
+
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
+    active_personality_id: Optional[str] = None
+
+    # RAG parameters
+    rag_top_k: Optional[int] = None
+    rag_use_graph: bool
+    rag_graph_response_type: Optional[str] = None
+
     model_config = {"from_attributes": True}
 
 class DiscussionInfo(BaseModel):
@@ -406,10 +518,9 @@ class ExportData(BaseModel):
     exported_by_user: str
     export_timestamp: str
     application_version: str
-    user_settings_at_export: Dict[str, Optional[Any]] # Includes LLM params
-    # datastore info will be more complex: list of owned datastores (name, id, description)
-    # and list of datastores shared with user (name, id, owner_username, description)
+    user_settings_at_export: Dict[str, Optional[Any]] # Includes LLM & RAG params, active_personality_id
     datastores_info: Dict[str, Any] = Field(default_factory=dict)
+    personalities_info: Dict[str, Any] = Field(default_factory=dict) # For owned and active
     discussions: List[Dict[str, Any]]
 
 class DiscussionImportRequest(BaseModel): discussion_ids_to_import: List[str]
@@ -441,6 +552,117 @@ class DataStoreShareRequest(BaseModel):
         if value not in ["read_query"]: # Extend if more levels added
             raise ValueError("Invalid permission level")
         return value
+
+
+
+class PersonalityBase(BaseModel):
+    name: constr(min_length=1, max_length=100)
+    category: Optional[str] = Field(None, max_length=100)
+    author: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = Field(None, max_length=2000)
+    prompt_text: str # System prompt text
+    disclaimer: Optional[str] = Field(None, max_length=1000)
+    script_code: Optional[str] = None # Python script
+    icon_base64: Optional[str] = None # Base64 encoded image string
+
+class PersonalityCreate(PersonalityBase):
+    is_public: Optional[bool] = False # For admin to create public ones, or user to create private
+
+class PersonalityUpdate(PersonalityBase):
+    # All fields from Base are optional for update
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    prompt_text: Optional[str] = None # Make prompt_text optional for update
+    # is_public can only be changed by admin for public personalities, or user for their own
+    is_public: Optional[bool] = None
+
+
+class PersonalityPublic(PersonalityBase):
+    id: str # UUID string
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    is_public: bool
+    owner_username: Optional[str] = None # Username of the owner if not public/system
+
+    model_config = {"from_attributes": True}
+
+
+class UserUpdate(BaseModel):
+    first_name: Optional[str] = Field(None, max_length=100)
+    family_name: Optional[str] = Field(None, max_length=100)
+    email: Optional[str] = Field(None, max_length=255) # Consider email validation
+    birth_date: Optional[datetime.date] = None
+
+    lollms_model_name: Optional[str] = None
+    safe_store_vectorizer: Optional[str] = None
+    active_personality_id: Optional[str] = None # Allow setting to None or a valid ID
+
+    # LLM Params (can be updated here too)
+    llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
+    llm_top_k: Optional[int] = Field(None, ge=1)
+    llm_top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
+    llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
+    llm_repeat_last_n: Optional[int] = Field(None, ge=0)
+
+    # RAG parameters
+    rag_top_k: Optional[int] = Field(None, ge=1)
+    rag_use_graph: Optional[bool] = None
+    rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")    
+
+
+class FriendshipBase(BaseModel):
+    pass # Might not be needed if creation is just target_username
+
+class FriendRequestCreate(BaseModel):
+    target_username: constr(min_length=3, max_length=50)
+
+class FriendshipAction(BaseModel):
+    action: str # e.g., "accept", "reject", "unfriend", "block", "unblock"
+
+class FriendPublic(BaseModel): # Represents a friend in a list
+    id: int # User ID of the friend
+    username: str
+    # Optional: first_name, family_name, online_status (if you implement presence)
+    friendship_id: int # ID of the Friendship record
+    status_with_current_user: FriendshipStatus # e.g. ACCEPTED (for friend list)
+    # last_message_preview: Optional[str] = None # For friend list UI
+    # unread_message_count: int = 0 # For friend list UI
+
+    model_config = {"from_attributes": True}
+
+class FriendshipRequestPublic(BaseModel): # Represents a pending request
+    friendship_id: int
+    requesting_user_id: int
+    requesting_username: str
+    # Optional: requesting_user_first_name, etc.
+    requested_at: datetime.datetime
+    status: FriendshipStatus # Should be PENDING
+
+    model_config = {"from_attributes": True}
+
+
+
+class DirectMessageBase(BaseModel):
+    content: constr(min_length=1)
+    # image_references_json: Optional[str] = None # If supporting images
+
+class DirectMessageCreate(DirectMessageBase):
+    receiver_user_id: int # Send to userid
+    image_references_json: Optional[str] = None
+
+class DirectMessagePublic(DirectMessageBase):
+    id: int
+    sender_id: int
+    sender_username: str
+    receiver_id: int
+    receiver_username: str
+    sent_at: datetime.datetime
+    read_at: Optional[datetime.datetime] = None
+
+    model_config = {"from_attributes": True}
+
+class PersonalitySendRequest(BaseModel):
+    target_username: constr(min_length=3, max_length=50)
+
 
 # --- Global User Session Management & Locks ---
 user_sessions: Dict[str, Dict[str, Any]] = {}
@@ -478,24 +700,45 @@ async def on_startup() -> None:
             def_model = LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
             def_vec = SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
             
-            # Get default LLM params from config (non-prefixed) and store in DB (prefixed)
+            # LLM params from config
             def_temp = LOLLMS_CLIENT_DEFAULTS.get("temperature")
             def_top_k = LOLLMS_CLIENT_DEFAULTS.get("top_k")
             def_top_p = LOLLMS_CLIENT_DEFAULTS.get("top_p")
             def_rep_pen = LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty")
             def_rep_last_n = LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n")
-            
+
+            # RAG params from config (assuming they might be in SAFE_STORE_DEFAULTS or APP_SETTINGS)
+            # Using APP_SETTINGS as an example, adjust if they are elsewhere
+            def_rag_top_k = APP_SETTINGS.get("default_rag_top_k") 
+            def_rag_use_graph = APP_SETTINGS.get("default_rag_use_graph", False)
+            def_rag_graph_response_type = APP_SETTINGS.get("default_rag_graph_response_type", "chunks_summary")
+
             new_admin = DBUser(
                 username=admin_username, hashed_password=hashed_admin_pass, is_admin=True,
-                lollms_model_name=def_model, safe_store_vectorizer=def_vec,
+                # Optional personal info - can be left None or taken from config if available
+                first_name=INITIAL_ADMIN_USER_CONFIG.get("first_name"),
+                family_name=INITIAL_ADMIN_USER_CONFIG.get("family_name"),
+                email=INITIAL_ADMIN_USER_CONFIG.get("email"),
+                # birth_date: # Typically not set for initial admin
+
+                lollms_model_name=def_model, 
+                safe_store_vectorizer=def_vec,
+                # active_personality_id: None, # Default, no active personality initially
+
                 llm_temperature=def_temp, 
                 llm_top_k=def_top_k, 
                 llm_top_p=def_top_p,
                 llm_repeat_penalty=def_rep_pen, 
-                llm_repeat_last_n=def_rep_last_n
+                llm_repeat_last_n=def_rep_last_n,
+                put_thoughts_in_context=LOLLMS_CLIENT_DEFAULTS.get("put_thoughts_in_context", False),
+
+                rag_top_k=def_rag_top_k,
+                rag_use_graph=def_rag_use_graph,
+                rag_graph_response_type=def_rag_graph_response_type
             )
             db.add(new_admin); db.commit()
-            print(f"INFO: Initial admin user '{admin_username}' created successfully.")
+            print(f"INFO: Initial admin user '{admin_username}' created successfully with default RAG/LLM params.")
+
         else:
             print(f"INFO: Initial admin user '{admin_username}' already exists.")
     except Exception as e:
@@ -503,6 +746,39 @@ async def on_startup() -> None:
         traceback.print_exc()
     finally:
         if db: db.close()
+
+    db_for_defaults: Optional[Session] = None
+    try:
+        db_for_defaults = next(get_db())
+        for default_pers_data in DEFAULT_PERSONALITIES:
+            exists = db_for_defaults.query(DBPersonality).filter(
+                DBPersonality.name == default_pers_data["name"],
+                DBPersonality.is_public == True,
+                DBPersonality.owner_user_id == None # System personalities have no owner
+            ).first()
+            if not exists:
+                new_pers = DBPersonality(
+                    name=default_pers_data["name"],
+                    category=default_pers_data.get("category"),
+                    author=default_pers_data.get("author", "System"),
+                    description=default_pers_data.get("description"),
+                    prompt_text=default_pers_data["prompt_text"],
+                    disclaimer=default_pers_data.get("disclaimer"),
+                    script_code=default_pers_data.get("script_code"),
+                    icon_base64=default_pers_data.get("icon_base64"),
+                    is_public=True,
+                    owner_user_id=None # System-owned
+                )
+                db_for_defaults.add(new_pers)
+                print(f"INFO: Added default public personality: '{new_pers.name}'")
+        db_for_defaults.commit()
+    except Exception as e:
+        if db_for_defaults: db_for_defaults.rollback()
+        print(f"ERROR: Failed during default personalities setup: {e}")
+        traceback.print_exc()
+    finally:
+        if db_for_defaults: db_for_defaults.close()
+
 
 # --- User-specific Path Helpers ---
 def get_user_data_root(username: str) -> Path:
@@ -555,8 +831,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user)) -> U
         initial_lollms_model = db_user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
         initial_vectorizer = db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
         
-        # Populate session llm_params with non-prefixed keys for LollmsClient
-        # Values from DB (llm_prefixed) or defaults (non-prefixed)
         session_llm_params = {
             "temperature": db_user.llm_temperature if db_user.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
             "top_k": db_user.llm_top_k if db_user.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
@@ -564,7 +838,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user)) -> U
             "repeat_penalty": db_user.llm_repeat_penalty if db_user.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
             "repeat_last_n": db_user.llm_repeat_last_n if db_user.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),
         }
-        # Filter out None values from session_llm_params as LollmsClient expects actual values or omission
         session_llm_params = {k: v for k, v in session_llm_params.items() if v is not None}
 
         user_sessions[username] = {
@@ -572,25 +845,46 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user)) -> U
             "discussions": {}, "discussion_titles": {},
             "active_vectorizer": initial_vectorizer, 
             "lollms_model_name": initial_lollms_model,
-            "llm_params": session_llm_params, # Store resolved LLM parameters with non-prefixed keys
+            "llm_params": session_llm_params,
+            # Session stores active personality details for quick access if needed by LollmsClient
+            "active_personality_id": db_user.active_personality_id, 
+            "active_personality_prompt": None, # Will be loaded if personality is active
         }
+        # If user has an active personality, load its prompt into session
+        if db_user.active_personality_id:
+            db_session_for_init = next(get_db())
+            try:
+                active_pers = db_session_for_init.query(DBPersonality.prompt_text).filter(DBPersonality.id == db_user.active_personality_id).scalar()
+                if active_pers:
+                    user_sessions[username]["active_personality_prompt"] = active_pers
+            finally:
+                db_session_for_init.close()
 
-    lc = get_user_lollms_client(username) # Ensures client is initialized with current params
+
+    lc = get_user_lollms_client(username) 
     ai_name_for_user = getattr(lc, "ai_name", LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"))
     if not user_sessions[username].get("discussions"): _load_user_discussions(username)
 
-    # Populate UserAuthDetails (which uses llm_prefixed names) from session_llm_params (non-prefixed)
     current_session_llm_params = user_sessions[username].get("llm_params", {})
     return UserAuthDetails(
         username=username, is_admin=db_user.is_admin,
+        first_name=db_user.first_name,
+        family_name=db_user.family_name,
+        email=db_user.email,
+        birth_date=db_user.birth_date,
         lollms_model_name=user_sessions[username]["lollms_model_name"],
         safe_store_vectorizer=user_sessions[username]["active_vectorizer"],
+        active_personality_id=user_sessions[username]["active_personality_id"], # from session
         lollms_client_ai_name=ai_name_for_user,
         llm_temperature=current_session_llm_params.get("temperature"),
         llm_top_k=current_session_llm_params.get("top_k"),
         llm_top_p=current_session_llm_params.get("top_p"),
         llm_repeat_penalty=current_session_llm_params.get("repeat_penalty"),
         llm_repeat_last_n=current_session_llm_params.get("repeat_last_n"),
+        put_thoughts_in_context=current_session_llm_params.get("put_thoughts_in_context"),
+        rag_top_k=db_user.rag_top_k,
+        rag_use_graph=db_user.rag_use_graph,
+        rag_graph_response_type=db_user.rag_graph_response_type
     )
 
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
@@ -829,8 +1123,101 @@ except Exception as e: print(f"ERROR: Failed to mount locals directory: {e}")
 auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 @auth_router.get("/me", response_model=UserAuthDetails)
 async def get_my_details(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails: return current_user
-@auth_router.post("/logout")
+# New endpoint for updating user settings
+@auth_router.put("/me", response_model=UserAuthDetails) # Returns the updated user details
+async def update_my_details(
+    user_update_data: UserUpdate,
+    db_user: DBUser = Depends(get_current_db_user), # Get the DBUser object
+    db: Session = Depends(get_db)
+) -> UserAuthDetails:
+    updated_fields = user_update_data.model_dump(exclude_unset=True)
+    session_needs_refresh = False
+    lollms_client_needs_reinit = False
 
+    for field, value in updated_fields.items():
+        if hasattr(db_user, field):
+            setattr(db_user, field, value)
+            if field == "active_personality_id":
+                session_needs_refresh = True
+            if field in ["lollms_model_name", "llm_temperature", "llm_top_k", "llm_top_p", "llm_repeat_penalty", "llm_repeat_last_n", "put_thoughts_in_context"]:
+                lollms_client_needs_reinit = True # Some LLM params might require client re-init
+                session_needs_refresh = True # Also refresh session for these
+
+    try:
+        db.commit()
+        db.refresh(db_user)
+
+        # Update session if critical fields changed
+        if session_needs_refresh and db_user.username in user_sessions:
+            session = user_sessions[db_user.username]
+            if "active_personality_id" in updated_fields:
+                session["active_personality_id"] = db_user.active_personality_id
+                if db_user.active_personality_id:
+                    active_pers_prompt = db.query(DBPersonality.prompt_text).filter(DBPersonality.id == db_user.active_personality_id).scalar()
+                    session["active_personality_prompt"] = active_pers_prompt
+                else:
+                    session["active_personality_prompt"] = None
+            
+            # Update session llm_params (non-prefixed keys)
+            session_llm_params = session.get("llm_params", {})
+            if "llm_temperature" in updated_fields: session_llm_params["temperature"] = db_user.llm_temperature
+            if "llm_top_k" in updated_fields: session_llm_params["top_k"] = db_user.llm_top_k
+            if "llm_top_p" in updated_fields: session_llm_params["top_p"] = db_user.llm_top_p
+            if "llm_repeat_penalty" in updated_fields: session_llm_params["repeat_penalty"] = db_user.llm_repeat_penalty
+            if "llm_repeat_last_n" in updated_fields: session_llm_params["repeat_last_n"] = db_user.llm_repeat_last_n
+            if "put_thoughts_in_context" in updated_fields: session_llm_params["put_thoughts_in_context"] = db_user.put_thoughts_in_context
+            
+            session["llm_params"] = {k: v for k, v in session_llm_params.items() if v is not None}
+
+            if "lollms_model_name" in updated_fields:
+                session["lollms_model_name"] = db_user.lollms_model_name
+                lollms_client_needs_reinit = True
+         
+            if lollms_client_needs_reinit:
+                session["lollms_client"] = None # Force re-init on next use
+
+        # Re-fetch UserAuthDetails to reflect all changes
+        # This is a bit inefficient as it re-runs get_current_active_user logic,
+        # but ensures consistency.
+        # A more direct way would be to construct UserAuthDetails from db_user and session here.
+        # For now, let's rely on a fresh call to get_current_active_user by the client after this.
+        # Or, we can construct it manually:
+        
+        lc = get_user_lollms_client(db_user.username) # Ensure client is available for ai_name
+        ai_name_for_user = getattr(lc, "ai_name", LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"))
+        current_session_llm_params = user_sessions[db_user.username].get("llm_params", {})
+
+
+        return UserAuthDetails(
+            username=db_user.username, is_admin=db_user.is_admin,
+            first_name=db_user.first_name, family_name=db_user.family_name,
+            email=db_user.email, birth_date=db_user.birth_date,
+            lollms_model_name=db_user.lollms_model_name,
+            safe_store_vectorizer=db_user.safe_store_vectorizer,
+            active_personality_id=db_user.active_personality_id,
+            lollms_client_ai_name=ai_name_for_user,
+            llm_temperature=current_session_llm_params.get("temperature"),
+            llm_top_k=current_session_llm_params.get("top_k"),
+            llm_top_p=current_session_llm_params.get("top_p"),
+            llm_repeat_penalty=current_session_llm_params.get("repeat_penalty"),
+            llm_repeat_last_n=current_session_llm_params.get("repeat_last_n"),
+            put_thoughts_in_context=current_session_llm_params.get("put_thoughts_in_context"),
+            rag_top_k=db_user.rag_top_k,
+            rag_use_graph=db_user.rag_use_graph,
+            rag_graph_response_type=db_user.rag_graph_response_type
+        )
+
+    except IntegrityError as e:
+        db.rollback()
+        # Check for specific constraint violations if needed, e.g., unique email
+        raise HTTPException(status_code=400, detail=f"Data integrity error: {e.orig}")
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@auth_router.post("/logout")
 async def logout(response: Response, current_user: UserAuthDetails = Depends(get_current_active_user), background_tasks: BackgroundTasks = BackgroundTasks()) -> Dict[str, str]:
     username = current_user.username
     if username in user_sessions:
@@ -1249,24 +1636,41 @@ async def chat_in_existing_discussion(
             return True
 
         try: 
-            full_prompt_to_llm = discussion_obj.prepare_query_for_llm(final_prompt_for_llm, llm_image_paths)
+            
             
             def blocking_call():
                 try:
+                    # Fetch active personality prompt from user's session
+                    active_personality_prompt_text = user_sessions[username].get("active_personality_prompt")
+                    user_puts_thoughts_in_context = user_sessions[username].get("llm_params", {}).get("put_thoughts_in_context", False)
+
                     shared_state["binding_name"] = lc.binding.binding_name if lc.binding else "unknown_binding"
                     shared_state["model_name"] = lc.binding.model_name if lc.binding and hasattr(lc.binding, "model_name") else user_sessions[username].get("lollms_model_name", "unknown_model")
                     
-                    # LollmsClient is initialized with temperature, top_k etc. from session["llm_params"]
-                    # These are already non-prefixed.
-                    # The generate_text call itself can also take these as overrides if needed.
-                    # For now, relying on client's initialized params.
-                    lc.generate_text(prompt=full_prompt_to_llm, images=llm_image_paths, stream=True, streaming_callback=llm_callback)
+                    # Prepare the main prompt (history + current user input)
+                    main_prompt_content = discussion_obj.prepare_query_for_llm(
+                        final_prompt_for_llm # This is the user's current text input, possibly augmented by RAG
+                        # max_total_tokens can be passed if needed, or rely on LollmsClient defaults
+                    )
+                    if not user_puts_thoughts_in_context:
+                        main_prompt_content = lc.remove_thinking_blocks(main_prompt_content)
+                    
+                    # Call generate_text with the separate system_prompt parameter
+                    lc.generate_text(
+                        prompt=main_prompt_content,
+                        system_prompt=active_personality_prompt_text, # Pass system prompt here
+                        images=llm_image_paths, 
+                        stream=True, 
+                        streaming_callback=llm_callback
+                        # Other parameters like temperature, top_k, etc., are assumed to be set
+                        # on the LollmsClient instance itself or can be overridden here if needed.
+                    )
                 except Exception as e_gen:
                     err_msg = f"LLM generation failed: {str(e_gen)}"
                     shared_state["generation_error"] = err_msg
                     if main_loop.is_running():
-                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
-                    traceback.print_exc() # Print full traceback for server logs
+                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
+                    traceback.print_exc() 
                 finally: 
                     if main_loop.is_running():
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, None) 
@@ -2082,7 +2486,8 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         llm_top_k=user_data.llm_top_k if user_data.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
         llm_top_p=user_data.llm_top_p if user_data.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
         llm_repeat_penalty=user_data.llm_repeat_penalty if user_data.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
-        llm_repeat_last_n=user_data.llm_repeat_last_n if user_data.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n")
+        llm_repeat_last_n=user_data.llm_repeat_last_n if user_data.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),
+        put_thoughts_in_context=user_data.put_thoughts_in_context if user_data.put_thoughts_in_context is not None else LOLLMS_CLIENT_DEFAULTS.get("put_thoughts_in_context", False)
     )
     try: db.add(new_db_user); db.commit(); db.refresh(new_db_user); return new_db_user
     except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"DB error: {e}")
@@ -2183,6 +2588,339 @@ async def get_locale_file(lang_code: str):
 
 app.include_router(languages_router)
 
+
+# --- Personality Pydantic Models (ensure these are defined) ---
+class PersonalityBase(BaseModel):
+    name: constr(min_length=1, max_length=100)
+    category: Optional[str] = Field(None, max_length=100)
+    author: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = Field(None, max_length=2000)
+    prompt_text: str 
+    disclaimer: Optional[str] = Field(None, max_length=1000)
+    script_code: Optional[str] = None
+    icon_base64: Optional[str] = None
+
+class PersonalityCreate(PersonalityBase):
+    is_public: Optional[bool] = False 
+
+class PersonalityUpdate(PersonalityBase):
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    prompt_text: Optional[str] = None
+    is_public: Optional[bool] = None # Only admin should be able to make an existing one public
+
+class PersonalityPublic(PersonalityBase):
+    id: str
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    is_public: bool
+    owner_username: Optional[str] = None 
+    model_config = {"from_attributes": True}
+
+# --- FastAPI Router for Personalities ---
+personalities_router = APIRouter(prefix="/api/personalities", tags=["Personalities"])
+
+def get_personality_public_from_db(db_personality: DBPersonality, owner_username: Optional[str] = None) -> PersonalityPublic:
+    """Helper to convert DBPersonality to PersonalityPublic, fetching owner username if needed."""
+    if owner_username is None and db_personality.owner_user_id and db_personality.owner:
+        owner_username = db_personality.owner.username
+    elif owner_username is None and db_personality.owner_user_id and not db_personality.owner:
+        # This case should be rare if relationships are loaded, but as a fallback:
+        # db = next(get_db()) # Avoid creating new session if possible
+        # owner = db.query(DBUser.username).filter(DBUser.id == db_personality.owner_user_id).scalar()
+        # owner_username = owner if owner else "Unknown"
+        # db.close()
+        # For simplicity, if owner not loaded, it will be None. Caller should ensure owner is loaded.
+        pass
+
+
+    return PersonalityPublic(
+        id=db_personality.id,
+        name=db_personality.name,
+        category=db_personality.category,
+        author=db_personality.author,
+        description=db_personality.description,
+        prompt_text=db_personality.prompt_text,
+        disclaimer=db_personality.disclaimer,
+        script_code=db_personality.script_code,
+        icon_base64=db_personality.icon_base64,
+        created_at=db_personality.created_at,
+        updated_at=db_personality.updated_at,
+        is_public=db_personality.is_public,
+        owner_username=owner_username
+    )
+
+@personalities_router.post("", response_model=PersonalityPublic, status_code=201)
+async def create_personality(
+    personality_data: PersonalityCreate,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> PersonalityPublic:
+    db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # Check for name conflict for this user
+    existing_personality = db.query(DBPersonality).filter(
+        DBPersonality.owner_user_id == db_user.id,
+        DBPersonality.name == personality_data.name
+    ).first()
+    if existing_personality:
+        raise HTTPException(status_code=400, detail=f"You already have a personality named '{personality_data.name}'.")
+
+    # If admin tries to create a public personality
+    owner_id_for_new_pers = db_user.id
+    if personality_data.is_public and current_user.is_admin:
+        # Admin can create a truly public (system) personality with no owner,
+        # or a public personality owned by themselves.
+        # For simplicity, let's assume admin-created public personalities are system-level (owner_user_id = None)
+        # Or, if you want admin to "own" public ones they create:
+        # owner_id_for_new_pers = db_user.id
+        # For truly public/system, set owner_id_for_new_pers = None
+        # Let's make admin-created public personalities owned by them for now, simpler.
+        pass # is_public will be set from personality_data
+    elif personality_data.is_public and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only administrators can create public personalities.")
+    
+    db_personality = DBPersonality(
+        **personality_data.model_dump(exclude={"is_public"}), # Exclude is_public if handled separately
+        owner_user_id=owner_id_for_new_pers, # User owns their created personalities
+        is_public=personality_data.is_public if current_user.is_admin else False # User-created are private
+    )
+
+    try:
+        db.add(db_personality)
+        db.commit()
+        db.refresh(db_personality)
+        return get_personality_public_from_db(db_personality, current_user.username)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Personality name conflict (race condition).")
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@personalities_router.get("/my", response_model=List[PersonalityPublic])
+async def get_my_personalities(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> List[PersonalityPublic]:
+    db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    owned_personalities_db = db.query(DBPersonality).filter(DBPersonality.owner_user_id == db_user.id).order_by(DBPersonality.name).all()
+    return [get_personality_public_from_db(p, current_user.username) for p in owned_personalities_db]
+
+@personalities_router.get("/public", response_model=List[PersonalityPublic])
+async def get_public_personalities(
+    db: Session = Depends(get_db)
+    # No auth needed to view public personalities, but could be added if desired
+) -> List[PersonalityPublic]:
+    # Load owner relationship to get owner_username
+    public_personalities_db = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(DBPersonality.is_public == True).order_by(DBPersonality.category, DBPersonality.name).all()
+    return [get_personality_public_from_db(p) for p in public_personalities_db]
+
+
+@personalities_router.get("/{personality_id}", response_model=PersonalityPublic)
+async def get_personality(
+    personality_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user), # Auth to check ownership for non-public
+    db: Session = Depends(get_db)
+) -> PersonalityPublic:
+    db_personality = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(DBPersonality.id == personality_id).first()
+    if not db_personality:
+        raise HTTPException(status_code=404, detail="Personality not found.")
+
+    db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not db_user: # Should not happen if current_user is valid
+        raise HTTPException(status_code=404, detail="Requesting user not found.")
+
+    is_owner = (db_personality.owner_user_id == db_user.id)
+
+    if not db_personality.is_public and not is_owner:
+        raise HTTPException(status_code=403, detail="You do not have permission to view this personality.")
+    
+    return get_personality_public_from_db(db_personality)
+
+
+@personalities_router.put("/{personality_id}", response_model=PersonalityPublic)
+async def update_personality(
+    personality_id: str,
+    personality_data: PersonalityUpdate,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> PersonalityPublic:
+    db_personality = db.query(DBPersonality).filter(DBPersonality.id == personality_id).first()
+    if not db_personality:
+        raise HTTPException(status_code=404, detail="Personality not found.")
+
+    db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    is_owner = (db_personality.owner_user_id == db_user.id)
+
+    if not is_owner and not current_user.is_admin: # Only owner or admin can update
+        raise HTTPException(status_code=403, detail="You do not have permission to update this personality.")
+    
+    # If admin is updating a personality not owned by them, they can change its public status.
+    # If user is updating their own, they cannot make it public unless they are also admin.
+    if personality_data.is_public is not None:
+        if not current_user.is_admin:
+            # Non-admin trying to change public status of their own personality
+            if is_owner and personality_data.is_public != db_personality.is_public:
+                 raise HTTPException(status_code=403, detail="Only administrators can change the public status of a personality.")
+        # If admin, they can change is_public for any personality
+        # If it's an admin updating their own, they can change it.
+        # If it's an admin updating someone else's, they can change it.
+        # If it's an admin updating a system (owner_user_id=None) personality, they can change it.
+        if current_user.is_admin:
+            db_personality.is_public = personality_data.is_public
+    
+    update_data = personality_data.model_dump(exclude_unset=True, exclude={"is_public"}) # is_public handled above
+
+    if "name" in update_data and update_data["name"] != db_personality.name:
+        # Check for name conflict for this user if it's their personality
+        # Or global conflict if it's a public personality being renamed by admin
+        owner_id_for_check = db_personality.owner_user_id
+        if db_personality.is_public and owner_id_for_check is None: # System personality
+             existing_conflict = db.query(DBPersonality).filter(
+                DBPersonality.owner_user_id == None, # Check among system personalities
+                DBPersonality.name == update_data["name"],
+                DBPersonality.id != personality_id
+            ).first()
+        else: # User-owned or admin-owned public
+            existing_conflict = db.query(DBPersonality).filter(
+                DBPersonality.owner_user_id == owner_id_for_check,
+                DBPersonality.name == update_data["name"],
+                DBPersonality.id != personality_id
+            ).first()
+        if existing_conflict:
+            raise HTTPException(status_code=400, detail=f"A personality named '{update_data['name']}' already exists.")
+
+    for field, value in update_data.items():
+        if hasattr(db_personality, field):
+            setattr(db_personality, field, value)
+    
+    try:
+        db.commit()
+        db.refresh(db_personality)
+        # Reload owner for username if it was an admin editing someone else's
+        db.refresh(db_personality, attribute_names=['owner']) 
+        return get_personality_public_from_db(db_personality)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Personality name conflict (race condition).")
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@personalities_router.delete("/{personality_id}", status_code=200)
+async def delete_personality(
+    personality_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, str]:
+    db_personality = db.query(DBPersonality).filter(DBPersonality.id == personality_id).first()
+    if not db_personality:
+        raise HTTPException(status_code=404, detail="Personality not found.")
+
+    db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    is_owner = (db_personality.owner_user_id == db_user.id)
+
+    if not is_owner and not (current_user.is_admin and db_personality.is_public):
+        # User can delete their own.
+        # Admin can delete any public personality (even if owned by another user, or system-owned).
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this personality.")
+
+    # If this personality is active for any user, set their active_personality_id to None
+    users_with_this_active_personality = db.query(DBUser).filter(DBUser.active_personality_id == personality_id).all()
+    for user_to_update in users_with_this_active_personality:
+        user_to_update.active_personality_id = None
+        # Clear from session if user is active
+        if user_to_update.username in user_sessions:
+            user_sessions[user_to_update.username]["active_personality_id"] = None
+            user_sessions[user_to_update.username]["active_personality_prompt"] = None
+            # If this affects the current_user, their session will be updated.
+            # If it affects other users, their session will update on their next /me or relevant action.
+
+    try:
+        db.delete(db_personality)
+        db.commit()
+        return {"message": f"Personality '{db_personality.name}' deleted successfully."}
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+@personalities_router.post("/{personality_id}/send", response_model=PersonalityPublic)
+async def send_personality_to_user(
+    personality_id: str,
+    send_request: PersonalitySendRequest,
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+) -> PersonalityPublic:
+    original_personality = db.query(DBPersonality).filter(
+        DBPersonality.id == personality_id,
+        # User can send their own, or an admin can send any public one
+        or_(
+            DBPersonality.owner_user_id == current_db_user.id,
+            and_(DBPersonality.is_public == True, current_db_user.is_admin == True)
+        )
+    ).first()
+
+    if not original_personality:
+        raise HTTPException(status_code=404, detail="Personality not found or you don't have permission to send it.")
+
+    target_user = db.query(DBUser).filter(DBUser.username == send_request.target_username).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail=f"Target user '{send_request.target_username}' not found.")
+    
+    if target_user.id == current_db_user.id:
+        raise HTTPException(status_code=400, detail="Cannot send a personality to yourself.")
+
+    # Check if target user already has a personality with the same name
+    existing_target_pers = db.query(DBPersonality).filter(
+        DBPersonality.owner_user_id == target_user.id,
+        DBPersonality.name == original_personality.name
+    ).first()
+    if existing_target_pers:
+        raise HTTPException(status_code=400, detail=f"User '{target_user.username}' already has a personality named '{original_personality.name}'.")
+
+    copied_personality = DBPersonality(
+        name=original_personality.name, # Or prompt for a new name if desired
+        category=original_personality.category,
+        author=original_personality.author, # Or set to sender: current_db_user.username
+        description=original_personality.description,
+        prompt_text=original_personality.prompt_text,
+        disclaimer=original_personality.disclaimer,
+        script_code=original_personality.script_code,
+        icon_base64=original_personality.icon_base64,
+        owner_user_id=target_user.id, # New owner is the target user
+        is_public=False # Copies are private to the recipient
+    )
+    db.add(copied_personality)
+    try:
+        db.commit()
+        db.refresh(copied_personality)
+        return get_personality_public_from_db(copied_personality, target_user.username)
+    except IntegrityError: # Should be caught by name check above
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Failed to send personality due to a name conflict for the target user.")
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error sending personality: {str(e)}")
+
+# Add the router to the main app
+app.include_router(personalities_router)
+
 # --- Main Execution ---
 if __name__ == "__main__":
     import uvicorn
@@ -2194,3 +2932,626 @@ if __name__ == "__main__":
     print(f"Access Admin Panel at: http://{host}:{port}/admin (requires admin login)")
     print("--------------------------------------------------------------------")
     uvicorn.run("main:app", host=host, port=port, reload=False) 
+
+# --- FastAPI Router for Friendships ---
+friends_router = APIRouter(prefix="/api/friends", tags=["Friends Management"])
+
+def get_friend_public_from_friendship(friendship: Friendship, current_user_id: int) -> FriendPublic:
+    """
+    Helper to determine who the 'friend' is in a friendship record
+    relative to the current_user_id and format it as FriendPublic.
+    """
+    friend_user_obj = None
+    if friendship.user1_id == current_user_id:
+        friend_user_obj = friendship.user2 # The other user is user2
+    elif friendship.user2_id == current_user_id:
+        friend_user_obj = friendship.user1 # The other user is user1
+    
+    if not friend_user_obj:
+        # This should not happen if the friendship involves the current_user_id
+        raise ValueError("Friendship record does not involve the current user.")
+
+    return FriendPublic(
+        id=friend_user_obj.id,
+        username=friend_user_obj.username,
+        friendship_id=friendship.id,
+        status_with_current_user=friendship.status # The status of the friendship itself
+    )
+
+@friends_router.post("/request", response_model=FriendshipRequestPublic, status_code=201)
+async def send_friend_request(
+    request_data: FriendRequestCreate,
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+) -> FriendshipRequestPublic:
+    if current_db_user.username == request_data.target_username:
+        raise HTTPException(status_code=400, detail="You cannot send a friend request to yourself.")
+
+    target_user = db.query(DBUser).filter(DBUser.username == request_data.target_username).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail=f"User '{request_data.target_username}' not found.")
+
+    # Ensure canonical order for user1_id and user2_id to prevent duplicate entries
+    # (user1_id < user2_id)
+    user1_id, user2_id = sorted((current_db_user.id, target_user.id))
+
+    existing_friendship = db.query(Friendship).filter(
+        Friendship.user1_id == user1_id,
+        Friendship.user2_id == user2_id
+    ).first()
+
+    if existing_friendship:
+        if existing_friendship.status == FriendshipStatus.ACCEPTED:
+            raise HTTPException(status_code=400, detail="You are already friends with this user.")
+        elif existing_friendship.status == FriendshipStatus.PENDING and existing_friendship.action_user_id == current_db_user.id:
+            raise HTTPException(status_code=400, detail="You have already sent a friend request to this user.")
+        elif existing_friendship.status == FriendshipStatus.PENDING and existing_friendship.action_user_id == target_user.id:
+            raise HTTPException(status_code=400, detail="This user has already sent you a friend request. Please respond to it.")
+        elif existing_friendship.status == FriendshipStatus.BLOCKED_BY_USER1 and user1_id == current_db_user.id: # You blocked them
+            raise HTTPException(status_code=403, detail="You have blocked this user. Unblock them to send a request.")
+        elif existing_friendship.status == FriendshipStatus.BLOCKED_BY_USER2 and user2_id == current_db_user.id: # You blocked them
+             raise HTTPException(status_code=403, detail="You have blocked this user. Unblock them to send a request.")
+        elif (existing_friendship.status == FriendshipStatus.BLOCKED_BY_USER1 and user1_id == target_user.id) or \
+             (existing_friendship.status == FriendshipStatus.BLOCKED_BY_USER2 and user2_id == target_user.id): # They blocked you
+            raise HTTPException(status_code=403, detail="You cannot send a friend request to this user as they have blocked you.")
+        # If other statuses, potentially allow re-request or overwrite (e.g., after a decline)
+        # For now, if any record exists and isn't one of the above, it's an edge case or needs specific handling.
+        # Let's assume we can overwrite a previously declined/removed one by setting status to PENDING.
+        existing_friendship.status = FriendshipStatus.PENDING
+        existing_friendship.action_user_id = current_db_user.id # Current user is sending the request
+        db_friendship_to_return = existing_friendship
+    else:
+        new_friendship = Friendship(
+            user1_id=user1_id,
+            user2_id=user2_id,
+            status=FriendshipStatus.PENDING,
+            action_user_id=current_db_user.id # Current user is sending the request
+        )
+        db.add(new_friendship)
+        db_friendship_to_return = new_friendship
+    
+    try:
+        db.commit()
+        db.refresh(db_friendship_to_return)
+        return FriendshipRequestPublic(
+            friendship_id=db_friendship_to_return.id,
+            requesting_user_id=current_db_user.id, # The one who sent the request
+            requesting_username=current_db_user.username,
+            requested_at=db_friendship_to_return.created_at, # Or updated_at if overwriting
+            status=db_friendship_to_return.status
+        )
+    except IntegrityError: # Should be caught by existing_friendship check mostly
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Friendship request conflict.")
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@friends_router.get("/requests/pending", response_model=List[FriendshipRequestPublic])
+async def get_pending_friend_requests(
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+) -> List[FriendshipRequestPublic]:
+    """Gets friend requests sent TO the current user that are pending."""
+    pending_requests_db = db.query(Friendship).options(
+        joinedload(Friendship.user1), # Eager load user1 (potential requester)
+        joinedload(Friendship.user2)  # Eager load user2 (potential requester)
+    ).filter(
+        or_(
+            and_(Friendship.user1_id == current_db_user.id, Friendship.action_user_id != current_db_user.id), # Request sent by user2 to user1
+            and_(Friendship.user2_id == current_db_user.id, Friendship.action_user_id != current_db_user.id)  # Request sent by user1 to user2
+        ),
+        Friendship.status == FriendshipStatus.PENDING
+    ).all()
+
+    response_list = []
+    for req in pending_requests_db:
+        requester = req.user1 if req.user2_id == current_db_user.id else req.user2
+        if requester: # Ensure requester object is loaded
+            response_list.append(FriendshipRequestPublic(
+                friendship_id=req.id,
+                requesting_user_id=requester.id,
+                requesting_username=requester.username,
+                requested_at=req.updated_at, # Use updated_at as it reflects when request was made/last actioned
+                status=req.status
+            ))
+    return response_list
+
+@friends_router.put("/requests/{friendship_id}", response_model=FriendPublic)
+async def respond_to_friend_request(
+    friendship_id: int,
+    response_data: FriendshipAction, # e.g., {"action": "accept"} or {"action": "reject"}
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+) -> FriendPublic:
+    friendship = db.query(Friendship).filter(Friendship.id == friendship_id).first()
+
+    if not friendship:
+        raise HTTPException(status_code=404, detail="Friend request not found.")
+
+    # Ensure the current user is the recipient of this pending request
+    is_recipient = (friendship.user1_id == current_db_user.id and friendship.action_user_id != current_db_user.id) or \
+                   (friendship.user2_id == current_db_user.id and friendship.action_user_id != current_db_user.id)
+
+    if not is_recipient or friendship.status != FriendshipStatus.PENDING:
+        raise HTTPException(status_code=403, detail="Not a valid pending request for you to respond to.")
+
+    action = response_data.action.lower()
+    if action == "accept":
+        friendship.status = FriendshipStatus.ACCEPTED
+        friendship.action_user_id = current_db_user.id # Current user accepted
+    elif action == "reject":
+        # Option 1: Delete the request
+        db.delete(friendship)
+        db.commit()
+        # Return a specific response or raise an exception that the frontend can interpret as "rejected and removed"
+        # For simplicity, let's just say it's gone. The frontend won't see it in pending list.
+        # Or, if you want to keep a "declined" state:
+        # friendship.status = FriendshipStatus.DECLINED 
+        # friendship.action_user_id = current_db_user.id
+        # For now, deleting is simpler.
+        raise HTTPException(status_code=200, detail="Friend request rejected and removed.") # 200 or 204
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action. Must be 'accept' or 'reject'.")
+
+    try:
+        db.commit()
+        db.refresh(friendship)
+        # Eager load related users for get_friend_public_from_friendship
+        db.refresh(friendship, attribute_names=['user1', 'user2'])
+        return get_friend_public_from_friendship(friendship, current_db_user.id)
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@friends_router.get("", response_model=List[FriendPublic]) # Get list of accepted friends
+async def get_my_friends(
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+) -> List[FriendPublic]:
+    # Friendships where current user is user1 OR user2, and status is ACCEPTED
+    friendships_db = db.query(Friendship).options(
+        joinedload(Friendship.user1), joinedload(Friendship.user2)
+    ).filter(
+        or_(Friendship.user1_id == current_db_user.id, Friendship.user2_id == current_db_user.id),
+        Friendship.status == FriendshipStatus.ACCEPTED
+    ).order_by(Friendship.updated_at.desc()).all() # Or order by friend's username
+
+    friends_list = []
+    for fs in friendships_db:
+        try:
+            friends_list.append(get_friend_public_from_friendship(fs, current_db_user.id))
+        except ValueError: # Should not happen with the query filter
+            pass 
+    
+    # Sort by username for consistent display
+    friends_list.sort(key=lambda f: f.username.lower())
+    return friends_list
+
+
+@friends_router.delete("/{friend_user_id_or_username}", status_code=200) # Unfriend or cancel sent request
+async def remove_friend_or_cancel_request(
+    friend_user_id_or_username: str,
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, str]:
+    other_user = None
+    try:
+        other_user_id = int(friend_user_id_or_username)
+        other_user = db.query(DBUser).filter(DBUser.id == other_user_id).first()
+    except ValueError:
+        other_user = db.query(DBUser).filter(DBUser.username == friend_user_id_or_username).first()
+
+    if not other_user:
+        raise HTTPException(status_code=404, detail="Target user not found.")
+    if other_user.id == current_db_user.id:
+        raise HTTPException(status_code=400, detail="Cannot perform this action on yourself.")
+
+    user1_id, user2_id = sorted((current_db_user.id, other_user.id))
+
+    friendship = db.query(Friendship).filter(
+        Friendship.user1_id == user1_id,
+        Friendship.user2_id == user2_id
+    ).first()
+
+    if not friendship:
+        raise HTTPException(status_code=404, detail="No friendship or request found with this user.")
+
+    action_taken = ""
+    if friendship.status == FriendshipStatus.ACCEPTED:
+        # Unfriend: Delete the record
+        db.delete(friendship)
+        action_taken = "unfriended"
+    elif friendship.status == FriendshipStatus.PENDING and friendship.action_user_id == current_db_user.id:
+        # Cancel sent request: Delete the record
+        db.delete(friendship)
+        action_taken = "friend request cancelled"
+    elif friendship.status == FriendshipStatus.PENDING and friendship.action_user_id == other_user.id:
+        # Reject incoming request: Delete the record (same as /requests/{id} with "reject")
+        db.delete(friendship)
+        action_taken = "friend request rejected"
+    else:
+        # E.g., trying to unfriend someone you blocked, or a non-pending/non-accepted state
+        raise HTTPException(status_code=400, detail=f"Cannot perform this action on current friendship status: {friendship.status.value}")
+
+    try:
+        db.commit()
+        return {"message": f"Successfully {action_taken} user '{other_user.username}'."}
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+# --- New Block/Unblock Endpoints ---
+@friends_router.put("/block/{user_id_or_username}", response_model=FriendPublic)
+async def block_user(
+    user_id_or_username: str,
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+) -> FriendPublic:
+    other_user = None
+    try:
+        other_user_id_val = int(user_id_or_username)
+        other_user = db.query(DBUser).filter(DBUser.id == other_user_id_val).first()
+    except ValueError:
+        other_user = db.query(DBUser).filter(DBUser.username == user_id_or_username).first()
+
+    if not other_user:
+        raise HTTPException(status_code=404, detail="Target user not found.")
+    if other_user.id == current_db_user.id:
+        raise HTTPException(status_code=400, detail="You cannot block yourself.")
+
+    friendship = get_friendship_record(db, current_db_user.id, other_user.id)
+    
+    user1_id_ordered, user2_id_ordered = sorted((current_db_user.id, other_user.id))
+
+    if not friendship:
+        friendship = Friendship(
+            user1_id=user1_id_ordered,
+            user2_id=user2_id_ordered,
+            action_user_id=current_db_user.id
+        )
+        db.add(friendship)
+    else:
+        # Check if already blocked by the other user
+        if (friendship.status == FriendshipStatus.BLOCKED_BY_USER1 and friendship.user1_id == other_user.id) or \
+           (friendship.status == FriendshipStatus.BLOCKED_BY_USER2 and friendship.user2_id == other_user.id):
+            raise HTTPException(status_code=403, detail="Cannot block a user who has blocked you.")
+        friendship.action_user_id = current_db_user.id
+
+
+    if user1_id_ordered == current_db_user.id: # Current user is user1 in the canonical pair
+        friendship.status = FriendshipStatus.BLOCKED_BY_USER1
+    else: # Current user is user2 in the canonical pair
+        friendship.status = FriendshipStatus.BLOCKED_BY_USER2
+    
+    try:
+        db.commit()
+        db.refresh(friendship)
+        db.refresh(friendship, attribute_names=['user1', 'user2'])
+        return get_friend_public_from_friendship(friendship, current_db_user.id)
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+@friends_router.put("/unblock/{user_id_or_username}", response_model=FriendPublic)
+async def unblock_user(
+    user_id_or_username: str,
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+) -> FriendPublic:
+    other_user = None
+    try:
+        other_user_id_val = int(user_id_or_username)
+        other_user = db.query(DBUser).filter(DBUser.id == other_user_id_val).first()
+    except ValueError:
+        other_user = db.query(DBUser).filter(DBUser.username == user_id_or_username).first()
+
+    if not other_user:
+        raise HTTPException(status_code=404, detail="Target user not found.")
+    if other_user.id == current_db_user.id: # Should not happen if UI prevents
+        raise HTTPException(status_code=400, detail="Invalid action.")
+
+    friendship = get_friendship_record(db, current_db_user.id, other_user.id)
+
+    if not friendship:
+        raise HTTPException(status_code=404, detail="No relationship record found with this user to unblock.")
+
+    # Check if the current user actually initiated the block
+    is_blocker = (friendship.status == FriendshipStatus.BLOCKED_BY_USER1 and friendship.user1_id == current_db_user.id) or \
+                 (friendship.status == FriendshipStatus.BLOCKED_BY_USER2 and friendship.user2_id == current_db_user.id)
+
+    if not is_blocker:
+        raise HTTPException(status_code=400, detail="You have not blocked this user, or they blocked you.")
+
+    # Unblocking sets the status back to PENDING (or you could delete the record if no prior friendship)
+    # If you want to restore previous friendship status, that's more complex (need to store pre-block status)
+    # For simplicity, unblocking could mean the relationship is removed, or goes to a neutral state.
+    # Let's assume unblocking removes the record, allowing for a fresh start.
+    # Or, set to PENDING, with action_user being the one unblocking, effectively "offering" a re-connection.
+    # For now, let's just delete the record to signify the end of the block.
+    # A more nuanced approach might set it to a neutral state or revert to pre-block status.
+    # Let's change this: unblocking will remove the friendship record entirely.
+    # This means if they were friends before, they are no longer. They'd have to re-request.
+    # This is simpler than trying to restore a previous state.
+    
+    # Alternative: Set to a neutral state, e.g., if they were friends, they remain friends.
+    # If it was PENDING before block, it's gone.
+    # This is complex. Let's make unblock simply remove the record for now.
+    # If you want to "unblock and revert to previous state", you'd need to store that state.
+
+    # Simpler: Unblocking removes the friendship record. User can re-initiate.
+    # db.delete(friendship)
+
+    # More user-friendly: Unblocking sets status to what it might have been before, or neutral.
+    # If they were friends, they become friends again. If nothing, then nothing.
+    # For now, let's set status to PENDING, with current user as action_user,
+    # effectively making them "open" to re-friending. The other user would see nothing changed
+    # until a new request is made or accepted.
+    # This is still not ideal. The simplest "unblock" is to remove the block status.
+    # What was the status before the block? If it was ACCEPTED, should it go back?
+    # Let's assume unblocking means the relationship is now "neutral" (no record or a new PENDING if one wants to re-initiate).
+    # For this implementation, let's just remove the record.
+    
+    # Revised: Unblocking sets the status to what it would be if no block existed.
+    # If they were friends, they are friends. If it was pending, it's pending from other user.
+    # This is too complex without storing pre-block state.
+    # Simplest: Unblock removes the record.
+    
+    # Let's try this: unblocking sets the status to PENDING, with the action_user_id being the one who unblocked.
+    # This means the relationship is now open for the other person to accept if they wish, or for the unblocker to send a new request.
+    # This is still not perfect.
+    # The most straightforward "unblock" is to simply remove the block status.
+    # If they were friends before, they are friends again.
+    # If the request was pending from the other user, it remains pending from them.
+    # If the request was pending from the current user (blocker), it's now unblocked and still pending from them.
+
+    # Let's assume the previous state was "nothing" or "pending from other".
+    # Unblocking will effectively delete the friendship record, requiring a new request.
+    # This is the cleanest break.
+    
+    # Final Decision for this iteration: Unblocking removes the friendship record.
+    # This forces a re-evaluation of the relationship.
+    db.delete(friendship)
+    action_message = f"User '{other_user.username}' unblocked. Any previous friendship status is cleared."
+
+
+    try:
+        db.commit()
+        # Since the record is deleted, we can't return FriendPublic of the old record.
+        # We return a message. The frontend should update its state.
+        return JSONResponse(status_code=200, content={"message": action_message})
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+
+
+# Add the router to the main app
+app.include_router(friends_router)
+
+dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
+
+@dm_router.post("/send", response_model=DirectMessagePublic, status_code=201)
+async def send_direct_message(
+    dm_data: DirectMessageCreate,
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+) -> DirectMessagePublic:
+    if current_db_user.id == dm_data.receiver_user_id:
+        raise HTTPException(status_code=400, detail="You cannot send a message to yourself.")
+
+    receiver_user = db.query(DBUser).filter(DBUser.id == dm_data.receiver_user_id).first()
+    if not receiver_user:
+        raise HTTPException(status_code=404, detail="Receiver user not found.")
+
+    # Check friendship status and blocks
+    friendship = get_friendship_record(db, current_db_user.id, receiver_user.id) # Uses helper from friends_router
+
+    if not friendship or friendship.status != FriendshipStatus.ACCEPTED:
+        # Check for blocks even if not "ACCEPTED" friends, as a block overrides everything
+        if friendship: # A record exists, check its status
+            if (friendship.status == FriendshipStatus.BLOCKED_BY_USER1 and friendship.user1_id == current_db_user.id) or \
+               (friendship.status == FriendshipStatus.BLOCKED_BY_USER2 and friendship.user2_id == current_db_user.id):
+                raise HTTPException(status_code=403, detail="You have blocked this user. Unblock them to send messages.")
+            if (friendship.status == FriendshipStatus.BLOCKED_BY_USER1 and friendship.user1_id == receiver_user.id) or \
+               (friendship.status == FriendshipStatus.BLOCKED_BY_USER2 and friendship.user2_id == receiver_user.id):
+                raise HTTPException(status_code=403, detail="You cannot send a message to this user as they have blocked you.")
+        # If no record or not accepted (and not blocked by receiver)
+        raise HTTPException(status_code=403, detail="You can only send messages to accepted friends who have not blocked you.")
+
+
+    new_dm = DirectMessage(
+        sender_id=current_db_user.id,
+        receiver_id=receiver_user.id,
+        content=dm_data.content
+        # image_references_json=dm_data.image_references_json # If supporting images
+    )
+    db.add(new_dm)
+    try:
+        db.commit()
+        db.refresh(new_dm)
+        # Eager load sender and receiver for username in response
+        db.refresh(new_dm, attribute_names=['sender', 'receiver'])
+        
+        return DirectMessagePublic(
+            id=new_dm.id,
+            sender_id=new_dm.sender_id,
+            sender_username=new_dm.sender.username,
+            receiver_id=new_dm.receiver_id,
+            receiver_username=new_dm.receiver.username,
+            content=new_dm.content,
+            sent_at=new_dm.sent_at,
+            read_at=new_dm.read_at
+            # image_references_json=new_dm.image_references_json
+        )
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error sending message: {str(e)}")
+
+
+@dm_router.get("/conversation/{other_user_id_or_username}", response_model=List[DirectMessagePublic])
+async def get_dm_conversation(
+    other_user_id_or_username: str,
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db),
+    before_message_id: Optional[int] = None, # For pagination: load messages before this ID
+    limit: int = Query(50, ge=1, le=100) # Pagination limit
+) -> List[DirectMessagePublic]:
+    other_user = None
+    try:
+        other_user_id_val = int(other_user_id_or_username)
+        other_user = db.query(DBUser).filter(DBUser.id == other_user_id_val).first()
+    except ValueError:
+        other_user = db.query(DBUser).filter(DBUser.username == other_user_id_or_username).first()
+
+    if not other_user:
+        raise HTTPException(status_code=404, detail="Other user not found.")
+    if other_user.id == current_db_user.id:
+        raise HTTPException(status_code=400, detail="Cannot fetch conversation with yourself.")
+
+    # Optional: Check friendship status before allowing to view conversation
+    # friendship = get_friendship_record(db, current_db_user.id, other_user.id)
+    # if not friendship or friendship.status != FriendshipStatus.ACCEPTED:
+    #     raise HTTPException(status_code=403, detail="You can only view conversations with accepted friends.")
+    # For now, allow viewing even if unfriended, but sending is restricted.
+
+    query = db.query(DirectMessage).options(
+        joinedload(DirectMessage.sender), joinedload(DirectMessage.receiver)
+    ).filter(
+        or_(
+            and_(DirectMessage.sender_id == current_db_user.id, DirectMessage.receiver_id == other_user.id),
+            and_(DirectMessage.sender_id == other_user.id, DirectMessage.receiver_id == current_db_user.id)
+        )
+    ).order_by(DirectMessage.sent_at.desc()) # Get newest first for pagination
+
+    if before_message_id:
+        before_message = db.query(DirectMessage).filter(DirectMessage.id == before_message_id).first()
+        if before_message:
+            query = query.filter(DirectMessage.sent_at < before_message.sent_at)
+        else: # Invalid before_message_id, return empty or error
+            return [] 
+            
+    messages_db = query.limit(limit).all()
+    
+    # Mark messages sent by the other user to current_user as read (if not already)
+    # This should ideally be a separate endpoint hit when user opens a conversation
+    unread_message_ids = [
+        msg.id for msg in messages_db 
+        if msg.receiver_id == current_db_user.id and msg.read_at is None
+    ]
+    if unread_message_ids:
+        db.query(DirectMessage).filter(
+            DirectMessage.id.in_(unread_message_ids)
+        ).update({"read_at": func.now()}, synchronize_session=False)
+        db.commit()
+        # Re-fetch to get updated read_at times for the response (or update in-memory)
+        for msg in messages_db:
+            if msg.id in unread_message_ids:
+                msg.read_at = datetime.datetime.now(datetime.timezone.utc) # Approximate
+
+    response_list = [
+        DirectMessagePublic(
+            id=msg.id,
+            sender_id=msg.sender_id,
+            sender_username=msg.sender.username,
+            receiver_id=msg.receiver_id,
+            receiver_username=msg.receiver.username,
+            content=msg.content,
+            sent_at=msg.sent_at,
+            read_at=msg.read_at
+            # image_references_json=msg.image_references_json
+        ) for msg in reversed(messages_db) # Reverse to show oldest first in the fetched page
+    ]
+    return response_list
+
+# Endpoint to explicitly mark messages as read (better than doing it in GET)
+@dm_router.post("/conversation/{other_user_id}/mark_read", status_code=200)
+async def mark_dm_conversation_as_read(
+    other_user_id: int,
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+):
+    # Mark all unread messages received by current_db_user from other_user_id as read
+    updated_count = db.query(DirectMessage).filter(
+        DirectMessage.sender_id == other_user_id,
+        DirectMessage.receiver_id == current_db_user.id,
+        DirectMessage.read_at == None
+    ).update({"read_at": func.now()}, synchronize_session=False)
+    
+    db.commit()
+    return {"message": f"{updated_count} messages marked as read."}
+
+
+# Placeholder for listing DM conversations (threads)
+# This would typically involve getting the latest message from each unique correspondent.
+@dm_router.get("/conversations", response_model=List[Dict[str, Any]]) # Response model needs to be defined
+async def list_dm_conversations(
+    current_db_user: DBUser = Depends(get_current_db_user),
+    db: Session = Depends(get_db)
+):
+    # This is a complex query to get distinct conversation partners and last message.
+    # Using a subquery to get the latest message_id for each conversation pair.
+    # SQL might look like:
+    # SELECT dm.*, u.username as partner_username FROM direct_messages dm
+    # JOIN (
+    #   SELECT
+    #     CASE WHEN sender_id = :current_user_id THEN receiver_id ELSE sender_id END as partner_id,
+    #     MAX(id) as max_id
+    #   FROM direct_messages
+    #   WHERE sender_id = :current_user_id OR receiver_id = :current_user_id
+    #   GROUP BY partner_id
+    # ) latest_msg ON dm.id = latest_msg.max_id
+    # JOIN users u ON u.id = latest_msg.partner_id
+    # ORDER BY dm.sent_at DESC;
+
+    # SQLAlchemy equivalent is more involved. For now, a simplified version:
+    # Get all friends, then for each friend, get the last message. This is N+1.
+    # A more optimized query is needed for production.
+
+    # Simplified approach: Get all friends, then fetch last message for each.
+    friends_response = await get_my_friends(current_db_user, db) # Re-use existing friends list endpoint logic
+    
+    conversations = []
+    for friend in friends_response:
+        last_message = db.query(DirectMessage).filter(
+            or_(
+                and_(DirectMessage.sender_id == current_db_user.id, DirectMessage.receiver_id == friend.id),
+                and_(DirectMessage.sender_id == friend.id, DirectMessage.receiver_id == current_db_user.id)
+            )
+        ).order_by(DirectMessage.sent_at.desc()).first()
+
+        unread_count = db.query(func.count(DirectMessage.id)).filter(
+            DirectMessage.sender_id == friend.id, # Messages from friend
+            DirectMessage.receiver_id == current_db_user.id, # To me
+            DirectMessage.read_at == None
+        ).scalar() or 0
+
+        if last_message:
+            conversations.append({
+                "partner_user_id": friend.id,
+                "partner_username": friend.username,
+                "last_message_content": last_message.content[:50] + "..." if last_message.content and len(last_message.content) > 50 else last_message.content,
+                "last_message_sent_at": last_message.sent_at,
+                "last_message_sender_id": last_message.sender_id,
+                "unread_count": unread_count
+            })
+        # else: # Friend with no messages yet, could still be listed
+        #    conversations.append({ "partner_user_id": friend.id, "partner_username": friend.username, "unread_count": 0})
+
+
+    # Sort conversations by last message time, descending
+    conversations.sort(key=lambda x: x.get("last_message_sent_at", datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)), reverse=True)
+    return conversations
+
+
+app.include_router(dm_router)
