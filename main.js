@@ -2656,6 +2656,11 @@ async function updateDiscussionRagStoreOnBackend(discussionId, ragDatastoreId) {
 
 // --- Branching Logic ---
 async function initiateBranch(discussionId, userMessageIdToBranchFrom) {
+    if (userMessageIndex === -1) {
+    console.error("initiateBranch: User message to branch from NOT FOUND in active branch:", userMessageIdToBranchFrom);
+    showStatus("Error: Could not find the message to branch from. It might have been deleted from this branch view.", "error");
+    return; // Stop if message not found
+}
     console.log(`initiateBranch called for discussion: ${discussionId}, branching from message: ${userMessageIdToBranchFrom}, current activeBranchId: ${activeBranchId}`);
     if (!discussionId || !userMessageIdToBranchFrom || generationInProgress) return;
     

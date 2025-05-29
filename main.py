@@ -911,7 +911,8 @@ def get_user_lollms_client(username: str) -> LollmsClient:
     if force_reinit:
         model_name = session["lollms_model_name"]
         binding_name = LOLLMS_CLIENT_DEFAULTS.get("binding_name", "lollms")
-        host_address = LOLLMS_CLIENT_DEFAULTS.get("host_address")
+        host_address = LOLLMS_CLIENT_DEFAULTS.get("host_address","")
+        models_path = LOLLMS_CLIENT_DEFAULTS.get("models_path","")
         ctx_size = LOLLMS_CLIENT_DEFAULTS.get("ctx_size", 4096)
         service_key_env_name = LOLLMS_CLIENT_DEFAULTS.get("service_key_env_var")
         service_key = os.getenv(service_key_env_name) if service_key_env_name else None
@@ -924,7 +925,7 @@ def get_user_lollms_client(username: str) -> LollmsClient:
         
         # Add other LollmsClient constructor parameters
         client_init_params.update({
-            "binding_name": binding_name, "model_name": model_name, "host_address": host_address,
+            "binding_name": binding_name, "model_name": model_name, "host_address": host_address, "models_path": models_path,
             "ctx_size": ctx_size, "service_key": service_key, 
             "user_name": user_name_conf, "ai_name": ai_name_conf,
         })
