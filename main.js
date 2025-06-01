@@ -1,7 +1,7 @@
 // --- Localization State ---
 let currentTranslations = {};
 let currentLang = 'en';
-let availableLanguages = { 'en': 'English' };
+let availableLanguages = { 'en': 'English', 'fr': 'Français' };
 
 // --- Global State ---
 let currentUser = null;
@@ -338,7 +338,7 @@ async function initializeLocalization() {
         const response = await apiRequest('/api/languages/');
         availableLanguages = await response.json();
     } catch (e) {
-        availableLanguages = { 'en': 'English' }; // Fallback
+        availableLanguages = { 'en': 'English', 'fr': 'Français' }; // Fallback
     }
 
     if (languageSelector) {
@@ -348,6 +348,8 @@ async function initializeLocalization() {
             option.value = code;
             option.textContent = availableLanguages[code];
             languageSelector.appendChild(option);
+            console.log("Added language")
+            console.log(code)
         }
         languageSelector.addEventListener('change', (e) => {
             loadLanguage(e.target.value);
