@@ -2249,7 +2249,11 @@ function createActionButton(type, tooltip, onClick, variant = 'default') {
         copy: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>`,
         edit: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>`,
         delete: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>`,
-        refresh: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`
+        refresh: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`,
+        delete: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>`,
+        chat_bubble: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>`,
+        person_remove: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m-.243-3.72a9.094 9.094 0 0 1-3.741-.479 3 3 0 0 1-4.682-2.72M12 12.75a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm-7.5 3.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm0 0h.01M12 12.75a9.094 9.094 0 0 0-3.741-.479 3 3 0 0 0-4.682-2.72m0 0a9.094 9.094 0 0 1 3.741-.479m0 0a3 3 0 1 0-4.682-2.72m4.682 2.72M3.055 11.676A9.094 9.094 0 0 1 6.795 11.2a3 3 0 0 1 4.682 2.719m0 0a3 3 0 0 1-4.682 2.72m4.682-2.72m6.945-5.438A9.094 9.094 0 0 1 17.205 11.2a3 3 0 0 1 4.682 2.719m0 0a3 3 0 0 1-4.682 2.72m4.682-2.72M12 12.75a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z" /></svg>`, // This is a complex group icon, find simpler ones
+        block: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" /></svg>`
     };
 
     button.innerHTML = icons[type] || '';
@@ -4156,12 +4160,46 @@ function createPersonalityListItem(p, isOwned) {
         const cloneBtn = document.createElement('button');
         cloneBtn.textContent = translate('clone_personality_btn', 'Clone');
         cloneBtn.className = 'btn btn-xs btn-outline'; // Define btn-outline
-        cloneBtn.onclick = () => clonePublicPersonality(p.id);
+        cloneBtn.onclick = () => clonePublicPersonality(p);
         actionsDiv.appendChild(cloneBtn);
     }
     div.appendChild(infoDiv);
     div.appendChild(actionsDiv);
     return div;
+}
+
+async function clonePublicPersonality(p) {
+    const id = personalityEditorId.value;
+    const payload = {
+        ...p, // Spread all properties from p into payload
+        is_public: false // Ensure is_public is set to false
+    };
+
+    if (!payload.name || !payload.prompt_text) {
+        showStatus(translate('error_personality_name_prompt_required', 'Name and System Prompt are required.'), 'error', personalityEditorStatus);
+        return;
+    }
+
+    const method = id ? 'PUT' : 'POST';
+    const url = id ? `/api/personalities/${id}` : '/api/personalities';
+
+    showStatus(translate(id ? 'status_saving_personality' : 'status_creating_personality', id ? 'Saving personality...' : 'Creating personality...'), 'info', personalityEditorStatus);
+    savePersonalityBtn.disabled = true;
+
+    try {
+        await apiRequest(url, {
+            method: method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            statusElement: personalityEditorStatus
+        });
+        showStatus(translate(id ? 'status_personality_saved_success' : 'status_personality_created_success', id ? 'Personality saved.' : 'Personality created.'), 'success', personalityEditorStatus);
+        await loadAndPopulatePersonalitiesTab(); // Refresh lists
+        setTimeout(() => closeModal('personalityEditorModal'), 1000);
+    } catch (error) { /* apiRequest handles status */
+    } finally {
+        savePersonalityBtn.disabled = false;
+    }
 }
 
 function openPersonalityEditor(personalityId) {
@@ -4425,8 +4463,8 @@ function renderFriendsList(friends) {
         actionsDiv.appendChild(unfriendBtn);
 
         // Optional: Block button directly in friend list
-        // const blockBtn = createActionButton('block', `Block ${friend.username}`, () => blockUser(friend.id, friend.username), 'destructive');
-        // actionsDiv.appendChild(blockBtn);
+        const blockBtn = createActionButton('block', `Block ${friend.username}`, () => blockUser(friend.id, friend.username), 'destructive');
+        actionsDiv.appendChild(blockBtn);
 
         friendDiv.appendChild(friendInfo);
         friendDiv.appendChild(actionsDiv);
@@ -4743,24 +4781,7 @@ async function handleConfirmSendPersonality() {
     }
 }
 
-// Helper to create action buttons with icons (extend if needed)
-function createActionButton(iconName, tooltip, onClick, variant = 'default') {
-    const button = document.createElement('button');
-    button.className = `action-btn p-1.5 hover:bg-gray-600 rounded-full transition-colors ${variant === 'destructive' ? 'text-red-400 hover:text-red-300' : 'text-gray-400 hover:text-gray-100'}`;
-    button.title = tooltip;
-    button.onclick = (e) => { e.stopPropagation(); onClick(); };
-    // Add SVG icons based on iconName
-    // This part needs to be filled with actual SVG strings for 'chat_bubble', 'person_remove', 'block'
-    const icons = {
-        edit: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>`,
-        delete: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>`,
-        chat_bubble: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>`,
-        person_remove: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m-.243-3.72a9.094 9.094 0 0 1-3.741-.479 3 3 0 0 1-4.682-2.72M12 12.75a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm-7.5 3.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm0 0h.01M12 12.75a9.094 9.094 0 0 0-3.741-.479 3 3 0 0 0-4.682-2.72m0 0a9.094 9.094 0 0 1 3.741-.479m0 0a3 3 0 1 0-4.682-2.72m4.682 2.72M3.055 11.676A9.094 9.094 0 0 1 6.795 11.2a3 3 0 0 1 4.682 2.719m0 0a3 3 0 0 1-4.682 2.72m4.682-2.72m6.945-5.438A9.094 9.094 0 0 1 17.205 11.2a3 3 0 0 1 4.682 2.719m0 0a3 3 0 0 1-4.682 2.72m4.682-2.72M12 12.75a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z" /></svg>`, // This is a complex group icon, find simpler ones
-        block: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" /></svg>`
-    };
-    button.innerHTML = icons[iconName] || iconName; // Fallback to text if icon not found
-    return button;
-}
+
 
 async function loadDmConversations() {
     if (!dmConversationsList) {
