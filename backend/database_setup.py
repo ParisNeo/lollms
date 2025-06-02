@@ -391,3 +391,13 @@ def get_db():
 
 def hash_password(password: str) -> str:
     return pwd_context.hash(password)
+
+
+def get_friendship_record(db, user_id, other_user_id):
+    # Query for the friendship where user_id < other_user_id
+    record = db.query(Friendship).filter(
+        ((Friendship.user1_id == user_id) & (Friendship.user2_id == other_user_id)) |
+        ((Friendship.user1_id == other_user_id) & (Friendship.user2_id == user_id))
+    ).first()
+
+    return record
