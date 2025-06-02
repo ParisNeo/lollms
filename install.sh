@@ -111,8 +111,8 @@ update_config "service_key_env_var" "OPENAI_API_KEY"
 
 # Safe store defaults
 echo $'\n🔧 Configure [safe_store_defaults] Settings'
-update_config_raw "chunk_size" 512
-update_config_raw "chunk_overlap" 50
+update_config_raw "chunk_size" 4096
+update_config_raw "chunk_overlap" 200
 
 # Encryption key generation
 read -p $'Generate new encryption_key? (y/N) [N]: ' gen_encryption
