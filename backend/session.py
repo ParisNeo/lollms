@@ -255,7 +255,10 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             session["lollms_client"] = lc
         except Exception as e:
             traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client: {str(e)}")
+            session["lollms_client"] = None
+            print(f"Could not initialize LLM Client: {str(e)}")
+            # removed to unblock if lc wasn't created
+            # raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client: {str(e)}")
             
     return cast(LollmsClient, session["lollms_client"])
 
