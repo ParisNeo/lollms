@@ -1812,7 +1812,7 @@ async def list_dm_conversations(
             DirectMessage.sender_id == friend.id, # Messages from friend
             DirectMessage.receiver_id == current_db_user.id, # To me
             DirectMessage.read_at == None
-        ).scalar() or 0
+        ).count() or 0
 
         if last_message:
             conversations.append({
