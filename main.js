@@ -2105,9 +2105,9 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
                     'refresh', 
                     translate('resend_branch_tooltip', 'Resend/Branch from this message'), 
                     (e) => { // Add event arg
-                        e.stopPropagation(); // Prevent event bubbling
                         console.log('Resend/Branch clicked for user message:', message.id, 'in discussion:', message.discussion_id);
                         initiateBranch(message.discussion_id, message.id); 
+                        e.stopPropagation(); // Prevent event bubbling
                     }
                 )
             );
@@ -2117,9 +2117,9 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
                     'refresh', 
                     translate('regenerate_message_tooltip', 'Regenerate this AI response'),
                     (e) => { // Add event arg
-                        e.stopPropagation();
                         console.log('Regenerate clicked for AI message:', message.id, 'on branch:', currentMessageBranchId);
                         regenerateMessage(message.id, currentMessageBranchId);
+                        e.stopPropagation();
                     }
                 )
             );
@@ -4477,7 +4477,7 @@ function handleFriendsMessagesTabSwitch(tabId) {
 
 
 
-
+//---- Friendship ----
 async function handleSendFriendRequest() {
     const targetUsername = addFriendInput.value.trim();
     if (!targetUsername) {
