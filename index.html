@@ -411,6 +411,79 @@
                     <button data-tab="ragParamsTab" class="settings-tab-btn w-full text-left px-3 py-2 rounded-md text-sm font-medium" data-translate-key="settings_tab_rag_params">RAG Parameters</button>                    
                 </nav>
                 <div class="flex-grow overflow-y-auto pl-3 py-3 pr-1">
+                    <!-- Personality Editor Modal (Separate Modal) -->
+                    <div id="personalityEditorModal" class="modal">
+                        <div class="modal-content bg-gray-800 text-gray-200 shadow-xl rounded-lg" style="max-width: 550px; display: flex; flex-direction: column; max-height: 85vh;">
+                            <div class="modal-header border-b border-gray-700 flex-shrink-0">
+                                <h3 id="personalityEditorTitle" class="modal-title text-lg font-semibold">Create New Personality</h3>
+                                <button class="modal-close-btn text-gray-400 absolute top-3 right-3" onclick="closeModal('personalityEditorModal')">
+                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
+
+                            <div class="py-4 px-6 space-y-4 overflow-y-auto flex-grow">
+                                <input type="hidden" id="personalityEditorId">
+
+                                <!-- Name -->
+                                <div style="display: block;">
+                                    <label for="personalityName" class="block text-sm font-medium text-gray-300">Name*</label>
+                                    <input type="text" id="personalityName" required class="input-field mt-1 w-full" placeholder="e.g., Creative Writer">
+                                </div>
+
+                                <!-- Category -->
+                                <div style="display: block;">
+                                    <label for="personalityCategory" class="block text-sm font-medium text-gray-300">Category</label>
+                                    <input type="text" id="personalityCategory" class="input-field mt-1 w-full" placeholder="e.g., Writing, Coding, Fun">
+                                </div>
+
+                                <!-- Author -->
+                                <div style="display: block;">
+                                    <label for="personalityAuthor" class="block text-sm font-medium text-gray-300">Author</label>
+                                    <input type="text" id="personalityAuthor" class="input-field mt-1 w-full" placeholder="Your name or organization">
+                                </div>
+
+                                <!-- Icon (Image) -->
+                                <div style="display: block;">
+                                    <label for="personalityIconUpload" class="block text-sm font-medium text-gray-300">Icon (Image)</label>
+                                    <input type="file" id="personalityIconUpload" accept="image/png, image/jpeg, image/webp, image/gif" class="input-file mt-1 block w-full text-sm">
+                                    <div class="mt-2">
+                                        <img id="personalityIconPreview" src="#" alt="Icon Preview" class="h-20 w-20 object-cover rounded-md border border-gray-600 hidden bg-gray-700"/>
+                                        <input type="hidden" id="personalityIconBase64">
+                                    </div>
+                                </div>
+
+                                <!-- Description -->
+                                <div style="display: block;">
+                                    <label for="personalityDescription" class="block text-sm font-medium text-gray-300">Description</label>
+                                    <textarea id="personalityDescription" rows="3" class="input-field mt-1 w-full" placeholder="Briefly describe this personality's purpose and style..."></textarea>
+                                </div>
+
+                                <!-- System Prompt -->
+                                <div style="display: block;">
+                                    <label for="personalityPromptText" class="block text-sm font-medium text-gray-300">System Prompt*</label>
+                                    <textarea id="personalityPromptText" rows="8" required class="input-field mt-1 w-full font-mono text-sm" placeholder="Enter the core instructions, role, and context for the AI..."></textarea>
+                                </div>
+
+                                <!-- Disclaimer -->
+                                <div style="display: block;">
+                                    <label for="personalityDisclaimer" class="block text-sm font-medium text-gray-300">Disclaimer</label>
+                                    <textarea id="personalityDisclaimer" rows="3" class="input-field mt-1 w-full" placeholder="Optional warnings, limitations, or disclaimers for users..."></textarea>
+                                </div>
+
+                                <!-- Script Code (Python) -->
+                                <div style="display: block;">
+                                    <label for="personalityScriptCode" class="block text-sm font-medium text-gray-300">Script Code (Python)</label>
+                                    <textarea id="personalityScriptCode" rows="5" class="input-field mt-1 w-full font-mono text-sm" placeholder="Optional Python script to be executed with the personality..."></textarea>
+                                </div>
+                            </div>
+
+                            <div class="modal-footer border-t border-gray-700 flex-shrink-0">
+                                <button onclick="closeModal('personalityEditorModal')" class="btn btn-secondary">Cancel</button>
+                                <button id="savePersonalityBtn" class="btn btn-primary">Save Personality</button>
+                            </div>
+                            <div id="personalityEditorStatus" class="text-sm h-4 text-center py-2 bg-gray-800 flex-shrink-0"></div>
+                        </div>
+                    </div>                    
                     <div id="llmConfigTab" class="settings-tab-content"><div class="space-y-3">
                         <h4 class="text-md font-semibold  mb-1" data-translate-key="settings_llm_config_model_header">Default LLM Model</h4>
                         <div>
@@ -524,72 +597,6 @@
                         </div>
                         <div id="settingsStatus_personalities" class="text-sm h-4"></div>
                     </div></div>
-                    <!-- Personality Editor Modal (Separate Modal) -->
-                    <div id="personalityEditorModal" class="modal">
-                        <div class="modal-content bg-gray-800 text-gray-200 shadow-xl rounded-lg" style="max-width: 550px; display: flex; flex-direction: column; max-height: 85vh;"> <!-- Adjusted max-width, flex column, max-height -->
-                            <div class="modal-header border-b border-gray-700 flex-shrink-0"> <!-- flex-shrink-0 for header -->
-                                <h3 id="personalityEditorTitle" class="modal-title text-lg font-semibold" data-translate-key="personality_editor_title_create">Create New Personality</h3>
-                                <button class="modal-close-btn text-gray-400 absolute top-3 right-3" onclick="closeModal('personalityEditorModal')">
-                                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>
-                                </button>
-                            </div>
-
-                            <div class="modal-body py-4 px-6 space-y-4 overflow-y-auto flex-grow"> <!-- Added overflow-y-auto and flex-grow -->
-                                <input type="hidden" id="personalityEditorId">
-
-                                <div>
-                                    <label for="personalityName" class="block text-sm font-medium text-gray-300" data-translate-key="personality_editor_name_label">Name*</label>
-                                    <input type="text" id="personalityName" required class="input-field mt-1 w-full" data-translate-placeholder="personality_editor_name_placeholder" placeholder="e.g., Creative Writer">
-                                </div>
-
-                                <div>
-                                    <label for="personalityCategory" class="block text-sm font-medium text-gray-300" data-translate-key="personality_editor_category_label">Category</label>
-                                    <input type="text" id="personalityCategory" class="input-field mt-1 w-full" data-translate-placeholder="personality_editor_category_placeholder" placeholder="e.g., Writing, Coding, Fun">
-                                </div>
-
-                                <div>
-                                    <label for="personalityAuthor" class="block text-sm font-medium text-gray-300" data-translate-key="personality_editor_author_label">Author</label>
-                                    <input type="text" id="personalityAuthor" class="input-field mt-1 w-full" data-translate-placeholder="personality_editor_author_placeholder" placeholder="Your name or organization">
-                                </div>
-                                
-                                <div>
-                                    <label for="personalityIconUpload" class="block text-sm font-medium text-gray-300" data-translate-key="personality_editor_icon_label">Icon (Image)</label>
-                                    <input type="file" id="personalityIconUpload" accept="image/png, image/jpeg, image/webp, image/gif" class="input-file mt-1 block w-full text-sm">
-                                    <div class="mt-2">
-                                        <img id="personalityIconPreview" src="#" alt="Icon Preview" class="h-20 w-20 object-cover rounded-md border border-gray-600 hidden bg-gray-700" data-translate-alt="personality_icon_preview_alt">
-                                        <input type="hidden" id="personalityIconBase64">
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label for="personalityDescription" class="block text-sm font-medium text-gray-300" data-translate-key="personality_editor_description_label">Description</label>
-                                    <textarea id="personalityDescription" rows="3" class="input-field mt-1 w-full" data-translate-placeholder="personality_editor_description_placeholder" placeholder="Briefly describe this personality's purpose and style..."></textarea>
-                                </div>
-
-                                <div>
-                                    <label for="personalityPromptText" class="block text-sm font-medium text-gray-300" data-translate-key="personality_editor_prompt_label">System Prompt*</label>
-                                    <textarea id="personalityPromptText" rows="8" required class="input-field mt-1 w-full font-mono text-sm" data-translate-placeholder="personality_editor_prompt_placeholder" placeholder="Enter the core instructions, role, and context for the AI..."></textarea>
-                                </div>
-                                
-                                <div>
-                                    <label for="personalityDisclaimer" class="block text-sm font-medium text-gray-300" data-translate-key="personality_editor_disclaimer_label">Disclaimer</label>
-                                    <textarea id="personalityDisclaimer" rows="3" class="input-field mt-1 w-full" data-translate-placeholder="personality_editor_disclaimer_placeholder" placeholder="Optional warnings, limitations, or disclaimers for users..."></textarea>
-                                </div>
-
-                                <div>
-                                    <label for="personalityScriptCode" class="block text-sm font-medium text-gray-300" data-translate-key="personality_editor_script_label">Script Code (Python)</label>
-                                    <textarea id="personalityScriptCode" rows="5" class="input-field mt-1 w-full font-mono text-sm" data-translate-placeholder="personality_editor_script_placeholder" placeholder="Optional Python script to be executed with the personality..."></textarea>
-                                </div>
-                            </div>
-
-                            <div class="modal-footer border-t border-gray-700 flex-shrink-0"> <!-- flex-shrink-0 for footer -->
-                                <button onclick="closeModal('personalityEditorModal')" class="btn btn-secondary" data-translate-key="cancel_btn">Cancel</button>
-                                <button id="savePersonalityBtn" class="btn btn-primary" data-translate-key="save_personality_btn">Save Personality</button>
-                            </div>
-                            <div id="personalityEditorStatus" class="text-sm h-4 text-center py-2 bg-gray-800 flex-shrink-0"></div> <!-- Status also flex-shrink-0 -->
-                        </div>
-                    </div>
-
 
                     <!-- LLM Params Tab (Update) -->
                     <div id="llmParamsTab" class="settings-tab-content" style="display: none;"><div class="space-y-4">
