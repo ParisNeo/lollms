@@ -1058,6 +1058,67 @@ async function loadDiscussions() {
         if (discussionListContainer) discussionListContainer.innerHTML = `<p class="text-red-500 text-sm text-center p-4">${translate('failed_to_load_discussions_error')}</p>`;
     }
 }
+function initiateInlineRename(id) {
+    const discussion = discussions[id];
+    if (!discussion) return;
+
+    const renameInput = document.getElementById('renameInput');
+    const renameDiscussionIdInput = document.getElementById('renameDiscussionIdInput');
+    const confirmRenameBtn = document.getElementById('confirmRenameBtn');
+    const cancelRenameBtn = document.getElementById('cancelRenameBtn');
+
+    // Set the initial values
+    renameInput.value = discussion.title;
+    renameDiscussionIdInput.value = id;
+
+    // Show the modal
+    openModal("renameModal");
+
+    // Event listener for the confirm button
+    confirmRenameBtn.onclick = async () => {
+        await confirmInlineRename();
+    };
+
+    // Event listener for the cancel button
+    cancelRenameBtn.onclick = () => {
+        closeModal('renameModal');
+    };
+}
+async function confirmInlineRename() {
+    const idToRename = renameDiscussionIdInput.value;
+    if (!idToRename || !discussions[idToRename]) return;
+
+    const newTitle = renameInput.value.trim();
+    if (!newTitle) {
+        showStatus(translate('rename_title_empty_error'), 'error', renameStatus);
+        return;
+    }
+
+    showStatus(translate('status_renaming', 'Renaming...'), 'info', renameStatus);
+
+    try {
+        const response = await apiRequest(`/api/discussions/${idToRename}/title`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title: newTitle }),
+            statusElement: renameStatus
+        });
+
+        const updatedInfo = await response.json(); // This is DiscussionInfo
+        discussions[idToRename].title = updatedInfo.title;
+        discussions[idToRename].last_activity_at = updatedInfo.last_activity_at || new Date().toISOString();
+
+        if (idToRename === currentDiscussionId && discussionTitle) {
+            discussionTitle.textContent = updatedInfo.title;
+        }
+
+        renderDiscussionList();
+        showStatus(translate('status_renamed_success', 'Renamed successfully.'), 'success', renameStatus);
+        setTimeout(() => closeModal('renameModal'), 1000);
+    } catch (error) {
+        // Handled by apiRequest
+    }
+}
 
 function createDiscussionItemElement(d) { /* As provided, ensure it uses d.title, d.id correctly */
     const item = document.createElement('div');
