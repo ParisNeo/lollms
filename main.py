@@ -116,8 +116,7 @@ FriendshipRequestPublic,
 PersonalitySendRequest,
 
 DirectMessagePublic,
-DirectMessageCreate,
-DirectMessage
+DirectMessageCreate
 )
 # safe_store is expected to be installed
 try:
