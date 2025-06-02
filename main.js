@@ -387,7 +387,6 @@ async function apiRequest(url, options = {}) { // Mostly as provided
     if (!options.statusElement && statusMessage) showStatus('', 'info', statusMessage); // Clear global status
     const fetchOptions = { ...options };
     fetchOptions.headers = { ...fetchOptions.headers };
-
     if (tempLoginUsername && tempLoginPassword && !fetchOptions.headers['Authorization']) {
         const basicAuth = btoa(`${tempLoginUsername}:${tempLoginPassword}`);
         fetchOptions.headers['Authorization'] = `Basic ${basicAuth}`;
@@ -543,217 +542,13 @@ window.onload = async () => {
     });
 
     function debounce(func, delay) {
-    let timeout;
-    return function(...args) {
-        const context = this;
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(context, args), delay);
-    };
-}
-
-async function handleDmUserSearch() {
-    const query = dmSearchUsersInput.value.trim().toLowerCase();
-    if (query.length < 2) { // Minimum characters to search
-        dmSearchResults.innerHTML = '';
-        dmSearchResults.classList.add('hidden');
-        return;
-    }
-
-    // For now, search within existing friends list.
-    // A proper backend search endpoint /api/users/search?q=... would be better.
-    const matchingFriends = availableDataStoresForRag // Re-using this for now, should be actual friends list
-        .filter(user => user.username.toLowerCase().includes(query) && user.username !== currentUser.username)
-        .slice(0, 5); // Limit results
-
-    dmSearchResults.innerHTML = '';
-    if (matchingFriends.length > 0) {
-        matchingFriends.forEach(user => {
-            const item = document.createElement('div');
-            item.className = 'p-2 hover:bg-gray-600 cursor-pointer text-sm';
-            item.textContent = user.username;
-            item.onclick = () => {
-                openDmChatWithUser(user.id, user.username); // Pass ID and username
-                dmSearchUsersInput.value = '';
-                dmSearchResults.classList.add('hidden');
-            };
-            dmSearchResults.appendChild(item);
-        });
-        dmSearchResults.classList.remove('hidden');
-    } else {
-        dmSearchResults.innerHTML = `<div class="p-2 text-xs text-gray-400">${translate('dm_no_users_found_search', 'No users found.')}</div>`;
-        dmSearchResults.classList.remove('hidden'); // Show "no users found"
-    }
-}
-
-
-async function loadDmConversations() {
-    if (!dmConversationsList) return;
-    dmConversationsList.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="dm_loading_conversations">Loading conversations...</p>`;
-    try {
-        const response = await apiRequest('/api/dm/conversations');
-        dmConversationsCache = await response.json(); // Expects List of conversation summaries
-        renderDmConversationsList();
-    } catch (error) {
-        dmConversationsList.innerHTML = `<p class="italic text-sm text-red-400">${translate('dm_error_loading_conversations', 'Failed to load conversations.')}</p>`;
-    }
-}
-
-function renderDmConversationsList() {
-    dmConversationsList.innerHTML = '';
-    if (dmConversationsCache.length === 0) {
-        dmConversationsList.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="dm_no_conversations_placeholder">No active conversations. Search for a user to start one.</p>`;
-        return;
-    }
-    dmConversationsCache.forEach(convo => {
-        const convoDiv = document.createElement('div');
-        convoDiv.className = `p-2 rounded-md cursor-pointer hover:bg-gray-700 transition-colors ${currentDmPartner && currentDmPartner.userId === convo.partner_user_id ? 'bg-gray-700' : 'bg-gray-750'}`;
-        convoDiv.onclick = () => openDmChatWithUser(convo.partner_user_id, convo.partner_username);
-
-        const header = document.createElement('div');
-        header.className = 'flex justify-between items-center mb-1';
-        const partnerName = document.createElement('span');
-        partnerName.className = 'font-semibold text-sm';
-        partnerName.textContent = convo.partner_username;
-        const lastMsgTime = document.createElement('span');
-        lastMsgTime.className = 'text-xs text-gray-400';
-        lastMsgTime.textContent = convo.last_message_sent_at ? formatTimestamp(new Date(convo.last_message_sent_at)) : '';
-        header.appendChild(partnerName);
-        header.appendChild(lastMsgTime);
-
-        const preview = document.createElement('p');
-        preview.className = 'text-xs text-gray-300 truncate';
-        preview.textContent = convo.last_message_content || translate('dm_no_messages_yet_preview', 'No messages yet.');
-        
-        if (convo.unread_count > 0) {
-            const unreadBadge = document.createElement('span');
-            unreadBadge.className = 'ml-2 bg-red-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5';
-            unreadBadge.textContent = convo.unread_count > 9 ? '9+' : convo.unread_count;
-            partnerName.appendChild(unreadBadge); // Append to name for visibility
-        }
-
-        convoDiv.appendChild(header);
-        convoDiv.appendChild(preview);
-        dmConversationsList.appendChild(convoDiv);
-    });
-    updateUIText();
-}
-
-async function openDmChatWithUser(partnerUserId, partnerUsername) {
-    currentDmPartner = { userId: partnerUserId, username: partnerUsername };
-    
-    dmChatArea.classList.remove('hidden');
-    dmNoConversationSelected.classList.add('hidden');
-    dmNoConversationSelected.style.display = 'none';
-
-
-    if(dmChatHeader) dmChatHeader.textContent = translate('dm_chatting_with_header', `Chat with ${partnerUsername}`, {username: partnerUsername});
-    if(dmChatMessages) dmChatMessages.innerHTML = `<p class="italic text-sm text-gray-500 text-center py-10" data-translate-key="dm_loading_messages_placeholder">Loading messages...</p>`;
-    if(directMessageInput) directMessageInput.value = '';
-    showStatus('', 'info', dmSendStatus);
-
-    // Highlight selected conversation in the list
-    renderDmConversationsList(); // Re-render to highlight
-
-    try {
-        // Mark conversation as read on the backend when opening
-        await apiRequest(`/api/dm/conversation/${partnerUserId}/mark_read`, { method: 'POST' });
-        // Update unread count in cache and re-render list
-        const convoInCache = dmConversationsCache.find(c => c.partner_user_id === partnerUserId);
-        if (convoInCache) {
-            convoInCache.unread_count = 0;
-            renderDmConversationsList(); // Re-render to remove badge
-        }
-
-
-        const response = await apiRequest(`/api/dm/conversation/${partnerUserId}`);
-        const messages = await response.json(); // Expects List[DirectMessagePublic]
-        renderDirectMessages(messages);
-    } catch (error) {
-        if(dmChatMessages) dmChatMessages.innerHTML = `<p class="italic text-sm text-red-400 text-center py-10">${translate('dm_error_loading_messages', 'Failed to load messages.')}</p>`;
-    }
-}
-
-function renderDirectMessages(messages) {
-    dmChatMessages.innerHTML = '';
-    if (messages.length === 0) {
-        dmChatMessages.innerHTML = `<p class="italic text-sm text-gray-400 text-center py-10" data-translate-key="dm_no_messages_in_conversation">No messages in this conversation yet. Say hello!</p>`;
-        updateUIText();
-        return;
-    }
-    messages.forEach(msg => {
-        const msgDiv = document.createElement('div');
-        const isSender = msg.sender_id === currentUser.id;
-        msgDiv.className = `dm-message-bubble ${isSender ? 'sent' : 'received'}`;
-        
-        const contentP = document.createElement('p');
-        contentP.textContent = msg.content; // Add Markdown parsing later if needed
-        
-        const timeSpan = document.createElement('span');
-        timeSpan.className = 'dm-message-timestamp';
-        timeSpan.textContent = formatTimestamp(new Date(msg.sent_at));
-        
-        msgDiv.appendChild(contentP);
-        msgDiv.appendChild(timeSpan);
-        dmChatMessages.appendChild(msgDiv);
-    });
-    dmChatMessages.scrollTop = dmChatMessages.scrollHeight; // Scroll to bottom
-}
-
-async function handleSendDirectMessage() {
-    if (!currentDmPartner || !directMessageInput || !sendDirectMessageBtn) return;
-    const content = directMessageInput.value.trim();
-    if (!content) return;
-
-    sendDirectMessageBtn.disabled = true;
-    directMessageInput.disabled = true;
-    showStatus(translate('dm_sending_message_status', 'Sending...'), 'info', dmSendStatus);
-
-    try {
-        const payload = {
-            receiver_user_id: currentDmPartner.userId,
-            content: content
+        let timeout;
+        return function(...args) {
+            const context = this;
+            clearTimeout(timeout);
+            timeout = setTimeout(() => func.apply(context, args), delay);
         };
-        const response = await apiRequest('/api/dm/send', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            statusElement: dmSendStatus
-        });
-        const newDm = await response.json(); // DirectMessagePublic
-
-        // Add to local messages and re-render
-        const currentChatMessages = Array.from(dmChatMessages.querySelectorAll('.dm-message-bubble')).map(el => ({
-            // This is a simplification; ideally, you'd have a proper local cache of DMs
-            // For now, just append and re-render this message
-        }));
-         // A bit hacky, ideally fetch full conversation or have a proper local store
-        const tempMessagesForRender = [];
-        dmChatMessages.querySelectorAll('.dm-message-bubble').forEach(bubble => {
-            // This is not ideal, we don't have the full message objects here.
-            // For a quick append, we'll just add the new one.
-            // A robust solution would fetch the conversation again or manage a local array.
-        });
-        renderDirectMessages([...tempMessagesForRender, newDm]); // This will clear and re-render, not ideal for just one new message
-        
-        // Better: Append directly
-        // const msgForRender = { // Construct object similar to what renderDirectMessages expects
-        //    id: newDm.id, sender_id: newDm.sender_id, content: newDm.content, sent_at: newDm.sent_at
-        // };
-        // appendSingleDirectMessage(msgForRender); // You'd need this helper
-
-        directMessageInput.value = '';
-        showStatus('', 'info', dmSendStatus);
-
-        // Refresh conversation list to update last message preview
-        await loadDmConversations();
-
-    } catch (error) {
-        // apiRequest shows error in dmSendStatus
-    } finally {
-        sendDirectMessageBtn.disabled = false;
-        directMessageInput.disabled = false;
     }
-}
     
     // RAG Toggle
     if (ragToggleBtn) ragToggleBtn.onclick = () => {
@@ -935,55 +730,135 @@ function handleClickOutsideUserMenu(event) {
 
 // --- Login and Logout ---
 async function handleLoginAttempt() {
-    const username = loginUsernameInput.value.trim(); const password = loginPasswordInput.value;
-    if (!username || !password) { showStatus(translate('login_username_password_required', "Username and password are required."), "error", loginStatus); return; }
-    showStatus(translate('login_attempting_status', "Attempting login..."), "info", loginStatus); loginSubmitBtn.disabled = true;
-    tempLoginUsername = username; tempLoginPassword = password;
-    try { await attemptInitialAuthAndLoad(); }
-    catch (error) {
-        if (error.status === 401) showStatus(translate('login_invalid_credentials', "Invalid username or password."), "error", loginStatus);
-        else showStatus(translate('login_error_status', `Login error: ${error.message}`, { message: error.message }), "error", loginStatus);
-    } finally { loginSubmitBtn.disabled = false; }
-}
+    console.log("Logging in");
 
+    const username = loginUsernameInput.value.trim();
+    const password = loginPasswordInput.value;
+
+    if (!username || !password) {
+        showStatus(translate('login_username_password_required', "Username and password are required."), "error", loginStatus);
+        return;
+    }
+
+    showStatus(
+        translate('login_attempting_status', "Attempting login..."),
+        "info",
+        loginStatus
+    );
+    loginSubmitBtn.disabled = true;
+
+    tempLoginUsername = username;
+    tempLoginPassword = password;
+
+    try {
+        await attemptInitialAuthAndLoad();
+    } catch (error) {
+        if (error.status === 401) {
+            showStatus(
+                translate('login_invalid_credentials', "Invalid username or password."),
+                "error",
+                loginStatus
+            );
+        } else {
+            showStatus(
+                translate('login_error_status', `Login error: ${error.message}`, { message: error.message }),
+                "error",
+                loginStatus
+            );
+        }
+    } finally {
+        loginSubmitBtn.disabled = false;
+    }
+}
 async function handleLogout() {
     showStatus(translate('logout_status_logging_out', "Logging out..."), "info");
-    try { await apiRequest('/api/auth/logout', { method: 'POST' }); }
-    catch (error) { 
-        showStatus(translate('logout_server_failed_status', "Logout from server failed, but resetting UI."), "warning"); 
-    }
-    finally {
-        currentUser = null; discussions = {}; currentMessages = []; currentDiscussionId = null;
-        aiMessageStreaming = false; currentAiMessageContainer = null; currentAiMessageContentAccumulator = ""; currentAiMessageId = null; currentAiMessageData = null;
-        isRagActive = false; uploadedImageServerPaths = [];
-        ownedDataStores = []; sharedDataStores = []; availableDataStoresForRag = [];
-        generationInProgress = false; if (activeGenerationAbortController) activeGenerationAbortController.abort();
+    console.log(document.cookie)
+    try {
+        await apiRequest('/api/auth/logout', { method: 'POST' });
+    } catch (error) {
+        showStatus(
+            translate('logout_server_failed_status', "Logout from server failed, but resetting UI."),
+            "warning"
+        );
+    } finally {
+        currentUser = null;
+        discussions = {};
+        currentMessages = [];
+        currentDiscussionId = null;
 
-        usernameDisplay.textContent = translate('username_display_default'); 
-        adminBadge.style.display = 'none'; adminLink.style.display = 'none';
-        discussionListContainer.innerHTML = `<p class="text-gray-500 text-sm text-center italic p-4">${translate('login_required_placeholder')}</p>`;
-        clearChatArea(true); sendMessageBtn.disabled = true; messageInput.value = ''; autoGrowTextarea(messageInput);
-        ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
-        ragDataStoreSelect.style.display = 'none'; 
-        ragDataStoreSelect.innerHTML = `<option value="">${translate('rag_select_default_option')}</option>`;
-        imageUploadPreviewContainer.innerHTML = ''; imageUploadPreviewContainer.style.display = 'none';
+        aiMessageStreaming = false;
+        currentAiMessageContainer = null;
+        currentAiMessageContentAccumulator = "";
+        currentAiMessageId = null;
+        currentAiMessageData = null;
+
+        isRagActive = false;
+        uploadedImageServerPaths = [];
+
+        ownedDataStores = [];
+        sharedDataStores = [];
+        availableDataStoresForRag = [];
+
+        generationInProgress = false;
+        if (activeGenerationAbortController) {
+            activeGenerationAbortController.abort();
+        }
+        usernameDisplay.textContent =
+            translate('username_display_default');
+        adminBadge.style.display = 'none';
+        adminLink.style.display = 'none';
+
+        discussionListContainer.innerHTML = `
+            <p class="text-gray-500 text-sm text-center italic p-4">
+                ${translate('login_required_placeholder')}
+            </p>
+        `;
+
+        clearChatArea(true);
+        sendMessageBtn.disabled = true;
+        messageInput.value = '';
+        autoGrowTextarea(messageInput);
+
+        ragToggleBtn.classList.remove('rag-toggle-on');
+        ragToggleBtn.classList.add('rag-toggle-off');
+
+        ragDataStoreSelect.style.display = 'none';
+        ragDataStoreSelect.innerHTML = `
+            <option value="">${translate('rag_select_default_option')}</option>
+        `;
+
+        imageUploadPreviewContainer.innerHTML = '';
+        imageUploadPreviewContainer.style.display = 'none';
+
         updateRagToggleButtonState();
-        userMenuDropdown.style.display = 'none'; userMenuArrow.classList.remove('rotate-180');
 
-        appContainer.style.display = 'none'; 
+        userMenuDropdown.style.display = 'none';
+        userMenuArrow.classList.remove('rotate-180');
+
+        appContainer.style.display = 'none';
         appLoadingMessage.style.opacity = '1';
         appLoadingMessage.style.display = 'flex';
         appLoadingProgress.style.width = '0%';
-        appLoadingStatus.textContent = translate('app_loading_status_default');
+        appLoadingStatus.textContent =
+            translate('app_loading_status_default');
 
+        showStatus('', 'info', statusMessage);
+        showStatus('', 'info', pyodideStatus);
 
-        showStatus('', 'info', statusMessage); showStatus('', 'info', pyodideStatus);
-        loginUsernameInput.value = ''; loginPasswordInput.value = ''; loginSubmitBtn.disabled = false;
-        showStatus(translate('logout_success_status', "You have been logged out."), "info", loginStatus);
-        openModal('loginModal', false); loginUsernameInput.focus();
+        loginUsernameInput.value = '';
+        loginPasswordInput.value = '';
+        loginSubmitBtn.disabled = false;
+
+        showStatus(
+            translate('logout_success_status', "You have been logged out."),
+            "info",
+            loginStatus
+        );
+        openModal('loginModal', false);
+        console.log("Showing login");
+        window.location.reload();
     }
 }
-
 
 // --- Modal Management ---
 function openModal(modalId, allowOverlayClose = true) {
@@ -1000,6 +875,9 @@ function openModal(modalId, allowOverlayClose = true) {
         if (modalId === 'sendDiscussionModal' && sendTargetUsernameInput) sendTargetUsernameInput.focus();
         if (modalId === 'editMessageModal' && editMessageInput) editMessageInput.focus();
         if (modalId === 'shareDataStoreModal' && shareTargetUsernameDSInput) shareTargetUsernameDSInput.focus();
+    }
+    else{
+        console.error("Unknown modal")
     }
 }
 function closeModal(modalId) {
@@ -4674,9 +4552,73 @@ function openDirectMessage(friendUserId, friendUsername) {
                 }
             };
         }
-        // TODO: Implement loadDirectMessagesForUser(friendUserId);
+        // TODO: Implement 
+        loadDirectMessagesForUser(friendUserId);
     }
     console.log(`Open DM with user ID: ${friendUserId}, Username: ${friendUsername}`);
+    openDmChatWithUser(friendUserId, friendUsername)
+}
+async function loadDirectMessagesForUser(friendUserId) {
+    if (!friendUserId || !currentUser.id) return; // Check for valid user ID
+
+    try {
+        const response = await apiRequest(`/api/dm/conversations/${friendUserId}`);
+        const data = await response.json();
+        console.log(data)
+        // Check for pagination links (if present)
+        if (data.links) {
+            // Handle pagination links (e.g., load more messages)
+            // ...
+        }
+
+        renderDirectMessages(data.messages);
+    } catch (error) {
+        console.error("Error loading direct messages:", error);
+        showStatus(translate('dm_error_loading_messages', 'Failed to load messages.'), 'error');
+    } finally {
+        if (loadingIndicator) {
+            loadingIndicator.style.display = 'none';
+        }
+    }
+}
+
+// Helper function to render direct messages
+function renderDirectMessages(messages) {
+    const dmChatMessages = document.getElementById('directMessageChatArea');
+
+    // Clear any existing messages
+    dmChatMessages.innerHTML = '';
+
+    // Render each message
+    messages.forEach((message, index) => {
+        const msgDiv = createMessageDiv(message);
+        dmChatMessages.appendChild(msgDiv);
+
+        // Scroll to the last message if necessary
+        if (index === 0) {
+            dmChatMessages.scrollTop = dmChatMessages.scrollHeight;
+        }
+    });
+}
+
+// Helper function to create a single message div
+function createMessageDiv(message) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'dm-message-bubble';
+
+    // Create content and timestamp elements
+    const contentP = document.createElement('p');
+    const timeSpan = document.createElement('span');
+
+    // Set content and timestamp values
+    contentP.textContent = message.content;
+    timeSpan.textContent = formatTimestamp(new Date(message.sent_at));
+
+    // Append to the message div
+    msgDiv.appendChild(contentP);
+    msgDiv.appendChild(timeSpan);
+
+    return msgDiv;
 }
 
 async function sendDirectMessageToServer(receiverUserId, content) {
@@ -4913,4 +4855,208 @@ function renderDmConversationsList() {
         dmConversationsList.appendChild(convoDiv);
     });
     updateUIText(); // Translate any new elements if they use data-translate-key
+}
+async function handleDmUserSearch() {
+    const query = dmSearchUsersInput.value.trim().toLowerCase();
+    if (query.length < 2) { // Minimum characters to search
+        dmSearchResults.innerHTML = '';
+        dmSearchResults.classList.add('hidden');
+        return;
+    }
+
+    // For now, search within existing friends list.
+    // A proper backend search endpoint /api/users/search?q=... would be better.
+    const matchingFriends = availableDataStoresForRag // Re-using this for now, should be actual friends list
+        .filter(user => user.username.toLowerCase().includes(query) && user.username !== currentUser.username)
+        .slice(0, 5); // Limit results
+
+    dmSearchResults.innerHTML = '';
+    if (matchingFriends.length > 0) {
+        matchingFriends.forEach(user => {
+            const item = document.createElement('div');
+            item.className = 'p-2 hover:bg-gray-600 cursor-pointer text-sm';
+            item.textContent = user.username;
+            item.onclick = () => {
+                openDmChatWithUser(user.id, user.username); // Pass ID and username
+                dmSearchUsersInput.value = '';
+                dmSearchResults.classList.add('hidden');
+            };
+            dmSearchResults.appendChild(item);
+        });
+        dmSearchResults.classList.remove('hidden');
+    } else {
+        dmSearchResults.innerHTML = `<div class="p-2 text-xs text-gray-400">${translate('dm_no_users_found_search', 'No users found.')}</div>`;
+        dmSearchResults.classList.remove('hidden'); // Show "no users found"
+    }
+}
+
+
+async function loadDmConversations() {
+    if (!dmConversationsList) return;
+    dmConversationsList.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="dm_loading_conversations">Loading conversations...</p>`;
+    try {
+        const response = await apiRequest('/api/dm/conversations');
+        dmConversationsCache = await response.json(); // Expects List of conversation summaries
+        renderDmConversationsList();
+    } catch (error) {
+        dmConversationsList.innerHTML = `<p class="italic text-sm text-red-400">${translate('dm_error_loading_conversations', 'Failed to load conversations.')}</p>`;
+    }
+}
+
+function renderDmConversationsList() {
+    dmConversationsList.innerHTML = '';
+    if (dmConversationsCache.length === 0) {
+        dmConversationsList.innerHTML = `<p class="italic text-sm text-gray-400" data-translate-key="dm_no_conversations_placeholder">No active conversations. Search for a user to start one.</p>`;
+        return;
+    }
+    dmConversationsCache.forEach(convo => {
+        const convoDiv = document.createElement('div');
+        convoDiv.className = `p-2 rounded-md cursor-pointer hover:bg-gray-700 transition-colors ${currentDmPartner && currentDmPartner.userId === convo.partner_user_id ? 'bg-gray-700' : 'bg-gray-750'}`;
+        convoDiv.onclick = () => openDmChatWithUser(convo.partner_user_id, convo.partner_username);
+
+        const header = document.createElement('div');
+        header.className = 'flex justify-between items-center mb-1';
+        const partnerName = document.createElement('span');
+        partnerName.className = 'font-semibold text-sm';
+        partnerName.textContent = convo.partner_username;
+        const lastMsgTime = document.createElement('span');
+        lastMsgTime.className = 'text-xs text-gray-400';
+        lastMsgTime.textContent = convo.last_message_sent_at ? formatTimestamp(new Date(convo.last_message_sent_at)) : '';
+        header.appendChild(partnerName);
+        header.appendChild(lastMsgTime);
+
+        const preview = document.createElement('p');
+        preview.className = 'text-xs text-gray-300 truncate';
+        preview.textContent = convo.last_message_content || translate('dm_no_messages_yet_preview', 'No messages yet.');
+        
+        if (convo.unread_count > 0) {
+            const unreadBadge = document.createElement('span');
+            unreadBadge.className = 'ml-2 bg-red-500 text-white text-xs font-bold rounded-full px-1.5 py-0.5';
+            unreadBadge.textContent = convo.unread_count > 9 ? '9+' : convo.unread_count;
+            partnerName.appendChild(unreadBadge); // Append to name for visibility
+        }
+
+        convoDiv.appendChild(header);
+        convoDiv.appendChild(preview);
+        dmConversationsList.appendChild(convoDiv);
+    });
+    updateUIText();
+}
+
+async function openDmChatWithUser(partnerUserId, partnerUsername) {
+    console.log("Opening dm chat")
+    currentDmPartner = { userId: partnerUserId, username: partnerUsername };
+    
+    dmChatArea.classList.remove('hidden');
+    dmNoConversationSelected.classList.add('hidden');
+    dmNoConversationSelected.style.display = 'none';
+
+
+    if(dmChatHeader) dmChatHeader.textContent = translate('dm_chatting_with_header', `Chat with ${partnerUsername}`, {username: partnerUsername});
+    if(dmChatMessages) dmChatMessages.innerHTML = `<p class="italic text-sm text-gray-500 text-center py-10" data-translate-key="dm_loading_messages_placeholder">Loading messages...</p>`;
+    if(directMessageInput) directMessageInput.value = '';
+    showStatus('', 'info', dmSendStatus);
+
+    // Highlight selected conversation in the list
+    renderDmConversationsList(); // Re-render to highlight
+
+    try {
+        // Mark conversation as read on the backend when opening
+        await apiRequest(`/api/dm/conversation/${partnerUserId}/mark_read`, { method: 'POST' });
+        // Update unread count in cache and re-render list
+        const convoInCache = dmConversationsCache.find(c => c.partner_user_id === partnerUserId);
+        if (convoInCache) {
+            convoInCache.unread_count = 0;
+            renderDmConversationsList(); // Re-render to remove badge
+        }
+
+
+        const response = await apiRequest(`/api/dm/conversation/${partnerUserId}`);
+        const messages = await response.json(); // Expects List[DirectMessagePublic]
+        renderDirectMessages(messages);
+    } catch (error) {
+        if(dmChatMessages) dmChatMessages.innerHTML = `<p class="italic text-sm text-red-400 text-center py-10">${translate('dm_error_loading_messages', 'Failed to load messages.')}</p>`;
+    }
+}
+
+function renderDirectMessages(messages) {
+    dmChatMessages.innerHTML = '';
+    if (messages.length === 0) {
+        dmChatMessages.innerHTML = `<p class="italic text-sm text-gray-400 text-center py-10" data-translate-key="dm_no_messages_in_conversation">No messages in this conversation yet. Say hello!</p>`;
+        updateUIText();
+        return;
+    }
+    messages.forEach(msg => {
+        const msgDiv = document.createElement('div');
+        const isSender = msg.sender_id === currentUser.id;
+        msgDiv.className = `dm-message-bubble ${isSender ? 'sent' : 'received'}`;
+        
+        const contentP = document.createElement('p');
+        contentP.textContent = msg.content; // Add Markdown parsing later if needed
+        
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'dm-message-timestamp';
+        timeSpan.textContent = formatTimestamp(new Date(msg.sent_at));
+        
+        msgDiv.appendChild(contentP);
+        msgDiv.appendChild(timeSpan);
+        dmChatMessages.appendChild(msgDiv);
+    });
+    dmChatMessages.scrollTop = dmChatMessages.scrollHeight; // Scroll to bottom
+}
+
+async function handleSendDirectMessage() {
+    if (!currentDmPartner || !directMessageInput || !sendDirectMessageBtn) return;
+    const content = directMessageInput.value.trim();
+    if (!content) return;
+
+    sendDirectMessageBtn.disabled = true;
+    directMessageInput.disabled = true;
+    showStatus(translate('dm_sending_message_status', 'Sending...'), 'info', dmSendStatus);
+
+    try {
+        const payload = {
+            receiver_user_id: currentDmPartner.userId,
+            content: content
+        };
+        const response = await apiRequest('/api/dm/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            statusElement: dmSendStatus
+        });
+        const newDm = await response.json(); // DirectMessagePublic
+
+        // Add to local messages and re-render
+        const currentChatMessages = Array.from(dmChatMessages.querySelectorAll('.dm-message-bubble')).map(el => ({
+            // This is a simplification; ideally, you'd have a proper local cache of DMs
+            // For now, just append and re-render this message
+        }));
+         // A bit hacky, ideally fetch full conversation or have a proper local store
+        const tempMessagesForRender = [];
+        dmChatMessages.querySelectorAll('.dm-message-bubble').forEach(bubble => {
+            // This is not ideal, we don't have the full message objects here.
+            // For a quick append, we'll just add the new one.
+            // A robust solution would fetch the conversation again or manage a local array.
+        });
+        renderDirectMessages([...tempMessagesForRender, newDm]); // This will clear and re-render, not ideal for just one new message
+        
+        // Better: Append directly
+        // const msgForRender = { // Construct object similar to what renderDirectMessages expects
+        //    id: newDm.id, sender_id: newDm.sender_id, content: newDm.content, sent_at: newDm.sent_at
+        // };
+        // appendSingleDirectMessage(msgForRender); // You'd need this helper
+
+        directMessageInput.value = '';
+        showStatus('', 'info', dmSendStatus);
+
+        // Refresh conversation list to update last message preview
+        await loadDmConversations();
+
+    } catch (error) {
+        // apiRequest shows error in dmSendStatus
+    } finally {
+        sendDirectMessageBtn.disabled = false;
+        directMessageInput.disabled = false;
+    }
 }
