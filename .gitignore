@@ -179,3 +179,4 @@ app_main.db
 
 # vscode
 .vscode
+models/
