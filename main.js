@@ -871,7 +871,7 @@ async function attemptInitialAuthAndLoad() { /* As provided */
         } else {
             if (appLoadingStatus) appLoadingStatus.textContent = translate('initialization_failed_status', `Initialization failed: ${error.message}. Please refresh.`, { message: error.message });
             if (appLoadingStatus) appLoadingStatus.classList.add('text-red-600');
-            if("Could not initialize LLM Client" in error.message) {
+            if("Could not initialize LLM Client" in structuredClone(error.message)) {
                 console.log("here!");
                 await initializeAppContent();
                 appLoadingMessage.style.display = 'none'; // bypass
