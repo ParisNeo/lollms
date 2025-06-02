@@ -1741,7 +1741,7 @@ async def get_dm_conversation(
     if unread_message_ids:
         db.query(DirectMessage).filter(
             DirectMessage.id.in_(unread_message_ids)
-        ).update({"read_at": func.now()}, synchronize_session=False)
+        ).update({"read_at": datetime.datetime.now(datetime.timezone.utc)}, synchronize_session=False)
         db.commit()
         # Re-fetch to get updated read_at times for the response (or update in-memory)
         for msg in messages_db:
@@ -1775,7 +1775,7 @@ async def mark_dm_conversation_as_read(
         DirectMessage.sender_id == other_user_id,
         DirectMessage.receiver_id == current_db_user.id,
         DirectMessage.read_at == None
-    ).update({"read_at": func.now()}, synchronize_session=False)
+    ).update({"read_at": datetime.datetime.now(datetime.timezone.utc)}, synchronize_session=False)
     
     db.commit()
     return {"message": f"{updated_count} messages marked as read."}
@@ -1819,7 +1819,7 @@ async def list_dm_conversations(
             )
         ).order_by(DirectMessage.sent_at.desc()).first()
 
-        unread_count = db.query(func.count(DirectMessage.id)).filter(
+        unread_count = db.query(DirectMessage).filter(
             DirectMessage.sender_id == friend.id, # Messages from friend
             DirectMessage.receiver_id == current_db_user.id, # To me
             DirectMessage.read_at == None
