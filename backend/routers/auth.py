@@ -27,7 +27,8 @@ from fastapi import (
     APIRouter,
     Response,
     Query,
-    BackgroundTasks
+    BackgroundTasks,
+    status
 )
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import (
@@ -231,7 +232,9 @@ async def logout(response: Response, current_user: UserAuthDetails = Depends(get
         
         del user_sessions[username]
         print(f"INFO: User '{username}' session cleared (logged out). Temp files scheduled for cleanup.")
-    return {"message": "Logout successful. Session cleared."}
+    response.status_code = status.HTTP_401_UNAUTHORIZED
+    del response.headers['www-authenticate'] # Ensure no WWW-Authenticate header is sent
+    return response#{"message": "Logout successful. Session cleared."}
 
 
 @auth_router.post("/change-password")
