@@ -74,6 +74,7 @@ from backend.database_setup import (
     get_db,
     hash_password,
     DATABASE_URL_CONFIG_KEY,
+    get_friendship_record
 )
 from lollms_client import (
     LollmsClient,
@@ -1210,18 +1211,6 @@ async def send_personality_to_user(
 # Add the router to the main app
 app.include_router(personalities_router)
 
-# --- Main Execution ---
-if __name__ == "__main__":
-    import uvicorn
-    host = SERVER_CONFIG.get("host", "127.0.0.1"); port = int(SERVER_CONFIG.get("port", 9642))
-    try: APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    except OSError as e: print(f"CRITICAL: Could not create main data directory {APP_DATA_DIR}: {e}")
-    print(f"--- Simplified LoLLMs Chat API Server (v{APP_VERSION}) ---")
-    print(f"Access UI at: http://{host}:{port}/")
-    print(f"Access Admin Panel at: http://{host}:{port}/admin (requires admin login)")
-    print("--------------------------------------------------------------------")
-    uvicorn.run("main:app", host=host, port=port, reload=False) 
-
 # --- FastAPI Router for Friendships ---
 friends_router = APIRouter(prefix="/api/friends", tags=["Friends Management"])
 
@@ -1844,3 +1833,16 @@ async def list_dm_conversations(
 
 
 app.include_router(dm_router)
+
+
+# --- Main Execution ---
+if __name__ == "__main__":
+    import uvicorn
+    host = SERVER_CONFIG.get("host", "127.0.0.1"); port = int(SERVER_CONFIG.get("port", 9642))
+    try: APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as e: print(f"CRITICAL: Could not create main data directory {APP_DATA_DIR}: {e}")
+    print(f"--- Simplified LoLLMs Chat API Server (v{APP_VERSION}) ---")
+    print(f"Access UI at: http://{host}:{port}/")
+    print(f"Access Admin Panel at: http://{host}:{port}/admin (requires admin login)")
+    print("--------------------------------------------------------------------")
+    uvicorn.run("main:app", host=host, port=port, reload=False) 
