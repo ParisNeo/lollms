@@ -194,6 +194,22 @@
     </div>
 
     <div id="modalsContainer">
+        <!-- Rename Modal -->
+        <div id="renameModal" class="modal hidden">
+            <div class="modal-content">
+                <h2 class="modal-title" id="renameModalTitle">Rename Discussion</h2>
+                <div class="modal-body">
+                    <input type="text" id="renameInput" placeholder="New Title" class="input-field">
+                    <input type="hidden" id="renameDiscussionIdInput">
+                    <p id="renameStatus" class="status-message"></p>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-primary" id="confirmRenameBtn">Rename</button>
+                    <button class="btn btn-secondary" id="cancelRenameBtn">Cancel</button>
+                </div>
+            </div>
+        </div>
+
         <div id="sendPersonalityModal" class="modal">
             <div class="modal-content">
                 <button class="modal-close-btn" onclick="closeModal('sendPersonalityModal')">X</button>
@@ -318,20 +334,7 @@
                 <button id="loginSubmitBtn" class="w-full px-4 py-2 text-sm font-medium rounded-md  focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500" data-translate-key="login_submit_btn">Login</button>
             </div>
         </div></div>
-        <div id="renameModal" class="modal"><div class="modal-content">
-            <button class="modal-close-btn" onclick="closeModal('renameModal')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg></button>
-            <div class="modal-header"><h3 class="modal-title" data-translate-key="rename_modal_title">Rename Discussion</h3></div>
-            <div class="modal-body py-4">
-                <label for="renameInput" class="block text-sm font-medium  mb-1" data-translate-key="rename_input_label">New discussion title:</label>
-                <input type="text" id="renameInput" class="w-full sm:text-sm" data-translate-placeholder="rename_input_placeholder" placeholder="Enter new title">
-                <div id="renameStatus" class="text-xs text-red-400 mt-1 h-4"></div>
-                <input type="hidden" id="renameDiscussionIdInput">
-            </div>
-            <div class="modal-footer">
-                <button onclick="closeModal('renameModal')" class="px-4 py-2   text-sm font-medium rounded-md " data-translate-key="cancel_btn">Cancel</button>
-                <button id="confirmRenameBtn" class="px-4 py-2 text-sm font-medium rounded-md " data-translate-key="rename_btn">Rename</button>
-            </div>
-        </div></div>
+
         <div id="sendDiscussionModal" class="modal"><div class="modal-content">
             <button class="modal-close-btn" onclick="closeModal('sendDiscussionModal')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg></button>
             <div class="modal-header"><h3 class="modal-title" data-translate-key="send_discussion_modal_title_default">Send Discussion</h3></div>
