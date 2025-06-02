@@ -869,9 +869,12 @@ async function attemptInitialAuthAndLoad() { /* As provided */
             openModal('loginModal', false);
             if (loginUsernameInput) loginUsernameInput.focus();
         } else {
-            if("Could not initialize LLM Client" in error.message) appLoadingMessage.style.display = 'none'; // bypass
             if (appLoadingStatus) appLoadingStatus.textContent = translate('initialization_failed_status', `Initialization failed: ${error.message}. Please refresh.`, { message: error.message });
             if (appLoadingStatus) appLoadingStatus.classList.add('text-red-600');
+            if("Could not initialize LLM Client" in error.message) {
+                await initializeAppContent();
+                appLoadingMessage.style.display = 'none'; // bypass
+            }
         }
     }
 }
