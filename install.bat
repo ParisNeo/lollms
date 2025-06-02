@@ -84,12 +84,12 @@ if "!apikey!"=="" set apikey=OPENAI_API_KEY
 call :update_config service_key_env_var "!apikey!"
 
 :: Safe store defaults
-set /p chunk=Enter chunk_size [512]: 
-if "!chunk!"=="" set chunk=512
+set /p chunk=Enter chunk_size [4096]: 
+if "!chunk!"=="" set chunk=4096
 call :update_config_raw chunk_size !chunk!
 
-set /p overlap=Enter chunk_overlap [50]: 
-if "!overlap!"=="" set overlap=50
+set /p overlap=Enter chunk_overlap [200]: 
+if "!overlap!"=="" set overlap=200
 call :update_config_raw chunk_overlap !overlap!
 
 :: Encryption key
