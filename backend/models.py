@@ -70,6 +70,8 @@ class UserAuthDetails(UserLLMParams):
 
     # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
+    max_rag_len: Optional[int] = Field(None, ge=1)
+    rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: bool = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
 
@@ -91,6 +93,8 @@ class UserCreateAdmin(UserLLMParams):
 
     # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
+    max_rag_len: Optional[int] = Field(None, ge=1)
+    rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: Optional[bool] = False # Optional on create, will default in DB
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
 
@@ -116,6 +120,8 @@ class UserPublic(UserLLMParams):
 
     # RAG parameters
     rag_top_k: Optional[int] = None
+    max_rag_len: Optional[int] = None
+    rag_min_sim_percent: Optional[float] = None
     rag_use_graph: bool
     rag_graph_response_type: Optional[str] = None
 
@@ -142,6 +148,7 @@ class MessageOutput(BaseModel):
     binding_name: Optional[str] = None
     model_name: Optional[str] = None
     token_count: Optional[int] = None
+    sources: Optional[List[Dict]] = None
     image_references: List[str] = []
     user_grade: int = 0
 
@@ -180,6 +187,8 @@ class DataStoreBase(BaseModel):
     description: Optional[str] = Field(None, max_length=500)
 
 class DataStoreCreate(DataStoreBase): pass
+class DataStoreEdit(DataStoreBase):
+    new_name: constr(min_length=1, max_length=100)
 
 class DataStorePublic(DataStoreBase):
     id: str
@@ -251,6 +260,8 @@ class UserUpdate(BaseModel):
 
     # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
+    max_rag_len: Optional[int] = Field(None, ge=1)
+    rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: Optional[bool] = None
     rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")    
 
