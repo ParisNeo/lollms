@@ -395,7 +395,7 @@ async def chat_in_existing_discussion(
 
 
                 max_rag_len, current_rag_len, rag_min_sim_percent = current_user.max_rag_len if current_user.max_rag_len else 80000, 0, current_user.rag_min_sim_percent or 0
-                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=current_user.rag_top_k, min_similarity_percent = rag_min_sim_percent) # Use user's default vectorizer for querying
+                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=current_user.rag_top_k if current_user.rag_top_k else 5, min_similarity_percent = rag_min_sim_percent if rag_min_sim_percent else 0) # Use user's default vectorizer for querying
                 if rag_results:
                     context_str = "\n\nRelevant context from documents:\n"; 
                     for i, res in enumerate(rag_results):
