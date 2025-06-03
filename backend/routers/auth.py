@@ -198,6 +198,8 @@ async def update_my_details(
             llm_repeat_last_n=current_session_llm_params.get("repeat_last_n"),
             put_thoughts_in_context=current_session_llm_params.get("put_thoughts_in_context"),
             rag_top_k=db_user.rag_top_k,
+            max_rag_len=db_user.max_rag_len,
+            rag_min_sim_percent=db_user.rag_min_sim_percent,
             rag_use_graph=db_user.rag_use_graph,
             rag_graph_response_type=db_user.rag_graph_response_type
         )
