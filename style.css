@@ -1836,3 +1836,8 @@ main > footer #pyodideStatus {
 .dm-message-bubble.sent .dm-message-timestamp {
     color: #d1d5db; /* theme.colors.gray[300] */
 }
+
+
+.source-badge {
+    background-color: #f9fbe7;
+}
