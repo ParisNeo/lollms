@@ -2093,8 +2093,6 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
             });
             detailsContainer.appendChild(sourceBadge);
         });
-    } else {
-        console.log("Message does NOT have sources or sources array is empty.", message.id); // DEBUGGING
     }
 
     if (message.processing_time_ms) {
