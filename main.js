@@ -234,6 +234,10 @@ const sendPersonalityStatus = document.getElementById('sendPersonalityStatus');
 const sendPersonalityIdInput = document.getElementById('sendPersonalityIdInput');
 const confirmSendPersonalityBtn = document.getElementById('confirmSendPersonalityBtn');
 
+const chatArea = document.getElementById('chatArea');
+const ragControls = document.getElementById('ragControls');
+
+
 
 let currentDmPartner = null; // { userId, username }
 let dmConversationsCache = [];
@@ -582,7 +586,14 @@ window.onload = async () => {
             showStatus(translate('rag_cannot_enable_no_stores_warning'), 'warning');
             return;
         }
+        console.log("isRagActive")
+        console.log(isRagActive)
         isRagActive = !isRagActive;
+        console.log(isRagActive)
+        if(!isRagActive){
+            const disc = currentDiscussionId ? discussions[currentDiscussionId] : null;
+            disc.rag_datastore_id = null;
+        }
         updateRagToggleButtonState(); // This function should also handle ragDataStoreSelect visibility
 
         if (currentDiscussionId && discussions[currentDiscussionId]) {
@@ -1262,6 +1273,8 @@ async function selectDiscussion(id) {
     }
     renderMessages(currentMessages);
     renderBranchTabsUI(id);
+    chatArea.classList.remove("hidden")
+    ragControls.classList.remove("hidden")
 }
 
 async function confirmInlineRename() { /* As provided, ensure it updates discussion list */
@@ -3347,7 +3360,7 @@ function updateRagToggleButtonState() {
 
     const hasDataStores = availableDataStoresForRag.length > 0;
     ragToggleBtn.disabled = !hasDataStores;
-    ragDataStoreSelect.style.display = (isRagActive && hasDataStores) ? 'inline-block' : 'none';
+    ragDataStoreSelect.style.display = (hasDataStores) ? 'inline-block' : 'none';
 
     if (!hasDataStores) {
         ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
@@ -3365,7 +3378,8 @@ function updateRagToggleButtonState() {
         isRagActive = !!currentDiscussionRagStore;
     }
 
-
+    console.log("isRagActive")
+    console.log(isRagActive)
     if (isRagActive) {
         ragToggleBtn.classList.remove('rag-toggle-off'); ragToggleBtn.classList.add('rag-toggle-on');
         const selectedDS = availableDataStoresForRag.find(ds => ds.id === currentDiscussionRagStore);
