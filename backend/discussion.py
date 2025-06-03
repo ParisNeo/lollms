@@ -148,11 +148,17 @@ class AppLollmsDiscussion:
         binding_name: Optional[str] = None,
         model_name: Optional[str] = None,
         token_count: Optional[int] = None,
+        sources: Optional[List[Dict]] = None,
         image_references: Optional[List[str]] = None,
     ) -> AppLollmsMessage:
         message = AppLollmsMessage(
-            sender=sender, content=content, parent_message_id=parent_message_id,
-            binding_name=binding_name, model_name=model_name, token_count=token_count,
+            sender=sender, 
+            content=content, 
+            parent_message_id=parent_message_id,
+            binding_name=binding_name, 
+            model_name=model_name, 
+            token_count=token_count, 
+            sources=sources,
             image_references=image_references or []
         )
         self.messages.append(message)
