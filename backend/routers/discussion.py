@@ -378,7 +378,7 @@ async def chat_in_existing_discussion(
                 active_vectorizer_for_store = user_sessions[username].get("active_vectorizer") # This is the name of vectorizer model, not datastore
                 
                 # Let's generate a more focused RAG query
-                rag_query_prompt = f"Based on the user's question: '{prompt}', formulate a concise search query to find relevant information in a document database. The query should be a few keywords or a short natural language question. Output only the search query itself."
+                rag_query_prompt = f"Based on the user's question: '{prompt}', formulate a concise search query to find relevant information in a document database. The query should be a few keywords or a short natural language question. Output only the search query itself. The query must ask questions about possible elemnts that can be relevant to answer the question and is not an exact transcription of the user request"
                 try:
                     # Note: LollmsClient.generate_text might be better than generate_code for this type of query generation
                     # For simplicity, using existing structure. Revisit if query generation is poor.
@@ -408,13 +408,13 @@ async def chat_in_existing_discussion(
                             context_str += f"{i+1}. From '{file_name}': {chunk_text}\n"; 
                             current_rag_len += len(chunk_text); 
                             sources.append({"document":file_name, "similarity": similarity_percent})
-                    extra_content = (f"User question: {prompt}\n\n"
-                                       f"Answer the user's question based *only* on the following context:\n{context_str.strip()}\n\n"
+                    extra_content = ( f"Answer the user's question based *only* on the following context:\n{context_str.strip()}\n\n"
                                        "Cite sources by filename if multiple are present."
                                       ) # Simplified RAG instruction
 
                 else:
-                     print(f"INFO: RAG query for '{query}' on datastore {rag_datastore_id} yielded no results.")
+                    extra_content = "Important information from the system: RAG Failed to extract relevant text from the provided datastore. Tell the user about this incident."
+                    print(f"INFO: RAG query for '{query}' on datastore {rag_datastore_id} yielded no results.")
             except HTTPException as e_rag_access: 
                 print(f"INFO: RAG query skipped for {username} on datastore {rag_datastore_id}: {e_rag_access.detail}")
             except Exception as e: 
