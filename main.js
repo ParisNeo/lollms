@@ -117,9 +117,23 @@ const changePasswordBtn = document.getElementById('changePasswordBtn');
 const passwordChangeStatus = document.getElementById('passwordChangeStatus');
 const dataStoresModal = document.getElementById('dataStoresModal');
 const createDataStoreForm = document.getElementById('createDataStoreForm');
+const btnCreateDataStore = document.getElementById('btnCreateDataStore');
+
 const newDataStoreNameInput = document.getElementById('newDataStoreName');
 const newDataStoreDescriptionInput = document.getElementById('newDataStoreDescription');
+
+const editDataStoreForm = document.getElementById('editDataStoreForm');
+const btnEditDataStore = document.getElementById('btnEditDataStore');
+const btnCancelEditDataStore = document.getElementById('btnCancelEditDataStore');
+
+const editDataStoreNameInput = document.getElementById('editDataStoreName');
+const editDataStoreNewNameInput = document.getElementById('editDataStoreNewName');
+
+const editDataStoreDescriptionInput = document.getElementById('editDataStoreDescription');
+
 const createDataStoreStatus = document.getElementById('createDataStoreStatus');
+const editDataStoreStatus = document.getElementById('editDataStoreStatus');
+
 const ownedDataStoresList = document.getElementById('ownedDataStoresList');
 const sharedDataStoresList = document.getElementById('sharedDataStoresList');
 const shareDataStoreModal = document.getElementById('shareDataStoreModal');
@@ -177,13 +191,16 @@ const personalityEditorStatus = document.getElementById('personalityEditorStatus
 
 const settingsPutThoughts = document.getElementById('settingsPutThoughts'); // For LLM Params
 
+
 const settingsRagTopK = document.getElementById('settingsRagTopK');
+const settingsRagMAXLEN = document.getElementById('settingsRagMAXLEN');
+const settingsRagMinSimPercent = document.getElementById('settingsRagMinSimPercent');
+
 const settingsRagUseGraph = document.getElementById('settingsRagUseGraph');
+const settingsRagGraphResponseTypeBlock = document.getElementById('settingsRagGraphResponseTypeBlock');
 const settingsRagGraphResponseType = document.getElementById('settingsRagGraphResponseType');
 const saveRagParamsBtn = document.getElementById('saveRagParamsBtn');
 const settingsStatus_ragParams = document.getElementById('settingsStatus_ragParams');
-const settingsDefaultVectorizer = document.getElementById('settingsDefaultVectorizer');
-const ragGraphResponseTypeContainer = document.getElementById('ragGraphResponseTypeContainer');
 
 const friendsMessagesBtn = document.getElementById('friendsMessagesBtn');
 const friendsMessagesModal = document.getElementById('friendsMessagesModal');
@@ -227,8 +244,10 @@ function isElementInDocument(element) {
 }
 
 function toggleRagGraphResponseTypeVisibility() {
-    if (settingsRagUseGraph && ragGraphResponseTypeContainer) {
-        ragGraphResponseTypeContainer.style.display = settingsRagUseGraph.checked ? 'block' : 'none';
+    if (settingsRagUseGraph && settingsRagGraphResponseTypeBlock) {
+        console.log("changing visibility")
+        settingsRagGraphResponseTypeBlock.style.display = settingsRagUseGraph.checked ? 'block' : 'none';
+        console.log(settingsRagGraphResponseTypeBlock.style.display)
     }
 }
 // --- Localization Functions (translate, updateUIText, etc.) ---
@@ -471,6 +490,11 @@ window.onload = async () => {
     if (createDataStoreForm) createDataStoreForm.addEventListener('submit', handleCreateDataStore);
     if (changePasswordBtn) changePasswordBtn.onclick = handleChangePassword;
 
+    if (editDataStoreForm) editDataStoreForm.addEventListener('submit', handleEditDataStore);
+    if (btnCancelEditDataStore) btnCancelEditDataStore.onclick = closeModal("editDataStoresModal");
+    
+    
+
     // For Profile Tab
     if (settingsFirstName) settingsFirstName.oninput = () => { if(saveProfileBtn) saveProfileBtn.disabled = false; };
     if (settingsFamilyName) settingsFamilyName.oninput = () => { if(saveProfileBtn) saveProfileBtn.disabled = false; };
@@ -492,14 +516,16 @@ window.onload = async () => {
 
     // For RAG Params Tab
     if (settingsRagTopK) settingsRagTopK.oninput = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
+    if (settingsRagMAXLEN) settingsRagMAXLEN.oninput = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
+    if (settingsRagMinSimPercent) settingsRagMinSimPercent.oninput = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
     if (settingsRagUseGraph) {
         settingsRagUseGraph.onchange = () => { 
+            console.log("Changing graphrag status")
             if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; 
             toggleRagGraphResponseTypeVisibility(); // Call on change
         };
     }
     if (settingsRagGraphResponseType) settingsRagGraphResponseType.onchange = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
-    if (settingsDefaultVectorizer) settingsDefaultVectorizer.onchange = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
     if (saveRagParamsBtn) saveRagParamsBtn.onclick = handleSaveRagParams;  
     
     const sidebarLogoutBtn = document.getElementById('sidebarLogoutBtn');
@@ -1950,6 +1976,21 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         tokenBadge.innerHTML = `<svg class="w-3 h-3 inline -mt-px" fill="currentColor" viewBox="0 0 20 20"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> ${message.token_count}`;
         detailsContainer.appendChild(tokenBadge);
     }
+    console.log(message)
+    if (message.sources && Array.isArray(message.sources)) {
+        message.sources.forEach(source => {
+            const sourceBadge = document.createElement('span');
+            sourceBadge.className = 'detail-badge source-badge';
+            sourceBadge.innerHTML = `
+                <svg class="w-3 h-3 inline -mt-px" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10 20a10 10 0 110-20 10 10 0 010 20zm0-2a8 8 0 100-16 8 8 0 000 16zm0-10h2v4h-2v-4zm0 7h2v4h-2v-4z"/>
+                </svg>
+                ${source.document} (Similarity: ${source.similarity}%)
+            `;
+            detailsContainer.appendChild(sourceBadge);
+        });
+    }
+
     if (message.processing_time_ms) { // Assuming you might get ms from backend
         const timeBadge = document.createElement('span');
         timeBadge.className = 'detail-badge time-badge';
@@ -2913,10 +2954,35 @@ async function handleCreateDataStore(event) {
     } catch (error) { /* Handled by apiRequest */ }
 }
 
+async function handleEditDataStore(event) {
+    event.preventDefault();
+    const name = editDataStoreNameInput.value.trim();
+    const new_name = editDataStoreNewNameInput.value.trim();
+    const description = editDataStoreDescriptionInput.value.trim();
+    if (!name) { showStatus(translate('datastores_name_required_error'), "error", editDataStoreStatus); return; }
+    showStatus(translate('status_creating_datastore', "Creating data store..."), "info", editDataStoreStatus);
+    try {
+        await apiRequest('/api/datastores/edit', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, new_name, description }),
+            statusElement: editDataStoreStatus
+        });
+        showStatus(translate('status_datastore_edited_success', `Data Store "${name}" edited.`, {name: name}), "success", editDataStoreStatus);
+        editDataStoreForm.reset();
+        openModal('dataStoresModal');
+        closeModal("editDataStoresModal")
+        await loadDataStores(); 
+    } catch (error) { /* Handled by apiRequest */ }
+}
+
 function initiateEditDataStore(id, name, description) { 
-    newDataStoreNameInput.value = name;
-    newDataStoreDescriptionInput.value = description;
-    showStatus(translate('status_editing_datastore_note', `Editing store: ${name}. (Note: Save functionality for edit uses the 'Create Store' button logic but would ideally be a PUT request to /api/datastores/${id})`, {name: name}), 'info', createDataStoreStatus);
+    closeModal('dataStoresModal'); 
+    editDataStoreNameInput.value = name;
+    editDataStoreNewNameInput.value = name;
+    editDataStoreDescriptionInput.value = description;
+    showStatus(translate('status_editing_datastore_note', `Editing store: ${name}.`, {name: name}), 'info', createDataStoreStatus);
+    openModal("editDataStoresModal")
 }
 
 async function deleteDataStore(id, name) {
@@ -3784,14 +3850,14 @@ async function populateSettingsModal() {
 
     // RAG Parameters Tab
     if(settingsRagTopK) settingsRagTopK.value = currentUser.rag_top_k ?? '';
+    if(settingsRagMAXLEN) settingsRagMAXLEN.value = currentUser.max_rag_len ?? '';
+    if(settingsRagMinSimPercent) settingsRagMinSimPercent.value = currentUser.rag_min_sim_percent ?? '';
+    
     if(settingsRagUseGraph) settingsRagUseGraph.checked = currentUser.rag_use_graph || false;
     if(settingsRagGraphResponseType) settingsRagGraphResponseType.value = currentUser.rag_graph_response_type || 'chunks_summary';
 
     toggleRagGraphResponseTypeVisibility();
 
-    if(settingsDefaultVectorizer) { // NEW check and element
-        populateDropdown(settingsDefaultVectorizer, availableVectorizers, currentUser.safe_store_vectorizer, translate('settings_vectorizer_loading')); // Changed placeholder
-    }
     if(saveRagParamsBtn) saveRagParamsBtn.disabled = true;
     showStatus('', 'info', settingsStatus_ragParams);
 
@@ -3999,15 +4065,16 @@ async function handleSaveRagParams() {
     if (!currentUser || !saveRagParamsBtn) return;
     const payload = {
         rag_top_k: parseInt(settingsRagTopK.value) || null,
+        max_rag_len: parseInt(settingsRagMAXLEN.value) || null,
+        rag_min_sim_percent: parseFloat(settingsRagMinSimPercent.value) || null,
         rag_use_graph: settingsRagUseGraph.checked,
         rag_graph_response_type: settingsRagGraphResponseType.value,
-        safe_store_vectorizer: settingsDefaultVectorizer ? settingsDefaultVectorizer.value : currentUser.safe_store_vectorizer 
     };
     showStatus(translate('status_saving_rag_params', 'Saving RAG parameters...'), 'info', settingsStatus_ragParams);
     saveRagParamsBtn.disabled = true;
     try {
         // API endpoint: PUT /api/users/me/settings (or similar)
-        const response = await apiRequest('/api/users/me', { // Assuming general update endpoint
+        const response = await apiRequest('/api/auth/me', { // Assuming general update endpoint
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -4359,29 +4426,6 @@ async function deletePersonality(id, name) {
     } catch (error) { /* apiRequest handles status */ }
 }
 
-// Function to load vectorizers (call this in initializeAppContent)
-async function loadAvailableVectorizers() {
-    if (!settingsDefaultVectorizer && !fileVectorizerSelect) return; 
-    
-    try {
-        const response = await apiRequest('/api/config/global-vectorizers'); // Call the new endpoint
-        availableVectorizers = await response.json();
-        console.log("Loaded available global vectorizers:", availableVectorizers);
-
-        if (settingsDefaultVectorizer) {
-            populateDropdown(settingsDefaultVectorizer, availableVectorizers, currentUser?.safe_store_vectorizer, translate('settings_vectorizer_select_default'));
-        }
-    } catch (error) {
-        console.error("Failed to load global vectorizers:", error);
-        availableVectorizers = [ // Provide a fallback list for UI
-            { name: "st:all-MiniLM-L6-v2", method_name: "all-MiniLM-L6-v2 (ST)" },
-            { name: "tfidf:default", method_name: "TF-IDF" }
-        ];
-        if (settingsDefaultVectorizer) {
-            populateDropdown(settingsDefaultVectorizer, availableVectorizers, currentUser?.safe_store_vectorizer, translate('settings_error_loading_vectorizers'));
-        }
-    }
-}
 
 function openFriendsMessagesModal() {
     if (!currentUser) return;
