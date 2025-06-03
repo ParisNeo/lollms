@@ -319,3 +319,4 @@ class DirectMessagePublic(DirectMessageBase):
 
 class PersonalitySendRequest(BaseModel):
     target_username: constr(min_length=3, max_length=50)
+

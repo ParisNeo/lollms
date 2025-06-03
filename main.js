@@ -1808,140 +1808,154 @@ function clearChatArea(clearHeader = true) {
     currentAiMessageDomContainer = null; currentAiMessageDomBubble = null;
     currentAiMessageContentAccumulator = ""; currentAiMessageId = null; currentAiMessageData = null;
 }
-
+function scrollToBottom(containerId = 'chatMessages') { // Default ID, can be overridden
+    const messagesContainer = document.getElementById(containerId);
+    if (messagesContainer) {
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    } else {
+        console.warn(`scrollToBottom: Container with ID '${containerId}' not found.`);
+    }
+}
 // `renderMessage` from your "Enhanced message rendering" section, adapted for the new DOM caching.
 // This is the "full" renderMessage you provided, slightly adapted.
+// Ensure currentUser is defined, e.g.:
+// const currentUser = { username: 'DefaultUser', lollms_client_ai_name: 'AI Assistant', avatar: 'path/to/user/avatar.png' };
+// const aiAvatar = 'path/to/ai/avatar.png'; // Or get this from config
+
 function renderMessage(message, existingContainer = null, existingBubble = null) {
-    if (!message || typeof message.sender === 'undefined' || (typeof message.content === 'undefined' && (!message.image_references || message.image_references.length === 0) && (!message.steps || message.steps.length === 0) && (!message.metadata || message.metadata.length === 0) && !(message.id === currentAiMessageId && (aiMessageStreaming || generationInProgress) ))) { // Allow rendering empty streaming AI msg
+    if (!message || typeof message.sender === 'undefined' || (typeof message.content === 'undefined' && (!message.image_references || message.image_references.length === 0) && (!message.steps || message.steps.length === 0) && (!message.metadata || message.metadata.length === 0) && !(message.id === currentAiMessageId && (aiMessageStreaming || generationInProgress) ))) {
         return;
     }
 
     const messageId = message.id || `temp-render-${Date.now()}`;
-    const domIdForBubble = `message-${messageId}`; // ID for the bubble div itself
+    const domIdForBubble = `message-${messageId}`;
 
     let messageContainerToUse = isElementInDocument(existingContainer) ? existingContainer : document.querySelector(`.message-container[data-message-id="${messageId}"]`);
     let bubbleDivToUse = isElementInDocument(existingBubble) && existingBubble.id === domIdForBubble ? existingBubble : null;
 
     if (isElementInDocument(messageContainerToUse) && !isElementInDocument(bubbleDivToUse)) {
-        // Container exists, but bubble might have been cleared or is incorrect. Try to find it.
         bubbleDivToUse = messageContainerToUse.querySelector(`#${domIdForBubble}`);
     }
     
     const isUpdate = isElementInDocument(messageContainerToUse) && isElementInDocument(bubbleDivToUse);
 
     if (isUpdate) {
-        // Clear dynamic parts for update
-        const elementsToClearOrRebuild = ['.sender-name', '.message-images-container', '.message-timestamp', '.message-content', '.message-footer'];
+        const elementsToClearOrRebuild = ['.sender-info', '.message-images-container', '.message-content', '.message-footer']; // Changed .sender-name to .sender-info, removed .message-timestamp (now part of .sender-info or footer)
         elementsToClearOrRebuild.forEach(selector => {
             const el = bubbleDivToUse.querySelector(selector);
             if (el) {
-                if (selector === '.message-content' || selector === '.message-footer') el.innerHTML = ''; // Clear content for rebuild
-                else el.remove(); // Remove structural elements like sender, images, timestamp for rebuild
+                if (selector === '.message-content' || selector === '.message-footer') el.innerHTML = '';
+                else el.remove();
             }
         });
-    } else { // Create new elements
+    } else {
         messageContainerToUse = document.createElement('div');
         messageContainerToUse.className = 'message-container flex flex-col';
         messageContainerToUse.dataset.messageId = messageId;
 
         bubbleDivToUse = document.createElement('div');
-        // bubbleDivToUse.id = domIdForBubble; // Set by enhanced styles later if needed, but good to have
         messageContainerToUse.appendChild(bubbleDivToUse);
-        if(chatMessages) chatMessages.appendChild(messageContainerToUse);
-        else { console.error("renderMessage: chatMessages DOM element not found!"); return; }
+        
+        if (chatMessages) { // Use the cached global variable
+            chatMessages.appendChild(messageContainerToUse);
+        } else { 
+            console.error("renderMessage: chatMessages DOM element not found!"); 
+            return; 
+        }
 
         messageContainerToUse.style.opacity = '0';
         messageContainerToUse.style.transform = 'translateY(20px)';
         requestAnimationFrame(() => {
-            messageContainerToUse.style.transition = 'all 0.3s ease-out';
+            messageContainerToUse.style.transition = 'opacity 0.3s ease-out, transform 0.3s ease-out';
             messageContainerToUse.style.opacity = '1';
             messageContainerToUse.style.transform = 'translateY(0)';
         });
     }
 
-    bubbleDivToUse.id = domIdForBubble; // Ensure ID is set/updated
+    bubbleDivToUse.id = domIdForBubble;
 
-    // Handle spacing (as before)
     if (message.addSpacing && messageContainerToUse.previousElementSibling) {
         messageContainerToUse.classList.add('mt-4');
     } else {
         messageContainerToUse.classList.remove('mt-4');
     }
 
-    // Determine bubble type and styling (as before)
     let bubbleClass = 'ai-bubble';
-    let senderNameForDisplay = getSenderNameText(message); // Use helper
-    let showGradeControls = false; // Renamed from showGrade for clarity
-    const userNames = [currentUser.username, 'user', 'You', translate('sender_you', 'You'), translate('sender_user', 'User')];
-    if (currentUser.lollms_client_ai_name === null || currentUser.lollms_client_ai_name === undefined) { // If AI name is not set, user is effectively the AI
-         // This case is tricky. If lollms_client_ai_name is null, it means the user IS the AI.
-         // So "User" messages are from "other users" if multi-user is deeply implemented.
-         // For single-user context or if client_ai_name is just not set, this logic might need adjustment.
-         // Assuming current logic: if message.sender matches User-like names, it's a user-bubble.
-    }
+    let senderDisplayName; // Will hold the name to display in the header
+    let senderType; // 'user', 'ai', 'system' for avatar/styling logic
 
-    if (userNames.includes(message.sender) || (message.sender === "User" && currentUser.username === "user") || (currentUser.lollms_client_ai_name === null && message.sender === currentUser.username)) {
+    const userSenderNames = [currentUser.username, 'user', 'User', 'You', translate('sender_you', 'You'), translate('sender_user', 'User')];
+    
+    if (userSenderNames.includes(message.sender) || (message.sender === "User" && currentUser.username.toLowerCase() === "user") || (currentUser.lollms_client_ai_name === null && message.sender === currentUser.username)) {
         bubbleClass = 'user-bubble';
-        senderNameForDisplay = ''; // User bubbles don't typically show "User"
+        senderDisplayName = currentUser.username || translate('sender_you', 'You'); // Show current user's name
+        senderType = 'user';
     } else if (message.sender && (message.sender.toLowerCase() === 'system' || message.sender.toLowerCase() === 'error')) {
         bubbleClass = 'system-bubble';
-        senderNameForDisplay = '';
+        senderDisplayName = message.sender; // Or '' if you don't want a header for system messages
+        senderType = 'system';
     } else { // AI or other named sender
         bubbleClass = 'ai-bubble';
-        // senderNameForDisplay is already set by getSenderNameText
-        showGradeControls = !messageId.startsWith('temp-');
+        senderDisplayName = getSenderNameText(message); // Uses your existing helper
+        senderType = 'ai';
+        // showGradeControls is handled later based on bubbleClass and messageId
     }
     bubbleDivToUse.className = `message-bubble ${bubbleClass}`;
 
-    // Timestamp (rebuild if not present or update)
-    let timestampDiv = bubbleDivToUse.querySelector('.message-timestamp');
-    if (message.timestamp || message.created_at) {
-        if (!timestampDiv) {
-            timestampDiv = document.createElement('div');
-            timestampDiv.className = 'message-timestamp';
-            bubbleDivToUse.insertBefore(timestampDiv, bubbleDivToUse.firstChild); // Timestamps often at top or bottom
+    // --- Sender Info (Header: Avatar, Name, Model, Timestamp) ---
+    let senderInfoDiv = bubbleDivToUse.querySelector('.sender-info');
+    if (senderDisplayName && bubbleClass !== 'system-bubble') { // System bubbles might not need this header
+        if (!senderInfoDiv) {
+            senderInfoDiv = document.createElement('div');
+            senderInfoDiv.className = 'sender-info';
+            bubbleDivToUse.insertBefore(senderInfoDiv, bubbleDivToUse.firstChild);
+        }
+        
+        let modelBadgeHTML = '';
+        if (senderType === 'ai' && message.model_name) {
+            modelBadgeHTML = `<span class="model-badge">${escapeHtml(message.model_name)}</span>`;
+        }
+
+        let timestampHTML = '';
+        if (message.timestamp || message.created_at) {
+            const timestampDate = new Date(message.timestamp || message.created_at);
+            timestampHTML = `<span class="message-timestamp">${formatTimestamp(timestampDate)}</span>`;
+        }
+        
+        // Determine avatar (this logic might be in getSenderAvatar or similar helper)
+        let avatarHTML = getSenderAvatar(senderDisplayName, senderType, message.sender); // Pass full sender for specific AI avatars
+
+        senderInfoDiv.innerHTML = `
+            ${avatarHTML}
+            <div class="sender-details">
+                <span class="sender-text">${escapeHtml(senderDisplayName)}</span>
+                ${modelBadgeHTML}
+            </div>
+            ${timestampHTML} 
+        `;
+        // Timestamp is now part of sender-info, CSS will position it
+    } else if (senderInfoDiv) {
+        senderInfoDiv.remove();
+    } else if (bubbleClass === 'system-bubble' && (message.timestamp || message.created_at)) {
+        // For system messages, if we want a timestamp but no full header
+        let systemTimestampDiv = bubbleDivToUse.querySelector('.message-timestamp-system');
+        if (!systemTimestampDiv) {
+            systemTimestampDiv = document.createElement('div');
+            systemTimestampDiv.className = 'message-timestamp-system'; // Specific class for styling
+            bubbleDivToUse.insertBefore(systemTimestampDiv, bubbleDivToUse.firstChild);
         }
         const timestampDate = new Date(message.timestamp || message.created_at);
-        timestampDiv.textContent = formatTimestamp(timestampDate);
-    } else if (timestampDiv) {
-        timestampDiv.remove();
+        systemTimestampDiv.textContent = formatTimestamp(timestampDate);
     }
 
 
-    // Sender Name (rebuild if not present or update)
-    let senderDiv = bubbleDivToUse.querySelector('.sender-name');
-    if (senderNameForDisplay) {
-        if (!senderDiv) {
-            senderDiv = document.createElement('div');
-            senderDiv.className = 'sender-name';
-            // Insert after timestamp if it exists, otherwise at the top
-            const existingTimestampDiv = bubbleDivToUse.querySelector('.message-timestamp');
-            bubbleDivToUse.insertBefore(senderDiv, existingTimestampDiv ? existingTimestampDiv.nextSibling : bubbleDivToUse.firstChild);
-        }
-        // Use innerHTML for avatar and model badge structure
-        senderDiv.innerHTML = `
-            <div class="flex items-center gap-2">
-                <span class="sender-avatar-placeholder"></span> <!-- Placeholder for JS-generated avatar -->
-                <span class="sender-text">${escapeHtml(senderNameForDisplay)}</span>
-                ${message.model_name ? `<span class="model-badge">${escapeHtml(message.model_name)}</span>` : ''}
-            </div>
-        `;
-        // JS-generated avatar
-        const avatarPlaceholder = senderDiv.querySelector('.sender-avatar-placeholder');
-        if(avatarPlaceholder) avatarPlaceholder.outerHTML = getSenderAvatar(senderNameForDisplay);
-
-    } else if (senderDiv) {
-        senderDiv.remove(); // Remove if no sender name to display
-    }
-
-
-    // Images (rebuild if not present or update)
+    // --- Images ---
     let imagesContainer = bubbleDivToUse.querySelector('.message-images-container');
     if (message.image_references && message.image_references.length > 0) {
         if (!imagesContainer) {
             imagesContainer = document.createElement('div');
             imagesContainer.className = 'message-images-container';
-            const anchor = bubbleDivToUse.querySelector('.sender-name') || bubbleDivToUse.querySelector('.message-timestamp');
+            const anchor = bubbleDivToUse.querySelector('.sender-info'); // Insert after header
             bubbleDivToUse.insertBefore(imagesContainer, anchor ? anchor.nextSibling : bubbleDivToUse.firstChild);
         }
         imagesContainer.innerHTML = ''; // Clear existing images
@@ -1949,7 +1963,7 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
             const imgItem = document.createElement('div'); imgItem.className = 'message-image-item';
             const imgTag = document.createElement('img'); imgTag.src = imgSrc; imgTag.alt = translate('chat_image_alt', 'Chat Image');
             imgTag.loading = 'lazy'; imgTag.onclick = () => viewImage(imgSrc);
-            imgTag.onload = () => imgItem.classList.add('loaded');
+            imgTag.onload = () => { imgItem.classList.add('loaded'); imgItem.style.opacity = 1; };
             imgTag.onerror = () => imgItem.classList.add('error');
             imgItem.appendChild(imgTag); imagesContainer.appendChild(imgItem);
         });
@@ -1957,205 +1971,215 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         imagesContainer.remove();
     }
 
-    // Content (get or create, then populate by renderEnhancedContent)
+    // --- Content ---
     let contentDiv = bubbleDivToUse.querySelector('.message-content');
     if (!contentDiv) {
         contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content'; // Base class, prose classes added by renderEnhancedContent if needed
-        const imagesAnchor = bubbleDivToUse.querySelector('.message-images-container') || bubbleDivToUse.querySelector('.sender-name') || bubbleDivToUse.querySelector('.message-timestamp');
-        bubbleDivToUse.insertBefore(contentDiv, imagesAnchor ? imagesAnchor.nextSibling : bubbleDivToUse.firstChild);
+        contentDiv.className = 'message-content';
+        const imagesAnchor = bubbleDivToUse.querySelector('.message-images-container');
+        const senderInfoAnchor = bubbleDivToUse.querySelector('.sender-info');
+        // Insert after images if they exist, else after sender-info, else at top
+        const anchor = imagesAnchor || senderInfoAnchor;
+        bubbleDivToUse.insertBefore(contentDiv, anchor ? anchor.nextSibling : bubbleDivToUse.firstChild);
     }
-    // renderEnhancedContent will clear and populate this contentDiv
     renderEnhancedContent(contentDiv, message.content || "", messageId, message.steps, message.metadata, message);
 
 
-    // Footer (get or create, then populate)
+    // --- Footer ---
     let footerDiv = bubbleDivToUse.querySelector('.message-footer');
-    if (!footerDiv) {
+    // Ensure footer is created or cleared
+    if (footerDiv) footerDiv.innerHTML = ''; // Clear for rebuild
+    else {
         footerDiv = document.createElement('div');
         footerDiv.className = 'message-footer';
-        bubbleDivToUse.appendChild(footerDiv); // Footer is usually last
+        // Appending deferred until we know if it has content
     }
-    // Footer content (details, actions, grade) is rebuilt below
-    const footerContent = document.createElement('div');
-    footerContent.className = 'footer-content'; // Flex container for left (details) and right (actions/grade)
+    
+    const footerContent = document.createElement('div'); // This inner div will always be there if footer is.
+    footerContent.className = 'footer-content';
 
-    // Message Details (left side of footer)
+    // Message Details (left side of footer - Tokens, Sources, Time)
     const detailsContainer = document.createElement('div');
     detailsContainer.className = 'message-details';
+
     if (message.token_count) {
         const tokenBadge = document.createElement('span');
         tokenBadge.className = 'detail-badge token-badge';
-        tokenBadge.innerHTML = `<svg class="w-3 h-3 inline -mt-px" fill="currentColor" viewBox="0 0 20 20"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> ${message.token_count}`;
+        tokenBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> ${message.token_count} ${translate('tokens_label', 'tokens')}`;
+        tokenBadge.title = `${message.token_count} ${translate('tokens_tooltip_text', 'tokens used')}`;
         detailsContainer.appendChild(tokenBadge);
     }
-    console.log(message)
-    if (message.sources && Array.isArray(message.sources)) {
+
+    // --- RAG Sources ---
+    if (message.sources && Array.isArray(message.sources) && message.sources.length > 0) {
+        console.log("Message has sources:", message.sources); // DEBUGGING
         message.sources.forEach(source => {
-            const sourceBadge = document.createElement('span');
-            const maxLength = 10;
-            const truncatedText = source.document.length > maxLength ? source.document.substring(0, maxLength) + '...' : source.document;
+            if (!source || typeof source.document === 'undefined' || typeof source.similarity === 'undefined') {
+                console.warn("Skipping malformed source:", source);
+                return; // Skip malformed source objects
+            }
+            const sourceBadge = document.createElement('button');
+            const maxLength = 15;
+            const truncatedText = source.document.length > maxLength ? source.document.substring(0, maxLength) + '…' : source.document;
             
             sourceBadge.innerHTML = `
-                <svg class="w-3 h-3 inline -mt-px" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M10 20a10 10 0 110-20 10 10 0 010 20zm0-2a8 8 0 100-16 8 8 0 000 16zm0-10h2v4h-2v-4zm0 7h2v4h-2v-4z"/>
+                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h8V7.414L11.414 4H6z" clip-rule="evenodd" />
                 </svg>
-                ${truncatedText}
-            `;
-            sourceBadge.className = 'detail-badge source-badge flex items-center cursor-pointer whitespace-nowrap overflow-hidden text-ellipsis';
-            sourceBadge.title = source.document;
+                <span>${escapeHtml(truncatedText)}</span>
+                <span class="source-similarity-chip">${source.similarity}%</span>`;
+            sourceBadge.className = 'detail-badge source-badge';
+            sourceBadge.title = `${translate('view_source_document', 'View source')}: ${escapeHtml(source.document)} (${translate('similarity_label', 'Similarity')}: ${source.similarity}%)`;
             
-            // Add event listener to show modal
             sourceBadge.addEventListener('click', () => {
+                // (Keep your existing modal display logic here - it seemed fine)
+                // ...
+                const modalId = `source-modal-${messageId}-${source.document.replace(/[^a-zA-Z0-9]/g, '')}`;
+                if (document.getElementById(modalId)) return;
+
                 const modal = document.createElement('div');
-                modal.className = 'fixed inset-0 flex items-center justify-center z-50';
-            
+                modal.id = modalId;
+                modal.className = 'source-modal-overlay';
+                modal.setAttribute('role', 'dialog');
+                modal.setAttribute('aria-modal', 'true');
+                modal.setAttribute('aria-labelledby', `source-modal-title-${modalId}`);
+
                 const modalContent = document.createElement('div');
-                modalContent.className = 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg max-w-md w-full relative max-h-[80vh] overflow-y-auto';
+                modalContent.className = 'source-modal-content';
             
-                // Close button
                 const closeButton = document.createElement('button');
-                closeButton.className = 'absolute top-2 right-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200';
-                closeButton.innerHTML = '&times;';
-                closeButton.addEventListener('click', () => {
-                    document.body.removeChild(modal);
-                });
+                closeButton.className = 'source-modal-close-btn';
+                closeButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" /></svg>';
+                closeButton.setAttribute('aria-label', translate('close_modal_aria_label', 'Close modal'));
+                closeButton.onclick = () => {
+                    modal.remove();
+                    document.removeEventListener('keydown', escapeListener);
+                };
             
-                // Source Title
                 const title = document.createElement('h2');
-                title.className = 'text-lg font-semibold text-gray-900 dark:text-gray-100';
+                title.id = `source-modal-title-${modalId}`;
+                title.className = 'source-modal-title';
                 title.textContent = source.document;
             
-                // Similarity with color coding
-                const similarity = document.createElement('p');
-                similarity.className = 'mt-2 text-gray-700 dark:text-gray-300';
-                similarity.textContent = `Similarity: ${source.similarity}%`;
-                let similarityColor;
-                if (source.similarity > 75) {
-                    similarityColor = 'text-green-500';
-                } else if (source.similarity > 50) {
-                    similarityColor = 'text-orange-500'; // Tomato color
-                } else {
-                    similarityColor = 'text-red-500';
-                }
-                similarity.classList.add(similarityColor);
+                const similarityP = document.createElement('p');
+                similarityP.className = 'source-modal-similarity';
+                let similarityColorClass = 'text-red-600 dark:text-red-400';
+                if (source.similarity > 75) similarityColorClass = 'text-green-600 dark:text-green-400';
+                else if (source.similarity > 50) similarityColorClass = 'text-yellow-600 dark:text-yellow-400';
+                similarityP.innerHTML = `${translate('similarity_label', 'Similarity')}: <strong class="${similarityColorClass}">${source.similarity}%</strong>`;
             
-                // Content in Markdown
-                const content = document.createElement('div');
-                content.className = 'mt-4 markdown-content text-gray-700 dark:text-gray-300';
-                content.innerHTML = marked.parse(source.content);
+                const contentDivModal = document.createElement('div');
+                contentDivModal.className = 'source-modal-body markdown-content';
+                contentDivModal.innerHTML = marked.parse(source.content || translate('no_content_available', 'No content available.'));
             
                 modalContent.appendChild(closeButton);
                 modalContent.appendChild(title);
-                modalContent.appendChild(similarity);
-                modalContent.appendChild(content);
-            
+                modalContent.appendChild(similarityP);
+                modalContent.appendChild(contentDivModal);
                 modal.appendChild(modalContent);
                 document.body.appendChild(modal);
+
+                const escapeListener = (e) => {
+                    if (e.key === 'Escape') closeButton.click();
+                };
+                document.addEventListener('keydown', escapeListener);
             
-                // Close modal on click outside
                 modal.addEventListener('click', (event) => {
-                    if (event.target === modal) {
-                        document.body.removeChild(modal);
-                    }
+                    if (event.target === modal) closeButton.click();
                 });
-            
-                // Prevent modal content from closing the modal
-                modalContent.addEventListener('click', (event) => {
+                 modalContent.addEventListener('click', (event) => { // Prevent modal close on content click
                     event.stopPropagation();
                 });
-                console.log("Pressed");
             });
-            
             detailsContainer.appendChild(sourceBadge);
-            
-
-
         });
+    } else {
+        console.log("Message does NOT have sources or sources array is empty.", message.id); // DEBUGGING
     }
-    if (message.processing_time_ms) { // Assuming you might get ms from backend
+
+    if (message.processing_time_ms) {
         const timeBadge = document.createElement('span');
         timeBadge.className = 'detail-badge time-badge';
-        timeBadge.innerHTML = `<svg class="w-3 h-3 inline -mt-px" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg> ${formatProcessingTime(message.processing_time_ms)}`;
+        timeBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg> ${formatProcessingTime(message.processing_time_ms)}`;
+        timeBadge.title = translate('processing_time_tooltip', 'Processing time');
         detailsContainer.appendChild(timeBadge);
     }
-    footerContent.appendChild(detailsContainer);
-
-    // Actions and Rating Container (right side of footer)
-    const actionsAndRatingContainer = document.createElement('div');
-    actionsAndRatingContainer.className = 'message-actions-container'; // This is the overall right-side container
-
-    // Action Buttons (Copy, Edit, Delete, Resend)
-    if (!messageId.startsWith('temp-')) { // Don't show for temporary messages
-        const actionsGroup = document.createElement('div');
-        actionsGroup.className = 'message-actions'; 
-
-        actionsGroup.appendChild(createActionButton('copy', translate('copy_content_tooltip'), () => {
-            navigator.clipboard.writeText(message.content || "").then(() => showStatus(translate('status_content_copied', "Content copied!"), "success")).catch(err => showStatus(translate('status_copy_failed', "Copy failed."), "error"));
-        }));
-        
-        // Ensure message.branch_id is available. If messages are loaded from an older backend without it,
-        // default to 'main' or handle appropriately.
-        actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip'), () => initiateEditMessage(messageId, currentMessageBranchId)));
-        
-        const currentMessageBranchId = message.branch_id || activeBranchId || 'main'; // Ensure we have a branch_id
-
-        if (bubbleClass === 'user-bubble') { 
-            actionsGroup.appendChild(
-                createActionButton(
-                    'refresh', 
-                    translate('resend_branch_tooltip', 'Resend/Branch from this message'), 
-                    (e) => { // Add event arg
-                        console.log('Resend/Branch clicked for user message:', message.id, 'in discussion:', message.discussion_id);
-                        initiateBranch(message.discussion_id, message.id); 
-                        e.stopPropagation(); // Prevent event bubbling
-                    }
-                )
-            );
-        } else if (bubbleClass === 'ai-bubble') { 
-            actionsGroup.appendChild(
-                createActionButton(
-                    'refresh', 
-                    translate('regenerate_message_tooltip', 'Regenerate this AI response'),
-                    (e) => { // Add event arg
-                        console.log('Regenerate clicked for AI message:', message.id, 'on branch:', currentMessageBranchId);
-                        regenerateMessage(message.id, currentMessageBranchId);
-                        e.stopPropagation();
-                    }
-                )
-            );
-        }
-
-        actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip'), () => deleteMessage(messageId, currentMessageBranchId), 'destructive'));
-        actionsAndRatingContainer.appendChild(actionsGroup);
+    
+    // Only append detailsContainer if it has children
+    if (detailsContainer.hasChildNodes()) {
+        footerContent.appendChild(detailsContainer);
     }
 
-    // Rating System for AI messages
-    if (showGradeControls && bubbleClass === 'ai-bubble') {
+    // Actions and Rating Container (right side of footer)
+    const footerActionsContainer = document.createElement('div');
+    footerActionsContainer.className = 'message-footer-actions'; 
+    let showGradeControlsActual = bubbleClass === 'ai-bubble' && !messageId.startsWith('temp-');
+
+
+    if (!messageId.startsWith('temp-')) {
+        const actionsGroup = document.createElement('div');
+        actionsGroup.className = 'message-actions-group'; 
+
+        actionsGroup.appendChild(createActionButton('copy', translate('copy_content_tooltip', "Copy content"), () => { /* ... */ }));
+        
+        const currentMessageBranchId = message.branch_id || activeBranchId || 'main';
+        actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip', "Edit message"), () => initiateEditMessage(messageId, currentMessageBranchId)));
+        
+        if (bubbleClass === 'user-bubble') { 
+            actionsGroup.appendChild(createActionButton('refresh', translate('resend_branch_tooltip', 'Resend/Branch'), (e) => { /* ... */ }, 'primary'));
+        } else if (bubbleClass === 'ai-bubble') { 
+            actionsGroup.appendChild(createActionButton('refresh', translate('regenerate_message_tooltip', 'Regenerate'), (e) => { /* ... */ }, 'primary'));
+        }
+        actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip', "Delete"), () => deleteMessage(messageId, currentMessageBranchId), 'destructive'));
+        
+        if (actionsGroup.hasChildNodes()){ // Only append if there are actions
+             footerActionsContainer.appendChild(actionsGroup);
+        }
+    }
+
+    if (showGradeControlsActual) { // Use the derived boolean
         const ratingContainer = document.createElement('div');
         ratingContainer.className = 'message-rating';
         const userGrade = message.user_grade || 0;
 
-        const upvoteBtn = document.createElement('button');
+        const upvoteBtn = document.createElement('button'); /* ... */
+        const gradeDisplay = document.createElement('span'); /* ... */
+        const downvoteBtn = document.createElement('button'); /* ... */
+        // (Keep your existing rating button creation logic)
         upvoteBtn.className = `rating-btn upvote ${userGrade > 0 ? 'active' : ''}`;
         upvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 3a1 1 0 01.707.293l5 5a1 1 0 01-1.414 1.414L11 6.414V16a1 1 0 11-2 0V6.414L5.707 9.707a1 1 0 01-1.414-1.414l5-5A1 1 0 0110 3z" clip-rule="evenodd" /></svg>`;
-        upvoteBtn.title = translate('grade_good_tooltip');
-        upvoteBtn.onclick = () => gradeMessage(messageId, 1, message.branch_id);
+        upvoteBtn.title = translate('grade_good_tooltip', 'Good response');
+        upvoteBtn.setAttribute('aria-pressed', userGrade > 0 ? 'true' : 'false');
+        upvoteBtn.onclick = () => gradeMessage(messageId, 1, message.branch_id || activeBranchId || 'main');
 
-        const gradeDisplay = document.createElement('span');
         gradeDisplay.className = 'rating-score'; gradeDisplay.textContent = userGrade;
+        gradeDisplay.setAttribute('aria-live', 'polite');
 
-        const downvoteBtn = document.createElement('button');
         downvoteBtn.className = `rating-btn downvote ${userGrade < 0 ? 'active' : ''}`;
         downvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 17a1 1 0 01-.707-.293l-5-5a1 1 0 011.414-1.414L9 13.586V4a1 1 0 112 0v9.586l3.293-3.293a1 1 0 011.414 1.414l-5 5A1 1 0 0110 17z" clip-rule="evenodd" /></svg>`;
-        downvoteBtn.title = translate('grade_bad_tooltip');
-        downvoteBtn.onclick = () => gradeMessage(messageId, -1, message.branch_id);
+        downvoteBtn.title = translate('grade_bad_tooltip', 'Bad response');
+        downvoteBtn.setAttribute('aria-pressed', userGrade < 0 ? 'true' : 'false');
+        downvoteBtn.onclick = () => gradeMessage(messageId, -1, message.branch_id || activeBranchId || 'main');
+
 
         ratingContainer.appendChild(upvoteBtn); ratingContainer.appendChild(gradeDisplay); ratingContainer.appendChild(downvoteBtn);
-        actionsAndRatingContainer.appendChild(ratingContainer);
+        footerActionsContainer.appendChild(ratingContainer);
     }
-    footerContent.appendChild(actionsAndRatingContainer);
-    footerDiv.appendChild(footerContent);
+    
+    // Only append footerActionsContainer if it has children
+    if (footerActionsContainer.hasChildNodes()) {
+        footerContent.appendChild(footerActionsContainer);
+    }
+    
+    // Only append the main footerDiv to bubble if footerContent actually has something in it
+    if (footerContent.hasChildNodes()) {
+        footerDiv.appendChild(footerContent);
+        if (!footerDiv.parentNode) { // If footerDiv was detached or new, append it
+            bubbleDivToUse.appendChild(footerDiv);
+        }
+    } else if (footerDiv.parentNode) { // If footer exists but is now empty, remove it
+        footerDiv.remove();
+    }
 
 
     // Final check for streaming AI message DOM caching
@@ -2163,8 +2187,31 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         currentAiMessageDomContainer = messageContainerToUse;
         currentAiMessageDomBubble = bubbleDivToUse;
     }
+
+    // Scroll to bottom
+    if (!isUpdate && chatMessages && chatMessages.lastChild === messageContainerToUse) {
+        scrollToBottom(); 
+    }
 }
 
+// --- Helper for getSenderAvatar (example) ---
+// You should have a more robust version of this
+function getSenderAvatar(senderDisplayName, senderType, originalSender) {
+    let avatarSrc = '';
+    let altText = senderDisplayName;
+
+    if (senderType === 'user') {
+        avatarSrc = currentUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(senderDisplayName)}&background=0D8ABC&color=fff&size=48`;
+    } else if (senderType === 'ai') {
+        // You might have a mapping of AI names to avatars
+        // For now, a generic AI avatar or based on lollms_client_ai_name
+        avatarSrc = (originalSender === currentUser.lollms_client_ai_name && window.uiValues && window.uiValues.aiAvatar) ? window.uiValues.aiAvatar : `https://ui-avatars.com/api/?name=${encodeURIComponent(senderDisplayName.substring(0,2))}&background=10B981&color=fff&size=48`;
+        altText = `${senderDisplayName} AI`;
+    } else { // system or other
+        return ''; // No avatar for system messages, or a generic icon
+    }
+    return `<img src="${avatarSrc}" alt="${escapeHtml(altText)}" class="sender-avatar">`;
+}
 // `renderEnhancedContent` (with <think> block fix)
 function renderEnhancedContent(contentDivElement, rawContent, messageId, steps = [], metadata = [], messageObject = {}) {
     contentDivElement.innerHTML = ''; // Start fresh
