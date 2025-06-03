@@ -1993,17 +1993,86 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     if (message.sources && Array.isArray(message.sources)) {
         message.sources.forEach(source => {
             const sourceBadge = document.createElement('span');
-            sourceBadge.className = 'detail-badge source-badge';
+            const maxLength = 10;
+            const truncatedText = source.document.length > maxLength ? source.document.substring(0, maxLength) + '...' : source.document;
+            
             sourceBadge.innerHTML = `
                 <svg class="w-3 h-3 inline -mt-px" fill="currentColor" viewBox="0 0 20 20">
                     <path d="M10 20a10 10 0 110-20 10 10 0 010 20zm0-2a8 8 0 100-16 8 8 0 000 16zm0-10h2v4h-2v-4zm0 7h2v4h-2v-4z"/>
                 </svg>
-                ${source.document} (Similarity: ${source.similarity}%)
+                ${truncatedText}
             `;
+            sourceBadge.className = 'detail-badge source-badge flex items-center cursor-pointer whitespace-nowrap overflow-hidden text-ellipsis';
+            sourceBadge.title = source.document;
+            
+            // Add event listener to show modal
+            sourceBadge.addEventListener('click', () => {
+                const modal = document.createElement('div');
+                modal.className = 'fixed inset-0 flex items-center justify-center z-50';
+            
+                const modalContent = document.createElement('div');
+                modalContent.className = 'bg-white dark:bg-gray-800 p-6 rounded-lg shadow-lg max-w-md w-full relative max-h-[80vh] overflow-y-auto';
+            
+                // Close button
+                const closeButton = document.createElement('button');
+                closeButton.className = 'absolute top-2 right-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200';
+                closeButton.innerHTML = '&times;';
+                closeButton.addEventListener('click', () => {
+                    document.body.removeChild(modal);
+                });
+            
+                // Source Title
+                const title = document.createElement('h2');
+                title.className = 'text-lg font-semibold text-gray-900 dark:text-gray-100';
+                title.textContent = source.document;
+            
+                // Similarity with color coding
+                const similarity = document.createElement('p');
+                similarity.className = 'mt-2 text-gray-700 dark:text-gray-300';
+                similarity.textContent = `Similarity: ${source.similarity}%`;
+                let similarityColor;
+                if (source.similarity > 75) {
+                    similarityColor = 'text-green-500';
+                } else if (source.similarity > 50) {
+                    similarityColor = 'text-orange-500'; // Tomato color
+                } else {
+                    similarityColor = 'text-red-500';
+                }
+                similarity.classList.add(similarityColor);
+            
+                // Content in Markdown
+                const content = document.createElement('div');
+                content.className = 'mt-4 markdown-content text-gray-700 dark:text-gray-300';
+                content.innerHTML = marked.parse(source.content);
+            
+                modalContent.appendChild(closeButton);
+                modalContent.appendChild(title);
+                modalContent.appendChild(similarity);
+                modalContent.appendChild(content);
+            
+                modal.appendChild(modalContent);
+                document.body.appendChild(modal);
+            
+                // Close modal on click outside
+                modal.addEventListener('click', (event) => {
+                    if (event.target === modal) {
+                        document.body.removeChild(modal);
+                    }
+                });
+            
+                // Prevent modal content from closing the modal
+                modalContent.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                });
+                console.log("Pressed");
+            });
+            
             detailsContainer.appendChild(sourceBadge);
+            
+
+
         });
     }
-
     if (message.processing_time_ms) { // Assuming you might get ms from backend
         const timeBadge = document.createElement('span');
         timeBadge.className = 'detail-badge time-badge';
@@ -2655,7 +2724,7 @@ async function updateDiscussionRagStoreOnBackend(discussionId, ragDatastoreId) {
 
 // --- Branching Logic ---
 async function initiateBranch(discussionId, userMessageIdToBranchFrom) {
-    if (userMessageIndex === -1) {
+    if (userMessageIdToBranchFrom === -1) {
     console.error("initiateBranch: User message to branch from NOT FOUND in active branch:", userMessageIdToBranchFrom);
     showStatus("Error: Could not find the message to branch from. It might have been deleted from this branch view.", "error");
     return; // Stop if message not found
