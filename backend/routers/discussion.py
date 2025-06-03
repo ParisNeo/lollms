@@ -407,7 +407,11 @@ async def chat_in_existing_discussion(
                                 context_str += f"... (truncated {len(rag_results) - i} more results)\n"; break
                             context_str += f"{i+1}. From '{file_name}': {chunk_text}\n"; 
                             current_rag_len += len(chunk_text); 
-                            sources.append({"document":file_name, "similarity": similarity_percent})
+                            sources.append({
+                                            "document":file_name, 
+                                            "similarity": similarity_percent, 
+                                            "content": chunk_text
+                                            })
                     extra_content = ( f"Answer the user's question based *only* on the following context:\n{context_str.strip()}\n\n"
                                        "Cite sources by filename if multiple are present."
                                       ) # Simplified RAG instruction
