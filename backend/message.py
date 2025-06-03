@@ -109,7 +109,8 @@ class AppLollmsMessage:
     parent_message_id: Optional[str] = None
     binding_name: Optional[str] = None
     model_name: Optional[str] = None
-    token_count: Optional[int] = None
+    token_count: Optional[int] = None    
+    sources: Optional[Dict] = None
     image_references: Optional[List[str]] = dataclass_field(default_factory=list) # Stores paths relative to user_discussion_assets_path / discussion_id
 
     def to_dict(self) -> Dict[str, Any]:
