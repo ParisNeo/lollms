@@ -21,7 +21,7 @@ from sqlalchemy import Enum as SQLAlchemyEnum # For status
 import enum # For Python enum
 
 DATABASE_URL_CONFIG_KEY = "database_url"
-CURRENT_DB_VERSION = "1.2.1" # Incremented version for friendships
+CURRENT_DB_VERSION = "1.2.2"
 
 Base = declarative_base()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -79,6 +79,9 @@ class User(Base):
     put_thoughts_in_context = Column(Boolean, default=False, nullable=False)
 
     rag_top_k = Column(Integer, nullable=True)
+    max_rag_len = Column(Integer, nullable=True)
+    rag_min_sim_percent  = Column(Float, nullable=True)
+    max_rag_len = Column(Integer, nullable=True)
     rag_use_graph = Column(Boolean, default=False, nullable=False)
     rag_graph_response_type = Column(String, default="chunks_summary", nullable=True)
 
@@ -296,7 +299,10 @@ def init_database(db_url: str):
 
                 new_user_cols_defs = {
                     "first_name": "VARCHAR", "family_name": "VARCHAR", "email": "VARCHAR",
-                    "birth_date": "DATE", "rag_top_k": "INTEGER",
+                    "birth_date": "DATE", 
+                    "rag_top_k": "INTEGER",
+                    "max_rag_len": "INTEGER",
+                    "rag_min_sim_percent": "FLOAT",
                     "rag_use_graph": "BOOLEAN DEFAULT 0",
                     "rag_graph_response_type": "VARCHAR DEFAULT 'chunks_summary'",
                     "put_thoughts_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
