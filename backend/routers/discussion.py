@@ -201,6 +201,7 @@ async def get_messages_for_discussion(discussion_id: str, current_user: UserAuth
                 id=msg.id, sender=msg.sender, content=msg.content,
                 parent_message_id=msg.parent_message_id, binding_name=msg.binding_name,
                 model_name=msg.model_name, token_count=msg.token_count,
+                sources = msg.sources,
                 image_references=full_image_refs, # Use full URLs for client
                 user_grade=user_grades_for_discussion.get(msg.id, 0)
             )
@@ -355,6 +356,7 @@ async def chat_in_existing_discussion(
     )
 
     extra_content = ""
+    sources=[]
     if use_rag and safe_store:
         if not rag_datastore_id:
             rag_datastore_id = discussion_obj.rag_datastore_id
@@ -363,7 +365,6 @@ async def chat_in_existing_discussion(
                 # user_sessions[username].get("active_vectorizer") is actually the default vectorizer name, not datastore_id.
                 # For RAG, a datastore must be selected for the discussion or explicitly passed.
                 print(f"WARNING: RAG requested by {username} but no datastore specified for discussion.")
-
 
         if rag_datastore_id:
             try:
@@ -393,17 +394,20 @@ async def chat_in_existing_discussion(
                     query = prompt
 
 
-                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=10) # Use user's default vectorizer for querying
+                max_rag_len, current_rag_len, rag_min_sim_percent = current_user.max_rag_len if current_user.max_rag_len else 80000, 0, current_user.rag_min_sim_percent or 0
+                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=current_user.rag_top_k, min_similarity_percent = rag_min_sim_percent) # Use user's default vectorizer for querying
                 if rag_results:
                     context_str = "\n\nRelevant context from documents:\n"; 
-                    max_rag_len, current_rag_len, sources = 80000, 0, set() # TODO: Make max_rag_len configurable
                     for i, res in enumerate(rag_results):
                         chunk_text = res.get('chunk_text','');
-                        file_name = Path(res.get('file_path','?')).name
-                        if current_rag_len + len(chunk_text) > max_rag_len and i > 0: 
-                            context_str += f"... (truncated {len(rag_results) - i} more results)\n"; break
-                        context_str += f"{i+1}. From '{file_name}': {chunk_text}\n"; 
-                        current_rag_len += len(chunk_text); sources.add(file_name)
+                        similarity_percent = res.get('similarity_percent',100)
+                        if similarity_percent>=rag_min_sim_percent:
+                            file_name = Path(res.get('file_path','?')).name
+                            if current_rag_len + len(chunk_text) > max_rag_len and i > 0: 
+                                context_str += f"... (truncated {len(rag_results) - i} more results)\n"; break
+                            context_str += f"{i+1}. From '{file_name}': {chunk_text}\n"; 
+                            current_rag_len += len(chunk_text); 
+                            sources.append({"document":file_name, "similarity": similarity_percent})
                     extra_content = (f"User question: {prompt}\n\n"
                                        f"Answer the user's question based *only* on the following context:\n{context_str.strip()}\n\n"
                                        "Cite sources by filename if multiple are present."
@@ -430,7 +434,8 @@ async def chat_in_existing_discussion(
         "final_message_id": None, 
         "binding_name": None, 
         "model_name": None,
-        "stop_event": stop_event 
+        "stop_event": stop_event,
+        "sources":sources
     }
 
     if username not in user_sessions: user_sessions[username] = {} 
@@ -516,7 +521,7 @@ async def chat_in_existing_discussion(
             ai_response_content = shared_state["accumulated_ai_response"]
             ai_token_count = lc.binding.count_tokens(ai_response_content) if ai_response_content else 0
             ai_parent_id = discussion_obj.messages[-1].id if discussion_obj.messages and discussion_obj.messages[-1].sender == lc.user_name else None
-
+            ai_sources = sources
             if ai_response_content and not shared_state["generation_error"]:
                 if shared_state["stop_event"].is_set():
                     print(f"INFO: Saving partial AI response for {username}/{discussion_id} as generation was stopped.")
@@ -524,7 +529,7 @@ async def chat_in_existing_discussion(
                 ai_message = discussion_obj.add_message(
                     sender=lc.ai_name, content=ai_response_content, parent_message_id=ai_parent_id,
                     binding_name=shared_state.get("binding_name"), model_name=shared_state.get("model_name"),
-                    token_count=ai_token_count
+                    token_count=ai_token_count,sources=ai_sources
                 )
                 if shared_state.get("final_message_id"): ai_message.id = shared_state["final_message_id"]
             elif shared_state["generation_error"]:
