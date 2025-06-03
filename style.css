@@ -964,6 +964,8 @@ body {
 .modal input[type="text"],
 .modal input[type="password"],
 .modal input[type="number"],
+.modal input[type="email"],
+.modal input[type="date"],
 .modal textarea,
 .modal select {
     border-radius: 0.375rem; padding: 0.5rem 0.75rem;
@@ -975,6 +977,8 @@ body {
 .dark .modal input[type="text"],
 .dark .modal input[type="password"],
 .dark .modal input[type="number"],
+.dark .modal input[type="email"],
+.dark .modal input[type="date"],
 .dark .modal textarea,
 .dark .modal select {
     border-color: #4b5563; /* dark:border-gray-600 */
