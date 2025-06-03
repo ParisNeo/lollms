@@ -3115,11 +3115,48 @@ function renderCustomCodeBlocks(element, messageId) {
         copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg><span data-translate-key="copy_code_btn_text">${translate('copy_code_btn_text', 'Copy')}</span>`;
         copyBtn.title = translate('copy_code_tooltip');
         copyBtn.onclick = () => {
-            navigator.clipboard.writeText(code).then(() => {
+            function fallbackCopyTextToClipboard(text) {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+              
+                // Avoid scrolling to bottom
+                textArea.style.top = '0';
+                textArea.style.left = '0';
+                textArea.style.position = 'fixed';
+              
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+              
+                try {
+                  const successful = document.execCommand('copy');
+                  const msg = successful ? 'successful' : 'unsuccessful';
+                  console.log('Copying text command was ' + msg);
+                } catch (err) {
+                  console.error('Oops, unable to copy', err);
+                }
+              
+                document.body.removeChild(textArea);
                 const originalText = copyBtn.querySelector('span').textContent;
                 copyBtn.querySelector('span').textContent = translate('copied_code_btn_text', 'Copied!');
                 setTimeout(() => { copyBtn.querySelector('span').textContent = originalText; }, 1500);
-            }).catch(err => console.error("Copy failed", err));
+
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                try {
+                    navigator.clipboard.writeText(code).then(() => {
+                        const originalText = copyBtn.querySelector('span').textContent;
+                        copyBtn.querySelector('span').textContent = translate('copied_code_btn_text', 'Copied!');
+                        setTimeout(() => { copyBtn.querySelector('span').textContent = originalText; }, 1500);
+                    }).catch(err => console.error("Copy failed", err));        
+                } catch (err) {
+                  console.error('Clipboard API failed: ', err);
+                  fallbackCopyTextToClipboard(code);
+                }
+              } else {
+                console.warn('Clipboard API is not available in this browser.');
+                fallbackCopyTextToClipboard(code);
+              }
         };
         buttonsDiv.appendChild(copyBtn);
 
