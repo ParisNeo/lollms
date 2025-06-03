@@ -102,6 +102,7 @@ DiscussionImportRequest,
 DiscussionSendRequest,
 DataStoreBase,
 DataStoreCreate,
+DataStoreEdit,
 DataStorePublic,
 DataStoreShareRequest,
 PersonalityBase,
@@ -218,6 +219,7 @@ async def on_startup() -> None:
             # RAG params from config (assuming they might be in SAFE_STORE_DEFAULTS or APP_SETTINGS)
             # Using APP_SETTINGS as an example, adjust if they are elsewhere
             def_rag_top_k = APP_SETTINGS.get("default_rag_top_k") 
+            def_rag_min_sim_percent = APP_SETTINGS.get("rag_min_sim_percent") 
             def_rag_use_graph = APP_SETTINGS.get("default_rag_use_graph", False)
             def_rag_graph_response_type = APP_SETTINGS.get("default_rag_graph_response_type", "chunks_summary")
 
@@ -241,6 +243,7 @@ async def on_startup() -> None:
                 put_thoughts_in_context=LOLLMS_CLIENT_DEFAULTS.get("put_thoughts_in_context", False),
 
                 rag_top_k=def_rag_top_k,
+                rag_min_sim_percent=def_rag_min_sim_percent,
                 rag_use_graph=def_rag_use_graph,
                 rag_graph_response_type=def_rag_graph_response_type
             )
@@ -533,6 +536,27 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
         return DataStorePublic(
             id=new_ds_db_obj.id, name=new_ds_db_obj.name, description=new_ds_db_obj.description,
             owner_username=current_user.username, created_at=new_ds_db_obj.created_at, updated_at=new_ds_db_obj.updated_at
+        )
+    except IntegrityError: 
+        db.rollback(); raise HTTPException(status_code=400, detail="DataStore name conflict (race condition).")
+    except Exception as e:
+        db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error creating datastore: {e}")
+
+@datastore_router.post("/edit", response_model=DataStorePublic, status_code=201)
+async def create_datastore(ds_edit: DataStoreEdit, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DBDataStore:
+    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
+    
+    existing_ds = db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_edit.name).first()
+    existing_ds.name = ds_edit.new_name
+    existing_ds.description = ds_edit.description
+    try:
+        db.commit(); db.refresh(existing_ds)
+        get_safe_store_instance(current_user.username, existing_ds.id, db)
+        
+        return DataStorePublic(
+            id=existing_ds.id, name=existing_ds.name, description=existing_ds.description,
+            owner_username=current_user.username, created_at=existing_ds.created_at, updated_at=existing_ds.updated_at
         )
     except IntegrityError: 
         db.rollback(); raise HTTPException(status_code=400, detail="DataStore name conflict (race condition).")
