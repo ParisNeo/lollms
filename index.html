@@ -144,7 +144,7 @@
             <header class=" border-b border-gray-700 p-3 flex items-center justify-between min-h-[65px] shadow-md">
                 <h3 id="discussionTitle" class="text-lg font-semibold  truncate px-2" data-translate-key="default_discussion_title">Select or Create a Discussion</h3>
                 <div class="flex items-center space-x-3">
-                    <div class="rag-controls">
+                    <div id="ragControls" class="rag-controls hidden">
                         <button id="ragToggleBtn" class="rag-toggle rag-toggle-off self-center" data-translate-key="rag_toggle_btn_text" data-translate-title="rag_toggle_btn_title_off">RAG</button>
                         <select id="ragDataStoreSelect" class="text-xs rounded-md border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500  py-1 px-1.5" style="display: none;">
                             <option value="" data-translate-key="rag_select_default_option">Select RAG Data Store</option>
@@ -172,7 +172,7 @@
                 <div class="text-center  italic mt-10" data-translate-key="chat_area_empty_placeholder">Select a discussion to start chatting.</div>
             </div>
 
-            <footer class=" border-t border-gray-700 p-3 shadow-inner-top">
+            <footer id="chatArea" class=" border-t border-gray-700 p-3 shadow-inner-top hidden">
                 <div id="imageUploadPreviewContainer" class="mb-2" style="display: none;"></div>
                <div class="flex items-end space-x-3">
                    <label for="imageUploadInput" class="p-2.5 rounded-lg  cursor-pointer self-end transition-colors" title="Upload Images">
