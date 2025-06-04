@@ -27,9 +27,9 @@ from fastapi import (
     APIRouter,
     Response,
     Query,
-    BackgroundTasks
+    BackgroundTasks,
+    status
 )
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import (
     HTMLResponse,
     StreamingResponse,
@@ -72,6 +72,7 @@ from lollms_client import (
 
 # --- Pydantic Models for API ---
 from backend.models import (
+UserCreate,
 UserLLMParams,
 UserAuthDetails,
 UserCreateAdmin,
@@ -104,7 +105,8 @@ FriendshipRequestPublic,
 PersonalitySendRequest,
 
 DirectMessagePublic,
-DirectMessageCreate
+DirectMessageCreate,
+TokenData
 )
 # safe_store is expected to be installed
 try:
@@ -122,21 +124,52 @@ except ImportError:
 
 from backend.message import AppLollmsMessage
 from backend.discussion import AppLollmsDiscussion
-
+from backend.security import oauth2_scheme, jwt, JWTError, get_password_hash
 
 # --- Global User Session Management & Locks ---
 user_sessions: Dict[str, Dict[str, Any]] = {}
 message_grade_lock = threading.Lock()
-security = HTTPBasic()
+# security = HTTPBasic()
 
 # --- Authentication Dependencies ---
-def get_current_db_user(credentials: HTTPBasicCredentials = Depends(security), db: Session = Depends(get_db)) -> DBUser:
-    user = db.query(DBUser).filter(DBUser.username == credentials.username).first()
-    if not user or not user.verify_password(credentials.password):
-        raise HTTPException(status_code=401, detail="Incorrect username or password", headers={"WWW-Authenticate": "Basic"})
+# def get_current_db_user_from_token(credentials: HTTPBasicCredentials = Depends(security), db: Session = Depends(get_db)) -> DBUser:
+#     user = db.query(DBUser).filter(DBUser.username == credentials.username).first()
+#     if not user or not user.verify_password(credentials.password):
+#         raise HTTPException(status_code=401, detail="Incorrect username or password", headers={"WWW-Authenticate": "Basic"})
+#     return user
+
+
+def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
+    return db.query(DBUser).filter(DBUser.username == username).first()
+
+def get_user_by_email(db: Session, email: str) -> Optional[DBUser]:
+    return db.query(DBUser).filter(DBUser.email == email).first()
+
+
+async def get_current_db_user_from_token(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> DBUser:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"}, # Note: Bearer, not Basic
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except JWTError:
+        raise credentials_exception
+    
+    # In a real app, you might want to check if token is in a denylist here
+    
+    user = get_user_by_username(db, username=token_data.username) # You'll need this function
+    if user is None:
+        raise credentials_exception
     return user
 
-def get_current_active_user(db_user: DBUser = Depends(get_current_db_user)) -> UserAuthDetails:
+
+def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_token)) -> UserAuthDetails:
     username = db_user.username
     if username not in user_sessions:
         print(f"INFO: Initializing session state for user: {username}")
@@ -196,6 +229,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user)) -> U
         put_thoughts_in_context=current_session_llm_params.get("put_thoughts_in_context"),
         rag_top_k=db_user.rag_top_k,
         max_rag_len=db_user.max_rag_len,
+        rag_n_hops=db_user.rag_n_hops,
         rag_min_sim_percent=db_user.rag_min_sim_percent,
         rag_use_graph=db_user.rag_use_graph,
         rag_graph_response_type=db_user.rag_graph_response_type

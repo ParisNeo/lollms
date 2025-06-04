@@ -406,50 +406,120 @@ async function initializeLocalization() {
 
 
 // --- API Helper ---
-async function apiRequest(url, options = {}) { // Mostly as provided
-    if (!options.statusElement && statusMessage) showStatus('', 'info', statusMessage); // Clear global status
-    const fetchOptions = { ...options };
-    fetchOptions.headers = { ...fetchOptions.headers };
-    if (tempLoginUsername && tempLoginPassword && !fetchOptions.headers['Authorization']) {
-        const basicAuth = btoa(`${tempLoginUsername}:${tempLoginPassword}`);
-        fetchOptions.headers['Authorization'] = `Basic ${basicAuth}`;
+// Ensure these are accessible or passed in if they live elsewhere
+// externals: openModal, loginModal, appContainer, appLoadingMessage, currentUser, showStatus, translate, statusMessage
+
+async function apiRequest(url, options = {}) {
+    if (!options.statusElement && typeof statusMessage !== 'undefined' && statusMessage) {
+        showStatus('', 'info', statusMessage); // Clear global status if statusMessage exists
     }
-    // Use activeGenerationAbortController only for specific cancellable requests (like chat)
-    // Not for all POST/PUT requests.
-    // if (activeGenerationAbortController && options.method && options.method.toUpperCase() !== 'GET') {
-    // fetchOptions.signal = activeGenerationAbortController.signal;
-    // }
+
+    const fetchOptions = { ...options };
+    fetchOptions.headers = { ...options.headers }; // Clone headers from options
+
+    const token = localStorage.getItem('lollms_chat_accessToken');
+
+    // Add JWT Bearer token if available AND it's not the token acquisition endpoint itself
+    if (token && url !== '/api/auth/token') {
+        fetchOptions.headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    // Automatically set Content-Type for JSON bodies if not FormData and not already set
+    if (fetchOptions.body && !(fetchOptions.body instanceof FormData) && typeof fetchOptions.body === 'object') {
+        if (!fetchOptions.headers['Content-Type']) {
+            fetchOptions.headers['Content-Type'] = 'application/json';
+        }
+        // Stringify the body if it's an object and Content-Type is application/json
+        if (fetchOptions.headers['Content-Type'] === 'application/json') {
+             fetchOptions.body = JSON.stringify(fetchOptions.body);
+        }
+    }
+    // Note: If options.body is already a string (e.g. pre-stringified JSON), this won't re-stringify.
+    // If options.body is FormData, Content-Type is set automatically by fetch.
 
     try {
         const response = await fetch(url, fetchOptions);
+
         if (!response.ok) {
             let errorDetail = `HTTP error ${response.status}`;
-            try { const errorData = await response.json(); errorDetail = errorData.detail || errorDetail; }
-            catch (e) { /* Ignore if error response is not JSON */ }
-            const errorMsg = translate('api_error_prefix', "API Error:") + ` ${errorDetail}`;
-            showStatus(errorMsg, "error", options.statusElement || statusMessage);
-            const error = new Error(errorMsg); error.status = response.status; throw error;
+            let errorData = null;
+            try {
+                errorData = await response.json();
+                errorDetail = errorData.detail || errorDetail;
+            } catch (e) {
+                // Error response was not JSON, or other parsing error
+                console.warn("Could not parse error response as JSON:", e);
+            }
+
+            // Specific handling for 401 Unauthorized (likely expired/invalid token)
+            // Do not trigger this for the login attempt itself if it fails with 401
+            if (response.status === 401 && url !== '/api/auth/token') {
+                console.warn('API request 401: Token invalid or expired. Clearing token and prompting login.');
+                localStorage.removeItem('lollms_chat_accessToken');
+                if (typeof currentUser !== 'undefined') currentUser = null; // Reset current user state
+
+                // Show login modal and hide app content
+                if (typeof openModal === 'function' && typeof loginModal !== 'undefined') {
+                    openModal('loginModal', false);
+                }
+                if (typeof appContainer !== 'undefined' && appContainer) appContainer.style.display = 'none';
+                if (typeof appLoadingMessage !== 'undefined' && appLoadingMessage) appLoadingMessage.style.display = 'flex';
+
+                showStatus(
+                    translate('session_expired_login_again', "Your session has expired. Please log in again."),
+                    "error",
+                    options.statusElement || (typeof loginStatus !== 'undefined' ? loginStatus : statusMessage) // Prefer loginStatus for auth errors
+                );
+            } else {
+                // For other errors, show the general error message
+                const errorMsg = translate('api_error_prefix', "API Error:") + ` ${errorDetail}`;
+                showStatus(errorMsg, "error", options.statusElement || (typeof statusMessage !== 'undefined' ? statusMessage : undefined));
+            }
+
+            const error = new Error(errorDetail);
+            error.status = response.status;
+            error.data = errorData; // Attach parsed error data if available
+            throw error;
         }
+
         if (response.status === 204) return null; // No content
-        return response;
+
+        // Try to parse as JSON, but return the raw response if not JSON
+        // This is a slight change from your original which always returned response object.
+        // Most of the time you'll want the JSON data.
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+            return response;
+        }
+        return response; // Return raw response for non-JSON content types (e.g., file downloads)
+
     } catch (error) {
         if (error.name === 'AbortError') {
             console.log("API Request Aborted:", url);
-            showStatus(translate('api_request_aborted', "Request aborted by user."), "warning", options.statusElement || statusMessage);
-        } else {
-            console.error("API Request Error:", url, fetchOptions, error);
-            // Only show status if it wasn't an AbortError and error.status is not already set (which means HTTP error was handled)
-            if (!error.status) {
-                 showStatus(translate('api_request_failed_prefix', "Request failed:") + ` ${error.message}`, "error", options.statusElement || statusMessage);
+            if (typeof showStatus === 'function') {
+                showStatus(
+                    translate('api_request_aborted', "Request aborted by user."),
+                    "warning",
+                    options.statusElement || (typeof statusMessage !== 'undefined' ? statusMessage : undefined)
+                );
+            }
+        } else if (error.status) { // HTTP error already handled (status set)
+            console.error("API Request HTTP Error:", url, error.status, error.message, error.data || '');
+        }
+        else { // Network error or other exception before/during fetch
+            console.error("API Request Network/Generic Error:", url, error);
+            if (typeof showStatus === 'function') {
+                 showStatus(
+                    translate('api_request_failed_prefix', "Request failed:") + ` ${error.message}`,
+                    "error",
+                    options.statusElement || (typeof statusMessage !== 'undefined' ? statusMessage : undefined)
+                );
             }
         }
-        throw error; // Re-throw to be handled by caller
-    } finally {
-        // Clear temp credentials after /me attempt if basic auth was used
-        if (url === '/api/auth/me' && fetchOptions.headers['Authorization'] && fetchOptions.headers['Authorization'].startsWith('Basic')) {
-            tempLoginUsername = null; tempLoginPassword = null;
-        }
+        throw error; // Re-throw to be handled by the caller
     }
+    // The 'finally' block for clearing tempLoginUsername/Password is no longer needed
+    // as Basic Auth is not the primary mechanism.
 }
 
 // --- Initialization ---
@@ -766,8 +836,9 @@ function handleClickOutsideUserMenu(event) {
 }
 
 // --- Login and Logout ---
+// --- Authentication Logic ---
 async function handleLoginAttempt() {
-    console.log("Logging in");
+    console.log("Attempting JWT login");
 
     const username = loginUsernameInput.value.trim();
     const password = loginPasswordInput.value;
@@ -777,47 +848,63 @@ async function handleLoginAttempt() {
         return;
     }
 
-    showStatus(
-        translate('login_attempting_status', "Attempting login..."),
-        "info",
-        loginStatus
-    );
+    showStatus(translate('login_attempting_status', "Attempting login..."), "info", loginStatus);
     loginSubmitBtn.disabled = true;
 
-    tempLoginUsername = username;
-    tempLoginPassword = password;
+    const formData = new FormData();
+    formData.append('username', username);
+    formData.append('password', password);
 
     try {
-        await attemptInitialAuthAndLoad();
-    } catch (error) {
-        if (error.status === 401) {
-            showStatus(
-                translate('login_invalid_credentials', "Invalid username or password."),
-                "error",
-                loginStatus
-            );
+        let data = await apiRequest('/api/auth/token', {
+            method: 'POST',
+            body: formData, // FormData is not JSON, apiRequest handles it
+            statusElement: loginStatus
+        });
+        data = await data.json();
+        if (data && data.access_token) {
+            localStorage.setItem('lollms_chat_accessToken', data.access_token);
+            showStatus(translate('login_successful_status', "Login successful! Loading your data..."), "success", loginStatus);
+            // Now that token is stored, attempt to load user data and initialize app
+            await attemptInitialAuthAndLoad(); // This function will now use the token via apiRequest
+            openModal('loginModal', false); // Close login modal on success
+            appContainer.style.display = 'block'; // Or your main app display style
+            appLoadingMessage.style.display = 'none';
+            closeModal("loginModal")
         } else {
-            showStatus(
-                translate('login_error_status', `Login error: ${error.message}`, { message: error.message }),
-                "error",
-                loginStatus
-            );
+            // Should be caught by apiRequest's !response.ok if server returns non-200
+            // but as a safeguard:
+            showStatus(translate('login_failed_no_token', "Login failed: No token received."), "error", loginStatus);
         }
+    } catch (error) {
+        console.error("Login error:", error);
+        let message = translate('login_error_status', `Login error: ${error.message}`, { message: error.message });
+        if (error.status === 401) { // Specifically for /api/auth/token failing
+            message = translate('login_invalid_credentials', "Invalid username or password.");
+        }
+        showStatus(message, "error", loginStatus);
     } finally {
         loginSubmitBtn.disabled = false;
     }
 }
+
 async function handleLogout() {
-    showStatus(translate('logout_status_logging_out', "Logging out..."), "info");
-    console.log(document.cookie)
+    showStatus(translate('logout_status_logging_out', "Logging out..."), "info", loginStatus); // Use loginStatus for consistency
+    console.log("Current token before logout:", localStorage.getItem('lollms_chat_accessToken'));
+
     try {
+        // The apiRequest function will automatically include the Authorization header
         await apiRequest('/api/auth/logout', { method: 'POST' });
+        showStatus(translate('logout_server_success', "Logged out from server."), "info", loginStatus);
     } catch (error) {
+        console.warn('Logout from server failed or user was already unauthenticated:', error);
         showStatus(
-            translate('logout_server_failed_status', "Logout from server failed, but resetting UI."),
-            "warning"
+            translate('logout_server_failed_status', "Server logout acknowledged or failed, resetting UI."),
+            "warning",
+            loginStatus
         );
     } finally {
+        localStorage.removeItem('lollms_chat_accessToken'); // <<< MOST IMPORTANT STEP FOR JWT LOGOUT
         currentUser = null;
         discussions = {};
         currentMessages = [];
@@ -886,14 +973,34 @@ async function handleLogout() {
         loginPasswordInput.value = '';
         loginSubmitBtn.disabled = false;
 
+        usernameDisplay.textContent = translate('username_display_default');
+        adminBadge.style.display = 'none';
+        adminLink.style.display = 'none';
+        discussionListContainer.innerHTML = `<p class="text-gray-500 text-sm text-center italic p-4">${translate('login_required_placeholder')}</p>`;
+        clearChatArea(true);
+        sendMessageBtn.disabled = true;
+        // ... (the rest of your UI reset code) ...
+
+        appContainer.style.display = 'none';
+        // appLoadingMessage.style.opacity = '1'; // This might be your login screen container
+        //appLoadingMessage.style.display = 'flex';
+        // appLoadingProgress.style.width = '0%';
+        // appLoadingStatus.textContent = translate('app_loading_status_default');
+
+        loginUsernameInput.value = '';
+        loginPasswordInput.value = '';
+        loginSubmitBtn.disabled = false;
+
         showStatus(
             translate('logout_success_status', "You have been logged out."),
             "info",
             loginStatus
         );
-        openModal('loginModal', false);
-        console.log("Showing login");
-        window.location.reload();
+        openModal('loginModal', false); // Show login modal after logout
+        console.log("UI reset, showing login modal.");
+        // window.location.reload(); // Reload can be an option for a very thorough reset,
+                                   // but a good SPA reset should make it unnecessary.
+                                   // If you keep it, it ensures no old state lingers.
     }
 }
 
@@ -974,6 +1081,7 @@ async function loadDiscussions() {
     }
 }
 function initiateInlineRename(id) {
+    console.log("Initialize")
     const discussion = discussions[id];
     if (!discussion) return;
 
@@ -1467,7 +1575,7 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
     renderDiscussionList();
 
     try {
-        const response = await fetch(`/api/discussions/${currentDiscussionId}/chat`, {
+        const response = await apiRequest(`/api/discussions/${currentDiscussionId}/chat`, {
             method: 'POST',
             body: formData,
             signal: activeGenerationAbortController.signal // Add signal here
@@ -1959,14 +2067,37 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
             bubbleDivToUse.insertBefore(imagesContainer, anchor ? anchor.nextSibling : bubbleDivToUse.firstChild);
         }
         imagesContainer.innerHTML = ''; // Clear existing images
-        message.image_references.forEach(imgSrc => {
-            const imgItem = document.createElement('div'); imgItem.className = 'message-image-item';
-            const imgTag = document.createElement('img'); imgTag.src = imgSrc; imgTag.alt = translate('chat_image_alt', 'Chat Image');
-            imgTag.loading = 'lazy'; imgTag.onclick = () => viewImage(imgSrc);
-            imgTag.onload = () => { imgItem.classList.add('loaded'); imgItem.style.opacity = 1; };
-            imgTag.onerror = () => imgItem.classList.add('error');
-            imgItem.appendChild(imgTag); imagesContainer.appendChild(imgItem);
+        message.image_references.forEach(async imgSrc => {
+            const imgItem = document.createElement('div');
+            imgItem.className = 'message-image-item';
+
+            const imgTag = document.createElement('img');
+            imgTag.alt = translate('chat_image_alt', 'Chat Image');
+            imgTag.loading = 'lazy';
+
+            try {
+                const response = await apiRequest(imgSrc, {
+                    method: 'GET'
+                });
+
+                const blob = await response.blob();
+                const objectURL = URL.createObjectURL(blob);
+                imgTag.src = objectURL;
+
+                imgTag.onclick = () => viewImage(objectURL);  // Optional: use object URL for preview
+                imgTag.onload = () => {
+                    imgItem.classList.add('loaded');
+                    imgItem.style.opacity = 1;
+                };
+            } catch (err) {
+                imgItem.classList.add('error');
+                console.error("Image failed to load:", imgSrc, err);
+            }
+
+            imgItem.appendChild(imgTag);
+            imagesContainer.appendChild(imgItem);
         });
+
     } else if (imagesContainer) {
         imagesContainer.remove();
     }
@@ -2347,23 +2478,6 @@ function renderMessages(messagesToRender) { /* Your "Enhanced renderMessages" fr
 // getSenderAvatar, createActionButton, addCodeBlockCopyButtons, renderSteps, renderMetadata, escapeHtml also as in your enhanced version.
 
 // Helper functions
-function createActionButton(type, tooltip, onClick, variant = 'default') {
-    const button = document.createElement('button');
-    button.className = `action-btn action-btn-${type} ${variant === 'destructive' ? 'destructive' : ''}`;
-    button.title = tooltip;
-    button.onclick = onClick;
-
-    const icons = {
-        copy: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>`,
-        edit: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>`,
-        delete: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>`,
-        refresh: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`
-    };
-
-    button.innerHTML = icons[type] || '';
-    return button;
-}
-
 function groupMessagesByDate(messages) {
     const groups = {};
     
@@ -2418,7 +2532,6 @@ function createActionButton(type, tooltip, onClick, variant = 'default') {
         edit: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>`,
         delete: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>`,
         refresh: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`,
-        delete: `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>`,
         chat_bubble: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.76c0 1.6 1.123 2.994 2.707 3.227 1.087.16 2.185.283 3.293.369V21l4.076-4.076a1.526 1.526 0 0 1 1.037-.443 48.282 48.282 0 0 0 5.68-.494c1.584-.233 2.707-1.626 2.707-3.228V6.741c0-1.602-1.123-2.995-2.707-3.228A48.394 48.394 0 0 0 12 3c-2.392 0-4.744.175-7.043.513C3.373 3.746 2.25 5.14 2.25 6.741v6.018Z" /></svg>`,
         person_remove: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m-.243-3.72a9.094 9.094 0 0 1-3.741-.479 3 3 0 0 1-4.682-2.72M12 12.75a3 3 0 1 1 0-6 3 3 0 0 1 0 6Zm-7.5 3.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm0 0h.01M12 12.75a9.094 9.094 0 0 0-3.741-.479 3 3 0 0 0-4.682-2.72m0 0a9.094 9.094 0 0 1 3.741-.479m0 0a3 3 0 1 0-4.682-2.72m4.682 2.72M3.055 11.676A9.094 9.094 0 0 1 6.795 11.2a3 3 0 0 1 4.682 2.719m0 0a3 3 0 0 1-4.682 2.72m4.682-2.72m6.945-5.438A9.094 9.094 0 0 1 17.205 11.2a3 3 0 0 1 4.682 2.719m0 0a3 3 0 0 1-4.682 2.72m4.682-2.72M12 12.75a3 3 0 1 1 0-6 3 3 0 0 1 0 6Z" /></svg>`, // This is a complex group icon, find simpler ones
         block: `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" /></svg>`
@@ -5290,3 +5403,18 @@ async function handleSendDirectMessage() {
         directMessageInput.disabled = false;
     }
 }
+
+adminLink.addEventListener('click', async function(event) {
+    event.preventDefault(); // Prevent the default GET behavior
+    const response = await apiRequest("/admin")
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+    }
+
+    const html = await response.text();
+
+    // Replace the whole page
+    document.open();
+    document.write(html);
+    document.close();    
+});

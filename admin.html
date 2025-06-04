@@ -100,43 +100,129 @@
 
         // API Helper (could be shared with index.html if using modules)
         async function apiRequest(url, options = {}) {
-            showStatus('', 'info'); // Clear status initially
-            try {
-                const defaultOptions = { headers: {} };
-                if (options.body && !(options.body instanceof FormData)) {
-                     defaultOptions.headers['Content-Type'] = 'application/json';
-                     options.body = JSON.stringify(options.body);
-                 }
-                const mergedOptions = { ...defaultOptions, ...options };
-
-                const response = await fetch(url, mergedOptions);
-                if (response.status === 401) {
-                    alert("Authentication failed or required. Ensure you are logged in with admin credentials.");
-                     showStatus("Authentication failed. Please refresh and login.", "error");
-                    throw new Error("Admin authentication failed.");
-                }
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({ detail: `HTTP error ${response.status}` }));
-                    const errorMessage = `API Error: ${errorData.detail || response.statusText}`;
-                    console.error(errorMessage, errorData);
-                    showStatus(errorMessage, 'error');
-                    // Throw error so calling function knows request failed
-                     throw new Error(errorMessage);
-                }
-                return response;
-            } catch (error) {
-                 // Error already shown by status or alert, re-throw for caller
-                 console.error("API Request Error Catch:", error);
-                 throw error;
+            if (!options.statusElement && typeof statusMessage !== 'undefined' && statusMessage) {
+                showStatus('', 'info', statusMessage); // Clear global status if statusMessage exists
             }
+
+            const fetchOptions = { ...options };
+            fetchOptions.headers = { ...options.headers }; // Clone headers from options
+
+            const token = localStorage.getItem('lollms_chat_accessToken');
+
+            // Add JWT Bearer token if available AND it's not the token acquisition endpoint itself
+            if (token && url !== '/api/auth/token') {
+                fetchOptions.headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            // Automatically set Content-Type for JSON bodies if not FormData and not already set
+            if (fetchOptions.body && !(fetchOptions.body instanceof FormData) && typeof fetchOptions.body === 'object') {
+                if (!fetchOptions.headers['Content-Type']) {
+                    fetchOptions.headers['Content-Type'] = 'application/json';
+                }
+                // Stringify the body if it's an object and Content-Type is application/json
+                if (fetchOptions.headers['Content-Type'] === 'application/json') {
+                    fetchOptions.body = JSON.stringify(fetchOptions.body);
+                }
+            }
+            // Note: If options.body is already a string (e.g. pre-stringified JSON), this won't re-stringify.
+            // If options.body is FormData, Content-Type is set automatically by fetch.
+
+            try {
+                const response = await fetch(url, fetchOptions);
+
+                if (!response.ok) {
+                    let errorDetail = `HTTP error ${response.status}`;
+                    let errorData = null;
+                    try {
+                        errorData = await response.json();
+                        errorDetail = errorData.detail || errorDetail;
+                    } catch (e) {
+                        // Error response was not JSON, or other parsing error
+                        console.warn("Could not parse error response as JSON:", e);
+                    }
+
+                    // Specific handling for 401 Unauthorized (likely expired/invalid token)
+                    // Do not trigger this for the login attempt itself if it fails with 401
+                    if (response.status === 401 && url !== '/api/auth/token') {
+                        console.warn('API request 401: Token invalid or expired. Clearing token and prompting login.');
+                        localStorage.removeItem('lollms_chat_accessToken');
+                        if (typeof currentUser !== 'undefined') currentUser = null; // Reset current user state
+
+                        // Show login modal and hide app content
+                        if (typeof openModal === 'function' && typeof loginModal !== 'undefined') {
+                            openModal('loginModal', false);
+                        }
+                        if (typeof appContainer !== 'undefined' && appContainer) appContainer.style.display = 'none';
+                        if (typeof appLoadingMessage !== 'undefined' && appLoadingMessage) appLoadingMessage.style.display = 'flex';
+
+                        showStatus(
+                            translate('session_expired_login_again', "Your session has expired. Please log in again."),
+                            "error",
+                            options.statusElement || (typeof loginStatus !== 'undefined' ? loginStatus : statusMessage) // Prefer loginStatus for auth errors
+                        );
+                    } else {
+                        // For other errors, show the general error message
+                        const errorMsg = translate('api_error_prefix', "API Error:") + ` ${errorDetail}`;
+                        showStatus(errorMsg, "error", options.statusElement || (typeof statusMessage !== 'undefined' ? statusMessage : undefined));
+                    }
+
+                    const error = new Error(errorDetail);
+                    error.status = response.status;
+                    error.data = errorData; // Attach parsed error data if available
+                    throw error;
+                }
+
+                if (response.status === 204) return null; // No content
+
+                // Try to parse as JSON, but return the raw response if not JSON
+                // This is a slight change from your original which always returned response object.
+                // Most of the time you'll want the JSON data.
+                const contentType = response.headers.get("content-type");
+                if (contentType && contentType.includes("application/json")) {
+                    return response;
+                }
+                return response; // Return raw response for non-JSON content types (e.g., file downloads)
+
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    console.log("API Request Aborted:", url);
+                    if (typeof showStatus === 'function') {
+                        showStatus(
+                            translate('api_request_aborted', "Request aborted by user."),
+                            "warning",
+                            options.statusElement || (typeof statusMessage !== 'undefined' ? statusMessage : undefined)
+                        );
+                    }
+                } else if (error.status) { // HTTP error already handled (status set)
+                    console.error("API Request HTTP Error:", url, error.status, error.message, error.data || '');
+                }
+                else { // Network error or other exception before/during fetch
+                    console.error("API Request Network/Generic Error:", url, error);
+                    if (typeof showStatus === 'function') {
+                        showStatus(
+                            translate('api_request_failed_prefix', "Request failed:") + ` ${error.message}`,
+                            "error",
+                            options.statusElement || (typeof statusMessage !== 'undefined' ? statusMessage : undefined)
+                        );
+                    }
+                }
+                throw error; // Re-throw to be handled by the caller
+            }
+            // The 'finally' block for clearing tempLoginUsername/Password is no longer needed
+            // as Basic Auth is not the primary mechanism.
         }
+
 
          // Fetch current admin username for UI logic
          async function fetchCurrentAdminUser() {
              try {
-                 const response = await fetch('/api/auth/me'); // Use the normal auth endpoint
+                 console.log("Fetching admin user")
+                 const response = await apiRequest('/api/auth/me'); // Use the normal auth endpoint
+                 console.log("Done")
+                 console.log(response)
                  if (response.ok) {
                      const user = await response.json();
+                     console.log(user)
                      if (user.is_admin) {
                          currentAdminUsername = user.username;
                      }

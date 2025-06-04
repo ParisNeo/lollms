@@ -16,15 +16,16 @@ from sqlalchemy import (
 from sqlalchemy.sql import func
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from sqlalchemy.exc import OperationalError
-from passlib.context import CryptContext
+
 from sqlalchemy import Enum as SQLAlchemyEnum # For status
 import enum # For Python enum
+from backend.config import DATABASE_URL_CONFIG_KEY
+from backend.security import pwd_context
 
-DATABASE_URL_CONFIG_KEY = "database_url"
 CURRENT_DB_VERSION = "1.2.2"
 
 Base = declarative_base()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 
 class Personality(Base):
     __tablename__ = "personalities"
@@ -80,6 +81,7 @@ class User(Base):
 
     rag_top_k = Column(Integer, nullable=True)
     max_rag_len = Column(Integer, nullable=True)
+    rag_n_hops = Column(Integer, nullable=True)
     rag_min_sim_percent  = Column(Float, nullable=True)
     max_rag_len = Column(Integer, nullable=True)
     rag_use_graph = Column(Boolean, default=False, nullable=False)
@@ -302,6 +304,7 @@ def init_database(db_url: str):
                     "birth_date": "DATE", 
                     "rag_top_k": "INTEGER",
                     "max_rag_len": "INTEGER",
+                    "rag_n_hops": "INTEGER",
                     "rag_min_sim_percent": "FLOAT",
                     "rag_use_graph": "BOOLEAN DEFAULT 0",
                     "rag_graph_response_type": "VARCHAR DEFAULT 'chunks_summary'",
@@ -407,3 +410,4 @@ def get_friendship_record(db, user_id, other_user_id):
     ).first()
 
     return record
+

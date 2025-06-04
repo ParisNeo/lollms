@@ -51,15 +51,10 @@ from backend.database_setup import Personality as DBPersonality # Add this impor
 # Local Application Imports
 from backend.database_setup import (
     User as DBUser,
-    UserStarredDiscussion,
-    UserMessageGrade,
-    FriendshipStatus,Friendship, 
-    DataStore as DBDataStore,
-    SharedDataStoreLink as DBSharedDataStoreLink,
-    init_database,
     get_db,
-    hash_password,
-    DATABASE_URL_CONFIG_KEY,
+    get_friendship_record,
+    FriendshipStatus,Friendship,
+    DirectMessage
 )
 from lollms_client import (
     LollmsClient,
@@ -115,7 +110,8 @@ FriendshipRequestPublic,
 PersonalitySendRequest,
 
 DirectMessagePublic,
-DirectMessageCreate
+DirectMessageCreate,
+
 )
 from backend.config import (
     TEMP_UPLOADS_DIR_NAME
@@ -123,7 +119,7 @@ from backend.config import (
 from backend.session import (
     get_current_active_user,
     get_current_admin_user,
-    get_current_db_user,
+    get_current_db_user_from_token,
     get_datastore_db_path,
     get_db, get_safe_store_instance,
     get_user_data_root, get_user_datastore_root_path,
@@ -139,7 +135,7 @@ from backend.session import (
     )
 from backend.config import (LOLLMS_CLIENT_DEFAULTS, SAFE_STORE_DEFAULTS)
 from backend.discussion import (AppLollmsDiscussion)
-
+from backend.routers.friends import get_my_friends
 security = HTTPBasic()
 
 dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
@@ -147,7 +143,7 @@ dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
 @dm_router.post("/send", response_model=DirectMessagePublic, status_code=201)
 async def send_direct_message(
     dm_data: DirectMessageCreate,
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ) -> DirectMessagePublic:
     if current_db_user.id == dm_data.receiver_user_id:
@@ -206,7 +202,7 @@ async def send_direct_message(
 @dm_router.get("/conversation/{other_user_id_or_username}", response_model=List[DirectMessagePublic])
 async def get_dm_conversation(
     other_user_id_or_username: str,
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db),
     before_message_id: Optional[int] = None, # For pagination: load messages before this ID
     limit: int = Query(50, ge=1, le=100) # Pagination limit
@@ -282,7 +278,7 @@ async def get_dm_conversation(
 @dm_router.post("/conversation/{other_user_id}/mark_read", status_code=200)
 async def mark_dm_conversation_as_read(
     other_user_id: int,
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
     # Mark all unread messages received by current_db_user from other_user_id as read
@@ -300,7 +296,7 @@ async def mark_dm_conversation_as_read(
 # This would typically involve getting the latest message from each unique correspondent.
 @dm_router.get("/conversations", response_model=List[Dict[str, Any]]) # Response model needs to be defined
 async def list_dm_conversations(
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
     # This is a complex query to get distinct conversation partners and last message.

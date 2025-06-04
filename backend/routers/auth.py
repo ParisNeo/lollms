@@ -30,13 +30,14 @@ from fastapi import (
     BackgroundTasks,
     status
 )
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+#from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import (
     HTMLResponse,
     StreamingResponse,
     JSONResponse,
     FileResponse,
 )
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, constr, field_validator, validator
 from sqlalchemy.orm import Session, joinedload
@@ -108,21 +109,110 @@ DirectMessagePublic,
 DirectMessageCreate
 )
 
-from backend.session import (get_current_active_user, get_current_db_user, get_user_lollms_client, get_user_temp_uploads_path, user_sessions)
-from backend.config import (LOLLMS_CLIENT_DEFAULTS)
+from backend.session import (get_current_active_user, get_current_db_user_from_token, get_user_lollms_client, get_user_temp_uploads_path, get_user_by_username, user_sessions)
+from backend.config import (LOLLMS_CLIENT_DEFAULTS, SECRET_KEY, ACCESS_TOKEN_EXPIRE_MINUTES)
+from backend.security import pwd_context, verify_password, create_access_token
+from backend.models import Token, TokenData
 
 auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
-security = HTTPBasic()
+#security = HTTPBasic()
 
+
+@auth_router.post("/token", response_model=Token)
+async def login_for_access_token(
+    form_data: OAuth2PasswordRequestForm = Depends(), 
+    db: Session = Depends(get_db)
+):
+    user = get_user_by_username(db, username=form_data.username)
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"}, # For consistency, though login form won't use it directly
+        )
+    access_token = create_access_token(
+        data={"sub": user.username} 
+    )
+    # Initialize user session upon successful login if not already present
+    # This ensures that subsequent calls to get_current_active_user have a session to work with
+    if user.username not in user_sessions:
+        print(f"INFO: Initializing session state for user: {user.username}")
+        initial_lollms_model = user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
+        initial_vectorizer = user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
+        
+        session_llm_params = {
+            "temperature": user.llm_temperature if user.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
+            "top_k": user.llm_top_k if user.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
+            "top_p": user.llm_top_p if user.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
+            "repeat_penalty": user.llm_repeat_penalty if user.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
+            "repeat_last_n": user.llm_repeat_last_n if user.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),
+        }
+        session_llm_params = {k: v for k, v in session_llm_params.items() if v is not None}
+
+        user_sessions[user.username] = {
+            "lollms_client": None, "safe_store_instances": {}, 
+            "discussions": {}, "discussion_titles": {},
+            "active_vectorizer": initial_vectorizer, 
+            "lollms_model_name": initial_lollms_model,
+            "llm_params": session_llm_params,
+            # Session stores active personality details for quick access if needed by LollmsClient
+            "active_personality_id": user.active_personality_id, 
+            "active_personality_prompt": None, # Will be loaded if personality is active
+        }
+        # If user has an active personality, load its prompt into session
+        if user.active_personality_id:
+            db_session_for_init = next(get_db())
+            try:
+                active_pers = db_session_for_init.query(DBPersonality.prompt_text).filter(DBPersonality.id == user.active_personality_id).scalar()
+                if active_pers:
+                    user_sessions[user.username]["active_personality_prompt"] = active_pers
+            finally:
+                db_session_for_init.close()
+
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@auth_router.post("/logout")
+async def logout(
+    response: Response, # To potentially clear cookies if you use them
+    current_user_details: UserAuthDetails = Depends(get_current_active_user), # Authenticates
+    background_tasks: BackgroundTasks = BackgroundTasks()
+) -> Dict[str, str]:
+    username = current_user_details.username
+    
+    # Your existing session cleanup logic
+    if username in user_sessions:
+        # temp_dir = get_user_temp_uploads_path(username) # Define this function
+        # if temp_dir.exists():
+        #     background_tasks.add_task(shutil.rmtree, temp_dir, ignore_errors=True)
+        
+        if "safe_store_instances" in user_sessions[username]:
+            for ds_id, ss_instance in user_sessions[username]["safe_store_instances"].items():
+                if hasattr(ss_instance, 'close') and callable(ss_instance.close):
+                    try: background_tasks.add_task(ss_instance.close)
+                    except Exception as e_ss_close: print(f"Error closing SafeStore {ds_id} for {username} on logout: {e_ss_close}")
+        
+        del user_sessions[username] # Clear the in-memory session data
+        print(f"INFO: User '{username}' session cleared from server.")
+
+    # For JWT, logout is primarily client-side (deleting the token).
+    # Server-side, if you implement a token denylist, you'd add the token JTI here.
+    # For now, we just clear the session data. The client should discard the token.
+    
+    # The 401 is not strictly necessary here if the client correctly removes the token.
+    # A 200 OK with a success message is also fine.
+    # response.status_code = status.HTTP_200_OK 
+    return {"message": "Logout successful. Please discard your token."}
 
 
 @auth_router.get("/me", response_model=UserAuthDetails)
-async def get_my_details(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails: return current_user
+async def get_my_details(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails: 
+    return current_user
 # New endpoint for updating user settings
 @auth_router.put("/me", response_model=UserAuthDetails) # Returns the updated user details
 async def update_my_details(
     user_update_data: UserUpdate,
-    db_user: DBUser = Depends(get_current_db_user), # Get the DBUser object
+    db_user: DBUser = Depends(get_current_db_user_from_token), # Get the DBUser object
     db: Session = Depends(get_db)
 ) -> UserAuthDetails:
     updated_fields = user_update_data.model_dump(exclude_unset=True)
@@ -199,6 +289,7 @@ async def update_my_details(
             put_thoughts_in_context=current_session_llm_params.get("put_thoughts_in_context"),
             rag_top_k=db_user.rag_top_k,
             max_rag_len=db_user.max_rag_len,
+            rag_n_hops=db_user.rag_n_hops,
             rag_min_sim_percent=db_user.rag_min_sim_percent,
             rag_use_graph=db_user.rag_use_graph,
             rag_graph_response_type=db_user.rag_graph_response_type
@@ -242,7 +333,7 @@ async def logout(response: Response, current_user: UserAuthDetails = Depends(get
 @auth_router.post("/change-password")
 async def change_user_password(
     payload: UserPasswordChange,
-    db_user_record: DBUser = Depends(get_current_db_user), # Directly get the DBUser object
+    db_user_record: DBUser = Depends(get_current_db_user_from_token), # Directly get the DBUser object
     db: Session = Depends(get_db) # Still need the session for commit
 ) -> Dict[str, str]:
     if not db_user_record.verify_password(payload.current_password):

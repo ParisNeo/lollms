@@ -167,7 +167,7 @@ from backend.discussion import AppLollmsDiscussion
 from backend.session import (
     get_current_active_user,
     get_current_admin_user,
-    get_current_db_user,
+    get_current_db_user_from_token,
     get_datastore_db_path,
     get_db, get_safe_store_instance,
     get_user_data_root, get_user_datastore_root_path,
@@ -845,7 +845,6 @@ async def delete_rag_document_from_datastore(datastore_id: str, filename: str, c
 
 app.include_router(store_files_router)
 app.include_router(admin_router)
-
 app.include_router(languages_router)
 
 # Add the router to the main app

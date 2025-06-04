@@ -46,22 +46,6 @@ from werkzeug.utils import secure_filename
 from pydantic import BaseModel, Field, constr, field_validator, validator # Ensure these are imported
 import datetime # Ensure datetime is imported
 
-from backend.database_setup import Personality as DBPersonality # Add this import at the top of main.py
-
-# Local Application Imports
-from backend.database_setup import (
-    User as DBUser,
-    UserStarredDiscussion,
-    UserMessageGrade,
-    FriendshipStatus,Friendship, 
-    DataStore as DBDataStore,
-    SharedDataStoreLink as DBSharedDataStoreLink,
-    init_database,
-    get_db,
-    hash_password,
-    DATABASE_URL_CONFIG_KEY,
-)
-
 
 # --- Application Version ---
 APP_VERSION = "1.6.0"  # Updated version for LLM param name fix
@@ -89,6 +73,7 @@ else:
             f"CRITICAL: Error parsing config.toml: {e}. Please check the file for syntax errors."
         )
         config = {}
+DATABASE_URL_CONFIG_KEY = "database_url"
 
 APP_SETTINGS = config.get("app_settings", {})
 APP_DATA_DIR = Path(APP_SETTINGS.get("data_dir", "data")).resolve()
@@ -103,6 +88,10 @@ SERVER_CONFIG = config.get("server", {})
 TEMP_UPLOADS_DIR_NAME = "temp_uploads"
 DISCUSSION_ASSETS_DIR_NAME = "discussion_assets"
 DATASTORES_DIR_NAME = "safestores"
+ALGORITHM = "HS256"
+SECRET_KEY = config.get("secret_key", os.environ.get("LOLLMS_SECRET_KEY","Some key"))
+ACCESS_TOKEN_EXPIRE_MINUTES = config.get("access_token_expires_mintes", os.environ.get("LOLLMS_ACCESS_TOKEN_EXPIRES_MINUTES", 30))
+
 
 
 DEFAULT_PERSONALITIES = [

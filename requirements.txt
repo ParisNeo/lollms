@@ -9,6 +9,8 @@ werkzeug           # For secure_filename
 toml  # For reading config.toml
 sqlalchemy
 passlib[bcrypt]  # For password hashing (bcrypt is a common and secure scheme)
+python-jose[cryptography] 
+python-multipart
 
 # --- LoLLMs Client Library and Common Backends ---
 lollms-client>=0.17.1
@@ -25,7 +27,8 @@ ollama # for ollama
 # transformers
 # accelerate
 # (Note: lollms-client itself pulls in requests, ascii-colors, pillow, pipmaster, yaml, pydantic, lollmsvectordb, numpy)
-
+pydantic
+pydantic[email] #for email validation
 
 # --- SafeStore Library and Common Features ---
 # Using safe_store[all] is a convenient way to get most features.

@@ -46,7 +46,7 @@ from backend.database_setup import (
     DATABASE_URL_CONFIG_KEY,
 )
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, constr, field_validator, validator
+from pydantic import BaseModel, Field, constr, field_validator, validator, EmailStr
 
 class UserLLMParams(BaseModel):
     llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
@@ -55,6 +55,16 @@ class UserLLMParams(BaseModel):
     llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
     llm_repeat_last_n: Optional[int] = Field(None, ge=0)
     put_thoughts_in_context: Optional[bool] = False
+
+class UserBase(BaseModel):
+    username: str
+    email: Optional[EmailStr] = None
+    first_name: Optional[str] = None
+    family_name: Optional[str] = None
+    birth_date: Optional[datetime.date] = None # Use datetime for date fields
+
+class UserCreate(UserBase):
+    password: str
 
 class UserAuthDetails(UserLLMParams):
     username: str
@@ -71,6 +81,7 @@ class UserAuthDetails(UserLLMParams):
     # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
+    rag_n_hops: Optional[int] = Field(None, ge=0)
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: bool = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
@@ -94,6 +105,7 @@ class UserCreateAdmin(UserLLMParams):
     # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
+    rag_n_hops: Optional[int] = Field(None, ge=0)
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: Optional[bool] = False # Optional on create, will default in DB
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
@@ -121,11 +133,19 @@ class UserPublic(UserLLMParams):
     # RAG parameters
     rag_top_k: Optional[int] = None
     max_rag_len: Optional[int] = None
+    rag_n_hops: Optional[int] = None
     rag_min_sim_percent: Optional[float] = None
     rag_use_graph: bool
     rag_graph_response_type: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
 
 class DiscussionInfo(BaseModel):
     id: str
@@ -261,6 +281,7 @@ class UserUpdate(BaseModel):
     # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
+    rag_n_hops: Optional[int] = Field(None, ge=0)
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: Optional[bool] = None
     rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")    

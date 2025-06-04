@@ -7,6 +7,7 @@ port = "9642"
 data_dir = "data"  # For user-specific discussion files and SafeStore DBs
 database_url = "sqlite:///./data/app_main.db" # Central SQLite DB for users and app settings
 secret_key = "a_very_secret_key_for_flask_sessions_or_jwt" # For potential future session/token use
+access_token_expires_mintes = 30 # How many minutes the access token stays alive after last use
 
 # Initial admin user to be created in the database if it doesn't exist.
 # The password here should be the PLAIN TEXT password you want for the first admin.

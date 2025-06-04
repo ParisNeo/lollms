@@ -51,15 +51,9 @@ from backend.database_setup import Personality as DBPersonality # Add this impor
 # Local Application Imports
 from backend.database_setup import (
     User as DBUser,
-    UserStarredDiscussion,
-    UserMessageGrade,
     FriendshipStatus,Friendship, 
-    DataStore as DBDataStore,
-    SharedDataStoreLink as DBSharedDataStoreLink,
-    init_database,
     get_db,
-    hash_password,
-    DATABASE_URL_CONFIG_KEY,
+    get_friendship_record,
 )
 from lollms_client import (
     LollmsClient,
@@ -123,7 +117,7 @@ from backend.config import (
 from backend.session import (
     get_current_active_user,
     get_current_admin_user,
-    get_current_db_user,
+    get_current_db_user_from_token,
     get_datastore_db_path,
     get_db, get_safe_store_instance,
     get_user_data_root, get_user_datastore_root_path,
@@ -172,7 +166,7 @@ def get_friend_public_from_friendship(friendship: Friendship, current_user_id: i
 @friends_router.post("/request", response_model=FriendshipRequestPublic, status_code=201)
 async def send_friend_request(
     request_data: FriendRequestCreate,
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ) -> FriendshipRequestPublic:
     if current_db_user.username == request_data.target_username:
@@ -242,7 +236,7 @@ async def send_friend_request(
 
 @friends_router.get("/requests/pending", response_model=List[FriendshipRequestPublic])
 async def get_pending_friend_requests(
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ) -> List[FriendshipRequestPublic]:
     """Gets friend requests sent TO the current user that are pending."""
@@ -274,7 +268,7 @@ async def get_pending_friend_requests(
 async def respond_to_friend_request(
     friendship_id: int,
     response_data: FriendshipAction, # e.g., {"action": "accept"} or {"action": "reject"}
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ) -> FriendPublic:
     friendship = db.query(Friendship).filter(Friendship.id == friendship_id).first()
@@ -321,7 +315,7 @@ async def respond_to_friend_request(
 
 @friends_router.get("", response_model=List[FriendPublic]) # Get list of accepted friends
 async def get_my_friends(
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ) -> List[FriendPublic]:
     # Friendships where current user is user1 OR user2, and status is ACCEPTED
@@ -347,7 +341,7 @@ async def get_my_friends(
 @friends_router.delete("/{friend_user_id_or_username}", status_code=200) # Unfriend or cancel sent request
 async def remove_friend_or_cancel_request(
     friend_user_id_or_username: str,
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ) -> Dict[str, str]:
     other_user = None
@@ -402,7 +396,7 @@ async def remove_friend_or_cancel_request(
 @friends_router.put("/block/{user_id_or_username}", response_model=FriendPublic)
 async def block_user(
     user_id_or_username: str,
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ) -> FriendPublic:
     other_user = None
@@ -455,7 +449,7 @@ async def block_user(
 @friends_router.put("/unblock/{user_id_or_username}", response_model=FriendPublic)
 async def unblock_user(
     user_id_or_username: str,
-    current_db_user: DBUser = Depends(get_current_db_user),
+    current_db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ) -> FriendPublic:
     other_user = None

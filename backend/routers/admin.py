@@ -105,7 +105,7 @@ from backend.session import (
     get_user_data_root,
     get_current_admin_user,
     get_current_active_user,
-    get_current_db_user,
+    get_current_db_user_from_token,
     get_user_lollms_client,
     get_user_temp_uploads_path,
     user_sessions)
@@ -114,12 +114,9 @@ from backend.config import (
     INITIAL_ADMIN_USER_CONFIG,
     SAFE_STORE_DEFAULTS)
 
-auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
-security = HTTPBasic()
-
-
 # --- Admin API ---
 admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependencies=[Depends(get_current_admin_user)])
+
 @admin_router.get("/users", response_model=List[UserPublic])
 async def admin_get_all_users(db: Session = Depends(get_db)) -> List[DBUser]: return db.query(DBUser).all()
 
