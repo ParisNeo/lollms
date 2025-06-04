@@ -10,6 +10,7 @@ import asyncio
 import threading
 import traceback
 import io
+from ascii_colors import trace_exception, ASCIIColors
 
 # Third-Party Imports
 import toml
@@ -356,77 +357,6 @@ async def chat_in_existing_discussion(
     )
 
     extra_content = ""
-    sources=[]
-    if use_rag and safe_store:
-        if not rag_datastore_id:
-            rag_datastore_id = discussion_obj.rag_datastore_id
-            if not rag_datastore_id:
-                # Fallback to user's default datastore is not implemented here,
-                # user_sessions[username].get("active_vectorizer") is actually the default vectorizer name, not datastore_id.
-                # For RAG, a datastore must be selected for the discussion or explicitly passed.
-                print(f"WARNING: RAG requested by {username} but no datastore specified for discussion.")
-
-        if rag_datastore_id:
-            try:
-                ss = get_safe_store_instance(username, rag_datastore_id, db)
-                # User's default vectorizer from their settings or global default.
-                # This is for querying; documents are added with a specific vectorizer.
-                # SafeStore can query using any vectorizer it has embeddings for.
-                # If not specified, SafeStore might use its own default or the one most docs are vectorized with.
-                # For now, let's rely on SafeStore's internal logic if vectorizer_name is None for query.
-                # Or, use the user's preferred one IF the datastore has it.
-                active_vectorizer_for_store = user_sessions[username].get("active_vectorizer") # This is the name of vectorizer model, not datastore
-                
-                # Let's generate a more focused RAG query
-                rag_query_prompt = f"Based on the user's question: '{prompt}', formulate a concise search query to find relevant information in a document database. The query should be a few keywords or a short natural language question. Output only the search query itself. The query must ask questions about possible elemnts that can be relevant to answer the question and is not an exact transcription of the user request"
-                try:
-                    # Note: LollmsClient.generate_text might be better than generate_code for this type of query generation
-                    # For simplicity, using existing structure. Revisit if query generation is poor.
-                    # This call needs to be non-streaming.
-                    query = lc.remove_thinking_blocks(lc.generate_text(prompt=rag_query_prompt,system_prompt="/no_think", stream=False, n_predict=250)) # Assuming generate_text is available and non-streaming works
-                    if isinstance(query, dict) and "generated_text" in query: # Adjust if LollmsClient non-stream returns differently
-                        query = query["generated_text"].strip()
-                    elif not isinstance(query, str): # Fallback if generate_text returns something unexpected
-                         query = prompt # Use original prompt as fallback query
-                    print(f"INFO: Generated RAG query: '{query}'")
-                except Exception as e_query_gen:
-                    print(f"ERROR: Failed to generate RAG query: {e_query_gen}. Using original prompt as query.")
-                    query = prompt
-
-
-                max_rag_len, current_rag_len, rag_min_sim_percent = current_user.max_rag_len if current_user.max_rag_len else 80000, 0, current_user.rag_min_sim_percent or 0
-                with ss: rag_results = ss.query(query, vectorizer_name=active_vectorizer_for_store, top_k=current_user.rag_top_k if current_user.rag_top_k else 5, min_similarity_percent = rag_min_sim_percent if rag_min_sim_percent else 0) # Use user's default vectorizer for querying
-                if rag_results:
-                    context_str = "\n\nRelevant context from documents:\n"; 
-                    for i, res in enumerate(rag_results):
-                        chunk_text = res.get('chunk_text','');
-                        similarity_percent = res.get('similarity_percent',100)
-                        if similarity_percent>=rag_min_sim_percent:
-                            file_name = Path(res.get('file_path','?')).name
-                            if current_rag_len + len(chunk_text) > max_rag_len and i > 0: 
-                                context_str += f"... (truncated {len(rag_results) - i} more results)\n"; break
-                            context_str += f"{i+1}. From '{file_name}': {chunk_text}\n"; 
-                            current_rag_len += len(chunk_text); 
-                            sources.append({
-                                            "document":file_name, 
-                                            "similarity": similarity_percent, 
-                                            "content": chunk_text
-                                            })
-                    extra_content = ( f"Answer the user's question based *only* on the following context:\n{context_str.strip()}\n\n"
-                                       "Cite sources by filename if multiple are present."
-                                      ) # Simplified RAG instruction
-
-                else:
-                    extra_content = "Important information from the system: RAG Failed to extract relevant text from the provided datastore. Tell the user about this incident."
-                    print(f"INFO: RAG query for '{query}' on datastore {rag_datastore_id} yielded no results.")
-            except HTTPException as e_rag_access: 
-                print(f"INFO: RAG query skipped for {username} on datastore {rag_datastore_id}: {e_rag_access.detail}")
-            except Exception as e: 
-                print(f"ERROR: RAG query failed for {username} on datastore {rag_datastore_id}: {e}")
-                traceback.print_exc()
-        else: print(f"WARNING: RAG requested by {username} but no RAG datastore selected for this discussion.")
-    elif use_rag and not safe_store: print(f"WARNING: RAG requested by {username} but safe_store is not available.")
-
 
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
@@ -439,7 +369,6 @@ async def chat_in_existing_discussion(
         "binding_name": None, 
         "model_name": None,
         "stop_event": stop_event,
-        "sources":sources
     }
 
     if username not in user_sessions: user_sessions[username] = {} 
@@ -448,7 +377,7 @@ async def chat_in_existing_discussion(
     async def stream_generator() -> AsyncGenerator[str, None]:
         generation_thread: Optional[threading.Thread] = None 
         
-        def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict[str, Any]] = None) -> bool:
+        def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict[str, Any]] = None, turn_history: Optional[List] = None) -> bool:
             if shared_state["stop_event"].is_set():
                 stop_message_payload = json.dumps({"type": "info", "content": "Generation stopped by user."}) + "\n"
                 if main_loop.is_running(): 
@@ -461,10 +390,33 @@ async def chat_in_existing_discussion(
             if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
                 shared_state["accumulated_ai_response"] += chunk
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "chunk", "content": chunk}) + "\n")
-            elif msg_type in (MSG_TYPE.MSG_TYPE_EXCEPTION, MSG_TYPE.MSG_TYPE_ERROR):
+            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_START:
+                step_type = params.get("type", "step")
+                hop = params.get("hop", "")
+                info = params.get("query", chunk) if step_type == "rag_query_generation" or step_type == "rag_retrieval" else chunk
+                ASCIIColors.yellow(f"\n>> RAG Step Start (Hop {hop}): {step_type} - Info: {str(info)[:100]}...", flush=True)
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step", "content": chunk +"\n"}) + "\n")
+            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_END:
+                step_type = params.get("type", "step")
+                hop = params.get("hop", "")
+                num_chunks = params.get("num_chunks", "")
+                query = params.get("query", "")
+                decision = params.get("decision", "")
+                
+                info_str = ""
+                if step_type == "rag_query_generation" and query: info_str = f"Generated Query: {query}"
+                elif step_type == "rag_retrieval": info_str = f"Retrieved {num_chunks} chunks"
+                elif step_type == "rag_llm_decision": info_str = f"LLM Decision: {json.dumps(decision)}"
+                elif step_type == "final_answer_generation": info_str = "Final answer generation complete."
+                else: info_str = chunk
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step", "content": chunk +"\n"}) + "\n")
+
+                ASCIIColors.green(f"\n<< RAG Step End (Hop {hop}): {step_type} - {info_str}", flush=True)
+
+            elif msg_type in (MSG_TYPE.MSG_TYPE_EXCEPTION, MSG_TYPE.MSG_TYPE_EXCEPTION):
                 err_content = f"LLM Error: {str(chunk)}"
                 shared_state["generation_error"] = err_content
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_content}) + "\n")
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_content +"\n"}) + "\n")
                 return False
             elif msg_type == MSG_TYPE.MSG_TYPE_FULL_INVISIBLE_TO_USER:
                 if params and "final_message_id" in params: shared_state["final_message_id"] = params["final_message_id"]
@@ -473,8 +425,8 @@ async def chat_in_existing_discussion(
 
         try: 
             
-            
-            def blocking_call():
+            sources =[]
+            def blocking_call(rag_datastore_id, sources):
                 try:
                     # Fetch active personality prompt from user's session
                     active_personality_prompt_text = user_sessions[username].get("active_personality_prompt")
@@ -491,17 +443,68 @@ async def chat_in_existing_discussion(
                     if not user_puts_thoughts_in_context:
                         main_prompt_content = lc.remove_thinking_blocks(main_prompt_content)
                     
-                    # Call generate_text with the separate system_prompt parameter
-                    lc.generate_text(
-                        prompt=main_prompt_content,
-                        system_prompt=active_personality_prompt_text, # Pass system prompt here
-                        images=llm_image_paths, 
-                        stream=True, 
-                        streaming_callback=llm_callback,
-                        split=True
-                        # Other parameters like temperature, top_k, etc., are assumed to be set
-                        # on the LollmsClient instance itself or can be overridden here if needed.
-                    )
+
+                    if use_rag and safe_store:
+                        if not rag_datastore_id:
+                            rag_datastore_id = discussion_obj.rag_datastore_id
+                            if not rag_datastore_id:
+                                # Fallback to user's default datastore is not implemented here,
+                                # user_sessions[username].get("active_vectorizer") is actually the default vectorizer name, not datastore_id.
+                                # For RAG, a datastore must be selected for the discussion or explicitly passed.
+                                print(f"WARNING: RAG requested by {username} but no datastore specified for discussion.")
+
+                        if rag_datastore_id:
+                            try:
+                                ss = get_safe_store_instance(username, rag_datastore_id, db)
+                                # User's default vectorizer from their settings or global default.
+                                # This is for querying; documents are added with a specific vectorizer.
+                                # SafeStore can query using any vectorizer it has embeddings for.
+                                # If not specified, SafeStore might use its own default or the one most docs are vectorized with.
+                                # For now, let's rely on SafeStore's internal logic if vectorizer_name is None for query.
+                                # Or, use the user's preferred one IF the datastore has it.
+                                active_vectorizer_for_store = user_sessions[username].get("active_vectorizer") # This is the name of vectorizer model, not datastore                    
+                                classic_rag_result = lc.generate_text_with_rag(
+                                        prompt=main_prompt_content,
+                                        system_prompt=active_personality_prompt_text,
+                                        rag_query_function=ss.query,
+                                        rag_vectorizer_name=active_vectorizer_for_store,
+                                        # rag_query_text=None, # Will use `prompt` for query
+                                        max_rag_hops=2,
+                                        rag_top_k=current_user.rag_top_k if current_user.rag_top_k  else 10, # Get 2 best chunks
+                                        rag_min_similarity_percent=current_user.rag_min_sim_percent if current_user.rag_min_sim_percent  else 0,
+                                        stream=True,
+                                        streaming_callback=llm_callback,
+                                        n_predict=1024 # Max tokens for final answer
+                                    )
+                                sources+=classic_rag_result["all_retrieved_sources"]
+                                print(classic_rag_result["final_answer"])
+                            except Exception as ex:
+                                trace_exception(ex)
+                        else:
+                            # Call generate_text with the separate system_prompt parameter
+                            lc.generate_text(
+                                prompt=main_prompt_content,
+                                system_prompt=active_personality_prompt_text, # Pass system prompt here
+                                images=llm_image_paths, 
+                                stream=True, 
+                                streaming_callback=llm_callback,
+                                split=True
+                                # Other parameters like temperature, top_k, etc., are assumed to be set
+                                # on the LollmsClient instance itself or can be overridden here if needed.
+                            )
+
+                    else:
+                        # Call generate_text with the separate system_prompt parameter
+                        lc.generate_text(
+                            prompt=main_prompt_content,
+                            system_prompt=active_personality_prompt_text, # Pass system prompt here
+                            images=llm_image_paths, 
+                            stream=True, 
+                            streaming_callback=llm_callback,
+                            split=True
+                            # Other parameters like temperature, top_k, etc., are assumed to be set
+                            # on the LollmsClient instance itself or can be overridden here if needed.
+                        )
                 except Exception as e_gen:
                     err_msg = f"LLM generation failed: {str(e_gen)}"
                     shared_state["generation_error"] = err_msg
@@ -512,7 +515,7 @@ async def chat_in_existing_discussion(
                     if main_loop.is_running():
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, None) 
             
-            generation_thread = threading.Thread(target=blocking_call, daemon=True)
+            generation_thread = threading.Thread(target=blocking_call, args=[rag_datastore_id, sources], daemon=True)
             generation_thread.start()
 
             while True:
