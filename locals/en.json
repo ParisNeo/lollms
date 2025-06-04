@@ -269,5 +269,9 @@
     "rename_input_label": "New discussion title:",
     "rename_input_placeholder": "Enter new title",
     "edit_message_modal_title": "Edit Message",
-    "edit_message_input_label": "Message content:"
+    "edit_message_input_label": "Message content",
+    "settings_rag_param_topk_label": "RAG Top K",
+    "settings_rag_param_max_rag_len_label": "Maximum RAG Length (in characters)",
+    "settings_rag_param_nhops_label": "Maximum number of RAG Hops",
+    "settings_rag_param_min_sim_percent_label": "RAG Min similarity %"
 }

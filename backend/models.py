@@ -81,7 +81,7 @@ class UserAuthDetails(UserLLMParams):
     # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
-    rag_n_hops: Optional[int] = Field(None, ge=0)
+    rag_n_hops: Optional[int] = Field(None, ge=1)
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: bool = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
@@ -105,7 +105,7 @@ class UserCreateAdmin(UserLLMParams):
     # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
-    rag_n_hops: Optional[int] = Field(None, ge=0)
+    rag_n_hops: Optional[int] = Field(None, ge=1)
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: Optional[bool] = False # Optional on create, will default in DB
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
@@ -281,7 +281,7 @@ class UserUpdate(BaseModel):
     # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
-    rag_n_hops: Optional[int] = Field(None, ge=0)
+    rag_n_hops: Optional[int] = Field(None, ge=1)
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: Optional[bool] = None
     rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")    

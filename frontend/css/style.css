@@ -1189,9 +1189,21 @@ aside #adminBadge {
 /* .modal .btn-secondary { background-color: #e5e7eb; color: #1f2937; border-color: #d1d5db; } */
 
 /* RAG Source Modal (specific styling if needed beyond general modal) */
-.source-modal-overlay { /* This is the .modal class itself if it's a RAG source modal */
-    /* General .modal styles apply */
+.source-modal-overlay {
+    position: fixed;           /* Stay in place */
+    top: 0;
+    left: 0;
+    width: 100vw;              /* Full width */
+    height: 100vh;             /* Full height */
+    background-color: rgba(0, 0, 0, 0.5); /* Optional: semi-transparent background */
+    z-index: 9999;             /* Ensure it's above other elements */
+    display: flex;             /* Flex to center content */
+    justify-content: center;
+    align-items: center;
+    backdrop-filter: blur(4px);
+    transition: opacity 0.3s ease;
 }
+
 .source-modal-content { /* This is .modal-content for RAG source */
     max-width: 42rem; /* Wider for content */
 }

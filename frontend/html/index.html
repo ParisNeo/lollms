@@ -195,7 +195,7 @@
 
     <div id="modalsContainer">
         <!-- Rename Modal -->
-        <div id="renameModal" class="modal hidden">
+        <div id="renameModal" class="modal">
             <div class="modal-content">
                 <h2 class="modal-title" id="renameModalTitle">Rename Discussion</h2>
                 <div class="modal-body">
@@ -645,11 +645,15 @@
                                 <input type="number" id="settingsRagTopK" step="1" min="1" class="mt-1 block w-full sm:text-sm" placeholder="e.g., 10">
                             </div>
                             <div>
-                                <label for="settingsRagMAXLEN" class="block text-sm font-medium" data-translate-key="settings_rag_param_topk_label">Maximum RAG Length (in characters)</label>
+                                <label for="settingsRagMAXLEN" class="block text-sm font-medium" data-translate-key="settings_rag_param_max_rag_len_label">Maximum RAG Length (in characters)</label>
                                 <input type="number" id="settingsRagMAXLEN" step="1" min="1" class="mt-1 block w-full sm:text-sm" placeholder="e.g., 80000">
                             </div>
                             <div>
-                                <label for="settingsRagMinSimPercent" class="block text-sm font-medium" data-translate-key="settings_rag_param_topk_label">RAG Min similarity %</label>
+                                <label for="settingsRagNBHops" class="block text-sm font-medium" data-translate-key="settings_rag_param_nhops_label">Maximum RAG Hops</label>
+                                <input type="number" id="settingsRagNBHops" step="1" min="0" class="mt-1 block w-full sm:text-sm" placeholder="e.g., 0">
+                            </div>
+                            <div>
+                                <label for="settingsRagMinSimPercent" class="block text-sm font-medium" data-translate-key="settings_rag_param_min_sim_percent_label">RAG Min similarity %</label>
                                 <input type="number" id="settingsRagMinSimPercent" step="1" min="1" class="mt-1 block w-full sm:text-sm" placeholder="e.g., 50 for 50%">
                             </div>
                             <div>

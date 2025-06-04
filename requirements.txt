@@ -13,7 +13,7 @@ python-jose[cryptography]
 python-multipart
 
 # --- LoLLMs Client Library and Common Backends ---
-lollms-client>=0.17.1
+lollms-client>=0.19.2
 ascii_colors>0.11.0
 pipmaster
 
@@ -38,7 +38,7 @@ pydantic[email] #for email validation
 # - pypdf, python-docx, beautifulsoup4, lxml (for document parsing)
 # - cryptography (for encryption)
 # - filelock (core concurrency mechanism for safe_store)
-safe_store[all]>=1.6.2
+safe_store[all]>=2.2.1
 lollmsvectordb
 wcwidth
 # If you prefer to install safe_store features individually:

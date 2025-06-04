@@ -462,21 +462,24 @@ async def chat_in_existing_discussion(
                                 # If not specified, SafeStore might use its own default or the one most docs are vectorized with.
                                 # For now, let's rely on SafeStore's internal logic if vectorizer_name is None for query.
                                 # Or, use the user's preferred one IF the datastore has it.
+                                def rqf(query, vectorizer_name, top_k, min_similarity_percent):
+                                    results = ss.query(query, vectorizer_name, top_k, min_similarity_percent)
+                                    return [{"file_path":Path(r["file_path"]).name,"similarity_percent":r["similarity_percent"],"chunk_text":r["chunk_text"]} for r in results]
                                 active_vectorizer_for_store = user_sessions[username].get("active_vectorizer") # This is the name of vectorizer model, not datastore                    
                                 classic_rag_result = lc.generate_text_with_rag(
                                         prompt=main_prompt_content,
                                         system_prompt=active_personality_prompt_text,
-                                        rag_query_function=ss.query,
+                                        rag_query_function=rqf,
                                         rag_vectorizer_name=active_vectorizer_for_store,
                                         # rag_query_text=None, # Will use `prompt` for query
-                                        max_rag_hops=2,
+                                        max_rag_hops=current_user.rag_n_hops if current_user.rag_n_hops else 1,
                                         rag_top_k=current_user.rag_top_k if current_user.rag_top_k  else 10, # Get 2 best chunks
                                         rag_min_similarity_percent=current_user.rag_min_sim_percent if current_user.rag_min_sim_percent  else 0,
                                         stream=True,
                                         streaming_callback=llm_callback,
-                                        n_predict=1024 # Max tokens for final answer
                                     )
-                                sources+=classic_rag_result["all_retrieved_sources"]
+                                sources+=[{"document":Path(r["document"]).name,"similarity":r["similarity"],"content":r["content"]} for r in classic_rag_result["all_retrieved_sources"]]
+
                                 print(classic_rag_result["final_answer"])
                             except Exception as ex:
                                 trace_exception(ex)

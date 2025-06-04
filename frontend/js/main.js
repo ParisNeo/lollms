@@ -194,6 +194,8 @@ const settingsPutThoughts = document.getElementById('settingsPutThoughts'); // F
 
 const settingsRagTopK = document.getElementById('settingsRagTopK');
 const settingsRagMAXLEN = document.getElementById('settingsRagMAXLEN');
+const settingsRagNBHops = document.getElementById('settingsRagNBHops');
+
 const settingsRagMinSimPercent = document.getElementById('settingsRagMinSimPercent');
 
 const settingsRagUseGraph = document.getElementById('settingsRagUseGraph');
@@ -590,6 +592,7 @@ window.onload = async () => {
 
     // For RAG Params Tab
     if (settingsRagTopK) settingsRagTopK.oninput = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
+    if (settingsRagNBHops) settingsRagNBHops.oninput = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
     if (settingsRagMAXLEN) settingsRagMAXLEN.oninput = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
     if (settingsRagMinSimPercent) settingsRagMinSimPercent.oninput = () => { if(saveRagParamsBtn) saveRagParamsBtn.disabled = false; };
     if (settingsRagUseGraph) {
@@ -835,7 +838,7 @@ function handleClickOutsideUserMenu(event) {
     }
 }
 
-// --- Login and Logout ---
+
 // --- Authentication Logic ---
 async function handleLoginAttempt() {
     console.log("Attempting JWT login");
@@ -867,10 +870,7 @@ async function handleLoginAttempt() {
             showStatus(translate('login_successful_status', "Login successful! Loading your data..."), "success", loginStatus);
             // Now that token is stored, attempt to load user data and initialize app
             await attemptInitialAuthAndLoad(); // This function will now use the token via apiRequest
-            openModal('loginModal', false); // Close login modal on success
-            appContainer.style.display = 'block'; // Or your main app display style
-            appLoadingMessage.style.display = 'none';
-            closeModal("loginModal")
+            window.location.reload();
         } else {
             // Should be caught by apiRequest's !response.ok if server returns non-200
             // but as a safeguard:
@@ -979,7 +979,6 @@ async function handleLogout() {
         discussionListContainer.innerHTML = `<p class="text-gray-500 text-sm text-center italic p-4">${translate('login_required_placeholder')}</p>`;
         clearChatArea(true);
         sendMessageBtn.disabled = true;
-        // ... (the rest of your UI reset code) ...
 
         appContainer.style.display = 'none';
         // appLoadingMessage.style.opacity = '1'; // This might be your login screen container
@@ -996,9 +995,7 @@ async function handleLogout() {
             "info",
             loginStatus
         );
-        openModal('loginModal', false); // Show login modal after logout
-        console.log("UI reset, showing login modal.");
-        // window.location.reload(); // Reload can be an option for a very thorough reset,
+        window.location.reload(); // Reload can be an option for a very thorough reset,
                                    // but a good SPA reset should make it unnecessary.
                                    // If you keep it, it ensures no old state lingers.
     }
@@ -1082,6 +1079,7 @@ async function loadDiscussions() {
 }
 function initiateInlineRename(id) {
     console.log("Initialize")
+    console.log(id)
     const discussion = discussions[id];
     if (!discussion) return;
 
@@ -1094,8 +1092,9 @@ function initiateInlineRename(id) {
     renameInput.value = discussion.title;
     renameDiscussionIdInput.value = id;
 
+    console.log("Showing rename modal")
     // Show the modal
-    openModal("renameModal");
+    openModal("renameModal", false);
 
     // Event listener for the confirm button
     confirmRenameBtn.onclick = async () => {
@@ -4092,6 +4091,8 @@ async function populateSettingsModal() {
     // RAG Parameters Tab
     if(settingsRagTopK) settingsRagTopK.value = currentUser.rag_top_k ?? '';
     if(settingsRagMAXLEN) settingsRagMAXLEN.value = currentUser.max_rag_len ?? '';
+    if(settingsRagNBHops) settingsRagNBHops.value = currentUser.rag_n_hops ?? '';
+    
     if(settingsRagMinSimPercent) settingsRagMinSimPercent.value = currentUser.rag_min_sim_percent ?? '';
     
     if(settingsRagUseGraph) settingsRagUseGraph.checked = currentUser.rag_use_graph || false;
@@ -4307,6 +4308,7 @@ async function handleSaveRagParams() {
     const payload = {
         rag_top_k: parseInt(settingsRagTopK.value) || null,
         max_rag_len: parseInt(settingsRagMAXLEN.value) || null,
+        rag_n_hops: parseInt(settingsRagNBHops.value) || null,
         rag_min_sim_percent: parseFloat(settingsRagMinSimPercent.value) || null,
         rag_use_graph: settingsRagUseGraph.checked,
         rag_graph_response_type: settingsRagGraphResponseType.value,
