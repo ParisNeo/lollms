@@ -1,3 +1,7 @@
+# $schema: ./schemas/config.schema.json
+# This file is compatible with the parisneo toml hilighter extension for vscode:
+# https://marketplace.visualstudio.com/items?itemName=parisneo.toml-hilighter&ssr=false#overview
+# This uses a schema to enforce the inputs
 # config.toml
 [server]
 host = "0.0.0.0"
@@ -6,8 +10,8 @@ port = "9642"
 [app_settings]
 data_dir = "data"  # For user-specific discussion files and SafeStore DBs
 database_url = "sqlite:///./data/app_main.db" # Central SQLite DB for users and app settings
-secret_key = "a_very_secret_key_for_flask_sessions_or_jwt" # For potential future session/token use
-access_token_expires_mintes = 30 # How many minutes the access token stays alive after last use
+secret_key = "a_very_secret_key_for_flask_sessions_or_jwt" # For session/token use
+access_token_expires_mintes = 44640 # How many minutes the access token stays alive after last use (44640 = 1 month)
 
 # Initial admin user to be created in the database if it doesn't exist.
 # The password here should be the PLAIN TEXT password you want for the first admin.
@@ -43,8 +47,8 @@ ai_name = "assistant" # Default name for the AI in prompts
 # top_p = 0.95 # Optional: Default top_p
 
 [safe_store_defaults] # Global defaults
-chunk_size = 4096 # characters (as safestore make no assumptions about the LLM)
-chunk_overlap = 200 # characters (as safestore make no assumptions about the LLM)
+chunk_size = 2096 # characters (as safestore make no assumptions about the LLM)
+chunk_overlap = 150 # characters (as safestore make no assumptions about the LLM)
 # Default vectorizer if not set per user. Users can override this.
 global_default_vectorizer = "st:all-MiniLM-L6-v2" # Example Sentence Transformer model
 # Global encryption key for user SafeStores.

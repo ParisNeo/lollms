@@ -89,8 +89,8 @@ TEMP_UPLOADS_DIR_NAME = "temp_uploads"
 DISCUSSION_ASSETS_DIR_NAME = "discussion_assets"
 DATASTORES_DIR_NAME = "safestores"
 ALGORITHM = "HS256"
-SECRET_KEY = config.get("secret_key", os.environ.get("LOLLMS_SECRET_KEY","Some key"))
-ACCESS_TOKEN_EXPIRE_MINUTES = config.get("access_token_expires_mintes", os.environ.get("LOLLMS_ACCESS_TOKEN_EXPIRES_MINUTES", 30))
+SECRET_KEY = APP_SETTINGS.get("secret_key", os.environ.get("LOLLMS_SECRET_KEY","Some key"))
+ACCESS_TOKEN_EXPIRE_MINUTES = APP_SETTINGS.get("access_token_expires_mintes", os.environ.get("LOLLMS_ACCESS_TOKEN_EXPIRES_MINUTES", 30))
 
 
 

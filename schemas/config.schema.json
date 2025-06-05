@@ -1,0 +1,170 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Configuration Schema for LoLLMs WebUI Fork",
+  "description": "Schema for the config.toml file.",
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "object",
+      "description": "Server settings for the web application.",
+      "properties": {
+        "host": {
+          "type": "string",
+          "format": "hostname",
+          "description": "Host address to bind the server to (e.g., '0.0.0.0' for all interfaces)."
+        },
+        "port": {
+          "type": "string",
+          "pattern": "^[0-9]+$",
+          "description": "Port number for the server (as a string)."
+        }
+      },
+      "required": ["host", "port"],
+      "additionalProperties": false
+    },
+    "app_settings": {
+      "type": "object",
+      "description": "General application settings.",
+      "properties": {
+        "data_dir": {
+          "type": "string",
+          "description": "Directory for user-specific discussion files and SafeStore DBs."
+        },
+        "database_url": {
+          "type": "string",
+          "format": "uri",
+          "description": "Connection URL for the central SQLite database."
+        },
+        "secret_key": {
+          "type": "string",
+          "description": "Secret key for Flask sessions or JWT tokens."
+        },
+        "access_token_expires_mintes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Access token expiration time in minutes."
+        }
+      },
+      "required": ["data_dir", "database_url", "secret_key", "access_token_expires_mintes"],
+      "additionalProperties": false
+    },
+    "initial_admin_user": {
+      "type": "object",
+      "description": "Credentials for the initial admin user to be created.",
+      "properties": {
+        "username": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Username for the initial admin."
+        },
+        "password": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Plain text password for the initial admin (will be hashed)."
+        }
+      },
+      "required": ["username", "password"],
+      "additionalProperties": false
+    },
+    "lollms_client_defaults": {
+      "type": "object",
+      "description": "Global default settings for the LoLLMs client.",
+      "properties": {
+        "binding_name": {
+          "type": "string",
+          "description": "Name of the LoLLMs binding to use (e.g., 'ollama', 'llamacpp').",
+          "enum": ["ollama", "openai", "lollms", "transformers", "llamacpp"]
+        },
+        "default_model_name": {
+          "type": "string",
+          "description": "Default model name for the selected binding."
+        },
+        "models_path": {
+          "type": "string",
+          "description": "Path to models, typically for local bindings like 'llamacpp'."
+        },
+        "host_address": {
+          "type": "string",
+          "format": "uri-reference",
+          "description": "Host address for the LLM service (e.g., Ollama URL, OpenAI API endpoint)."
+        },
+        "service_key_env_var": {
+          "type": "string",
+          "description": "Environment variable name holding the API key (e.g., 'OPENAI_API_KEY')."
+        },
+        "ctx_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default context size for the LLM."
+        },
+        "user_name": {
+          "type": "string",
+          "description": "Default name for the user in prompts."
+        },
+        "ai_name": {
+          "type": "string",
+          "description": "Default name for the AI in prompts."
+        },
+        "temperature": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2,
+          "description": "Optional: Default temperature for generation."
+        },
+        "top_k": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Optional: Default top_k for generation."
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Optional: Default top_p for generation."
+        }
+      },
+      "required": [
+        "binding_name",
+        "default_model_name",
+        "ctx_size",
+        "user_name",
+        "ai_name"
+      ],
+      "additionalProperties": false
+    },
+    "safe_store_defaults": {
+      "type": "object",
+      "description": "Global default settings for the SafeStore.",
+      "properties": {
+        "chunk_size": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Default chunk size in characters for SafeStore."
+        },
+        "chunk_overlap": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Default chunk overlap in characters for SafeStore."
+        },
+        "global_default_vectorizer": {
+          "type": "string",
+          "description": "Default vectorizer model name (e.g., a Sentence Transformer model)."
+        },
+        "encryption_key": {
+          "type": ["string", "null"],
+          "description": "Global encryption key for SafeStores. Null or omit to disable."
+        }
+      },
+      "required": ["chunk_size", "chunk_overlap", "global_default_vectorizer"],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "server",
+    "app_settings",
+    "initial_admin_user",
+    "lollms_client_defaults",
+    "safe_store_defaults"
+  ],
+  "additionalProperties": false
+}
