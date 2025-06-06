@@ -337,6 +337,57 @@ aside #adminBadge {
 }
 .dark #userMenuDropdown hr.my-1 { border-color: #374151; }
 
+.hljs-keyword{
+    color: rgb(47, 80, 45)
+}
+
+.dark .hljs-keyword{
+    color: rgb(186, 241, 182)
+}
+
+.hljs-number{
+    color: rgb(47, 80, 45)
+}
+
+
+
+.dark .hljs-number{
+    color: rgb(186, 241, 182)
+}
+
+
+.hljs-string{
+    color: rgb(54, 107, 52)
+}
+
+hljs-string
+
+.dark .hljs-string{
+    color: rgb(186, 241, 182)
+}
+
+.hljs-title{
+    color: rgb(60, 64, 89)
+}
+.dark .hljs-title{
+    color: rgb(191, 198, 243)
+}
+
+.hljs-built_in{
+    color: rgb(60, 64, 89)
+}
+.dark .hljs-built_in{
+    color: rgb(191, 198, 243)
+}
+
+.hljs-comment{
+    color: rgb(60, 64, 89)
+}
+.dark .hljs-comment{
+    color: rgb(191, 198, 243)
+}
+
+
 /* ==========================================================================
    3. Chat Area & Message Styling
    ========================================================================== */
@@ -551,6 +602,7 @@ aside #adminBadge {
     overflow-x: auto;
     font-size: 0.85rem;
     background-color: rgba(0,0,0,0.05);
+    color: #111827;
     font-family: 'Fira Code', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
 }
 .dark .message-bubble pre.simple-code {
@@ -659,22 +711,31 @@ aside #adminBadge {
    4. Code Blocks & Output
    ========================================================================== */
 
-/* Enhanced Code Block (uses CSS Variables) */
-.code-block-container {
-    margin: 1rem 0;
+/* Shared Styles */
+.code-block-container,
+.code-block-wrapper {
     border-radius: 0.75rem;
     overflow: hidden;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
     font-family: 'Fira Code', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
-    background: var(--code-bg-light);
-    border: 1px solid var(--code-border-light);
-    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05); /* Subtle shadow */
-}
-.dark .code-block-container {
-    background: var(--code-bg-dark);
-    border: 1px solid var(--code-border-dark);
+    box-sizing: border-box;
 }
 
-.code-block-container .code-block-header {
+/* Light Theme Container */
+.code-block-container {
+    margin: 1rem 0;
+    background: var(--code-bg-light);
+    border: 1px solid var(--code-border-light);
+}
+
+/* Dark Theme Container */
+.dark .code-block-container {
+    background: var(--code-bg-dark);
+    border-color: var(--code-border-dark);
+}
+
+/* Header Shared */
+.code-block-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -682,24 +743,30 @@ aside #adminBadge {
     border-bottom: 1px solid var(--code-border-light);
     background: var(--code-header-bg-light);
 }
-.dark .code-block-container .code-block-header {
-    border-bottom: 1px solid var(--code-border-dark);
+
+.dark .code-block-header {
+    border-bottom-color: var(--code-border-dark);
     background: var(--code-header-bg-dark);
 }
 
-.code-block-container .code-language {
+/* Language Label */
+.code-language {
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--code-header-text-light);
 }
-.dark .code-block-container .code-language {
+
+.dark .code-language {
     color: var(--code-header-text-dark);
 }
 
-.code-block-container .code-copy-btn {
-    display: flex; align-items: center; gap: 0.25rem;
+/* Copy Button */
+.code-copy-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
     padding: 0.25rem 0.5rem;
     border-radius: 0.375rem;
     font-size: 0.75rem;
@@ -709,142 +776,153 @@ aside #adminBadge {
     border: 1px solid var(--code-copy-btn-border-light);
     color: var(--code-copy-btn-text-light);
 }
-.dark .code-block-container .code-copy-btn {
+
+.dark .code-copy-btn {
     background: var(--code-copy-btn-bg-dark);
-    border: 1px solid var(--code-copy-btn-border-dark);
+    border-color: var(--code-copy-btn-border-dark);
     color: var(--code-copy-btn-text-dark);
 }
-.code-block-container .code-copy-btn:hover {
+
+.code-copy-btn:hover {
     background: var(--code-copy-btn-hover-bg-light);
     border-color: var(--code-copy-btn-hover-border-light);
 }
-.dark .code-block-container .code-copy-btn:hover {
+
+.dark .code-copy-btn:hover {
     background: var(--code-copy-btn-hover-bg-dark);
     border-color: var(--code-copy-btn-hover-border-dark);
 }
-.code-block-container .code-copy-btn.copied {
+
+.code-copy-btn.copied {
     background: var(--code-copy-btn-copied-bg-light);
     border-color: var(--code-copy-btn-copied-border-light);
     color: var(--code-copy-btn-copied-text-light);
 }
-.dark .code-block-container .code-copy-btn.copied {
-    background: #22c55e; /* Tailwind green-500 */
-    border-color: #16a34a; /* Tailwind green-600 */
+
+.dark .code-copy-btn.copied {
+    background: #22c55e;
+    border-color: #16a34a;
     color: white;
 }
-.code-block-container .code-copy-btn svg {
-    width: 0.875rem; height: 0.875rem; /* 14px */
+
+.code-copy-btn svg {
+    width: 14px;
+    height: 14px;
 }
 
-
-.code-block-container .code-block { /* The actual <pre> or <code> with code */
+/* Code Block */
+.code-block {
     margin: 0;
     padding: 1rem;
     font-size: 0.875rem;
-    line-height: 1.6; /* Consistent line height */
+    line-height: 1.6;
     overflow-x: auto;
     color: var(--code-text-light);
-    background: var(--code-bg-light); /* Ensure pre/code also has this bg */
+    background: var(--code-bg-light);
 }
-.dark .code-block-container .code-block {
+
+.dark .code-block {
     color: var(--code-text-dark);
     background: var(--code-bg-dark);
 }
 
-/* Simpler Code Block Wrapper (if used for non-highlighted <pre> or basic formatting) */
+/* Wrapper for Basic Blocks */
 .code-block-wrapper {
     margin-bottom: 1rem;
+    border: 1px solid #e5e7eb;
     border-radius: 0.375rem;
-    overflow: hidden;
-    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); /* shadow-md */
-    border: 1px solid #e5e7eb; /* border border-gray-200 */
-}
-.dark .code-block-wrapper {
-    border-color: #374151; /* dark:border-gray-700 */
 }
 
-.code-block-wrapper .code-block-header { /* Scoped to this wrapper */
+.dark .code-block-wrapper {
+    border-color: #374151;
+}
+
+.code-block-wrapper .code-block-header {
     padding: 0.5rem 0.75rem;
     font-size: 0.8em;
     font-weight: 500;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background-color: #f3f4f6; /* bg-gray-100 */
-    color: #374151; /* text-gray-700 */
-    border-bottom: 1px solid #d1d5db; /* border-b border-gray-300 */
-}
-.dark .code-block-wrapper .code-block-header {
-    background-color: #1f2937; /* dark:bg-gray-800 */
-    color: #d1d5db; /* dark:text-gray-300 */
-    border-bottom-color: #374151; /* dark:border-gray-700 */
+    background-color: #f3f4f6;
+    color: #374151;
+    border-bottom: 1px solid #d1d5db;
 }
 
-.code-block-wrapper .code-block-buttons button {
-    border: 1px solid #d1d5db; /* border-gray-300 */
+.dark .code-block-wrapper .code-block-header {
+    background-color: #1f2937;
+    color: #d1d5db;
+    border-bottom-color: #374151;
+}
+
+/* Buttons Inside Wrapper */
+.code-block-buttons button {
+    border: 1px solid #d1d5db;
     padding: 0.25rem 0.5rem;
     font-size: 0.75em;
-    cursor: pointer;
     border-radius: 0.25rem;
     margin-left: 0.5rem;
+    cursor: pointer;
     transition: background-color 0.2s;
-    background-color: #e5e7eb; /* bg-gray-200 */
-    color: #374151; /* text-gray-700 */
+    background-color: #e5e7eb;
+    color: #374151;
 }
-.code-block-wrapper .code-block-buttons button:hover {
-    background-color: #d1d5db; /* hover:bg-gray-300 */
-}
-.dark .code-block-wrapper .code-block-buttons button {
-    background-color: #374151; /* dark:bg-gray-700 */
-    border-color: #4b5563; /* dark:border-gray-600 */
-    color: #e5e7eb; /* dark:text-gray-200 */
-}
-.dark .code-block-wrapper .code-block-buttons button:hover {
-    background-color: #4b5563; /* dark:hover:bg-gray-600 */
-}
-.code-block-wrapper .code-block-buttons button svg { vertical-align: middle; }
 
-/* Styling for <pre> tags, potentially within .message-content.prose or .code-block-wrapper */
+.code-block-buttons button:hover {
+    background-color: #d1d5db;
+}
+
+.dark .code-block-buttons button {
+    background-color: #374151;
+    border-color: #4b5563;
+    color: #e5e7eb;
+}
+
+.dark .code-block-buttons button:hover {
+    background-color: #4b5563;
+}
+
+.code-block-buttons button svg {
+    vertical-align: middle;
+}
+
+/* <pre> styles in prose context */
 .message-content.prose pre,
 .code-block-wrapper pre {
-    padding: 0 !important; /* Reset padding, assuming hljs or theme handles it */
-    margin:0 !important;
-    border-radius: 0 !important; /* Reset radius */
-    background-color: transparent !important; /* Handled by hljs or specific themes */
-    white-space: pre-wrap; /* Allow wrapping of long lines */
-    word-break: break-all; /* Break long words/tokens */
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    background-color: transparent !important;
+    white-space: pre-wrap;
+    word-break: break-all;
     overflow-x: auto;
 }
-.message-content.prose pre code.hljs { /* If using highlight.js within prose */
-    padding: 1em; /* Standard padding for hljs themes */
+
+.message-content.prose pre {
+    padding: 1em;
     display: block;
     font-size: 0.875em;
     line-height: 1.6;
-    border-bottom-left-radius: 0.375rem; /* Match wrapper if applicable */
+    border-bottom-left-radius: 0.375rem;
     border-bottom-right-radius: 0.375rem;
 }
 
-/* Code Output (for results of code execution, not the code itself) */
+/* Code Output Styling */
 .code-output {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     font-size: 0.875em;
     padding: 0.75em 1em;
-    margin-top: 0; /* Assumed to be part of a code block structure */
-    border-bottom-left-radius: 0.375rem;
-    border-bottom-right-radius: 0.375rem;
-    border-top: 1px solid #d1d5db; /* border-gray-300 */
+    margin-top: 0;
+    border-top: 1px solid #d1d5db;
+    border-radius: 0 0 0.375rem 0.375rem;
+    background-color: #f9fafb;
+    color: #1f2937;
     max-height: 200px;
     overflow-y: auto;
-    word-wrap: break-word;
-    overflow-wrap: break-word;
     word-break: break-all;
-    background-color: #f9fafb; /* bg-gray-50 */
-    color: #1f2937; /* text-gray-800 */
 }
+
 .dark .code-output {
-    background-color: #111827; /* dark:bg-gray-900 */
-    color: #9ca3af; /* dark:text-gray-400 */
-    border-top-color: #374151; /* dark:border-gray-700 */
+    background-color: #111827;
+    color: #9ca3af;
+    border-top-color: #374151;
 }
 
 
@@ -1686,12 +1764,16 @@ html:not(.dark) #appLoadingMessage { background: linear-gradient(135deg, #f9fafb
 
 /* Reset for code blocks handled by syntax highlighters (e.g. Highlight.js) */
 .prose pre code {
-    background-color: transparent !important;
-    color: inherit !important;
+    background-color: white !important;
+    color: black !important;
     padding: 0 !important;
     font-weight: inherit !important;
     font-size: inherit !important; /* Ensure it inherits from pre */
     border-radius: 0 !important;
+}
+.dark .prose pre code {
+    background-color: black !important;
+    color: white !important;
 }
 .prose pre { /* For the <pre> tag itself when using syntax highlighting */
     /* Background, padding etc. should be handled by the syntax highlighter's theme */
@@ -1699,6 +1781,8 @@ html:not(.dark) #appLoadingMessage { background: linear-gradient(135deg, #f9fafb
     border-radius: 0.375rem; /* If .code-block-container is not used */
     overflow-x: auto;
 }
+
+
 
 .prose ul > li::before {
     background-color: #9ca3af; /* bg-gray-400 */
