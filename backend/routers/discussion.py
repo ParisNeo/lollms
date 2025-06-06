@@ -140,7 +140,7 @@ from backend.session import (
     )
 from backend.config import (LOLLMS_CLIENT_DEFAULTS, SAFE_STORE_DEFAULTS)
 from backend.discussion import (AppLollmsDiscussion)
-
+from backend.message import AppLollmsMessage
 security = HTTPBasic()
 
 
