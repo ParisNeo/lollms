@@ -3403,88 +3403,124 @@ function updateRagToggleButtonState() {
         ragToggleBtn.title = translate('rag_toggle_btn_title_off');
     }
 }
-
 function renderCustomCodeBlocks(element, messageId) {
+    console.log("Rendering custom Code blocks");
+
     element.querySelectorAll('pre').forEach((preElement) => {
-        if (preElement.parentElement.classList.contains('code-block-wrapper')) return; 
+        if (preElement.parentElement.classList.contains('code-block-wrapper')) return;
 
         const codeElement = preElement.querySelector('code');
         if (!codeElement) return;
 
+        // Determine language
         let language = 'plaintext';
-        const langClassMatch = Array.from(codeElement.classList).find(cls => cls.startsWith('language-'));
-        if (langClassMatch) language = langClassMatch.substring('language-'.length);
-        else { const hljsLangClass = Array.from(codeElement.classList).find(cls => hljs.getLanguage(cls)); if(hljsLangClass) language = hljsLangClass; }
+        const langClass = Array.from(codeElement.classList).find(cls => cls.startsWith('language-'));
+        if (langClass) {
+            language = langClass.replace('language-', '');
+        } else {
+            const hljsLang = Array.from(codeElement.classList).find(cls => hljs.getLanguage(cls));
+            if (hljsLang) language = hljsLang;
+        }
 
         const code = codeElement.textContent || '';
-        const wrapperDiv = document.createElement('div'); wrapperDiv.className = 'code-block-wrapper'; 
-        const header = document.createElement('div'); header.className = 'code-block-header';
-        const langSpan = document.createElement('span'); langSpan.textContent = language; langSpan.className = 'text-xs font-semibold';
-        const buttonsDiv = document.createElement('div'); buttonsDiv.className = 'code-block-buttons';
 
+        // Create wrapper
+        const wrapper = document.createElement('div');
+        wrapper.className = 'code-block-wrapper';
+
+        // Create header
+        const header = document.createElement('div');
+        header.className = 'code-block-header';
+
+        const langLabel = document.createElement('span');
+        langLabel.className = 'text-xs font-semibold';
+        langLabel.textContent = language;
+
+        const buttons = document.createElement('div');
+        buttons.className = 'code-block-buttons';
+
+        // Copy button
         const copyBtn = document.createElement('button');
-        copyBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg><span data-translate-key="copy_code_btn_text">${translate('copy_code_btn_text', 'Copy')}</span>`;
+        copyBtn.innerHTML = `
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+            <span data-translate-key="copy_code_btn_text">${translate('copy_code_btn_text', 'Copy')}</span>
+        `;
         copyBtn.title = translate('copy_code_tooltip');
-        copyBtn.onclick = () => {
-            function fallbackCopyTextToClipboard(text) {
-                const textArea = document.createElement('textarea');
-                textArea.value = text;
-              
-                // Avoid scrolling to bottom
-                textArea.style.top = '0';
-                textArea.style.left = '0';
-                textArea.style.position = 'fixed';
-              
-                document.body.appendChild(textArea);
-                textArea.focus();
-                textArea.select();
-              
-                try {
-                  const successful = document.execCommand('copy');
-                  const msg = successful ? 'successful' : 'unsuccessful';
-                  console.log('Copying text command was ' + msg);
-                } catch (err) {
-                  console.error('Oops, unable to copy', err);
-                }
-              
-                document.body.removeChild(textArea);
-                const originalText = copyBtn.querySelector('span').textContent;
-                copyBtn.querySelector('span').textContent = translate('copied_code_btn_text', 'Copied!');
-                setTimeout(() => { copyBtn.querySelector('span').textContent = originalText; }, 1500);
 
-            }
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-                try {
-                    navigator.clipboard.writeText(code).then(() => {
-                        const originalText = copyBtn.querySelector('span').textContent;
-                        copyBtn.querySelector('span').textContent = translate('copied_code_btn_text', 'Copied!');
-                        setTimeout(() => { copyBtn.querySelector('span').textContent = originalText; }, 1500);
-                    }).catch(err => console.error("Copy failed", err));        
-                } catch (err) {
-                  console.error('Clipboard API failed: ', err);
-                  fallbackCopyTextToClipboard(code);
-                }
-              } else {
-                console.warn('Clipboard API is not available in this browser.');
-                fallbackCopyTextToClipboard(code);
-              }
+        const showCopied = () => {
+            const span = copyBtn.querySelector('span');
+            const original = span.textContent;
+            span.textContent = translate('copied_code_btn_text', 'Copied!');
+            setTimeout(() => (span.textContent = original), 1500);
         };
-        buttonsDiv.appendChild(copyBtn);
 
-        if (language === 'python') {
+        const fallbackCopy = (text) => {
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.style.position = 'fixed';
+            textarea.style.top = '0';
+            textarea.style.left = '0';
+            document.body.appendChild(textarea);
+            textarea.focus();
+            textarea.select();
+            try {
+                document.execCommand('copy');
+            } catch (err) {
+                console.error('Fallback copy failed', err);
+            }
+            document.body.removeChild(textarea);
+            showCopied();
+        };
+
+        copyBtn.onclick = () => {
+            if (navigator.clipboard?.writeText) {
+                navigator.clipboard.writeText(code)
+                    .then(showCopied)
+                    .catch(err => {
+                        console.error('Clipboard API failed', err);
+                        fallbackCopy(code);
+                    });
+            } else {
+                fallbackCopy(code);
+            }
+        };
+
+        buttons.appendChild(copyBtn);
+
+        // Optional: Python run button
+        if (language.toLowerCase() === 'python') {
             const execBtn = document.createElement('button');
-            execBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" /><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span data-translate-key="run_code_btn_text">${translate('run_code_btn_text', 'Run')}</span>`;
+            execBtn.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 inline-block mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span data-translate-key="run_code_btn_text">${translate('run_code_btn_text', 'Run')}</span>
+            `;
             execBtn.title = translate('execute_python_code_tooltip');
-            execBtn.onclick = () => executePythonCode(code, wrapperDiv); 
-            buttonsDiv.appendChild(execBtn);
+            execBtn.onclick = () => executePythonCode(code, wrapper);
+            buttons.appendChild(execBtn);
         }
-        header.appendChild(langSpan); header.appendChild(buttonsDiv);
-        
-        preElement.parentNode.insertBefore(wrapperDiv, preElement);
-        wrapperDiv.appendChild(header); wrapperDiv.appendChild(preElement); 
-        preElement.classList.add('relative'); 
+
+        // Final assembly
+        header.appendChild(langLabel);
+        header.appendChild(buttons);
+        wrapper.appendChild(header);
+
+        preElement.classList.add('relative');
+        wrapper.appendChild(preElement.cloneNode(true));
+
+        // Replace pre with wrapper
+        preElement.parentNode.replaceChild(wrapper, preElement);
+
+        // Highlight after insertion
+        const newCodeElement = wrapper.querySelector('code');
+        if (newCodeElement) hljs.highlightElement(newCodeElement);
     });
 }
+
 // --- Re-add the other functions from your original script ---
 // handleImageFileSelection, renderImagePreview, viewImage,
 // handleSettingsTabSwitch, loadAvailableLollmsModels, saveLollmsModelConfig, saveLLMParamsConfig, handleChangePassword, populateSettingsModal,
