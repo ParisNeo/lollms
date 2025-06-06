@@ -37,8 +37,9 @@ from fastapi import (
     APIRouter,
     Response,
     Query,
-    BackgroundTasks
+    BackgroundTasks,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.responses import (
     HTMLResponse,
@@ -739,6 +740,41 @@ app.include_router(personalities_router)
 # Add the router to the main app
 app.include_router(friends_router)
 app.include_router(dm_router)
+
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], # Add your Vue dev server URL
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+VUE_APP_DIR = Path(__file__).resolve().parent / "frontend"/ "simplified-lollms-vue" / "dist" # Adjust path
+
+# Mount the static files directory from the Vue build
+# This should be AFTER your /api routes to avoid conflicts
+# app.mount("/assets", StaticFiles(directory=VUE_APP_DIR / "assets"), name="vue-assets")
+
+# @app.get("/{full_path:path}", include_in_schema=False)
+# async def serve_vue_app(request: Request, full_path: str):
+#     """
+#     Serves the Vue app.
+#     If a specific file is requested and exists, serve it.
+#     Otherwise, serve index.html for SPA routing.
+#     """
+#     # Check if the requested path points to an existing file in VUE_APP_DIR
+#     potential_file_path = VUE_APP_DIR / full_path
+#     if os.path.isfile(potential_file_path):
+#         return FileResponse(potential_file_path)
+    
+#     # If not a file or path is empty, serve index.html
+#     index_path = VUE_APP_DIR / "index.html"
+#     if not index_path.is_file():
+#         raise HTTPException(status_code=404, detail="Vue app index.html not found. Did you build the Vue app?")
+#     return FileResponse(index_path)
+
+
 
 # --- Main Execution ---
 if __name__ == "__main__":

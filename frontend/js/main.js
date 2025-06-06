@@ -1692,6 +1692,7 @@ function handleStreamChunk(data) { // Patched to use cached DOM elements
         currentAiMessageData.content = currentAiMessageContentAccumulator;
         needsRerender = true;
     } else if (data.type === 'step_update') {
+        console.log("Step received")
         currentAiMessageData.steps = data.steps || [];
         needsRerender = true;
     } else if (data.type === 'metadata_update') {
@@ -1930,6 +1931,8 @@ function scrollToBottom(containerId = 'chatMessages') { // Default ID, can be ov
 // const aiAvatar = 'path/to/ai/avatar.png'; // Or get this from config
 
 function renderMessage(message, existingContainer = null, existingBubble = null) {
+    console.log("rendering message")
+    console.log(message)
     if (!message || typeof message.sender === 'undefined' || (typeof message.content === 'undefined' && (!message.image_references || message.image_references.length === 0) && (!message.steps || message.steps.length === 0) && (!message.metadata || message.metadata.length === 0) && !(message.id === currentAiMessageId && (aiMessageStreaming || generationInProgress) ))) {
         return;
     }
@@ -2112,6 +2115,7 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         const anchor = imagesAnchor || senderInfoAnchor;
         bubbleDivToUse.insertBefore(contentDiv, anchor ? anchor.nextSibling : bubbleDivToUse.firstChild);
     }
+    console.log(message.steps)
     renderEnhancedContent(contentDiv, message.content || "", messageId, message.steps, message.metadata, message);
 
 
@@ -2343,6 +2347,7 @@ function getSenderAvatar(senderDisplayName, senderType, originalSender) {
 // `renderEnhancedContent` (with <think> block fix)
 function renderEnhancedContent(contentDivElement, rawContent, messageId, steps = [], metadata = [], messageObject = {}) {
     contentDivElement.innerHTML = ''; // Start fresh
+    console.log(steps)
 
     let currentSegment = rawContent || "";
     const thinkBlockRegex = /<think>([\s\S]*?)<\/think>/gs;
@@ -2577,6 +2582,7 @@ function addCodeBlockCopyButtons(container) {
 }
 
 function renderSteps(container, steps) {
+    print("rendering steps")
     if (!steps || steps.length === 0) return;
 
     const stepsContainer = document.createElement('div');
@@ -3604,8 +3610,6 @@ function updateRagToggleButtonState() {
         isRagActive = !!currentDiscussionRagStore;
     }
 
-    console.log("isRagActive")
-    console.log(isRagActive)
     if (isRagActive) {
         ragToggleBtn.classList.remove('rag-toggle-off'); ragToggleBtn.classList.add('rag-toggle-on');
         const selectedDS = availableDataStoresForRag.find(ds => ds.id === currentDiscussionRagStore);
