@@ -373,8 +373,6 @@ async function initializeLocalization() {
             option.value = code;
             option.textContent = availableLanguages[code];
             languageSelector.appendChild(option);
-            console.log("Added language")
-            console.log(code)
         }
         languageSelector.addEventListener('change', (e) => {
             loadLanguage(e.target.value);
@@ -659,10 +657,7 @@ window.onload = async () => {
             showStatus(translate('rag_cannot_enable_no_stores_warning'), 'warning');
             return;
         }
-        console.log("isRagActive")
-        console.log(isRagActive)
         isRagActive = !isRagActive;
-        console.log(isRagActive)
         if(!isRagActive){
             const disc = currentDiscussionId ? discussions[currentDiscussionId] : null;
             disc.rag_datastore_id = null;
@@ -732,12 +727,10 @@ window.onload = async () => {
 // --- Theme Management Functions ---
 function applyTheme(theme) { /* As provided */
     if (theme === 'dark') {
-        console.log("dark mode")
         document.documentElement.classList.add('dark');
         if (themeIconMoon) themeIconMoon.classList.remove('hidden');
         if (themeIconSun) themeIconSun.classList.add('hidden');
     } else {
-        console.log("light mode")
         document.documentElement.classList.remove('dark');
         if (themeIconSun) themeIconSun.classList.remove('hidden');
         if (themeIconMoon) themeIconMoon.classList.add('hidden');
@@ -1078,8 +1071,6 @@ async function loadDiscussions() {
     }
 }
 function initiateInlineRename(id) {
-    console.log("Initialize")
-    console.log(id)
     const discussion = discussions[id];
     if (!discussion) return;
 
@@ -1693,7 +1684,11 @@ function handleStreamChunk(data) { // Patched to use cached DOM elements
         needsRerender = true;
     } else if (data.type === 'step_update') {
         console.log("Step received")
-        currentAiMessageData.steps = data.steps || [];
+        console.log(data)
+        console.log(currentAiMessageData)
+
+        currentAiMessageData.steps.push(data.content);
+        console.log(currentAiMessageData)
         needsRerender = true;
     } else if (data.type === 'metadata_update') {
         currentAiMessageData.metadata = data.metadata || [];
@@ -1931,8 +1926,6 @@ function scrollToBottom(containerId = 'chatMessages') { // Default ID, can be ov
 // const aiAvatar = 'path/to/ai/avatar.png'; // Or get this from config
 
 function renderMessage(message, existingContainer = null, existingBubble = null) {
-    console.log("rendering message")
-    console.log(message)
     if (!message || typeof message.sender === 'undefined' || (typeof message.content === 'undefined' && (!message.image_references || message.image_references.length === 0) && (!message.steps || message.steps.length === 0) && (!message.metadata || message.metadata.length === 0) && !(message.id === currentAiMessageId && (aiMessageStreaming || generationInProgress) ))) {
         return;
     }
@@ -2347,7 +2340,6 @@ function getSenderAvatar(senderDisplayName, senderType, originalSender) {
 // `renderEnhancedContent` (with <think> block fix)
 function renderEnhancedContent(contentDivElement, rawContent, messageId, steps = [], metadata = [], messageObject = {}) {
     contentDivElement.innerHTML = ''; // Start fresh
-    console.log(steps)
 
     let currentSegment = rawContent || "";
     const thinkBlockRegex = /<think>([\s\S]*?)<\/think>/gs;
@@ -2582,7 +2574,6 @@ function addCodeBlockCopyButtons(container) {
 }
 
 function renderSteps(container, steps) {
-    print("rendering steps")
     if (!steps || steps.length === 0) return;
 
     const stepsContainer = document.createElement('div');
@@ -2610,7 +2601,7 @@ function renderSteps(container, steps) {
                 <span class="step-number">${index + 1}</span>
             </div>
             <div class="step-content">
-                <div class="step-title">${step.title || `Step ${index + 1}`}</div>
+                <div class="step-title">${step}</div>
                 ${step.description ? `<div class="step-description">${step.description}</div>` : ''}
                 ${step.duration ? `<div class="step-duration">${formatProcessingTime(step.duration)}</div>` : ''}
             </div>
@@ -3404,8 +3395,6 @@ function updateRagToggleButtonState() {
     }
 }
 function renderCustomCodeBlocks(element, messageId) {
-    console.log("Rendering custom Code blocks");
-
     element.querySelectorAll('pre').forEach((preElement) => {
         if (preElement.parentElement.classList.contains('code-block-wrapper')) return;
 
@@ -4966,7 +4955,6 @@ async function loadDirectMessagesForUser(friendUserId) {
     try {
         const response = await apiRequest(`/api/dm/conversations/${friendUserId}`);
         const data = await response.json();
-        console.log(data)
         // Check for pagination links (if present)
         if (data.links) {
             // Handle pagination links (e.g., load more messages)
