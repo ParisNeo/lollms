@@ -31,6 +31,8 @@ let activeGenerationAbortController = null;
 let currentTheme = localStorage.getItem('theme') || 'dark';
 let activeBranchId = 'main'; // Global active branch ID for the current discussion
 
+let currentSortMethod = 'date_desc'; // Default sort method: Most Recent
+
 const backendCapabilities = {
     supportsBranches: false, // Will be updated based on API responses
     checked: false
@@ -1133,10 +1135,11 @@ async function confirmInlineRename() {
     }
 }
 
-function createDiscussionItemElement(d) { /* As provided, ensure it uses d.title, d.id correctly */
+function createDiscussionItemElement(d) {
     const item = document.createElement('div');
     item.className = `discussion-item p-2.5 rounded-lg cursor-pointer flex justify-between items-center text-sm transition-colors duration-150 ${d.id === currentDiscussionId ? 'bg-blue-700 font-medium text-blue-100 hover:bg-blue-600 dark:bg-blue-600 dark:hover:bg-blue-500' : 'text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-700'}`;
-    item.dataset.id = d.id; item.onclick = () => selectDiscussion(d.id);
+    item.dataset.id = d.id;
+    item.onclick = () => selectDiscussion(d.id);
 
     const titleSpan = document.createElement('span');
     titleSpan.textContent = d.title || translate('untitled_discussion_prefix', `Discussion ${d.id.substring(0, 6)}`, {id_short: d.id.substring(0,6)});
@@ -1150,37 +1153,46 @@ function createDiscussionItemElement(d) { /* As provided, ensure it uses d.title
 
     const sendBtn = document.createElement('button');
     sendBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg>`;
-    sendBtn.title = translate('send_discussion_tooltip'); sendBtn.className = 'discussion-action-btn';
+    sendBtn.title = translate('send_discussion_tooltip');
+    sendBtn.className = 'discussion-action-btn';
     sendBtn.onclick = (e) => { e.stopPropagation(); initiateSendDiscussion(d.id); };
     actionsContainer.appendChild(sendBtn);
 
     const renameBtn = document.createElement('button');
     renameBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg>`;
-    renameBtn.title = translate('rename_discussion_tooltip'); renameBtn.className = 'discussion-action-btn';
+    renameBtn.title = translate('rename_discussion_tooltip');
+    renameBtn.className = 'discussion-action-btn';
     renameBtn.onclick = (e) => { e.stopPropagation(); initiateInlineRename(d.id); };
     actionsContainer.appendChild(renameBtn);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg>`;
-    deleteBtn.title = translate('delete_discussion_tooltip'); deleteBtn.className = 'discussion-action-btn destructive'; // Added destructive for potential styling
-    deleteBtn.querySelector('svg')?.classList.add('text-red-500', 'dark:text-red-400'); // Style icon
+    deleteBtn.title = translate('delete_discussion_tooltip');
+    deleteBtn.className = 'discussion-action-btn destructive';
+    deleteBtn.querySelector('svg')?.classList.add('text-red-500', 'dark:text-red-400');
     deleteBtn.onclick = (e) => { e.stopPropagation(); deleteInlineDiscussion(d.id); };
     actionsContainer.appendChild(deleteBtn);
 
     controlsDiv.appendChild(actionsContainer);
 
-    const starSpan = document.createElement('button'); // Changed to button for accessibility
+    const starSpan = document.createElement('button');
     starSpan.className = `discussion-action-btn p-1 ml-1 star-icon ${d.is_starred ? 'starred' : ''}`;
     starSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" fill="${d.is_starred ? 'currentColor' : 'none'}" viewBox="0 0 24 24" stroke-width="1.5" stroke="${d.is_starred ? 'none' : 'currentColor'}" class="w-4 h-4 transition-colors duration-150"><path stroke-linecap="round" stroke-linejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 21.1a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z" /></svg>`;
     starSpan.title = d.is_starred ? translate('unstar_discussion_tooltip') : translate('star_discussion_tooltip');
-    starSpan.onclick = (e) => { e.stopPropagation(); console.log("Star clicked"); toggleStarDiscussion(d.id, d.is_starred); renderDiscussionList(); console.log("Refreshed");};
+    
+    // --- BUG FIX IS HERE ---
+    // Removed the premature renderDiscussionList() call. The toggleStarDiscussion function
+    // will now handle re-rendering on its own after the API call completes.
+    starSpan.onclick = (e) => { e.stopPropagation(); toggleStarDiscussion(d.id, d.is_starred); };
+    // --- END BUG FIX ---
+
     actionsContainer.appendChild(starSpan);
 
     item.appendChild(titleSpan);
     item.appendChild(controlsDiv);
     return item;
 }
-function renderDiscussionList() { /* As provided, uses createDiscussionItemElement */
+function renderDiscussionList() {
     if (!discussionListContainer || !discussions) return;
     discussionListContainer.innerHTML = '';
     const searchTerm = discussionSearchInput ? discussionSearchInput.value.toLowerCase() : "";
@@ -1190,11 +1202,20 @@ function renderDiscussionList() { /* As provided, uses createDiscussionItemEleme
         ? allDiscussionValues.filter(d => (d.title || '').toLowerCase().includes(searchTerm))
         : allDiscussionValues;
 
-    // Sort by last_activity_at DESC, then by title ASC
-    const sortByDateDesc = (a, b) => (new Date(b.last_activity_at || 0) - new Date(a.last_activity_at || 0)) || (a.title || '').localeCompare(b.title || '');
+    // --- NEW: Dynamic Sorting Logic ---
+    const sortFunctions = {
+        'date_desc': (a, b) => new Date(b.last_activity_at || 0) - new Date(a.last_activity_at || 0),
+        'date_asc': (a, b) => new Date(a.last_activity_at || 0) - new Date(b.last_activity_at || 0),
+        'title_asc': (a, b) => (a.title || '').localeCompare(b.title || ''),
+        'title_za': (a, b) => (b.title || '').localeCompare(a.title || '')
+    };
 
-    const starredDiscussions = filteredDiscussions.filter(d => d.is_starred).sort(sortByDateDesc);
-    const regularDiscussions = filteredDiscussions.filter(d => !d.is_starred).sort(sortByDateDesc);
+    // Get the selected sort function, with a fallback to the default
+    const selectedSortFunction = sortFunctions[currentSortMethod] || sortFunctions['date_desc'];
+
+    const starredDiscussions = filteredDiscussions.filter(d => d.is_starred).sort(selectedSortFunction);
+    const regularDiscussions = filteredDiscussions.filter(d => !d.is_starred).sort(selectedSortFunction);
+    // --- END: Dynamic Sorting Logic ---
 
 
     if (filteredDiscussions.length === 0) {
@@ -2767,9 +2788,11 @@ function renderOrUpdateSteps(parentContainer, steps, isInitialRenderFromHistory 
         `;
         parentContainer.appendChild(stepsContainer);
         parentContainer.appendChild(toggleButton);
+
         toggleButton.onclick = () => {
             const isCollapsing = !stepsContainer.classList.contains('collapsed');
             stepsContainer.classList.toggle('collapsed', isCollapsing);
+
             if (!isCollapsing) {
                 requestAnimationFrame(() => {
                     stepsContainer.style.maxHeight = stepsContainer.scrollHeight + 'px';
@@ -2779,6 +2802,12 @@ function renderOrUpdateSteps(parentContainer, steps, isInitialRenderFromHistory 
             }
             updateToggleButtonText(toggleButton, stepsContainer);
         };
+        
+        // **THE FIX, Part 1:** When a message is from history, set its initial state and we are done.
+        // For new messages, we start it expanded and let the user decide when to collapse.
+        if (isInitialRenderFromHistory) {
+             stepsContainer.classList.add('collapsed');
+        }
     }
 
     steps.forEach(stepData => {
@@ -2818,29 +2847,15 @@ function renderOrUpdateSteps(parentContainer, steps, isInitialRenderFromHistory 
         }
     });
 
-    // --- Manage collapsed state (THE FIX) ---
-    if (isInitialRenderFromHistory) {
-        // For old messages loaded from history, set the initial collapsed state.
-        stepsContainer.classList.toggle('collapsed', stepsContainer.children.length > 1);
-    } else {
-        // During live streaming:
-        const isFirstCollapse = (stepsContainer.children.length === 2 && !stepsContainer.hasAttribute('data-initial-collapse-set'));
-        if (isFirstCollapse) {
-            // This is the first time we have enough steps to collapse, so set the default state.
-            stepsContainer.classList.add('collapsed');
-            stepsContainer.setAttribute('data-initial-collapse-set', 'true'); // Mark that we've done this.
-        }
-    }
-
-    // If the container is currently expanded, we must update its maxHeight
-    // to accommodate the newly prepended step.
+    // **THE FIX, Part 2:** If the container is currently expanded (not collapsed),
+    // we must update its maxHeight to animate the new step in. We no longer automatically
+    // add the 'collapsed' class here during live streaming.
     if (!stepsContainer.classList.contains('collapsed')) {
         requestAnimationFrame(() => {
             stepsContainer.style.maxHeight = stepsContainer.scrollHeight + 'px';
         });
     }
 
-    // Always update the button text regardless of state changes.
     updateToggleButtonText(toggleButton, stepsContainer);
 }
 
@@ -5697,4 +5712,47 @@ adminLink.addEventListener('click', async function(event) {
     document.open();
     document.write(html);
     document.close();    
+});
+
+
+document.addEventListener('DOMContentLoaded', () => {
+
+    const sortMenuBtn = document.getElementById('sortMenuBtn');
+    const sortMenuDropdown = document.getElementById('sortMenuDropdown');
+    const discussionSearchInput = document.getElementById('discussionSearchInput'); // Ensure this is defined here or globally
+
+    // Add event listener for discussion search input
+    if(discussionSearchInput) {
+        discussionSearchInput.addEventListener('input', () => renderDiscussionList());
+    }
+
+    if (sortMenuBtn && sortMenuDropdown) {
+        // Toggle the dropdown visibility
+        sortMenuBtn.addEventListener('click', (event) => {
+            event.stopPropagation(); // Prevents the window click listener from closing it immediately
+            sortMenuDropdown.classList.toggle('hidden');
+        });
+
+        // Handle selection of a sort option
+        sortMenuDropdown.addEventListener('click', (event) => {
+            const target = event.target.closest('.sort-option');
+            if (target) {
+                event.preventDefault();
+                const newSortMethod = target.dataset.sort;
+                if (newSortMethod) {
+                    currentSortMethod = newSortMethod;
+                    renderDiscussionList(); // Re-render the list with the new sort order
+                    sortMenuDropdown.classList.add('hidden'); // Hide the menu after selection
+                }
+            }
+        });
+
+        // Hide the dropdown if clicking anywhere else on the page
+        window.addEventListener('click', (event) => {
+            if (!sortMenuDropdown.classList.contains('hidden') && !sortMenuBtn.contains(event.target)) {
+                sortMenuDropdown.classList.add('hidden');
+            }
+        });
+    }
+
 });
