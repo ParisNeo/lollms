@@ -842,12 +842,13 @@ hljs-string
     border-top-color: #374151; /* dark:border-gray-700 */
 }
 
+
 .step-item {
     display: flex;
     align-items: center;
     margin-bottom: 0.5rem;
-    font-size: 0.875rem; /* text-sm */
-    color: #6b7280; /* text-gray-500 */
+    font-size: 0.875rem;
+    color: #6b7280;
 }
 .dark .step-item {
     color: #9ca3af; /* dark:text-gray-400 */
@@ -889,6 +890,29 @@ hljs-string
     color: #d1d5db; /* dark:text-gray-300 */
 }
 
+/* --- New styles for differentiated steps --- */
+
+/* Style for informational steps ('step' type) */
+.step-item-info {
+    color: #4B5563; /* gray-600 */
+    align-items: flex-start; /* Align icon to top */
+}
+.dark .step-item-info {
+    color: #D1D5DB; /* dark:text-gray-300 */
+}
+.step-item-info .step-icon {
+    margin-top: 0.125rem; /* Align icon nicely with first line of text */
+}
+
+/* Style for process steps ('step_start'/'step_end' type) */
+.step-item-process.status-pending {
+    color: #6b7280; /* text-gray-500 */
+}
+.dark .step-item-process.status-pending {
+    color: #9ca3af; /* dark:text-gray-400 */
+}
+
+
 /* Spinner Keyframe Animations */
 @keyframes rotate { 100% { transform: rotate(360deg); } }
 @keyframes dash {
@@ -898,8 +922,14 @@ hljs-string
 }
 /* --- Collapsible Steps Styles --- */
 .steps-container {
-    overflow: hidden; /* This is key for the collapse animation */
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #e5e7eb; /* border-gray-200 */
+    overflow: hidden; /* Key for the collapse animation */
     transition: max-height 0.4s ease-in-out;
+}
+.dark .steps-container {
+    border-top-color: #374151; /* dark:border-gray-700 */
 }
 
 /* By default, the container is collapsed to show only the last step */
@@ -908,37 +938,39 @@ hljs-string
     max-height: 36px; 
 }
 
+
+
+
+/* ... (step-icon, spinner, and status-done styles remain the same) ... */
+
+/* --- The Toggle Button --- */
 .steps-toggle-button {
-    background: none;
-    border: none;
-    color: #6B7280; /* text-gray-500 */
-    font-size: 0.75rem; /* text-xs */
-    font-weight: 500;
-    cursor: pointer;
-    margin-top: 0.25rem;
-    padding: 0.25rem 0.5rem;
-    border-radius: 0.25rem;
-    display: flex;
-    align-items: center;
+    background: none; border: none;
+    color: #6B7280; font-size: 0.8rem;
+    font-weight: 500; cursor: pointer;
+    margin-top: 0.25rem; padding: 0.25rem 0;
+    display: flex; align-items: center;
+    width: 100%;
 }
-.dark .steps-toggle-button {
-    color: #9CA3AF; /* dark:text-gray-400 */
-}
-.steps-toggle-button:hover {
-    background-color: #F3F4F6; /* bg-gray-100 */
-}
-.dark .steps-toggle-button:hover {
-    background-color: #374151; /* dark:bg-gray-700 */
+.dark .steps-toggle-button { color: #9CA3AF; }
+.steps-toggle-button:hover .toggle-text { text-decoration: underline; }
+
+.steps-toggle-button .toggle-text {
+    /* --- Key addition for long text --- */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-grow: 1;
+    text-align: left;
 }
 
 .steps-toggle-button .toggle-arrow {
-    width: 0.75rem; /* w-3 */
-    height: 0.75rem; /* h-3 */
-    margin-left: 0.25rem;
+    width: 0.85rem; height: 0.85rem;
+    margin-left: 0.5rem;
+    flex-shrink: 0;
     transition: transform 0.3s ease;
 }
-
-.steps-container.collapsed .steps-toggle-button .toggle-arrow {
+.steps-container.collapsed + .steps-toggle-button .toggle-arrow {
     transform: rotate(-90deg);
 }
 /* ==========================================================================

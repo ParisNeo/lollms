@@ -1672,44 +1672,85 @@ function handleStreamChunk(data) {
     }
 
     let needsContentRerender = false;
-    if (data.type === 'chunk') {
-        if (currentAiMessageContentAccumulator === "") {
-            currentAiMessageDomBubble.classList.remove('is-streaming');
-        }
-        currentAiMessageContentAccumulator += data.content;
-        currentAiMessageData.content = currentAiMessageContentAccumulator;
-        needsContentRerender = true;
-    } else if (data.type === 'step') {
-        currentAiMessageData.steps.push(data);
-        renderNewStep(currentAiMessageDomBubble, data);
-        updateStepStatus(currentAiMessageDomBubble, data.id, 'done');
-    } else if (data.type === 'step_start') {
-        currentAiMessageData.steps.push(data);
-        renderNewStep(currentAiMessageDomBubble, data);
-    } else if (data.type === 'step_end') {
-        const stepToUpdate = currentAiMessageData.steps.find(step => step.id === data.id);
-        if (stepToUpdate) {
-            stepToUpdate.status = 'done';
-            stepToUpdate.content = data.content
-            updateStepStatus(currentAiMessageDomBubble, data.id, 'done');
-        }
-    } else if (data.type === 'metadata_update') {
-        currentAiMessageData.metadata = data.metadata || [];
-        needsContentRerender = true;
-    } else if (data.type === 'error') {
-        const errorMsgData = { id: `err-stream-${Date.now()}`, sender: 'system', content: translate('llm_error_prefix', `LLM Error: ${data.content}`, { content: data.content }), steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId };
-        currentMessages.push(errorMsgData); renderMessage(errorMsgData);
-        handleStreamEnd(true);
-        return;
-    } else if (data.type === 'info' && data.content === "Generation stopped by user.") {
-        showStatus(translate('status_generation_stopped_by_user', 'Generation stopped by user.'), 'info');
-        return;
+    let needsStepsRerender = false;
+
+    switch (data.type) {
+        case 'chunk':
+            if (currentAiMessageContentAccumulator === "") {
+                // Remove the "is-streaming" class only when the first text chunk arrives,
+                // to gracefully replace the typing indicator with actual content.
+                const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
+                if (contentDiv) {
+                    // This check ensures we don't remove it if steps are already showing
+                    const typingIndicator = contentDiv.querySelector('.typing-indicator');
+                    if(typingIndicator) typingIndicator.remove();
+                }
+            }
+            currentAiMessageContentAccumulator += data.content;
+            currentAiMessageData.content = currentAiMessageContentAccumulator;
+            needsContentRerender = true;
+            break;
+
+        case 'step': // Purely informational step
+        case 'step_start': // The beginning of a process
+            currentAiMessageData.steps.push(data);
+            needsStepsRerender = true;
+            break;
+
+        case 'step_end':
+            const stepToUpdate = currentAiMessageData.steps.find(step => step.id === data.id && step.type === 'step_start');
+            if (stepToUpdate) {
+                stepToUpdate.status = 'done';
+                // The final, complete content for the step often comes in the 'step_end' event
+                if (data.content) {
+                    stepToUpdate.content = data.content;
+                }
+            } else {
+                // If a step_end arrives without a corresponding step_start, treat it as a new 'done' step.
+                // This adds robustness.
+                currentAiMessageData.steps.push({ ...data, status: 'done', type: 'step_start' });
+            }
+            needsStepsRerender = true;
+            break;
+
+        case 'metadata_update':
+            currentAiMessageData.metadata = data.metadata || [];
+            // This might eventually need its own render function, for now piggyback on content render
+            needsContentRerender = true;
+            break;
+
+        case 'error':
+            const errorMsgData = {
+                id: `err-stream-${Date.now()}`,
+                sender: 'system',
+                content: translate('llm_error_prefix', `LLM Error: ${data.content}`, { content: data.content }),
+                steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId
+            };
+            currentMessages.push(errorMsgData);
+            renderMessage(errorMsgData);
+            handleStreamEnd(true);
+            return; // Exit early on error
+
+        case 'info':
+             if (data.content === "Generation stopped by user.") {
+                showStatus(translate('status_generation_stopped_by_user', 'Generation stopped by user.'), 'info');
+             }
+             break;
     }
 
+    // --- Perform DOM updates based on flags ---
     if (needsContentRerender) {
         const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
         if (contentDiv) {
-            renderEnhancedContent(contentDiv, currentAiMessageData.content, currentAiMessageData.id, currentAiMessageData.steps, currentAiMessageData.metadata, currentAiMessageData);
+            renderEnhancedContent(contentDiv, currentAiMessageData.content, currentAiMessageData.id, [], currentAiMessageData.metadata, currentAiMessageData);
+        }
+    }
+
+    if (needsStepsRerender) {
+        const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
+        if (contentDiv) {
+            // Re-render the entire steps block with the updated data array
+            renderOrUpdateSteps(contentDiv, currentAiMessageData.steps);
         }
     }
 
@@ -1718,118 +1759,114 @@ function handleStreamChunk(data) {
 
 function handleStreamEnd(errorOccurred = false, wasAbortedByStopButton = false) {
     const wasManuallyStopped = !generationInProgress && !errorOccurred;
-    
+
     aiMessageStreaming = false;
     if (generationInProgress) generationInProgress = false;
 
     if (currentAiMessageData && isElementInDocument(currentAiMessageDomBubble)) {
         currentAiMessageDomBubble.classList.remove('is-streaming');
 
+        // Finalize token count and processing time badges
         const tokenBadge = currentAiMessageDomBubble.querySelector('[data-placeholder="token-count"]');
         if (tokenBadge && currentAiMessageData.token_count) {
             tokenBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> ${currentAiMessageData.token_count} ${translate('tokens_label', 'tokens')}`;
             tokenBadge.style.display = 'inline-flex';
         }
-        
         const timeBadge = currentAiMessageDomBubble.querySelector('[data-placeholder="processing-time"]');
         if (timeBadge && currentAiMessageData.processing_time_ms) {
             timeBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg> ${formatProcessingTime(currentAiMessageData.processing_time_ms)}`;
             timeBadge.style.display = 'inline-flex';
         }
 
-        currentAiMessageDomBubble.querySelectorAll('.message-footer button').forEach(btn => {
-            btn.disabled = false;
-        });
+        // --- RAG SOURCES RENDERING ---
+        const sources = currentAiMessageData.metadata?.sources;
+        const detailsContainer = currentAiMessageDomBubble.querySelector('.message-details');
+
+        if (detailsContainer && Array.isArray(sources) && sources.length > 0) {
+            sources.forEach(source => {
+                if (!source || typeof source.document === 'undefined' || typeof source.similarity === 'undefined') {
+                    console.warn("Skipping malformed RAG source:", source);
+                    return;
+                }
+
+                const sourceBadge = document.createElement('button');
+                const maxLength = 25;
+                const truncatedText = source.document.length > maxLength ? source.document.substring(0, maxLength) + '…' : source.document;
+
+                sourceBadge.innerHTML = `
+                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h8V7.414L11.414 4H6z" clip-rule="evenodd" /></svg>
+                    <span>${escapeHtml(truncatedText)}</span>
+                    <span class="source-similarity-chip">${Math.round(source.similarity * 100)}%</span>`;
+                sourceBadge.className = 'detail-badge source-badge';
+                sourceBadge.title = `${translate('view_source_document', 'View source')}: ${escapeHtml(source.document)} (${translate('similarity_label', 'Similarity')}: ${Math.round(source.similarity * 100)}%)`;
+
+                sourceBadge.onclick = () => {
+                    const modalId = `source-modal-${currentAiMessageData.id}-${source.document.replace(/[^a-zA-Z0-9]/g, '')}`;
+                    if (document.getElementById(modalId)) return;
+
+                    const modal = document.createElement('div');
+                    modal.id = modalId;
+                    modal.className = 'source-modal-overlay';
+                    modal.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display:flex; align-items:center; justify-content:center; z-index: 1001; opacity: 0; transition: opacity 0.2s;`;
+
+                    const modalContent = document.createElement('div');
+                    modalContent.style.cssText = `background: white; color: black; padding: 2rem; border-radius: 8px; max-width: 800px; max-height: 80vh; overflow-y: auto; position: relative;`;
+                    
+                    const closeButton = document.createElement('button');
+                    closeButton.innerHTML = '×';
+                    closeButton.style.cssText = `position: absolute; top: 10px; right: 15px; font-size: 1.5rem; background:none; border:none; cursor:pointer;`;
+                    
+                    const title = document.createElement('h2');
+                    title.textContent = source.document;
+                    title.style.marginTop = '0';
+
+                    const similarityP = document.createElement('p');
+                    similarityP.innerHTML = `${translate('similarity_label', 'Similarity')}: <strong>${Math.round(source.similarity * 100)}%</strong>`;
+
+                    const contentDivModal = document.createElement('div');
+                    contentDivModal.className = 'markdown-content';
+                    contentDivModal.innerHTML = marked.parse(source.content || translate('no_content_available', 'No content available.'));
+                
+                    modalContent.appendChild(closeButton);
+                    modalContent.appendChild(title);
+                    modalContent.appendChild(similarityP);
+                    modalContent.appendChild(contentDivModal);
+                    modal.appendChild(modalContent);
+                    document.body.appendChild(modal);
+                    
+                    requestAnimationFrame(() => modal.style.opacity = '1');
+
+                    const closeModalFunc = () => {
+                        modal.style.opacity = '0';
+                        modal.addEventListener('transitionend', () => modal.remove(), { once: true });
+                        document.removeEventListener('keydown', escapeListener);
+                    };
+
+                    closeButton.onclick = closeModalFunc;
+                    modal.onclick = (e) => { if (e.target === modal) closeModalFunc(); };
+                    const escapeListener = (e) => { if (e.key === 'Escape') closeModalFunc(); };
+                    document.addEventListener('keydown', escapeListener);
+                };
+                detailsContainer.appendChild(sourceBadge);
+            });
+        }
+        
+        currentAiMessageDomBubble.querySelectorAll('.message-footer button').forEach(btn => btn.disabled = false);
 
         const finalId = currentAiMessageData.id;
-        if (currentAiMessageDomContainer.dataset.messageId !== finalId) {
-            currentAiMessageDomContainer.dataset.messageId = finalId;
+        const messageContainer = currentAiMessageDomBubble.closest('.message-container');
+        if (messageContainer && messageContainer.dataset.messageId !== finalId) {
+            messageContainer.dataset.messageId = finalId;
         }
         if (currentAiMessageDomBubble.id !== `message-${finalId}`) {
             currentAiMessageDomBubble.id = `message-${finalId}`;
         }
     }
 
-    // --- RAG Sources (Add this block back) ---
-    if (currentAiMessageDomBubble.sources && Array.isArray(currentAiMessageDomBubble.sources) && currentAiMessageDomBubble.sources.length > 0) {
-        currentAiMessageDomBubble.sources.forEach(source => {
-            if (!source || typeof source.document === 'undefined' || typeof source.similarity === 'undefined') {
-                console.warn("Skipping malformed source:", source);
-                return; // Skip malformed source objects
-            }
-            
-            const sourceBadge = document.createElement('button');
-            const maxLength = 15;
-            const truncatedText = source.document.length > maxLength ? source.document.substring(0, maxLength) + '…' : source.document;
-            
-            sourceBadge.innerHTML = `
-                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h8V7.414L11.414 4H6z" clip-rule="evenodd" />
-                </svg>
-                <span>${escapeHtml(truncatedText)}</span>
-                <span class="source-similarity-chip">${source.similarity}%</span>`;
-            sourceBadge.className = 'detail-badge source-badge';
-            sourceBadge.title = `${translate('view_source_document', 'View source')}: ${escapeHtml(source.document)} (${translate('similarity_label', 'Similarity')}: ${source.similarity}%)`;
-            
-            sourceBadge.addEventListener('click', () => {
-                // This uses the same custom modal logic as your image viewer for consistency,
-                // but tailored for text content.
-                const modalId = `source-modal-${currentAiMessageId}-${source.document.replace(/[^a-zA-Z0-9]/g, '')}`;
-                if (document.getElementById(modalId)) return;
-
-                const modal = document.createElement('div');
-                modal.id = modalId;
-                modal.className = 'source-modal-overlay'; // You'll need CSS for this or adapt image modal styles
-                modal.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display:flex; align-items:center; justify-content:center; z-index: 1001; opacity: 0; transition: opacity 0.2s;`;
-
-                const modalContent = document.createElement('div');
-                modalContent.style.cssText = `background: white; color: black; padding: 2rem; border-radius: 8px; max-width: 800px; max-height: 80vh; overflow-y: auto; position: relative;`;
-                
-                const closeButton = document.createElement('button');
-                closeButton.innerHTML = '×';
-                closeButton.style.cssText = `position: absolute; top: 10px; right: 15px; font-size: 1.5rem; background:none; border:none; cursor:pointer;`;
-                
-                const title = document.createElement('h2');
-                title.textContent = source.document;
-                title.style.marginTop = '0';
-
-                const similarityP = document.createElement('p');
-                similarityP.innerHTML = `${translate('similarity_label', 'Similarity')}: <strong>${source.similarity}%</strong>`;
-
-                const contentDivModal = document.createElement('div');
-                contentDivModal.className = 'markdown-content'; // Reuse your markdown styles
-                contentDivModal.innerHTML = marked.parse(source.content || translate('no_content_available', 'No content available.'));
-            
-                modalContent.appendChild(closeButton);
-                modalContent.appendChild(title);
-                modalContent.appendChild(similarityP);
-                modalContent.appendChild(contentDivModal);
-                modal.appendChild(modalContent);
-                document.body.appendChild(modal);
-                
-                requestAnimationFrame(() => modal.style.opacity = '1');
-
-                const closeModal = () => {
-                    modal.style.opacity = '0';
-                    modal.addEventListener('transitionend', () => modal.remove(), { once: true });
-                    document.removeEventListener('keydown', escapeListener);
-                };
-
-                closeButton.onclick = closeModal;
-                modal.onclick = (e) => { if (e.target === modal) closeModal(); };
-                const escapeListener = (e) => { if (e.key === 'Escape') closeModal(); };
-                document.addEventListener('keydown', escapeListener);
-            });
-
-            // Append the created badge to the details container in the footer
-            detailsContainer.appendChild(sourceBadge);
-        });
+    if (errorOccurred && !wasAbortedByStopButton) {
+        refreshMessagesAfterStream(currentAiMessageData?.id);
     }
-    
-    if (errorOccurred) {
-        refreshMessagesAfterStream(currentAiMessageId);
-    }
-    
+
     currentAiMessageContentAccumulator = "";
     currentAiMessageData = null;
     currentAiMessageId = null;
@@ -1839,12 +1876,11 @@ function handleStreamEnd(errorOccurred = false, wasAbortedByStopButton = false) 
     if(sendMessageBtn) sendMessageBtn.style.display = 'inline-flex';
     if(stopGenerationBtn) stopGenerationBtn.style.display = 'none';
     if(sendMessageBtn && messageInput) sendMessageBtn.disabled = !(messageInput.value.trim() || uploadedImageServerPaths.length > 0);
-    
+
     if (wasManuallyStopped || wasAbortedByStopButton) {
         showStatus(translate('status_generation_process_halted', 'Generation process halted.'), 'info');
     }
 }
-
 async function stopGeneration() {
     if (!generationInProgress || !currentDiscussionId) return;
 
@@ -2107,16 +2143,6 @@ function viewImage(imgSrc) {
     // Initial zoom level display
     updateZoom(1);
 }
-/**
- * Renders a single message bubble in the chat.
- * This function handles both creating new messages and updating existing ones.
- * For streaming AI messages, it renders a complete placeholder with a pulsing
- * animation and disabled buttons, which are finalized in handleStreamEnd.
- *
- * @param {object} message The message data object.
- * @param {HTMLElement} [existingContainer=null] An existing container to update.
- * @param {HTMLElement} [existingBubble=null] An existing bubble element to update.
- */
 function renderMessage(message, existingContainer = null, existingBubble = null) {
     if (!message || typeof message.sender === 'undefined') {
         return;
@@ -2131,7 +2157,7 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     if (isElementInDocument(messageContainerToUse) && !isElementInDocument(bubbleDivToUse)) {
         bubbleDivToUse = messageContainerToUse.querySelector(`#${domIdForBubble}`);
     }
-    
+
     const isUpdate = isElementInDocument(messageContainerToUse) && isElementInDocument(bubbleDivToUse);
 
     if (isUpdate) {
@@ -2146,12 +2172,12 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         messageContainerToUse.dataset.messageId = messageId;
         bubbleDivToUse = document.createElement('div');
         messageContainerToUse.appendChild(bubbleDivToUse);
-        
+
         if (chatMessages) {
             chatMessages.appendChild(messageContainerToUse);
-        } else { 
-            console.error("renderMessage: chatMessages DOM element not found!"); 
-            return; 
+        } else {
+            console.error("renderMessage: chatMessages DOM element not found!");
+            return;
         }
 
         messageContainerToUse.style.opacity = '0';
@@ -2170,7 +2196,7 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     let senderDisplayName;
     let senderType;
     const userSenderNames = [currentUser.username, 'user', 'User', 'You', translate('sender_you', 'You'), translate('sender_user', 'User')];
-    
+
     if (userSenderNames.includes(message.sender) || (message.sender === "User" && currentUser.username.toLowerCase() === "user") || (currentUser.lollms_client_ai_name === null && message.sender === currentUser.username)) {
         bubbleClass = 'user-bubble';
         senderDisplayName = currentUser.username || translate('sender_you', 'You');
@@ -2184,45 +2210,37 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         senderDisplayName = getSenderNameText(message);
         senderType = 'ai';
     }
-    
+
     bubbleDivToUse.className = `message-bubble ${bubbleClass} ${isStreamingThisMessage ? 'is-streaming' : ''}`;
 
-    // --- Sender Info (Header: Avatar, Name, Model, Timestamp) ---
     if (senderDisplayName && bubbleClass !== 'system-bubble') {
         const senderInfoDiv = document.createElement('div');
         senderInfoDiv.className = 'sender-info';
-        
         let modelBadgeHTML = '';
         if (senderType === 'ai' && message.model_name) {
             modelBadgeHTML = `<span class="model-badge">${escapeHtml(message.model_name)}</span>`;
         }
-
         let timestampHTML = '';
         if (message.created_at) {
             timestampHTML = `<span class="message-timestamp">${formatTimestamp(new Date(message.created_at))}</span>`;
         }
-        
         let avatarHTML = getSenderAvatar(senderDisplayName, senderType, message.sender);
-
         senderInfoDiv.innerHTML = `
             ${avatarHTML}
             <div class="sender-details">
                 <span class="sender-text">${escapeHtml(senderDisplayName)}</span>
                 ${modelBadgeHTML}
             </div>
-            ${timestampHTML} 
+            ${timestampHTML}
         `;
         bubbleDivToUse.insertBefore(senderInfoDiv, bubbleDivToUse.firstChild);
     }
 
-    // --- Images ---
     if (message.image_references && message.image_references.length > 0) {
         const imagesContainer = document.createElement('div');
         imagesContainer.className = 'message-images-container';
-        
         const header = bubbleDivToUse.querySelector('.sender-info');
         bubbleDivToUse.insertBefore(imagesContainer, header ? header.nextSibling : bubbleDivToUse.firstChild);
-
         (async () => {
             for (const imgSrc of message.image_references) {
                 const imgItem = document.createElement('div');
@@ -2230,23 +2248,16 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
                 const imgTag = document.createElement('img');
                 imgTag.alt = translate('chat_image_alt', 'Chat Image');
                 imgTag.loading = 'lazy';
-                
                 try {
                     const response = await apiRequest(imgSrc, { method: 'GET' });
                     if (!response.ok) throw new Error(`Failed to load image: ${response.statusText}`);
-                    
                     const blob = await response.blob();
                     const objectURL = URL.createObjectURL(blob);
-
                     imgTag.src = objectURL;
-                    // THIS IS THE IMPORTANT CHANGE: Call our new viewImage function
                     imgTag.onclick = () => viewImage(objectURL);
-
-                    imgTag.onload = () => imgItem.classList.add('loaded'); // For your fade-in effect
-
+                    imgTag.onload = () => imgItem.classList.add('loaded');
                     imgItem.appendChild(imgTag);
                     imagesContainer.appendChild(imgItem);
-
                 } catch (err) {
                     console.error("Image failed to load securely:", imgSrc, err);
                     imgItem.classList.add('error');
@@ -2255,21 +2266,19 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
             }
         })();
     }
-    // --- Content ---
+
     let contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
     bubbleDivToUse.appendChild(contentDiv);
     renderEnhancedContent(contentDiv, message.content || "", messageId, message.steps, message.metadata, message);
 
-    // --- Footer (Unified Rendering) ---
     const footerDiv = document.createElement('div');
     footerDiv.className = 'message-footer';
-    
     const footerContent = document.createElement('div');
     footerContent.className = 'footer-content';
     const detailsContainer = document.createElement('div');
     detailsContainer.className = 'message-details';
-    
+
     if (message.token_count || (bubbleClass === 'ai-bubble' && isStreamingThisMessage)) {
         const tokenBadge = document.createElement('span');
         tokenBadge.className = 'detail-badge token-badge';
@@ -2279,26 +2288,26 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         detailsContainer.appendChild(tokenBadge);
     }
     
-    // (Your RAG sources and other details logic would go here)
-    if (detailsContainer.hasChildNodes()) footerContent.appendChild(detailsContainer);
+    // Always append the details container so it's ready for sources later
+    footerContent.appendChild(detailsContainer);
 
     const footerActionsContainer = document.createElement('div');
-    footerActionsContainer.className = 'message-footer-actions'; 
+    footerActionsContainer.className = 'message-footer-actions';
     const isDisabled = isStreamingThisMessage;
     const actionsGroup = document.createElement('div');
-    actionsGroup.className = 'message-actions-group'; 
+    actionsGroup.className = 'message-actions-group';
     const currentMessageBranchId = message.branch_id || activeBranchId || 'main';
 
     actionsGroup.appendChild(createActionButton('copy', translate('copy_content_tooltip', "Copy content"), () => { navigator.clipboard.writeText(message.content).then(() => showStatus(translate('status_copied_to_clipboard', 'Copied!'), 'success')); }, 'default', isDisabled));
     actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip', "Edit message"), () => initiateEditMessage(messageId, currentMessageBranchId), 'default', isDisabled));
-    
-    if (bubbleClass === 'user-bubble') { 
+
+    if (bubbleClass === 'user-bubble') {
         actionsGroup.appendChild(createActionButton('refresh', translate('resend_branch_tooltip', 'Resend/Branch'), () => initiateBranch(message.id), 'primary', isDisabled));
-    } else if (bubbleClass === 'ai-bubble') { 
+    } else if (bubbleClass === 'ai-bubble') {
         actionsGroup.appendChild(createActionButton('refresh', translate('regenerate_message_tooltip', 'Regenerate'), () => regenerateMessage(message.id), 'primary', isDisabled));
     }
     actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip', "Delete"), () => deleteMessage(messageId, currentMessageBranchId), 'destructive', isDisabled));
-    
+
     if (actionsGroup.hasChildNodes()) footerActionsContainer.appendChild(actionsGroup);
 
     if (bubbleClass === 'ai-bubble') {
@@ -2308,31 +2317,27 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         const upvoteBtn = document.createElement('button');
         const gradeDisplay = document.createElement('span');
         const downvoteBtn = document.createElement('button');
-        
         upvoteBtn.className = `rating-btn upvote ${userGrade > 0 ? 'active' : ''}`;
         upvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 3a1 1 0 01.707.293l5 5a1 1 0 01-1.414 1.414L11 6.414V16a1 1 0 11-2 0V6.414L5.707 9.707a1 1 0 01-1.414-1.414l5-5A1 1 0 0110 3z" clip-rule="evenodd" /></svg>`;
         upvoteBtn.title = translate('grade_good_tooltip', 'Good response');
         upvoteBtn.setAttribute('aria-pressed', userGrade > 0 ? 'true' : 'false');
         upvoteBtn.onclick = () => gradeMessage(messageId, 1, currentMessageBranchId);
         upvoteBtn.disabled = isDisabled;
-
-        gradeDisplay.className = 'rating-score'; 
+        gradeDisplay.className = 'rating-score';
         gradeDisplay.textContent = userGrade;
         gradeDisplay.setAttribute('aria-live', 'polite');
-
         downvoteBtn.className = `rating-btn downvote ${userGrade < 0 ? 'active' : ''}`;
         downvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 17a1 1 0 01-.707-.293l-5-5a1 1 0 011.414-1.414L9 13.586V4a1 1 0 112 0v9.586l3.293-3.293a1 1 0 011.414 1.414l-5 5A1 1 0 0110 17z" clip-rule="evenodd" /></svg>`;
         downvoteBtn.title = translate('grade_bad_tooltip', 'Bad response');
         downvoteBtn.setAttribute('aria-pressed', userGrade < 0 ? 'true' : 'false');
         downvoteBtn.onclick = () => gradeMessage(messageId, -1, currentMessageBranchId);
         downvoteBtn.disabled = isDisabled;
-
-        ratingContainer.appendChild(upvoteBtn); 
-        ratingContainer.appendChild(gradeDisplay); 
+        ratingContainer.appendChild(upvoteBtn);
+        ratingContainer.appendChild(gradeDisplay);
         ratingContainer.appendChild(downvoteBtn);
         footerActionsContainer.appendChild(ratingContainer);
     }
-    
+
     if (footerActionsContainer.hasChildNodes()) footerContent.appendChild(footerActionsContainer);
     if (footerContent.hasChildNodes()) {
         footerDiv.appendChild(footerContent);
@@ -2557,46 +2562,52 @@ function updateStepStatus(bubbleDiv, stepId, newStatus) {
     }
 }
 /**
- * Renders the main body of a message with all enhancements:
- * - Shows a typing indicator for new, empty streaming messages.
- * - Parses <think> blocks into collapsible sections.
- * - Renders Markdown content.
- * - Renders steps and metadata.
- * - Renders LaTeX mathematical expressions using KaTeX (if available).
- * - Renders and syntax-highlights custom code blocks with copy buttons.
+ * Renders the main body of a message with all enhancements.
+ * This version treats the steps container as persistent and does not clear it
+ * during content-only re-renders, fixing the bug where steps disappeared.
  */
 function renderEnhancedContent(contentDivElement, rawContent, messageId, steps = [], metadata = [], messageObject = {}) {
-    contentDivElement.innerHTML = ''; // Start fresh
+    // --- Find or Create the Main Content Wrapper ---
+    let mainContentWrapper = contentDivElement.querySelector('.prose');
+    if (!mainContentWrapper) {
+        mainContentWrapper = document.createElement('div');
+        mainContentWrapper.classList.add('prose', 'prose-sm', 'max-w-none', 'dark:prose-invert');
+        contentDivElement.prepend(mainContentWrapper); // Prepend to ensure it's before steps
+    }
 
     // --- Logic for Typing Indicator ---
     const isStreamingThisMessage = aiMessageStreaming && messageId === currentAiMessageId;
     const isEffectivelyEmpty = !(rawContent && rawContent.trim()) && (!steps || steps.length === 0) && (!metadata || metadata.length === 0);
 
-    // If we are streaming this specific message AND it has no content yet, show the indicator.
-    if (isStreamingThisMessage && isEffectivelyEmpty) {
+    // Check if the steps container already exists.
+    const stepsContainerExists = !!contentDivElement.querySelector('.steps-container');
+
+    if (isStreamingThisMessage && isEffectivelyEmpty && !stepsContainerExists) {
+        // Only show typing indicator if there's no content AND no steps have been rendered yet.
+        mainContentWrapper.innerHTML = ''; // Clear any previous prose content
         const typingIndicatorDiv = document.createElement('div');
         typingIndicatorDiv.className = 'typing-indicator';
-        // Create the three bouncing dots
         for (let i = 0; i < 3; i++) {
             typingIndicatorDiv.appendChild(document.createElement('span'));
         }
-        contentDivElement.appendChild(typingIndicatorDiv);
-        // We are done for this render, the indicator is all we need to show.
-        return;
+        mainContentWrapper.appendChild(typingIndicatorDiv);
+        return; // We are done for this render cycle.
     }
 
-    // --- Render Main Content if it exists ---
+    // --- Render Main Content (Markdown, Think Blocks) ---
+    // This section now *only* updates the mainContentWrapper, leaving other elements untouched.
     let currentSegment = rawContent || "";
     const thinkBlockRegex = /<think>([\s\S]*?)<\/think>/gs;
     let lastIndex = 0;
     let match;
+    mainContentWrapper.innerHTML = ''; // Clear ONLY the prose content for re-rendering
 
     while ((match = thinkBlockRegex.exec(currentSegment)) !== null) {
         const textBefore = currentSegment.substring(lastIndex, match.index);
         if (textBefore.trim()) {
             const regularContentSegmentDiv = document.createElement('div');
             regularContentSegmentDiv.innerHTML = marked.parse(textBefore);
-            contentDivElement.appendChild(regularContentSegmentDiv);
+            mainContentWrapper.appendChild(regularContentSegmentDiv);
         }
 
         const thinkDetails = document.createElement('details');
@@ -2607,10 +2618,10 @@ function renderEnhancedContent(contentDivElement, rawContent, messageId, steps =
         const thinkContentDiv = document.createElement('div');
         thinkContentDiv.className = 'think-content p-2 border-t border-gray-200 dark:border-gray-700 prose prose-sm max-w-none dark:prose-invert';
         thinkContentDiv.innerHTML = marked.parse(match[1].trim());
-        
+
         thinkDetails.appendChild(thinkSummary);
         thinkDetails.appendChild(thinkContentDiv);
-        contentDivElement.appendChild(thinkDetails);
+        mainContentWrapper.appendChild(thinkDetails);
         lastIndex = thinkBlockRegex.lastIndex;
     }
 
@@ -2618,42 +2629,35 @@ function renderEnhancedContent(contentDivElement, rawContent, messageId, steps =
     if (remainingText.trim()) {
         const finalContentSegmentDiv = document.createElement('div');
         finalContentSegmentDiv.innerHTML = marked.parse(remainingText);
-        contentDivElement.appendChild(finalContentSegmentDiv);
+        mainContentWrapper.appendChild(finalContentSegmentDiv);
     }
     
-    // Apply prose styling for consistent typography
-    if (contentDivElement.hasChildNodes() && !contentDivElement.classList.contains('prose')) {
-         contentDivElement.classList.add('prose', 'prose-sm', 'max-w-none', 'dark:prose-invert');
-    }
-
-    // --- Render Steps and Metadata ---
+    // --- Render Steps and Metadata (only if provided) ---
+    // This part is now additive. It won't clear the steps container if the `steps` array is empty.
     if (steps && steps.length > 0) {
-        // Assuming renderSteps is another helper you have
-        renderSteps(contentDivElement, steps); 
+        renderOrUpdateSteps(contentDivElement, steps, true); // true for initialRender from history
     }
     if (metadata && metadata.length > 0) {
-        // Assuming renderMetadata is another helper you have
+        // This assumes renderMetadata is also additive and doesn't clear its container.
         renderMetadata(contentDivElement, metadata);
     }
-    
+
     // --- Fallback for completely empty, non-streaming messages ---
-    if (isEffectivelyEmpty && (!messageObject.image_references || messageObject.image_references.length === 0)) {
-        contentDivElement.innerHTML = `<p class="empty-message-placeholder">${translate('empty_message_placeholder', 'Empty message')}</p>`;
+    if (isEffectivelyEmpty && !stepsContainerExists && (!messageObject.image_references || messageObject.image_references.length === 0)) {
+        mainContentWrapper.innerHTML = `<p class="empty-message-placeholder">${translate('empty_message_placeholder', 'Empty message')}</p>`;
     }
 
     // --- Post-processing for dynamic content ---
-    
-    // KaTeX for LaTeX rendering
+    // This now runs on the entire message-content div to catch content in both prose and steps.
     if (typeof renderMathInElement === 'function') {
         try {
             renderMathInElement(contentDivElement, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\(', right: '\\)', display: false }, { left: '\\[', right: '\\]', display: true }], throwOnError: false });
         } catch (e) { console.warn("KaTeX rendering error:", e); }
     }
 
-    // Syntax Highlighting and Copy Buttons
-    renderCustomCodeBlocks(contentDivElement, messageId); // Assuming this is your custom code block handler
-    applySyntaxHighlighting(contentDivElement); // General highlighter like PrismJS
-    addCodeBlockCopyButtons(contentDivElement); // Adds copy buttons to standard <pre><code> blocks
+    renderCustomCodeBlocks(contentDivElement, messageId);
+    applySyntaxHighlighting(contentDivElement);
+    addCodeBlockCopyButtons(contentDivElement);
 }
 // Helper functions
 function createActionButton(type, tooltip, onClick, variant = 'default') {
@@ -2712,49 +2716,157 @@ function addCodeBlockCopyButtons(container) {
     });
 }
 /**
- * Renders a list of completed steps from a saved message history.
- * This function mimics the visual style of the dynamic step rendering,
- * ensuring a consistent user experience.
- *
- * @param {HTMLElement} container The parent element to append the steps to.
- * @param {Array<object>} steps The array of step data objects.
+ * A helper function to update the toggle button's text and visibility.
+ * @param {HTMLElement} toggleButton The button element to update.
+ * @param {HTMLElement} stepsContainer The container holding the step items.
  */
-function renderSteps(container, steps) {
-    // Do nothing if there are no steps to render.
+function updateToggleButtonText(toggleButton, stepsContainer) {
+    const stepCount = stepsContainer.children.length;
+
+    if (stepCount <= 1) {
+        toggleButton.style.display = 'none';
+        return;
+    }
+
+    toggleButton.style.display = 'flex';
+    const textEl = toggleButton.querySelector('.toggle-text');
+    const isCollapsed = stepsContainer.classList.contains('collapsed');
+
+    if (isCollapsed) {
+        const olderStepsCount = stepCount - 1;
+        textEl.textContent = translate('show_older_steps_btn', `Show ${olderStepsCount} older step(s)...`, { count: olderStepsCount });
+    } else {
+        textEl.textContent = translate('hide_steps_btn', 'Hide steps');
+    }
+}
+
+
+/**
+ * Renders or updates a list of steps, with the latest step always on top.
+ * Manages a collapsible container to show/hide the history of older steps.
+ * Differentiates between 'process' steps (with states) and 'info' steps.
+ *
+ * @param {HTMLElement} parentContainer The element to attach the steps to (e.g., message-content).
+ * @param {Array<object>} steps The array of step objects to render or update.
+ * @param {boolean} isInitialRenderFromHistory If true, sets the initial state from saved data.
+ */
+function renderOrUpdateSteps(parentContainer, steps, isInitialRenderFromHistory = false) {
     if (!steps || steps.length === 0) return;
 
-    // Create the main container for all steps.
-    const stepsContainer = document.createElement('div');
-    stepsContainer.className = 'steps-container'; // No 'collapsed' class needed.
-    
-    // Loop through the steps and create a DOM element for each one.
-    // We use .forEach() and .prepend() to ensure the newest step is at the top,
-    // matching the live generation behavior.
-    steps.forEach(step => {
-        const stepItem = document.createElement('div');
-        
-        // Since this function renders completed history, all steps are 'done'.
-        stepItem.className = 'step-item status-done';
-        stepItem.dataset.stepId = step.id;
-        
-        const stepText = escapeHtml(step.content || step.chunk || '');
+    let stepsContainer = parentContainer.querySelector('.steps-container');
+    let toggleButton = parentContainer.querySelector('.steps-toggle-button');
 
-        // Use the HTML structure for a "done" step with a checkmark.
-        stepItem.innerHTML = `
-            <div class="step-icon">
-                <svg fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
-                </svg>
-            </div>
-            <div class="step-text">${stepText}</div>
+    if (!stepsContainer) {
+        stepsContainer = document.createElement('div');
+        stepsContainer.className = 'steps-container';
+        toggleButton = document.createElement('button');
+        toggleButton.className = 'steps-toggle-button';
+        toggleButton.innerHTML = `
+            <span class="toggle-text"></span>
+            <svg class="toggle-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
         `;
-        
-        // Prepend the step to the container.
-        stepsContainer.prepend(stepItem);
+        parentContainer.appendChild(stepsContainer);
+        parentContainer.appendChild(toggleButton);
+        toggleButton.onclick = () => {
+            const isCollapsing = !stepsContainer.classList.contains('collapsed');
+            stepsContainer.classList.toggle('collapsed', isCollapsing);
+            if (!isCollapsing) {
+                requestAnimationFrame(() => {
+                    stepsContainer.style.maxHeight = stepsContainer.scrollHeight + 'px';
+                });
+            } else {
+                stepsContainer.style.maxHeight = null;
+            }
+            updateToggleButtonText(toggleButton, stepsContainer);
+        };
+    }
+
+    steps.forEach(stepData => {
+        if (!stepData || !stepData.id) return;
+        let stepEl = stepsContainer.querySelector(`.step-item[data-step-id="${stepData.id}"]`);
+        if (!stepEl) {
+            stepEl = document.createElement('div');
+            stepEl.dataset.stepId = stepData.id;
+            const stepText = escapeHtml(stepData.content || stepData.chunk || '');
+            let iconHTML = '';
+            let itemClass = '';
+            if (stepData.type === 'step') {
+                itemClass = 'step-item step-item-info';
+                iconHTML = `<svg class="w-4 h-4 text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" /></svg>`;
+            } else {
+                itemClass = 'step-item step-item-process status-pending';
+                iconHTML = `<svg class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>`;
+            }
+            stepEl.className = itemClass;
+            stepEl.innerHTML = `<div class="step-icon">${iconHTML}</div><div class="step-text">${stepText}</div>`;
+            stepsContainer.prepend(stepEl);
+        }
+        if (stepEl.classList.contains('step-item-process') && stepData.status === 'done') {
+            const wasPending = stepEl.classList.contains('status-pending');
+            if (wasPending) {
+                stepEl.classList.remove('status-pending');
+                stepEl.classList.add('status-done');
+                const iconDiv = stepEl.querySelector('.step-icon');
+                if (iconDiv) {
+                    iconDiv.innerHTML = `<svg fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>`;
+                }
+                const textDiv = stepEl.querySelector('.step-text');
+                if (textDiv && stepData.content) {
+                    textDiv.textContent = escapeHtml(stepData.content);
+                }
+            }
+        }
     });
 
-    // Append the fully constructed container to the message content.
-    container.appendChild(stepsContainer);
+    // --- Manage collapsed state (THE FIX) ---
+    if (isInitialRenderFromHistory) {
+        // For old messages loaded from history, set the initial collapsed state.
+        stepsContainer.classList.toggle('collapsed', stepsContainer.children.length > 1);
+    } else {
+        // During live streaming:
+        const isFirstCollapse = (stepsContainer.children.length === 2 && !stepsContainer.hasAttribute('data-initial-collapse-set'));
+        if (isFirstCollapse) {
+            // This is the first time we have enough steps to collapse, so set the default state.
+            stepsContainer.classList.add('collapsed');
+            stepsContainer.setAttribute('data-initial-collapse-set', 'true'); // Mark that we've done this.
+        }
+    }
+
+    // If the container is currently expanded, we must update its maxHeight
+    // to accommodate the newly prepended step.
+    if (!stepsContainer.classList.contains('collapsed')) {
+        requestAnimationFrame(() => {
+            stepsContainer.style.maxHeight = stepsContainer.scrollHeight + 'px';
+        });
+    }
+
+    // Always update the button text regardless of state changes.
+    updateToggleButtonText(toggleButton, stepsContainer);
+}
+
+/**
+ * Helper function to update the toggle button's text based on the current state.
+ * @param {HTMLElement} toggleButton The button to update.
+ * @param {HTMLElement} stepsContainer The container with the steps.
+ */
+function updateToggleButtonText(toggleButton, stepsContainer) {
+    const stepCount = stepsContainer.children.length;
+    if (stepCount <= 1) {
+        toggleButton.style.display = 'none';
+        return;
+    }
+    
+    toggleButton.style.display = 'flex';
+    const textEl = toggleButton.querySelector('.toggle-text');
+    const isCollapsed = stepsContainer.classList.contains('collapsed');
+
+    if (isCollapsed) {
+        // Show the text of the latest (first) step, which is visible
+        const latestStepText = stepsContainer.firstElementChild.querySelector('.step-text').textContent;
+        textEl.textContent = latestStepText;
+    } else {
+        textEl.textContent = `Show less (${stepCount} steps)`;
+    }
 }
 
 function renderMetadata(container, metadata) {
