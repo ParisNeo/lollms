@@ -1454,14 +1454,38 @@ async function deleteInlineDiscussion(id) {
         }
 }
 async function toggleStarDiscussion(id, isCurrentlyStarred) {
-        const method = isCurrentlyStarred ? 'DELETE' : 'POST';
-        try {
+    if (!discussions[id]) return;
+
+    const originalStarredState = discussions[id].is_starred;
+
+    // --- 1. Optimistic Update ---
+    // Immediately update the local data and re-render the list for a snappy UI.
+    discussions[id].is_starred = !isCurrentlyStarred;
+    discussions[id].last_activity_at = new Date().toISOString(); // Update activity time to help with sorting
+    renderDiscussionList();
+
+    // --- 2. Sync with Server ---
+    // Perform the API request in the background.
+    const method = isCurrentlyStarred ? 'DELETE' : 'POST';
+    try {
         const response = await apiRequest(`/api/discussions/${id}/star`, { method: method });
+        // After success, we can optionally re-sync the state from the server's response
+        // to ensure consistency, though it's not strictly necessary if the API is reliable.
         const updatedInfo = await response.json();
-        discussions[id].is_starred = updatedInfo.is_starred; 
-        discussions[id].last_activity_at = updatedInfo.last_activity_at || discussions[id].last_activity_at || new Date().toISOString();
-        renderDiscussionList();
-        } catch (error) { showStatus(translate(isCurrentlyStarred ? 'status_unstar_failed' : 'status_star_failed', `Failed to ${isCurrentlyStarred ? 'unstar' : 'star'} discussion.`), 'error'); }
+        discussions[id].is_starred = updatedInfo.is_starred;
+        discussions[id].last_activity_at = updatedInfo.last_activity_at || discussions[id].last_activity_at;
+
+        // We can do a final re-render to be perfectly in sync, though often it's not visually noticeable
+        // renderDiscussionList(); 
+
+    } catch (error) {
+        // --- 3. Rollback on Error ---
+        // If the API call fails, revert the change and notify the user.
+        showStatus(translate(isCurrentlyStarred ? 'status_unstar_failed' : 'status_star_failed', `Failed to ${isCurrentlyStarred ? 'unstar' : 'star'} discussion.`), 'error');
+        
+        discussions[id].is_starred = originalStarredState; // Revert to the original state
+        renderDiscussionList(); // Re-render again to show the reverted state
+    }
 }
 
 // --- Chat Interaction ---
