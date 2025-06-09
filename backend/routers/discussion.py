@@ -390,14 +390,20 @@ async def chat_in_existing_discussion(
             if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
                 shared_state["accumulated_ai_response"] += chunk
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "chunk", "content": chunk}) + "\n")
-            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_START:
+            elif msg_type == MSG_TYPE.MSG_TYPE_STEP:
                 step_type = params.get("type", "step")
                 hop = params.get("hop", "")
                 info = params.get("query", chunk) if step_type == "rag_query_generation" or step_type == "rag_retrieval" else chunk
+                ASCIIColors.yellow(f"\n>> RAG Step (Hop {hop}): {step_type} - Info: {str(info)[:100]}...", flush=True)
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step", "content": chunk +"\n", "id": params["type"], "status":"pending"}) + "\n")
+            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_START:
+                step_type = params.get("type", "step_start")
+                hop = params.get("hop", "")
+                info = params.get("query", chunk) if step_type == "rag_query_generation" or step_type == "rag_retrieval" else chunk
                 ASCIIColors.yellow(f"\n>> RAG Step Start (Hop {hop}): {step_type} - Info: {str(info)[:100]}...", flush=True)
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_update", "content": chunk +"\n"}) + "\n")
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": chunk +"\n", "id": params["type"], "status":"pending"}) + "\n")
             elif msg_type == MSG_TYPE.MSG_TYPE_STEP_END:
-                step_type = params.get("type", "step")
+                step_type = params.get("type", "step_end")
                 hop = params.get("hop", "")
                 num_chunks = params.get("num_chunks", "")
                 query = params.get("query", "")
@@ -409,7 +415,7 @@ async def chat_in_existing_discussion(
                 elif step_type == "rag_llm_decision": info_str = f"LLM Decision: {json.dumps(decision)}"
                 elif step_type == "final_answer_generation": info_str = "Final answer generation complete."
                 else: info_str = chunk
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_update", "content": chunk +"\n"}) + "\n")
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": chunk +"\n", "id": params["type"], "status":"done"}) + "\n")
 
                 ASCIIColors.green(f"\n<< RAG Step End (Hop {hop}): {step_type} - {info_str}", flush=True)
 

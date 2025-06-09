@@ -484,7 +484,24 @@ hljs-string
     color: #FEF3C7; /* dark:text-yellow-200 */
     border-color: #a16207; /* dark:border-yellow-700 */
 }
+/* The class that JavaScript will add to the AI bubble during generation */
+.ai-bubble.is-streaming {
+    animation: pulse-bg 2s infinite;
+}
 
+
+/* The keyframe animation for the pulse effect */
+@keyframes pulse-bg {
+    0% {
+        background-color: var(--ai-bubble-bg-color);
+    }
+    50% {
+        background-color: var(--ai-bubble-bg-pulse-color);
+    }
+    100% {
+        background-color: var(--ai-bubble-bg-color);
+    }
+}
 /* Sender Information (Name, Avatar, Model Badge) */
 .sender-name {
     font-size: 0.75rem; /* Standardized from 0.7rem and 0.75rem */
@@ -651,7 +668,116 @@ hljs-string
     background: rgba(0,0,0,0.7);
 }
 
+/* --- Image Modal Viewer Styles (REVISED) --- */
+
+.image-modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100vw; height: 100vh;
+    background-color: rgba(0, 0, 0, 0.85);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    cursor: zoom-out;
+}
+
+.image-modal-overlay.visible {
+    opacity: 1;
+}
+
+.image-modal-content {
+    position: relative;
+    max-width: 90vw;
+    max-height: 90vh;
+    transition: transform 0.3s ease;
+    cursor: grab;
+    
+    /* --- KEY CHANGES --- */
+    display: flex; /* Make the container a flexbox */
+    overflow: auto; /* Add scrollbars if content overflows */
+}
+
+.image-modal-content.zoomed {
+    cursor: move;
+    overflow: hidden; /* Hide scrollbars when zoomed for panning */
+}
+
+.image-modal-content img {
+    /* --- KEY CHANGES --- */
+    width: auto;
+    height: auto;
+    max-width: 100%;  /* The image can't be wider than its container */
+    max-height: 100%; /* The image can't be taller than its container */
+    margin: auto;     /* This centers the image perfectly inside the flex container */
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.image-modal-close-btn {
+    position: absolute;
+    top: -40px;
+    right: 0;
+    background: none;
+    border: none;
+    color: white;
+    font-size: 2rem;
+    cursor: pointer;
+    padding: 0.5rem;
+    line-height: 1;
+}
+
+.image-modal-help-text {
+    position: absolute;
+    bottom: -40px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 0.9rem;
+    white-space: nowrap;
+    pointer-events: none;
+}
+
 /* Typing Indicator */
+/* --- Typing Indicator Styles --- */
+.typing-indicator {
+    display: flex;
+    align-items: center;
+    padding: 10px 0;
+}
+
+.typing-indicator span {
+    height: 8px;
+    width: 8px;
+    border-radius: 50%;
+    background-color: #9ca3af; /* A neutral gray */
+    margin: 0 2px;
+    animation: bounce 1.4s infinite ease-in-out both;
+}
+
+.dark .typing-indicator span {
+    background-color: #6b7280;
+}
+
+.typing-indicator span:nth-of-type(1) {
+    animation-delay: -0.32s;
+}
+
+.typing-indicator span:nth-of-type(2) {
+    animation-delay: -0.16s;
+}
+
+/* The bouncing animation keyframes */
+@keyframes bounce {
+    0%, 80%, 100% {
+        transform: scale(0);
+    }
+    40% {
+        transform: scale(1.0);
+    }
+}
 .typing-bubble { /* Represents the AI bubble placeholder */
     align-self: flex-start;
     padding: 1rem 1.25rem; /* Matches AI bubble padding if desired or can be unique */
@@ -706,7 +832,115 @@ hljs-string
 }
 .dark .empty-message { color: #9ca3af; /* dark:text-gray-400 */ }
 
+/* --- Step Rendering Styles --- */
+.steps-container {
+    margin-top: 1rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid #e5e7eb; /* border-gray-200 */
+}
+.dark .steps-container {
+    border-top-color: #374151; /* dark:border-gray-700 */
+}
 
+.step-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.5rem;
+    font-size: 0.875rem; /* text-sm */
+    color: #6b7280; /* text-gray-500 */
+}
+.dark .step-item {
+    color: #9ca3af; /* dark:text-gray-400 */
+}
+
+.step-icon {
+    flex-shrink: 0;
+    width: 1.25rem; /* w-5 */
+    height: 1.25rem; /* h-5 */
+    margin-right: 0.75rem; /* mr-3 */
+}
+
+/* Spinner for 'pending' status */
+.step-item.status-pending .step-icon .spinner {
+    animation: rotate 1.5s linear infinite;
+    width: 1rem;
+    height: 1rem;
+}
+.step-item.status-pending .step-icon .spinner .path {
+    stroke: #6b7280; /* text-gray-500 */
+    stroke-linecap: round;
+    animation: dash 1.5s ease-in-out infinite;
+}
+.dark .step-item.status-pending .step-icon .spinner .path {
+    stroke: #9ca3af; /* dark:text-gray-400 */
+}
+
+/* Checkmark for 'done' status */
+.step-item.status-done .step-icon {
+    color: #10B981; /* green-500 */
+}
+.dark .step-item.status-done .step-icon {
+    color: #34D399; /* green-400 */
+}
+.step-item.status-done .step-text {
+    color: #1f2937; /* text-gray-800 */
+}
+.dark .step-item.status-done .step-text {
+    color: #d1d5db; /* dark:text-gray-300 */
+}
+
+/* Spinner Keyframe Animations */
+@keyframes rotate { 100% { transform: rotate(360deg); } }
+@keyframes dash {
+    0% { stroke-dasharray: 1, 150; stroke-dashoffset: 0; }
+    50% { stroke-dasharray: 90, 150; stroke-dashoffset: -35; }
+    100% { stroke-dasharray: 90, 150; stroke-dashoffset: -124; }
+}
+/* --- Collapsible Steps Styles --- */
+.steps-container {
+    overflow: hidden; /* This is key for the collapse animation */
+    transition: max-height 0.4s ease-in-out;
+}
+
+/* By default, the container is collapsed to show only the last step */
+.steps-container.collapsed {
+    /* Adjust this value if your step items have different heights */
+    max-height: 36px; 
+}
+
+.steps-toggle-button {
+    background: none;
+    border: none;
+    color: #6B7280; /* text-gray-500 */
+    font-size: 0.75rem; /* text-xs */
+    font-weight: 500;
+    cursor: pointer;
+    margin-top: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 0.25rem;
+    display: flex;
+    align-items: center;
+}
+.dark .steps-toggle-button {
+    color: #9CA3AF; /* dark:text-gray-400 */
+}
+.steps-toggle-button:hover {
+    background-color: #F3F4F6; /* bg-gray-100 */
+}
+.dark .steps-toggle-button:hover {
+    background-color: #374151; /* dark:bg-gray-700 */
+}
+
+.steps-toggle-button .toggle-arrow {
+    width: 0.75rem; /* w-3 */
+    height: 0.75rem; /* h-3 */
+    margin-left: 0.25rem;
+    transition: transform 0.3s ease;
+}
+
+.steps-container.collapsed .steps-toggle-button .toggle-arrow {
+    transform: rotate(-90deg);
+}
 /* ==========================================================================
    4. Code Blocks & Output
    ========================================================================== */
@@ -966,6 +1200,11 @@ hljs-string
     display: flex;
     align-items: center;
     gap: 0.25rem; /* Tighter gap for individual action buttons */
+}
+.message-actions-group button:disabled,
+.message-rating button:disabled {
+    opacity: var(--message-action-btn-disabled-opacity);
+    cursor: not-allowed;
 }
 
 /* Detail Badges (Token, Time, Source) */
@@ -1985,4 +2224,77 @@ html:not(.dark) #appLoadingMessage { background: linear-gradient(135deg, #f9fafb
 .dark .discussion-action-btn.primary:hover {
     background-color: #1E3A8A; /* dark:bg-blue-800 */
     color: #93C5FD; /* dark:text-blue-300 */
+}
+
+
+/* --- Custom Image Modal Styles --- */
+
+/* The dark overlay that covers the entire screen */
+.image-modal-overlay {
+    position: fixed;
+    z-index: 1000;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.85); /* Dark, semi-transparent background */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: zoom-out;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+/* A class to add when the modal is open for the fade-in effect */
+.image-modal-overlay.open {
+    opacity: 1;
+}
+
+/* The image itself inside the modal */
+.image-modal-content {
+    max-width: 90vw;   /* Max width is 90% of viewport width */
+    max-height: 90vh;  /* Max height is 90% of viewport height */
+    object-fit: contain; /* Ensures the whole image is visible without distortion */
+    transition: transform 0.3s ease;
+    cursor: default;
+}
+
+/* The close button (top right corner) */
+.image-modal-close-btn {
+    position: absolute;
+    top: 20px;
+    right: 30px;
+    font-size: 3rem;
+    color: white;
+    font-weight: bold;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    transition: transform 0.2s ease;
+}
+
+.image-modal-close-btn:hover {
+    transform: scale(1.1);
+}
+
+/* --- Thumbnail Enhancement in Chat Bubble --- */
+
+/* Style for the image item in the chat */
+.message-image-item {
+    cursor: zoom-in;
+    overflow: hidden; /* Important for the zoom effect */
+    border-radius: 8px;
+}
+
+/* The actual image thumbnail */
+.message-image-item img {
+    display: block;
+    width: 100%;
+    transition: transform 0.3s ease;
+}
+
+/* A nice zoom-in effect when hovering over the thumbnail */
+.message-image-item:hover img {
+    transform: scale(1.05);
 }

@@ -1446,11 +1446,45 @@ async function toggleStarDiscussion(id, isCurrentlyStarred) {
 // --- Chat Interaction ---
 
 function autoGrowTextarea(element) { 
-    element.style.height = 'auto'; const maxHeight = 200;
+    element.style.height = 'auto';
+    const maxHeight = 200;
     element.style.height = Math.min(element.scrollHeight, maxHeight) + 'px';
     element.style.overflowY = element.scrollHeight > maxHeight ? 'auto' : 'hidden';
 }
-       
+
+/**
+ * Checks if a container is scrolled to the bottom.
+ * A small threshold is used for leniency.
+ * @param {HTMLElement} el The container element.
+ * @returns {boolean} True if scrolled to the bottom.
+ */
+function isScrolledToBottom(el) {
+    if (!el) return false;
+    const threshold = 15; // px
+    return el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+}
+
+/**
+ * Scrolls the chat to the bottom only if the user is already there.
+ * This prevents interrupting a user who has scrolled up to read.
+ */
+function smartScrollToBottom() {
+    const chatContainer = document.getElementById('chatMessages');
+    if (chatContainer && isScrolledToBottom(chatContainer)) {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+}
+
+/**
+ * Forces the chat container to scroll to the very bottom.
+ * Used when a user sends a message or a full history is loaded.
+ */
+function forceScrollToBottom() {
+    const chatContainer = document.getElementById('chatMessages');
+    if (chatContainer) {
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+}
 
 async function sendMessage(branchFromUserMessageId = null, resendData = null) {
     if (generationInProgress || !currentDiscussionId) return;
@@ -1460,18 +1494,16 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
         showStatus(translate('error_active_discussion_branch_missing', "Error: Active discussion branch missing."), "error");
         return;
     }
-    // Ensure currentMessages is always up-to-date with the active branch
     currentMessages = currentDisc.branches[activeBranchId];
 
     let prompt;
-    let imagePayloadForBackend = []; // This will hold server_paths for backend
+    let imagePayloadForBackend = [];
 
-    if (resendData) { // This path is taken by initiateBranch
+    if (resendData) {
         prompt = resendData.prompt;
-        imagePayloadForBackend = resendData.image_server_paths || []; // Use server paths
-    } else { // Normal new message
+        imagePayloadForBackend = resendData.image_server_paths || [];
+    } else {
         prompt = messageInput.value.trim();
-        // uploadedImageServerPaths contains { filename, server_path, file_obj }
         imagePayloadForBackend = uploadedImageServerPaths.map(img => img.server_path);
         if (!prompt && imagePayloadForBackend.length === 0) return;
     }
@@ -1481,7 +1513,6 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
     if (sendMessageBtn) sendMessageBtn.style.display = 'none';
     if (stopGenerationBtn) { stopGenerationBtn.style.display = 'inline-flex'; stopGenerationBtn.disabled = false; }
 
-    // Add user message to the current active branch (if not a resend that already did this)
     if (!resendData) {
         const tempUserMessageId = `temp-user-${Date.now()}`;
         const userMessageData = {
@@ -1489,29 +1520,28 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
             sender: translate(currentUser.lollms_client_ai_name ? 'sender_you' : (currentUser.username || 'sender_user'), 'User'),
             content: prompt,
             user_grade: 0, token_count: null, model_name: null,
-            image_references: uploadedImageServerPaths.map(img => URL.createObjectURL(img.file_obj)), // For immediate display
-            server_image_paths: imagePayloadForBackend, // For API
+            image_references: uploadedImageServerPaths.map(img => URL.createObjectURL(img.file_obj)),
+            server_image_paths: imagePayloadForBackend,
             steps: [], metadata: [],
             created_at: new Date().toISOString(),
-            branch_id: activeBranchId, // Associate with active branch
+            branch_id: activeBranchId,
             discussion_id: currentDiscussionId
         };
         currentMessages.push(userMessageData);
-        renderMessage(userMessageData); // Render this new user message
+        renderMessage(userMessageData);
     }
 
     const formData = new FormData();
     formData.append('prompt', prompt);
     formData.append('image_server_paths_json', JSON.stringify(imagePayloadForBackend));
-    formData.append('use_rag', isRagActive.toString()); // Send as string
+    formData.append('use_rag', isRagActive.toString());
     if (isRagActive && currentDisc.rag_datastore_id) {
         formData.append('rag_datastore_id', currentDisc.rag_datastore_id);
     }
 
-    // Branching parameters for new backend
     if (backendCapabilities.supportsBranches) {
-        formData.append('branch_id', activeBranchId); // Always send current active branch
-        if (resendData && branchFromUserMessageId) { // resendData implies is_resend
+        formData.append('branch_id', activeBranchId);
+        if (resendData && branchFromUserMessageId) {
             formData.append('is_resend', 'true');
             formData.append('branch_from_message_id', branchFromUserMessageId);
         } else {
@@ -1519,8 +1549,7 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
         }
     }
 
-
-    if (!resendData) { // Clear input only for new messages, not for resends
+    if (!resendData) {
         if (messageInput) messageInput.value = '';
         uploadedImageServerPaths = [];
         if (imageUploadPreviewContainer) {
@@ -1529,37 +1558,35 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
         }
         if (messageInput) autoGrowTextarea(messageInput);
     }
-    scrollChatToBottom();
+    forceScrollToBottom();
 
     aiMessageStreaming = true;
     currentAiMessageContentAccumulator = "";
-    currentAiMessageId = `temp-ai-${Date.now()}`; // Temporary ID for AI message
-    currentAiMessageData = { // Placeholder data for the AI message
+    currentAiMessageId = `temp-ai-${Date.now()}`;
+    currentAiMessageData = {
         id: currentAiMessageId,
         sender: currentUser.lollms_client_ai_name || translate('sender_assistant', 'Assistant'),
         content: "", user_grade: 0, token_count: null, model_name: null,
         image_references: [], steps: [], metadata: [],
         created_at: new Date().toISOString(),
-        branch_id: activeBranchId, // AI message belongs to the same active branch
+        branch_id: activeBranchId,
         discussion_id: currentDiscussionId
     };
     currentMessages.push(currentAiMessageData);
-    renderMessage(currentAiMessageData); // Initial render of AI placeholder
+    renderMessage(currentAiMessageData);
+    forceScrollToBottom();
 
-    // Cache the DOM elements for the AI message *after* initial render
     currentAiMessageDomContainer = document.querySelector(`.message-container[data-message-id="${currentAiMessageId}"]`);
-    currentAiMessageDomBubble = document.getElementById(`message-${currentAiMessageId}`); // Assuming bubble gets this ID
+    currentAiMessageDomBubble = document.getElementById(`message-${currentAiMessageId}`);
 
     if (!isElementInDocument(currentAiMessageDomContainer) || !isElementInDocument(currentAiMessageDomBubble)) {
         console.error("sendMessage: AI placeholder DOM elements not found after initial render!");
-        // Fallback or error handling
         generationInProgress = false; aiMessageStreaming = false;
         if(sendMessageBtn) sendMessageBtn.style.display = 'inline-flex';
         if(stopGenerationBtn) stopGenerationBtn.style.display = 'none';
-        currentMessages.pop(); // Remove the failed placeholder
+        currentMessages.pop();
         return;
     }
-
 
     currentDisc.last_activity_at = new Date().toISOString();
     renderDiscussionList();
@@ -1568,7 +1595,7 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
         const response = await apiRequest(`/api/discussions/${currentDiscussionId}/chat`, {
             method: 'POST',
             body: formData,
-            signal: activeGenerationAbortController.signal // Add signal here
+            signal: activeGenerationAbortController.signal
         });
 
         if (!response.ok || !response.body) {
@@ -1590,22 +1617,13 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
             lines.forEach(line => {
                 try {
                     const parsedLine = JSON.parse(line);
-                    // Check for a special message type that might confirm the AI message ID
                     if (parsedLine.type === 'final_ai_message_id' && parsedLine.id && currentAiMessageData && currentAiMessageData.id === currentAiMessageId) {
-                        // Backend confirmed/provided the final ID for the AI message.
-                        // Update client-side ID if different.
                         const oldId = currentAiMessageId;
                         const newId = parsedLine.id;
                         if (oldId !== newId) {
                             console.log(`AI Message ID confirmed/updated: ${oldId} -> ${newId}`);
                             currentAiMessageId = newId;
                             currentAiMessageData.id = newId;
-
-                            // Update DOM element IDs
-                            if (isElementInDocument(currentAiMessageDomContainer)) currentAiMessageDomContainer.dataset.messageId = newId;
-                            if (isElementInDocument(currentAiMessageDomBubble)) currentAiMessageDomBubble.id = `message-${newId}`;
-                            
-                            // Update in currentMessages array
                             const msgIndex = currentMessages.findIndex(m => m.id === oldId);
                             if (msgIndex > -1) currentMessages[msgIndex].id = newId;
                         }
@@ -1614,7 +1632,6 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
                     }
                 } catch (e) {
                     console.error("sendMessage: Error parsing stream line:", line, e);
-                    // Render a system error message in the chat
                     const systemErrorMsg = {
                         id: `syserr-${Date.now()}`, sender: 'system',
                         content: translate('malformed_data_chunk_error', 'Malformed data chunk from server.'),
@@ -1624,13 +1641,11 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
                 }
             });
         }
-        if (generationInProgress) handleStreamEnd(false); // False = not an error
+        if (generationInProgress) handleStreamEnd(false);
     } catch (error) {
         if (error.name === 'AbortError') {
             showStatus(translate('status_generation_cancelled_by_user', 'Generation cancelled by user.'), 'info');
-             // handleStreamEnd will be called by stopGeneration if that was the source of abort
-             // If abort came from elsewhere (e.g. navigation), ensure stream ends.
-            if (generationInProgress) handleStreamEnd(true, true); // error=true, wasAborted=true
+            if (generationInProgress) handleStreamEnd(true, true);
         } else {
             showStatus(translate('chat_stream_failed_error', `Chat stream failed: ${error.message}`, { message: error.message }), "error");
             const streamErrorMsg = {
@@ -1639,133 +1654,192 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
                 steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId
             };
             currentMessages.push(streamErrorMsg); renderMessage(streamErrorMsg);
-            if (generationInProgress) handleStreamEnd(true); // error=true
+            if (generationInProgress) handleStreamEnd(true);
         }
     } finally {
-        // This finally block ensures UI reset even if errors occur before or during fetch
-        if (generationInProgress) generationInProgress = false; // Should be set by handleStreamEnd or stopGeneration
-
+        if (generationInProgress) generationInProgress = false;
         if(sendMessageBtn) sendMessageBtn.style.display = 'inline-flex';
         if(stopGenerationBtn) stopGenerationBtn.style.display = 'none';
         if(sendMessageBtn && messageInput) sendMessageBtn.disabled = !(messageInput.value.trim() || uploadedImageServerPaths.length > 0);
-        
         activeGenerationAbortController = null;
-        // Clear DOM element caches
-        currentAiMessageDomContainer = null;
-        currentAiMessageDomBubble = null;
     }
 }
 
-function handleStreamChunk(data) { // Patched to use cached DOM elements
-    if (!currentAiMessageData || currentAiMessageData.id !== currentAiMessageId) {
-        // If currentAiMessageData was reset or ID changed unexpectedly, log and skip.
-        // This can happen if handleStreamEnd was called prematurely or due to race conditions.
-        console.warn("handleStreamChunk: Mismatch or missing currentAiMessageData. Skipping chunk for ID:", currentAiMessageId, "Data:", data);
+function handleStreamChunk(data) {
+    if (!currentAiMessageData || !isElementInDocument(currentAiMessageDomBubble)) {
+        console.warn("handleStreamChunk: Stale or missing AI message bubble. Skipping chunk.");
         return;
     }
 
-    // Critical: Ensure the cached DOM elements are still valid and in the document.
-    if (!isElementInDocument(currentAiMessageDomContainer) || !isElementInDocument(currentAiMessageDomBubble)) {
-        console.error("handleStreamChunk: AI message DOM elements are invalid or not in document. Attempting to re-find for ID:", currentAiMessageId);
-        currentAiMessageDomContainer = document.querySelector(`.message-container[data-message-id="${currentAiMessageId}"]`);
-        currentAiMessageDomBubble = document.getElementById(`message-${currentAiMessageId}`);
-        if (!isElementInDocument(currentAiMessageDomContainer) || !isElementInDocument(currentAiMessageDomBubble)) {
-            console.error("handleStreamChunk: CRITICAL - Unable to re-find AI message DOM elements for ID:", currentAiMessageId, ". Stream updates may fail.");
-            // Optionally, could attempt a full re-render of the last AI message if data is available,
-            // but this might cause flickering. For now, log and potentially lose this chunk update.
-            return;
-        }
-    }
-
-    let needsRerender = false;
+    let needsContentRerender = false;
     if (data.type === 'chunk') {
+        if (currentAiMessageContentAccumulator === "") {
+            currentAiMessageDomBubble.classList.remove('is-streaming');
+        }
         currentAiMessageContentAccumulator += data.content;
         currentAiMessageData.content = currentAiMessageContentAccumulator;
-        needsRerender = true;
-    } else if (data.type === 'step_update') {
-        console.log("Step received")
-        console.log(data)
-        console.log(currentAiMessageData)
-
-        currentAiMessageData.steps.push(data.content);
-        console.log(currentAiMessageData)
-        needsRerender = true;
+        needsContentRerender = true;
+    } else if (data.type === 'step') {
+        currentAiMessageData.steps.push(data);
+        renderNewStep(currentAiMessageDomBubble, data);
+        updateStepStatus(currentAiMessageDomBubble, data.id, 'done');
+    } else if (data.type === 'step_start') {
+        currentAiMessageData.steps.push(data);
+        renderNewStep(currentAiMessageDomBubble, data);
+    } else if (data.type === 'step_end') {
+        const stepToUpdate = currentAiMessageData.steps.find(step => step.id === data.id);
+        if (stepToUpdate) {
+            stepToUpdate.status = 'done';
+            stepToUpdate.content = data.content
+            updateStepStatus(currentAiMessageDomBubble, data.id, 'done');
+        }
     } else if (data.type === 'metadata_update') {
         currentAiMessageData.metadata = data.metadata || [];
-        needsRerender = true;
+        needsContentRerender = true;
     } else if (data.type === 'error') {
         const errorMsgData = { id: `err-stream-${Date.now()}`, sender: 'system', content: translate('llm_error_prefix', `LLM Error: ${data.content}`, { content: data.content }), steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId };
         currentMessages.push(errorMsgData); renderMessage(errorMsgData);
-        handleStreamEnd(true); // error=true
+        handleStreamEnd(true);
         return;
     } else if (data.type === 'info' && data.content === "Generation stopped by user.") {
         showStatus(translate('status_generation_stopped_by_user', 'Generation stopped by user.'), 'info');
-        // Stream will end; generationInProgress likely already false if stopGeneration was called.
         return;
     }
 
-    if (needsRerender) {
-        // Pass the cached DOM elements to renderMessage for targeted update
-        renderMessage(currentAiMessageData, currentAiMessageDomContainer, currentAiMessageDomBubble);
-        scrollChatToBottom();
+    if (needsContentRerender) {
+        const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
+        if (contentDiv) {
+            renderEnhancedContent(contentDiv, currentAiMessageData.content, currentAiMessageData.id, currentAiMessageData.steps, currentAiMessageData.metadata, currentAiMessageData);
+        }
     }
+
+    smartScrollToBottom();
 }
 
 function handleStreamEnd(errorOccurred = false, wasAbortedByStopButton = false) {
-    const wasManuallyStopped = !generationInProgress && !errorOccurred; // If genInProgress already false due to stopGeneration
+    const wasManuallyStopped = !generationInProgress && !errorOccurred;
     
     aiMessageStreaming = false;
-    if (generationInProgress) generationInProgress = false; // Ensure it's set to false here
-    // activeGenerationAbortController is cleared by sendMessage's finally or stopGeneration
+    if (generationInProgress) generationInProgress = false;
 
-    if(sendMessageBtn) sendMessageBtn.style.display = 'inline-flex';
-    if(stopGenerationBtn) stopGenerationBtn.style.display = 'none';
-    // stopGenerationBtn.disabled = false; // Handled by stopGeneration
-    if(sendMessageBtn && messageInput) sendMessageBtn.disabled = !(messageInput.value.trim() || uploadedImageServerPaths.length > 0);
+    if (currentAiMessageData && isElementInDocument(currentAiMessageDomBubble)) {
+        currentAiMessageDomBubble.classList.remove('is-streaming');
 
-    // Finalize the AI message in currentMessages if it exists
-    // The message object currentAiMessageData itself should be up-to-date from handleStreamChunk
-    // We just need to ensure it's correctly represented in the currentMessages array
-    // and potentially re-render it if its final state changed (e.g. error step added)
+        const tokenBadge = currentAiMessageDomBubble.querySelector('[data-placeholder="token-count"]');
+        if (tokenBadge && currentAiMessageData.token_count) {
+            tokenBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> ${currentAiMessageData.token_count} ${translate('tokens_label', 'tokens')}`;
+            tokenBadge.style.display = 'inline-flex';
+        }
+        
+        const timeBadge = currentAiMessageDomBubble.querySelector('[data-placeholder="processing-time"]');
+        if (timeBadge && currentAiMessageData.processing_time_ms) {
+            timeBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg> ${formatProcessingTime(currentAiMessageData.processing_time_ms)}`;
+            timeBadge.style.display = 'inline-flex';
+        }
 
-    if (currentAiMessageData) {
-        const msgIndex = currentMessages.findIndex(m => m.id === currentAiMessageId);
-        if (msgIndex > -1) {
-            currentMessages[msgIndex] = { ...currentAiMessageData }; // Ensure array has the latest version
-            // Add final step if error or manual stop not already reflected
-            let finalStepAdded = false;
-            if (errorOccurred && !currentMessages[msgIndex].steps.some(s => s.status === 'error')) {
-                currentMessages[msgIndex].steps.push({ text: translate('step_error_occurred', "An error occurred."), status: 'error', done: true });
-                finalStepAdded = true;
-            } else if ((wasManuallyStopped || wasAbortedByStopButton) && !currentMessages[msgIndex].steps.some(s => s.status === 'stopped')) {
-                currentMessages[msgIndex].steps.push({ text: translate('step_generation_stopped_by_user', "Generation stopped."), status: 'stopped', done: true });
-                finalStepAdded = true;
-            }
-            if (finalStepAdded && isElementInDocument(currentAiMessageDomBubble)) {
-                 renderMessage(currentMessages[msgIndex], currentAiMessageDomContainer, currentAiMessageDomBubble); // Re-render with final step
-            }
+        currentAiMessageDomBubble.querySelectorAll('.message-footer button').forEach(btn => {
+            btn.disabled = false;
+        });
+
+        const finalId = currentAiMessageData.id;
+        if (currentAiMessageDomContainer.dataset.messageId !== finalId) {
+            currentAiMessageDomContainer.dataset.messageId = finalId;
+        }
+        if (currentAiMessageDomBubble.id !== `message-${finalId}`) {
+            currentAiMessageDomBubble.id = `message-${finalId}`;
         }
     }
-    
-    // It's crucial that currentAiMessageData is nulled *after* refreshMessagesAfterStream
-    // if refresh relies on its ID for some reason, or before if refresh rebuilds everything.
-    // Since refreshMessagesAfterStream fetches fresh data, nulling here is okay.
-    const lastAiMessageId = currentAiMessageId; // Keep for refresh check
 
+    // --- RAG Sources (Add this block back) ---
+    if (currentAiMessageDomBubble.sources && Array.isArray(currentAiMessageDomBubble.sources) && currentAiMessageDomBubble.sources.length > 0) {
+        currentAiMessageDomBubble.sources.forEach(source => {
+            if (!source || typeof source.document === 'undefined' || typeof source.similarity === 'undefined') {
+                console.warn("Skipping malformed source:", source);
+                return; // Skip malformed source objects
+            }
+            
+            const sourceBadge = document.createElement('button');
+            const maxLength = 15;
+            const truncatedText = source.document.length > maxLength ? source.document.substring(0, maxLength) + '…' : source.document;
+            
+            sourceBadge.innerHTML = `
+                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h8V7.414L11.414 4H6z" clip-rule="evenodd" />
+                </svg>
+                <span>${escapeHtml(truncatedText)}</span>
+                <span class="source-similarity-chip">${source.similarity}%</span>`;
+            sourceBadge.className = 'detail-badge source-badge';
+            sourceBadge.title = `${translate('view_source_document', 'View source')}: ${escapeHtml(source.document)} (${translate('similarity_label', 'Similarity')}: ${source.similarity}%)`;
+            
+            sourceBadge.addEventListener('click', () => {
+                // This uses the same custom modal logic as your image viewer for consistency,
+                // but tailored for text content.
+                const modalId = `source-modal-${currentAiMessageId}-${source.document.replace(/[^a-zA-Z0-9]/g, '')}`;
+                if (document.getElementById(modalId)) return;
+
+                const modal = document.createElement('div');
+                modal.id = modalId;
+                modal.className = 'source-modal-overlay'; // You'll need CSS for this or adapt image modal styles
+                modal.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display:flex; align-items:center; justify-content:center; z-index: 1001; opacity: 0; transition: opacity 0.2s;`;
+
+                const modalContent = document.createElement('div');
+                modalContent.style.cssText = `background: white; color: black; padding: 2rem; border-radius: 8px; max-width: 800px; max-height: 80vh; overflow-y: auto; position: relative;`;
+                
+                const closeButton = document.createElement('button');
+                closeButton.innerHTML = '×';
+                closeButton.style.cssText = `position: absolute; top: 10px; right: 15px; font-size: 1.5rem; background:none; border:none; cursor:pointer;`;
+                
+                const title = document.createElement('h2');
+                title.textContent = source.document;
+                title.style.marginTop = '0';
+
+                const similarityP = document.createElement('p');
+                similarityP.innerHTML = `${translate('similarity_label', 'Similarity')}: <strong>${source.similarity}%</strong>`;
+
+                const contentDivModal = document.createElement('div');
+                contentDivModal.className = 'markdown-content'; // Reuse your markdown styles
+                contentDivModal.innerHTML = marked.parse(source.content || translate('no_content_available', 'No content available.'));
+            
+                modalContent.appendChild(closeButton);
+                modalContent.appendChild(title);
+                modalContent.appendChild(similarityP);
+                modalContent.appendChild(contentDivModal);
+                modal.appendChild(modalContent);
+                document.body.appendChild(modal);
+                
+                requestAnimationFrame(() => modal.style.opacity = '1');
+
+                const closeModal = () => {
+                    modal.style.opacity = '0';
+                    modal.addEventListener('transitionend', () => modal.remove(), { once: true });
+                    document.removeEventListener('keydown', escapeListener);
+                };
+
+                closeButton.onclick = closeModal;
+                modal.onclick = (e) => { if (e.target === modal) closeModal(); };
+                const escapeListener = (e) => { if (e.key === 'Escape') closeModal(); };
+                document.addEventListener('keydown', escapeListener);
+            });
+
+            // Append the created badge to the details container in the footer
+            detailsContainer.appendChild(sourceBadge);
+        });
+    }
+    
+    if (errorOccurred) {
+        refreshMessagesAfterStream(currentAiMessageId);
+    }
+    
     currentAiMessageContentAccumulator = "";
     currentAiMessageData = null;
     currentAiMessageId = null;
-    // DOM element caches are cleared by sendMessage's finally block
+    currentAiMessageDomContainer = null;
+    currentAiMessageDomBubble = null;
 
-    if (currentDiscussionId) {
-        // Refresh only if not a clean manual stop, or if an error occurred, to get definitive state.
-        // A clean manual stop might have partially streamed content the user wants to see before refresh.
-        if (errorOccurred || !wasManuallyStopped || !wasAbortedByStopButton) {
-            refreshMessagesAfterStream(lastAiMessageId);
-        }
-    }
-    scrollChatToBottom();
-
+    if(sendMessageBtn) sendMessageBtn.style.display = 'inline-flex';
+    if(stopGenerationBtn) stopGenerationBtn.style.display = 'none';
+    if(sendMessageBtn && messageInput) sendMessageBtn.disabled = !(messageInput.value.trim() || uploadedImageServerPaths.length > 0);
+    
     if (wasManuallyStopped || wasAbortedByStopButton) {
         showStatus(translate('status_generation_process_halted', 'Generation process halted.'), 'info');
     }
@@ -1778,16 +1852,12 @@ async function stopGeneration() {
     showStatus(translate('status_stopping_generation', 'Attempting to stop generation...'), 'info');
 
     if (activeGenerationAbortController) {
-        activeGenerationAbortController.abort(); // Signal fetch to abort
+        activeGenerationAbortController.abort();
     }
-    // Set generationInProgress to false *immediately* so handleStreamChunk stops processing new chunks
-    // and handleStreamEnd knows it was a manual stop.
     const wasInProgress = generationInProgress;
     generationInProgress = false; 
 
     try {
-        // This API call is a "best effort" to tell the backend.
-        // Client-side abort is the primary stop mechanism for the stream.
         await apiRequest(`/api/discussions/${currentDiscussionId}/stop_generation`, {
             method: 'POST'
         });
@@ -1795,26 +1865,19 @@ async function stopGeneration() {
     } catch (error) {
         showStatus(translate('status_stop_signal_failed_client_halted', `Stop signal to server failed, but client generation halted. ${error.message}`), 'warning');
     } finally {
-        // Ensure UI reset and stream end handling occurs
-        if (wasInProgress) { // Only call handleStreamEnd if generation was truly in progress
-            handleStreamEnd(false, true); // error=false, wasAbortedByStopButton=true
+        if (wasInProgress) {
+            handleStreamEnd(false, true);
         }
-        // Redundant if handleStreamEnd does it, but safe:
         if(sendMessageBtn) sendMessageBtn.style.display = 'inline-flex';
         if(stopGenerationBtn) { stopGenerationBtn.style.display = 'none'; stopGenerationBtn.disabled = false; }
         if(sendMessageBtn && messageInput) sendMessageBtn.disabled = !(messageInput.value.trim() || uploadedImageServerPaths.length > 0);
-        
-        // Clear data related to the (now stopped) AI message stream
-        currentAiMessageContentAccumulator = "";
-        // currentAiMessageData and currentAiMessageId are cleared by handleStreamEnd or subsequent refresh
-        // DOM caches currentAiMessageDomContainer/Bubble are cleared by sendMessage finally or if re-found by handleStreamChunk
-        scrollChatToBottom();
+        smartScrollToBottom();
     }
 }
 
 
 async function refreshMessagesAfterStream(lastStreamedAiMessageId = null) {
-    await new Promise(resolve => setTimeout(resolve, 250)); // Small delay
+    await new Promise(resolve => setTimeout(resolve, 250));
     if (!currentDiscussionId || aiMessageStreaming || generationInProgress) return;
 
     const currentDisc = discussions[currentDiscussionId];
@@ -1823,12 +1886,10 @@ async function refreshMessagesAfterStream(lastStreamedAiMessageId = null) {
     }
 
     try {
-        // Determine which branch's messages to fetch
         const branchToFetch = backendCapabilities.supportsBranches ? activeBranchId : 'main';
         const response = await apiRequest(`/api/discussions/${currentDiscussionId}${backendCapabilities.supportsBranches ? '?branch_id=' + branchToFetch : ''}`);
         const loadedMessagesRaw = await response.json();
 
-        // Detect branch support based on message structure if not already known
         if (!backendCapabilities.checked && Array.isArray(loadedMessagesRaw) && loadedMessagesRaw.length > 0 && typeof loadedMessagesRaw[0].branch_id === 'string') {
             backendCapabilities.supportsBranches = true;
             backendCapabilities.checked = true;
@@ -1838,18 +1899,15 @@ async function refreshMessagesAfterStream(lastStreamedAiMessageId = null) {
             ...msg,
             steps: msg.steps || [],
             metadata: msg.metadata || [],
-            branch_id: backendCapabilities.supportsBranches ? msg.branch_id : 'main' // Ensure branch_id
+            branch_id: backendCapabilities.supportsBranches ? msg.branch_id : 'main'
         }));
 
         if (backendCapabilities.supportsBranches) {
             currentDisc.branches[branchToFetch] = processedMessages;
         } else {
-            // Old backend, all messages are for 'main'
             currentDisc.branches['main'] = processedMessages;
-            // If activeBranchId was something else, its client-side copy remains.
-            // The user experience for "old backend + client branches" is that only 'main' gets server updates.
         }
-        currentMessages = currentDisc.branches[activeBranchId] || []; // Update currentMessages to reflect the active branch
+        currentMessages = currentDisc.branches[activeBranchId] || [];
 
         if (currentMessages.length > 0) {
             const lastMessage = currentMessages[currentMessages.length - 1];
@@ -1857,13 +1915,12 @@ async function refreshMessagesAfterStream(lastStreamedAiMessageId = null) {
                 currentDisc.last_activity_at = lastMessage.created_at;
             }
         } else if (currentDisc.branches['main'] && currentDisc.branches['main'].length > 0) {
-            // Fallback to main branch for last activity if active branch is empty
             const lastMainMessage = currentDisc.branches['main'][currentDisc.branches['main'].length-1];
              if (lastMainMessage.created_at && (!currentDisc.last_activity_at || new Date(lastMainMessage.created_at) > new Date(currentDisc.last_activity_at))) {
                 currentDisc.last_activity_at = lastMainMessage.created_at;
             }
         }
-         else { // If all branches are empty, fetch discussion list to update activity time from server potentially
+         else {
             const discussionsListResponse = await apiRequest('/api/discussions');
             const allDiscs = await discussionsListResponse.json();
             const updatedDiscInfo = allDiscs.find(d => d.id === currentDiscussionId);
@@ -1873,15 +1930,14 @@ async function refreshMessagesAfterStream(lastStreamedAiMessageId = null) {
         }
 
         renderMessages(currentMessages);
-        renderDiscussionList(); // Update discussion list (e.g. last activity time)
-        renderBranchTabsUI(currentDiscussionId); // Update branch tabs
+        renderDiscussionList();
+        renderBranchTabsUI(currentDiscussionId);
     } catch (error) {
         const errorMsgData = { id: `err-refresh-${Date.now()}`, sender: 'system', content: translate('refresh_message_list_failed_error'), steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId };
-        // Avoid pushing to currentMessages if it's about to be overwritten or cleared
-        if (chatMessages) { // Directly render the error if chatMessages is available
+        if (chatMessages) {
             const tempContainer = document.createElement('div');
-            renderMessage(errorMsgData, tempContainer); // Render into a temp container
-            chatMessages.appendChild(tempContainer.firstChild); // Append the message container
+            renderMessage(errorMsgData, tempContainer);
+            chatMessages.appendChild(tempContainer.firstChild);
         } else {
             console.error("Chat messages container not found for error display.");
         }
@@ -1889,7 +1945,7 @@ async function refreshMessagesAfterStream(lastStreamedAiMessageId = null) {
 }
 
 
-// --- Message Rendering (renderMessage, renderProcessedContent, etc.) ---
+// --- Message Rendering and Helpers ---
 function clearChatArea(clearHeader = true) {
     if(chatMessages) chatMessages.innerHTML = '';
     if (clearHeader) {
@@ -1901,7 +1957,7 @@ function clearChatArea(clearHeader = true) {
         if(ragDataStoreSelect) { ragDataStoreSelect.style.display = 'none'; ragDataStoreSelect.value = ''; }
         isRagActive = false; updateRagToggleButtonState();
         const branchTabsContainer = document.getElementById('branchTabsContainer');
-        if (branchTabsContainer) branchTabsContainer.innerHTML = ''; // Clear branch tabs
+        if (branchTabsContainer) branchTabsContainer.innerHTML = '';
     } else {
         if (!currentDiscussionId && chatMessages) {
             chatMessages.innerHTML = `<div class="text-center text-gray-500 dark:text-gray-400 italic mt-10">${translate('chat_area_empty_placeholder')}</div>`;
@@ -1911,22 +1967,158 @@ function clearChatArea(clearHeader = true) {
     currentAiMessageDomContainer = null; currentAiMessageDomBubble = null;
     currentAiMessageContentAccumulator = ""; currentAiMessageId = null; currentAiMessageData = null;
 }
-function scrollToBottom(containerId = 'chatMessages') { // Default ID, can be overridden
-    const messagesContainer = document.getElementById(containerId);
-    if (messagesContainer) {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    } else {
-        console.warn(`scrollToBottom: Container with ID '${containerId}' not found.`);
-    }
-}
-// `renderMessage` from your "Enhanced message rendering" section, adapted for the new DOM caching.
-// This is the "full" renderMessage you provided, slightly adapted.
-// Ensure currentUser is defined, e.g.:
-// const currentUser = { username: 'DefaultUser', lollms_client_ai_name: 'AI Assistant', avatar: 'path/to/user/avatar.png' };
-// const aiAvatar = 'path/to/ai/avatar.png'; // Or get this from config
+/**
+ * Displays an image in a custom, zoomable modal viewer with UI controls.
+ * @param {string} imgSrc The source URL of the image to display.
+ */
+function viewImage(imgSrc) {
+    // Prevent creating multiple modals
+    if (document.querySelector('.image-modal-overlay-js')) return;
 
+    // --- Create All Modal Elements ---
+    const overlay = document.createElement('div');
+    overlay.className = 'image-modal-overlay-js';
+
+    const content = document.createElement('div'); // This is the container we'll zoom/pan
+    content.className = 'image-modal-content-js';
+
+    const img = document.createElement('img');
+    img.src = imgSrc;
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'image-modal-close-btn-js';
+    closeBtn.innerHTML = '×';
+    closeBtn.title = 'Close (Esc)';
+
+    // --- Create the Toolbar ---
+    const toolbar = document.createElement('div');
+    toolbar.className = 'image-modal-toolbar-js';
+
+    const zoomOutBtn = document.createElement('button');
+    zoomOutBtn.textContent = '−';
+    zoomOutBtn.title = 'Zoom Out';
+    
+    const zoomLevelText = document.createElement('span');
+    zoomLevelText.className = 'image-modal-zoom-level-js';
+    
+    const zoomInBtn = document.createElement('button');
+    zoomInBtn.textContent = '+';
+    zoomInBtn.title = 'Zoom In';
+    
+    const zoomResetBtn = document.createElement('button');
+    zoomResetBtn.innerHTML = '↺'; // Reset arrow icon
+    zoomResetBtn.title = 'Reset Zoom';
+
+    // --- Apply Styles Programmatically to Avoid Conflicts ---
+    overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0, 0, 0, 0.85); display: flex; align-items: center; justify-content: center; z-index: 1000; cursor: zoom-out; opacity: 0; transition: opacity 0.2s ease;`;
+    content.style.cssText = `display: flex; transition: transform 0.3s ease; cursor: grab;`;
+    img.style.cssText = `max-width: 90vw; max-height: 90vh; object-fit: contain; user-select: none; -webkit-user-drag: none;`;
+    closeBtn.style.cssText = `position: absolute; top: 10px; right: 20px; color: white; background: none; border: none; font-size: 3rem; cursor: pointer;`;
+    toolbar.style.cssText = `position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background-color: rgba(30, 30, 30, 0.7); color: white; padding: 8px; border-radius: 8px; display: flex; align-items: center; gap: 10px; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px);`;
+    const buttonStyles = `background: transparent; border: 1px solid white; color: white; border-radius: 50%; width: 32px; height: 32px; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; cursor: pointer;`;
+    zoomInBtn.style.cssText = buttonStyles;
+    zoomOutBtn.style.cssText = buttonStyles;
+    zoomResetBtn.style.cssText = buttonStyles;
+    zoomLevelText.style.cssText = `font-size: 0.9rem; min-width: 50px; text-align: center;`;
+
+    // --- Assemble and Display ---
+    toolbar.appendChild(zoomOutBtn);
+    toolbar.appendChild(zoomLevelText);
+    toolbar.appendChild(zoomInBtn);
+    toolbar.appendChild(zoomResetBtn);
+    
+    content.appendChild(img);
+    overlay.appendChild(content);
+    overlay.appendChild(closeBtn);
+    overlay.appendChild(toolbar);
+    document.body.appendChild(overlay);
+
+    requestAnimationFrame(() => overlay.style.opacity = '1');
+
+    // --- State and Event Handlers ---
+    let isDragging = false;
+    let startX, startY, posX = 0, posY = 0;
+    let scale = 1;
+
+    function updateZoom(newScale) {
+        scale = Math.min(Math.max(1, newScale), 10); // Clamp scale 1x - 10x
+        const isZoomed = scale > 1;
+
+        content.style.cursor = isZoomed ? 'move' : 'grab';
+        
+        if (!isZoomed) { // Reset position if not zoomed
+            posX = 0;
+            posY = 0;
+        }
+        content.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+        zoomLevelText.textContent = `${Math.round(scale * 100)}%`;
+    }
+    
+    function closeModal() {
+        overlay.style.opacity = '0';
+        overlay.addEventListener('transitionend', () => {
+            overlay.remove();
+            document.removeEventListener('keydown', keydownHandler);
+            window.removeEventListener('mousemove', drag);
+            window.removeEventListener('mouseup', stopDrag);
+        }, { once: true });
+    }
+
+    const keydownHandler = (e) => { if (e.key === 'Escape') closeModal(); };
+    const wheelHandler = (e) => { e.preventDefault(); updateZoom(scale + e.deltaY * -0.01); };
+    const startDrag = (e) => {
+        if (scale > 1) { // Only allow dragging when zoomed
+            e.preventDefault();
+            isDragging = true;
+            startX = e.clientX - posX;
+            startY = e.clientY - posY;
+            content.style.transition = 'none';
+        }
+    };
+    const drag = (e) => {
+        if (isDragging) {
+            e.preventDefault();
+            posX = e.clientX - startX;
+            posY = e.clientY - startY;
+            content.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+        }
+    };
+    const stopDrag = () => {
+        isDragging = false;
+        content.style.transition = 'transform 0.3s ease';
+    };
+
+    // --- Add Event Listeners ---
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+    closeBtn.addEventListener('click', closeModal);
+    document.addEventListener('keydown', keydownHandler);
+
+    // Zoom and Pan Listeners
+    content.addEventListener('wheel', wheelHandler);
+    content.addEventListener('mousedown', startDrag);
+    window.addEventListener('mousemove', drag);
+    window.addEventListener('mouseup', stopDrag);
+    
+    // Toolbar Button Listeners
+    zoomInBtn.addEventListener('click', () => updateZoom(scale + 0.25));
+    zoomOutBtn.addEventListener('click', () => updateZoom(scale - 0.25));
+    zoomResetBtn.addEventListener('click', () => updateZoom(1));
+    
+    // Initial zoom level display
+    updateZoom(1);
+}
+/**
+ * Renders a single message bubble in the chat.
+ * This function handles both creating new messages and updating existing ones.
+ * For streaming AI messages, it renders a complete placeholder with a pulsing
+ * animation and disabled buttons, which are finalized in handleStreamEnd.
+ *
+ * @param {object} message The message data object.
+ * @param {HTMLElement} [existingContainer=null] An existing container to update.
+ * @param {HTMLElement} [existingBubble=null] An existing bubble element to update.
+ */
 function renderMessage(message, existingContainer = null, existingBubble = null) {
-    if (!message || typeof message.sender === 'undefined' || (typeof message.content === 'undefined' && (!message.image_references || message.image_references.length === 0) && (!message.steps || message.steps.length === 0) && (!message.metadata || message.metadata.length === 0) && !(message.id === currentAiMessageId && (aiMessageStreaming || generationInProgress) ))) {
+    if (!message || typeof message.sender === 'undefined') {
         return;
     }
 
@@ -1943,23 +2135,19 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     const isUpdate = isElementInDocument(messageContainerToUse) && isElementInDocument(bubbleDivToUse);
 
     if (isUpdate) {
-        const elementsToClearOrRebuild = ['.sender-info', '.message-images-container', '.message-content', '.message-footer']; // Changed .sender-name to .sender-info, removed .message-timestamp (now part of .sender-info or footer)
+        const elementsToClearOrRebuild = ['.sender-info', '.message-images-container', '.message-content', '.message-footer'];
         elementsToClearOrRebuild.forEach(selector => {
             const el = bubbleDivToUse.querySelector(selector);
-            if (el) {
-                if (selector === '.message-content' || selector === '.message-footer') el.innerHTML = '';
-                else el.remove();
-            }
+            if (el) el.remove();
         });
     } else {
         messageContainerToUse = document.createElement('div');
         messageContainerToUse.className = 'message-container flex flex-col';
         messageContainerToUse.dataset.messageId = messageId;
-
         bubbleDivToUse = document.createElement('div');
         messageContainerToUse.appendChild(bubbleDivToUse);
         
-        if (chatMessages) { // Use the cached global variable
+        if (chatMessages) {
             chatMessages.appendChild(messageContainerToUse);
         } else { 
             console.error("renderMessage: chatMessages DOM element not found!"); 
@@ -1977,42 +2165,32 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
 
     bubbleDivToUse.id = domIdForBubble;
 
-    if (message.addSpacing && messageContainerToUse.previousElementSibling) {
-        messageContainerToUse.classList.add('mt-4');
-    } else {
-        messageContainerToUse.classList.remove('mt-4');
-    }
-
-    let bubbleClass = 'ai-bubble';
-    let senderDisplayName; // Will hold the name to display in the header
-    let senderType; // 'user', 'ai', 'system' for avatar/styling logic
-
+    const isStreamingThisMessage = message.id === currentAiMessageId && (aiMessageStreaming || generationInProgress);
+    let bubbleClass;
+    let senderDisplayName;
+    let senderType;
     const userSenderNames = [currentUser.username, 'user', 'User', 'You', translate('sender_you', 'You'), translate('sender_user', 'User')];
     
     if (userSenderNames.includes(message.sender) || (message.sender === "User" && currentUser.username.toLowerCase() === "user") || (currentUser.lollms_client_ai_name === null && message.sender === currentUser.username)) {
         bubbleClass = 'user-bubble';
-        senderDisplayName = currentUser.username || translate('sender_you', 'You'); // Show current user's name
+        senderDisplayName = currentUser.username || translate('sender_you', 'You');
         senderType = 'user';
     } else if (message.sender && (message.sender.toLowerCase() === 'system' || message.sender.toLowerCase() === 'error')) {
         bubbleClass = 'system-bubble';
-        senderDisplayName = message.sender; // Or '' if you don't want a header for system messages
+        senderDisplayName = message.sender;
         senderType = 'system';
-    } else { // AI or other named sender
+    } else {
         bubbleClass = 'ai-bubble';
-        senderDisplayName = getSenderNameText(message); // Uses your existing helper
+        senderDisplayName = getSenderNameText(message);
         senderType = 'ai';
-        // showGradeControls is handled later based on bubbleClass and messageId
     }
-    bubbleDivToUse.className = `message-bubble ${bubbleClass}`;
+    
+    bubbleDivToUse.className = `message-bubble ${bubbleClass} ${isStreamingThisMessage ? 'is-streaming' : ''}`;
 
     // --- Sender Info (Header: Avatar, Name, Model, Timestamp) ---
-    let senderInfoDiv = bubbleDivToUse.querySelector('.sender-info');
-    if (senderDisplayName && bubbleClass !== 'system-bubble') { // System bubbles might not need this header
-        if (!senderInfoDiv) {
-            senderInfoDiv = document.createElement('div');
-            senderInfoDiv.className = 'sender-info';
-            bubbleDivToUse.insertBefore(senderInfoDiv, bubbleDivToUse.firstChild);
-        }
+    if (senderDisplayName && bubbleClass !== 'system-bubble') {
+        const senderInfoDiv = document.createElement('div');
+        senderInfoDiv.className = 'sender-info';
         
         let modelBadgeHTML = '';
         if (senderType === 'ai' && message.model_name) {
@@ -2020,13 +2198,11 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         }
 
         let timestampHTML = '';
-        if (message.timestamp || message.created_at) {
-            const timestampDate = new Date(message.timestamp || message.created_at);
-            timestampHTML = `<span class="message-timestamp">${formatTimestamp(timestampDate)}</span>`;
+        if (message.created_at) {
+            timestampHTML = `<span class="message-timestamp">${formatTimestamp(new Date(message.created_at))}</span>`;
         }
         
-        // Determine avatar (this logic might be in getSenderAvatar or similar helper)
-        let avatarHTML = getSenderAvatar(senderDisplayName, senderType, message.sender); // Pass full sender for specific AI avatars
+        let avatarHTML = getSenderAvatar(senderDisplayName, senderType, message.sender);
 
         senderInfoDiv.innerHTML = `
             ${avatarHTML}
@@ -2036,403 +2212,139 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
             </div>
             ${timestampHTML} 
         `;
-        // Timestamp is now part of sender-info, CSS will position it
-    } else if (senderInfoDiv) {
-        senderInfoDiv.remove();
-    } else if (bubbleClass === 'system-bubble' && (message.timestamp || message.created_at)) {
-        // For system messages, if we want a timestamp but no full header
-        let systemTimestampDiv = bubbleDivToUse.querySelector('.message-timestamp-system');
-        if (!systemTimestampDiv) {
-            systemTimestampDiv = document.createElement('div');
-            systemTimestampDiv.className = 'message-timestamp-system'; // Specific class for styling
-            bubbleDivToUse.insertBefore(systemTimestampDiv, bubbleDivToUse.firstChild);
-        }
-        const timestampDate = new Date(message.timestamp || message.created_at);
-        systemTimestampDiv.textContent = formatTimestamp(timestampDate);
+        bubbleDivToUse.insertBefore(senderInfoDiv, bubbleDivToUse.firstChild);
     }
-
 
     // --- Images ---
-    let imagesContainer = bubbleDivToUse.querySelector('.message-images-container');
     if (message.image_references && message.image_references.length > 0) {
-        if (!imagesContainer) {
-            imagesContainer = document.createElement('div');
-            imagesContainer.className = 'message-images-container';
-            const anchor = bubbleDivToUse.querySelector('.sender-info'); // Insert after header
-            bubbleDivToUse.insertBefore(imagesContainer, anchor ? anchor.nextSibling : bubbleDivToUse.firstChild);
-        }
-        imagesContainer.innerHTML = ''; // Clear existing images
-        message.image_references.forEach(async imgSrc => {
-            const imgItem = document.createElement('div');
-            imgItem.className = 'message-image-item';
+        const imagesContainer = document.createElement('div');
+        imagesContainer.className = 'message-images-container';
+        
+        const header = bubbleDivToUse.querySelector('.sender-info');
+        bubbleDivToUse.insertBefore(imagesContainer, header ? header.nextSibling : bubbleDivToUse.firstChild);
 
-            const imgTag = document.createElement('img');
-            imgTag.alt = translate('chat_image_alt', 'Chat Image');
-            imgTag.loading = 'lazy';
+        (async () => {
+            for (const imgSrc of message.image_references) {
+                const imgItem = document.createElement('div');
+                imgItem.className = 'message-image-item';
+                const imgTag = document.createElement('img');
+                imgTag.alt = translate('chat_image_alt', 'Chat Image');
+                imgTag.loading = 'lazy';
+                
+                try {
+                    const response = await apiRequest(imgSrc, { method: 'GET' });
+                    if (!response.ok) throw new Error(`Failed to load image: ${response.statusText}`);
+                    
+                    const blob = await response.blob();
+                    const objectURL = URL.createObjectURL(blob);
 
-            try {
-                const response = await apiRequest(imgSrc, {
-                    method: 'GET'
-                });
+                    imgTag.src = objectURL;
+                    // THIS IS THE IMPORTANT CHANGE: Call our new viewImage function
+                    imgTag.onclick = () => viewImage(objectURL);
 
-                const blob = await response.blob();
-                const objectURL = URL.createObjectURL(blob);
-                imgTag.src = objectURL;
+                    imgTag.onload = () => imgItem.classList.add('loaded'); // For your fade-in effect
 
-                imgTag.onclick = () => viewImage(objectURL);  // Optional: use object URL for preview
-                imgTag.onload = () => {
-                    imgItem.classList.add('loaded');
-                    imgItem.style.opacity = 1;
-                };
-            } catch (err) {
-                imgItem.classList.add('error');
-                console.error("Image failed to load:", imgSrc, err);
+                    imgItem.appendChild(imgTag);
+                    imagesContainer.appendChild(imgItem);
+
+                } catch (err) {
+                    console.error("Image failed to load securely:", imgSrc, err);
+                    imgItem.classList.add('error');
+                    imagesContainer.appendChild(imgItem);
+                }
             }
-
-            imgItem.appendChild(imgTag);
-            imagesContainer.appendChild(imgItem);
-        });
-
-    } else if (imagesContainer) {
-        imagesContainer.remove();
+        })();
     }
-
     // --- Content ---
-    let contentDiv = bubbleDivToUse.querySelector('.message-content');
-    if (!contentDiv) {
-        contentDiv = document.createElement('div');
-        contentDiv.className = 'message-content';
-        const imagesAnchor = bubbleDivToUse.querySelector('.message-images-container');
-        const senderInfoAnchor = bubbleDivToUse.querySelector('.sender-info');
-        // Insert after images if they exist, else after sender-info, else at top
-        const anchor = imagesAnchor || senderInfoAnchor;
-        bubbleDivToUse.insertBefore(contentDiv, anchor ? anchor.nextSibling : bubbleDivToUse.firstChild);
-    }
-    console.log(message.steps)
+    let contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    bubbleDivToUse.appendChild(contentDiv);
     renderEnhancedContent(contentDiv, message.content || "", messageId, message.steps, message.metadata, message);
 
-
-    // --- Footer ---
-    let footerDiv = bubbleDivToUse.querySelector('.message-footer');
-    // Ensure footer is created or cleared
-    if (footerDiv) footerDiv.innerHTML = ''; // Clear for rebuild
-    else {
-        footerDiv = document.createElement('div');
-        footerDiv.className = 'message-footer';
-        // Appending deferred until we know if it has content
-    }
+    // --- Footer (Unified Rendering) ---
+    const footerDiv = document.createElement('div');
+    footerDiv.className = 'message-footer';
     
-    const footerContent = document.createElement('div'); // This inner div will always be there if footer is.
+    const footerContent = document.createElement('div');
     footerContent.className = 'footer-content';
-
-    // Message Details (left side of footer - Tokens, Sources, Time)
     const detailsContainer = document.createElement('div');
     detailsContainer.className = 'message-details';
-
-    if (message.token_count) {
+    
+    if (message.token_count || (bubbleClass === 'ai-bubble' && isStreamingThisMessage)) {
         const tokenBadge = document.createElement('span');
         tokenBadge.className = 'detail-badge token-badge';
-        tokenBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> ${message.token_count} ${translate('tokens_label', 'tokens')}`;
-        tokenBadge.title = `${message.token_count} ${translate('tokens_tooltip_text', 'tokens used')}`;
+        tokenBadge.dataset.placeholder = 'token-count';
+        tokenBadge.style.display = message.token_count ? 'inline-flex' : 'none';
+        tokenBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> ${message.token_count || ''} ${translate('tokens_label', 'tokens')}`;
         detailsContainer.appendChild(tokenBadge);
     }
-
-    // --- RAG Sources ---
-    if (message.sources && Array.isArray(message.sources) && message.sources.length > 0) {
-        console.log("Message has sources:", message.sources); // DEBUGGING
-        message.sources.forEach(source => {
-            if (!source || typeof source.document === 'undefined' || typeof source.similarity === 'undefined') {
-                console.warn("Skipping malformed source:", source);
-                return; // Skip malformed source objects
-            }
-            const sourceBadge = document.createElement('button');
-            const maxLength = 15;
-            const truncatedText = source.document.length > maxLength ? source.document.substring(0, maxLength) + '…' : source.document;
-            
-            sourceBadge.innerHTML = `
-                <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
-                    <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h8V7.414L11.414 4H6z" clip-rule="evenodd" />
-                </svg>
-                <span>${escapeHtml(truncatedText)}</span>
-                <span class="source-similarity-chip">${source.similarity}%</span>`;
-            sourceBadge.className = 'detail-badge source-badge';
-            sourceBadge.title = `${translate('view_source_document', 'View source')}: ${escapeHtml(source.document)} (${translate('similarity_label', 'Similarity')}: ${source.similarity}%)`;
-            
-            sourceBadge.addEventListener('click', () => {
-                // (Keep your existing modal display logic here - it seemed fine)
-                // ...
-                const modalId = `source-modal-${messageId}-${source.document.replace(/[^a-zA-Z0-9]/g, '')}`;
-                if (document.getElementById(modalId)) return;
-
-                const modal = document.createElement('div');
-                modal.id = modalId;
-                modal.className = 'source-modal-overlay';
-                modal.setAttribute('role', 'dialog');
-                modal.setAttribute('aria-modal', 'true');
-                modal.setAttribute('aria-labelledby', `source-modal-title-${modalId}`);
-
-                const modalContent = document.createElement('div');
-                modalContent.className = 'source-modal-content';
-            
-                const closeButton = document.createElement('button');
-                closeButton.className = 'source-modal-close-btn';
-                closeButton.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-5 h-5"><path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" /></svg>';
-                closeButton.setAttribute('aria-label', translate('close_modal_aria_label', 'Close modal'));
-                closeButton.onclick = () => {
-                    modal.remove();
-                    document.removeEventListener('keydown', escapeListener);
-                };
-            
-                const title = document.createElement('h2');
-                title.id = `source-modal-title-${modalId}`;
-                title.className = 'source-modal-title';
-                title.textContent = source.document;
-            
-                const similarityP = document.createElement('p');
-                similarityP.className = 'source-modal-similarity';
-                let similarityColorClass = 'text-red-600 dark:text-red-400';
-                if (source.similarity > 75) similarityColorClass = 'text-green-600 dark:text-green-400';
-                else if (source.similarity > 50) similarityColorClass = 'text-yellow-600 dark:text-yellow-400';
-                similarityP.innerHTML = `${translate('similarity_label', 'Similarity')}: <strong class="${similarityColorClass}">${source.similarity}%</strong>`;
-            
-                const contentDivModal = document.createElement('div');
-                contentDivModal.className = 'source-modal-body markdown-content';
-                contentDivModal.innerHTML = marked.parse(source.content || translate('no_content_available', 'No content available.'));
-            
-                modalContent.appendChild(closeButton);
-                modalContent.appendChild(title);
-                modalContent.appendChild(similarityP);
-                modalContent.appendChild(contentDivModal);
-                modal.appendChild(modalContent);
-                document.body.appendChild(modal);
-
-                const escapeListener = (e) => {
-                    if (e.key === 'Escape') closeButton.click();
-                };
-                document.addEventListener('keydown', escapeListener);
-            
-                modal.addEventListener('click', (event) => {
-                    if (event.target === modal) closeButton.click();
-                });
-                 modalContent.addEventListener('click', (event) => { // Prevent modal close on content click
-                    event.stopPropagation();
-                });
-            });
-            detailsContainer.appendChild(sourceBadge);
-        });
-    }
-
-    if (message.processing_time_ms) {
-        const timeBadge = document.createElement('span');
-        timeBadge.className = 'detail-badge time-badge';
-        timeBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg> ${formatProcessingTime(message.processing_time_ms)}`;
-        timeBadge.title = translate('processing_time_tooltip', 'Processing time');
-        detailsContainer.appendChild(timeBadge);
-    }
     
-    // Only append detailsContainer if it has children
-    if (detailsContainer.hasChildNodes()) {
-        footerContent.appendChild(detailsContainer);
-    }
+    // (Your RAG sources and other details logic would go here)
+    if (detailsContainer.hasChildNodes()) footerContent.appendChild(detailsContainer);
 
-    // Actions and Rating Container (right side of footer)
     const footerActionsContainer = document.createElement('div');
     footerActionsContainer.className = 'message-footer-actions'; 
-    let showGradeControlsActual = bubbleClass === 'ai-bubble' && !messageId.startsWith('temp-');
+    const isDisabled = isStreamingThisMessage;
+    const actionsGroup = document.createElement('div');
+    actionsGroup.className = 'message-actions-group'; 
+    const currentMessageBranchId = message.branch_id || activeBranchId || 'main';
 
-
-    if (!messageId.startsWith('temp-')) {
-        const actionsGroup = document.createElement('div');
-        actionsGroup.className = 'message-actions-group'; 
-
-        actionsGroup.appendChild(createActionButton('copy', translate('copy_content_tooltip', "Copy content"), () => { /* ... */ }));
-        
-        const currentMessageBranchId = message.branch_id || activeBranchId || 'main';
-        actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip', "Edit message"), () => initiateEditMessage(messageId, currentMessageBranchId)));
-        
-        if (bubbleClass === 'user-bubble') { 
-            actionsGroup.appendChild(createActionButton('refresh', translate('resend_branch_tooltip', 'Resend/Branch'), (e) => { /* ... */ }, 'primary'));
-        } else if (bubbleClass === 'ai-bubble') { 
-            actionsGroup.appendChild(createActionButton('refresh', translate('regenerate_message_tooltip', 'Regenerate'), (e) => { /* ... */ }, 'primary'));
-        }
-        actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip', "Delete"), () => deleteMessage(messageId, currentMessageBranchId), 'destructive'));
-        
-        if (actionsGroup.hasChildNodes()){ // Only append if there are actions
-             footerActionsContainer.appendChild(actionsGroup);
-        }
+    actionsGroup.appendChild(createActionButton('copy', translate('copy_content_tooltip', "Copy content"), () => { navigator.clipboard.writeText(message.content).then(() => showStatus(translate('status_copied_to_clipboard', 'Copied!'), 'success')); }, 'default', isDisabled));
+    actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip', "Edit message"), () => initiateEditMessage(messageId, currentMessageBranchId), 'default', isDisabled));
+    
+    if (bubbleClass === 'user-bubble') { 
+        actionsGroup.appendChild(createActionButton('refresh', translate('resend_branch_tooltip', 'Resend/Branch'), () => initiateBranch(message.id), 'primary', isDisabled));
+    } else if (bubbleClass === 'ai-bubble') { 
+        actionsGroup.appendChild(createActionButton('refresh', translate('regenerate_message_tooltip', 'Regenerate'), () => regenerateMessage(message.id), 'primary', isDisabled));
     }
+    actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip', "Delete"), () => deleteMessage(messageId, currentMessageBranchId), 'destructive', isDisabled));
+    
+    if (actionsGroup.hasChildNodes()) footerActionsContainer.appendChild(actionsGroup);
 
-    if (showGradeControlsActual) { // Use the derived boolean
+    if (bubbleClass === 'ai-bubble') {
         const ratingContainer = document.createElement('div');
         ratingContainer.className = 'message-rating';
         const userGrade = message.user_grade || 0;
-
-        const upvoteBtn = document.createElement('button'); /* ... */
-        const gradeDisplay = document.createElement('span'); /* ... */
-        const downvoteBtn = document.createElement('button'); /* ... */
-        // (Keep your existing rating button creation logic)
+        const upvoteBtn = document.createElement('button');
+        const gradeDisplay = document.createElement('span');
+        const downvoteBtn = document.createElement('button');
+        
         upvoteBtn.className = `rating-btn upvote ${userGrade > 0 ? 'active' : ''}`;
         upvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 3a1 1 0 01.707.293l5 5a1 1 0 01-1.414 1.414L11 6.414V16a1 1 0 11-2 0V6.414L5.707 9.707a1 1 0 01-1.414-1.414l5-5A1 1 0 0110 3z" clip-rule="evenodd" /></svg>`;
         upvoteBtn.title = translate('grade_good_tooltip', 'Good response');
         upvoteBtn.setAttribute('aria-pressed', userGrade > 0 ? 'true' : 'false');
-        upvoteBtn.onclick = () => gradeMessage(messageId, 1, message.branch_id || activeBranchId || 'main');
+        upvoteBtn.onclick = () => gradeMessage(messageId, 1, currentMessageBranchId);
+        upvoteBtn.disabled = isDisabled;
 
-        gradeDisplay.className = 'rating-score'; gradeDisplay.textContent = userGrade;
+        gradeDisplay.className = 'rating-score'; 
+        gradeDisplay.textContent = userGrade;
         gradeDisplay.setAttribute('aria-live', 'polite');
 
         downvoteBtn.className = `rating-btn downvote ${userGrade < 0 ? 'active' : ''}`;
         downvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 17a1 1 0 01-.707-.293l-5-5a1 1 0 011.414-1.414L9 13.586V4a1 1 0 112 0v9.586l3.293-3.293a1 1 0 011.414 1.414l-5 5A1 1 0 0110 17z" clip-rule="evenodd" /></svg>`;
         downvoteBtn.title = translate('grade_bad_tooltip', 'Bad response');
         downvoteBtn.setAttribute('aria-pressed', userGrade < 0 ? 'true' : 'false');
-        downvoteBtn.onclick = () => gradeMessage(messageId, -1, message.branch_id || activeBranchId || 'main');
+        downvoteBtn.onclick = () => gradeMessage(messageId, -1, currentMessageBranchId);
+        downvoteBtn.disabled = isDisabled;
 
-
-        ratingContainer.appendChild(upvoteBtn); ratingContainer.appendChild(gradeDisplay); ratingContainer.appendChild(downvoteBtn);
+        ratingContainer.appendChild(upvoteBtn); 
+        ratingContainer.appendChild(gradeDisplay); 
+        ratingContainer.appendChild(downvoteBtn);
         footerActionsContainer.appendChild(ratingContainer);
     }
     
-    // Only append footerActionsContainer if it has children
-    if (footerActionsContainer.hasChildNodes()) {
-        footerContent.appendChild(footerActionsContainer);
-    }
-    
-    // Only append the main footerDiv to bubble if footerContent actually has something in it
+    if (footerActionsContainer.hasChildNodes()) footerContent.appendChild(footerActionsContainer);
     if (footerContent.hasChildNodes()) {
         footerDiv.appendChild(footerContent);
-        if (!footerDiv.parentNode) { // If footerDiv was detached or new, append it
-            bubbleDivToUse.appendChild(footerDiv);
-        }
-    } else if (footerDiv.parentNode) { // If footer exists but is now empty, remove it
-        footerDiv.remove();
+        bubbleDivToUse.appendChild(footerDiv);
     }
 
-
-    // Final check for streaming AI message DOM caching
-    if (messageId === currentAiMessageId && (aiMessageStreaming || generationInProgress)) {
+    if (isStreamingThisMessage) {
         currentAiMessageDomContainer = messageContainerToUse;
         currentAiMessageDomBubble = bubbleDivToUse;
     }
-
-    // Scroll to bottom
-    if (!isUpdate && chatMessages && chatMessages.lastChild === messageContainerToUse) {
-        scrollToBottom(); 
-    }
 }
-
-// --- Helper for getSenderAvatar (example) ---
-// You should have a more robust version of this
-function getSenderAvatar(senderDisplayName, senderType, originalSender) {
-    let avatarSrc = '';
-    let altText = senderDisplayName;
-
-    if (senderType === 'user') {
-        avatarSrc = currentUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(senderDisplayName)}&background=0D8ABC&color=fff&size=48`;
-    } else if (senderType === 'ai') {
-        // You might have a mapping of AI names to avatars
-        // For now, a generic AI avatar or based on lollms_client_ai_name
-        avatarSrc = (originalSender === currentUser.lollms_client_ai_name && window.uiValues && window.uiValues.aiAvatar) ? window.uiValues.aiAvatar : `https://ui-avatars.com/api/?name=${encodeURIComponent(senderDisplayName.substring(0,2))}&background=10B981&color=fff&size=48`;
-        altText = `${senderDisplayName} AI`;
-    } else { // system or other
-        return ''; // No avatar for system messages, or a generic icon
-    }
-    return `<img src="${avatarSrc}" alt="${escapeHtml(altText)}" class="sender-avatar">`;
-}
-// `renderEnhancedContent` (with <think> block fix)
-function renderEnhancedContent(contentDivElement, rawContent, messageId, steps = [], metadata = [], messageObject = {}) {
-    contentDivElement.innerHTML = ''; // Start fresh
-
-    let currentSegment = rawContent || "";
-    const thinkBlockRegex = /<think>([\s\S]*?)<\/think>/gs;
-    let lastIndex = 0;
-    let match;
-    let hasRenderedTextContent = false;
-
-    while ((match = thinkBlockRegex.exec(currentSegment)) !== null) {
-        const textBefore = currentSegment.substring(lastIndex, match.index);
-        if (textBefore.trim()) {
-            const regularContentSegmentDiv = document.createElement('div');
-            regularContentSegmentDiv.innerHTML = marked.parse(textBefore); // Use a Markdown parser
-            contentDivElement.appendChild(regularContentSegmentDiv);
-            hasRenderedTextContent = true;
-        }
-
-        const thinkDetails = document.createElement('details');
-        thinkDetails.className = 'think-block my-2';
-        const thinkSummary = document.createElement('summary');
-        thinkSummary.className = 'px-2 py-1 text-xs italic text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-750 rounded focus:outline-none focus:ring-2 focus:ring-blue-500';
-        thinkSummary.textContent = translate('assistant_thoughts_summary', "Assistant's Thoughts");
-        const thinkContentDiv = document.createElement('div');
-        thinkContentDiv.className = 'think-content p-2 border-t border-gray-200 dark:border-gray-700 prose prose-sm max-w-none dark:prose-invert';
-        thinkContentDiv.innerHTML = marked.parse(match[1].trim()); // Parse think content as Markdown
-        
-        thinkDetails.appendChild(thinkSummary);
-        thinkDetails.appendChild(thinkContentDiv);
-        contentDivElement.appendChild(thinkDetails);
-        hasRenderedTextContent = true; // A think block counts as content
-        lastIndex = thinkBlockRegex.lastIndex;
-    }
-
-    const remainingText = currentSegment.substring(lastIndex);
-    if (remainingText.trim()) {
-        const finalContentSegmentDiv = document.createElement('div');
-        finalContentSegmentDiv.innerHTML = marked.parse(remainingText); // Parse remaining as Markdown
-        contentDivElement.appendChild(finalContentSegmentDiv);
-        hasRenderedTextContent = true;
-    }
-    
-    // Apply prose styling to the main content if it doesn't have specific sub-containers that handle it
-    if (hasRenderedTextContent && !contentDivElement.classList.contains('prose')) {
-         // Check if children are already prose, if not, wrap text nodes or apply to contentDivElement
-        let applyProseToBase = true;
-        contentDivElement.childNodes.forEach(node => {
-            if (node.nodeType === Node.ELEMENT_NODE && (node.classList.contains('prose') || node.classList.contains('think-block') || node.classList.contains('steps-container') || node.classList.contains('message-metadata'))) {
-                applyProseToBase = false;
-            }
-        });
-        if(applyProseToBase) {
-            contentDivElement.classList.add('prose', 'prose-sm', 'max-w-none', 'dark:prose-invert');
-            // Ensure code block theming for prose is applied
-            contentDivElement.classList.add('prose-code:before:content-none', 'prose-code:after:content-none', 'prose-code:font-normal', 'prose-code:bg-gray-200', 'dark:prose-code:bg-gray-700', 'prose-code:text-gray-800', 'dark:prose-code:text-gray-100', 'prose-code:px-1', 'prose-code:py-0.5', 'prose-code:rounded');
-        }
-    }
-
-
-    if (steps && steps.length > 0) renderSteps(contentDivElement, steps); // From your enhanced rendering
-    if (metadata && metadata.length > 0) renderMetadata(contentDivElement, metadata); // From your enhanced rendering
-
-    // Typing Indicator or Empty Placeholder
-    const isStreamingThisMessage = aiMessageStreaming && messageId === currentAiMessageId;
-    const isEffectivelyEmpty = !hasRenderedTextContent && (!steps || steps.length === 0) && (!metadata || metadata.length === 0);
-
-    if (isStreamingThisMessage && currentAiMessageContentAccumulator === "" && isEffectivelyEmpty) {
-        if (!contentDivElement.querySelector('.typing-indicator')) {
-            const typingIndicatorDiv = document.createElement('div');
-            typingIndicatorDiv.className = 'typing-indicator flex items-center space-x-1 h-5 my-1';
-            for (let i = 0; i < 3; i++) { typingIndicatorDiv.appendChild(document.createElement('span')); }
-            contentDivElement.appendChild(typingIndicatorDiv);
-        }
-    } else if (isEffectivelyEmpty &&
-        (!messageObject.image_references || messageObject.image_references.length === 0) &&
-        !isStreamingThisMessage) {
-        contentDivElement.innerHTML = `<p class="empty-message">${translate('empty_message_placeholder')}</p>`;
-    }
-
-    // KaTeX and Custom Code Blocks
-    if (typeof renderMathInElement === 'function') { // Check if KaTeX utility is available
-        try {
-            renderMathInElement(contentDivElement, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\(', right: '\\)', display: false }, { left: '\\[', right: '\\]', display: true }], throwOnError: false });
-        } catch (e) { console.warn("KaTeX rendering error:", e); }
-    } else if (typeof MathJax !== 'undefined') { // Fallback for MathJax if pre-loaded
-         MathJax.typesetPromise([contentDivElement]).catch(err => console.warn('MathJax error:', err));
-    }
-
-    renderCustomCodeBlocks(contentDivElement, messageId); // Your syntax highlighting and copy button logic
-    applySyntaxHighlighting(contentDivElement); // Apply basic or PrismJS highlighting
-    addCodeBlockCopyButtons(contentDivElement); // Add copy buttons to all code blocks now
-}
-
-
-function renderMessages(messagesToRender) { /* Your "Enhanced renderMessages" from problem desc, with date grouping */
+function renderMessages(messagesToRender) {
     if(!chatMessages) return;
     chatMessages.innerHTML = '';
 
@@ -2453,14 +2365,10 @@ function renderMessages(messagesToRender) { /* Your "Enhanced renderMessages" fr
     const messagesByDate = groupMessagesByDate(messagesToRender);
 
     Object.entries(messagesByDate).forEach(([date, messagesOnDate]) => {
-        if (Object.keys(messagesByDate).length > 1 || (Object.keys(messagesByDate).length === 1 && new Date(date).toDateString() !== new Date().toDateString())) { // Show for single day if not today
+        if (Object.keys(messagesByDate).length > 1 || (new Date(date).toDateString() !== new Date().toDateString())) {
             const dateSeparator = document.createElement('div');
             dateSeparator.className = 'date-separator';
-            dateSeparator.innerHTML = `
-                <div class="date-separator-line"></div>
-                <div class="date-separator-text">${formatDateSeparator(new Date(date))}</div>
-                <div class="date-separator-line"></div>
-            `;
+            dateSeparator.innerHTML = `<div class="date-separator-line"></div><div class="date-separator-text">${formatDateSeparator(new Date(date))}</div><div class="date-separator-line"></div>`;
             chatMessages.appendChild(dateSeparator);
         }
         messagesOnDate.forEach((msg, index) => {
@@ -2468,12 +2376,11 @@ function renderMessages(messagesToRender) { /* Your "Enhanced renderMessages" fr
             renderMessage(msg);
         });
     });
-    requestAnimationFrame(() => { scrollChatToBottom(false); }); // Scroll immediately after render
+    requestAnimationFrame(() => { forceScrollToBottom(); });
 }
-// groupMessagesByDate, formatDateSeparator, formatProcessingTime as in your enhanced version
-// getSenderAvatar, createActionButton, addCodeBlockCopyButtons, renderSteps, renderMetadata, escapeHtml also as in your enhanced version.
 
-// Helper functions
+// --- All Other Helper Functions ---
+// (The rest of your original helpers from your first post are included here for completeness)
 function groupMessagesByDate(messages) {
     const groups = {};
     
@@ -2507,15 +2414,247 @@ function formatDateSeparator(date) {
         });
     }
 } 
-function getSenderAvatar(senderName) {
-    // Generate a simple avatar based on sender name
-    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8'];
-    const colorIndex = senderName.length % colors.length;
-    const initial = senderName.charAt(0).toUpperCase();
+/**
+ * Creates an HTML string for a sender's avatar.
+ * @param {string} senderDisplayName The name to display.
+ * @param {string} senderType 'user' or 'ai'.
+ * @param {string} originalSender The original sender name from the message object.
+ * @returns {string} The HTML string for the <img> tag.
+ */
+function getSenderAvatar(senderDisplayName, senderType, originalSender) {
+    let avatarSrc = '';
+    let altText = senderDisplayName;
+
+    if (senderType === 'user') {
+        // Use user's avatar or fall back to a UI-Avatar
+        avatarSrc = currentUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(senderDisplayName)}&background=0D8ABC&color=fff&size=48`;
+    } else if (senderType === 'ai') {
+        // Use a specific AI avatar if available, otherwise fall back to a UI-Avatar
+        avatarSrc = (window.uiValues && window.uiValues.aiAvatar) ? window.uiValues.aiAvatar : `https://ui-avatars.com/api/?name=${encodeURIComponent(senderDisplayName.substring(0,2))}&background=10B981&color=fff&size=48`;
+        altText = `${senderDisplayName} AI`;
+    } else { 
+        return ''; // No avatar for system messages
+    }
+    return `<img src="${avatarSrc}" alt="${escapeHtml(altText)}" class="sender-avatar">`;
+}
+// You should have a more robust version of this
+function getSenderAvatar(senderDisplayName, senderType, originalSender) {
+    let avatarSrc = '';
+    let altText = senderDisplayName;
+
+    if (senderType === 'user') {
+        avatarSrc = currentUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(senderDisplayName)}&background=0D8ABC&color=fff&size=48`;
+    } else if (senderType === 'ai') {
+        // You might have a mapping of AI names to avatars
+        // For now, a generic AI avatar or based on lollms_client_ai_name
+        avatarSrc = (originalSender === currentUser.lollms_client_ai_name && window.uiValues && window.uiValues.aiAvatar) ? window.uiValues.aiAvatar : `https://ui-avatars.com/api/?name=${encodeURIComponent(senderDisplayName.substring(0,2))}&background=10B981&color=fff&size=48`;
+        altText = `${senderDisplayName} AI`;
+    } else { // system or other
+        return ''; // No avatar for system messages, or a generic icon
+    }
+    return `<img src="${avatarSrc}" alt="${escapeHtml(altText)}" class="sender-avatar">`;
+}
+/**
+ * Renders a new step by PREPENDING it, ensuring the latest step is always at the top.
+ * This makes the collapse/expand behavior more intuitive for the user.
+ *
+ * @param {HTMLElement} bubbleDiv The parent message bubble element.
+ * @param {object} stepData The data for the new step.
+ */
+function renderNewStep(bubbleDiv, stepData) {
+    const contentDiv = bubbleDiv.querySelector('.message-content');
+    if (!contentDiv) return;
+
+    let stepsContainer = contentDiv.querySelector('.steps-container');
+    let toggleButton = contentDiv.querySelector('.steps-toggle-button');
+
+    // --- Create container and button on first step ---
+    if (!stepsContainer) {
+        stepsContainer = document.createElement('div');
+        stepsContainer.className = 'steps-container';
+        // The button now goes AFTER the container in the DOM
+        contentDiv.appendChild(stepsContainer);
+
+        toggleButton = document.createElement('button');
+        toggleButton.className = 'steps-toggle-button';
+        toggleButton.innerHTML = `
+            <span class="toggle-text"></span>
+            <svg class="toggle-arrow" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+        `;
+        contentDiv.appendChild(toggleButton);
+
+        toggleButton.onclick = () => {
+            const isCollapsed = stepsContainer.classList.toggle('collapsed');
+            const textEl = toggleButton.querySelector('.toggle-text');
+            const stepCount = stepsContainer.children.length;
+            if (isCollapsed) {
+                textEl.textContent = `Show ${stepCount - 1} older steps...`;
+            } else {
+                textEl.textContent = 'Show only latest step';
+                // Animate to full height when manually expanded
+                stepsContainer.style.maxHeight = stepsContainer.scrollHeight + 'px';
+            }
+        };
+    }
     
-    return `<div class="sender-avatar" style="background-color: ${colors[colorIndex]}">${initial}</div>`;
+    // --- Create and PREPEND the new step item ---
+    const stepEl = document.createElement('div');
+    stepEl.className = 'step-item status-pending';
+    stepEl.dataset.stepId = stepData.id;
+    const stepText = escapeHtml(stepData.content || stepData.chunk || '');
+    stepEl.innerHTML = `
+        <div class="step-icon">
+            <svg class="spinner" viewBox="0 0 50 50"><circle class="path" cx="25" cy="25" r="20" fill="none" stroke-width="5"></circle></svg>
+        </div>
+        <div class="step-text">${stepText}</div>
+    `;
+    // THIS IS THE KEY CHANGE:
+    stepsContainer.prepend(stepEl);
+
+    // --- Update state and collapse logic ---
+    const stepCount = stepsContainer.children.length;
+    const textEl = toggleButton.querySelector('.toggle-text');
+
+    if (stepCount > 1) {
+        stepsContainer.classList.add('collapsed');
+        textEl.textContent = `Show ${stepCount - 1} older steps...`;
+        toggleButton.style.display = 'flex';
+    } else {
+        stepsContainer.classList.remove('collapsed');
+        toggleButton.style.display = 'none'; // No need to show button for one step
+    }
 }
 
+/**
+ * Updates a step's status and expands the container if all steps are done.
+ *
+ * @param {HTMLElement} bubbleDiv The parent message bubble element.
+ * @param {string} stepId The ID of the step to update.
+ * @param {string} newStatus The new status.
+ */
+function updateStepStatus(bubbleDiv, stepId, newStatus) {
+    const stepEl = bubbleDiv.querySelector(`.step-item[data-step-id="${stepId}"]`);
+    if (stepEl) {
+        stepEl.className = `step-item status-${newStatus}`;
+        const iconDiv = stepEl.querySelector('.step-icon');
+        if (iconDiv && newStatus === 'done') {
+            iconDiv.innerHTML = `<svg fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>`;
+        }
+    }
+    
+    // --- Check if all steps are done to auto-expand ---
+    const stepsContainer = bubbleDiv.querySelector('.steps-container');
+    const toggleButton = bubbleDiv.querySelector('.steps-toggle-button');
+    if (stepsContainer && toggleButton) {
+        const allSteps = Array.from(stepsContainer.children);
+        const allDone = allSteps.every(s => s.classList.contains('status-done'));
+        // We only auto-expand if the process completes naturally
+        if (allDone && allSteps.length > 1 && aiMessageStreaming === false) {
+            stepsContainer.classList.remove('collapsed');
+            stepsContainer.style.maxHeight = stepsContainer.scrollHeight + 'px'; // Animate to full height
+            toggleButton.style.display = 'none'; // Hide button when process is complete
+        }
+    }
+}
+/**
+ * Renders the main body of a message with all enhancements:
+ * - Shows a typing indicator for new, empty streaming messages.
+ * - Parses <think> blocks into collapsible sections.
+ * - Renders Markdown content.
+ * - Renders steps and metadata.
+ * - Renders LaTeX mathematical expressions using KaTeX (if available).
+ * - Renders and syntax-highlights custom code blocks with copy buttons.
+ */
+function renderEnhancedContent(contentDivElement, rawContent, messageId, steps = [], metadata = [], messageObject = {}) {
+    contentDivElement.innerHTML = ''; // Start fresh
+
+    // --- Logic for Typing Indicator ---
+    const isStreamingThisMessage = aiMessageStreaming && messageId === currentAiMessageId;
+    const isEffectivelyEmpty = !(rawContent && rawContent.trim()) && (!steps || steps.length === 0) && (!metadata || metadata.length === 0);
+
+    // If we are streaming this specific message AND it has no content yet, show the indicator.
+    if (isStreamingThisMessage && isEffectivelyEmpty) {
+        const typingIndicatorDiv = document.createElement('div');
+        typingIndicatorDiv.className = 'typing-indicator';
+        // Create the three bouncing dots
+        for (let i = 0; i < 3; i++) {
+            typingIndicatorDiv.appendChild(document.createElement('span'));
+        }
+        contentDivElement.appendChild(typingIndicatorDiv);
+        // We are done for this render, the indicator is all we need to show.
+        return;
+    }
+
+    // --- Render Main Content if it exists ---
+    let currentSegment = rawContent || "";
+    const thinkBlockRegex = /<think>([\s\S]*?)<\/think>/gs;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = thinkBlockRegex.exec(currentSegment)) !== null) {
+        const textBefore = currentSegment.substring(lastIndex, match.index);
+        if (textBefore.trim()) {
+            const regularContentSegmentDiv = document.createElement('div');
+            regularContentSegmentDiv.innerHTML = marked.parse(textBefore);
+            contentDivElement.appendChild(regularContentSegmentDiv);
+        }
+
+        const thinkDetails = document.createElement('details');
+        thinkDetails.className = 'think-block my-2';
+        const thinkSummary = document.createElement('summary');
+        thinkSummary.className = 'px-2 py-1 text-xs italic text-gray-500 dark:text-gray-400 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-750 rounded focus:outline-none focus:ring-2 focus:ring-blue-500';
+        thinkSummary.textContent = translate('assistant_thoughts_summary', "Assistant's Thoughts");
+        const thinkContentDiv = document.createElement('div');
+        thinkContentDiv.className = 'think-content p-2 border-t border-gray-200 dark:border-gray-700 prose prose-sm max-w-none dark:prose-invert';
+        thinkContentDiv.innerHTML = marked.parse(match[1].trim());
+        
+        thinkDetails.appendChild(thinkSummary);
+        thinkDetails.appendChild(thinkContentDiv);
+        contentDivElement.appendChild(thinkDetails);
+        lastIndex = thinkBlockRegex.lastIndex;
+    }
+
+    const remainingText = currentSegment.substring(lastIndex);
+    if (remainingText.trim()) {
+        const finalContentSegmentDiv = document.createElement('div');
+        finalContentSegmentDiv.innerHTML = marked.parse(remainingText);
+        contentDivElement.appendChild(finalContentSegmentDiv);
+    }
+    
+    // Apply prose styling for consistent typography
+    if (contentDivElement.hasChildNodes() && !contentDivElement.classList.contains('prose')) {
+         contentDivElement.classList.add('prose', 'prose-sm', 'max-w-none', 'dark:prose-invert');
+    }
+
+    // --- Render Steps and Metadata ---
+    if (steps && steps.length > 0) {
+        // Assuming renderSteps is another helper you have
+        renderSteps(contentDivElement, steps); 
+    }
+    if (metadata && metadata.length > 0) {
+        // Assuming renderMetadata is another helper you have
+        renderMetadata(contentDivElement, metadata);
+    }
+    
+    // --- Fallback for completely empty, non-streaming messages ---
+    if (isEffectivelyEmpty && (!messageObject.image_references || messageObject.image_references.length === 0)) {
+        contentDivElement.innerHTML = `<p class="empty-message-placeholder">${translate('empty_message_placeholder', 'Empty message')}</p>`;
+    }
+
+    // --- Post-processing for dynamic content ---
+    
+    // KaTeX for LaTeX rendering
+    if (typeof renderMathInElement === 'function') {
+        try {
+            renderMathInElement(contentDivElement, { delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }, { left: '\\(', right: '\\)', display: false }, { left: '\\[', right: '\\]', display: true }], throwOnError: false });
+        } catch (e) { console.warn("KaTeX rendering error:", e); }
+    }
+
+    // Syntax Highlighting and Copy Buttons
+    renderCustomCodeBlocks(contentDivElement, messageId); // Assuming this is your custom code block handler
+    applySyntaxHighlighting(contentDivElement); // General highlighter like PrismJS
+    addCodeBlockCopyButtons(contentDivElement); // Adds copy buttons to standard <pre><code> blocks
+}
 // Helper functions
 function createActionButton(type, tooltip, onClick, variant = 'default') {
     const button = document.createElement('button');
@@ -2572,45 +2711,49 @@ function addCodeBlockCopyButtons(container) {
         });
     });
 }
-
+/**
+ * Renders a list of completed steps from a saved message history.
+ * This function mimics the visual style of the dynamic step rendering,
+ * ensuring a consistent user experience.
+ *
+ * @param {HTMLElement} container The parent element to append the steps to.
+ * @param {Array<object>} steps The array of step data objects.
+ */
 function renderSteps(container, steps) {
+    // Do nothing if there are no steps to render.
     if (!steps || steps.length === 0) return;
 
+    // Create the main container for all steps.
     const stepsContainer = document.createElement('div');
-    stepsContainer.className = 'message-steps';
+    stepsContainer.className = 'steps-container'; // No 'collapsed' class needed.
     
-    const stepsHeader = document.createElement('div');
-    stepsHeader.className = 'steps-header';
-    stepsHeader.innerHTML = `
-        <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm0 4a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/>
-        </svg>
-        Processing Steps
-    `;
-    stepsContainer.appendChild(stepsHeader);
-
-    const stepsList = document.createElement('div');
-    stepsList.className = 'steps-list';
-
-    steps.forEach((step, index) => {
+    // Loop through the steps and create a DOM element for each one.
+    // We use .forEach() and .prepend() to ensure the newest step is at the top,
+    // matching the live generation behavior.
+    steps.forEach(step => {
         const stepItem = document.createElement('div');
-        stepItem.className = `step-item ${step.status || 'completed'}`;
         
+        // Since this function renders completed history, all steps are 'done'.
+        stepItem.className = 'step-item status-done';
+        stepItem.dataset.stepId = step.id;
+        
+        const stepText = escapeHtml(step.content || step.chunk || '');
+
+        // Use the HTML structure for a "done" step with a checkmark.
         stepItem.innerHTML = `
-            <div class="step-indicator">
-                <span class="step-number">${index + 1}</span>
+            <div class="step-icon">
+                <svg fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>
+                </svg>
             </div>
-            <div class="step-content">
-                <div class="step-title">${step}</div>
-                ${step.description ? `<div class="step-description">${step.description}</div>` : ''}
-                ${step.duration ? `<div class="step-duration">${formatProcessingTime(step.duration)}</div>` : ''}
-            </div>
+            <div class="step-text">${stepText}</div>
         `;
         
-        stepsList.appendChild(stepItem);
+        // Prepend the step to the container.
+        stepsContainer.prepend(stepItem);
     });
 
-    stepsContainer.appendChild(stepsList);
+    // Append the fully constructed container to the message content.
     container.appendChild(stepsContainer);
 }
 
@@ -4196,11 +4339,6 @@ function renderImagePreview(file, serverPath) {
     };
     reader.readAsDataURL(file);
 }
-function viewImage(src) {
-    imageViewerSrc.src = src;
-    openModal('imageViewerModal');
-}
-
 // --- Export / Import Logic ---
 function populateExportModal() { 
     exportDiscussionList.innerHTML = '';
