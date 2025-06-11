@@ -1808,6 +1808,9 @@ function handleStreamEnd(errorOccurred = false, wasAbortedByStopButton = false) 
     aiMessageStreaming = false;
     if (generationInProgress) generationInProgress = false;
 
+    // Grab the final ID before we nullify currentAiMessageData
+    const finalStreamedAiMessageId = currentAiMessageData?.id;
+
     if (currentAiMessageData && isElementInDocument(currentAiMessageDomBubble)) {
         currentAiMessageDomBubble.classList.remove('is-streaming');
 
@@ -1908,10 +1911,13 @@ function handleStreamEnd(errorOccurred = false, wasAbortedByStopButton = false) 
         }
     }
 
-    if (errorOccurred && !wasAbortedByStopButton) {
-        refreshMessagesAfterStream(currentAiMessageData?.id);
-    }
+    // FIX: Always refresh the message list from the server after any stream ends (success, error, or abort).
+    // This is the most robust way to ensure the client has the "source of truth" and all button
+    // handlers are correctly re-bound with the final, permanent message IDs.
+    // The small delay allows the UI to feel responsive before the final state loads.
+    setTimeout(() => refreshMessagesAfterStream(finalStreamedAiMessageId), 100);
 
+    // Clean up temporary streaming state
     currentAiMessageContentAccumulator = "";
     currentAiMessageData = null;
     currentAiMessageId = null;
@@ -2315,7 +2321,7 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     let contentDiv = document.createElement('div');
     contentDiv.className = 'message-content';
     bubbleDivToUse.appendChild(contentDiv);
-    renderEnhancedContent(contentDiv, message.content || "", messageId, message.steps, message.metadata, message);
+    renderEnhancedContent(contentDiv, message.content || "", message.id, message.steps, message.metadata, message);
 
     const footerDiv = document.createElement('div');
     footerDiv.className = 'message-footer';
@@ -2343,15 +2349,20 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     actionsGroup.className = 'message-actions-group';
     const currentMessageBranchId = message.branch_id || activeBranchId || 'main';
 
+    // FIX: The onclick handlers now reference `message.id` directly.
+    // This ensures that even if the message object's ID is updated after rendering (during streaming),
+    // the button click will use the *final, correct* ID.
     actionsGroup.appendChild(createActionButton('copy', translate('copy_content_tooltip', "Copy content"), () => { navigator.clipboard.writeText(message.content).then(() => showStatus(translate('status_copied_to_clipboard', 'Copied!'), 'success')); }, 'default', isDisabled));
-    actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip', "Edit message"), () => initiateEditMessage(messageId, currentMessageBranchId), 'default', isDisabled));
+    actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip', "Edit message"), () => initiateEditMessage(message.id, currentMessageBranchId), 'default', isDisabled));
 
     if (bubbleClass === 'user-bubble') {
-        actionsGroup.appendChild(createActionButton('refresh', translate('resend_branch_tooltip', 'Resend/Branch'), () => initiateBranch(message.id), 'primary', isDisabled));
+        // FIX: Corrected arguments for initiateBranch. It needs discussionId and messageId.
+        actionsGroup.appendChild(createActionButton('refresh', translate('resend_branch_tooltip', 'Resend/Branch'), () => initiateBranch(currentDiscussionId, message.id), 'primary', isDisabled));
     } else if (bubbleClass === 'ai-bubble') {
-        actionsGroup.appendChild(createActionButton('refresh', translate('regenerate_message_tooltip', 'Regenerate'), () => regenerateMessage(message.id), 'primary', isDisabled));
+        // FIX: Corrected arguments for regenerateMessage. It needs the branchId.
+        actionsGroup.appendChild(createActionButton('refresh', translate('regenerate_message_tooltip', 'Regenerate'), () => regenerateMessage(message.id, currentMessageBranchId), 'primary', isDisabled));
     }
-    actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip', "Delete"), () => deleteMessage(messageId, currentMessageBranchId), 'destructive', isDisabled));
+    actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip', "Delete"), () => deleteMessage(message.id, currentMessageBranchId), 'destructive', isDisabled));
 
     if (actionsGroup.hasChildNodes()) footerActionsContainer.appendChild(actionsGroup);
 
@@ -2366,7 +2377,8 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         upvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 3a1 1 0 01.707.293l5 5a1 1 0 01-1.414 1.414L11 6.414V16a1 1 0 11-2 0V6.414L5.707 9.707a1 1 0 01-1.414-1.414l5-5A1 1 0 0110 3z" clip-rule="evenodd" /></svg>`;
         upvoteBtn.title = translate('grade_good_tooltip', 'Good response');
         upvoteBtn.setAttribute('aria-pressed', userGrade > 0 ? 'true' : 'false');
-        upvoteBtn.onclick = () => gradeMessage(messageId, 1, currentMessageBranchId);
+        // FIX: Ensure correct ID is used here as well.
+        upvoteBtn.onclick = () => gradeMessage(message.id, 1, currentMessageBranchId);
         upvoteBtn.disabled = isDisabled;
         gradeDisplay.className = 'rating-score';
         gradeDisplay.textContent = userGrade;
@@ -2375,7 +2387,8 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         downvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 17a1 1 0 01-.707-.293l-5-5a1 1 0 011.414-1.414L9 13.586V4a1 1 0 112 0v9.586l3.293-3.293a1 1 0 011.414 1.414l-5 5A1 1 0 0110 17z" clip-rule="evenodd" /></svg>`;
         downvoteBtn.title = translate('grade_bad_tooltip', 'Bad response');
         downvoteBtn.setAttribute('aria-pressed', userGrade < 0 ? 'true' : 'false');
-        downvoteBtn.onclick = () => gradeMessage(messageId, -1, currentMessageBranchId);
+        // FIX: Ensure correct ID is used here as well.
+        downvoteBtn.onclick = () => gradeMessage(message.id, -1, currentMessageBranchId);
         downvoteBtn.disabled = isDisabled;
         ratingContainer.appendChild(upvoteBtn);
         ratingContainer.appendChild(gradeDisplay);
@@ -3069,7 +3082,13 @@ async function confirmMessageEdit() {
 }
 
 async function deleteMessage(messageId, branchId) {
-    if (!currentDiscussionId || !messageId || messageId.startsWith('temp-') || !branchId) return;
+    console.log(`Attempting to delete message with ID: ${messageId} in branch: ${branchId}`); // DEBUG LOG
+    if (!currentDiscussionId || !messageId || messageId.startsWith('temp-') || !branchId) {
+        if (messageId && messageId.startsWith('temp-')) {
+            console.warn("Delete aborted: Message ID is still temporary.", messageId);
+        }
+        return;
+    }
 
     const disc = discussions[currentDiscussionId];
     if (!disc || !disc.branches[branchId]) return;
@@ -3100,7 +3119,7 @@ async function deleteMessage(messageId, branchId) {
             renderBranchTabsUI(currentDiscussionId); // Update tabs (branch might be gone or empty)
 
             showStatus(translate('status_message_deleted_success', 'Message deleted successfully.'), 'success');
-            await refreshMessagesAfterStream(); // Get definitive state, especially if active branch changed
+            // No need to call refreshMessagesAfterStream here, as we have manually updated the state.
         } catch (error) { /* apiRequest handles status */ }
     }
 }
