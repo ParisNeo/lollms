@@ -114,12 +114,13 @@ FriendshipAction,
 FriendPublic,
 FriendshipRequestPublic,
 PersonalitySendRequest,
-
+DiscussionBranchSwitchRequest, # Import new model
 DirectMessagePublic,
 DirectMessageCreate
 )
 from backend.config import (
-    TEMP_UPLOADS_DIR_NAME
+    TEMP_UPLOADS_DIR_NAME,
+    APP_VERSION
 )
 from backend.session import (
     get_current_active_user,
@@ -141,7 +142,6 @@ from backend.session import (
 from backend.config import (LOLLMS_CLIENT_DEFAULTS, SAFE_STORE_DEFAULTS)
 from backend.discussion import (AppLollmsDiscussion)
 from backend.message import AppLollmsMessage
-security = HTTPBasic()
 
 
 # --- Discussion API ---
@@ -161,7 +161,8 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
         infos.append(DiscussionInfo(
             id=disc_id, title=disc_obj.title, 
             is_starred=(disc_id in starred_ids),
-            rag_datastore_id=disc_obj.rag_datastore_id
+            rag_datastore_id=disc_obj.rag_datastore_id,
+            active_branch_id=disc_obj.active_branch_id # NEW
         ))
     return infos
 
@@ -171,30 +172,66 @@ async def create_new_discussion(current_user: UserAuthDetails = Depends(get_curr
     discussion_id = str(uuid.uuid4())
     discussion_obj = get_user_discussion(username, discussion_id, create_if_missing=True)
     if not discussion_obj: raise HTTPException(status_code=500, detail="Failed to create new discussion.")
-    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=False, rag_datastore_id=None)
+    # For a new discussion, there is no active branch yet. It will be set by the first message.
+    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=False, rag_datastore_id=None, active_branch_id=None)
 
 @discussion_router.get("/{discussion_id}", response_model=List[MessageOutput])
-async def get_messages_for_discussion(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[MessageOutput]:
+async def get_messages_for_discussion(
+    discussion_id: str,
+    branch_id: Optional[str] = Query(None), # Client sends the start_id of the branch it wants
+    current_user: UserAuthDetails = Depends(get_current_active_user), 
+    db: Session = Depends(get_db)
+) -> List[MessageOutput]:
     username = current_user.username
     user_id = db.query(DBUser.id).filter(DBUser.username == username).scalar()
     if not user_id: raise HTTPException(status_code=404, detail="User not found.")
+    
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj: raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
+    
+    # --- FIX: Resolve the full branch path from the client's request ---
+    # The client can send a branch's start_id. We must find the tip of that branch 
+    # to retrieve the full message history for rendering.
+    
+    branch_tip_to_load = None
+    if branch_id:
+        # Use the new helper method to trace from the start_id to the branch's leaf.
+        branch_tip_to_load = discussion_obj.get_branch_tip(branch_id)
+    else:
+        # If no specific branch is requested, use the discussion's last known active branch tip.
+        branch_tip_to_load = discussion_obj.active_branch_id
+    
+    messages_in_branch = []
+    if branch_tip_to_load:
+        # get_path_to_message correctly gets all ancestors up to the given tip.
+        messages_in_branch = discussion_obj.get_path_to_message(branch_tip_to_load)
+    elif discussion_obj.messages: 
+        # Fallback for older discussions or edge cases where no active_branch_id is set.
+        # We find the tip of the branch containing the chronologically last message.
+        last_message_tip = discussion_obj.get_branch_tip(discussion_obj.messages[-1].id)
+        messages_in_branch = discussion_obj.get_path_to_message(last_message_tip)
+    
+    if not messages_in_branch and branch_id:
+        print(f"WARN: Could not resolve a message path for branch_id '{branch_id}' in discussion '{discussion_id}'. Returning empty list.")
+    
+    # --- End of Fix ---
+
     user_grades_for_discussion = {
         grade.message_id: grade.grade
         for grade in db.query(UserMessageGrade.message_id, UserMessageGrade.grade)
         .filter(UserMessageGrade.user_id == user_id, UserMessageGrade.discussion_id == discussion_id).all()
     }
+    
     messages_output = []
-    for msg in discussion_obj.messages:
-        # Construct full URL for image assets if any
+    for msg in messages_in_branch:
+        # This part correctly identifies branch points by checking for multiple children.
+        children = discussion_obj.get_message_children(msg.id)
+        child_branch_ids = [child.id for child in children] if len(children) > 1 else None
+
         full_image_refs = []
         if msg.image_references:
             for ref in msg.image_references:
-                # Assuming ref is like "discussion_assets_dir_name/discussion_id/image_filename"
-                # or just "image_filename" if stored directly under discussion_assets/discussion_id
-                # Client-side, it will request /user_assets/<username>/<discussion_id>/<filename>
-                asset_filename = Path(ref).name # Get the filename part
+                asset_filename = Path(ref).name
                 full_image_refs.append(f"/user_assets/{username}/{discussion_obj.discussion_id}/{asset_filename}")
 
         messages_output.append(
@@ -202,12 +239,46 @@ async def get_messages_for_discussion(discussion_id: str, current_user: UserAuth
                 id=msg.id, sender=msg.sender, content=msg.content,
                 parent_message_id=msg.parent_message_id, binding_name=msg.binding_name,
                 model_name=msg.model_name, token_count=msg.token_count,
-                sources = msg.sources,
-                image_references=full_image_refs, # Use full URLs for client
-                user_grade=user_grades_for_discussion.get(msg.id, 0)
+                sources=msg.sources,
+                image_references=full_image_refs,
+                user_grade=user_grades_for_discussion.get(msg.id, 0),
+                created_at=msg.created_at,
+                # The branch_id for the whole list is the tip we are viewing.
+                branch_id=branch_tip_to_load, 
+                # The 'branches' property is for the specific message 'msg', indicating if IT is a branch point.
+                branches=child_branch_ids
             )
         )
     return messages_output
+@discussion_router.put("/{discussion_id}/active_branch", response_model=DiscussionInfo)
+async def update_discussion_active_branch(
+    discussion_id: str, 
+    branch_request: DiscussionBranchSwitchRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user), 
+    db: Session = Depends(get_db)
+) -> DiscussionInfo:
+    username = current_user.username
+    discussion_obj = get_user_discussion(username, discussion_id)
+    if not discussion_obj:
+        raise HTTPException(status_code=404, detail="Discussion not found.")
+
+    # Validate that the new active_branch_id exists in the discussion
+    if not any(msg.id == branch_request.active_branch_id for msg in discussion_obj.messages):
+        raise HTTPException(status_code=404, detail="Branch ID not found in discussion.")
+
+    discussion_obj.active_branch_id = branch_request.active_branch_id
+    save_user_discussion(username, discussion_id, discussion_obj)
+
+    user_id = db.query(DBUser.id).filter(DBUser.username == username).scalar()
+    is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_id, discussion_id=discussion_id).first() is not None
+    
+    return DiscussionInfo(
+        id=discussion_id, 
+        title=discussion_obj.title, 
+        is_starred=is_starred, 
+        rag_datastore_id=discussion_obj.rag_datastore_id,
+        active_branch_id=discussion_obj.active_branch_id
+    )
 
 @discussion_router.put("/{discussion_id}/title", response_model=DiscussionInfo)
 async def update_discussion_title(discussion_id: str, title_update: DiscussionTitleUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
@@ -219,7 +290,7 @@ async def update_discussion_title(discussion_id: str, title_update: DiscussionTi
     discussion_obj.title = title_update.title
     save_user_discussion(username, discussion_id, discussion_obj)
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_id, discussion_id=discussion_id).first() is not None
-    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=is_starred, rag_datastore_id=discussion_obj.rag_datastore_id)
+    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=is_starred, rag_datastore_id=discussion_obj.rag_datastore_id, active_branch_id=discussion_obj.active_branch_id)
 
 @discussion_router.put("/{discussion_id}/rag_datastore", response_model=DiscussionInfo)
 async def update_discussion_rag_datastore(discussion_id: str, update_payload: DiscussionRagDatastoreUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
@@ -236,15 +307,14 @@ async def update_discussion_rag_datastore(discussion_id: str, update_payload: Di
         except Exception as e_val:
              raise HTTPException(status_code=500, detail=f"Error validating RAG datastore: {str(e_val)}")
 
-
     discussion_obj.rag_datastore_id = update_payload.rag_datastore_id
     save_user_discussion(username, discussion_id, discussion_obj)
     
     user_id = db.query(DBUser.id).filter(DBUser.username == username).scalar()
-    if not user_id: raise HTTPException(status_code=404, detail="User not found in DB for star check.") # Should not happen if active_user works
+    if not user_id: raise HTTPException(status_code=404, detail="User not found in DB for star check.")
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_id, discussion_id=discussion_id).first() is not None
     
-    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=is_starred, rag_datastore_id=discussion_obj.rag_datastore_id)
+    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=is_starred, rag_datastore_id=discussion_obj.rag_datastore_id, active_branch_id=discussion_obj.active_branch_id)
 
 
 @discussion_router.delete("/{discussion_id}", status_code=200)
@@ -279,104 +349,123 @@ async def delete_specific_discussion(discussion_id: str, current_user: UserAuthD
         print(f"ERROR: Failed to delete DB entries for discussion {discussion_id}: {e_db}")
     return {"message": f"Discussion '{discussion_id}' deleted successfully."}
 
-@discussion_router.post("/{discussion_id}/star", status_code=201)
-async def star_discussion(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:
+@discussion_router.post("/{discussion_id}/star", status_code=201, response_model=DiscussionInfo)
+async def star_discussion(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
     username = current_user.username
     user_id = db.query(DBUser.id).filter(DBUser.username == username).scalar()
     if not user_id: raise HTTPException(status_code=404, detail="User not found.")
-    if not get_user_discussion(username, discussion_id): raise HTTPException(status_code=404, detail="Discussion not found.")
-    if db.query(UserStarredDiscussion).filter_by(user_id=user_id, discussion_id=discussion_id).first():
-        return {"message": "Discussion already starred."}
-    new_star = UserStarredDiscussion(user_id=user_id, discussion_id=discussion_id)
-    try: db.add(new_star); db.commit(); return {"message": "Discussion starred successfully."}
-    except IntegrityError: db.rollback(); return {"message": "Discussion already starred (race condition handled)."}
-    except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    discussion_obj = get_user_discussion(username, discussion_id)
+    if not discussion_obj: raise HTTPException(status_code=404, detail="Discussion not found.")
+    
+    if not db.query(UserStarredDiscussion).filter_by(user_id=user_id, discussion_id=discussion_id).first():
+        new_star = UserStarredDiscussion(user_id=user_id, discussion_id=discussion_id)
+        try: 
+            db.add(new_star)
+            db.commit()
+        except IntegrityError: 
+            db.rollback()
+        except Exception as e: 
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-@discussion_router.delete("/{discussion_id}/star", status_code=200)
-async def unstar_discussion(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:
+    return DiscussionInfo(
+        id=discussion_id, 
+        title=discussion_obj.title, 
+        is_starred=True, 
+        rag_datastore_id=discussion_obj.rag_datastore_id,
+        active_branch_id=discussion_obj.active_branch_id
+    )
+
+@discussion_router.delete("/{discussion_id}/star", status_code=200, response_model=DiscussionInfo)
+async def unstar_discussion(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
     username = current_user.username
     user_id = db.query(DBUser.id).filter(DBUser.username == username).scalar()
     if not user_id: raise HTTPException(status_code=404, detail="User not found.")
+    
+    discussion_obj = get_user_discussion(username, discussion_id)
+    if not discussion_obj: raise HTTPException(status_code=404, detail="Discussion not found.")
+
     star_to_delete = db.query(UserStarredDiscussion).filter_by(user_id=user_id, discussion_id=discussion_id).first()
-    if not star_to_delete: return {"message": "Discussion was not starred."}
-    try: db.delete(star_to_delete); db.commit(); return {"message": "Discussion unstarred successfully."}
-    except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    if star_to_delete:
+        try: 
+            db.delete(star_to_delete)
+            db.commit()
+        except Exception as e: 
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+    return DiscussionInfo(
+        id=discussion_id, 
+        title=discussion_obj.title, 
+        is_starred=False, 
+        rag_datastore_id=discussion_obj.rag_datastore_id,
+        active_branch_id=discussion_obj.active_branch_id
+    )
 
 @discussion_router.post("/{discussion_id}/chat")
 async def chat_in_existing_discussion(
     discussion_id: str, prompt: str = Form(...),
-    image_server_paths_json: str = Form("[]"), # JSON string of server_paths from upload
+    image_server_paths_json: str = Form("[]"),
     use_rag: bool = Form(False),
-    rag_datastore_id: Optional[str] = Form(None), # Datastore to use if RAG is active
-    parent_message_id: Optional[str] = Form(None),
+    rag_datastore_id: Optional[str] = Form(None),
+    is_resend: bool = Form(False), # NEW
+    branch_from_message_id: Optional[str] = Form(None), # NEW
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db), background_tasks: BackgroundTasks = BackgroundTasks()
 ) -> StreamingResponse:
     username = current_user.username
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj: raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
-
     lc = get_user_lollms_client(username)
-    
-    # Process and persist uploaded images
+
+    # --- Determine parent message ID for the new user message ---
+    parent_message_id = None
+    if is_resend:
+        if not branch_from_message_id: raise HTTPException(status_code=400, detail="branch_from_message_id is required for resend.")
+        # When branching, the parent is the message we are branching from.
+        parent_message_id = branch_from_message_id
+    elif discussion_obj.active_branch_id:
+        # When continuing, the parent is the tip of the active branch.
+        parent_message_id = discussion_obj.active_branch_id
+    # If it's the very first message in a discussion, parent_message_id remains None.
+
     final_image_references_for_message: List[str] = []
-    llm_image_paths: List[str] = [] # Absolute paths for LollmsClient
-
     try: image_server_paths = json.loads(image_server_paths_json)
-    except json.JSONDecodeError: raise HTTPException(status_code=400, detail="Invalid image_server_paths_json format.")
-
+    except json.JSONDecodeError: raise HTTPException(status_code=400, detail="Invalid JSON format.")
     if image_server_paths:
         user_temp_uploads_path = get_user_temp_uploads_path(username)
         discussion_assets_path = get_user_discussion_assets_path(username) / discussion_id
         discussion_assets_path.mkdir(parents=True, exist_ok=True)
-
         for temp_rel_path in image_server_paths:
-            if not temp_rel_path.startswith(TEMP_UPLOADS_DIR_NAME + "/"):
-                print(f"WARNING: Invalid temporary image path format: {temp_rel_path}")
-                continue
-            
             image_filename = Path(temp_rel_path).name
             temp_abs_path = user_temp_uploads_path / image_filename
-            
             if temp_abs_path.is_file():
                 persistent_filename = f"{uuid.uuid4().hex[:8]}_{image_filename}"
                 persistent_abs_path = discussion_assets_path / persistent_filename
                 try:
                     shutil.move(str(temp_abs_path), str(persistent_abs_path))
                     final_image_references_for_message.append(persistent_filename)
-                    llm_image_paths.append(str(persistent_abs_path))
-                except Exception as e_move:
-                    print(f"ERROR moving image {temp_abs_path} to {persistent_abs_path}: {e_move}")
-            else:
-                print(f"WARNING: Temporary image file not found: {temp_abs_path}")
+                except Exception as e_move: print(f"ERROR moving image: {e_move}")
     
     user_token_count = lc.binding.count_tokens(prompt) if prompt else 0
-    discussion_obj.add_message(
+    new_user_message = discussion_obj.add_message(
         sender=lc.user_name, content=prompt, parent_message_id=parent_message_id,
         token_count=user_token_count, image_references=final_image_references_for_message
     )
 
-    extra_content = ""
+    # The tip of the branch for context is now the new user message we just added
+    branch_tip_for_context = new_user_message.id
 
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
-
     stop_event = threading.Event()
-    shared_state = {
-        "accumulated_ai_response": "", 
-        "generation_error": None, 
-        "final_message_id": None, 
-        "binding_name": None, 
-        "model_name": None,
-        "stop_event": stop_event,
-    }
-
-    if username not in user_sessions: user_sessions[username] = {} 
-    user_sessions[username].setdefault("active_generation_control", {})[discussion_id] = stop_event
+    shared_state = {"accumulated_ai_response": "", "generation_error": None, "final_message_id": None, "binding_name": None, "model_name": None, "stop_event": stop_event}
+    user_sessions.setdefault(username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event
 
     async def stream_generator() -> AsyncGenerator[str, None]:
-        generation_thread: Optional[threading.Thread] = None 
-        
+        generation_thread: Optional[threading.Thread] = None
+        sources = []
+       
         def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict[str, Any]] = None, turn_history: Optional[List] = None) -> bool:
             if shared_state["stop_event"].is_set():
                 stop_message_payload = json.dumps({"type": "info", "content": "Generation stopped by user."}) + "\n"
@@ -425,162 +514,102 @@ async def chat_in_existing_discussion(
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_content +"\n"}) + "\n")
                 return False
             elif msg_type == MSG_TYPE.MSG_TYPE_FULL_INVISIBLE_TO_USER:
-                if params and "final_message_id" in params: shared_state["final_message_id"] = params["final_message_id"]
-            elif msg_type == MSG_TYPE.MSG_TYPE_FINISHED_MESSAGE: return False
+                if params and "final_message_id" in params: 
+                    shared_state["final_message_id"] = params["final_message_id"]
+            elif msg_type == MSG_TYPE.MSG_TYPE_FINISHED_MESSAGE:    
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "sources", "sources": sources}) + "\n")
+
+                return False
             return True
 
-        try: 
-            
-            sources =[]
-            def blocking_call(rag_datastore_id, sources):
+        try:
+            def blocking_call(rag_datastore_id_in_call, sources_in_call):
                 try:
-                    # Fetch active personality prompt from user's session
-                    active_personality_prompt_text = user_sessions[username].get("active_personality_prompt")
-                    user_puts_thoughts_in_context = user_sessions[username].get("llm_params", {}).get("put_thoughts_in_context", False)
-
+                    active_personality_prompt = user_sessions[username].get("active_personality_prompt")
                     shared_state["binding_name"] = lc.binding.binding_name if lc.binding else "unknown_binding"
                     shared_state["model_name"] = lc.binding.model_name if lc.binding and hasattr(lc.binding, "model_name") else user_sessions[username].get("lollms_model_name", "unknown_model")
                     
-                    # Prepare the main prompt (history + current user input)
-                    main_prompt_content = discussion_obj.prepare_query_for_llm(
-                        extra_content # This is the user's current text input, possibly augmented by RAG
-                        # max_total_tokens can be passed if needed, or rely on LollmsClient defaults
-                    )
-                    if not user_puts_thoughts_in_context:
-                        main_prompt_content = lc.remove_thinking_blocks(main_prompt_content)
-                    
+                    user_assets_path = get_user_discussion_assets_path(username)
+                    client_discussion = discussion_obj.to_lollms_client_discussion(user_assets_path, branch_tip_id=branch_tip_for_context)
+                    client_discussion.set_system_prompt(active_personality_prompt)
 
                     if use_rag and safe_store:
-                        if not rag_datastore_id:
-                            rag_datastore_id = discussion_obj.rag_datastore_id
-                            if not rag_datastore_id:
-                                # Fallback to user's default datastore is not implemented here,
-                                # user_sessions[username].get("active_vectorizer") is actually the default vectorizer name, not datastore_id.
-                                # For RAG, a datastore must be selected for the discussion or explicitly passed.
-                                print(f"WARNING: RAG requested by {username} but no datastore specified for discussion.")
-
-                        if rag_datastore_id:
+                        effective_rag_datastore_id = rag_datastore_id_in_call or discussion_obj.rag_datastore_id
+                        if not effective_rag_datastore_id:
+                            print(f"WARNING: RAG requested by {username} but no datastore specified for discussion.")
+                        
+                        if effective_rag_datastore_id:
                             try:
-                                ss = get_safe_store_instance(username, rag_datastore_id, db)
-                                # User's default vectorizer from their settings or global default.
-                                # This is for querying; documents are added with a specific vectorizer.
-                                # SafeStore can query using any vectorizer it has embeddings for.
-                                # If not specified, SafeStore might use its own default or the one most docs are vectorized with.
-                                # For now, let's rely on SafeStore's internal logic if vectorizer_name is None for query.
-                                # Or, use the user's preferred one IF the datastore has it.
+                                ss = get_safe_store_instance(username, effective_rag_datastore_id, db)
                                 def rqf(query, vectorizer_name, top_k, min_similarity_percent):
                                     results = ss.query(query, vectorizer_name, top_k, min_similarity_percent)
                                     return [{"file_path":Path(r["file_path"]).name,"similarity_percent":r["similarity_percent"],"chunk_text":r["chunk_text"]} for r in results]
-                                active_vectorizer_for_store = user_sessions[username].get("active_vectorizer") # This is the name of vectorizer model, not datastore                    
+                                
+                                active_vectorizer_for_store = user_sessions[username].get("active_vectorizer")
+                                
                                 classic_rag_result = lc.generate_text_with_rag(
-                                        prompt=main_prompt_content,
-                                        system_prompt=active_personality_prompt_text,
+                                        prompt=client_discussion.format_discussion(lc.default_ctx_size),
+                                        system_prompt=client_discussion.system_prompt,
                                         rag_query_function=rqf,
                                         rag_vectorizer_name=active_vectorizer_for_store,
-                                        # rag_query_text=None, # Will use `prompt` for query
                                         max_rag_hops=current_user.rag_n_hops if current_user.rag_n_hops else 1,
-                                        rag_top_k=current_user.rag_top_k if current_user.rag_top_k  else 10, # Get 2 best chunks
+                                        rag_top_k=current_user.rag_top_k if current_user.rag_top_k  else 10,
                                         rag_min_similarity_percent=current_user.rag_min_sim_percent if current_user.rag_min_sim_percent  else 0,
                                         stream=True,
                                         streaming_callback=llm_callback,
                                     )
-                                sources+=[{"document":Path(r["document"]).name,"similarity":r["similarity"],"content":r["content"]} for r in classic_rag_result["all_retrieved_sources"]]
-
-                                print(classic_rag_result["final_answer"])
+                                sources_in_call += [{"document":Path(r["document"]).name,"similarity":r["similarity"],"content":r["content"]} for r in classic_rag_result.get("all_retrieved_sources", [])]
                             except Exception as ex:
                                 trace_exception(ex)
+                                # Fallback to non-RAG if RAG process fails
+                                lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
                         else:
-                            # Call generate_text with the separate system_prompt parameter
-                            lc.generate_text(
-                                prompt=main_prompt_content,
-                                system_prompt=active_personality_prompt_text, # Pass system prompt here
-                                images=llm_image_paths, 
-                                stream=True, 
-                                streaming_callback=llm_callback,
-                                split=True
-                                # Other parameters like temperature, top_k, etc., are assumed to be set
-                                # on the LollmsClient instance itself or can be overridden here if needed.
-                            )
-
+                            # Fallback to non-RAG if no datastore after all checks
+                            lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
                     else:
-                        # Call generate_text with the separate system_prompt parameter
-                        lc.generate_text(
-                            prompt=main_prompt_content,
-                            system_prompt=active_personality_prompt_text, # Pass system prompt here
-                            images=llm_image_paths, 
-                            stream=True, 
-                            streaming_callback=llm_callback,
-                            split=True
-                            # Other parameters like temperature, top_k, etc., are assumed to be set
-                            # on the LollmsClient instance itself or can be overridden here if needed.
-                        )
+                        lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
+
                 except Exception as e_gen:
                     err_msg = f"LLM generation failed: {str(e_gen)}"
                     shared_state["generation_error"] = err_msg
                     if main_loop.is_running():
-                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
                     traceback.print_exc() 
                 finally: 
                     if main_loop.is_running():
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, None) 
-            
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
+
             generation_thread = threading.Thread(target=blocking_call, args=[rag_datastore_id, sources], daemon=True)
             generation_thread.start()
 
             while True:
                 item = await stream_queue.get()
-                if item is None: stream_queue.task_done(); break
-                yield item; stream_queue.task_done()
-            
-            if generation_thread: generation_thread.join(timeout=10) 
-
+                if item is None: break
+                yield item
+            if sources:
+                yield json.dumps({"type": "sources", "sources": sources}) + "\n"
             ai_response_content = shared_state["accumulated_ai_response"]
-            ai_token_count = lc.binding.count_tokens(ai_response_content) if ai_response_content else 0
-            ai_parent_id = discussion_obj.messages[-1].id if discussion_obj.messages and discussion_obj.messages[-1].sender == lc.user_name else None
-            ai_sources = sources
             if ai_response_content and not shared_state["generation_error"]:
-                if shared_state["stop_event"].is_set():
-                    print(f"INFO: Saving partial AI response for {username}/{discussion_id} as generation was stopped.")
-                
+                ai_token_count = lc.binding.count_tokens(ai_response_content)
                 ai_message = discussion_obj.add_message(
-                    sender=lc.ai_name, content=ai_response_content, parent_message_id=ai_parent_id,
+                    sender=lc.ai_name, content=ai_response_content, parent_message_id=new_user_message.id,
                     binding_name=shared_state.get("binding_name"), model_name=shared_state.get("model_name"),
-                    token_count=ai_token_count,sources=ai_sources
+                    token_count=ai_token_count, sources=sources
                 )
-                if shared_state.get("final_message_id"): ai_message.id = shared_state["final_message_id"]
+                if shared_state.get("final_message_id"): 
+                    ai_message.id = shared_state["final_message_id"]
+                discussion_obj.active_branch_id = ai_message.id # Set new active branch
             elif shared_state["generation_error"]:
-                 discussion_obj.add_message(sender="system", content=shared_state["generation_error"], parent_message_id=ai_parent_id)
+                discussion_obj.add_message(sender="system", content=shared_state["generation_error"], parent_message_id=new_user_message.id)
             
             save_user_discussion(username, discussion_id, discussion_obj)
-
-        except Exception as e_outer:
-            error_msg = f"Chat stream error: {str(e_outer)}"; traceback.print_exc()
-            try: discussion_obj.add_message(sender="system", content=error_msg); save_user_discussion(username, discussion_id, discussion_obj)
-            except Exception as save_err: print(f"ERROR: Failed to save discussion after outer stream error: {save_err}")
-            yield json.dumps({"type": "error", "content": error_msg}) + "\n"
         finally:
             if username in user_sessions and "active_generation_control" in user_sessions[username]:
                 active_gen_control = user_sessions[username]["active_generation_control"]
-                if discussion_id in active_gen_control and active_gen_control.get(discussion_id) == stop_event:
+                if discussion_id in active_gen_control:
                     del active_gen_control[discussion_id]
-                if not active_gen_control: 
-                    del user_sessions[username]["active_generation_control"]
-            
-            if generation_thread and generation_thread.is_alive(): 
-                print(f"WARNING: LLM gen thread for {username}/{discussion_id} still alive after stream_generator's main loop. Signaling stop forcefully.")
-                if not shared_state["stop_event"].is_set():
-                    shared_state["stop_event"].set() 
-                generation_thread.join(timeout=5) 
-                if generation_thread.is_alive():
-                    print(f"CRITICAL: LLM gen thread for {username}/{discussion_id} did not terminate after stop signal and extended wait.")
-
-            if image_server_paths:
-                user_temp_uploads_path = get_user_temp_uploads_path(username)
-                for temp_rel_path in image_server_paths:
-                    image_filename = Path(temp_rel_path).name
-                    temp_abs_path = user_temp_uploads_path / image_filename
-                    if temp_abs_path.exists(): 
-                        background_tasks.add_task(temp_abs_path.unlink, missing_ok=True)
+            if generation_thread and generation_thread.is_alive():
+                shared_state["stop_event"].set()
 
     return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
 
@@ -914,3 +943,4 @@ async def import_user_data(import_file: UploadFile = File(...), import_request_j
     try: db.commit()
     except Exception as e_db: db.rollback(); errors.append({"DB_COMMIT_ERROR": str(e_db)})
     return {"message": f"Import finished. Imported: {imported_count}, Skipped/Errors: {skipped_count}.", "imported_count": imported_count, "skipped_count": skipped_count, "errors": errors}
+

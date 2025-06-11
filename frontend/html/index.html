@@ -158,31 +158,34 @@
         </aside>
 
         <main class="flex-1 flex flex-col ">
-            <header class=" border-b border-gray-700 p-3 flex items-center justify-between min-h-[65px] shadow-md">
-                <h3 id="discussionTitle" class="text-lg font-semibold  truncate px-2" data-translate-key="default_discussion_title">Select or Create a Discussion</h3>
-                <div class="flex items-center space-x-3">
-                    <div id="ragControls" class="rag-controls hidden">
-                        <button id="ragToggleBtn" class="rag-toggle rag-toggle-off self-center" data-translate-key="rag_toggle_btn_text" data-translate-title="rag_toggle_btn_title_off">RAG</button>
-                        <select id="ragDataStoreSelect" class="text-xs rounded-md border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500  py-1 px-1.5" style="display: none;">
-                            <option value="" data-translate-key="rag_select_default_option">Select RAG Data Store</option>
-                        </select>
-                    </div>
-                    <div class="language-controls">
-                        <label for="languageSelector" class="sr-only" data-translate-key="language_selector_label_sr">Select Language</label>
-                        <select id="languageSelector" class="text-xs rounded-md border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 px-2"></select>
-                    </div>
-                    <!-- Dark/Light Mode Toggle -->
-                    <div class="theme-toggle-controls">
-                        <button id="themeToggleBtn" title="Toggle Dark/Light Mode" class="p-2 rounded-full   transition-colors">
-                            <svg id="themeIconSun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 hidden">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
-                            </svg>
-                            <svg id="themeIconMoon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 hidden">
-                                <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
-                            </svg>
-                        </button>
+            <header id="chatHeader" class="border-b border-gray-700 shadow-md flex flex-col">
+                <div class="p-3 flex items-center justify-between min-h-[65px] w-full">
+                    <h3 id="discussionTitle" class="text-lg font-semibold truncate px-2" data-translate-key="default_discussion_title">Select or Create a Discussion</h3>
+                    <div class="flex items-center space-x-3">
+                        <div id="ragControls" class="rag-controls hidden">
+                            <button id="ragToggleBtn" class="rag-toggle rag-toggle-off self-center" data-translate-key="rag_toggle_btn_text" data-translate-title="rag_toggle_btn_title_off">RAG</button>
+                            <select id="ragDataStoreSelect" class="text-xs rounded-md border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1 px-1.5" style="display: none;">
+                                <option value="" data-translate-key="rag_select_default_option">Select RAG Data Store</option>
+                            </select>
+                        </div>
+                        <div class="language-controls">
+                            <label for="languageSelector" class="sr-only" data-translate-key="language_selector_label_sr">Select Language</label>
+                            <select id="languageSelector" class="text-xs rounded-md border-gray-600 shadow-sm focus:border-blue-500 focus:ring-blue-500 py-1.5 px-2"></select>
+                        </div>
+                        <!-- Dark/Light Mode Toggle -->
+                        <div class="theme-toggle-controls">
+                            <button id="themeToggleBtn" title="Toggle Dark/Light Mode" class="p-2 rounded-full transition-colors">
+                                <svg id="themeIconSun" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 hidden">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386-1.591 1.591M21 12h-2.25m-.386 6.364-1.591-1.591M12 18.75V21m-4.773-4.227-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" />
+                                </svg>
+                                <svg id="themeIconMoon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 hidden">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.72 9.72 0 0 1 18 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 0 0 3 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 0 0 9.002-5.998Z" />
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                 </div>
+                <!-- Branch tabs will be inserted here by JS -->
             </header>
 
             <div id="chatMessages" class="flex-1 overflow-y-auto p-4 space-y-2">
@@ -374,6 +377,8 @@
                 <textarea id="editMessageInput" rows="5" class="w-full sm:text-sm"></textarea>
                 <div id="editMessageStatus" class="text-xs text-red-400 mt-1 h-4"></div>
                 <input type="hidden" id="editMessageIdInput">
+                <!-- ADD THIS NEW HIDDEN INPUT -->
+                <input type="hidden" id="editMessageBranchIdInput">
             </div>
             <div class="modal-footer">
                 <button onclick="closeModal('editMessageModal')" class="px-4 py-2   text-sm font-medium rounded-md " data-translate-key="cancel_btn">Cancel</button>
@@ -699,6 +704,30 @@
                 <button onclick="closeModal('settingsModal')" class="px-4 py-2   text-sm font-medium rounded-md " data-translate-key="close_btn">Close</button>
             </div>
         </div></div>
+        <!-- Modal for Creating a New Data Store -->
+        <div id="createDataStoreModal" class="modal">
+            <div class="modal-content">
+                <section class="border border-gray-700 rounded-md p-4">
+                    <h4 class="text-md font-medium mb-3" data-translate-key="datastores_create_header">Create New Data Store</h4>
+                    <form id="createDataStoreForm" class="space-y-3">
+                        <div>
+                            <label for="newDataStoreName" class="block text-sm font-medium" data-translate-key="datastores_name_label">Name</label>
+                            <input type="text" id="newDataStoreName" required minlength="3" maxlength="100" class="mt-1 block w-full sm:text-sm">
+                        </div>
+                        <div>
+                            <label for="newDataStoreDescription" class="block text-sm font-medium" data-translate-key="datastores_description_label">Description (Optional)</label>
+                            <textarea id="newDataStoreDescription" rows="2" maxlength="500" class="mt-1 block w-full sm:text-sm"></textarea>
+                        </div>
+                        <div class="text-right space-x-2">
+                            <!-- Added a cancel button to close the modal without creating -->
+                            <button id="btnCancelCreateDataStore" type="button" class="px-4 py-2 bg-gray-600 text-sm font-medium rounded-md hover:bg-gray-700" data-translate-key="cancel_btn">Cancel</button>
+                            <button id="btnCreateDataStore" type="submit" class="px-4 py-2 bg-green-600 text-sm font-medium rounded-md hover:bg-green-700" data-translate-key="datastores_create_btn">Create Store</button>
+                        </div>
+                    </form>
+                    <div id="createDataStoreStatus" class="text-sm h-4 mt-2"></div>
+                </section>
+            </div>
+        </div>
         <div id="editDataStoresModal" class="modal"><div class="modal-content">
             <section class="border border-gray-700 rounded-md p-4">
                 <h4 class="text-md font-medium  mb-3" data-translate-key="datastores_edit_header">Edit Data Store</h4>
@@ -723,44 +752,32 @@
                 <div id="editDataStoreStatus" class="text-sm h-4 mt-2"></div>
             </section>
         </div></div>
-        <div id="dataStoresModal" class="modal"><div class="modal-content">
-            <button class="modal-close-btn" onclick="closeModal('dataStoresModal')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg></button>
-            <div class="modal-header"><h3 class="modal-title" data-translate-key="datastores_modal_title">Manage Data Stores (RAG)</h3></div>
-            <div class="modal-body space-y-6 py-4">
-                <section class="border border-gray-700 rounded-md p-4">
-                    <h4 class="text-md font-medium  mb-3" data-translate-key="datastores_create_header">Create New Data Store</h4>
-                    <form id="createDataStoreForm" class="space-y-3">
-                        <div>
-                            <label for="newDataStoreName" class="block text-sm font-medium " data-translate-key="datastores_name_label">Name</label>
-                            <input type="text" id="newDataStoreName" required minlength="3" maxlength="100" class="mt-1 block w-full sm:text-sm">
-                        </div>
-                        <div>
-                            <label for="newDataStoreDescription" class="block text-sm font-medium " data-translate-key="datastores_description_label">Description (Optional)</label>
-                            <textarea id="newDataStoreDescription" rows="2" maxlength="500" class="mt-1 block w-full sm:text-sm"></textarea>
-                        </div>
-                        <div class="text-right">
-                            <button id="btnCreateDataStore" type="submit" class="px-4 py-2 bg-green-600  text-sm font-medium rounded-md hover:bg-green-700" data-translate-key="datastores_create_btn">Create Store</button>
-                        </div>
-                    </form>
-                    <div id="createDataStoreStatus" class="text-sm h-4 mt-2"></div>
-                </section>
-                <section>
-                    <h4 class="text-md font-medium  mb-2" data-translate-key="datastores_owned_header">Your Data Stores</h4>
-                    <div id="ownedDataStoresList" class="max-h-48 overflow-y-auto space-y-2  border border-gray-600 rounded p-3">
-                        <p class=" italic" data-translate-key="datastores_loading_owned">Loading your stores...</p>
+        <!-- Modal for Managing (Viewing) Existing Data Stores -->
+        <div id="dataStoresModal" class="modal">
+            <div class="modal-content">
+                <div class="modal-body space-y-6 py-4">
+                    <!-- A button to open the create modal would typically go here -->
+                    <div class="flex justify-between items-center">
+                        <h3 class="text-lg font-medium" data-translate-key="datastores_manage_header">Manage Data Stores</h3>
+                        <!-- This button would open the createDataStoreModal -->
+                        <button id="btnOpenCreateStore" class="px-4 py-2 bg-blue-600 text-sm font-medium rounded-md hover:bg-blue-700" data-translate-key="datastores_create_header">Create New Data Store</button>
                     </div>
-                </section>
-                <section>
-                    <h4 class="text-md font-medium  mb-2" data-translate-key="datastores_shared_header">Data Stores Shared With You</h4>
-                    <div id="sharedDataStoresList" class="max-h-48 overflow-y-auto space-y-2  border border-gray-600 rounded p-3">
-                       <p class=" italic" data-translate-key="datastores_loading_shared">Loading shared stores...</p>
-                    </div>
-                </section>
+                    <section>
+                        <h4 class="text-md font-medium mb-2" data-translate-key="datastores_owned_header">Your Data Stores</h4>
+                        <div id="ownedDataStoresList" class="max-h-48 overflow-y-auto space-y-2 border border-gray-600 rounded p-3">
+                            <p class="italic" data-translate-key="datastores_loading_owned">Loading your stores...</p>
+                        </div>
+                    </section>
+                    <section>
+                        <h4 class="text-md font-medium mb-2" data-translate-key="datastores_shared_header">Data Stores Shared With You</h4>
+                        <div id="sharedDataStoresList" class="max-h-48 overflow-y-auto space-y-2 border border-gray-600 rounded p-3">
+                        <p class="italic" data-translate-key="datastores_loading_shared">Loading shared stores...</p>
+                        </div>
+                    </section>
+                </div>
             </div>
-            <div class="modal-footer">
-                <button onclick="closeModal('dataStoresModal')" class="px-4 py-2   text-sm font-medium rounded-md " data-translate-key="close_btn">Close</button>
-            </div>
-        </div></div>
+        </div>        
+
         <div id="shareDataStoreModal" class="modal"><div class="modal-content" style="width: 450px;">
             <button class="modal-close-btn" onclick="closeModal('shareDataStoreModal')"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg></button>
             <div class="modal-header"><h3 id="shareDataStoreTitle" class="modal-title" data-translate-key="share_datastore_modal_title_default">Share Data Store</h3></div>

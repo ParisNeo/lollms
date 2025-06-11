@@ -6,8 +6,14 @@ let availableLanguages = { 'en': 'English', 'fr': 'Français' };
 // --- Global State ---
 let currentUser = null;
 let currentDiscussionId = null;
+// --- NEW STATE for Branching ---
 let discussions = {}; // Enhanced: { discId: { title, is_starred, rag_datastore_id, last_activity_at, branches: { branchId: [messages] }, activeBranchId, messages_loaded_fully: {branchId: bool} } }
 let currentMessages = []; // Points to discussions[currentDiscussionId].branches[activeBranchId]
+let activeBranchId = null; // Global active branch ID for the current discussion
+const backendCapabilities = { // NEW: To track backend features
+    supportsBranches: false,
+    checked: false
+};
 let aiMessageStreaming = false;
 let currentAiMessageDomContainer = null; // Actual DOM element for streaming AI message's container
 let currentAiMessageDomBubble = null;   // Actual DOM element for streaming AI message's bubble
@@ -29,14 +35,9 @@ let tempLoginPassword = null;
 let generationInProgress = false;
 let activeGenerationAbortController = null;
 let currentTheme = localStorage.getItem('theme') || 'dark';
-let activeBranchId = 'main'; // Global active branch ID for the current discussion
 
 let currentSortMethod = 'date_desc'; // Default sort method: Most Recent
 
-const backendCapabilities = {
-    supportsBranches: false, // Will be updated based on API responses
-    checked: false
-};
 
 // --- DOM Elements (Assuming all your const declarations are correct) ---
 // ... (All your document.getElementById calls remain here) ...
@@ -120,6 +121,10 @@ const passwordChangeStatus = document.getElementById('passwordChangeStatus');
 const dataStoresModal = document.getElementById('dataStoresModal');
 const createDataStoreForm = document.getElementById('createDataStoreForm');
 const btnCreateDataStore = document.getElementById('btnCreateDataStore');
+
+const btnCancelCreateDataStore = document.getElementById('btnCancelCreateDataStore');
+const btnOpenCreateStore = document.getElementById('btnOpenCreateStore');
+
 
 const newDataStoreNameInput = document.getElementById('newDataStoreName');
 const newDataStoreDescriptionInput = document.getElementById('newDataStoreDescription');
@@ -323,7 +328,6 @@ function updateUIText() { // As provided, potentially needs to call renderDiscus
     renderDiscussionList();
     if (currentDiscussionId && discussions[currentDiscussionId]) {
         discussionTitle.textContent = discussions[currentDiscussionId].title;
-        renderBranchTabsUI(currentDiscussionId); // Update branch tabs if discussion selected
     } else {
         discussionTitle.textContent = translate('default_discussion_title');
         const branchTabsContainer = document.getElementById('branchTabsContainer');
@@ -564,6 +568,15 @@ window.onload = async () => {
     if (loginSubmitBtn) loginSubmitBtn.onclick = handleLoginAttempt;
     if (loginPasswordInput) loginPasswordInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleLoginAttempt(); });
     if (createDataStoreForm) createDataStoreForm.addEventListener('submit', handleCreateDataStore);
+    if (btnOpenCreateStore) btnOpenCreateStore.onclick = () => {
+        closeModal('dataStoresModal')
+        openModal('createDataStoreModal');
+    }
+    if (btnCancelCreateDataStore) btnCancelCreateDataStore.onclick = () => {
+        closeModal('createDataStoreModal')
+        openModal('dataStoresModal');
+    }
+
     if (changePasswordBtn) changePasswordBtn.onclick = handleChangePassword;
 
     if (editDataStoreForm) editDataStoreForm.addEventListener('submit', handleEditDataStore);
@@ -655,32 +668,30 @@ window.onload = async () => {
     
     // RAG Toggle
     if (ragToggleBtn) ragToggleBtn.onclick = () => {
+        if (!currentDiscussionId) {
+            showStatus(translate('status_select_discussion_first_warning'), 'warning');
+            return;
+        }
         if (availableDataStoresForRag.length === 0) {
             showStatus(translate('rag_cannot_enable_no_stores_warning'), 'warning');
             return;
         }
-        isRagActive = !isRagActive;
-        if(!isRagActive){
-            const disc = currentDiscussionId ? discussions[currentDiscussionId] : null;
-            disc.rag_datastore_id = null;
-        }
-        updateRagToggleButtonState(); // This function should also handle ragDataStoreSelect visibility
+        const disc = discussions[currentDiscussionId];
+        const isCurrentlyOn = !!disc.rag_datastore_id;
+        let newRagDatastoreId = null;
 
-        if (currentDiscussionId && discussions[currentDiscussionId]) {
-            const disc = discussions[currentDiscussionId];
-            if (isRagActive && !disc.rag_datastore_id && availableDataStoresForRag.length > 0) {
-                // If RAG activated and no specific store for discussion, pick first available
-                disc.rag_datastore_id = availableDataStoresForRag[0].id;
-                if (ragDataStoreSelect) ragDataStoreSelect.value = disc.rag_datastore_id;
-            } else if (!isRagActive) {
-                // If RAG deactivated, clear discussion's RAG store
-                disc.rag_datastore_id = null;
-                if (ragDataStoreSelect) ragDataStoreSelect.value = "";
-            }
-            // Update backend about the change in discussion's RAG datastore
-            updateDiscussionRagStoreOnBackend(currentDiscussionId, disc.rag_datastore_id);
+        if (isCurrentlyOn) {
+            newRagDatastoreId = null; // Turn it off
+        } else {
+            newRagDatastoreId = ragDataStoreSelect.value || (availableDataStoresForRag[0] ? availableDataStoresForRag[0].id : null);
         }
-        showStatus(translate(isRagActive ? 'status_rag_active' : 'status_rag_inactive', `RAG is now ${isRagActive ? 'ACTIVE' : 'INACTIVE'}.`), 'info');
+        
+        disc.rag_datastore_id = newRagDatastoreId;
+        updateDiscussionRagStoreOnBackend(currentDiscussionId, newRagDatastoreId);
+        updateRagToggleButtonState();
+        
+        const ragStatusMessage = newRagDatastoreId ? translate('status_rag_active') : translate('status_rag_inactive');
+        showStatus(ragStatusMessage, 'info');
     };
 
     // RAG DataStore Select
@@ -1030,6 +1041,9 @@ document.querySelectorAll('.modal').forEach(modal => {
         if (event.target === modal && allowClose) closeModal(modal.id);
     });
 });
+
+
+
 // --- Discussion Management ---
 async function loadDiscussions() {
     try {
@@ -1046,27 +1060,24 @@ async function loadDiscussions() {
                 rag_datastore_id: d_info.rag_datastore_id,
                 last_activity_at: d_info.last_activity_at || d_info.created_at || `1970-01-01T00:00:00Z`,
                 branches: { main: [] }, // Initialize client-side branch structure
-                activeBranchId: d_info.active_branch_id || 'main', // Use from backend if available (new backend)
+                activeBranchId: d_info.active_branch_id || 'main', // Use from backend if available
                 messages_loaded_fully: {} // Per-branch loading status: { branchId: boolean }
             };
-            // Basic branch support detection from discussion list structure
+            // Detect branching support from the API response
             if (!backendCapabilities.checked && typeof d_info.active_branch_id === 'string') {
                 backendCapabilities.supportsBranches = true;
-                // backendCapabilities.checked = true; // Check only once from list
             }
         });
-        // If still not detected, can try further checks when loading individual discussion messages
-        if (!backendCapabilities.checked && loadedDiscussionsList.length > 0) {
-             // Heuristic: if any discussion implies branching, assume support for now.
-             // A dedicated capabilities endpoint would be better.
-        }
-
+        
+        // Mark capability check as done after processing the list
+        backendCapabilities.checked = true;
 
         renderDiscussionList();
         if (currentDiscussionId && discussions[currentDiscussionId]) {
             await selectDiscussion(currentDiscussionId); // Reselect if one was active
         } else if (currentDiscussionId) { // Was active, but now gone
-            clearChatArea(true); currentDiscussionId = null;
+            clearChatArea(true); 
+            currentDiscussionId = null;
         }
     } catch (error) {
         if (discussionListContainer) discussionListContainer.innerHTML = `<p class="text-red-500 text-sm text-center p-4">${translate('failed_to_load_discussions_error')}</p>`;
@@ -1271,6 +1282,8 @@ if (newDiscussionBtn) newDiscussionBtn.onclick = async () => {
     try {
         const response = await apiRequest('/api/discussions', { method: 'POST' });
         const newDiscussionInfo = await response.json(); // This is DiscussionInfo
+        
+        // Initialize with the new branching structure
         discussions[newDiscussionInfo.id] = {
             id: newDiscussionInfo.id,
             title: newDiscussionInfo.title,
@@ -1279,121 +1292,134 @@ if (newDiscussionBtn) newDiscussionBtn.onclick = async () => {
             last_activity_at: newDiscussionInfo.last_activity_at || new Date().toISOString(),
             branches: { main: [] }, // Initialize with an empty main branch
             activeBranchId: 'main',
-            messages_loaded_fully: { main: true } // New discussion starts with "fully loaded" empty branch
+            messages_loaded_fully: { main: true } // New discussion starts with a "fully loaded" empty main branch
         };
+        
         renderDiscussionList();
         await selectDiscussion(newDiscussionInfo.id); // selectDiscussion now handles branches
         showStatus(translate('status_new_discussion_created', 'New discussion created.'), 'success');
     } catch (error) { /* apiRequest handles showing status */ }
 };
 
+/**
+ * CORRECTED: Processes a list of messages to distribute branch information to all
+ * sibling messages. When a message has multiple responses (branches), the backend
+ * might only attach the list of branch IDs to one of them. This function ensures
+ * that *all* messages in that sibling group receive the same list of branches,
+ * so they can all render the navigation UI correctly.
+ *
+ * @param {Array<object>} rawMessages The list of messages as received from the API.
+ * @returns {Array<object>} A new list of messages with branch data correctly distributed.
+ */
+function processAndDistributeBranches(rawMessages) {
+    if (!rawMessages || rawMessages.length === 0) {
+        return [];
+    }
+
+    // Create a mutable map of messages for efficient lookups and updates.
+    const messageMap = new Map(rawMessages.map(msg => [msg.id, { ...msg }]));
+
+    // Find any message that contains the "source of truth" branches array.
+    for (const message of messageMap.values()) {
+        if (message.branches && message.branches.length > 1) {
+            
+            // This is the list of all sibling IDs for this group.
+            const siblingBranchIds = message.branches;
+
+            // Now, iterate through this list and ensure every sibling has this same array.
+            for (const siblingId of siblingBranchIds) {
+                const siblingMessage = messageMap.get(siblingId);
+                
+                // If the sibling exists in our current message list...
+                if (siblingMessage) {
+                    //...assign the complete list of branches to it.
+                    siblingMessage.branches = siblingBranchIds;
+                }
+            }
+        }
+    }
+    
+    // Return the corrected list of messages from the map.
+    return Array.from(messageMap.values());
+}
+
 async function selectDiscussion(id) {
     if (!discussions[id] || aiMessageStreaming) return;
 
     currentDiscussionId = id;
+    // CRITICAL: Define discussionData here, at the top level of the function.
+    // This ensures it is available in the try, catch, and finally blocks.
     const discussionData = discussions[id];
 
-    // Ensure branching structure is initialized (might be redundant if loadDiscussions does it well)
     if (!discussionData.branches) discussionData.branches = { main: [] };
-    if (!discussionData.activeBranchId || !discussionData.branches[discussionData.activeBranchId]) {
-        discussionData.activeBranchId = 'main';
-    }
-    if (!discussionData.branches['main']) discussionData.branches['main'] = []; // Ensure main always exists
-    
-    activeBranchId = discussionData.activeBranchId; // Set global activeBranchId
-    currentMessages = discussionData.branches[activeBranchId] || []; // Point to current branch's messages
+    if (!discussionData.activeBranchId) discussionData.activeBranchId = 'main';
+    if (!discussionData.branch_map) discussionData.branch_map = {}; // Initialize the map
+
+    let branchToLoad = discussionData.activeBranchId;
+    activeBranchId = branchToLoad;
+    currentMessages = discussionData.branches[branchToLoad] || [];
 
     if (discussionTitle) discussionTitle.textContent = discussionData.title;
-    if (sendMessageBtn) sendMessageBtn.disabled = false;
-    renderDiscussionList(); // Highlight selected
+    if (sendMessageBtn) sendMessageBtn.disabled = generationInProgress;
+    renderDiscussionList();
     clearChatArea(false);
     if (chatMessages) chatMessages.innerHTML = `<p class="text-gray-500 dark:text-gray-400 text-center italic mt-10">${translate('chat_area_loading_messages')}</p>`;
-
-    isRagActive = !!discussionData.rag_datastore_id;
+    
     updateRagToggleButtonState();
-    if (ragDataStoreSelect) {
-        if (isRagActive && discussionData.rag_datastore_id) {
-            ragDataStoreSelect.value = discussionData.rag_datastore_id;
-        } else if (availableDataStoresForRag.length > 0) {
-            ragDataStoreSelect.value = "";
-        }
+
+    // Use the tip ID from the map if we already know it.
+    const knownTipId = discussionData.branch_map[branchToLoad];
+    if (knownTipId && discussionData.messages_loaded_fully[knownTipId]) {
+         branchToLoad = knownTipId;
+         discussionData.activeBranchId = knownTipId;
+         activeBranchId = knownTipId;
+         currentMessages = discussionData.branches[knownTipId] || [];
     }
     
-    // Load messages for the active branch
-    // The messages_loaded_fully check should be per-branch
-    if (!discussionData.messages_loaded_fully || !discussionData.messages_loaded_fully[activeBranchId]) {
+    if (!discussionData.messages_loaded_fully || !discussionData.messages_loaded_fully[branchToLoad]) {
         try {
-            let apiMessages;
-            // For old backend or if explicit branch fetching isn't implemented for GET /messages
-            // we always fetch all messages and assume they belong to 'main' or are undifferentiated.
-            const messagesResponse = await apiRequest(`/api/discussions/${id}${backendCapabilities.supportsBranches ? '?branch_id=' + activeBranchId : ''}`);
-            const rawMessages = await messagesResponse.json();
+            const messagesResponse = await apiRequest(`/api/discussions/${id}?branch_id=${branchToLoad}`);
+            const loadedMessages = await messagesResponse.json();
 
-            if (Array.isArray(rawMessages) && rawMessages.length > 0 && typeof rawMessages[0].branch_id === 'string' && !backendCapabilities.checked) {
-                backendCapabilities.supportsBranches = true; // Detected branch support from message structure
-                backendCapabilities.checked = true;
-            }
+            // Distribute branch info to all sibling messages in a group.
+            const distributedMessages = processAndDistributeBranches(loadedMessages);
+            const processedMessages = distributedMessages.map(msg => ({ ...msg, steps: msg.steps || [], metadata: msg.metadata || [] }));
 
-
-            if (backendCapabilities.supportsBranches) {
-                // If new backend returns messages specifically for the branch, use them directly.
-                // Or if it returns all branches, filter here.
-                // For now, assume API returns messages for the requested branch_id.
-                apiMessages = rawMessages.map(msg => ({ ...msg, steps: msg.steps || [], metadata: msg.metadata || [] }));
-                discussionData.branches[activeBranchId] = apiMessages;
-            } else {
-                // Old backend: all messages go to 'main'.
-                // If activeBranchId is not 'main', currentMessages will be a client-side filtered view later.
-                apiMessages = rawMessages.map(msg => ({ ...msg, steps: msg.steps || [], metadata: msg.metadata || [], branch_id: 'main' })); // Assign to main
-                discussionData.branches['main'] = apiMessages;
-                if (activeBranchId !== 'main') {
-                    // Create client-side branch view if not main
-                    // This part is complex: how to define the subset for a client-side branch?
-                    // For simplicity now, if backend doesn't support branches, we only truly support 'main'.
-                    // Other "branches" created via UI might only be visual until a message is sent.
-                    // For now, if backend is old, we only really operate on 'main'.
-                    // If we are trying to view a client-side-only branch that has messages copied into it:
-                    if (discussionData.branches[activeBranchId] && discussionData.branches[activeBranchId].length > 0){
-                        // It means this branch was created by client-side copy, use its messages.
-                        currentMessages = discussionData.branches[activeBranchId];
-                    } else {
-                         // Active branch is not main and has no messages, or backend is old.
-                         // Default to showing main branch messages if activeBranch is not main and empty.
-                         currentMessages = discussionData.branches['main'];
-                         if (activeBranchId !== 'main') {
-                            console.warn(`Backend doesn't support branches or branch ${activeBranchId} is empty. Showing 'main' branch content.`);
-                            // Potentially switch activeBranchId back to 'main' visually if it's a non-functional branch.
-                            // discussionData.activeBranchId = 'main'; activeBranchId = 'main';
-                         }
-                    }
-                } else {
-                     currentMessages = discussionData.branches['main'];
+            if (processedMessages.length > 0) {
+                const actualTipId = processedMessages[processedMessages.length - 1].id;
+                
+                discussionData.branch_map[branchToLoad] = actualTipId;
+                
+                if (branchToLoad !== actualTipId) {
+                    discussionData.activeBranchId = actualTipId;
+                    activeBranchId = actualTipId;
                 }
-            }
-            
-            discussionData.messages_loaded_fully = discussionData.messages_loaded_fully || {};
-            discussionData.messages_loaded_fully[activeBranchId] = true;
+                
+                discussionData.branches[actualTipId] = processedMessages;
+                currentMessages = processedMessages;
+                discussionData.messages_loaded_fully[actualTipId] = true;
 
-            if (currentMessages.length > 0) {
                 const lastMessage = currentMessages[currentMessages.length - 1];
                 if (lastMessage.created_at && new Date(lastMessage.created_at) > new Date(discussionData.last_activity_at || 0)) {
                     discussionData.last_activity_at = lastMessage.created_at;
                     renderDiscussionList();
                 }
+
+            } else {
+                discussionData.branches[branchToLoad] = [];
+                currentMessages = [];
+                discussionData.messages_loaded_fully[branchToLoad] = true;
             }
         } catch (error) {
-            if (chatMessages) chatMessages.innerHTML = `<p class="text-red-500 dark:text-red-400 text-center mt-10">${translate('chat_area_error_loading_messages')}</p>`;
-            discussionData.messages_loaded_fully = discussionData.messages_loaded_fully || {};
-            discussionData.messages_loaded_fully[activeBranchId] = false; // Mark as not loaded on error
+            if (chatMessages) chatMessages.innerHTML = `<p class="text-red-500 dark:text-red-400 text-center py-10">${translate('chat_area_error_loading_messages')}</p>`;
+            // This line now works correctly because discussionData is in scope.
+            discussionData.messages_loaded_fully[branchToLoad] = false;
         }
-    } else {
-        // Messages for this branch already loaded
-        currentMessages = discussionData.branches[activeBranchId] || [];
     }
+    
     renderMessages(currentMessages);
-    renderBranchTabsUI(id);
-    chatArea.classList.remove("hidden")
-    ragControls.classList.remove("hidden")
+    chatArea.classList.remove("hidden");
+    ragControls.classList.remove("hidden");
 }
 
 async function confirmInlineRename() { /* As provided, ensure it updates discussion list */
@@ -1562,7 +1588,7 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
         const tempUserMessageId = `temp-user-${Date.now()}`;
         const userMessageData = {
             id: tempUserMessageId,
-            sender: translate(currentUser.lollms_client_ai_name ? 'sender_you' : (currentUser.username || 'sender_user'), 'User'),
+            sender: currentUser.username || 'User',
             content: prompt,
             user_grade: 0, token_count: null, model_name: null,
             image_references: uploadedImageServerPaths.map(img => URL.createObjectURL(img.file_obj)),
@@ -1575,23 +1601,21 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
         currentMessages.push(userMessageData);
         renderMessage(userMessageData);
     }
-
+    const useRag = !!(currentDisc && currentDisc.rag_datastore_id);
     const formData = new FormData();
     formData.append('prompt', prompt);
     formData.append('image_server_paths_json', JSON.stringify(imagePayloadForBackend));
-    formData.append('use_rag', isRagActive.toString());
-    if (isRagActive && currentDisc.rag_datastore_id) {
+    formData.append('use_rag', useRag.toString());
+    if (useRag && currentDisc.rag_datastore_id) {
         formData.append('rag_datastore_id', currentDisc.rag_datastore_id);
     }
 
-    if (backendCapabilities.supportsBranches) {
-        formData.append('branch_id', activeBranchId);
-        if (resendData && branchFromUserMessageId) {
-            formData.append('is_resend', 'true');
-            formData.append('branch_from_message_id', branchFromUserMessageId);
-        } else {
-            formData.append('is_resend', 'false');
-        }
+    const isBranchingOrResending = !!(resendData || branchFromUserMessageId);
+    if (backendCapabilities.supportsBranches && isBranchingOrResending) {
+        formData.append('is_resend', 'true');
+        formData.append('branch_from_message_id', branchFromUserMessageId);
+    } else {
+        formData.append('is_resend', 'false');
     }
 
     if (!resendData) {
@@ -1610,29 +1634,14 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
     currentAiMessageId = `temp-ai-${Date.now()}`;
     currentAiMessageData = {
         id: currentAiMessageId,
-        sender: currentUser.lollms_client_ai_name || translate('sender_assistant', 'Assistant'),
+        sender: currentUser.lollms_client_ai_name || 'Assistant',
         content: "", user_grade: 0, token_count: null, model_name: null,
         image_references: [], steps: [], metadata: [],
         created_at: new Date().toISOString(),
         branch_id: activeBranchId,
         discussion_id: currentDiscussionId
     };
-    currentMessages.push(currentAiMessageData);
     renderMessage(currentAiMessageData);
-    forceScrollToBottom();
-
-    currentAiMessageDomContainer = document.querySelector(`.message-container[data-message-id="${currentAiMessageId}"]`);
-    currentAiMessageDomBubble = document.getElementById(`message-${currentAiMessageId}`);
-
-    if (!isElementInDocument(currentAiMessageDomContainer) || !isElementInDocument(currentAiMessageDomBubble)) {
-        console.error("sendMessage: AI placeholder DOM elements not found after initial render!");
-        generationInProgress = false; aiMessageStreaming = false;
-        if(sendMessageBtn) sendMessageBtn.style.display = 'inline-flex';
-        if(stopGenerationBtn) stopGenerationBtn.style.display = 'none';
-        currentMessages.pop();
-        return;
-    }
-
     currentDisc.last_activity_at = new Date().toISOString();
     renderDiscussionList();
 
@@ -1645,7 +1654,7 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
 
         if (!response.ok || !response.body) {
             let errorDetailMessage = `HTTP error ${response.status}`;
-            try { const errorData = await response.json(); errorDetailMessage = errorData.detail || errorDetailMessage; } catch (e) { /* ignore */ }
+            try { const errorData = await response.json(); errorDetailMessage = errorData.detail || errorDetailMessage; } catch (e) {}
             throw new Error(translate('chat_stream_start_error', `Error starting chat stream: ${errorDetailMessage}`, { detail: errorDetailMessage }));
         }
 
@@ -1661,44 +1670,90 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
             const lines = textChunk.split('\n').filter(line => line.trim() !== '');
             lines.forEach(line => {
                 try {
-                    const parsedLine = JSON.parse(line);
-                    if (parsedLine.type === 'final_ai_message_id' && parsedLine.id && currentAiMessageData && currentAiMessageData.id === currentAiMessageId) {
-                        const oldId = currentAiMessageId;
-                        const newId = parsedLine.id;
-                        if (oldId !== newId) {
-                            console.log(`AI Message ID confirmed/updated: ${oldId} -> ${newId}`);
-                            currentAiMessageId = newId;
-                            currentAiMessageData.id = newId;
-                            const msgIndex = currentMessages.findIndex(m => m.id === oldId);
-                            if (msgIndex > -1) currentMessages[msgIndex].id = newId;
-                        }
-                    } else {
-                        handleStreamChunk(parsedLine);
+                    const data = JSON.parse(line);
+                    
+                    // --- Re-integrated logic from handleStreamChunk ---
+                    if (!currentAiMessageData) { return; }
+
+                    if (!isElementInDocument(currentAiMessageDomBubble)) {
+                        currentMessages.push(currentAiMessageData);
+                        renderMessage(currentAiMessageData);
+                        forceScrollToBottom();
                     }
+                
+                    const bubbleExists = isElementInDocument(currentAiMessageDomBubble);
+                
+                    switch (data.type) {
+                        case 'chunk':
+                            currentAiMessageContentAccumulator += data.content;
+                            currentAiMessageData.content = currentAiMessageContentAccumulator;
+                            if (bubbleExists) {
+                                if (currentAiMessageContentAccumulator === data.content) {
+                                    const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
+                                    if (contentDiv) {
+                                        const typingIndicator = contentDiv.querySelector('.typing-indicator');
+                                        if (typingIndicator) typingIndicator.remove();
+                                    }
+                                }
+                                const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
+                                if (contentDiv) renderEnhancedContent(contentDiv, currentAiMessageData.content, currentAiMessageData.id, [], currentAiMessageData.metadata, currentAiMessageData);
+                            }
+                            break;
+                        case 'sources':
+                            if (!currentAiMessageData.metadata) currentAiMessageData.metadata = {};
+                            currentAiMessageData.metadata.sources = data.sources || [];
+                            if (bubbleExists) renderMessage(currentAiMessageData, currentAiMessageDomContainer, currentAiMessageDomBubble);
+                            break;
+                        case 'step':
+                        case 'step_start':
+                            currentAiMessageData.steps.push(data);
+                            if (bubbleExists) {
+                                const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
+                                if (contentDiv) renderOrUpdateSteps(contentDiv, currentAiMessageData.steps);
+                            }
+                            break;
+                        case 'step_end':
+                            const stepToUpdate = currentAiMessageData.steps.find(step => step.id === data.id && step.type === 'step_start');
+                            if (stepToUpdate) {
+                                stepToUpdate.status = 'done';
+                                if (data.content) stepToUpdate.content = data.content;
+                            } else {
+                                currentAiMessageData.steps.push({ ...data, status: 'done', type: 'step_start' });
+                            }
+                            if (bubbleExists) {
+                                const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
+                                if (contentDiv) renderOrUpdateSteps(contentDiv, currentAiMessageData.steps);
+                            }
+                            break;
+                        case 'error':
+                            const errorMsgData = {
+                                id: `err-stream-${Date.now()}`, sender: 'system',
+                                content: translate('llm_error_prefix', `LLM Error: ${data.content}`, { content: data.content }),
+                                steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId
+                            };
+                            currentMessages.push(errorMsgData);
+                            renderMessage(errorMsgData);
+                            handleStreamEnd(true);
+                            return;
+                        case 'info':
+                             if (data.content === "Generation stopped by user.") {
+                                showStatus(translate('status_generation_stopped_by_user', 'Generation stopped by user.'), 'info');
+                             }
+                             break;
+                    }
+                    if (bubbleExists) smartScrollToBottom();
+                    // --- End of re-integrated logic ---
+
                 } catch (e) {
                     console.error("sendMessage: Error parsing stream line:", line, e);
-                    const systemErrorMsg = {
-                        id: `syserr-${Date.now()}`, sender: 'system',
-                        content: translate('malformed_data_chunk_error', 'Malformed data chunk from server.'),
-                        steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId
-                    };
-                    currentMessages.push(systemErrorMsg); renderMessage(systemErrorMsg);
                 }
             });
         }
         if (generationInProgress) handleStreamEnd(false);
     } catch (error) {
         if (error.name === 'AbortError') {
-            showStatus(translate('status_generation_cancelled_by_user', 'Generation cancelled by user.'), 'info');
             if (generationInProgress) handleStreamEnd(true, true);
         } else {
-            showStatus(translate('chat_stream_failed_error', `Chat stream failed: ${error.message}`, { message: error.message }), "error");
-            const streamErrorMsg = {
-                id: `syserr-${Date.now()}`, sender: 'system',
-                content: translate('stream_error_prefix', `Stream Error: ${error.message}`, { message: error.message }),
-                steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId
-            };
-            currentMessages.push(streamErrorMsg); renderMessage(streamErrorMsg);
             if (generationInProgress) handleStreamEnd(true);
         }
     } finally {
@@ -1709,228 +1764,132 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
         activeGenerationAbortController = null;
     }
 }
-
-function handleStreamChunk(data) {
-    if (!currentAiMessageData || !isElementInDocument(currentAiMessageDomBubble)) {
-        console.warn("handleStreamChunk: Stale or missing AI message bubble. Skipping chunk.");
-        return;
-    }
-
-    let needsContentRerender = false;
-    let needsStepsRerender = false;
-
-    switch (data.type) {
-        case 'chunk':
-            if (currentAiMessageContentAccumulator === "") {
-                // Remove the "is-streaming" class only when the first text chunk arrives,
-                // to gracefully replace the typing indicator with actual content.
-                const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
-                if (contentDiv) {
-                    // This check ensures we don't remove it if steps are already showing
-                    const typingIndicator = contentDiv.querySelector('.typing-indicator');
-                    if(typingIndicator) typingIndicator.remove();
-                }
-            }
-            currentAiMessageContentAccumulator += data.content;
-            currentAiMessageData.content = currentAiMessageContentAccumulator;
-            needsContentRerender = true;
-            break;
-
-        case 'step': // Purely informational step
-        case 'step_start': // The beginning of a process
-            currentAiMessageData.steps.push(data);
-            needsStepsRerender = true;
-            break;
-
-        case 'step_end':
-            const stepToUpdate = currentAiMessageData.steps.find(step => step.id === data.id && step.type === 'step_start');
-            if (stepToUpdate) {
-                stepToUpdate.status = 'done';
-                // The final, complete content for the step often comes in the 'step_end' event
-                if (data.content) {
-                    stepToUpdate.content = data.content;
-                }
-            } else {
-                // If a step_end arrives without a corresponding step_start, treat it as a new 'done' step.
-                // This adds robustness.
-                currentAiMessageData.steps.push({ ...data, status: 'done', type: 'step_start' });
-            }
-            needsStepsRerender = true;
-            break;
-
-        case 'metadata_update':
-            currentAiMessageData.metadata = data.metadata || [];
-            // This might eventually need its own render function, for now piggyback on content render
-            needsContentRerender = true;
-            break;
-
-        case 'error':
-            const errorMsgData = {
-                id: `err-stream-${Date.now()}`,
-                sender: 'system',
-                content: translate('llm_error_prefix', `LLM Error: ${data.content}`, { content: data.content }),
-                steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId
-            };
-            currentMessages.push(errorMsgData);
-            renderMessage(errorMsgData);
-            handleStreamEnd(true);
-            return; // Exit early on error
-
-        case 'info':
-             if (data.content === "Generation stopped by user.") {
-                showStatus(translate('status_generation_stopped_by_user', 'Generation stopped by user.'), 'info');
-             }
-             break;
-    }
-
-    // --- Perform DOM updates based on flags ---
-    if (needsContentRerender) {
-        const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
-        if (contentDiv) {
-            renderEnhancedContent(contentDiv, currentAiMessageData.content, currentAiMessageData.id, [], currentAiMessageData.metadata, currentAiMessageData);
-        }
-    }
-
-    if (needsStepsRerender) {
-        const contentDiv = currentAiMessageDomBubble.querySelector('.message-content');
-        if (contentDiv) {
-            // Re-render the entire steps block with the updated data array
-            renderOrUpdateSteps(contentDiv, currentAiMessageData.steps);
-        }
-    }
-
-    smartScrollToBottom();
-}
-
+/**
+ * Finalizes the UI after a chat stream ends, either by completion, error, or user cancellation.
+ * It ensures the final state of the AI message bubble is rendered correctly with all its data.
+ *
+ * @param {boolean} [errorOccurred=false] - True if the stream ended due to an error.
+ * @param {boolean} [wasAbortedByStopButton=false] - True if the user explicitly clicked the stop button.
+ */
 function handleStreamEnd(errorOccurred = false, wasAbortedByStopButton = false) {
-    const wasManuallyStopped = !generationInProgress && !errorOccurred;
-
     aiMessageStreaming = false;
     if (generationInProgress) generationInProgress = false;
 
-    // Grab the final ID before we nullify currentAiMessageData
-    const finalStreamedAiMessageId = currentAiMessageData?.id;
-
+    // --- Core Fix ---
+    // If we have the streaming message data and its DOM element exists, do one final, full re-render.
+    // This call to renderMessage() will correctly display all accumulated data:
+    // - Final content from the accumulator.
+    // - Sources received from the 'sources' event.
+    // - Steps, ratings, and all other metadata.
     if (currentAiMessageData && isElementInDocument(currentAiMessageDomBubble)) {
+        renderMessage(currentAiMessageData, currentAiMessageDomContainer, currentAiMessageDomBubble);
+        // Clean up streaming-specific states on the bubble.
         currentAiMessageDomBubble.classList.remove('is-streaming');
-
-        // Finalize token count and processing time badges
-        const tokenBadge = currentAiMessageDomBubble.querySelector('[data-placeholder="token-count"]');
-        if (tokenBadge && currentAiMessageData.token_count) {
-            tokenBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg> ${currentAiMessageData.token_count} ${translate('tokens_label', 'tokens')}`;
-            tokenBadge.style.display = 'inline-flex';
-        }
-        const timeBadge = currentAiMessageDomBubble.querySelector('[data-placeholder="processing-time"]');
-        if (timeBadge && currentAiMessageData.processing_time_ms) {
-            timeBadge.innerHTML = `<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg> ${formatProcessingTime(currentAiMessageData.processing_time_ms)}`;
-            timeBadge.style.display = 'inline-flex';
-        }
-
-        // --- RAG SOURCES RENDERING ---
-        const sources = currentAiMessageData.metadata?.sources;
-        const detailsContainer = currentAiMessageDomBubble.querySelector('.message-details');
-
-        if (detailsContainer && Array.isArray(sources) && sources.length > 0) {
-            sources.forEach(source => {
-                if (!source || typeof source.document === 'undefined' || typeof source.similarity === 'undefined') {
-                    console.warn("Skipping malformed RAG source:", source);
-                    return;
-                }
-
-                const sourceBadge = document.createElement('button');
-                const maxLength = 25;
-                const truncatedText = source.document.length > maxLength ? source.document.substring(0, maxLength) + '…' : source.document;
-
-                sourceBadge.innerHTML = `
-                    <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h8V7.414L11.414 4H6z" clip-rule="evenodd" /></svg>
-                    <span>${escapeHtml(truncatedText)}</span>
-                    <span class="source-similarity-chip">${Math.round(source.similarity * 100)}%</span>`;
-                sourceBadge.className = 'detail-badge source-badge';
-                sourceBadge.title = `${translate('view_source_document', 'View source')}: ${escapeHtml(source.document)} (${translate('similarity_label', 'Similarity')}: ${Math.round(source.similarity * 100)}%)`;
-
-                sourceBadge.onclick = () => {
-                    const modalId = `source-modal-${currentAiMessageData.id}-${source.document.replace(/[^a-zA-Z0-9]/g, '')}`;
-                    if (document.getElementById(modalId)) return;
-
-                    const modal = document.createElement('div');
-                    modal.id = modalId;
-                    modal.className = 'source-modal-overlay';
-                    modal.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display:flex; align-items:center; justify-content:center; z-index: 1001; opacity: 0; transition: opacity 0.2s;`;
-
-                    const modalContent = document.createElement('div');
-                    modalContent.style.cssText = `background: white; color: black; padding: 2rem; border-radius: 8px; max-width: 800px; max-height: 80vh; overflow-y: auto; position: relative;`;
-                    
-                    const closeButton = document.createElement('button');
-                    closeButton.innerHTML = '×';
-                    closeButton.style.cssText = `position: absolute; top: 10px; right: 15px; font-size: 1.5rem; background:none; border:none; cursor:pointer;`;
-                    
-                    const title = document.createElement('h2');
-                    title.textContent = source.document;
-                    title.style.marginTop = '0';
-
-                    const similarityP = document.createElement('p');
-                    similarityP.innerHTML = `${translate('similarity_label', 'Similarity')}: <strong>${Math.round(source.similarity * 100)}%</strong>`;
-
-                    const contentDivModal = document.createElement('div');
-                    contentDivModal.className = 'markdown-content';
-                    contentDivModal.innerHTML = marked.parse(source.content || translate('no_content_available', 'No content available.'));
-                
-                    modalContent.appendChild(closeButton);
-                    modalContent.appendChild(title);
-                    modalContent.appendChild(similarityP);
-                    modalContent.appendChild(contentDivModal);
-                    modal.appendChild(modalContent);
-                    document.body.appendChild(modal);
-                    
-                    requestAnimationFrame(() => modal.style.opacity = '1');
-
-                    const closeModalFunc = () => {
-                        modal.style.opacity = '0';
-                        modal.addEventListener('transitionend', () => modal.remove(), { once: true });
-                        document.removeEventListener('keydown', escapeListener);
-                    };
-
-                    closeButton.onclick = closeModalFunc;
-                    modal.onclick = (e) => { if (e.target === modal) closeModalFunc(); };
-                    const escapeListener = (e) => { if (e.key === 'Escape') closeModalFunc(); };
-                    document.addEventListener('keydown', escapeListener);
-                };
-                detailsContainer.appendChild(sourceBadge);
-            });
-        }
-        
         currentAiMessageDomBubble.querySelectorAll('.message-footer button').forEach(btn => btn.disabled = false);
-
-        const finalId = currentAiMessageData.id;
-        const messageContainer = currentAiMessageDomBubble.closest('.message-container');
-        if (messageContainer && messageContainer.dataset.messageId !== finalId) {
-            messageContainer.dataset.messageId = finalId;
-        }
-        if (currentAiMessageDomBubble.id !== `message-${finalId}`) {
-            currentAiMessageDomBubble.id = `message-${finalId}`;
-        }
     }
+    
+    // Schedule a full refresh from the server to get canonical message IDs and branch states.
+    setTimeout(() => refreshMessagesAfterStream(), 100);
 
-    // FIX: Always refresh the message list from the server after any stream ends (success, error, or abort).
-    // This is the most robust way to ensure the client has the "source of truth" and all button
-    // handlers are correctly re-bound with the final, permanent message IDs.
-    // The small delay allows the UI to feel responsive before the final state loads.
-    setTimeout(() => refreshMessagesAfterStream(finalStreamedAiMessageId), 100);
-
-    // Clean up temporary streaming state
+    // Clean up all temporary streaming state variables.
     currentAiMessageContentAccumulator = "";
     currentAiMessageData = null;
     currentAiMessageId = null;
     currentAiMessageDomContainer = null;
     currentAiMessageDomBubble = null;
 
+    // Restore UI button states.
     if(sendMessageBtn) sendMessageBtn.style.display = 'inline-flex';
     if(stopGenerationBtn) stopGenerationBtn.style.display = 'none';
     if(sendMessageBtn && messageInput) sendMessageBtn.disabled = !(messageInput.value.trim() || uploadedImageServerPaths.length > 0);
 
-    if (wasManuallyStopped || wasAbortedByStopButton) {
+    // Show a status message if the generation was manually stopped.
+    if (wasAbortedByStopButton) {
         showStatus(translate('status_generation_process_halted', 'Generation process halted.'), 'info');
     }
+}
+/**
+ * Displays the content of a RAG source document in a modal, styled with Tailwind CSS
+ * and supporting dark mode.
+ * @param {object} source The source object containing document, similarity, and content.
+ * @param {string} messageId The ID of the message the source belongs to, for creating a unique modal ID.
+ */
+function showSourceModal(source, messageId) {
+    // Generate a unique ID for the modal to prevent duplicates.
+    const modalId = `source-modal-${messageId}-${source.document.replace(/[^a-zA-Z0-9]/g, '')}`;
+    if (document.getElementById(modalId)) return; // Don't open if already open
+
+    // --- Create Modal Elements with Tailwind Classes ---
+
+    // Modal Overlay - THIS IS THE CORRECTED LINE
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 opacity-0 transition-opacity duration-300 ease-in-out backdrop-blur-sm';
+
+    // Modal Content Panel
+    const modalContent = document.createElement('div');
+    modalContent.className = 'relative flex flex-col w-full max-w-3xl max-h-[85vh] p-6 space-y-4 modal-content border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl';
+
+    // Close Button
+    const closeButton = document.createElement('button');
+    closeButton.innerHTML = '×';
+    closeButton.className = 'absolute top-3 right-3 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-colors text-2xl leading-none';
+    closeButton.title = 'Close (Esc)';
+
+    // Header section for Title and Similarity
+    const header = document.createElement('div');
+    header.className = 'flex-shrink-0'; // Prevents header from shrinking if content is long
+
+    // Title
+    const title = document.createElement('h2');
+    title.textContent = source.document;
+    title.className = 'text-xl font-semibold modal-content';
+    
+    // Similarity Score
+    const similarityP = document.createElement('p');
+    similarityP.innerHTML = `${translate('similarity_label', 'Similarity')}: <strong class="font-medium">${Math.round(source.similarity)}%</strong>`;
+    similarityP.className = 'text-sm modal-content mt-1';
+
+    // Main Content Area (Scrollable)
+    const contentContainer = document.createElement('div');
+    contentContainer.className = 'overflow-y-auto pr-2'; // Added padding-right for scrollbar space
+
+    const contentDivModal = document.createElement('div');
+    // These classes correctly leverage the Tailwind Typography plugin for markdown styling
+    contentDivModal.className = 'markdown-content prose prose-sm max-w-none dark:prose-invert';
+    contentDivModal.innerHTML = marked.parse(source.content || `<p><em>${translate('no_content_available', 'No content available.')}</em></p>`);
+
+    // --- Assemble the Modal ---
+    header.appendChild(title);
+    header.appendChild(similarityP);
+
+    contentContainer.appendChild(contentDivModal);
+
+    modalContent.appendChild(closeButton);
+    modalContent.appendChild(header);
+    modalContent.appendChild(contentContainer);
+
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+    
+    // --- Animate In and Add Event Listeners ---
+    requestAnimationFrame(() => {
+        modal.classList.remove('opacity-0');
+        modal.classList.add('opacity-100');
+    });
+
+    // Event Handlers for Closing
+    const closeModalFunc = () => {
+        modal.classList.remove('opacity-100');
+        modal.classList.add('opacity-0');
+        modal.addEventListener('transitionend', () => modal.remove(), { once: true });
+        document.removeEventListener('keydown', escapeListener);
+    };
+
+    const escapeListener = (e) => { if (e.key === 'Escape') closeModalFunc(); };
+
+    closeButton.onclick = closeModalFunc;
+    modal.onclick = (e) => { if (e.target === modal) closeModalFunc(); };
+    document.addEventListener('keydown', escapeListener);
 }
 async function stopGeneration() {
     if (!generationInProgress || !currentDiscussionId) return;
@@ -1962,98 +1921,94 @@ async function stopGeneration() {
     }
 }
 
-
+/**
+ * Fetches the latest message list for the current branch after a stream ends.
+ * This ensures the UI is in sync with the server, including message IDs and branch data.
+ * @param {string|null} lastStreamedAiMessageId The ID of the message that just finished streaming.
+ */
 async function refreshMessagesAfterStream(lastStreamedAiMessageId = null) {
-    await new Promise(resolve => setTimeout(resolve, 250));
-    if (!currentDiscussionId || aiMessageStreaming || generationInProgress) return;
-
-    const currentDisc = discussions[currentDiscussionId];
-    if (!currentDisc || !currentDisc.branches || !currentDisc.branches[activeBranchId]) {
+    if (!currentDiscussionId || aiMessageStreaming || generationInProgress) {
         return;
     }
 
-    try {
-        const branchToFetch = backendCapabilities.supportsBranches ? activeBranchId : 'main';
-        const response = await apiRequest(`/api/discussions/${currentDiscussionId}${backendCapabilities.supportsBranches ? '?branch_id=' + branchToFetch : ''}`);
-        const loadedMessagesRaw = await response.json();
+    const currentDisc = discussions[currentDiscussionId];
+    if (!currentDisc) {
+        return;
+    }
 
-        if (!backendCapabilities.checked && Array.isArray(loadedMessagesRaw) && loadedMessagesRaw.length > 0 && typeof loadedMessagesRaw[0].branch_id === 'string') {
-            backendCapabilities.supportsBranches = true;
-            backendCapabilities.checked = true;
+    // A small delay to allow the backend to fully commit the new messages.
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    try {
+        // First, get the latest state of discussions to find the true active branch ID.
+        // This is important because a regeneration might have changed it.
+        const discussionsResponse = await apiRequest('/api/discussions');
+        const allDiscs = await discussionsResponse.json();
+        const updatedDiscInfo = allDiscs.find(d => d.id === currentDiscussionId);
+        
+        if (updatedDiscInfo) {
+            // Update our local cache of the active branch ID.
+            currentDisc.activeBranchId = updatedDiscInfo.active_branch_id || currentDisc.activeBranchId;
+        }
+
+        // --- THE FIX IS HERE ---
+        // Define `branchToFetch` using the up-to-date activeBranchId from our discussion object.
+        const branchToFetch = currentDisc.activeBranchId;
+
+        // Now, fetch the messages for that specific branch.
+        const messagesResponse = await apiRequest(`/api/discussions/${currentDiscussionId}?branch_id=${branchToFetch}`);
+        const loadedMessagesRaw = await messagesResponse.json();
+
+        if (!Array.isArray(loadedMessagesRaw)) {
+             console.error("API did not return a valid list of messages for the branch.", loadedMessagesRaw);
+             throw new Error("Invalid message data received from server.");
         }
         
-        const processedMessages = loadedMessagesRaw.map(msg => ({
-            ...msg,
-            steps: msg.steps || [],
-            metadata: msg.metadata || [],
-            branch_id: backendCapabilities.supportsBranches ? msg.branch_id : 'main'
-        }));
+        // Distribute branch info to all sibling messages in a group.
+        const distributedMessages = processAndDistributeBranches(loadedMessagesRaw);
+        const processedMessages = distributedMessages.map(msg => ({ ...msg, steps: msg.steps || [], metadata: msg.metadata || [] }));
 
-        if (backendCapabilities.supportsBranches) {
-            currentDisc.branches[branchToFetch] = processedMessages;
-        } else {
-            currentDisc.branches['main'] = processedMessages;
-        }
-        currentMessages = currentDisc.branches[activeBranchId] || [];
+        // Update the client-side cache with the fully confirmed data.
+        currentDisc.branches[branchToFetch] = processedMessages;
+        currentDisc.messages_loaded_fully[branchToFetch] = true;
+        currentMessages = processedMessages;
 
-        if (currentMessages.length > 0) {
-            const lastMessage = currentMessages[currentMessages.length - 1];
-            if (lastMessage.created_at && (!currentDisc.last_activity_at || new Date(lastMessage.created_at) > new Date(currentDisc.last_activity_at))) {
-                currentDisc.last_activity_at = lastMessage.created_at;
-            }
-        } else if (currentDisc.branches['main'] && currentDisc.branches['main'].length > 0) {
-            const lastMainMessage = currentDisc.branches['main'][currentDisc.branches['main'].length-1];
-             if (lastMainMessage.created_at && (!currentDisc.last_activity_at || new Date(lastMainMessage.created_at) > new Date(currentDisc.last_activity_at))) {
-                currentDisc.last_activity_at = lastMainMessage.created_at;
-            }
-        }
-         else {
-            const discussionsListResponse = await apiRequest('/api/discussions');
-            const allDiscs = await discussionsListResponse.json();
-            const updatedDiscInfo = allDiscs.find(d => d.id === currentDiscussionId);
-            if (updatedDiscInfo && updatedDiscInfo.last_activity_at) {
-                currentDisc.last_activity_at = updatedDiscInfo.last_activity_at;
-            }
-        }
-
+        // Re-render the chat and discussion list with the fresh data.
         renderMessages(currentMessages);
         renderDiscussionList();
-        renderBranchTabsUI(currentDiscussionId);
     } catch (error) {
-        const errorMsgData = { id: `err-refresh-${Date.now()}`, sender: 'system', content: translate('refresh_message_list_failed_error'), steps: [], metadata: [], branch_id: activeBranchId, discussion_id: currentDiscussionId };
-        if (chatMessages) {
-            const tempContainer = document.createElement('div');
-            renderMessage(errorMsgData, tempContainer);
-            chatMessages.appendChild(tempContainer.firstChild);
-        } else {
-            console.error("Chat messages container not found for error display.");
-        }
+        console.error("Error refreshing messages after stream:", error);
+        showStatus("Could not refresh discussion state. Please select it again.", "error");
     }
 }
-
 
 // --- Message Rendering and Helpers ---
 function clearChatArea(clearHeader = true) {
-    if(chatMessages) chatMessages.innerHTML = '';
-    if (clearHeader) {
-        if(discussionTitle) discussionTitle.textContent = translate('default_discussion_title');
-        if(sendMessageBtn) sendMessageBtn.disabled = true;
-        if(ragToggleBtn) {
-            ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
-        }
-        if(ragDataStoreSelect) { ragDataStoreSelect.style.display = 'none'; ragDataStoreSelect.value = ''; }
-        isRagActive = false; updateRagToggleButtonState();
-        const branchTabsContainer = document.getElementById('branchTabsContainer');
-        if (branchTabsContainer) branchTabsContainer.innerHTML = '';
-    } else {
-        if (!currentDiscussionId && chatMessages) {
-            chatMessages.innerHTML = `<div class="text-center text-gray-500 dark:text-gray-400 italic mt-10">${translate('chat_area_empty_placeholder')}</div>`;
-        }
+    if (chatMessages) {
+        chatMessages.innerHTML = '';
     }
-    currentMessages = [];
-    currentAiMessageDomContainer = null; currentAiMessageDomBubble = null;
-    currentAiMessageContentAccumulator = ""; currentAiMessageId = null; currentAiMessageData = null;
+    if (clearHeader) {
+        if (discussionTitle) {
+            discussionTitle.textContent = translate('default_discussion_title');
+        }
+        if (sendMessageBtn) {
+            sendMessageBtn.disabled = true;
+        }
+        if (ragToggleBtn) {
+            ragToggleBtn.classList.remove('rag-toggle-on');
+            ragToggleBtn.classList.add('rag-toggle-off');
+        }
+        if (ragDataStoreSelect) {
+            ragDataStoreSelect.style.display = 'none';
+            ragDataStoreSelect.value = '';
+        }
+        updateRagToggleButtonState();
+        currentMessages = [];
+        currentDiscussionId = null;
+        activeBranchId = null;
+    }
 }
+
 /**
  * Displays an image in a custom, zoomable modal viewer with UI controls.
  * @param {string} imgSrc The source URL of the image to display.
@@ -2194,6 +2149,7 @@ function viewImage(imgSrc) {
     // Initial zoom level display
     updateZoom(1);
 }
+
 function renderMessage(message, existingContainer = null, existingBubble = null) {
     if (!message || typeof message.sender === 'undefined') {
         return;
@@ -2212,11 +2168,18 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     const isUpdate = isElementInDocument(messageContainerToUse) && isElementInDocument(bubbleDivToUse);
 
     if (isUpdate) {
-        const elementsToClearOrRebuild = ['.sender-info', '.message-images-container', '.message-content', '.message-footer'];
-        elementsToClearOrRebuild.forEach(selector => {
-            const el = bubbleDivToUse.querySelector(selector);
-            if (el) el.remove();
-        });
+        const senderInfo = bubbleDivToUse.querySelector('.sender-info');
+        if (senderInfo) senderInfo.remove();
+        
+        const imagesContainer = bubbleDivToUse.querySelector('.message-images-container');
+        if (imagesContainer) imagesContainer.remove();
+
+        const contentDiv = bubbleDivToUse.querySelector('.message-content');
+        if (contentDiv) contentDiv.innerHTML = '';
+
+        const footerDiv = bubbleDivToUse.querySelector('.message-footer');
+        if (footerDiv) footerDiv.remove();
+
     } else {
         messageContainerToUse = document.createElement('div');
         messageContainerToUse.className = 'message-container flex flex-col';
@@ -2248,7 +2211,7 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     let senderType;
     const userSenderNames = [currentUser.username, 'user', 'User', 'You', translate('sender_you', 'You'), translate('sender_user', 'User')];
 
-    if (userSenderNames.includes(message.sender) || (message.sender === "User" && currentUser.username.toLowerCase() === "user") || (currentUser.lollms_client_ai_name === null && message.sender === currentUser.username)) {
+    if (userSenderNames.some(name => name.toLowerCase() === (message.sender || '').toLowerCase())) {
         bubbleClass = 'user-bubble';
         senderDisplayName = currentUser.username || translate('sender_you', 'You');
         senderType = 'user';
@@ -2263,6 +2226,9 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     }
 
     bubbleDivToUse.className = `message-bubble ${bubbleClass} ${isStreamingThisMessage ? 'is-streaming' : ''}`;
+    if (message.addSpacing) {
+        messageContainerToUse.classList.add('mt-4');
+    }
 
     if (senderDisplayName && bubbleClass !== 'system-bubble') {
         const senderInfoDiv = document.createElement('div');
@@ -2300,17 +2266,13 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
                 imgTag.alt = translate('chat_image_alt', 'Chat Image');
                 imgTag.loading = 'lazy';
                 try {
-                    const response = await apiRequest(imgSrc, { method: 'GET' });
-                    if (!response.ok) throw new Error(`Failed to load image: ${response.statusText}`);
-                    const blob = await response.blob();
-                    const objectURL = URL.createObjectURL(blob);
-                    imgTag.src = objectURL;
-                    imgTag.onclick = () => viewImage(objectURL);
+                    imgTag.src = imgSrc;
+                    imgTag.onclick = () => viewImage(imgSrc);
                     imgTag.onload = () => imgItem.classList.add('loaded');
                     imgItem.appendChild(imgTag);
                     imagesContainer.appendChild(imgItem);
                 } catch (err) {
-                    console.error("Image failed to load securely:", imgSrc, err);
+                    console.error("Image failed to load:", imgSrc, err);
                     imgItem.classList.add('error');
                     imagesContainer.appendChild(imgItem);
                 }
@@ -2339,7 +2301,37 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         detailsContainer.appendChild(tokenBadge);
     }
     
-    // Always append the details container so it's ready for sources later
+    if (message.branches && message.branches.length > 1) {
+        const branchNav = createBranchNavUI(message);
+        detailsContainer.appendChild(branchNav);
+    }
+
+    const sources = message.sources;
+    if (Array.isArray(sources) && sources.length > 0) {
+        sources.forEach(source => {
+            // Basic validation for the source object
+            if (!source || typeof source.document === 'undefined' || typeof source.similarity === 'undefined') {
+                console.warn("Skipping malformed RAG source:", source);
+                return;
+            }
+
+            const sourceBadge = document.createElement('button');
+            const maxLength = 25;
+            const truncatedText = source.document.length > maxLength ? source.document.substring(0, maxLength) + '…' : source.document;
+
+            sourceBadge.innerHTML = `
+                <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 0v12h8V7.414L11.414 4H6z" clip-rule="evenodd" /></svg>
+                <span>${escapeHtml(truncatedText)}</span>
+                <span class="source-similarity-chip">${Math.round(source.similarity)}%</span>`;
+            sourceBadge.className = 'detail-badge source-badge';
+            sourceBadge.title = `${translate('view_source_document', 'View source')}: ${escapeHtml(source.document)} (${translate('similarity_label', 'Similarity')}: ${Math.round(source.similarity * 100)}%)`;
+
+            // Use the new helper function for the click event
+            sourceBadge.onclick = () => showSourceModal(source, message.id);
+            detailsContainer.appendChild(sourceBadge);
+        });
+    }    
+
     footerContent.appendChild(detailsContainer);
 
     const footerActionsContainer = document.createElement('div');
@@ -2349,24 +2341,19 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     actionsGroup.className = 'message-actions-group';
     const currentMessageBranchId = message.branch_id || activeBranchId || 'main';
 
-    // FIX: The onclick handlers now reference `message.id` directly.
-    // This ensures that even if the message object's ID is updated after rendering (during streaming),
-    // the button click will use the *final, correct* ID.
     actionsGroup.appendChild(createActionButton('copy', translate('copy_content_tooltip', "Copy content"), () => { navigator.clipboard.writeText(message.content).then(() => showStatus(translate('status_copied_to_clipboard', 'Copied!'), 'success')); }, 'default', isDisabled));
     actionsGroup.appendChild(createActionButton('edit', translate('edit_message_tooltip', "Edit message"), () => initiateEditMessage(message.id, currentMessageBranchId), 'default', isDisabled));
 
-    if (bubbleClass === 'user-bubble') {
-        // FIX: Corrected arguments for initiateBranch. It needs discussionId and messageId.
-        actionsGroup.appendChild(createActionButton('refresh', translate('resend_branch_tooltip', 'Resend/Branch'), () => initiateBranch(currentDiscussionId, message.id), 'primary', isDisabled));
-    } else if (bubbleClass === 'ai-bubble') {
-        // FIX: Corrected arguments for regenerateMessage. It needs the branchId.
+    if (senderType === 'user') {
+        actionsGroup.appendChild(createActionButton('refresh', translate('resend_branch_tooltip', 'Resend/Branch'), () => initiateBranch(currentDiscussionId, message.id, currentMessageBranchId), 'primary', isDisabled));
+    } else if (senderType === 'ai') {
         actionsGroup.appendChild(createActionButton('refresh', translate('regenerate_message_tooltip', 'Regenerate'), () => regenerateMessage(message.id, currentMessageBranchId), 'primary', isDisabled));
     }
     actionsGroup.appendChild(createActionButton('delete', translate('delete_message_tooltip', "Delete"), () => deleteMessage(message.id, currentMessageBranchId), 'destructive', isDisabled));
 
     if (actionsGroup.hasChildNodes()) footerActionsContainer.appendChild(actionsGroup);
 
-    if (bubbleClass === 'ai-bubble') {
+    if (senderType === 'ai') {
         const ratingContainer = document.createElement('div');
         ratingContainer.className = 'message-rating';
         const userGrade = message.user_grade || 0;
@@ -2377,7 +2364,6 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         upvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 3a1 1 0 01.707.293l5 5a1 1 0 01-1.414 1.414L11 6.414V16a1 1 0 11-2 0V6.414L5.707 9.707a1 1 0 01-1.414-1.414l5-5A1 1 0 0110 3z" clip-rule="evenodd" /></svg>`;
         upvoteBtn.title = translate('grade_good_tooltip', 'Good response');
         upvoteBtn.setAttribute('aria-pressed', userGrade > 0 ? 'true' : 'false');
-        // FIX: Ensure correct ID is used here as well.
         upvoteBtn.onclick = () => gradeMessage(message.id, 1, currentMessageBranchId);
         upvoteBtn.disabled = isDisabled;
         gradeDisplay.className = 'rating-score';
@@ -2387,7 +2373,6 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         downvoteBtn.innerHTML = `<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 17a1 1 0 01-.707-.293l-5-5a1 1 0 011.414-1.414L9 13.586V4a1 1 0 112 0v9.586l3.293-3.293a1 1 0 011.414 1.414l-5 5A1 1 0 0110 17z" clip-rule="evenodd" /></svg>`;
         downvoteBtn.title = translate('grade_bad_tooltip', 'Bad response');
         downvoteBtn.setAttribute('aria-pressed', userGrade < 0 ? 'true' : 'false');
-        // FIX: Ensure correct ID is used here as well.
         downvoteBtn.onclick = () => gradeMessage(message.id, -1, currentMessageBranchId);
         downvoteBtn.disabled = isDisabled;
         ratingContainer.appendChild(upvoteBtn);
@@ -2406,6 +2391,180 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
         currentAiMessageDomContainer = messageContainerToUse;
         currentAiMessageDomBubble = bubbleDivToUse;
     }
+}
+/**
+ * FIX: Processes a list of messages to move branch information from a child message
+ * to its rightful parent. The backend sometimes incorrectly attaches the list of
+ * sibling branches to the first child, instead of attaching the list of children
+ * to the parent. This function corrects that data structure before rendering.
+ *
+ * @param {Array<object>} rawMessages The list of messages as received from the API.
+ * @returns {Array<object>} A new list of messages with branch data correctly mapped to parent messages.
+ */
+function processAndRemapBranches(rawMessages) {
+    if (!rawMessages || rawMessages.length === 0) {
+        return [];
+    }
+
+    // Create a map for quick ID-based lookups.
+    const messageMap = new Map(rawMessages.map(msg => [msg.id, { ...msg }]));
+
+    // Iterate over a copy of the keys to avoid issues with map modification
+    for (const message of messageMap.values()) {
+        // Find any message that has the incorrectly placed 'branches' array.
+        if (message.branches && message.branches.length > 0) {
+            
+            // Find this message's parent.
+            if (message.parent_message_id) {
+                const parentMessage = messageMap.get(message.parent_message_id);
+
+                if (parentMessage) {
+                    // Move the branches array to the parent.
+                    parentMessage.branches = message.branches;
+
+                    // Remove the array from the child to prevent it from rendering there.
+                    message.branches = null;
+                }
+            }
+        }
+    }
+    
+    // Return the corrected list of messages from the map.
+    return Array.from(messageMap.values());
+}
+/**
+ * Creates the navigation UI for switching between message branches. This version uses a robust
+ * method to correctly identify the currently active branch.
+ * 
+ * @param {object} message The message object that has multiple branches.
+ * @returns {HTMLElement} The container element for the branch navigation UI.
+ */
+function createBranchNavUI(message) {
+    const discussionData = discussions[currentDiscussionId];
+    // Don't render if there's no branching data, only one branch, or the discussion map is missing.
+    if (!discussionData || !discussionData.branch_map || !message.branches || message.branches.length <= 1) {
+        return document.createElement('div');
+    }
+
+    // The ground truth: The list of START IDs for all possible child branches from this message.
+    const childBranchStartIds = message.branches;
+
+    // --- Helper to find the current branch's info ---
+    const getCurrentBranchInfo = () => {
+        const activeTipId = discussionData.activeBranchId; // The ID of the LAST message in the active branch.
+        const branchMap = discussionData.branch_map;   // The map of { startId: tipId }.
+
+        // PRIMARY METHOD: Reverse lookup in the branch map.
+        // Find which startId in our map points to the currently active tipId.
+        const currentStartId = Object.keys(branchMap).find(startId => branchMap[startId] === activeTipId);
+
+        if (currentStartId) {
+            // We found the startId that corresponds to our active branch.
+            // Now, find its index within the list of possible branches for *this specific message*.
+            const index = childBranchStartIds.indexOf(currentStartId);
+            if (index !== -1) {
+                // Success! We know our current branch index.
+                return { index: index, startId: currentStartId };
+            }
+        }
+        
+        // FALLBACK METHOD: If the map lookup fails (e.g., data is momentarily stale),
+        // scan the active message list. This is slower but provides robustness.
+        const activeBranchMessages = discussionData.branches[activeTipId];
+        if (activeBranchMessages) {
+            for (const msg of activeBranchMessages) {
+                const index = childBranchStartIds.indexOf(msg.id);
+                if (index !== -1) {
+                    // Found a match by scanning.
+                    return { index: index, startId: msg.id };
+                }
+            }
+        }
+        
+        // If both methods fail, we can't determine the branch.
+        return { index: -1, startId: null };
+    };
+
+    // --- Create UI Elements ---
+    const navContainer = document.createElement('div');
+    navContainer.className = 'branch-nav-container';
+
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'branch-nav-btn';
+    prevBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>';
+    prevBtn.title = translate('previous_branch_tooltip', 'Previous Branch');
+
+    const statusText = document.createElement('span');
+    statusText.className = 'branch-nav-status';
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'branch-nav-btn';
+    nextBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>';
+    nextBtn.title = translate('next_branch_tooltip', 'Next Branch');
+
+    // --- Update and Navigation Logic ---
+    const updateStatus = () => {
+        const { index } = getCurrentBranchInfo();
+        if (index !== -1) {
+            statusText.textContent = `${index + 1} / ${childBranchStartIds.length}`;
+        } else {
+            statusText.textContent = `? / ${childBranchStartIds.length}`;
+        }
+    };
+
+    const navigate = (direction) => {
+        const { index } = getCurrentBranchInfo();
+
+        if (index === -1) {
+            console.warn("Could not determine current branch index for navigation. Defaulting to first branch.");
+            switchBranch(currentDiscussionId, childBranchStartIds[0]);
+            return;
+        }
+
+        const nextIndex = (index + direction + childBranchStartIds.length) % childBranchStartIds.length;
+        const nextBranchStartId = childBranchStartIds[nextIndex];
+        
+        switchBranch(currentDiscussionId, nextBranchStartId);
+    };
+
+    prevBtn.onclick = () => navigate(-1);
+    nextBtn.onclick = () => navigate(1);
+
+    navContainer.appendChild(prevBtn);
+    navContainer.appendChild(statusText);
+    navContainer.appendChild(nextBtn);
+    
+    updateStatus();
+
+    return navContainer;
+}
+
+/**
+ * Switches the active branch for the current discussion and reloads the chat view.
+ * @param {string} discussionId The ID of the current discussion.
+ * @param {string} newBranchStartId The starting message ID of the branch to switch to.
+ */
+async function switchBranch(discussionId, newBranchStartId) {
+    if (!discussionId || !newBranchStartId || aiMessageStreaming) return;
+    
+    const discussionData = discussions[discussionId];
+    if (!discussionData) return;
+
+    // Set the new active branch ID. `selectDiscussion` will handle loading it.
+    discussionData.activeBranchId = newBranchStartId;
+    
+    // We can "forget" that this branch was fully loaded to force a fresh fetch from the server.
+    // This is safer in case the tip ID has changed since we last loaded it.
+    const knownTipId = discussionData.branch_map[newBranchStartId];
+    if (knownTipId && discussionData.messages_loaded_fully) {
+        delete discussionData.messages_loaded_fully[knownTipId];
+    }
+    if (discussionData.messages_loaded_fully) {
+        delete discussionData.messages_loaded_fully[newBranchStartId];
+    }
+    
+    // Calling selectDiscussion will now fetch and render the correct new branch.
+    await selectDiscussion(discussionId);
 }
 function renderMessages(messagesToRender) {
     if(!chatMessages) return;
@@ -2436,6 +2595,7 @@ function renderMessages(messagesToRender) {
         }
         messagesOnDate.forEach((msg, index) => {
             msg.addSpacing = (index > 0 && messagesOnDate[index - 1].sender !== msg.sender);
+            console.log(msg)
             renderMessage(msg);
         });
     });
@@ -3003,11 +3163,19 @@ async function gradeMessage(messageId, change, branchId) { // Added branchId
 // --- Message Edit/Delete ---
 function initiateEditMessage(messageId, branchId) {
     if (!currentDiscussionId || !discussions[currentDiscussionId] || !branchId) return;
+    
+    // Find the message in the correct branch's message list
     const branchMessages = discussions[currentDiscussionId].branches[branchId];
-    if (!branchMessages) return;
+    if (!branchMessages) {
+        console.error("Branch not found in client-side cache for editing:", branchId);
+        return;
+    }
 
     const messageData = branchMessages.find(m => m.id === messageId);
-    if (!messageData) { showStatus(translate('status_cannot_find_message_to_edit'), "error"); return; }
+    if (!messageData) { 
+        showStatus(translate('status_cannot_find_message_to_edit'), "error"); 
+        return; 
+    }
 
     if(editMessageIdInput) editMessageIdInput.value = messageId;
     if(editMessageBranchIdInput) editMessageBranchIdInput.value = branchId; // Store branchId
@@ -3022,13 +3190,12 @@ async function confirmMessageEdit() {
     const newContent = editMessageInput ? editMessageInput.value : null;
 
     if (!messageId || !branchId || !currentDiscussionId || newContent === null) return;
+    
     showStatus(translate('status_saving_changes', 'Saving changes...'), 'info', editMessageStatus);
     if(confirmEditMessageBtn) confirmEditMessageBtn.disabled = true;
 
-    let apiUrl = `/api/discussions/${currentDiscussionId}/messages/${messageId}`;
-    if (backendCapabilities.supportsBranches) {
-        apiUrl += `?branch_id=${encodeURIComponent(branchId)}`;
-    }
+    // Use the new endpoint that includes branch_id
+    let apiUrl = `/api/discussions/${currentDiscussionId}/messages/${messageId}?branch_id=${encodeURIComponent(branchId)}`;
 
     try {
         const response = await apiRequest(apiUrl, {
@@ -3043,36 +3210,14 @@ async function confirmMessageEdit() {
         if (disc && disc.branches[branchId]) {
             const msgIndex = disc.branches[branchId].findIndex(m => m.id === messageId);
             if (msgIndex > -1) {
-                // Preserve client-side only fields if backend doesn't return everything
                 const originalMsg = disc.branches[branchId][msgIndex];
-                disc.branches[branchId][msgIndex] = {
-                    ...originalMsg, // Keep original fields like addSpacing
-                    ...updatedMessageData, // Overlay with backend response
-                    steps: updatedMessageData.steps || originalMsg.steps || [], // Merge steps/meta carefully
-                    metadata: updatedMessageData.metadata || originalMsg.metadata || [],
-                    branch_id: branchId // Ensure branch_id is correct
-                };
+                disc.branches[branchId][msgIndex] = { ...originalMsg, ...updatedMessageData };
             }
         }
-
-        // Re-render only the affected message for efficiency
-        const messageContainer = document.querySelector(`.message-container[data-message-id="${messageId}"]`);
-        const messageBubble = document.getElementById(`message-${messageId}`);
-        if (messageContainer && messageBubble && disc.branches[branchId]) {
-            const msgToRender = disc.branches[branchId].find(m => m.id === messageId);
-            if (msgToRender) {
-                 msgToRender.addSpacing = messageContainer.classList.contains('mt-4'); // Preserve spacing
-                 renderMessage(msgToRender, messageContainer, messageBubble);
-            }
-        } else { // Fallback to full re-render if specific elements not found
-            renderMessages(currentMessages);
-        }
-
-
-        if (disc && updatedMessageData.created_at) { // Backend should return updated timestamp
-            disc.last_activity_at = updatedMessageData.created_at;
-            renderDiscussionList();
-        }
+        
+        // This is a branching action, so we should refresh the current branch view
+        await selectDiscussion(currentDiscussionId);
+        
         showStatus(translate('status_message_updated_success', 'Message updated successfully.'), 'success', editMessageStatus);
         setTimeout(() => closeModal('editMessageModal'), 1000);
     } catch (error) { /* apiRequest handles status */
@@ -3082,7 +3227,7 @@ async function confirmMessageEdit() {
 }
 
 async function deleteMessage(messageId, branchId) {
-    console.log(`Attempting to delete message with ID: ${messageId} in branch: ${branchId}`); // DEBUG LOG
+    console.log(`Attempting to delete message with ID: ${messageId} in branch: ${branchId}`);
     if (!currentDiscussionId || !messageId || messageId.startsWith('temp-') || !branchId) {
         if (messageId && messageId.startsWith('temp-')) {
             console.warn("Delete aborted: Message ID is still temporary.", messageId);
@@ -3107,20 +3252,14 @@ async function deleteMessage(messageId, branchId) {
         try {
             await apiRequest(apiUrl, { method: 'DELETE' });
             disc.branches[branchId] = disc.branches[branchId].filter(m => m.id !== messageId);
-            // If active branch becomes empty (and not 'main'), consider switching or special UI
+            
             if (disc.branches[branchId].length === 0 && branchId !== 'main') {
-                // Optional: delete branch from client & backend if empty
-                // For now, just leave it empty. Client can navigate away.
-                // delete disc.branches[branchId];
-                // if (disc.activeBranchId === branchId) switchBranch(currentDiscussionId, 'main');
             }
-            currentMessages = disc.branches[activeBranchId] || []; // Refresh currentMessages pointer
-            renderMessages(currentMessages); // Re-render messages for the active branch
-            renderBranchTabsUI(currentDiscussionId); // Update tabs (branch might be gone or empty)
+            currentMessages = disc.branches[activeBranchId] || [];
+            renderMessages(currentMessages);
 
             showStatus(translate('status_message_deleted_success', 'Message deleted successfully.'), 'success');
-            // No need to call refreshMessagesAfterStream here, as we have manually updated the state.
-        } catch (error) { /* apiRequest handles status */ }
+        } catch (error) { }
     }
 }
 
@@ -3130,38 +3269,36 @@ async function regenerateMessage(messageId, branchId) {
     const disc = discussions[currentDiscussionId];
     if (!disc || !disc.branches[branchId]) return;
 
-    const aiMessageIndex = disc.branches[branchId].findIndex(msg => msg.id === messageId);
-    if (aiMessageIndex === -1 || aiMessageIndex === 0) { // Cannot regenerate first message or non-AI
+    const branchMessages = disc.branches[branchId];
+    const aiMessageIndex = branchMessages.findIndex(msg => msg.id === messageId);
+    if (aiMessageIndex === -1 || aiMessageIndex === 0) {
         showStatus(translate('status_cannot_regenerate_message', "Cannot regenerate this message."), "warning");
         return;
     }
 
-    const aiMessageToRegenerate = disc.branches[branchId][aiMessageIndex];
-    const userPromptMessage = disc.branches[branchId][aiMessageIndex - 1];
-
-    if (!userPromptMessage || userPromptMessage.sender.toLowerCase() === (currentUser.lollms_client_ai_name || 'assistant').toLowerCase()) {
+    const userPromptMessage = branchMessages[aiMessageIndex - 1];
+    const userNamesForCheck = [currentUser.username, 'User', 'user', translate('sender_you', 'You'), translate('sender_user', 'User')];
+    if (!userPromptMessage || !userNamesForCheck.some(name => name.toLowerCase() === (userPromptMessage.sender || '').toLowerCase())) {
         showStatus(translate('status_cannot_regenerate_no_user_prompt', "Cannot regenerate without a preceding user prompt."), "warning");
         return;
     }
-
+    
     showStatus(translate('status_regenerating_response', "Regenerating response..."), "info");
 
-    // Remove the AI message and any subsequent messages in this branch
-    disc.branches[branchId] = disc.branches[branchId].slice(0, aiMessageIndex);
-    currentMessages = disc.branches[branchId]; // Update currentMessages
-    renderMessages(currentMessages); // Re-render to remove messages
+    disc.branches[branchId] = branchMessages.slice(0, aiMessageIndex);
+    currentMessages = disc.branches[branchId];
+    renderMessages(currentMessages);
+    forceScrollToBottom();
 
-    // Prepare data for resending the user prompt
     const resendPayload = {
         prompt: userPromptMessage.content,
-        image_server_paths: userPromptMessage.server_image_paths || userPromptMessage.image_references || [] // Use server_paths if available
+        image_server_paths: userPromptMessage.server_image_paths || []
     };
+    
+    // The message to branch from is the PARENT of the user message that prompted the AI.
+    const parentOfUserPrompt = userPromptMessage.parent_message_id;
 
-    // Call sendMessage, effectively resending the user's prompt in the same branch
-    // The `is_resend` and `branch_from_message_id` are not strictly needed here as we are
-    // continuing the *same* branch, not creating a new one from this action.
-    // The key is that sendMessage will use the current `activeBranchId` (which is `branchId`).
-    await sendMessage(null, resendPayload); // branchFromUserMessageId is null, resendData has the payload
+    await sendMessage(parentOfUserPrompt, resendPayload);
 }
 
 
@@ -3190,162 +3327,91 @@ async function updateDiscussionRagStoreOnBackend(discussionId, ragDatastoreId) {
 }
 
 // --- Branching Logic ---
-async function initiateBranch(discussionId, userMessageIdToBranchFrom) {
-    if (userMessageIdToBranchFrom === -1) {
-    console.error("initiateBranch: User message to branch from NOT FOUND in active branch:", userMessageIdToBranchFrom);
-    showStatus("Error: Could not find the message to branch from. It might have been deleted from this branch view.", "error");
-    return; // Stop if message not found
-}
-    console.log(`initiateBranch called for discussion: ${discussionId}, branching from message: ${userMessageIdToBranchFrom}, current activeBranchId: ${activeBranchId}`);
-    if (!discussionId || !userMessageIdToBranchFrom || generationInProgress) return;
-    
+/**
+ * Handles the "Resend/Branch" action from a user message.
+ * This function will truncate the conversation at that message, and then resend the
+ * user's prompt to generate a new response, effectively creating a new branch.
+ *
+ * @param {string} discussionId The ID of the current discussion.
+ * @param {string} userMessageId The ID of the user's message to branch from.
+ * @param {string} branchId The specific branch ID this user message belongs to.
+ */
+async function initiateBranch(discussionId, userMessageId, branchId) {
+    if (!discussionId || !userMessageId || !branchId || generationInProgress) return;
+
     const disc = discussions[discussionId];
-    if (!disc) {
-        console.error("initiateBranch: Discussion not found:", discussionId); return;
+    if (!disc || !disc.branches || !disc.branches[branchId]) {
+        console.error("initiateBranch: Source branch not found in client data:", branchId);
+        showStatus("Error: Could not find the source branch for this message.", "error");
+        return;
     }
 
-    // We need to find the message in its original branch to get its content and history.
-    // This assumes userMessageIdToBranchFrom is globally unique or we know its original branch.
-    // For simplicity, let's assume we branch from the currently active branch.
-    if (!disc.branches || !disc.branches[activeBranchId]) {
-        console.error("initiateBranch: Active branch not found in discussion:", activeBranchId, disc); return;
-    }
-    const sourceBranchMessages = disc.branches[activeBranchId];
-    const userMessageIndex = sourceBranchMessages.findIndex(msg => msg.id === userMessageIdToBranchFrom);
-    console.log("Source branch messages:", JSON.parse(JSON.stringify(sourceBranchMessages))); // Log a copy
-    console.log(`User message index for branching: ${userMessageIndex}`);
+    // Find the message in its specific, correct branch, not just the "active" one.
+    const sourceBranchMessages = disc.branches[branchId];
+    const userMessageIndex = sourceBranchMessages.findIndex(msg => msg.id === userMessageId);
+
     if (userMessageIndex === -1) {
-        console.error("initiateBranch: User message to branch from not found in active branch:", userMessageIdToBranchFrom); return;
-    }
-    const userMessageToResend = sourceBranchMessages[userMessageIndex];
-
-    // Ensure it's a user message
-    const userNamesForCheck = [currentUser.username, 'User', 'user', translate('sender_you', 'You')];
-    if (!userNamesForCheck.includes(userMessageToResend.sender)) {
-        showStatus(translate('status_can_only_branch_from_user_prompts', "Can only branch/resend from your own prompts."), "warning");
+        // This is the error you were seeing. This check remains as a safeguard.
+        console.error("initiateBranch: User message to branch from not found in its own branch:", userMessageId, "in branch", branchId);
+        showStatus("Error: Could not find the message to branch from. Please refresh.", "error");
         return;
     }
 
-    // 1. Create a new client-side branch ID
-    const newBranchId = `branch-${Date.now()}`;
-    showStatus(translate('status_creating_branch', `Creating new branch "${newBranchId.substring(7,12)}"...`), 'info');
+    const userMessageData = sourceBranchMessages[userMessageIndex];
+    const parentMessageId = userMessageData.parent_message_id; // The message we will branch OFF of.
 
-    // 2. Copy messages from the source branch up to (and including) the message being branched from
-    //    into the new branch. These messages in the new branch should get the newBranchId.
-    disc.branches[newBranchId] = sourceBranchMessages.slice(0, userMessageIndex + 1).map(msg => ({
-        ...msg, // Copy all properties
-        branch_id: newBranchId, // Assign to the new branch
-        // Reset grades or other per-branch states if necessary
-        user_grade: 0, 
-        // Steps and metadata might also need to be cleared or re-evaluated for a new branch
-        steps: [], 
-        metadata: [] 
-    }));
+    showStatus(translate('status_creating_new_branch', "Creating new branch..."), "info");
 
-    // 3. Set the new branch as active (client-side)
-    disc.activeBranchId = newBranchId;
-    activeBranchId = newBranchId; // Update global active branch
-    currentMessages = disc.branches[newBranchId]; // Point to the new branch's messages
+    // Truncate the branch's message array to remove the user message and everything after it.
+    disc.branches[branchId] = sourceBranchMessages.slice(0, userMessageIndex);
+    
+    // The branch we just modified now becomes the active one for rendering purposes.
+    activeBranchId = branchId;
+    currentMessages = disc.branches[branchId];
 
-    // 4. Update UI: Render the messages of the new branch and update tabs
-    renderMessages(currentMessages); // Shows history up to the resent message
-    renderBranchTabsUI(discussionId);
-    scrollChatToBottom(false); // Scroll to the (now last) user message
+    // Re-render the UI to show the truncated history.
+    renderMessages(currentMessages);
+    forceScrollToBottom();
 
-    // 5. Prepare payload for sendMessage to "resend" the user's prompt on this new branch
+    // Prepare the payload to resend the user's prompt.
     const resendPayload = {
-        prompt: userMessageToResend.content,
-        // If the original user message had images, include their server_paths
-        image_server_paths: userMessageToResend.server_image_paths || 
-                            (userMessageToResend.image_references && userMessageToResend.image_references.length > 0 ? 
-                                userMessageToResend.image_references.map(ref => {
-                                    // Convert client-side display URL back to server_path if possible
-                                    // This is tricky if only display URLs are stored.
-                                    // Assume server_image_paths was stored on the original message object.
-                                    // If not, this part needs a robust way to get original server paths.
-                                    // For now, if server_image_paths isn't there, we can't easily resend images.
-                                    return ref; // This might be a display URL, backend might not handle it.
-                                }) : []) 
+        prompt: userMessageData.content,
+        image_server_paths: userMessageData.server_image_paths || []
     };
-    await sendMessage(userMessageIdToBranchFrom, resendPayload, true /* isBranchingAction */);
+    
+    // Send the message. The backend will handle creating the new branch history
+    // because we are sending from an older parent message ID.
+    await sendMessage(parentMessageId, resendPayload);
 }
 
-function renderBranchTabsUI(discussionId) {
+async function switchBranch(discussionId, branchIdentifier) {
     const disc = discussions[discussionId];
-    let tabsContainer = document.getElementById('branchTabsContainer');
-
-    if (!disc || !disc.branches || Object.keys(disc.branches).length <= 1) {
-        if (tabsContainer) tabsContainer.innerHTML = ''; // Clear if only main or no branches
+    if (!disc || !branchIdentifier || disc.activeBranchId === branchIdentifier || generationInProgress) {
         return;
     }
 
-    if (!tabsContainer && chatHeader) { // Create if doesn't exist, place in chat header
-        tabsContainer = document.createElement('div');
-        tabsContainer.id = 'branchTabsContainer';
-        // Style appropriately, e.g., below discussion title
-        tabsContainer.className = 'flex flex-wrap gap-2 p-2 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800';
-        chatHeader.appendChild(tabsContainer); // Append to chat header
-    } else if (!tabsContainer) { // Fallback if chatHeader not found
-        console.warn("Branch tabs container or chat header not found. Tabs UI will not be rendered.");
-        return;
+    showStatus(translate('status_switching_branch', `Switching branch...`), 'info');
+
+    // Set the target branch to load. selectDiscussion will handle fetching and state correction.
+    disc.activeBranchId = branchIdentifier;
+    
+    try {
+        // selectDiscussion will now fetch messages using branchIdentifier, find the true tip,
+        // and correct the local state (disc.activeBranchId).
+        await selectDiscussion(discussionId);
+
+        // After selectDiscussion has corrected the state, we send the *correct* tip ID to the backend
+        // to ensure the session is in sync for future loads.
+        await apiRequest(`/api/discussions/${discussionId}/active_branch`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ active_branch_id: disc.activeBranchId })
+        });
+        
+        showStatus(translate('status_branch_switched_success', 'Branch switched.'), 'success');
+    } catch (error) {
+        showStatus(translate('status_failed_to_switch_branch', "Failed to switch branch."), "error");
     }
-    tabsContainer.innerHTML = ''; // Clear existing tabs
-
-    const branchIds = Object.keys(disc.branches).sort((a, b) => {
-        if (a === 'main') return -1; if (b === 'main') return 1;
-        // Sort by part after "branch-" if it's a timestamp, otherwise localeCompare
-        const aTime = a.startsWith('branch-') ? parseInt(a.substring(7), 10) : 0;
-        const bTime = b.startsWith('branch-') ? parseInt(b.substring(7), 10) : 0;
-        if (aTime && bTime) return aTime - bTime;
-        return a.localeCompare(b);
-    });
-
-    branchIds.forEach(branchId => {
-        const tabButton = document.createElement('button');
-        const idSuffix = branchId.startsWith('branch-') ? branchId.substring(branchId.lastIndexOf('-') + 1).substring(0, 5) : branchId;
-        tabButton.textContent = branchId === 'main' ? translate('branch_tab_main', 'Main') : translate('branch_tab_branch_prefix', `Branch ${idSuffix}`, { id_short: idSuffix });
-        tabButton.className = `px-3 py-1 text-xs rounded-full transition-colors whitespace-nowrap ${branchId === disc.activeBranchId
-            ? 'bg-blue-500 text-white font-semibold'
-            : 'bg-gray-200 text-gray-700 hover:bg-gray-300 dark:bg-gray-700 dark:text-gray-300 dark:hover:bg-gray-600'}`;
-        tabButton.onclick = () => switchBranch(discussionId, branchId);
-        tabsContainer.appendChild(tabButton);
-    });
-}
-
-async function switchBranch(discussionId, newBranchId) {
-    const disc = discussions[discussionId];
-    if (!disc || !disc.branches || !disc.branches[newBranchId] || disc.activeBranchId === newBranchId || generationInProgress) {
-        return;
-    }
-
-    showStatus(translate('status_switching_branch', `Switching to branch: ${newBranchId}...`, { branch_id: newBranchId }), 'info');
-
-    if (backendCapabilities.supportsBranches) {
-        try {
-            await apiRequest(`/api/discussions/${discussionId}/active_branch`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ active_branch_id: newBranchId })
-            });
-            disc.activeBranchId = newBranchId;
-        } catch (error) {
-            showStatus(translate('status_failed_to_set_active_branch_backend_switched_client', "Failed to set active branch on server. Switched client-side."), "warning");
-            disc.activeBranchId = newBranchId; // Still switch client-side
-        }
-    } else {
-        disc.activeBranchId = newBranchId; // Client-side only switch
-    }
-    activeBranchId = newBranchId;
-    currentMessages = disc.branches[newBranchId] || []; // Fallback to empty if branch somehow missing
-
-    // Check if messages for this branch are loaded
-    if (!disc.messages_loaded_fully || !disc.messages_loaded_fully[newBranchId]) {
-        await selectDiscussion(discussionId); // This will re-trigger message loading for the new active branch
-    } else {
-        renderMessages(currentMessages); // Messages already loaded, just render
-    }
-    renderBranchTabsUI(discussionId);
-    scrollChatToBottom(false);
 }
 
 // --- Utilities (scrollChatToBottom, showStatus, populateDropdown - largely as provided) ---
@@ -3423,23 +3489,16 @@ function populateRagDataStoreSelect() {
     }
 }
 
-ragDataStoreSelect.onchange = async () => {
-    if (!currentDiscussionId) return;
-    const selectedDataStoreId = ragDataStoreSelect.value || null; 
-    try {
-        await apiRequest(`/api/discussions/${currentDiscussionId}/rag_datastore`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rag_datastore_id: selectedDataStoreId })
-        });
-        discussions[currentDiscussionId].rag_datastore_id = selectedDataStoreId;
-        const dsName = selectedDataStoreId ? availableDataStoresForRag.find(ds=>ds.id===selectedDataStoreId)?.name : translate('none_text');
-        showStatus(translate('status_rag_datastore_set', `RAG datastore for this discussion set to: ${dsName}.`, {name: dsName}), 'success');
-        updateRagToggleButtonState(); 
-    } catch (error) {
-        showStatus(translate('status_rag_datastore_set_failed'), 'error');
-        ragDataStoreSelect.value = discussions[currentDiscussionId].rag_datastore_id || "";
+if (ragDataStoreSelect) ragDataStoreSelect.onchange = async () => {
+    if (!currentDiscussionId || !discussions[currentDiscussionId]) return;
+    const disc = discussions[currentDiscussionId];
+    const selectedDataStoreId = ragDataStoreSelect.value || null;
+    
+    if (disc.rag_datastore_id !== selectedDataStoreId) {
+        disc.rag_datastore_id = selectedDataStoreId;
+        await updateDiscussionRagStoreOnBackend(currentDiscussionId, selectedDataStoreId);
     }
+    updateRagToggleButtonState();
 };
 
 function populateDataStoresModal() {
@@ -3501,6 +3560,8 @@ async function handleCreateDataStore(event) {
         createDataStoreForm.reset();
         await loadDataStores(); 
     } catch (error) { /* Handled by apiRequest */ }
+    closeModal('createDataStoreModal')
+    openModal("dataStoresModal")
 }
 
 async function handleEditDataStore(event) {
@@ -3689,22 +3750,40 @@ ragToggleBtn.onclick = () => {
         showStatus(translate(isRagActive ? 'status_rag_active' : 'status_rag_inactive', `RAG is now ${isRagActive ? 'ACTIVE' : 'INACTIVE'}.`), 'info');
 };
 function updateRagToggleButtonState() {
+    if (!ragToggleBtn || !ragDataStoreSelect) return;
+    
     const hasDataStores = availableDataStoresForRag.length > 0;
-    ragToggleBtn.disabled = !hasDataStores;
-    ragDataStoreSelect.style.display = (isRagActive && hasDataStores) ? 'inline-block' : 'none';
+    const disc = currentDiscussionId ? discussions[currentDiscussionId] : null;
+    const ragIsOn = disc && disc.rag_datastore_id;
 
+    ragToggleBtn.disabled = !hasDataStores;
+    
     if (!hasDataStores) {
-        ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
-        ragToggleBtn.title = translate('rag_toggle_btn_title_no_stores'); 
-        isRagActive = false; return;
+        ragToggleBtn.classList.remove('rag-toggle-on');
+        ragToggleBtn.classList.add('rag-toggle-off');
+        ragToggleBtn.title = translate('rag_toggle_btn_title_no_stores');
+        ragDataStoreSelect.style.display = 'none';
+        return;
     }
-    if (isRagActive) {
-        ragToggleBtn.classList.remove('rag-toggle-off'); ragToggleBtn.classList.add('rag-toggle-on');
-        const selectedDS = availableDataStoresForRag.find(ds => ds.id === ragDataStoreSelect.value);
-        ragToggleBtn.title = translate('rag_toggle_btn_title_on', `RAG Active ${selectedDS ? `(Using: ${selectedDS.name})` : '(Select Store)'} - Click to disable`, {datastore_name: selectedDS ? selectedDS.name : translate('rag_select_store_text', '(Select Store)')});
+
+    ragDataStoreSelect.style.display = 'inline-block';
+    
+    if (ragIsOn) {
+        ragToggleBtn.classList.remove('rag-toggle-off');
+        ragToggleBtn.classList.add('rag-toggle-on');
+        const selectedDS = availableDataStoresForRag.find(ds => ds.id === disc.rag_datastore_id);
+        const datastoreNameText = selectedDS ? `(Using: ${selectedDS.name})` : '(Store selected)';
+        ragToggleBtn.title = translate('rag_toggle_btn_title_on', `RAG Active ${datastoreNameText} - Click to disable`, {datastore_name: datastoreNameText});
     } else {
-        ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
+        ragToggleBtn.classList.remove('rag-toggle-on');
+        ragToggleBtn.classList.add('rag-toggle-off');
         ragToggleBtn.title = translate('rag_toggle_btn_title_off');
+    }
+
+    if (disc) {
+        ragDataStoreSelect.value = disc.rag_datastore_id || "";
+    } else {
+        ragDataStoreSelect.value = "";
     }
 }
 function renderCustomCodeBlocks(element, messageId) {

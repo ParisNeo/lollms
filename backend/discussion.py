@@ -1,4 +1,3 @@
-
 # --- Helpers ---
 # Standard Library Imports
 import os
@@ -70,42 +69,6 @@ from lollms_client import (
     ELF_COMPLETION_FORMAT, # For client params
 )
 
-# --- Pydantic Models for API ---
-from backend.models import (
-UserLLMParams,
-UserAuthDetails,
-UserCreateAdmin,
-UserPasswordResetAdmin,UserPasswordChange,
-UserPublic,
-DiscussionInfo,
-DiscussionTitleUpdate,
-DiscussionRagDatastoreUpdate,MessageOutput,
-MessageContentUpdate,
-MessageGradeUpdate,
-SafeStoreDocumentInfo,
-DiscussionExportRequest,
-ExportData,
-DiscussionImportRequest,
-DiscussionSendRequest,
-DataStoreBase,
-DataStoreCreate,
-DataStorePublic,
-DataStoreShareRequest,
-PersonalityBase,
-PersonalityCreate,
-PersonalityUpdate,
-PersonalityPublic,
-UserUpdate,
-FriendshipBase,
-FriendRequestCreate,
-FriendshipAction,
-FriendPublic,
-FriendshipRequestPublic,
-PersonalitySendRequest,
-
-DirectMessagePublic,
-DirectMessageCreate
-)
 # safe_store is expected to be installed
 try:
     import safe_store
@@ -138,6 +101,8 @@ class AppLollmsDiscussion:
         )
         # RAG datastore to use for this discussion (can be set by user)
         self.rag_datastore_id: Optional[str] = None
+        # NEW: ID of the tip message of the currently active branch
+        self.active_branch_id: Optional[str] = None
 
 
     def add_message(
@@ -180,6 +145,38 @@ class AppLollmsDiscussion:
         # TODO: Optionally delete associated image assets from disk
         return len(self.messages) < original_len
 
+    # --- NEW METHOD TO ADD ---
+    def get_message(self, message_id: str) -> Optional[AppLollmsMessage]:
+        """Finds a message by its ID."""
+        for msg in self.messages:
+            if msg.id == message_id:
+                return msg
+        return None
+    # --- END OF NEW METHOD ---
+
+    def get_message_children(self, message_id: str) -> List[AppLollmsMessage]:
+        """Finds all direct children of a given message."""
+        children = [msg for msg in self.messages if msg.parent_message_id == message_id]
+        # Sort by creation time to ensure consistent order
+        return sorted(children, key=lambda m: m.created_at or datetime.datetime.min)
+
+    def get_path_to_message(self, message_id: str) -> List[AppLollmsMessage]:
+        """Traces the ancestry of a message back to the root of the discussion."""
+        messages_by_id = {msg.id: msg for msg in self.messages}
+        if message_id not in messages_by_id:
+            return []
+        
+        path = []
+        current_msg_id = message_id
+        while current_msg_id:
+            msg = messages_by_id.get(current_msg_id)
+            if not msg:
+                break # Should not happen in a consistent tree
+            path.append(msg)
+            current_msg_id = msg.parent_message_id
+        
+        return path[::-1] # Reverse to get root -> leaf order
+
     def _generate_title_from_messages_if_needed(self) -> None:
         is_generic_title = (
             self.title.startswith("New Discussion") or self.title.startswith("Imported") or
@@ -198,14 +195,14 @@ class AppLollmsDiscussion:
                     new_title = (new_title_base[: max_title_len - 3] + "...") if len(new_title_base) > max_title_len else new_title_base
                     if new_title: self.title = new_title
 
-
     def to_dict(self) -> Dict[str, Any]:
         self._generate_title_from_messages_if_needed()
         return {
             "discussion_id": self.discussion_id,
             "title": self.title,
             "messages": [message.to_dict() for message in self.messages],
-            "rag_datastore_id": self.rag_datastore_id, # Persist selected datastore
+            "rag_datastore_id": self.rag_datastore_id,
+            "active_branch_id": self.active_branch_id # Persist active branch
         }
 
     def save_to_disk(self, file_path: Union[str, Path]) -> None:
@@ -242,7 +239,8 @@ class AppLollmsDiscussion:
         discussion_id = data.get("discussion_id", actual_path.stem)
         title = data.get("title", f"Imported {discussion_id[:8]}")
         discussion = cls(lollms_client_instance, discussion_id=discussion_id, title=title)
-        discussion.rag_datastore_id = data.get("rag_datastore_id") # Load selected datastore
+        discussion.rag_datastore_id = data.get("rag_datastore_id")
+        discussion.active_branch_id = data.get("active_branch_id") # Load active branch
 
         loaded_messages_data = data.get("messages", [])
         if isinstance(loaded_messages_data, list):
@@ -256,53 +254,76 @@ class AppLollmsDiscussion:
             discussion._generate_title_from_messages_if_needed()
         return discussion
 
-    def prepare_query_for_llm(
-        self, extra_content: str, 
-        # image_paths_for_llm: Optional[List[str]], # This is handled by LollmsClient.generate_text directly
-        max_total_tokens: Optional[int] = None
-        # active_personality_system_prompt is no longer needed here
-    ) -> str: # Returns only the user-facing part of the prompt including history
-        lc = self.lollms_client
+    def to_lollms_client_discussion(
+        self,
+        user_assets_path: Path,
+        branch_tip_id: Optional[str] = None
+    ) -> LollmsClientDiscussion:
+        """
+        Converts this AppLollmsDiscussion into a LollmsClientDiscussion object,
+        ready to be used with LollmsClient.chat(). If a branch_tip_id is provided,
+        it builds the history for that specific branch.
+        """
+        if branch_tip_id:
+            messages_to_convert = self.get_path_to_message(branch_tip_id)
+        else:
+            # Fallback for non-branch-aware calls, might not be ideal for complex trees
+            messages_to_convert = self.messages
+
+        client_discussion = LollmsClientDiscussion(self.lollms_client)
         
-        if max_total_tokens is None:
-            max_total_tokens = getattr(lc, "default_ctx_size", LOLLMS_CLIENT_DEFAULTS.get("ctx_size", 32000))
-
-        client_discussion = LollmsClientDiscussion(lc)
-        for app_msg in self.messages:
-            client_discussion.add_message(sender=app_msg.sender, content=app_msg.content)
-
-        user_prefix = f"{lc.user_full_header}"
-        ai_prefix = f"{lc.ai_full_header}"
+        user_name = self.lollms_client.user_name
+        ai_name = self.lollms_client.ai_name
         
-        # The prompt passed to LollmsClient.generate_text will be the current user turn.
-        # The history will be managed by LollmsClient itself if we pass the discussion object,
-        # or we format it here and pass it as part of the prompt.
-        # Let's assume LollmsClient.generate_text can take the full prompt (history + current turn)
-        # and a separate system_prompt.
+        client_discussion.set_participants({
+            user_name: "user",
+            ai_name: "assistant"
+        })
 
-        # Calculate tokens for the current turn's text to determine history budget
-        # The system_prompt tokens will be handled separately by the caller of generate_text
-        current_turn_formatted_text_only = f"{user_prefix}\n{extra_content}\n{ai_prefix}"
-        try:
-            current_turn_tokens = self.lollms_client.binding.count_tokens(current_turn_formatted_text_only)
-        except Exception:
-            current_turn_tokens = len(current_turn_formatted_text_only) // 3 # Fallback
+        for app_msg in messages_to_convert:
+            images_for_client = []
+            if app_msg.image_references:
+                discussion_assets_path = user_assets_path / self.discussion_id
+                for img_ref in app_msg.image_references:
+                    absolute_image_path = discussion_assets_path / img_ref
+                    if absolute_image_path.exists():
+                        images_for_client.append({
+                            "type": "path",
+                            "data": str(absolute_image_path)
+                        })
+                    else:
+                        print(f"Warning: Image reference not found, skipping: {absolute_image_path}")
 
-        # The max_total_tokens should account for the system_prompt, which will be passed separately.
-        # So, the history + current_prompt should fit within (max_total_tokens - system_prompt_tokens).
-        # Since this function doesn't know the system_prompt_tokens, the caller of generate_text
-        # needs to be mindful or LollmsClient needs to handle truncation considering all parts.
+            client_discussion.add_message(
+                sender=app_msg.sender,
+                content=app_msg.content,
+                images=images_for_client if images_for_client else None,
+                parent_id=app_msg.parent_message_id,
+            )
+            
+        return client_discussion
+    
+    def get_branch_tip(self, start_message_id: str) -> str:
+        """
+        Finds the tip (leaf message) of a branch starting from a given message_id.
+        It follows the path of single children. If multiple children are found, 
+        it follows the first child by default to define a deterministic path.
+        If the start_message_id is invalid, it returns the id itself.
+        """
+        if not self.get_message(start_message_id):
+            # The provided ID doesn't exist in the discussion, can't find a tip.
+            return start_message_id
 
-        # For simplicity here, let's assume max_total_tokens is for history + current_prompt.
-        # The LollmsClient will then internally manage this with its own context size and the provided system_prompt.
-        tokens_for_history = max_total_tokens - current_turn_tokens
-        if tokens_for_history < 0: tokens_for_history = 0
-        
-        history_text = client_discussion.format_discussion(max_allowed_tokens=tokens_for_history)
-        
-        # The prompt to return is the history + current user turn, ready for the AI.
-        # The system prompt will be passed as a separate argument to generate_text.
-        full_user_facing_prompt = f"{extra_content}{history_text}\n{ai_prefix}"
-        
-        return full_user_facing_prompt
-
+        current_message_id = start_message_id
+        while True:
+            # get_message_children should be efficient (e.g., using a pre-built map)
+            children = self.get_message_children(current_message_id)
+            
+            if not children:
+                # No more children, this is a leaf node and therefore the tip of this branch.
+                return current_message_id
+            
+            # By convention, follow the first child to trace the "main" path of this branch.
+            # This ensures a predictable branch is returned when starting from a message
+            # that may have multiple direct children.
+            current_message_id = children[0].id

@@ -152,6 +152,12 @@ class DiscussionInfo(BaseModel):
     title: str
     is_starred: bool
     rag_datastore_id: Optional[str] = None # Datastore used for RAG in this discussion
+    created_at: Optional[datetime.datetime] = None
+    last_activity_at: Optional[datetime.datetime] = None
+    active_branch_id: Optional[str] = None
+
+class DiscussionBranchSwitchRequest(BaseModel): # NEW: For switching branches
+    active_branch_id: str
 
 class DiscussionTitleUpdate(BaseModel):
     title: constr(min_length=1, max_length=255)
@@ -171,7 +177,11 @@ class MessageOutput(BaseModel):
     sources: Optional[List[Dict]] = None
     image_references: List[str] = []
     user_grade: int = 0
-
+    created_at: Optional[datetime.datetime] = None
+    # NEW Branching fields for the frontend
+    branch_id: Optional[str] = None
+    branches: Optional[List[str]] = None # List of child branch IDs if this is a branch point
+    
     @field_validator('user_grade', mode='before')
     def provide_default_grade(cls, value):
         return value if value is not None else 0
