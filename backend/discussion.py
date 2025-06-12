@@ -299,6 +299,7 @@ class AppLollmsDiscussion:
                 content=app_msg.content,
                 images=images_for_client if images_for_client else None,
                 parent_id=app_msg.parent_message_id,
+                override_id = app_msg.id
             )
             
         return client_discussion
