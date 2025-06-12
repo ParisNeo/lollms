@@ -189,6 +189,9 @@ async def get_messages_for_discussion(
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj: raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
     
+    if branch_id =="main" and len(discussion_obj.messages)>0:
+        branch_id = discussion_obj.messages[-1].id
+    
     # --- FIX: Resolve the full branch path from the client's request ---
     # The client can send a branch's start_id. We must find the tip of that branch 
     # to retrieve the full message history for rendering.
