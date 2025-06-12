@@ -10,7 +10,7 @@ import datetime
 import asyncio
 import threading
 import traceback
-import io
+import base64
 
 # Third-Party Imports
 import toml
@@ -288,8 +288,8 @@ class AppLollmsDiscussion:
                     absolute_image_path = discussion_assets_path / img_ref
                     if absolute_image_path.exists():
                         images_for_client.append({
-                            "type": "path",
-                            "data": str(absolute_image_path)
+                            "type": "base64",
+                            "data": base64.b64encode(absolute_image_path.read_bytes()).decode("utf-8")
                         })
                     else:
                         print(f"Warning: Image reference not found, skipping: {absolute_image_path}")
