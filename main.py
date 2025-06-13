@@ -219,6 +219,7 @@ async def on_startup() -> None:
             def_vec = SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
             
             # LLM params from config
+            def_ctx_size = LOLLMS_CLIENT_DEFAULTS.get("ctx_size")
             def_temp = LOLLMS_CLIENT_DEFAULTS.get("temperature")
             def_top_k = LOLLMS_CLIENT_DEFAULTS.get("top_k")
             def_top_p = LOLLMS_CLIENT_DEFAULTS.get("top_p")
@@ -243,7 +244,7 @@ async def on_startup() -> None:
                 lollms_model_name=def_model, 
                 safe_store_vectorizer=def_vec,
                 # active_personality_id: None, # Default, no active personality initially
-
+                llm_ctx_size= def_ctx_size,
                 llm_temperature=def_temp, 
                 llm_top_k=def_top_k, 
                 llm_top_p=def_top_p,
@@ -465,6 +466,7 @@ async def set_user_lollms_model(model_name: str = Form(...), current_user: UserA
 async def get_user_llm_params(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserLLMParams:
     # UserAuthDetails already contains llm_prefixed params, sourced from session's non-prefixed params
     return UserLLMParams(
+        llm_ctx_size=current_user.llm_ctx_size,
         llm_temperature=current_user.llm_temperature,
         llm_top_k=current_user.llm_top_k,
         llm_top_p=current_user.llm_top_p,
@@ -480,6 +482,8 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
 
     updated_params_in_db = False
     # Update DBUser record with llm_prefixed fields
+    if params.llm_ctx_size is not None and db_user_record.llm_ctx_size != params.llm_ctx_size:
+        db_user_record.llm_ctx_size = params.llm_ctx_size; updated_params_in_db = True
     if params.llm_temperature is not None and db_user_record.llm_temperature != params.llm_temperature:
         db_user_record.llm_temperature = params.llm_temperature; updated_params_in_db = True
     if params.llm_top_k is not None and db_user_record.llm_top_k != params.llm_top_k:
@@ -499,6 +503,8 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
     session_llm_params = user_sessions[username].get("llm_params", {})
     updated_params_in_session = False
 
+    if params.llm_ctx_size is not None and session_llm_params.get("ctx_size") != params.llm_ctx_size:
+        session_llm_params["ctx_size"] = params.llm_ctx_size; updated_params_in_session = True
     if params.llm_temperature is not None and session_llm_params.get("temperature") != params.llm_temperature:
         session_llm_params["temperature"] = params.llm_temperature; updated_params_in_session = True
     if params.llm_top_k is not None and session_llm_params.get("top_k") != params.llm_top_k:
