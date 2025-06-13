@@ -105,11 +105,14 @@ const importStatus = document.getElementById('importStatus');
 const settingsModal = document.getElementById('settingsModal');
 const settingsLollmsModelSelect = document.getElementById('settingsLollmsModelSelect');
 const saveLLMParamsBtn = document.getElementById('saveLLMParamsBtn');
+
+const settingsContextSize = document.getElementById('settingsContextSize');
 const settingsTemperature = document.getElementById('settingsTemperature');
 const settingsTopK = document.getElementById('settingsTopK');
 const settingsTopP = document.getElementById('settingsTopP');
 const settingsRepeatPenalty = document.getElementById('settingsRepeatPenalty');
 const settingsRepeatLastN = document.getElementById('settingsRepeatLastN');
+
 const settingsStatus_llmConfig = document.getElementById('settingsStatus_llmConfig');
 const settingsStatus_llmParams = document.getElementById('settingsStatus_llmParams');
 const settingsCurrentPassword = document.getElementById('settingsCurrentPassword');
@@ -329,8 +332,6 @@ function updateUIText() { // As provided, potentially needs to call renderDiscus
         discussionTitle.textContent = discussions[currentDiscussionId].title;
     } else {
         discussionTitle.textContent = translate('default_discussion_title');
-        const branchTabsContainer = document.getElementById('branchTabsContainer');
-        if (branchTabsContainer) branchTabsContainer.innerHTML = ''; // Clear branch tabs
     }
     updateRagToggleButtonState();
     if (currentMessages.length > 0) {
@@ -1313,7 +1314,7 @@ function processAndDistributeBranches(rawMessages) {
     if (!rawMessages || rawMessages.length === 0) {
         return [];
     }
-
+    console.log("Processing branches")
     // Create a mutable map of messages for efficient lookups and updates.
     const messageMap = new Map(rawMessages.map(msg => [msg.id, { ...msg }]));
 
@@ -2300,6 +2301,7 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
     }
     
     if (message.branches && message.branches.length > 1) {
+        console.log(message.branches)
         const branchNav = createBranchNavUI(message);
         detailsContainer.appendChild(branchNav);
     }
@@ -2416,13 +2418,7 @@ function processAndRemapBranches(rawMessages) {
             if (message.parent_message_id) {
                 const parentMessage = messageMap.get(message.parent_message_id);
 
-                if (parentMessage) {
-                    // Move the branches array to the parent.
-                    parentMessage.branches = message.branches;
 
-                    // Remove the array from the child to prevent it from rendering there.
-                    message.branches = null;
-                }
             }
         }
     }
@@ -4285,12 +4281,13 @@ saveLLMParamsBtn.onclick = async () => {
     }
 };
 
-[settingsTemperature, settingsTopK, settingsTopP, settingsRepeatPenalty, settingsRepeatLastN].forEach(el => {
+[settingsTemperature, settingsTopK, settingsTopP, settingsRepeatPenalty, settingsRepeatLastN, settingsContextSize].forEach(el => {
     el.oninput = () => { saveLLMParamsBtn.disabled = false; };
 });
 
 saveLLMParamsBtn.onclick = async () => {
     const params = {
+        llm_ctx_size: parseInt(settingsContextSize.value) || null,
         llm_temperature: parseFloat(settingsTemperature.value) || null,
         llm_top_k: parseInt(settingsTopK.value) || null,
         llm_top_p: parseFloat(settingsTopP.value) || null,
@@ -4348,7 +4345,7 @@ async function loadAvailableLollmsModels() { /* As provided */
 
 // **RENAMED AND DEFINED AS SEPARATE FUNCTION**
 async function handleSaveModelAndVectorizer() {
-    if (!settingsLollmsModelSelect || !currentUser || !saveLLMParamsBtn || !settingsTemperature || !settingsTopK || !settingsTopP || !settingsRepeatPenalty || !settingsRepeatLastN || !saveLLMParamsBtn) return;
+    if (!settingsLollmsModelSelect || !currentUser || !saveLLMParamsBtn || !settingsContextSize || !settingsTemperature || !settingsTopK || !settingsTopP || !settingsRepeatPenalty || !settingsRepeatLastN || !saveLLMParamsBtn) return;
 
     const selectedModel = settingsLollmsModelSelect.value;
     let modelChanged = selectedModel && selectedModel !== currentUser.lollms_model_name;
@@ -4378,6 +4375,7 @@ async function handleSaveModelAndVectorizer() {
 async function handleSaveLLMParams() {
 
     const params = {
+        llm_ctx_size: parseInt(settingsContextSize.value) || null,
         llm_temperature: parseFloat(settingsTemperature.value) || null,
         llm_top_k: parseInt(settingsTopK.value) || null,
         llm_top_p: parseFloat(settingsTopP.value) || null,
@@ -4481,6 +4479,8 @@ async function populateSettingsModal() {
     showStatus('', 'info', settingsStatus_llmConfig);
     
     // LLM Parameters Tab
+    
+    if(settingsContextSize) settingsContextSize.value = currentUser.llm_ctx_size ?? '';
     if(settingsTemperature) settingsTemperature.value = currentUser.llm_temperature ?? '';
     if(settingsTopK) settingsTopK.value = currentUser.llm_top_k ?? '';
     if(settingsTopP) settingsTopP.value = currentUser.llm_top_p ?? '';
@@ -4999,7 +4999,7 @@ function openPersonalityEditor(personalityId) {
     } else {
         personalityEditorTitle.textContent = translate('create_personality_modal_title', 'Create New Personality');
     }
-    openModal('personalityEditorModal');
+    openModal('personalityEditorModal', false);
 }
 
 function handlePersonalityIconChange(event) {
