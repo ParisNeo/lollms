@@ -173,7 +173,7 @@ async def create_new_discussion(current_user: UserAuthDetails = Depends(get_curr
     discussion_obj = get_user_discussion(username, discussion_id, create_if_missing=True)
     if not discussion_obj: raise HTTPException(status_code=500, detail="Failed to create new discussion.")
     # For a new discussion, there is no active branch yet. It will be set by the first message.
-    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=False, rag_datastore_id=None, active_branch_id=None)
+    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=False, rag_datastore_id=None, active_branch_id=None, created_at=datetime.datetime.now(), last_activity_at=datetime.datetime.now())
 
 @discussion_router.get("/{discussion_id}", response_model=List[MessageOutput])
 async def get_messages_for_discussion(
@@ -553,6 +553,12 @@ async def chat_in_existing_discussion(
                                 classic_rag_result = lc.generate_text_with_rag(
                                         prompt=client_discussion.format_discussion(lc.default_ctx_size),
                                         system_prompt=client_discussion.system_prompt,
+                                        temperature=current_user.llm_temperature,
+                                        top_k=current_user.llm_top_k,
+                                        top_p=current_user.llm_top_p,
+                                        repeat_penalty=current_user.llm_repeat_penalty,
+                                        repeat_last_n=current_user.llm_repeat_last_n,
+                                        ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
                                         rag_query_function=rqf,
                                         rag_vectorizer_name=active_vectorizer_for_store,
                                         max_rag_hops=current_user.rag_n_hops if current_user.rag_n_hops else 1,
@@ -565,12 +571,42 @@ async def chat_in_existing_discussion(
                             except Exception as ex:
                                 trace_exception(ex)
                                 # Fallback to non-RAG if RAG process fails
-                                lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
+                                lc.chat(
+                                        discussion=client_discussion,
+                                        stream=True,
+                                        temperature=current_user.llm_temperature,
+                                        top_k=current_user.llm_top_k,
+                                        top_p=current_user.llm_top_p,
+                                        repeat_penalty=current_user.llm_repeat_penalty,
+                                        repeat_last_n=current_user.llm_repeat_last_n,
+                                        ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
+                                        streaming_callback=llm_callback
+                                )
                         else:
                             # Fallback to non-RAG if no datastore after all checks
-                            lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
+                                lc.chat(
+                                        discussion=client_discussion,
+                                        stream=True,
+                                        temperature=current_user.llm_temperature,
+                                        top_k=current_user.llm_top_k,
+                                        top_p=current_user.llm_top_p,
+                                        repeat_penalty=current_user.llm_repeat_penalty,
+                                        repeat_last_n=current_user.llm_repeat_last_n,
+                                        ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
+                                        streaming_callback=llm_callback
+                                )
                     else:
-                        lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
+                        lc.chat(
+                                discussion=client_discussion,
+                                stream=True,
+                                temperature=current_user.llm_temperature,
+                                top_k=current_user.llm_top_k,
+                                top_p=current_user.llm_top_p,
+                                repeat_penalty=current_user.llm_repeat_penalty,
+                                repeat_last_n=current_user.llm_repeat_last_n,
+                                ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
+                                streaming_callback=llm_callback
+                        )
 
                 except Exception as e_gen:
                     err_msg = f"LLM generation failed: {str(e_gen)}"
@@ -756,6 +792,7 @@ async def send_discussion_to_user(
     if target_username not in user_sessions:
         initial_lollms_model_target = target_user_db.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
         llm_params_target_session = { # non-prefixed for session
+            "ctx_size": target_user_db.llm_ctx_size if target_user_db.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
             "temperature": target_user_db.llm_temperature if target_user_db.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
             "top_k": target_user_db.llm_top_k if target_user_db.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
             "top_p": target_user_db.llm_top_p if target_user_db.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
@@ -828,6 +865,7 @@ async def export_user_data(export_request: DiscussionExportRequest, current_user
     user_settings = {
         "lollms_model_name": user_db_record.lollms_model_name,
         "safe_store_vectorizer": user_db_record.safe_store_vectorizer,
+        "llm_ctx_size": user_db_record.llm_ctx_size,
         "llm_temperature": user_db_record.llm_temperature,
         "llm_top_k": user_db_record.llm_top_k,
         "llm_top_p": user_db_record.llm_top_p,
