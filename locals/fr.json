@@ -148,6 +148,7 @@
     "settings_llm_models_loading": "Chargement des modèles...",
     "settings_llm_config_save_model_btn": "Sauvegarder le Modèle",
     "settings_llm_params_header": "Paramètres de Génération LLM",
+    "settings_llm_param_ctx_size_label": "Taille du context",
     "settings_llm_param_temp_label": "Température",
     "settings_llm_param_topk_label": "Top K",
     "settings_llm_param_topp_label": "Top P",
