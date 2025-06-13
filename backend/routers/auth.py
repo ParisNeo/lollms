@@ -110,7 +110,7 @@ DirectMessageCreate
 )
 
 from backend.session import (get_current_active_user, get_current_db_user_from_token, get_user_lollms_client, get_user_temp_uploads_path, get_user_by_username, user_sessions)
-from backend.config import (LOLLMS_CLIENT_DEFAULTS, SECRET_KEY, ACCESS_TOKEN_EXPIRE_MINUTES)
+from backend.config import (LOLLMS_CLIENT_DEFAULTS, SAFE_STORE_DEFAULTS)
 from backend.security import pwd_context, verify_password, create_access_token
 from backend.models import Token, TokenData
 
@@ -141,6 +141,7 @@ async def login_for_access_token(
         initial_vectorizer = user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
         
         session_llm_params = {
+            "ctx_size": user.llm_ctx_size if user.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
             "temperature": user.llm_temperature if user.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
             "top_k": user.llm_top_k if user.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
             "top_p": user.llm_top_p if user.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
@@ -224,7 +225,7 @@ async def update_my_details(
             setattr(db_user, field, value)
             if field == "active_personality_id":
                 session_needs_refresh = True
-            if field in ["lollms_model_name", "llm_temperature", "llm_top_k", "llm_top_p", "llm_repeat_penalty", "llm_repeat_last_n", "put_thoughts_in_context"]:
+            if field in ["lollms_model_name", "llm_ctx_size", "llm_temperature", "llm_top_k", "llm_top_p", "llm_repeat_penalty", "llm_repeat_last_n", "put_thoughts_in_context"]:
                 lollms_client_needs_reinit = True # Some LLM params might require client re-init
                 session_needs_refresh = True # Also refresh session for these
 
@@ -245,6 +246,8 @@ async def update_my_details(
             
             # Update session llm_params (non-prefixed keys)
             session_llm_params = session.get("llm_params", {})
+            
+            if "llm_ctx_size" in updated_fields: session_llm_params["ctx_size"] = db_user.llm_ctx_size
             if "llm_temperature" in updated_fields: session_llm_params["temperature"] = db_user.llm_temperature
             if "llm_top_k" in updated_fields: session_llm_params["top_k"] = db_user.llm_top_k
             if "llm_top_p" in updated_fields: session_llm_params["top_p"] = db_user.llm_top_p
@@ -281,6 +284,7 @@ async def update_my_details(
             safe_store_vectorizer=db_user.safe_store_vectorizer,
             active_personality_id=db_user.active_personality_id,
             lollms_client_ai_name=ai_name_for_user,
+            llm_ctx_size=current_session_llm_params.get("ctx_size"),
             llm_temperature=current_session_llm_params.get("temperature"),
             llm_top_k=current_session_llm_params.get("top_k"),
             llm_top_p=current_session_llm_params.get("top_p"),
