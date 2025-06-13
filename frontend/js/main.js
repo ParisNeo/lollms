@@ -104,13 +104,12 @@ const confirmImportBtn = document.getElementById('confirmImportBtn');
 const importStatus = document.getElementById('importStatus');
 const settingsModal = document.getElementById('settingsModal');
 const settingsLollmsModelSelect = document.getElementById('settingsLollmsModelSelect');
-const saveModelAndVectorizerBtn = document.getElementById('saveModelAndVectorizerBtn');
+const saveLLMParamsBtn = document.getElementById('saveLLMParamsBtn');
 const settingsTemperature = document.getElementById('settingsTemperature');
 const settingsTopK = document.getElementById('settingsTopK');
 const settingsTopP = document.getElementById('settingsTopP');
 const settingsRepeatPenalty = document.getElementById('settingsRepeatPenalty');
 const settingsRepeatLastN = document.getElementById('settingsRepeatLastN');
-const saveLLMParamsBtn = document.getElementById('saveLLMParamsBtn');
 const settingsStatus_llmConfig = document.getElementById('settingsStatus_llmConfig');
 const settingsStatus_llmParams = document.getElementById('settingsStatus_llmParams');
 const settingsCurrentPassword = document.getElementById('settingsCurrentPassword');
@@ -727,8 +726,7 @@ window.onload = async () => {
     if(settingsBtn) settingsBtn.onclick = () => openModal('settingsModal');
     if(dataStoresBtn) dataStoresBtn.onclick = () => openModal('dataStoresModal');
     // ... other settings listeners if they were missed ...
-    if(saveModelAndVectorizerBtn) saveModelAndVectorizerBtn.onclick = handleSaveModelAndVectorizer;
-    if(saveLLMParamsBtn) saveLLMParamsBtn.onclick = handleSaveLLMParams;
+    if(saveLLMParamsBtn) saveLLMParamsBtn.onclick = handleSaveModelAndVectorizer;
 
 
     // Initial render of empty chat area (if applicable)
@@ -4265,15 +4263,15 @@ async function loadAvailableLollmsModels() {
         }
     }
 
-settingsLollmsModelSelect.onchange = () => { saveModelAndVectorizerBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name); };
+settingsLollmsModelSelect.onchange = () => { saveLLMParamsBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name); };
 
-saveModelAndVectorizerBtn.onclick = async () => {
+saveLLMParamsBtn.onclick = async () => {
     const selectedModel = settingsLollmsModelSelect.value;
     let modelChanged = selectedModel && selectedModel !== currentUser.lollms_model_name;
     if (!modelChanged) return;
 
     showStatus(translate('status_saving_model', 'Saving model...'), 'info', settingsStatus_llmConfig); 
-    saveModelAndVectorizerBtn.disabled = true;
+    saveLLMParamsBtn.disabled = true;
     try {
         if (modelChanged) {
             const formData = new FormData(); formData.append('model_name', selectedModel);
@@ -4283,7 +4281,7 @@ saveModelAndVectorizerBtn.onclick = async () => {
         showStatus(translate('status_model_saved_success', 'Model saved. LLM Client will re-init if model changed.'), 'success', settingsStatus_llmConfig);
     } catch (error) { /* Handled by apiRequest */ 
     } finally {
-        saveModelAndVectorizerBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name);
+        saveLLMParamsBtn.disabled = (settingsLollmsModelSelect.value === currentUser.lollms_model_name);
     }
 };
 
@@ -4350,37 +4348,34 @@ async function loadAvailableLollmsModels() { /* As provided */
 
 // **RENAMED AND DEFINED AS SEPARATE FUNCTION**
 async function handleSaveModelAndVectorizer() {
-    if (!settingsLollmsModelSelect || !currentUser || !saveModelAndVectorizerBtn) return;
+    if (!settingsLollmsModelSelect || !currentUser || !saveLLMParamsBtn || !settingsTemperature || !settingsTopK || !settingsTopP || !settingsRepeatPenalty || !settingsRepeatLastN || !saveLLMParamsBtn) return;
 
     const selectedModel = settingsLollmsModelSelect.value;
     let modelChanged = selectedModel && selectedModel !== currentUser.lollms_model_name;
-
-    if (!modelChanged) {
-        showStatus(translate('status_no_model_changes', 'No model changes to save.'), 'info', settingsStatus_llmConfig);
-        return;
+    if (modelChanged) {
+        showStatus(translate('status_saving_model', 'Saving model...'), 'info', settingsStatus_llmConfig);
+        saveLLMParamsBtn.disabled = true;
+        try {
+            const formData = new FormData(); formData.append('model_name', selectedModel);
+            await apiRequest('/api/config/lollms-model', { method: 'POST', body: formData, statusElement: settingsStatus_llmConfig });
+            currentUser.lollms_model_name = selectedModel; // Update local currentUser state
+            showStatus(translate('status_model_saved_success', 'Model saved. LLM Client will re-init if model changed.'), 'success', settingsStatus_llmConfig);
+        } catch (error) {
+            // apiRequest should handle showing the error status
+            saveLLMParamsBtn.disabled = false; // Re-enable on error
+        } finally {
+            // Disable button again only if selection matches current user setting (or it was re-enabled by error)
+            if (settingsLollmsModelSelect.value === currentUser.lollms_model_name && !saveLLMParamsBtn.disabled) {
+                 saveLLMParamsBtn.disabled = true;
+            }
+        }        
     }
+    handleSaveLLMParams()
 
-    showStatus(translate('status_saving_model', 'Saving model...'), 'info', settingsStatus_llmConfig);
-    saveModelAndVectorizerBtn.disabled = true;
-    try {
-        const formData = new FormData(); formData.append('model_name', selectedModel);
-        await apiRequest('/api/config/lollms-model', { method: 'POST', body: formData, statusElement: settingsStatus_llmConfig });
-        currentUser.lollms_model_name = selectedModel; // Update local currentUser state
-        showStatus(translate('status_model_saved_success', 'Model saved. LLM Client will re-init if model changed.'), 'success', settingsStatus_llmConfig);
-    } catch (error) {
-        // apiRequest should handle showing the error status
-        saveModelAndVectorizerBtn.disabled = false; // Re-enable on error
-    } finally {
-        // Disable button again only if selection matches current user setting (or it was re-enabled by error)
-        if (settingsLollmsModelSelect.value === currentUser.lollms_model_name && !saveModelAndVectorizerBtn.disabled) {
-             saveModelAndVectorizerBtn.disabled = true;
-        }
-    }
 }
 
 // **RENAMED AND DEFINED AS SEPARATE FUNCTION**
 async function handleSaveLLMParams() {
-    if (!settingsTemperature || !settingsTopK || !settingsTopP || !settingsRepeatPenalty || !settingsRepeatLastN || !saveLLMParamsBtn) return;
 
     const params = {
         llm_temperature: parseFloat(settingsTemperature.value) || null,
@@ -4418,7 +4413,7 @@ async function handleSaveLLMParams() {
         return;
     }
 
-    showStatus(translate('status_saving_llm_params', 'Saving LLM parameters...'), 'info', settingsStatus_llmParams);
+    showStatus(translate('status_saving_llm_params', 'Saving LLM parameters...'), 'info', settingsStatus_llmConfig);
     saveLLMParamsBtn.disabled = true;
     try {
         await apiRequest('/api/config/llm-params', {
@@ -4428,7 +4423,7 @@ async function handleSaveLLMParams() {
             statusElement: settingsStatus_llmParams
         });
         if (currentUser) Object.assign(currentUser, payload); // Update local state
-        showStatus(translate('status_llm_params_saved_success', 'LLM parameters saved.'), 'success', settingsStatus_llmParams);
+        showStatus(translate('status_llm_params_saved_success', 'LLM parameters saved.'), 'success', settingsStatus_llmConfig);
     } catch (error) {
         // apiRequest handles status
         saveLLMParamsBtn.disabled = false; // Re-enable on error
@@ -4482,7 +4477,7 @@ async function handleChangePassword() {
 async function populateSettingsModal() {
     if (!currentUser) return;
     populateDropdown(settingsLollmsModelSelect, availableLollmsModels, currentUser.lollms_model_name, translate('settings_no_models_found'));
-    saveModelAndVectorizerBtn.disabled = true;
+    saveLLMParamsBtn.disabled = true;
     showStatus('', 'info', settingsStatus_llmConfig);
     
     // LLM Parameters Tab
