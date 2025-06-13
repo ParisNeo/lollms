@@ -177,6 +177,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         initial_vectorizer = db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
         
         session_llm_params = {
+            "ctx_size": db_user.llm_ctx_size if db_user.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
             "temperature": db_user.llm_temperature if db_user.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
             "top_k": db_user.llm_top_k if db_user.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
             "top_p": db_user.llm_top_p if db_user.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
@@ -221,6 +222,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         safe_store_vectorizer=user_sessions[username]["active_vectorizer"],
         active_personality_id=user_sessions[username]["active_personality_id"], # from session
         lollms_client_ai_name=ai_name_for_user,
+        
+        llm_ctx_size=current_session_llm_params.get("ctx_size"),
         llm_temperature=current_session_llm_params.get("temperature"),
         llm_top_k=current_session_llm_params.get("top_k"),
         llm_top_p=current_session_llm_params.get("top_p"),
