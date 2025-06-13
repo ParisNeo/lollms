@@ -49,6 +49,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, constr, field_validator, validator, EmailStr
 
 class UserLLMParams(BaseModel):
+    llm_ctx_size: Optional[int] = Field(None, ge=0)
     llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
     llm_top_k: Optional[int] = Field(None, ge=1)
     llm_top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
@@ -282,6 +283,8 @@ class UserUpdate(BaseModel):
     active_personality_id: Optional[str] = None # Allow setting to None or a valid ID
 
     # LLM Params (can be updated here too)
+    
+    llm_ctx_size: Optional[int] = Field(None, ge=0)
     llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
     llm_top_k: Optional[int] = Field(None, ge=1)
     llm_top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
