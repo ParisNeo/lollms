@@ -72,6 +72,7 @@ class User(Base):
     
     active_personality_id = Column(String, ForeignKey("personalities.id", name="fk_user_active_personality", ondelete="SET NULL"), nullable=True)
 
+    llm_ctx_size    = Column(Integer, nullable=True)
     llm_temperature = Column(Float, nullable=True)
     llm_top_k = Column(Integer, nullable=True)
     llm_top_p = Column(Float, nullable=True)
@@ -302,6 +303,7 @@ def init_database(db_url: str):
                 new_user_cols_defs = {
                     "first_name": "VARCHAR", "family_name": "VARCHAR", "email": "VARCHAR",
                     "birth_date": "DATE", 
+                    "llm_ctx_size": "INTEGER",
                     "rag_top_k": "INTEGER",
                     "max_rag_len": "INTEGER",
                     "rag_n_hops": "INTEGER",
