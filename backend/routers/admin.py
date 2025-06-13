@@ -131,6 +131,7 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         is_admin=user_data.is_admin, 
         lollms_model_name=user_data.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
         safe_store_vectorizer=user_data.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
+        llm_ctx_size=user_data.llm_ctx_size if user_data.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
         llm_temperature=user_data.llm_temperature if user_data.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
         llm_top_k=user_data.llm_top_k if user_data.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
         llm_top_p=user_data.llm_top_p if user_data.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
