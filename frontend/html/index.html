@@ -533,6 +533,11 @@
                                 <label for="settingsRepeatLastN" class="block text-sm font-medium " data-translate-key="settings_llm_param_repeatlastn_label">Repeat Last N</label>
                                 <input type="number" id="settingsRepeatLastN" step="1" min="0" class="mt-1 block w-full sm:text-sm" placeholder="e.g., 64">
                             </div>
+                            <div>
+                                <label for="settingsContextSize" class="block text-sm font-medium " data-translate-key="settings_llm_param_ctx_size_label">Context size</label>
+                                <input type="number" id="settingsContextSize" step="1" min="1024" class="mt-1 block w-full sm:text-sm" placeholder="e.g., 128000">
+                            </div>
+                            
                         </div>                        
                         <div class="text-right">
                              <button id="saveLLMParamsBtn" class="px-3 py-1.5   text-sm font-medium rounded-md  disabled:opacity-50" data-translate-key="settings_llm_config_save_model_btn">Save Model</button>
