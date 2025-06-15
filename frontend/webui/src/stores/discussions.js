@@ -18,11 +18,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     });
 
     const activeMessages = computed(() => {
-        if (activeDiscussion.value) {
-            const branchId = activeDiscussion.value.activeBranchId || 'main';
-            return activeDiscussion.value.branches?.[branchId] || [];
-        }
-        return [];
+        const disc = activeDiscussion.value;
+        if (!disc) return [];
+        const branchId = disc.activeBranchId || 'main';
+        return disc.branches?.[branchId] || [];
     });
 
     // Helpers
@@ -30,6 +29,33 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const disc = discussions.value[discussionId];
         if (!disc || !disc.branches || !disc.branches[branchId]) return null;
         return disc.branches[branchId].find(m => m.id === messageId);
+    }
+
+    /**
+     * Processes raw message objects from the API, adding client-side metadata.
+     * @param {Array} messages - The array of message objects.
+     * @returns {Array} The processed array of message objects.
+     */
+    function processMessages(messages) {
+        const authStore = useAuthStore();
+        return messages.map(msg => {
+            let senderType = 'assistant'; // Default to assistant
+            const sender = msg.sender?.toLowerCase();
+            const username = authStore.user?.username?.toLowerCase();
+
+            if (sender === 'system' || sender === 'error') {
+                senderType = 'system';
+            } else if (sender === username || sender === 'user') {
+                senderType = 'user';
+            }
+
+            return {
+                ...msg,
+                sender_type: senderType, // 'user', 'assistant', or 'system'
+                steps: msg.steps || [],
+                metadata: msg.metadata || {}
+            };
+        });
     }
 
     // Actions
@@ -68,12 +94,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (!disc.messages_loaded_fully[branchId]) {
             try {
                 const response = await apiClient.get(`/api/discussions/${id}?branch_id=${branchId}`);
-                // Ensure steps and metadata are arrays to prevent rendering errors
-                const processedMessages = response.data.map(msg => ({
-                    ...msg,
-                    steps: msg.steps || [],
-                    metadata: msg.metadata || {}
-                }));
+                // Use the new processing function
+                const processedMessages = processMessages(response.data);
                 disc.branches = { ...disc.branches, [branchId]: processedMessages };
                 disc.messages_loaded_fully[branchId] = true;
             } catch (error) {
@@ -257,6 +279,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                         switch (data.type) {
                             case 'chunk': messageToUpdate.content += data.content; break;
                             case 'model_name': messageToUpdate.model_name = data.name; break;
+                            case 'token_count': messageToUpdate.token_count = data.count; break;
                             case 'step_start': messageToUpdate.steps.push({ id: data.id, content: data.content, status: 'pending', type: 'step_start' }); break;
                             case 'step': messageToUpdate.steps.push({ id: data.id, content: data.content, status: 'done', type: 'step' }); break;
                             case 'step_end': {
@@ -306,36 +329,25 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             await new Promise(resolve => setTimeout(resolve, 250));
             
-            // --- FIX START: MERGE LOGIC ---
             const oldMessages = discussions.value[discId]?.branches?.[branchId] || [];
             
             const response = await apiClient.get(`/api/discussions/${discId}?branch_id=${branchId}`);
-            const newMessages = response.data.map(msg => ({ // Ensure new messages have placeholders
-                ...msg,
-                steps: msg.steps || [],
-                metadata: msg.metadata || {}
-            }));
+            const newMessages = processMessages(response.data);
 
             const lastOldMsg = oldMessages.length > 0 ? oldMessages[oldMessages.length - 1] : null;
             const lastNewMsg = newMessages.length > 0 ? newMessages[newMessages.length - 1] : null;
 
-            // If the last message in our client-side list was the one we were streaming,
-            // merge its transient data (steps, sources) into the permanent version from the server.
             if (lastOldMsg && lastNewMsg && lastOldMsg.isStreaming) {
-                // Merge sources from metadata
                 if (lastOldMsg.metadata?.sources?.length > 0) {
                     if (!lastNewMsg.metadata) lastNewMsg.metadata = {};
                     lastNewMsg.metadata.sources = [...(lastNewMsg.metadata.sources || []), ...lastOldMsg.metadata.sources];
                 }
-                // Carry over steps
                 if (lastOldMsg.steps?.length > 0) {
                     lastNewMsg.steps = lastOldMsg.steps;
                 }
             }
 
-            // Now, commit the corrected message list to the store.
             discussions.value[discId].branches[branchId] = newMessages;
-            // --- FIX END ---
         } catch(e) {
             useUiStore().addNotification('Failed to refresh conversation state.', 'warning');
         }

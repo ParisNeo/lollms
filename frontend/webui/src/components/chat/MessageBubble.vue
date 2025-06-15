@@ -3,7 +3,6 @@ import { computed, ref, onMounted } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
-import CodeBlock from './CodeBlock.vue';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import { marked } from 'marked';
 
@@ -18,11 +17,9 @@ const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
-// --- FIX: The default state for steps should be collapsed IF the message is not currently streaming.
 const isStepsCollapsed = ref(!props.message.isStreaming);
 
 onMounted(() => {
-    // This ensures that for messages loaded from history, the steps are initially collapsed.
     isStepsCollapsed.value = !props.message.isStreaming;
 });
 
@@ -37,6 +34,12 @@ const bubbleClass = computed(() => ({
   'is-streaming': props.message.isStreaming,
 }));
 
+const containerClass = computed(() => ({
+    'justify-center': isSystem.value,
+    'items-end': isUser.value,
+    'items-start': isAi.value
+}));
+
 const senderName = computed(() => {
     if (isUser.value) {
         return authStore.user?.username || 'You';
@@ -46,10 +49,9 @@ const senderName = computed(() => {
 
 const renderedContent = computed(() => {
   if (!props.message.content) return '';
-  // Ensure 'think' blocks are parsed correctly and not escaped by marked
   let processedContent = props.message.content.replace(/<think>([\s\S]*?)<\/think>/gs, (match, thinkContent) => {
-      // Temporarily encode to avoid markdown processing
-      return `<details class="think-block my-2"><summary class="px-2 py-1 text-xs italic text-gray-500 dark:text-gray-400 cursor-pointer">Assistant's Thoughts</summary><div class="think-content p-2 border-t border-gray-200 dark:border-gray-700">${marked.parse(thinkContent.trim())}</div></details>`;
+      const thinkHtml = marked.parse(thinkContent.trim());
+      return `<details class="think-block my-2"><summary class="px-2 py-1 text-xs italic text-gray-500 dark:text-gray-400 cursor-pointer">Assistant's Thoughts</summary><div class="think-content p-2 border-t border-gray-200 dark:border-gray-700">${thinkHtml}</div></details>`;
   });
   return marked.parse(processedContent, { breaks: true, gfm: true });
 });
@@ -116,7 +118,7 @@ function handleBranchOrRegenerate() {
 </script>
 
 <template>
-  <div class="message-container group flex flex-col" :data-message-id="message.id">
+  <div class="message-container group flex flex-col" :class="containerClass" :data-message-id="message.id">
     <div class="message-bubble" :class="bubbleClass">
       <!-- Sender & Model Info -->
       <div v-if="!isUser && !isSystem" class="flex items-center text-xs mb-2 text-gray-500 dark:text-gray-400">
@@ -177,23 +179,31 @@ function handleBranchOrRegenerate() {
       </div>
       
       <!-- Footer with Sources and Actions -->
-      <div v-if="!isSystem" class="message-footer mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
-        <div v-if="message.metadata?.sources?.length" class="flex flex-wrap gap-2 mb-2">
-            <button v-for="source in message.metadata.sources" :key="source.document" @click="showSourceDetails(source)" class="source-badge" :title="`View source: ${source.document}`">
-                <span class="similarity-chip w-3 h-3 rounded-full" :class="getSimilarityColor(source.similarity*100)"></span>
-                <span class="truncate max-w-xs">{{ source.document }}</span>
-            </button>
-        </div>
-        
-        <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400">
-            <span>{{ formatTimestamp(message.created_at) }}</span>
-            <div class="actions flex items-center space-x-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button @click="copyContent" title="Copy" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg></button>
-                <button @click="handleBranchOrRegenerate" :title="isUser ? 'Resend/Branch' : 'Regenerate'" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></button>
-                <button @click="handleDelete" title="Delete" class="p-1.5 rounded-full hover:bg-red-200 dark:hover:bg-red-700 text-red-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
-                <div v-if="isAi" class="flex items-center space-x-1 ml-2 border-l border-gray-300 dark:border-gray-600 pl-2">
-                    <button @click="handleGrade(1)" title="Good" class="p-1.5 rounded-full" :class="message.user_grade > 0 ? 'bg-green-100 text-green-700' : 'hover:bg-gray-200 dark:hover:bg-gray-600'"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333V17a1 1 0 001 1h6.758a1 1 0 00.97-1.22l-1.933-6.511A1 1 0 0012 9.5H7.083A1 1 0 006 10.333zM7 9a1 1 0 00-1 1v1a1 1 0 102 0v-1a1 1 0 00-1-1z" /></svg></button>
-                    <button @click="handleGrade(-1)" title="Bad" class="p-1.5 rounded-full" :class="message.user_grade < 0 ? 'bg-red-100 text-red-700' : 'hover:bg-gray-200 dark:hover:bg-gray-600'"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M18 9.5a1.5 1.5 0 11-3 0v-6a1.5 1.5 0 013 0v6zM14 9.667V3a1 1 0 00-1-1H6.242a1 1 0 00-.97 1.22l1.933 6.511A1 1 0 008 10.5h4.917a1 1 0 00.999-.667zM13 11a1 1 0 10-2 0v1a1 1 0 102 0v-1z" /></svg></button>
+      <div v-if="!isSystem" class="message-footer">
+        <div class="flex justify-between items-start gap-2">
+            <!-- Left Side: Details (Tokens, Sources) -->
+            <div class="flex items-center flex-wrap gap-2">
+                 <div v-if="message.token_count" class="detail-badge token-badge">
+                    <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M15.988 3.012A2.25 2.25 0 0118 5.25v9.5A2.25 2.25 0 0115.75 17h-3.389a1.5 1.5 0 01-1.49-1.076L9.4 12.5H2.25a.75.75 0 010-1.5h7.15l1.45-3.868A1.5 1.5 0 0112.361 6h3.389A2.25 2.25 0 0115.988 3.012z" clip-rule="evenodd" /></svg>
+                    <span>{{ message.token_count }}</span>
+                </div>
+                <button v-for="source in message.metadata?.sources" :key="source.document" @click="showSourceDetails(source)" class="detail-badge source-badge" :title="`View source: ${source.document}`">
+                    <span class="similarity-chip" :class="getSimilarityColor(source.similarity*100)"></span>
+                    <span class="truncate max-w-xs">{{ source.document }}</span>
+                </button>
+            </div>
+
+            <!-- Right Side: Actions (Copy, Rate, etc.) -->
+            <div class="flex items-center gap-2 flex-shrink-0">
+                <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button @click="copyContent" title="Copy" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg></button>
+                    <button @click="handleBranchOrRegenerate" :title="isUser ? 'Resend/Branch' : 'Regenerate'" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></button>
+                    <button @click="handleDelete" title="Delete" class="p-1.5 rounded-full hover:bg-red-200 dark:hover:bg-red-700 text-red-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                </div>
+                <div v-if="isAi" class="message-rating">
+                    <button @click="handleGrade(1)" title="Good response" class="rating-btn upvote" :class="{ 'active': message.user_grade > 0 }"><svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg></button>
+                    <span class="rating-score">{{ message.user_grade || 0 }}</span>
+                    <button @click="handleGrade(-1)" title="Bad response" class="rating-btn downvote" :class="{ 'active': message.user_grade < 0 }"><svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M9.106 17.447a1 1 0 001.788 0l7-14a1 1 0 00-1.169-1.409l-5 1.429A1 1 0 0011 4.429V9a1 1 0 11-2 0V4.429a1 1 0 00-.725-.962l-5-1.428a1 1 0 00-1.17 1.408l7 14z" /></svg></button>
                 </div>
             </div>
         </div>
@@ -209,7 +219,6 @@ function handleBranchOrRegenerate() {
 .typing-indicator .dot:nth-of-type(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
 
-/* Ensure prose styles within steps are reset correctly */
 .step-text > :first-child { margin-top: 0; }
 .step-text > :last-child { margin-bottom: 0; }
 
