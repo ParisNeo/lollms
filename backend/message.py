@@ -103,6 +103,7 @@ except ImportError:
 class AppLollmsMessage:
     """Represents a single message with enriched metadata for persistence."""
     sender: str
+    sender_type: str
     content: str
     id: str = dataclass_field(default_factory=lambda: str(uuid.uuid4()))
     parent_message_id: Optional[str] = None
@@ -144,10 +145,11 @@ class AppLollmsMessage:
         else:
             # If no timestamp, create one now (useful for migrating old data)
             created_at = datetime.datetime.now(datetime.timezone.utc)
-
+        sender = data.get("sender", "unknown")
         return cls(
             id=data.get("id", str(uuid.uuid4())),
-            sender=data.get("sender", "unknown"),
+            sender=sender,
+            sender_type=data.get("sender_type", "user" if sender!="lollms" and sender!="assistant" else "assistant"),
             content=data.get("content", ""),
             parent_message_id=data.get("parent_message_id"),
             created_at=created_at,

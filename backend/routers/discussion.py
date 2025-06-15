@@ -452,7 +452,7 @@ async def chat_in_existing_discussion(
     
     user_token_count = lc.binding.count_tokens(prompt) if prompt else 0
     new_user_message = discussion_obj.add_message(
-        sender=lc.user_name, content=prompt, parent_message_id=parent_message_id,
+        sender=lc.user_name, sender_type="user", content=prompt, parent_message_id=parent_message_id,
         token_count=user_token_count, image_references=final_image_references_for_message
     )
 
@@ -630,8 +630,9 @@ async def chat_in_existing_discussion(
             ai_response_content = shared_state["accumulated_ai_response"]
             if ai_response_content and not shared_state["generation_error"]:
                 ai_token_count = lc.binding.count_tokens(ai_response_content)
+                personality= current_user.active_personality_id
                 ai_message = discussion_obj.add_message(
-                    sender=lc.ai_name, content=ai_response_content, parent_message_id=new_user_message.id,
+                    sender=lc.ai_name, sender_type= personality if personality else "assistant", content=ai_response_content, parent_message_id=new_user_message.id,
                     binding_name=shared_state.get("binding_name"), model_name=shared_state.get("model_name"),
                     token_count=ai_token_count, sources=sources
                 )
@@ -639,7 +640,7 @@ async def chat_in_existing_discussion(
                     ai_message.id = shared_state["final_message_id"]
                 discussion_obj.active_branch_id = ai_message.id # Set new active branch
             elif shared_state["generation_error"]:
-                discussion_obj.add_message(sender="system", content=shared_state["generation_error"], parent_message_id=new_user_message.id)
+                discussion_obj.add_message(sender="system", sender_type="system", content=shared_state["generation_error"], parent_message_id=new_user_message.id)
             
             save_user_discussion(username, discussion_id, discussion_obj)
         finally:
@@ -841,7 +842,7 @@ async def send_discussion_to_user(
                     print(f"WARN: Asset {original_asset_file} for discussion send not found, skipping.")
         
         copied_discussion_obj.add_message(
-            sender=msg.sender, content=msg.content,
+            sender=msg.sender, sender_type=msg.sender_type,content=msg.content,
             parent_message_id=msg.parent_message_id, 
             binding_name=msg.binding_name, model_name=msg.model_name,
             token_count=msg.token_count, image_references=new_image_refs

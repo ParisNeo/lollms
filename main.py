@@ -194,6 +194,9 @@ app = FastAPI(
 )
 security = HTTPBasic()
 
+## VUE TRANSITION: Check config to decide which frontend to serve
+SERVE_VUE_FRONTEND = SERVER_CONFIG.get("serve_vue_frontend", False)
+
 @app.on_event("startup")
 async def on_startup() -> None:
     try:
@@ -306,38 +309,6 @@ async def on_startup() -> None:
 
 
 # --- Root and Static File Endpoints ---
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def serve_index_html(request: Request) -> FileResponse:
-    index_path = Path(__file__).parent/"frontend"/"html"/"index.html"
-    if not index_path.is_file(): raise HTTPException(status_code=404, detail="index.html not found.")
-    return FileResponse(index_path)
-
-@app.get("/main.js", include_in_schema=False)
-async def serve_main_js(request: Request) -> FileResponse:
-    main_js_path = Path(__file__).parent/"frontend"/"js"/"main.js"
-    if not main_js_path.is_file(): raise HTTPException(status_code=404, detail="main.js not found.")
-    return FileResponse(main_js_path, media_type="application/javascript")
-@app.get("/style.css", include_in_schema=False)
-async def serve_style_css(request: Request) -> FileResponse:
-    style_css_path = Path(__file__).parent/"frontend"/"css"/"style.css"
-    if not style_css_path.is_file(): raise HTTPException(status_code=404, detail="style.css not found.")
-    return FileResponse(style_css_path, media_type="text/css")
-
-@app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
-async def serve_admin_panel_page(admin_user: UserAuthDetails = Depends(get_current_admin_user)) -> FileResponse:
-    admin_html_path = Path(__file__).parent/"frontend"/"html"/"admin.html"
-    if not admin_html_path.is_file(): raise HTTPException(status_code=404, detail="admin.html not found.")
-    return FileResponse(admin_html_path)
-
-@app.get("/favicon.ico", include_in_schema=False)
-async def favicon() -> Response:
-    favicon_path = Path("favicon.ico").resolve()
-    return FileResponse(favicon_path, media_type="image/x-icon") if favicon_path.is_file() else Response(status_code=204)
-
-@app.get("/logo.png", include_in_schema=False)
-async def logo() -> Response:
-    logo_path = Path("logo.png").resolve()
-    return FileResponse(logo_path, media_type="image/png") if logo_path.is_file() else Response(status_code=404)
 
 # Serve discussion assets (uploaded images)
 user_assets_path_base = APP_DATA_DIR # Used to construct full path for StaticFiles
@@ -756,31 +727,66 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-VUE_APP_DIR = Path(__file__).resolve().parent / "frontend"/ "simplified-lollms-vue" / "dist" # Adjust path
 
-# Mount the static files directory from the Vue build
-# This should be AFTER your /api routes to avoid conflicts
-# app.mount("/assets", StaticFiles(directory=VUE_APP_DIR / "assets"), name="vue-assets")
+## VUE TRANSITION: This section is now conditional based on the config.
 
-# @app.get("/{full_path:path}", include_in_schema=False)
-# async def serve_vue_app(request: Request, full_path: str):
-#     """
-#     Serves the Vue app.
-#     If a specific file is requested and exists, serve it.
-#     Otherwise, serve index.html for SPA routing.
-#     """
-#     # Check if the requested path points to an existing file in VUE_APP_DIR
-#     potential_file_path = VUE_APP_DIR / full_path
-#     if os.path.isfile(potential_file_path):
-#         return FileResponse(potential_file_path)
+if not SERVE_VUE_FRONTEND:
+    # Serve the original static HTML frontend
+    print("INFO: Serving original static HTML frontend.")
+    app.mount("/js", StaticFiles(directory=Path(__file__).parent / "frontend" / "legacy_webui" / "js"), name="js")
+    app.mount("/css", StaticFiles(directory=Path(__file__).parent / "frontend" / "legacy_webui" / "css"), name="css")
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def serve_index_html(request: Request) -> FileResponse:
+        index_path = Path(__file__).parent / "frontend" / "legacy_webui" / "html" / "index.html"
+        if not index_path.is_file(): raise HTTPException(status_code=404, detail="index.html not found.")
+        return FileResponse(index_path)
+    @app.get("/main.js", include_in_schema=False)
+    async def serve_main_js(request: Request) -> FileResponse:
+        main_js_path = Path(__file__).parent/"frontend" / "legacy_webui"/"js"/"main.js"
+        if not main_js_path.is_file(): raise HTTPException(status_code=404, detail="main.js not found.")
+        return FileResponse(main_js_path, media_type="application/javascript")
+    @app.get("/style.css", include_in_schema=False)
+    async def serve_style_css(request: Request) -> FileResponse:
+        style_css_path = Path(__file__).parent/"frontend" / "legacy_webui"/"css"/"style.css"
+        if not style_css_path.is_file(): raise HTTPException(status_code=404, detail="style.css not found.")
+        return FileResponse(style_css_path, media_type="text/css")
+    @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)
+    async def serve_admin_panel_page(admin_user: UserAuthDetails = Depends(get_current_admin_user)) -> FileResponse:
+        admin_html_path = Path(__file__).parent / "frontend" / "legacy_webui" / "html" / "admin.html"
+        if not admin_html_path.is_file(): raise HTTPException(status_code=404, detail="admin.html not found.")
+        return FileResponse(admin_html_path)
+
+else:
+    # Serve the new Vue.js frontend from the 'dist' directory
+    print("INFO: Serving new Vue.js frontend.")
+    VUE_APP_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
     
-#     # If not a file or path is empty, serve index.html
-#     index_path = VUE_APP_DIR / "index.html"
-#     if not index_path.is_file():
-#         raise HTTPException(status_code=404, detail="Vue app index.html not found. Did you build the Vue app?")
-#     return FileResponse(index_path)
+    # Mount the static assets directory from the Vue build.
+    # The path must be absolute or relative to where the script is run.
+    app.mount("/assets", StaticFiles(directory=VUE_APP_DIR / "assets"), name="vue-assets")
+
+    # This catch-all route MUST be last.
+    @app.get("/{full_path:path}", response_class=HTMLResponse, include_in_schema=False)
+    async def serve_vue_app(request: Request, full_path: str):
+        index_path = VUE_APP_DIR / "index.html"
+        if not index_path.is_file():
+            raise HTTPException(status_code=404, detail="Vue app index.html not found. Did you run 'npm run build'?")
+        return FileResponse(index_path)
 
 
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon() -> Response:
+    # Use a common favicon path regardless of which frontend is served
+    favicon_path = Path(__file__).parent / "frontend" / "webui" / "public" / "favicon.ico"
+    return FileResponse(favicon_path, media_type="image/x-icon") if favicon_path.is_file() else Response(status_code=204)
+
+@app.get("/logo.png", include_in_schema=False)
+async def logo() -> Response:
+    # Use a common logo path
+    logo_path = Path(__file__).parent / "frontend" / "webui" / "public" / "logo.png"
+    return FileResponse(logo_path, media_type="image/png") if logo_path.is_file() else Response(status_code=404)
 
 # --- Main Execution ---
 if __name__ == "__main__":
@@ -788,8 +794,8 @@ if __name__ == "__main__":
     host = SERVER_CONFIG.get("host", "127.0.0.1"); port = int(SERVER_CONFIG.get("port", 9642))
     try: APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
     except OSError as e: print(f"CRITICAL: Could not create main data directory {APP_DATA_DIR}: {e}")
-    print(f"--- Simplified LoLLMs Chat API Server (v{APP_VERSION}) ---")
+    print(f"--- LoLLMs Chat API Server (v{APP_VERSION}) ---")
     print(f"Access UI at: http://{host}:{port}/")
     print(f"Access Admin Panel at: http://{host}:{port}/admin (requires admin login)")
     print("--------------------------------------------------------------------")
-    uvicorn.run("main:app", host=host, port=port, reload=False) 
+    uvicorn.run("main:app", host=host, port=port, reload=False)

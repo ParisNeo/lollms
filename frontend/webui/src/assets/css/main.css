@@ -1,0 +1,342 @@
+/* Import Tailwind CSS base styles */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   1. Global Styles & Root Variables
+   ========================================================================== */
+:root {
+    /* Light Theme - General */
+    --bg-main-light: #f3f4f6; /* bg-gray-100 */
+    --text-main-light: #111827; /* text-gray-900 */
+    --bg-content-light: #f9fafb; /* bg-gray-50 */
+    --bg-sidebar-light: white;
+    --border-light: #e5e7eb; /* border-gray-200 */
+    --border-focus-light: #3b82f6; /* border-blue-500 */
+
+    /* Dark Theme - General */
+    --bg-main-dark: #111827; /* bg-gray-900 */
+    --text-main-dark: #f3f4f6; /* text-gray-100 */
+    --bg-content-dark: #1f2937; /* bg-gray-800 */
+    --bg-sidebar-dark: #1f2937;
+    --border-dark: #374151; /* border-gray-700 */
+    --border-focus-dark: #3b82f6; /* border-blue-500 */
+
+    /* Light Theme - Code Blocks */
+    --code-bg-light: #f8f9fa;
+    --code-text-light: #212529;
+    --code-border-light: #dee2e6;
+    --code-header-bg-light: #e9ecef;
+    --code-header-text-light: #495057;
+    --code-copy-btn-bg-light: #f1f3f5;
+    --code-copy-btn-text-light: #495057;
+
+    /* Dark Theme - Code Blocks */
+    --code-bg-dark: #1E1E1E;
+    --code-text-dark: #D4D4D4;
+    --code-border-dark: #3c3c3c;
+    --code-header-bg-dark: #252526;
+    --code-header-text-dark: #CCCCCC;
+    --code-copy-btn-bg-dark: #333333;
+    --code-copy-btn-text-dark: #CCCCCC;
+}
+
+@layer base {
+    body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+        overscroll-behavior-y: none;
+        @apply bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+        margin: 0;
+        transition: background-color 0.3s ease, color 0.3s ease;
+    }
+}
+
+
+/* Custom scrollbar for webkit browsers */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { @apply bg-gray-100 dark:bg-gray-700/50 rounded-lg; }
+::-webkit-scrollbar-thumb { @apply bg-gray-400 dark:bg-gray-600 rounded-lg; }
+::-webkit-scrollbar-thumb:hover { @apply bg-gray-500 dark:bg-gray-500; }
+
+/* ==========================================================================
+   2. General UI Theming & Layout
+   ========================================================================== */
+
+/* Main Layout Containers */
+aside {
+    @apply bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700;
+}
+
+main {
+    @apply bg-gray-50 dark:bg-gray-900;
+}
+
+header, footer {
+    @apply border-gray-200 dark:border-gray-700;
+}
+
+
+/* ==========================================================================
+   3. Chat Area & Message Styling
+   ========================================================================== */
+
+.message-bubble {
+    @apply max-w-[85%] px-4 py-3 rounded-xl mb-1 break-words relative text-base;
+    line-height: 1.6;
+    box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+    border: 1px solid transparent;
+    transition: box-shadow 0.2s ease-in-out;
+}
+
+.message-bubble:hover {
+    @apply shadow-lg;
+}
+.dark .message-bubble:hover {
+     box-shadow: 0 10px 15px -3px rgba(0,0,0,0.2), 0 4px 6px -4px rgba(0,0,0,0.1);
+}
+
+.user-bubble {
+    @apply self-end rounded-br-md bg-blue-50 text-blue-900 dark:bg-blue-800 dark:text-blue-100;
+}
+
+.ai-bubble {
+    @apply self-start rounded-bl-md bg-white text-gray-800 border border-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600;
+}
+
+.system-bubble {
+    @apply self-center italic text-sm text-center max-w-full md:max-w-[80%] rounded-lg px-4 py-2 bg-yellow-50 text-yellow-800 border border-yellow-200 dark:bg-yellow-900/50 dark:text-yellow-200 dark:border-yellow-700/50 shadow-none;
+}
+
+/* Streaming AI Bubble */
+.ai-bubble.is-streaming {
+    animation: pulse-bg 2s infinite;
+}
+@keyframes pulse-bg {
+    0% { @apply bg-white; }
+    50% { @apply bg-gray-100; }
+    100% { @apply bg-white; }
+}
+.dark .ai-bubble.is-streaming {
+    animation: pulse-bg-dark 2s infinite;
+}
+@keyframes pulse-bg-dark {
+    0% { @apply bg-gray-700; }
+    50% { @apply bg-gray-600; }
+    100% { @apply bg-gray-700; }
+}
+
+/* ==========================================================================
+   4. Code Blocks & Output
+   ========================================================================== */
+
+.code-block-container {
+    @apply my-4 rounded-lg overflow-hidden shadow-md font-mono border;
+    background: var(--code-bg-light);
+    border-color: var(--code-border-light);
+}
+.dark .code-block-container {
+    background: var(--code-bg-dark);
+    border-color: var(--code-border-dark);
+}
+
+.code-block-header {
+    @apply flex justify-between items-center px-4 py-2 border-b;
+    background: var(--code-header-bg-light);
+    border-color: var(--code-border-light);
+}
+.dark .code-block-header {
+    background: var(--code-header-bg-dark);
+    border-color: var(--code-border-dark);
+}
+
+.code-language {
+    @apply text-xs font-semibold uppercase tracking-wider;
+    color: var(--code-header-text-light);
+}
+.dark .code-language {
+    color: var(--code-header-text-dark);
+}
+
+.code-copy-btn {
+    @apply flex items-center gap-1 px-2 py-1 rounded-md text-xs cursor-pointer border;
+    background: var(--code-copy-btn-bg-light);
+    color: var(--code-copy-btn-text-light);
+    border-color: #ced4da;
+    transition: background-color 0.2s ease, transform 0.1s ease;
+}
+.dark .code-copy-btn {
+    background: var(--code-copy-btn-bg-dark);
+    color: var(--code-copy-btn-text-dark);
+    border-color: #454545;
+}
+.code-copy-btn:hover {
+    @apply bg-gray-200 dark:bg-gray-600;
+}
+.code-copy-btn:active {
+    transform: scale(0.95);
+}
+
+.code-block {
+    @apply m-0 p-4 text-sm overflow-x-auto;
+    line-height: 1.6;
+    color: var(--code-text-light);
+    background: var(--code-bg-light);
+}
+.dark .code-block {
+    color: var(--code-text-dark);
+    background: var(--code-bg-dark);
+}
+
+/* Highlight.js theme overrides */
+.hljs { background: transparent !important; color: inherit !important; }
+.hljs-keyword { color: #569cd6; } /* VS Code Blue */
+.dark .hljs-keyword { color: #569cd6; }
+.hljs-built_in { color: #4ec9b0; } /* VS Code Teal */
+.dark .hljs-built_in { color: #4ec9b0; }
+.hljs-string { color: #ce9178; } /* VS Code Orange */
+.dark .hljs-string { color: #ce9178; }
+.hljs-comment, .hljs-quote { color: #6a9955; } /* VS Code Green */
+.dark .hljs-comment, .dark .hljs-quote { color: #6a9955; }
+.hljs-number, .hljs-literal { color: #b5cea8; } /* VS Code Light Green */
+.dark .hljs-number, .dark .hljs-literal { color: #b5cea8; }
+.hljs-title, .hljs-section, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: #dcdcaa; } /* VS Code Yellow */
+.dark .hljs-title, .dark .hljs-section, .dark .hljs-name, .dark .hljs-selector-id, .dark .hljs-selector-class { color: #dcdcaa; }
+
+/* ==========================================================================
+   5. Modals & Popups
+   ========================================================================== */
+
+.modal-overlay {
+    @apply fixed inset-0 z-50 flex items-center justify-center p-4;
+    @apply bg-black/60 backdrop-blur-sm;
+    transition: opacity 0.3s ease-in-out;
+}
+
+.modal-content {
+    @apply flex flex-col relative shadow-2xl;
+    @apply bg-white dark:bg-gray-800 p-6;
+    @apply border border-gray-200 dark:border-gray-700;
+    @apply text-gray-900 dark:text-gray-100;
+    max-height: 90vh;
+    border-radius: 0.75rem;
+    transform: scale(0.95);
+    
+    width: 95vw; /* Use viewport width for responsiveness */
+    height: 90vh; /* Use viewport height */
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.active-modal .modal-content {
+    transform: scale(1);
+    opacity: 1;
+}
+
+/* ==========================================================================
+   6. General Component Styles
+   ========================================================================== */
+
+.btn {
+    @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2;
+    @apply transition-all duration-150 ease-in-out;
+}
+.btn:not(:disabled):hover {
+    @apply brightness-110;
+}
+.btn:not(:disabled):active {
+    transform: scale(0.98);
+}
+
+.btn-primary {
+    @apply text-white bg-blue-600 hover:bg-blue-700 focus:ring-blue-500 disabled:bg-blue-400/50 disabled:cursor-not-allowed;
+}
+.btn-secondary {
+    @apply text-gray-700 bg-gray-200 hover:bg-gray-300 focus:ring-gray-400 disabled:bg-gray-100;
+    @apply dark:text-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 dark:focus:ring-gray-500 dark:disabled:bg-gray-800/50;
+}
+.btn-danger {
+    @apply text-white bg-red-600 hover:bg-red-700 focus:ring-red-500 disabled:bg-red-400/50;
+}
+.btn-success {
+    @apply text-white bg-green-600 hover:bg-green-700 focus:ring-green-500 disabled:bg-green-400/50;
+}
+
+
+.input-field {
+    @apply block w-full px-3 py-2 border rounded-md shadow-sm sm:text-sm;
+    @apply bg-gray-50 border-gray-300 placeholder-gray-400;
+    @apply dark:bg-gray-700/50 dark:border-gray-600 dark:placeholder-gray-400;
+    @apply transition-colors duration-150 ease-in-out;
+}
+.input-field:focus {
+    @apply ring-2 ring-blue-500/50 border-blue-500;
+}
+
+/* ==========================================================================
+   7. Specific Component Styles
+   ========================================================================== */
+
+.steps-container {
+    @apply mt-4 pt-3 border-t border-gray-200 dark:border-gray-600;
+}
+
+.step-item {
+    @apply flex items-start space-x-3 text-sm mb-2 p-2 rounded-md transition-colors;
+}
+
+.step-icon {
+    @apply flex-shrink-0 w-5 h-5 mt-0.5;
+}
+
+/* Style for informational steps ('step' type) */
+.step-item-info {
+    @apply text-gray-600 dark:text-gray-400;
+}
+.step-item-info .step-icon {
+    @apply text-blue-500;
+}
+.step-item-info .step-text {
+    @apply prose prose-sm dark:prose-invert max-w-none;
+}
+
+/* Style for process steps ('step_start'/'step_end' type) */
+.step-item-process.status-pending {
+    @apply bg-blue-50 dark:bg-blue-900/40 border border-blue-200 dark:border-blue-700/50;
+}
+.step-item-process.status-pending .step-icon {
+    @apply text-blue-500;
+}
+.step-item-process.status-done .step-icon {
+    @apply text-green-500;
+}
+.step-item-process .step-text {
+    @apply text-gray-800 dark:text-gray-200;
+}
+
+
+.source-badge {
+    @apply inline-flex items-center gap-1.5 px-2 py-1 text-xs font-medium rounded-full cursor-pointer transition-colors;
+    @apply bg-gray-100 text-gray-700 hover:bg-gray-200;
+    @apply dark:bg-gray-600/50 dark:text-gray-300 dark:hover:bg-gray-600;
+}
+.source-badge .similarity-chip {
+    @apply w-3 h-3 rounded-full;
+}
+
+
+/* ==========================================================================
+   8. Animation Utilities
+   ========================================================================== */
+@keyframes messageSlideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
+}

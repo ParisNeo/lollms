@@ -108,6 +108,7 @@ class AppLollmsDiscussion:
     def add_message(
         self,
         sender: str,
+        sender_type: str,
         content: str,
         parent_message_id: Optional[str] = None,
         binding_name: Optional[str] = None,
@@ -118,6 +119,7 @@ class AppLollmsDiscussion:
     ) -> AppLollmsMessage:
         message = AppLollmsMessage(
             sender=sender, 
+            sender_type=sender_type,
             content=content, 
             parent_message_id=parent_message_id,
             binding_name=binding_name, 
@@ -296,6 +298,7 @@ class AppLollmsDiscussion:
 
             client_discussion.add_message(
                 sender=app_msg.sender,
+                sender_type=app_msg.sender_type,
                 content=app_msg.content,
                 images=images_for_client if images_for_client else None,
                 parent_id=app_msg.parent_message_id,
