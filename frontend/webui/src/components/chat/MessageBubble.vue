@@ -188,7 +188,7 @@ function handleBranchOrRegenerate() {
                     <span>{{ message.token_count }}</span>
                 </div>
                 <button v-for="source in message.metadata?.sources" :key="source.document" @click="showSourceDetails(source)" class="detail-badge source-badge" :title="`View source: ${source.document}`">
-                    <span class="similarity-chip" :class="getSimilarityColor(source.similarity*100)"></span>
+                    <span class="similarity-chip" :class="getSimilarityColor(source.similarity)"></span>
                     <span class="truncate max-w-xs">{{ source.document }}</span>
                 </button>
             </div>
