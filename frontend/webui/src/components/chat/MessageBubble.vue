@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
@@ -18,7 +18,13 @@ const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
-const isStepsCollapsed = ref(true);
+// --- FIX: The default state for steps should be collapsed IF the message is not currently streaming.
+const isStepsCollapsed = ref(!props.message.isStreaming);
+
+onMounted(() => {
+    // This ensures that for messages loaded from history, the steps are initially collapsed.
+    isStepsCollapsed.value = !props.message.isStreaming;
+});
 
 const isUser = computed(() => props.message.sender_type === 'user');
 const isAi = computed(() => props.message.sender_type === 'assistant');
@@ -40,20 +46,22 @@ const senderName = computed(() => {
 
 const renderedContent = computed(() => {
   if (!props.message.content) return '';
-  return marked.parse(props.message.content);
+  // Ensure 'think' blocks are parsed correctly and not escaped by marked
+  let processedContent = props.message.content.replace(/<think>([\s\S]*?)<\/think>/gs, (match, thinkContent) => {
+      // Temporarily encode to avoid markdown processing
+      return `<details class="think-block my-2"><summary class="px-2 py-1 text-xs italic text-gray-500 dark:text-gray-400 cursor-pointer">Assistant's Thoughts</summary><div class="think-content p-2 border-t border-gray-200 dark:border-gray-700">${marked.parse(thinkContent.trim())}</div></details>`;
+  });
+  return marked.parse(processedContent, { breaks: true, gfm: true });
 });
 
-// FIX: New method to parse markdown for step content
+
 const getStepContent = (content) => {
     if (!content) return '';
-    // Use 'breaks: true' to ensure newlines are rendered as <br>
     return marked.parse(content, { breaks: true });
 }
 
-// FIX: New computed property to get the latest step for the collapsed view
 const latestStep = computed(() => {
     if (props.message.steps && props.message.steps.length > 0) {
-        // The last item in the array is the most recent step
         return props.message.steps[props.message.steps.length - 1];
     }
     return null;
@@ -138,7 +146,6 @@ function handleBranchOrRegenerate() {
 
       <!-- Generation Steps -->
       <div v-if="message.steps && message.steps.length > 0" class="steps-container">
-        <!-- FIX: Updated Toggle Button to show latest step -->
         <button @click="isStepsCollapsed = !isStepsCollapsed" class="text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 flex items-center w-full text-left mb-2 group/toggle">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 transition-transform flex-shrink-0 group-hover/toggle:text-gray-900 dark:group-hover/toggle:text-white" :class="{'rotate-90': !isStepsCollapsed, 'rotate-0': isStepsCollapsed}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
             <div class="flex items-center space-x-2 overflow-hidden">
@@ -150,7 +157,6 @@ function handleBranchOrRegenerate() {
                 <span v-else>Hide Steps</span>
             </div>
         </button>
-        <!-- FIX: Updated rendering logic for steps -->
         <div v-show="!isStepsCollapsed" class="space-y-2 pl-5 border-l-2 border-gray-200 dark:border-gray-700 ml-2">
             <template v-for="step in message.steps" :key="step.id">
                 <div v-if="step.type === 'step'" class="step-item step-item-info">
@@ -174,7 +180,7 @@ function handleBranchOrRegenerate() {
       <div v-if="!isSystem" class="message-footer mt-3 pt-3 border-t border-gray-200 dark:border-gray-600">
         <div v-if="message.metadata?.sources?.length" class="flex flex-wrap gap-2 mb-2">
             <button v-for="source in message.metadata.sources" :key="source.document" @click="showSourceDetails(source)" class="source-badge" :title="`View source: ${source.document}`">
-                <span class="similarity-chip" :class="getSimilarityColor(source.similarity)"></span>
+                <span class="similarity-chip w-3 h-3 rounded-full" :class="getSimilarityColor(source.similarity*100)"></span>
                 <span class="truncate max-w-xs">{{ source.document }}</span>
             </button>
         </div>
@@ -207,4 +213,13 @@ function handleBranchOrRegenerate() {
 .step-text > :first-child { margin-top: 0; }
 .step-text > :last-child { margin-bottom: 0; }
 
+.think-block summary {
+    list-style: none; /* Hide default triangle */
+}
+.think-block summary::-webkit-details-marker {
+    display: none;
+}
+.think-content {
+    @apply prose-sm max-w-none text-gray-600 dark:text-gray-400;
+}
 </style>

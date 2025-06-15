@@ -46,7 +46,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             discussionData.forEach(d => {
                 loadedDiscussions[d.id] = {
                     ...d,
-                    rag_datastore_id: d.rag_datastore_id, // Ensure it's singular
+                    rag_datastore_id: d.rag_datastore_id,
                     branches: {},
                     activeBranchId: d.active_branch_id || 'main',
                     messages_loaded_fully: {}
@@ -68,7 +68,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (!disc.messages_loaded_fully[branchId]) {
             try {
                 const response = await apiClient.get(`/api/discussions/${id}?branch_id=${branchId}`);
-                disc.branches = { ...disc.branches, [branchId]: response.data };
+                // Ensure steps and metadata are arrays to prevent rendering errors
+                const processedMessages = response.data.map(msg => ({
+                    ...msg,
+                    steps: msg.steps || [],
+                    metadata: msg.metadata || {}
+                }));
+                disc.branches = { ...disc.branches, [branchId]: processedMessages };
                 disc.messages_loaded_fully[branchId] = true;
             } catch (error) {
                 useUiStore().addNotification('Failed to load messages.', 'error');
@@ -299,8 +305,37 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const branchId = activeDiscussion.value.activeBranchId;
         try {
             await new Promise(resolve => setTimeout(resolve, 250));
+            
+            // --- FIX START: MERGE LOGIC ---
+            const oldMessages = discussions.value[discId]?.branches?.[branchId] || [];
+            
             const response = await apiClient.get(`/api/discussions/${discId}?branch_id=${branchId}`);
-            discussions.value[discId].branches[branchId] = response.data;
+            const newMessages = response.data.map(msg => ({ // Ensure new messages have placeholders
+                ...msg,
+                steps: msg.steps || [],
+                metadata: msg.metadata || {}
+            }));
+
+            const lastOldMsg = oldMessages.length > 0 ? oldMessages[oldMessages.length - 1] : null;
+            const lastNewMsg = newMessages.length > 0 ? newMessages[newMessages.length - 1] : null;
+
+            // If the last message in our client-side list was the one we were streaming,
+            // merge its transient data (steps, sources) into the permanent version from the server.
+            if (lastOldMsg && lastNewMsg && lastOldMsg.isStreaming) {
+                // Merge sources from metadata
+                if (lastOldMsg.metadata?.sources?.length > 0) {
+                    if (!lastNewMsg.metadata) lastNewMsg.metadata = {};
+                    lastNewMsg.metadata.sources = [...(lastNewMsg.metadata.sources || []), ...lastOldMsg.metadata.sources];
+                }
+                // Carry over steps
+                if (lastOldMsg.steps?.length > 0) {
+                    lastNewMsg.steps = lastOldMsg.steps;
+                }
+            }
+
+            // Now, commit the corrected message list to the store.
+            discussions.value[discId].branches[branchId] = newMessages;
+            // --- FIX END ---
         } catch(e) {
             useUiStore().addNotification('Failed to refresh conversation state.', 'warning');
         }
