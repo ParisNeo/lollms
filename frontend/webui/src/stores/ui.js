@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
+import apiClient from '../services/api';
 
 export const useUiStore = defineStore('ui', () => {
     // State
@@ -15,11 +16,24 @@ export const useUiStore = defineStore('ui', () => {
 
     const imageViewerSrc = ref(null);
 
+    // --- NEW: Localization State ---
+    const availableLanguages = ref({});
+    const currentLanguage = ref(localStorage.getItem('lollms_language') || 'en');
+    const translations = ref({});
+
     // Getters
     const isModalOpen = computed(() => (modalName) => openModals.value.includes(modalName));
     const modalData = computed(() => (modalName) => modalDataStore.value[modalName]);
     const isImageViewerOpen = computed(() => !!imageViewerSrc.value);
 
+    // --- NEW: Translate Getter ---
+    const translate = computed(() => (key, fallback = null, vars = {}) => {
+        let translation = translations.value[key] || fallback || key;
+        for (const varKey in vars) {
+            translation = translation.replace(new RegExp(`{{${varKey}}}`, 'g'), vars[varKey]);
+        }
+        return translation;
+    });
 
     // Actions
     function initializeTheme() {
@@ -99,8 +113,51 @@ export const useUiStore = defineStore('ui', () => {
         imageViewerSrc.value = null;
     }
 
+    // --- NEW: Localization Actions ---
+    async function fetchAvailableLanguages() {
+        try {
+            const response = await apiClient.get('/api/languages/');
+            availableLanguages.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch available languages:", error);
+            availableLanguages.value = { 'en': 'English' }; // Fallback
+        }
+    }
+
+    async function loadTranslations(langCode) {
+        try {
+            const response = await apiClient.get(`/locals/${langCode}.json`);
+            translations.value = response.data;
+            document.documentElement.lang = langCode.split('-')[0];
+        } catch (error) {
+            console.error(`Failed to load translations for ${langCode}:`, error);
+            if (langCode !== 'en') {
+                await loadTranslations('en'); // Fallback to English
+            }
+        }
+    }
+
+    async function setLanguage(langCode) {
+        currentLanguage.value = langCode;
+        localStorage.setItem('lollms_language', langCode);
+        await loadTranslations(langCode);
+    }
+
+    async function initializeLocalization() {
+        await fetchAvailableLanguages();
+        let langToLoad = localStorage.getItem('lollms_language');
+        
+        if (!langToLoad || !availableLanguages.value[langToLoad]) {
+            const browserLang = navigator.language.split('-')[0];
+            langToLoad = availableLanguages.value[browserLang] ? browserLang : 'en';
+        }
+        
+        await setLanguage(langToLoad);
+    }
+
 
     return {
+        // State
         currentTheme,
         notifications,
         isModalOpen,
@@ -109,6 +166,14 @@ export const useUiStore = defineStore('ui', () => {
         confirmationOptions,
         imageViewerSrc,
         isImageViewerOpen,
+        availableLanguages,
+        currentLanguage,
+        translations,
+
+        // Getters
+        translate,
+
+        // Actions
         initializeTheme,
         toggleTheme,
         openModal,
@@ -120,5 +185,7 @@ export const useUiStore = defineStore('ui', () => {
         cancelAction,
         openImageViewer,
         closeImageViewer,
+        initializeLocalization,
+        setLanguage
     };
 });

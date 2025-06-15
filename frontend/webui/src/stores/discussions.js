@@ -329,25 +329,34 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             await new Promise(resolve => setTimeout(resolve, 250));
             
-            const oldMessages = discussions.value[discId]?.branches?.[branchId] || [];
+            const localBranch = discussions.value[discId]?.branches?.[branchId] || [];
             
             const response = await apiClient.get(`/api/discussions/${discId}?branch_id=${branchId}`);
-            const newMessages = processMessages(response.data);
+            const finalMessages = processMessages(response.data);
 
-            const lastOldMsg = oldMessages.length > 0 ? oldMessages[oldMessages.length - 1] : null;
-            const lastNewMsg = newMessages.length > 0 ? newMessages[newMessages.length - 1] : null;
+            // Find the temporary message that was being streamed
+            const streamingMsgIndex = localBranch.findIndex(m => m.isStreaming);
+            
+            if (streamingMsgIndex > -1) {
+                const tempMsg = localBranch[streamingMsgIndex];
+                // The new message list should contain the permanent version. We assume it's the last one.
+                const finalMsg = finalMessages[finalMessages.length - 1];
 
-            if (lastOldMsg && lastNewMsg && lastOldMsg.isStreaming) {
-                if (lastOldMsg.metadata?.sources?.length > 0) {
-                    if (!lastNewMsg.metadata) lastNewMsg.metadata = {};
-                    lastNewMsg.metadata.sources = [...(lastNewMsg.metadata.sources || []), ...lastOldMsg.metadata.sources];
-                }
-                if (lastOldMsg.steps?.length > 0) {
-                    lastNewMsg.steps = lastOldMsg.steps;
+                if (finalMsg) {
+                    // Carry over sources if the final message doesn't have them
+                    if (tempMsg.metadata?.sources?.length > 0 && !finalMsg.metadata?.sources?.length) {
+                        if (!finalMsg.metadata) finalMsg.metadata = {};
+                        finalMsg.metadata.sources = tempMsg.metadata.sources;
+                    }
+                    // Carry over steps if the final message doesn't have them
+                    if (tempMsg.steps?.length > 0 && !finalMsg.steps?.length) {
+                        finalMsg.steps = tempMsg.steps;
+                    }
                 }
             }
+            
+            discussions.value[discId].branches[branchId] = finalMessages;
 
-            discussions.value[discId].branches[branchId] = newMessages;
         } catch(e) {
             useUiStore().addNotification('Failed to refresh conversation state.', 'warning');
         }

@@ -1,15 +1,20 @@
 <script setup>
-import { ref } from 'vue';
+import { computed } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
+import { useUiStore } from '../../stores/ui';
 import DiscussionList from './DiscussionList.vue';
 import UserInfo from './UserInfo.vue';
-import logoUrl from '../../assets/logo.png'; // <-- IMPORT THE LOGO
+import logoUrl from '../../assets/logo.png';
 
 const discussionsStore = useDiscussionsStore();
+const uiStore = useUiStore();
 
 function handleNewDiscussion() {
   discussionsStore.createNewDiscussion();
 }
+
+const newDiscussionText = computed(() => uiStore.translate('new_discussion_btn', 'New Discussion'));
+
 </script>
 
 <template>
@@ -17,7 +22,7 @@ function handleNewDiscussion() {
     <!-- Header with Logo and New Discussion Button -->
     <div class="p-4 border-b dark:border-gray-700">
       <div class="flex items-center space-x-3 mb-4">
-        <img :src="logoUrl" alt="Logo" class="h-10 w-10 rounded-full shadow"> <!-- <-- BIND THE SRC -->
+        <img :src="logoUrl" alt="Logo" class="h-10 w-10 rounded-full shadow">
         <div>
           <h2 class="text-xl font-semibold text-gray-800 dark:text-gray-100">Lollms Chat</h2>
           <p class="text-xs text-gray-500 dark:text-gray-400">Simplified Version</p>
@@ -30,7 +35,7 @@ function handleNewDiscussion() {
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 mr-2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
         </svg>
-        <span>New Discussion</span>
+        <span>{{ newDiscussionText }}</span>
       </button>
     </div>
 

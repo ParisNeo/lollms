@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
 import HomeView from './views/HomeView.vue';
@@ -46,8 +46,11 @@ const isImportOpen = computed(() => uiStore.isModalOpen('import'));
 
 
 // Initial check for authentication and theme
-authStore.attemptInitialAuth();
-uiStore.initializeTheme();
+onMounted(() => {
+    authStore.attemptInitialAuth();
+    uiStore.initializeTheme();
+    uiStore.initializeLocalization();
+});
 
 </script>
 

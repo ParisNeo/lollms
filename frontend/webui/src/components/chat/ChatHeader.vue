@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import ThemeToggle from '../ui/ThemeToggle.vue';
+import LanguageSelector from '../ui/LanguageSelector.vue';
 
 const store = useDiscussionsStore();
 const activeDiscussion = computed(() => store.activeDiscussion);
@@ -16,8 +17,11 @@ const activeDiscussion = computed(() => store.activeDiscussion);
       </h3>
 
       <!-- Right-side Controls -->
-      <div class="flex items-center space-x-3">
+      <div class="flex items-center space-x-2">
         <!-- RAG Controls have been moved to ChatInput.vue for better context -->
+        
+        <!-- Language Selector -->
+        <LanguageSelector />
         
         <!-- Theme Toggle -->
         <ThemeToggle />
