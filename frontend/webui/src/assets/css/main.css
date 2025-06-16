@@ -210,7 +210,6 @@ header, footer {
 .modal-overlay {
     @apply fixed inset-0 z-50 flex items-center justify-center p-4;
     @apply bg-black/60 backdrop-blur-sm;
-    transition: opacity 0.3s ease-in-out;
 }
 
 .modal-content {
@@ -221,8 +220,26 @@ header, footer {
     width: 98vw;
     max-height: 90vh;
     border-radius: 0.75rem;
-    /* Removed padding and size from here, handled by GenericModal.vue for better flexibility */
-    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* Vue Transition classes for Modals */
+.modal-enter-active,
+.modal-leave-active {
+    transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.modal-enter-active .modal-content,
+.modal-leave-active .modal-content {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal-enter-from,
+.modal-leave-to {
+    opacity: 0;
+}
+.modal-enter-from .modal-content,
+.modal-leave-to .modal-content {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
 }
 
 /* ==========================================================================
