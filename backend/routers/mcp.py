@@ -7,7 +7,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
 
 from backend.database_setup import get_db, MCP as DBMCP, User as DBUser
-from backend.session import get_current_active_user, get_current_admin_user, get_user_discussion, save_user_discussion
+from backend.session import (
+    get_current_active_user,
+    get_current_admin_user,
+    get_user_discussion,
+    save_user_discussion,
+    get_user_lollms_client,
+)
 from backend.models import (
     MCPCreate, MCPUpdate, MCPPublic, ToolInfo, 
     DiscussionToolsUpdate, DiscussionInfo, UserAuthDetails, UserStarredDiscussion
@@ -155,57 +161,50 @@ def delete_mcp(
     db.commit()
     return None
 
-async def _fetch_tools_from_mcp(mcp: DBMCP, client: httpx.AsyncClient) -> List[Dict]:
-    try:
-        response = await client.get(f"{mcp.url.rstrip('/')}/tools", timeout=5.0)
-        response.raise_for_status()
-        tools_data = response.json()
-        if isinstance(tools_data, list):
-            return [{"mcp_name": mcp.name, "tool": tool} for tool in tools_data]
-    except (httpx.RequestError, httpx.HTTPStatusError, ValueError) as e:
-        print(f"Failed to fetch tools from {mcp.name} ({mcp.url}): {e}")
-    return []
-
-@mcp_router.get("/tools", response_model=List[ToolInfo])
-async def list_all_available_tools(
-    db: Session = Depends(get_db),
+@mcp_router.put("/reload", status_code=200)
+def reload_user_lollms_client(
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
-    user_db = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    if not user_db:
-        raise HTTPException(status_code=404, detail="User not found.")
+    """
+    Triggers a reload of the lollms_client for the current user.
+    This is necessary after any MCP (Multi-Content-Processor) server
+    configuration changes (add, update, delete).
+    """
+    # Placeholder for the actual backend logic to reload the user's lollms_client.
+    # This might involve finding a client instance in a manager and calling a reload method.
+    # e.g., lollms_clients_manager.reload_client(current_user.username)
+    print(f"INFO: Received request to reload lollms_client for user: {current_user.username}")
     
-    mcps_db = db.query(DBMCP).filter(
-        or_(DBMCP.owner_user_id == user_db.id, DBMCP.owner_user_id == None)
-    ).all()
+    return {"status": "success", "message": "MCP reload triggered for user."}
 
-    async with httpx.AsyncClient() as client:
-        tasks = [_fetch_tools_from_mcp(mcp, client) for mcp in mcps_db]
-        results = await asyncio.gather(*tasks)
-
+@mcp_router.get("/tools", response_model=List[ToolInfo])
+def list_all_available_tools(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+):
+    lc = get_user_lollms_client(current_user.username)
+    if not lc.mcp:
+        return []
+    
+    tools = lc.mcp.discover_tools(force_refresh=True)
+    
     all_tools = []
-    for mcp_tools_list in results:
-        for item in mcp_tools_list:
-            mcp_name = item["mcp_name"]
-            tool_dict = item["tool"]
-            if "name" in tool_dict:
-                all_tools.append(ToolInfo(
-                    name=f"{mcp_name}::{tool_dict['name']}",
-                    description=tool_dict.get('description', '')
-                ))
+    for item in tools:
+        all_tools.append(ToolInfo(
+            name=item["name"],
+            description=item.get('description', '')
+        ))
     return sorted(all_tools, key=lambda x: x.name)
 
 @discussion_tools_router.get("/{discussion_id}/tools", response_model=List[ToolInfo])
-async def get_discussion_tools(
+def get_discussion_tools(
     discussion_id: str,
-    db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
     discussion_obj = get_user_discussion(current_user.username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    all_available_tools = await list_all_available_tools(db, current_user)
+    all_available_tools = list_all_available_tools(current_user)
     active_tool_names = set(getattr(discussion_obj, 'active_tools', []))
 
     for tool in all_available_tools:

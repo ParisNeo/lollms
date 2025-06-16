@@ -1,9 +1,10 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue';
+import { ref, watch, onMounted, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
+import IconSelectMenu from '../ui/IconSelectMenu.vue'; // Import the new component
 
 const authStore = useAuthStore();
 const dataStore = useDataStore();
@@ -17,26 +18,42 @@ const activePersonalityId = ref('');
 const isLoading = ref(false);
 const hasChanges = ref(false);
 
-const isEditorOpen = ref(false);
-const editorPersonality = ref(null); // Holds personality data for the editor
+// Format items for the IconSelectMenu
+const personalityItems = computed(() => {
+    const items = [];
+    if (userPersonalities.value.length > 0) {
+        items.push({
+            isGroup: true,
+            label: "Your Personalities",
+            items: userPersonalities.value.map(p => ({ id: p.id, name: p.name, icon_base64: p.icon_base64 }))
+        });
+    }
+    if (publicPersonalities.value.length > 0) {
+         items.push({
+            isGroup: true,
+            label: "Public Personalities",
+            items: publicPersonalities.value.map(p => ({ id: p.id, name: p.name, icon_base64: p.icon_base64 }))
+        });
+    }
+    return items;
+});
+
 
 // --- Logic ---
 
-// Populate form when component mounts or user data changes
 const populateForm = () => {
     if (user.value) {
-        activePersonalityId.value = user.value.active_personality_id || '';
-        hasChanges.value = false; // Reset change tracking
+        activePersonalityId.value = user.value.active_personality_id || null;
+        hasChanges.value = false;
     }
 };
 
 onMounted(() => {
-    dataStore.fetchPersonalities(); // Ensure data is fresh
+    dataStore.fetchPersonalities();
     populateForm();
 });
 watch(user, populateForm);
 
-// Watch for changes to enable the save button
 watch(activePersonalityId, (newValue) => {
     if (user.value) {
         hasChanges.value = (newValue || null) !== (user.value.active_personality_id || null);
@@ -58,18 +75,18 @@ async function handleSaveActivePersonality() {
 }
 
 function openEditor(personality = null) {
-    editorPersonality.value = personality ? { ...personality } : { name: '', category: '', description: '', prompt_text: '', is_public: false };
-    isEditorOpen.value = true;
-}
+    const isCloning = personality && personality.owner_username !== user.value.username;
+    let personalityData;
 
-async function handleSavePersonality(personalityData) {
-    const action = personalityData.id ? dataStore.updatePersonality : dataStore.addPersonality;
-    try {
-        await action(personalityData);
-        isEditorOpen.value = false; // Close editor on success
-    } catch (error) {
-        // Don't close editor on failure
+    if (isCloning) {
+        personalityData = { ...personality, id: null, owner_username: null, is_public: false };
+    } else {
+        personalityData = personality 
+            ? { ...personality } 
+            : { name: '', category: '', description: '', prompt_text: '', is_public: false, icon_base64: null };
     }
+    
+    uiStore.openModal('personalityEditor', { personality: personalityData });
 }
 
 async function handleDeletePersonality(personality) {
@@ -81,7 +98,7 @@ async function handleDeletePersonality(personality) {
     if (confirmed) {
         await dataStore.deletePersonality(personality.id);
         if (activePersonalityId.value === personality.id) {
-            activePersonalityId.value = '';
+            activePersonalityId.value = null; // Set to null for the 'None' option
             handleSaveActivePersonality();
         }
     }
@@ -95,16 +112,12 @@ async function handleDeletePersonality(personality) {
         <!-- Active Personality Selection -->
         <form @submit.prevent="handleSaveActivePersonality" class="space-y-4 max-w-md mb-8">
             <div>
-                <label for="activePersonality" class="block text-sm font-medium">Active Personality</label>
-                <select id="activePersonality" v-model="activePersonalityId" class="input-field mt-1">
-                    <option value="">None (Default)</option>
-                    <optgroup label="Your Personalities">
-                        <option v-for="p in userPersonalities" :key="p.id" :value="p.id">{{ p.name }}</option>
-                    </optgroup>
-                    <optgroup label="Public Personalities">
-                        <option v-for="p in publicPersonalities" :key="p.id" :value="p.id">{{ p.name }}</option>
-                    </optgroup>
-                </select>
+                <label for="activePersonality" class="block text-sm font-medium mb-1">Active Personality</label>
+                <IconSelectMenu
+                    v-model="activePersonalityId"
+                    :items="personalityItems"
+                    placeholder="None (Default)"
+                />
             </div>
              <div class="text-right">
                 <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">
@@ -122,10 +135,16 @@ async function handleDeletePersonality(personality) {
             <div class="max-h-60 overflow-y-auto border dark:border-gray-600 rounded p-2 space-y-1">
                 <p v-if="userPersonalities.length === 0" class="italic text-sm text-gray-500 p-2">You haven't created any personalities yet.</p>
                 <div v-for="p in userPersonalities" :key="p.id" class="flex justify-between items-center py-1.5 px-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm">
-                    <span>{{ p.name }}</span>
+                    <div class="flex items-center space-x-3">
+                        <img v-if="p.icon_base64" :src="p.icon_base64" class="h-8 w-8 rounded-md object-cover bg-gray-200 dark:bg-gray-700"/>
+                        <div v-else class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                        </div>
+                        <span>{{ p.name }}</span>
+                    </div>
                     <div class="space-x-2">
-                        <button @click="openEditor(p)" class="text-blue-500 hover:text-blue-700">Edit</button>
-                        <button @click="handleDeletePersonality(p)" class="text-red-500 hover:text-red-700">Delete</button>
+                        <button @click="openEditor(p)" class="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Edit</button>
+                        <button @click="handleDeletePersonality(p)" class="font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300">Delete</button>
                     </div>
                 </div>
             </div>
@@ -137,25 +156,19 @@ async function handleDeletePersonality(personality) {
              <div class="max-h-60 overflow-y-auto border dark:border-gray-600 rounded p-2 space-y-1">
                 <p v-if="publicPersonalities.length === 0" class="italic text-sm text-gray-500 p-2">No public personalities available.</p>
                 <div v-for="p in publicPersonalities" :key="p.id" class="flex justify-between items-center py-1.5 px-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm">
-                    <span>{{ p.name }} <em class="text-xs text-gray-500">by {{ p.author || 'System' }}</em></span>
-                    <button @click="openEditor(p)" class="text-blue-500 hover:text-blue-700">Clone & Edit</button>
+                    <div class="flex items-center space-x-3">
+                        <img v-if="p.icon_base64" :src="p.icon_base64" class="h-8 w-8 rounded-md object-cover bg-gray-200 dark:bg-gray-700"/>
+                         <div v-else class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-700 flex items-center justify-center text-gray-400">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>
+                        </div>
+                        <div>
+                            <span>{{ p.name }}</span>
+                            <em class="block text-xs text-gray-500">by {{ p.author || 'System' }}</em>
+                        </div>
+                    </div>
+                    <button @click="openEditor(p)" class="font-medium text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300">Clone & Edit</button>
                 </div>
             </div>
         </div>
     </section>
-
-    <!-- Personality Editor Modal (Conceptual) -->
-    <!-- A real implementation would use a separate component and the uiStore to manage the modal state -->
-    <div v-if="isEditorOpen" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-xl w-full max-w-lg">
-        <h3 class="text-lg font-bold mb-4">{{ editorPersonality.id ? 'Edit' : 'Create' }} Personality</h3>
-        <!-- A full form for editorPersonality would go here -->
-        <p>Name: <input v-model="editorPersonality.name" class="input-field"></p>
-        <p class="mt-2">Prompt: <textarea v-model="editorPersonality.prompt_text" rows="5" class="input-field"></textarea></p>
-        <div class="flex justify-end space-x-2 mt-4">
-          <button @click="isEditorOpen = false" class="btn btn-secondary">Cancel</button>
-          <button @click="handleSavePersonality(editorPersonality)" class="btn btn-primary">Save</button>
-        </div>
-      </div>
-    </div>
 </template>

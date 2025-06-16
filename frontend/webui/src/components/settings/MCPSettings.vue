@@ -1,55 +1,90 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
+import { useAuthStore } from '../../stores/auth';
 
 // --- Store Setup ---
 const dataStore = useDataStore();
 const uiStore = useUiStore();
+const authStore = useAuthStore();
 const { userMcps } = storeToRefs(dataStore);
+const { user } = storeToRefs(authStore);
 
 // --- Component State ---
-const newMcpForm = ref({
-    alias: '',
-    address: ''
+const mcpForm = ref({
+    name: '',
+    url: ''
 });
-const isAdding = ref(false);
+const editingMcp = ref(null); // If not null, we are in edit mode
+const isLoading = ref(false);
+
+onMounted(() => {
+    dataStore.fetchMcps();
+});
 
 // --- Computed Properties ---
-const sortedMcps = computed(() => {
-    // Spreading to avoid sorting the original store array
-    return [...userMcps.value].sort((a, b) => a.alias.localeCompare(b.alias));
+const isEditMode = computed(() => editingMcp.value !== null);
+
+const sortedUserMcps = computed(() => {
+    return userMcps.value
+        .filter(mcp => mcp.owner_username === user.value?.username)
+        .sort((a, b) => a.name.localeCompare(b.name));
+});
+
+const sortedSystemMcps = computed(() => {
+    return userMcps.value
+        .filter(mcp => mcp.owner_username === null)
+        .sort((a, b) => a.name.localeCompare(b.name));
 });
 
 // --- Methods ---
-async function handleAddMcp() {
-    if (!newMcpForm.value.alias || !newMcpForm.value.address) {
-        uiStore.addNotification('Alias and Address are required.', 'warning');
+function startEditing(mcp) {
+    editingMcp.value = { ...mcp }; // Create a copy for editing
+    mcpForm.value.name = mcp.name;
+    mcpForm.value.url = mcp.url;
+}
+
+function cancelEditing() {
+    editingMcp.value = null;
+    mcpForm.value = { name: '', url: '' }; // Clear the form
+}
+
+async function handleFormSubmit() {
+    if (!mcpForm.value.name || !mcpForm.value.url) {
+        uiStore.addNotification('Name and URL are required.', 'warning');
         return;
     }
 
-    isAdding.value = true;
+    isLoading.value = true;
     try {
-        await dataStore.addMcp(newMcpForm.value);
-        // Reset form on success
-        newMcpForm.value.alias = '';
-        newMcpForm.value.address = '';
+        if (isEditMode.value) {
+            // Update existing MCP
+            await dataStore.updateMcp(editingMcp.value.id, { name: mcpForm.value.name, url: mcpForm.value.url });
+        } else {
+            // Add new MCP
+            await dataStore.addMcp(mcpForm.value);
+        }
+        cancelEditing(); // Reset form and mode on success
     } catch (error) {
-        // Error notification is handled by the data store or global interceptor
-        // The component does not need to crash or block
+        // Error notification is handled globally
     } finally {
-        isAdding.value = false;
+        isLoading.value = false;
     }
 }
 
 async function handleDeleteMcp(mcp) {
     const confirmed = await uiStore.showConfirmation({
-        title: `Delete '${mcp.alias}'?`,
-        message: `Are you sure you want to remove the MCP server at ${mcp.address}? This cannot be undone.`,
+        title: `Delete '${mcp.name}'?`,
+        message: `Are you sure you want to remove the MCP server at ${mcp.url}? This cannot be undone.`,
         confirmText: 'Delete'
     });
     if (confirmed) {
+        // If we are currently editing the one we're deleting, cancel edit mode
+        if (editingMcp.value && editingMcp.value.id === mcp.id) {
+            cancelEditing();
+        }
         await dataStore.deleteMcp(mcp.id);
     }
 }
@@ -57,43 +92,65 @@ async function handleDeleteMcp(mcp) {
 
 <template>
     <div class="space-y-8">
-        <!-- Add MCP Server Section -->
+        <!-- Add/Edit MCP Server Section -->
         <section>
-            <h4 class="text-lg font-semibold mb-4 border-b dark:border-gray-600 pb-2">Add MCP Server</h4>
-            <form @submit.prevent="handleAddMcp" class="space-y-4 max-w-xl">
+            <h4 class="text-lg font-semibold mb-4 border-b dark:border-gray-600 pb-2">
+                {{ isEditMode ? 'Edit Personal MCP Server' : 'Add Personal MCP Server' }}
+            </h4>
+            <form @submit.prevent="handleFormSubmit" class="space-y-4 max-w-xl">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
-                        <label for="mcpAlias" class="block text-sm font-medium">Alias</label>
-                        <input type="text" id="mcpAlias" v-model="newMcpForm.alias" class="input-field mt-1" placeholder="e.g., My Local Server" required>
+                        <label for="mcpName" class="block text-sm font-medium">Name</label>
+                        <input type="text" id="mcpName" v-model="mcpForm.name" class="input-field mt-1" placeholder="e.g., My Local Server" required>
                     </div>
                     <div>
-                        <label for="mcpAddress" class="block text-sm font-medium">Address</label>
-                        <input type="url" id="mcpAddress" v-model="newMcpForm.address" class="input-field mt-1" placeholder="http://127.0.0.1:9602" required>
+                        <label for="mcpUrl" class="block text-sm font-medium">URL</label>
+                        <input type="url" id="mcpUrl" v-model="mcpForm.url" class="input-field mt-1" placeholder="http://127.0.0.1:9602" required>
                     </div>
                 </div>
-                <div class="text-right">
-                    <button type="submit" class="btn btn-primary" :disabled="isAdding">
-                        {{ isAdding ? 'Adding...' : 'Add MCP Server' }}
+                <div class="text-right flex justify-end items-center space-x-2">
+                    <button v-if="isEditMode" @click="cancelEditing" type="button" class="btn btn-secondary">
+                        Cancel
+                    </button>
+                    <button type="submit" class="btn btn-primary" :disabled="isLoading">
+                        <span v-if="isLoading">{{ isEditMode ? 'Saving...' : 'Adding...' }}</span>
+                        <span v-else>{{ isEditMode ? 'Save Changes' : 'Add MCP Server' }}</span>
                     </button>
                 </div>
             </form>
         </section>
 
-        <!-- Manage MCP Servers Section -->
+        <!-- Manage Your MCP Servers Section -->
         <section>
-            <h4 class="text-lg font-semibold mb-2">Configured MCP Servers</h4>
-            <div class="max-h-80 overflow-y-auto border dark:border-gray-600 rounded p-2 space-y-1">
-                <p v-if="!sortedMcps || sortedMcps.length === 0" class="italic text-sm text-gray-500 p-2">
-                    No MCP servers configured. Add one using the form above.
+            <h4 class="text-lg font-semibold mb-2">Your MCP Servers</h4>
+            <div class="max-h-60 overflow-y-auto border dark:border-gray-600 rounded p-2 space-y-1">
+                <p v-if="sortedUserMcps.length === 0" class="italic text-sm text-gray-500 p-2">
+                    No personal MCP servers configured.
                 </p>
-                <div v-for="mcp in sortedMcps" :key="mcp.id" class="flex justify-between items-center py-1.5 px-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm">
+                <div v-for="mcp in sortedUserMcps" :key="mcp.id" class="flex justify-between items-center py-1.5 px-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-sm">
                     <div>
-                        <strong class="font-medium text-gray-800 dark:text-gray-100">{{ mcp.alias }}</strong>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 font-mono">{{ mcp.address }}</p>
+                        <strong class="font-medium text-gray-800 dark:text-gray-100">{{ mcp.name }}</strong>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-mono">{{ mcp.url }}</p>
                     </div>
-                    <div class="space-x-2">
-                        <!-- Edit button can be added here in the future -->
-                        <button @click="handleDeleteMcp(mcp)" class="text-red-500 hover:text-red-700" title="Delete MCP Server">Delete</button>
+                    <div class="space-x-4 flex-shrink-0">
+                        <button @click="startEditing(mcp)" class="font-medium text-blue-500 hover:text-blue-700" title="Edit MCP Server">Edit</button>
+                        <button @click="handleDeleteMcp(mcp)" class="font-medium text-red-500 hover:text-red-700" title="Delete MCP Server">Delete</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- System MCP Servers Section -->
+        <section>
+            <h4 class="text-lg font-semibold mb-2">System MCP Servers</h4>
+            <div class="max-h-60 overflow-y-auto border dark:border-gray-600 rounded p-2 space-y-1">
+                <p v-if="sortedSystemMcps.length === 0" class="italic text-sm text-gray-500 p-2">
+                    No system-wide MCP servers available.
+                </p>
+                <div v-for="mcp in sortedSystemMcps" :key="mcp.id" class="flex justify-between items-center py-1.5 px-2 text-sm">
+                    <div>
+                        <strong class="font-medium text-gray-800 dark:text-gray-100">{{ mcp.name }}</strong>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 font-mono">{{ mcp.url }}</p>
                     </div>
                 </div>
             </div>

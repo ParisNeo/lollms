@@ -32,12 +32,28 @@ export const useDataStore = defineStore('data', () => {
     });
 
     const availableMcpToolsForSelector = computed(() => {
-        if (!Array.isArray(mcpTools.value)) return [];
-        return mcpTools.value
-            .map(group => ({
+        if (!Array.isArray(mcpTools.value) || mcpTools.value.length === 0) return [];
+        
+        const grouped = mcpTools.value.reduce((acc, tool) => {
+            const parts = tool.name.split('::');
+            if (parts.length !== 2) return acc;
+
+            const mcpName = parts[0];
+            const toolName = parts[1];
+            
+            if (!acc[mcpName]) {
+                acc[mcpName] = [];
+            }
+            
+            acc[mcpName].push({ id: tool.name, name: toolName });
+            return acc;
+        }, {});
+
+        return Object.entries(grouped)
+            .map(([mcpName, tools]) => ({
                 isGroup: true,
-                label: group.mcp_alias,
-                items: Array.isArray(group.tools) ? group.tools.map(tool => ({ id: tool.id, name: tool.name })) : []
+                label: mcpName,
+                items: tools.sort((a, b) => a.name.localeCompare(b.name))
             }))
             .sort((a,b) => a.label.localeCompare(b.label));
     });
@@ -229,12 +245,24 @@ export const useDataStore = defineStore('data', () => {
 
     // --- MCP Actions ---
 
+    async function triggerMcpReload() {
+        const uiStore = useUiStore();
+        uiStore.addNotification('Reloading MCP services...', 'info');
+        try {
+            await apiClient.put('/api/mcps/reload');
+            await fetchMcpTools(); // Also refresh the tool list
+            uiStore.addNotification('MCP services reloaded.', 'success');
+        } catch (error) {
+            console.error("Failed to trigger MCP reload:", error);
+        }
+    }
+
     async function fetchMcps() {
         try {
-            const response = await apiClient.get('/api/mcps/');
+            const response = await apiClient.get('/api/mcps');
             userMcps.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
-            console.error("Failed to load MCP servers. The endpoint may not be implemented yet.", error);
+            console.error("Failed to load MCP servers:", error);
             userMcps.value = [];
         }
     }
@@ -242,11 +270,27 @@ export const useDataStore = defineStore('data', () => {
     async function addMcp(mcpData) {
         const uiStore = useUiStore();
         try {
-            const response = await apiClient.post('/api/mcps/', mcpData);
+            const response = await apiClient.post('/api/mcps/personal', mcpData);
             userMcps.value.push(response.data);
             uiStore.addNotification('MCP server added successfully.', 'success');
+            await triggerMcpReload();
         } catch (error) {
             console.error("Failed to add MCP server:", error);
+            throw error;
+        }
+    }
+
+    async function updateMcp(mcpId, mcpData) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.put(`/api/mcps/${mcpId}`, mcpData);
+            userMcps.value = userMcps.value.map(mcp => 
+                mcp.id === mcpId ? response.data : mcp
+            );
+            uiStore.addNotification('MCP server updated successfully.', 'success');
+            await triggerMcpReload();
+        } catch (error) {
+            console.error("Failed to update MCP server:", error);
             throw error;
         }
     }
@@ -257,6 +301,7 @@ export const useDataStore = defineStore('data', () => {
             await apiClient.delete(`/api/mcps/${mcpId}`);
             userMcps.value = userMcps.value.filter(m => m.id !== mcpId);
             uiStore.addNotification('MCP server removed.', 'success');
+            await triggerMcpReload();
         } catch (error) {
             console.error("Failed to delete MCP server:", error);
             throw error;
@@ -268,7 +313,7 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/mcps/tools');
             mcpTools.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
-            console.error("Failed to load MCP tools. The endpoint may not be implemented yet.", error);
+            console.error("Failed to load MCP tools:", error);
             mcpTools.value = [];
         }
     }
@@ -289,6 +334,7 @@ export const useDataStore = defineStore('data', () => {
 
         // Actions
         loadAllInitialData,
+        fetchAvailableLollmsModels,
         fetchDataStores,
         addDataStore,
         updateDataStore,
@@ -304,7 +350,9 @@ export const useDataStore = defineStore('data', () => {
         deletePersonality,
         fetchMcps,
         addMcp,
+        updateMcp,
         deleteMcp,
         fetchMcpTools,
+        triggerMcpReload,
     };
 });

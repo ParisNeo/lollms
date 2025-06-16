@@ -143,7 +143,7 @@ from backend.routers.personalities import personalities_router
 from backend.routers.friends import friends_router
 from backend.routers.dm import dm_router
 from backend.routers.stores import store_files_router
-
+from backend.routers.mcp import mcp_router, discussion_tools_router
 
 
 # --- Application Version ---
@@ -335,11 +335,6 @@ async def get_discussion_asset(
     return FileResponse(asset_path)
 
 
-try:
-    locales_path = Path("locals").resolve()
-    if locales_path.is_dir(): app.mount("/locals", StaticFiles(directory=locales_path, html=False), name="locals")
-    else: print("WARNING: 'locals' directory not found. Localization files will not be served.")
-except Exception as e: print(f"ERROR: Failed to mount locals directory: {e}")
 
 app.include_router(auth_router)
 
@@ -717,6 +712,8 @@ app.include_router(personalities_router)
 # Add the router to the main app
 app.include_router(friends_router)
 app.include_router(dm_router)
+app.include_router(mcp_router)
+app.include_router(discussion_tools_router)
 
 
 app.add_middleware(
@@ -758,6 +755,12 @@ if not SERVE_VUE_FRONTEND:
         return FileResponse(admin_html_path)
 
 else:
+    try:
+        locales_path = (Path("frontend")/"legacy_webui"/"locals").resolve()
+        if locales_path.is_dir(): app.mount("/locals", StaticFiles(directory=locales_path, html=False), name="locals")
+        else: print("WARNING: 'locals' directory not found. Localization files will not be served.")
+    except Exception as e: print(f"ERROR: Failed to mount locals directory: {e}")
+
     # Serve the new Vue.js frontend from the 'dist' directory
     print("INFO: Serving new Vue.js frontend.")
     VUE_APP_DIR = Path(__file__).resolve().parent / "frontend" / "dist"

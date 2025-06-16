@@ -74,7 +74,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 loadedDiscussions[d.id] = {
                     ...d,
                     rag_datastore_id: d.rag_datastore_id,
-                    mcp_tool_ids: d.mcp_tool_ids || [],
+                    // Map `active_tools` from backend to `mcp_tool_ids` in frontend state
+                    mcp_tool_ids: d.active_tools || [], 
                     branches: {},
                     activeBranchId: d.active_branch_id || 'main',
                     messages_loaded_fully: {}
@@ -196,13 +197,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             disc.title = originalTitle;
         }
     }
-
-    // FIX: This action now ONLY updates the local state.
-    // The selection is sent to the backend with the next message.
-    function updateDiscussionMcps({ discussionId, mcp_tool_ids }) {
+    
+    async function updateDiscussionMcps({ discussionId, mcp_tool_ids }) {
         const disc = discussions.value[discussionId];
-        if (disc) {
-            disc.mcp_tool_ids = mcp_tool_ids;
+        if (!disc) return;
+
+        const originalTools = disc.mcp_tool_ids;
+        disc.mcp_tool_ids = mcp_tool_ids;
+
+        try {
+            // Backend expects `tools` field
+            await apiClient.put(`/api/discussions/${discussionId}/tools`, { tools: mcp_tool_ids });
+            useUiStore().addNotification('Tools updated for this discussion.', 'success');
+        } catch (error) {
+            disc.mcp_tool_ids = originalTools;
         }
     }
 
@@ -255,6 +263,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             formData.append('use_rag', 'false');
         }
 
+        // Send active tool IDs with the message
         if (activeDiscussion.value.mcp_tool_ids && activeDiscussion.value.mcp_tool_ids.length > 0) {
             formData.append('mcp_tool_ids_json', JSON.stringify(activeDiscussion.value.mcp_tool_ids));
         }
