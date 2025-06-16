@@ -48,11 +48,12 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             } else if (sender === username || sender === 'user') {
                 senderType = 'user';
             }
-
+            console.log(msg)
             return {
                 ...msg,
                 sender_type: senderType, // 'user', 'assistant', or 'system'
                 steps: msg.steps || [],
+                sources: msg.sources || [],
                 metadata: msg.metadata || {}
             };
         });
@@ -73,6 +74,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 loadedDiscussions[d.id] = {
                     ...d,
                     rag_datastore_id: d.rag_datastore_id,
+                    mcp_tool_ids: d.mcp_tool_ids || [],
                     branches: {},
                     activeBranchId: d.active_branch_id || 'main',
                     messages_loaded_fully: {}
@@ -94,7 +96,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (!disc.messages_loaded_fully[branchId]) {
             try {
                 const response = await apiClient.get(`/api/discussions/${id}?branch_id=${branchId}`);
-                // Use the new processing function
                 const processedMessages = processMessages(response.data);
                 disc.branches = { ...disc.branches, [branchId]: processedMessages };
                 disc.messages_loaded_fully[branchId] = true;
@@ -112,6 +113,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const newDisc = response.data;
             discussions.value[newDisc.id] = {
                 ...newDisc,
+                mcp_tool_ids: [],
                 branches: { 'main': [] },
                 activeBranchId: 'main',
                 messages_loaded_fully: { 'main': true }
@@ -195,6 +197,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
+    // FIX: This action now ONLY updates the local state.
+    // The selection is sent to the backend with the next message.
+    function updateDiscussionMcps({ discussionId, mcp_tool_ids }) {
+        const disc = discussions.value[discussionId];
+        if (disc) {
+            disc.mcp_tool_ids = mcp_tool_ids;
+        }
+    }
+
     async function sendMessage(payload) {
         if (!activeDiscussion.value) return;
 
@@ -242,6 +253,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             formData.append('use_rag', 'true');
         } else {
             formData.append('use_rag', 'false');
+        }
+
+        if (activeDiscussion.value.mcp_tool_ids && activeDiscussion.value.mcp_tool_ids.length > 0) {
+            formData.append('mcp_tool_ids_json', JSON.stringify(activeDiscussion.value.mcp_tool_ids));
         }
 
         if (payload.branch_from_message_id) {
@@ -334,21 +349,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const response = await apiClient.get(`/api/discussions/${discId}?branch_id=${branchId}`);
             const finalMessages = processMessages(response.data);
 
-            // Find the temporary message that was being streamed
             const streamingMsgIndex = localBranch.findIndex(m => m.isStreaming);
             
             if (streamingMsgIndex > -1) {
                 const tempMsg = localBranch[streamingMsgIndex];
-                // The new message list should contain the permanent version. We assume it's the last one.
                 const finalMsg = finalMessages[finalMessages.length - 1];
 
                 if (finalMsg) {
-                    // Carry over sources if the final message doesn't have them
-                    if (tempMsg.metadata?.sources?.length > 0 && !finalMsg.metadata?.sources?.length) {
-                        if (!finalMsg.metadata) finalMsg.metadata = {};
-                        finalMsg.metadata.sources = tempMsg.metadata.sources;
-                    }
-                    // Carry over steps if the final message doesn't have them
                     if (tempMsg.steps?.length > 0 && !finalMsg.steps?.length) {
                         finalMsg.steps = tempMsg.steps;
                     }
@@ -448,7 +455,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const response = await apiClient.post('/api/discussions/import', formData);
             
             uiStore.addNotification(response.data.message || 'Import completed.', 'success');
-            await loadDiscussions(); // Refresh the list
+            await loadDiscussions();
         } catch (error) {
             console.error("Import failed:", error);
         }
@@ -462,6 +469,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         renameDiscussion,
         sendMessage, stopGeneration, updateMessageContent, gradeMessage, deleteMessage,
         initiateBranch,
-        exportDiscussions, importDiscussions
+        exportDiscussions, importDiscussions,
+        updateDiscussionMcps,
     };
 });

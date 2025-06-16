@@ -4,7 +4,7 @@ import { ref, computed, watch } from 'vue';
 const props = defineProps({
   items: {
     type: Array,
-    default: () => [] // Expects [{id: '..', name: '...'}]
+    default: () => [] // Expects [{id: '..', name: '...'}, {isGroup: true, label: '..', items: [...]}]
   },
   placeholder: {
     type: String,
@@ -86,13 +86,25 @@ const vOnClickOutside = {
     </button>
     <div v-if="isOpen" class="absolute bottom-full mb-2 w-full bg-white dark:bg-gray-800 shadow-lg rounded-md border border-gray-300 dark:border-gray-600 max-h-60 overflow-y-auto z-10">
       <ul v-if="items.length > 0">
-        <li v-for="item in items" :key="item.id" @click="toggleItem(item.id)" class="px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center">
-          <input type="checkbox" :checked="isSelected(item.id)" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-3 pointer-events-none">
-          <span class="text-sm text-gray-900 dark:text-gray-100">{{ item.name }}</span>
-        </li>
+        <template v-for="(item, index) in items" :key="index">
+            <!-- Render as a group header -->
+            <li v-if="item.isGroup" class="px-3 py-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 sticky top-0 bg-gray-50 dark:bg-gray-700">
+                {{ item.label }}
+            </li>
+            <!-- Render a normal item -->
+            <li v-else @click="toggleItem(item.id)" class="px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center">
+              <input type="checkbox" :checked="isSelected(item.id)" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-3 pointer-events-none">
+              <span class="text-sm text-gray-900 dark:text-gray-100">{{ item.name }}</span>
+            </li>
+            <!-- Render items inside a group -->
+            <li v-if="item.isGroup" v-for="subItem in item.items" :key="subItem.id" @click="toggleItem(subItem.id)" class="px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center pl-6">
+                <input type="checkbox" :checked="isSelected(subItem.id)" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-3 pointer-events-none">
+                <span class="text-sm text-gray-900 dark:text-gray-100">{{ subItem.name }}</span>
+            </li>
+        </template>
       </ul>
       <div v-else class="px-3 py-2 text-sm text-gray-500 italic">
-        No stores available.
+        No items available.
       </div>
     </div>
   </div>

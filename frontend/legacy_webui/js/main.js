@@ -2324,7 +2324,7 @@ function renderMessage(message, existingContainer = null, existingBubble = null)
                 <span>${escapeHtml(truncatedText)}</span>
                 <span class="source-similarity-chip">${Math.round(source.similarity)}%</span>`;
             sourceBadge.className = 'detail-badge source-badge';
-            sourceBadge.title = `${translate('view_source_document', 'View source')}: ${escapeHtml(source.document)} (${translate('similarity_label', 'Similarity')}: ${Math.round(source.similarity * 100)}%)`;
+            sourceBadge.title = `${translate('view_source_document', 'View source')}: ${escapeHtml(source.document)} (${translate('similarity_label', 'Similarity')}: ${Math.round(source.similarity)}%)`;
 
             // Use the new helper function for the click event
             sourceBadge.onclick = () => showSourceModal(source, message.id);

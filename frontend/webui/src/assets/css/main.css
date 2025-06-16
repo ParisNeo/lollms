@@ -218,6 +218,7 @@ header, footer {
     @apply bg-white dark:bg-gray-800;
     @apply text-gray-900 dark:text-gray-100;
     @apply border border-gray-200 dark:border-gray-700;
+    width: 98vw;
     max-height: 90vh;
     border-radius: 0.75rem;
     /* Removed padding and size from here, handled by GenericModal.vue for better flexibility */

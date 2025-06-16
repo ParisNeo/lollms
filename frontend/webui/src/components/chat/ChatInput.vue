@@ -19,12 +19,13 @@ const imageInput = ref(null);
 const generationInProgress = computed(() => discussionsStore.generationInProgress);
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const availableRagStores = computed(() => dataStore.availableRagStores);
+const availableMcpTools = computed(() => dataStore.availableMcpToolsForSelector); // <-- NEW
 
 const isSendDisabled = computed(() => {
   return generationInProgress.value || (messageText.value.trim() === '' && uploadedImages.value.length === 0);
 });
 
-// FIX: This computed property now correctly interfaces between the singular state and the multi-select component
+// RAG Store Selection
 const ragStoreSelection = computed({
     get() {
         const currentId = activeDiscussion.value?.rag_datastore_id;
@@ -32,9 +33,7 @@ const ragStoreSelection = computed({
     },
     set(newIds) {
         if (activeDiscussion.value) {
-            // Per instructions, use only the first selected item, or null if empty
             const singleIdToSet = newIds.length > 0 ? newIds[0] : null;
-            
             if (activeDiscussion.value.rag_datastore_id !== singleIdToSet) {
                 discussionsStore.updateDiscussionRagStore({
                     discussionId: activeDiscussion.value.id,
@@ -45,13 +44,32 @@ const ragStoreSelection = computed({
     }
 });
 
+// NEW: MCP Tool Selection
+const mcpToolSelection = computed({
+    get() {
+        return activeDiscussion.value?.mcp_tool_ids || [];
+    },
+    set(newIds) {
+        if (activeDiscussion.value) {
+            discussionsStore.updateDiscussionMcps({
+                discussionId: activeDiscussion.value.id,
+                mcp_tool_ids: newIds
+            });
+        }
+    }
+});
+
+
 watch(activeDiscussion, (newDiscussion) => {
     if (newDiscussion) {
-        // Sync the selection when the discussion changes
-        const currentId = newDiscussion.rag_datastore_id;
-        ragStoreSelection.value = currentId ? [currentId] : [];
+        // Sync the RAG selection when the discussion changes
+        const currentRagId = newDiscussion.rag_datastore_id;
+        ragStoreSelection.value = currentRagId ? [currentRagId] : [];
+        // Sync the MCP selection
+        mcpToolSelection.value = newDiscussion.mcp_tool_ids || [];
     } else {
         ragStoreSelection.value = [];
+        mcpToolSelection.value = [];
     }
 }, { immediate: true });
 
@@ -161,6 +179,19 @@ function removeImage(index) {
       </button>
       <input type="file" ref="imageInput" @change="handleImageSelection" multiple accept="image/*" class="hidden">
       
+      <!-- MCP Tool Selector (NEW) -->
+      <div class="self-end w-40">
+        <MultiSelectMenu
+            v-model="mcpToolSelection"
+            :items="availableMcpTools"
+            placeholder="MCP Tools"
+            buttonClass="!py-2.5"
+            activeClass="!bg-purple-600 !text-white"
+            inactiveClass="btn-secondary"
+        />
+      </div>
+
+      <!-- RAG Store Selector -->
       <div class="self-end w-40">
         <MultiSelectMenu
             v-model="ragStoreSelection"

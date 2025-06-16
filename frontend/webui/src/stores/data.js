@@ -11,6 +11,8 @@ export const useDataStore = defineStore('data', () => {
     const sharedDataStores = ref([]);
     const userPersonalities = ref([]);
     const publicPersonalities = ref([]);
+    const userMcps = ref([]);
+    const mcpTools = ref([]);
 
     // GETTERS
     const availableRagStores = computed(() => {
@@ -29,20 +31,33 @@ export const useDataStore = defineStore('data', () => {
         return [...owned, ...shared].sort((a, b) => a.name.localeCompare(b.name));
     });
 
+    const availableMcpToolsForSelector = computed(() => {
+        if (!Array.isArray(mcpTools.value)) return [];
+        return mcpTools.value
+            .map(group => ({
+                isGroup: true,
+                label: group.mcp_alias,
+                items: Array.isArray(group.tools) ? group.tools.map(tool => ({ id: tool.id, name: tool.name })) : []
+            }))
+            .sort((a,b) => a.label.localeCompare(b.label));
+    });
+
     // ACTIONS
 
     async function loadAllInitialData() {
         await Promise.all([
             fetchAvailableLollmsModels(),
             fetchDataStores(),
-            fetchPersonalities()
+            fetchPersonalities(),
+            fetchMcps(),
+            fetchMcpTools()
         ]);
     }
 
     async function fetchAvailableLollmsModels() {
         try {
             const response = await apiClient.get('/api/config/lollms-models');
-            availableLollmsModels.value = response.data;
+            availableLollmsModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             console.error("Failed to load LLM models:", error);
             availableLollmsModels.value = [];
@@ -53,9 +68,12 @@ export const useDataStore = defineStore('data', () => {
         try {
             const response = await apiClient.get('/api/datastores');
             const authStore = useAuthStore();
-            if (response.data && authStore.user) {
+            if (Array.isArray(response.data) && authStore.user) {
                 ownedDataStores.value = response.data.filter(ds => ds.owner_username === authStore.user.username);
                 sharedDataStores.value = response.data.filter(ds => ds.owner_username !== authStore.user.username);
+            } else {
+                ownedDataStores.value = [];
+                sharedDataStores.value = [];
             }
         } catch (error) {
             console.error("Failed to load data stores:", error);
@@ -163,8 +181,8 @@ export const useDataStore = defineStore('data', () => {
                 apiClient.get('/api/personalities/my'),
                 apiClient.get('/api/personalities/public')
             ]);
-            userPersonalities.value = ownedRes.data;
-            publicPersonalities.value = publicRes.data;
+            userPersonalities.value = Array.isArray(ownedRes.data) ? ownedRes.data : [];
+            publicPersonalities.value = Array.isArray(publicRes.data) ? publicRes.data : [];
         } catch (error) {
             console.error("Failed to load personalities:", error);
             userPersonalities.value = [];
@@ -209,13 +227,67 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
+    // --- MCP Actions ---
+
+    async function fetchMcps() {
+        try {
+            const response = await apiClient.get('/api/mcps/');
+            userMcps.value = Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            console.error("Failed to load MCP servers. The endpoint may not be implemented yet.", error);
+            userMcps.value = [];
+        }
+    }
+
+    async function addMcp(mcpData) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post('/api/mcps/', mcpData);
+            userMcps.value.push(response.data);
+            uiStore.addNotification('MCP server added successfully.', 'success');
+        } catch (error) {
+            console.error("Failed to add MCP server:", error);
+            throw error;
+        }
+    }
+
+    async function deleteMcp(mcpId) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.delete(`/api/mcps/${mcpId}`);
+            userMcps.value = userMcps.value.filter(m => m.id !== mcpId);
+            uiStore.addNotification('MCP server removed.', 'success');
+        } catch (error) {
+            console.error("Failed to delete MCP server:", error);
+            throw error;
+        }
+    }
+
+    async function fetchMcpTools() {
+        try {
+            const response = await apiClient.get('/api/mcps/tools');
+            mcpTools.value = Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            console.error("Failed to load MCP tools. The endpoint may not be implemented yet.", error);
+            mcpTools.value = [];
+        }
+    }
+
     return {
+        // State
         availableLollmsModels,
         ownedDataStores,
         sharedDataStores,
         userPersonalities,
         publicPersonalities,
+        userMcps,
+        mcpTools,
+        
+        // Getters
         availableRagStores,
+        availableMcpToolsForSelector,
+
+        // Actions
         loadAllInitialData,
         fetchDataStores,
         addDataStore,
@@ -229,6 +301,10 @@ export const useDataStore = defineStore('data', () => {
         fetchPersonalities,
         addPersonality,
         updatePersonality,
-        deletePersonality
+        deletePersonality,
+        fetchMcps,
+        addMcp,
+        deleteMcp,
+        fetchMcpTools,
     };
 });

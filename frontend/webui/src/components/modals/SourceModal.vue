@@ -32,7 +32,7 @@ const renderedContent = computed(() => {
       <div class="space-y-4">
         <div v-if="sourceData.similarity" class="text-sm text-gray-600 dark:text-gray-400">
           <strong>Similarity Score:</strong>
-          <span class="font-semibold text-gray-800 dark:text-gray-200">{{ Math.round(sourceData.similarity * 100) }}%</span>
+          <span class="font-semibold text-gray-800 dark:text-gray-200">{{ Math.round(sourceData.similarity) }}%</span>
         </div>
         <div 
           class="prose prose-sm dark:prose-invert max-w-none p-4 border dark:border-gray-700 rounded-md bg-gray-50 dark:bg-gray-900/50"

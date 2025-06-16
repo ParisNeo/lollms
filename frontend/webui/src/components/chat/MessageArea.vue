@@ -12,18 +12,7 @@ export default {
   computed: {
     ...mapState(useDiscussionsStore, ['activeMessages']),
   },
-  watch: {
-    // Watch for changes in the messages array to scroll to the bottom.
-    activeMessages: {
-      handler(newMessages, oldMessages) {
-        // Use nextTick to ensure the DOM has updated before scrolling.
-        nextTick(() => {
-          this.scrollToBottom();
-        });
-      },
-      deep: true, // Watch for changes inside the array objects as well.
-    },
-  },
+  // WATCHER REMOVED to disable auto-scrolling on new messages.
   mounted() {
     this.scrollToBottom(false); // Initial scroll on mount
   },
