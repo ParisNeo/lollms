@@ -115,6 +115,7 @@ class AppLollmsDiscussion:
         model_name: Optional[str] = None,
         token_count: Optional[int] = None,
         sources: Optional[List[Dict]] = None,
+        steps: Optional[List[Dict]] = None,
         image_references: Optional[List[str]] = None,
     ) -> AppLollmsMessage:
         message = AppLollmsMessage(
@@ -126,6 +127,7 @@ class AppLollmsDiscussion:
             model_name=model_name, 
             token_count=token_count, 
             sources=sources,
+            steps=steps,
             image_references=image_references or []
         )
         self.messages.append(message)
@@ -164,6 +166,8 @@ class AppLollmsDiscussion:
 
     def get_path_to_message(self, message_id: str) -> List[AppLollmsMessage]:
         """Traces the ancestry of a message back to the root of the discussion."""
+        if message_id=="main":
+            message_id = self.messages[-1].id
         messages_by_id = {msg.id: msg for msg in self.messages}
         if message_id not in messages_by_id:
             return []

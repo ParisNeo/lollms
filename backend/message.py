@@ -112,6 +112,7 @@ class AppLollmsMessage:
     model_name: Optional[str] = None
     token_count: Optional[int] = None    
     sources: Optional[List[Dict]] = None # FIXED: Should be a list of dicts for multiple sources
+    steps: Optional[List[Dict]] = None
     image_references: Optional[List[str]] = dataclass_field(default_factory=list) # Stores paths relative to user_discussion_assets_path / discussion_id
 
     def to_dict(self) -> Dict[str, Any]:

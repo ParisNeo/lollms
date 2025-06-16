@@ -1,10 +1,19 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue';
+import { computed, ref, onMounted, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import { marked } from 'marked';
+
+// Import the interactive CodeBlock component
+import CodeBlock from './CodeBlock.vue';
+
+// CodeMirror imports for the editor
+import { Codemirror } from 'vue-codemirror';
+import { markdown } from '@codemirror/lang-markdown';
+import { oneDark } from '@codemirror/theme-one-dark';
+import { EditorView, lineNumbers } from '@codemirror/view';
 
 const props = defineProps({
   message: {
@@ -17,12 +26,24 @@ const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
+// --- Component State ---
 const isStepsCollapsed = ref(!props.message.isStreaming);
+const isEditing = ref(false);
+const editedContent = ref('');
+const codeMirrorView = ref(null);
 
+// --- Lifecycle & Watchers ---
 onMounted(() => {
     isStepsCollapsed.value = !props.message.isStreaming;
 });
 
+watch(() => props.message.content, () => {
+    if (isEditing.value) {
+        isEditing.value = false;
+    }
+});
+
+// --- Computed Properties ---
 const isUser = computed(() => props.message.sender_type === 'user');
 const isAi = computed(() => props.message.sender_type === 'assistant');
 const isSystem = computed(() => props.message.sender_type === 'system');
@@ -32,6 +53,7 @@ const bubbleClass = computed(() => ({
   'ai-bubble': isAi.value,
   'system-bubble': isSystem.value,
   'is-streaming': props.message.isStreaming,
+  'is-editing': isEditing.value,
 }));
 
 const containerClass = computed(() => ({
@@ -47,15 +69,17 @@ const senderName = computed(() => {
     return props.message.sender || 'Unknown';
 });
 
-const renderedContent = computed(() => {
-  if (!props.message.content) return '';
-  let processedContent = props.message.content.replace(/<think>([\s\S]*?)<\/think>/gs, (match, thinkContent) => {
-      const thinkHtml = marked.parse(thinkContent.trim());
-      return `<details class="think-block my-2"><summary class="px-2 py-1 text-xs italic text-gray-500 dark:text-gray-400 cursor-pointer">Assistant's Thoughts</summary><div class="think-content p-2 border-t border-gray-200 dark:border-gray-700">${thinkHtml}</div></details>`;
-  });
-  return marked.parse(processedContent, { breaks: true, gfm: true });
+// NEW: Parse content into tokens for selective rendering
+const messageTokens = computed(() => {
+    if (!props.message.content) return [];
+    
+    // Use marked's lexer to get a token stream
+    const tokens = marked.lexer(props.message.content);
+    
+    // marked.lexer() adds a `links` property to the array, which we don't want to render.
+    // So we filter it out and return a plain array.
+    return Array.from(tokens);
 });
-
 
 const getStepContent = (content) => {
     if (!content) return '';
@@ -69,17 +93,107 @@ const latestStep = computed(() => {
     return null;
 });
 
-function formatTimestamp(timestamp) {
-  if (!timestamp) return '';
-  const date = new Date(timestamp);
-  const now = new Date();
-  const diff = now - date;
-  const minutes = Math.floor(diff / 60000);
-  const hours = Math.floor(diff / 3600000);
-  if (minutes < 1) return 'Just now';
-  if (minutes < 60) return `${minutes}m ago`;
-  if (hours < 24) return `${hours}h ago`;
-  return date.toLocaleDateString();
+const editorExtensions = computed(() => {
+    const extensions = [markdown(), EditorView.lineWrapping, lineNumbers()];
+    if (uiStore.currentTheme === 'dark') {
+        extensions.push(oneDark);
+    }
+    return extensions;
+});
+
+
+// --- Edit Mode Logic ---
+function toggleEdit() {
+    isEditing.value = !isEditing.value;
+    if (isEditing.value) {
+        editedContent.value = props.message.content;
+    }
+}
+
+async function handleSaveEdit() {
+    const branchId = props.message.branch_id || discussionsStore.activeDiscussion.activeBranchId;
+    if (!branchId) {
+        uiStore.addNotification('Could not save edit: branch not found.', 'error');
+        return;
+    }
+    await discussionsStore.updateMessageContent({
+        messageId: props.message.id,
+        branchId,
+        newContent: editedContent.value,
+    });
+    isEditing.value = false;
+}
+
+function handleCancelEdit() {
+    isEditing.value = false;
+}
+
+function handleEditorReady(payload) {
+    codeMirrorView.value = payload.view;
+}
+
+function insertTextAtCursor(before, after = '', placeholder = '') {
+    const view = codeMirrorView.value;
+    if (!view) return;
+
+    const { from, to } = view.state.selection.main;
+    const selectedText = view.state.doc.sliceString(from, to);
+
+    let textToInsert;
+    let selectionOffsetStart;
+    let selectionOffsetEnd;
+
+    if (selectedText) {
+        textToInsert = `${before}${selectedText}${after}`;
+        selectionOffsetStart = from + before.length;
+        selectionOffsetEnd = selectionOffsetStart + selectedText.length;
+    } else {
+        textToInsert = `${before}${placeholder}${after}`;
+        selectionOffsetStart = from + before.length;
+        selectionOffsetEnd = selectionOffsetStart + placeholder.length;
+    }
+    
+    view.dispatch({
+        changes: { from, to, insert: textToInsert },
+        selection: { anchor: selectionOffsetStart, head: selectionOffsetEnd }
+    });
+    view.focus();
+}
+
+// --- Action Handlers ---
+function copyContent() {
+  navigator.clipboard.writeText(props.message.content);
+  uiStore.addNotification('Content copied!', 'success');
+}
+
+async function handleDelete() {
+  const branchId = props.message.branch_id || discussionsStore.activeDiscussion?.activeBranchId;
+  if (!branchId) {
+      uiStore.addNotification('Cannot delete message: active branch not found.', 'error');
+      return;
+  }
+  const confirmed = await uiStore.showConfirmation({
+      title: 'Delete Message',
+      message: 'Are you sure you want to delete this message and all subsequent replies?',
+      confirmText: 'Delete'
+  });
+  if (confirmed) {
+    discussionsStore.deleteMessage({ messageId: props.message.id, branchId: branchId });
+  }
+}
+
+function handleGrade(change) {
+  const branchId = props.message.branch_id || discussionsStore.activeDiscussion?.activeBranchId;
+  if (!branchId) return;
+  discussionsStore.gradeMessage({ messageId: props.message.id, branchId: branchId, change });
+}
+
+function handleBranchOrRegenerate() {
+  discussionsStore.initiateBranch(props.message);
+}
+
+function showSourceDetails(source) {
+    uiStore.openModal('sourceViewer', source);
 }
 
 function getSimilarityColor(score) {
@@ -87,67 +201,78 @@ function getSimilarityColor(score) {
   if (score >= 70) return 'bg-yellow-500';
   return 'bg-red-500';
 }
-
-function showSourceDetails(source) {
-    uiStore.openModal('sourceViewer', source);
-}
-
-function copyContent() {
-  navigator.clipboard.writeText(props.message.content);
-  uiStore.addNotification('Content copied!', 'success');
-}
-
-async function handleDelete() {
-  const confirmed = await uiStore.showConfirmation({
-      title: 'Delete Message',
-      message: 'Are you sure you want to delete this message and all subsequent replies?',
-      confirmText: 'Delete'
-  });
-  if (confirmed) {
-    discussionsStore.deleteMessage({ messageId: props.message.id, branchId: props.message.branch_id });
-  }
-}
-
-function handleGrade(change) {
-  discussionsStore.gradeMessage({ messageId: props.message.id, branchId: props.message.branch_id, change });
-}
-
-function handleBranchOrRegenerate() {
-  discussionsStore.initiateBranch(props.message);
-}
 </script>
 
 <template>
   <div class="message-container group flex flex-col" :class="containerClass" :data-message-id="message.id">
     <div class="message-bubble" :class="bubbleClass">
-      <!-- Sender & Model Info -->
-      <div v-if="!isUser && !isSystem" class="flex items-center text-xs mb-2 text-gray-500 dark:text-gray-400">
-        <span class="font-semibold text-gray-700 dark:text-gray-300">{{ senderName }}</span>
-        <span v-if="isAi && message.model_name" class="ml-2">· {{ message.model_name }}</span>
-      </div>
+        <!-- Default View -->
+        <div v-if="!isEditing">
+            <!-- Sender & Model Info -->
+            <div v-if="!isUser && !isSystem" class="flex items-center text-xs mb-2 text-gray-500 dark:text-gray-400">
+                <span class="font-semibold text-gray-700 dark:text-gray-300">{{ senderName }}</span>
+                <span v-if="isAi && message.model_name" class="ml-2">· {{ message.model_name }}</span>
+            </div>
 
-      <!-- Image Display -->
-      <div v-if="message.image_references && message.image_references.length > 0" 
-           class="my-2 grid gap-2"
-           :class="[message.image_references.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
-        <div 
-            v-for="(imgSrc, index) in message.image_references" 
-            :key="index" 
-            class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer"
-            @click="uiStore.openImageViewer(imgSrc)"
-        >
-          <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain" />
+            <!-- Image Display -->
+            <div v-if="message.image_references && message.image_references.length > 0" 
+                class="my-2 grid gap-2"
+                :class="[message.image_references.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
+                <div 
+                    v-for="(imgSrc, index) in message.image_references" 
+                    :key="index" 
+                    class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer"
+                    @click="uiStore.openImageViewer(imgSrc)"
+                >
+                <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain" />
+                </div>
+            </div>
+
+            <!-- Main Content - Token-based rendering -->
+            <div class="message-content text-sm prose prose-sm dark:prose-invert max-w-none">
+                <template v-for="(token, index) in messageTokens" :key="index">
+                    <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" />
+                    <div v-else v-html="marked.parse(token.raw, { gfm: true, breaks: true })"></div>
+                </template>
+            </div>
+            
+            <div v-if="message.isStreaming && !message.content && (!message.image_references || message.image_references.length === 0)" class="typing-indicator">
+                    <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+            </div>
         </div>
-      </div>
 
-      <!-- Main Content -->
-      <div class="message-content text-sm prose prose-sm dark:prose-invert max-w-none" v-html="renderedContent"></div>
-      <div v-if="message.isStreaming && !message.content && (!message.image_references || message.image_references.length === 0)" class="typing-indicator">
-            <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      </div>
+        <!-- Editing View -->
+        <div v-else class="w-full">
+            <!-- Toolbar -->
+            <div class="flex items-center space-x-1 border-b dark:border-gray-600 mb-2 pb-2">
+                <button @click="insertTextAtCursor('**', '**', 'bold text')" title="Bold" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><b>B</b></button>
+                <button @click="insertTextAtCursor('*', '*', 'italic text')" title="Italic" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><i>I</i></button>
+                <button @click="insertTextAtCursor('`', '`', 'code')" title="Inline Code" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm font-mono text-xs"></button>
+                <button @click="insertTextAtCursor('$$', '$$', 'latex')" title="LaTeX" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">Σ</button>
+                <button @click="insertTextAtCursor('```python\n', '\n```')" title="Python Code Block" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm font-mono text-xs">Py</button>
+                <button @click="insertTextAtCursor('```json\n', '\n```')" title="JSON Code Block" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm font-mono text-xs">Json</button>
+                <button @click="insertTextAtCursor('```javascript\n', '\n```')" title="JavaScript Code Block" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm font-mono text-xs">JS</button>
+            </div>
+            <!-- CodeMirror Editor -->
+            <codemirror
+                v-model="editedContent"
+                placeholder="Enter your message..."
+                :style="{ maxHeight: '500px' }"
+                :autofocus="true"
+                :indent-with-tab="true"
+                :tab-size="2"
+                :extensions="editorExtensions"
+                @ready="handleEditorReady"
+            />
+            <!-- Edit Actions -->
+            <div class="flex justify-end space-x-2 mt-2">
+                <button @click="handleCancelEdit" class="btn btn-secondary !py-1 !px-3">Cancel</button>
+                <button @click="handleSaveEdit" class="btn btn-primary !py-1 !px-3">Save</button>
+            </div>
+        </div>
 
-      <!-- Generation Steps -->
-      <div v-if="message.steps && message.steps.length > 0" class="steps-container">
+      <!-- Generation Steps (visible in both modes) -->
+      <div v-if="message.steps && message.steps.length > 0 && !isEditing" class="steps-container">
         <button @click="isStepsCollapsed = !isStepsCollapsed" class="text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 flex items-center w-full text-left mb-2 group/toggle">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 transition-transform flex-shrink-0 group-hover/toggle:text-gray-900 dark:group-hover/toggle:text-white" :class="{'rotate-90': !isStepsCollapsed, 'rotate-0': isStepsCollapsed}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
             <div class="flex items-center space-x-2 overflow-hidden">
@@ -178,16 +303,16 @@ function handleBranchOrRegenerate() {
         </div>
       </div>
       
-      <!-- Footer with Sources and Actions -->
+      <!-- Footer with Sources and Actions (visible in both modes) -->
       <div v-if="!isSystem" class="message-footer">
         <div class="flex justify-between items-start gap-2">
             <!-- Left Side: Details (Tokens, Sources) -->
             <div class="flex items-center flex-wrap gap-2">
-                 <div v-if="message.token_count" class="detail-badge token-badge">
+                 <div v-if="message.token_count && !isEditing" class="detail-badge token-badge">
                     <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M15.988 3.012A2.25 2.25 0 0118 5.25v9.5A2.25 2.25 0 0115.75 17h-3.389a1.5 1.5 0 01-1.49-1.076L9.4 12.5H2.25a.75.75 0 010-1.5h7.15l1.45-3.868A1.5 1.5 0 0112.361 6h3.389A2.25 2.25 0 0115.988 3.012z" clip-rule="evenodd" /></svg>
                     <span>{{ message.token_count }}</span>
                 </div>
-                <button v-for="source in message.sources" :key="source.document" @click="showSourceDetails(source)" class="detail-badge source-badge" :title="`View source: ${source.document}`">
+                <button v-if="!isEditing" v-for="source in message.sources" :key="source.document" @click="showSourceDetails(source)" class="detail-badge source-badge" :title="`View source: ${source.document}`">
                     <span class="similarity-chip" :class="getSimilarityColor(source.similarity)"></span>
                     <span class="truncate max-w-xs">{{ source.document }}</span>
                 </button>
@@ -195,12 +320,13 @@ function handleBranchOrRegenerate() {
 
             <!-- Right Side: Actions (Copy, Rate, etc.) -->
             <div class="flex items-center gap-2 flex-shrink-0">
-                <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div v-if="!isEditing" class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button @click="copyContent" title="Copy" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg></button>
+                    <button @click="toggleEdit" title="Edit" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg></button>
                     <button @click="handleBranchOrRegenerate" :title="isUser ? 'Resend/Branch' : 'Regenerate'" class="p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></button>
                     <button @click="handleDelete" title="Delete" class="p-1.5 rounded-full hover:bg-red-200 dark:hover:bg-red-700 text-red-500"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
                 </div>
-                <div v-if="isAi" class="message-rating">
+                <div v-if="isAi && !isEditing" class="message-rating">
                     <button @click="handleGrade(1)" title="Good response" class="rating-btn upvote" :class="{ 'active': message.user_grade > 0 }"><svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" /></svg></button>
                     <span class="rating-score">{{ message.user_grade || 0 }}</span>
                     <button @click="handleGrade(-1)" title="Bad response" class="rating-btn downvote" :class="{ 'active': message.user_grade < 0 }"><svg class="w-4 h-4" viewBox="0 0 20 20" fill="currentColor"><path d="M9.106 17.447a1 1 0 001.788 0l7-14a1 1 0 00-1.169-1.409l-5 1.429A1 1 0 0011 4.429V9a1 1 0 11-2 0V4.429a1 1 0 00-.725-.962l-5-1.428a1 1 0 00-1.17 1.408l7 14z" /></svg></button>

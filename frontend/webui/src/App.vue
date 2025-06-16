@@ -2,6 +2,7 @@
 import { computed, onMounted } from 'vue';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
+import { usePyodideStore } from './stores/pyodide'; // Import Pyodide store
 import HomeView from './views/HomeView.vue';
 import LoginModal from './components/modals/LoginModal.vue';
 import SettingsModal from './components/modals/SettingsModal.vue';
@@ -26,6 +27,7 @@ import logoUrl from './assets/logo.png';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
+const pyodideStore = usePyodideStore(); // Get Pyodide store instance
 
 // Reactive check for which modals are open
 const isLoginOpen = computed(() => uiStore.isModalOpen('login'));
@@ -46,10 +48,15 @@ const isImportOpen = computed(() => uiStore.isModalOpen('import'));
 
 
 // Initial check for authentication and theme
-onMounted(() => {
-    authStore.attemptInitialAuth();
+onMounted(async () => {
+    await authStore.attemptInitialAuth();
     uiStore.initializeTheme();
     uiStore.initializeLocalization();
+    
+    // Start loading Pyodide in the background after initial auth is done
+    if (authStore.isAuthenticated) {
+        pyodideStore.initialize();
+    }
 });
 
 </script>

@@ -634,8 +634,8 @@
 
     *   **`MSG_TYPE(Enum)`**: Specifies the type of message being communicated, especially in streaming callbacks.
         *   `MSG_TYPE_CHUNK`: A segment of a larger message.
-        *   `MSG_TYPE_FULL`: A complete message.
-        *   `MSG_TYPE_FULL_INVISIBLE_TO_AI`/`_USER`: Full messages with specific visibility.
+        *   `MSG_TYPE_CONTENT`: A complete message.
+        *   `MSG_TYPE_CONTENT_INVISIBLE_TO_AI`/`_USER`: Full messages with specific visibility.
         *   `MSG_TYPE_EXCEPTION`, `MSG_TYPE_WARNING`, `MSG_TYPE_INFO`: For status updates.
         *   `MSG_TYPE_STEP_START`, `MSG_TYPE_STEP_PROGRESS`, `MSG_TYPE_STEP_END`: For task progress.
         *   `MSG_TYPE_JSON_INFOS`, `MSG_TYPE_REF`, `MSG_TYPE_CODE`, `MSG_TYPE_UI`: For special content types.

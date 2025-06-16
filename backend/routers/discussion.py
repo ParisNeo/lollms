@@ -162,7 +162,8 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
             id=disc_id, title=disc_obj.title, 
             is_starred=(disc_id in starred_ids),
             rag_datastore_id=disc_obj.rag_datastore_id,
-            active_branch_id=disc_obj.active_branch_id # NEW
+            active_tools=getattr(disc_obj, 'active_tools', []),
+            active_branch_id=disc_obj.active_branch_id
         ))
     return infos
 
@@ -172,13 +173,12 @@ async def create_new_discussion(current_user: UserAuthDetails = Depends(get_curr
     discussion_id = str(uuid.uuid4())
     discussion_obj = get_user_discussion(username, discussion_id, create_if_missing=True)
     if not discussion_obj: raise HTTPException(status_code=500, detail="Failed to create new discussion.")
-    # For a new discussion, there is no active branch yet. It will be set by the first message.
     return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=False, rag_datastore_id=None, active_branch_id=None, created_at=datetime.datetime.now(), last_activity_at=datetime.datetime.now())
 
 @discussion_router.get("/{discussion_id}", response_model=List[MessageOutput])
 async def get_messages_for_discussion(
     discussion_id: str,
-    branch_id: Optional[str] = Query(None), # Client sends the start_id of the branch it wants
+    branch_id: Optional[str] = Query(None),
     current_user: UserAuthDetails = Depends(get_current_active_user), 
     db: Session = Depends(get_db)
 ) -> List[MessageOutput]:
@@ -189,36 +189,20 @@ async def get_messages_for_discussion(
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj: raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
     
-    if branch_id =="main" and len(discussion_obj.messages)>0:
-        branch_id = discussion_obj.messages[-1].id
-    
-    # --- FIX: Resolve the full branch path from the client's request ---
-    # The client can send a branch's start_id. We must find the tip of that branch 
-    # to retrieve the full message history for rendering.
-    
-    branch_tip_to_load = None
+    branch_tip_to_load = discussion_obj.active_branch_id
     if branch_id:
-        # Use the new helper method to trace from the start_id to the branch's leaf.
         branch_tip_to_load = discussion_obj.get_branch_tip(branch_id)
-    else:
-        # If no specific branch is requested, use the discussion's last known active branch tip.
-        branch_tip_to_load = discussion_obj.active_branch_id
     
     messages_in_branch = []
     if branch_tip_to_load:
-        # get_path_to_message correctly gets all ancestors up to the given tip.
         messages_in_branch = discussion_obj.get_path_to_message(branch_tip_to_load)
     elif discussion_obj.messages: 
-        # Fallback for older discussions or edge cases where no active_branch_id is set.
-        # We find the tip of the branch containing the chronologically last message.
         last_message_tip = discussion_obj.get_branch_tip(discussion_obj.messages[-1].id)
         messages_in_branch = discussion_obj.get_path_to_message(last_message_tip)
     
     if not messages_in_branch and branch_id:
-        print(f"WARN: Could not resolve a message path for branch_id '{branch_id}' in discussion '{discussion_id}'. Returning empty list.")
+        print(f"WARN: Could not resolve message path for branch_id '{branch_id}'. Returning empty list.")
     
-    # --- End of Fix ---
-
     user_grades_for_discussion = {
         grade.message_id: grade.grade
         for grade in db.query(UserMessageGrade.message_id, UserMessageGrade.grade)
@@ -227,7 +211,6 @@ async def get_messages_for_discussion(
     
     messages_output = []
     for msg in messages_in_branch:
-        # This part correctly identifies branch points by checking for multiple children.
         children = discussion_obj.get_message_children(msg.id)
         child_branch_ids = [child.id for child in children] if len(children) > 1 else None
 
@@ -243,12 +226,11 @@ async def get_messages_for_discussion(
                 parent_message_id=msg.parent_message_id, binding_name=msg.binding_name,
                 model_name=msg.model_name, token_count=msg.token_count,
                 sources=msg.sources,
+                steps=msg.steps,
                 image_references=full_image_refs,
                 user_grade=user_grades_for_discussion.get(msg.id, 0),
                 created_at=msg.created_at,
-                # The branch_id for the whole list is the tip we are viewing.
                 branch_id=branch_tip_to_load, 
-                # The 'branches' property is for the specific message 'msg', indicating if IT is a branch point.
                 branches=child_branch_ids
             )
         )
@@ -265,7 +247,6 @@ async def update_discussion_active_branch(
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    # Validate that the new active_branch_id exists in the discussion
     if not any(msg.id == branch_request.active_branch_id for msg in discussion_obj.messages):
         raise HTTPException(status_code=404, detail="Branch ID not found in discussion.")
 
@@ -280,6 +261,7 @@ async def update_discussion_active_branch(
         title=discussion_obj.title, 
         is_starred=is_starred, 
         rag_datastore_id=discussion_obj.rag_datastore_id,
+        active_tools=getattr(discussion_obj, 'active_tools', []),
         active_branch_id=discussion_obj.active_branch_id
     )
 
@@ -293,7 +275,7 @@ async def update_discussion_title(discussion_id: str, title_update: DiscussionTi
     discussion_obj.title = title_update.title
     save_user_discussion(username, discussion_id, discussion_obj)
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_id, discussion_id=discussion_id).first() is not None
-    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=is_starred, rag_datastore_id=discussion_obj.rag_datastore_id, active_branch_id=discussion_obj.active_branch_id)
+    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=is_starred, rag_datastore_id=discussion_obj.rag_datastore_id, active_branch_id=discussion_obj.active_branch_id, active_tools=getattr(discussion_obj, 'active_tools', []))
 
 @discussion_router.put("/{discussion_id}/rag_datastore", response_model=DiscussionInfo)
 async def update_discussion_rag_datastore(discussion_id: str, update_payload: DiscussionRagDatastoreUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
@@ -301,12 +283,12 @@ async def update_discussion_rag_datastore(discussion_id: str, update_payload: Di
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj: raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
 
-    if update_payload.rag_datastore_id: # Validate datastore existence and user access
+    if update_payload.rag_datastore_id:
         try: get_safe_store_instance(username, update_payload.rag_datastore_id, db)
         except HTTPException as e:
             if e.status_code == 404 or e.status_code == 403:
                 raise HTTPException(status_code=400, detail=f"Invalid or inaccessible RAG datastore ID: {update_payload.rag_datastore_id}")
-            raise e # Re-raise other HTTPExceptions
+            raise e
         except Exception as e_val:
              raise HTTPException(status_code=500, detail=f"Error validating RAG datastore: {str(e_val)}")
 
@@ -317,7 +299,7 @@ async def update_discussion_rag_datastore(discussion_id: str, update_payload: Di
     if not user_id: raise HTTPException(status_code=404, detail="User not found in DB for star check.")
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_id, discussion_id=discussion_id).first() is not None
     
-    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=is_starred, rag_datastore_id=discussion_obj.rag_datastore_id, active_branch_id=discussion_obj.active_branch_id)
+    return DiscussionInfo(id=discussion_id, title=discussion_obj.title, is_starred=is_starred, rag_datastore_id=discussion_obj.rag_datastore_id, active_branch_id=discussion_obj.active_branch_id, active_tools=getattr(discussion_obj, 'active_tools', []))
 
 
 @discussion_router.delete("/{discussion_id}", status_code=200)
@@ -338,7 +320,6 @@ async def delete_specific_discussion(discussion_id: str, current_user: UserAuthD
         try: file_path.unlink()
         except OSError as e:
             if file_path.exists(): print(f"ERROR: Failed to delete discussion file {file_path}: {e}")
-    # Delete associated assets
     assets_path = get_user_discussion_assets_path(username) / discussion_id
     if assets_path.exists() and assets_path.is_dir():
         background_tasks.add_task(shutil.rmtree, assets_path, ignore_errors=True)
@@ -376,6 +357,7 @@ async def star_discussion(discussion_id: str, current_user: UserAuthDetails = De
         title=discussion_obj.title, 
         is_starred=True, 
         rag_datastore_id=discussion_obj.rag_datastore_id,
+        active_tools=getattr(discussion_obj, 'active_tools', []),
         active_branch_id=discussion_obj.active_branch_id
     )
 
@@ -402,39 +384,40 @@ async def unstar_discussion(discussion_id: str, current_user: UserAuthDetails = 
         title=discussion_obj.title, 
         is_starred=False, 
         rag_datastore_id=discussion_obj.rag_datastore_id,
+        active_tools=getattr(discussion_obj, 'active_tools', []),
         active_branch_id=discussion_obj.active_branch_id
     )
 
 @discussion_router.post("/{discussion_id}/chat")
 async def chat_in_existing_discussion(
-    discussion_id: str, prompt: str = Form(...),
+    discussion_id: str, 
+    prompt: str = Form(...),
     image_server_paths_json: str = Form("[]"),
     use_rag: bool = Form(False),
     rag_datastore_id: Optional[str] = Form(None),
-    is_resend: bool = Form(False), # NEW
-    branch_from_message_id: Optional[str] = Form(None), # NEW
+    mcp_tool_ids_json: str = Form("[]"),
+    is_resend: bool = Form(False),
+    branch_from_message_id: Optional[str] = Form(None),
     current_user: UserAuthDetails = Depends(get_current_active_user),
-    db: Session = Depends(get_db), background_tasks: BackgroundTasks = BackgroundTasks()
+    db: Session = Depends(get_db), 
+    background_tasks: BackgroundTasks = BackgroundTasks()
 ) -> StreamingResponse:
     username = current_user.username
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj: raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
     lc = get_user_lollms_client(username)
 
-    # --- Determine parent message ID for the new user message ---
     parent_message_id = None
     if is_resend:
         if not branch_from_message_id: raise HTTPException(status_code=400, detail="branch_from_message_id is required for resend.")
-        # When branching, the parent is the message we are branching from.
         parent_message_id = branch_from_message_id
     elif discussion_obj.active_branch_id:
-        # When continuing, the parent is the tip of the active branch.
         parent_message_id = discussion_obj.active_branch_id
-    # If it's the very first message in a discussion, parent_message_id remains None.
 
     final_image_references_for_message: List[str] = []
     try: image_server_paths = json.loads(image_server_paths_json)
     except json.JSONDecodeError: raise HTTPException(status_code=400, detail="Invalid JSON format.")
+    
     if image_server_paths:
         user_temp_uploads_path = get_user_temp_uploads_path(username)
         discussion_assets_path = get_user_discussion_assets_path(username) / discussion_id
@@ -456,7 +439,6 @@ async def chat_in_existing_discussion(
         token_count=user_token_count, image_references=final_image_references_for_message
     )
 
-    # The tip of the branch for context is now the new user message we just added
     branch_tip_for_context = new_user_message.id
 
     main_loop = asyncio.get_event_loop()
@@ -464,10 +446,18 @@ async def chat_in_existing_discussion(
     stop_event = threading.Event()
     shared_state = {"accumulated_ai_response": "", "generation_error": None, "final_message_id": None, "binding_name": None, "model_name": None, "stop_event": stop_event}
     user_sessions.setdefault(username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event
-
+    def mark_step_done(steps, step_id):
+        for step in steps:
+            if step.get("id") == step_id:
+                step["status"] = "done"
+                return True
+            
+        return False  # Returns False if no matching step is found
     async def stream_generator() -> AsyncGenerator[str, None]:
         generation_thread: Optional[threading.Thread] = None
         sources = []
+        steps = []
+        mcp_output = []
        
         def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict[str, Any]] = None, turn_history: Optional[List] = None) -> bool:
             if shared_state["stop_event"].is_set():
@@ -482,51 +472,43 @@ async def chat_in_existing_discussion(
             if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
                 shared_state["accumulated_ai_response"] += chunk
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "chunk", "content": chunk}) + "\n")
-            elif msg_type == MSG_TYPE.MSG_TYPE_STEP:
-                step_type = params.get("type", "step")
-                hop = params.get("hop", "")
-                info = params.get("query", chunk) if step_type == "rag_query_generation" or step_type == "rag_retrieval" else chunk
-                ASCIIColors.yellow(f"\n>> RAG Step (Hop {hop}): {step_type} - Info: {str(info)[:100]}...", flush=True)
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step", "content": chunk +"\n", "id": params["id"], "status":"pending"}) + "\n")
+            elif msg_type == MSG_TYPE.MSG_TYPE_CONTENT:
+                shared_state["accumulated_ai_response"] = chunk
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "chunk", "content": chunk}) + "\n")
             elif msg_type == MSG_TYPE.MSG_TYPE_STEP_START:
-                step_type = params.get("type", "step_start")
-                hop = params.get("hop", "")
-                info = params.get("query", chunk) if step_type == "rag_query_generation" or step_type == "rag_retrieval" else chunk
-                ASCIIColors.yellow(f"\n>> RAG Step Start (Hop {hop}): {step_type} - Info: {str(info)[:100]}...", flush=True)
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": chunk +"\n", "id": params["id"], "status":"pending"}) + "\n")
+                steps.append({"type": "step_start", "content": chunk, "id": params["id"], "status":"pending"})
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": chunk, "id": params["id"], "status":"pending"}) + "\n")
             elif msg_type == MSG_TYPE.MSG_TYPE_STEP_END:
-                step_type = params.get("type", "step_end")
-                hop = params.get("hop", "")
-                num_chunks = params.get("num_chunks", "")
-                query = params.get("query", "")
-                decision = params.get("decision", "")
-                
-                info_str = ""
-                if step_type == "rag_query_generation" and query: info_str = f"Generated Query: {query}"
-                elif step_type == "rag_retrieval": info_str = f"Retrieved {num_chunks} chunks"
-                elif step_type == "rag_llm_decision": info_str = f"LLM Decision: {json.dumps(decision)}"
-                elif step_type == "final_answer_generation": info_str = "Final answer generation complete."
-                else: info_str = chunk
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": chunk +"\n", "id": params["id"], "status":"done"}) + "\n")
-
-                ASCIIColors.green(f"\n<< RAG Step End (Hop {hop}): {step_type} - {info_str}", flush=True)
-
+                mark_step_done(steps, params["id"])
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": chunk, "id": params["id"], "status":"done"}) + "\n")
+            elif msg_type == MSG_TYPE.MSG_TYPE_STEP or msg_type == MSG_TYPE.MSG_TYPE_INFO:
+                steps.append({"type": "step", "content": chunk, "id": params["id"]})
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step", "content": chunk, "id": params["id"], "status":"done"}) + "\n")
+            elif msg_type == MSG_TYPE.MSG_TYPE_TOOL_OUTPUT:
+                if params["output"]:
+                    if "error" in params["output"]:
+                        if params["output"] is dict:
+                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": params["output"]["error"] +"\n"}) + "\n")
+                        else:
+                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": str(params["output"]) +"\n"}) + "\n")
+                    else:
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step", "content": chunk, "id": "tool", "status":"done"}) + "\n")
             elif msg_type in (MSG_TYPE.MSG_TYPE_EXCEPTION, MSG_TYPE.MSG_TYPE_EXCEPTION):
                 err_content = f"LLM Error: {str(chunk)}"
                 shared_state["generation_error"] = err_content
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_content +"\n"}) + "\n")
                 return False
-            elif msg_type == MSG_TYPE.MSG_TYPE_FULL_INVISIBLE_TO_USER:
+            elif msg_type == MSG_TYPE.MSG_TYPE_CONTENT_INVISIBLE_TO_USER:
                 if params and "final_message_id" in params: 
                     shared_state["final_message_id"] = params["final_message_id"]
             elif msg_type == MSG_TYPE.MSG_TYPE_FINISHED_MESSAGE:    
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "sources", "sources": sources}) + "\n")
-
                 return False
             return True
 
         try:
-            def blocking_call(rag_datastore_id_in_call, sources_in_call):
+            mcp_tool_ids = json.loads(mcp_tool_ids_json)
+            def blocking_call(rag_datastore_id_in_call, sources_in_call, mcp_tool_ids_in_call):
                 try:
                     active_personality_prompt = user_sessions[username].get("active_personality_prompt")
                     shared_state["binding_name"] = lc.binding.binding_name if lc.binding else "unknown_binding"
@@ -534,12 +516,29 @@ async def chat_in_existing_discussion(
                     
                     user_assets_path = get_user_discussion_assets_path(username)
                     client_discussion = discussion_obj.to_lollms_client_discussion(user_assets_path, branch_tip_id=branch_tip_for_context)
-                    client_discussion.set_system_prompt(active_personality_prompt)
+                    
+                    if active_personality_prompt:
+                        client_discussion.set_system_prompt(active_personality_prompt)
+                    
+                    # --- Main Generation Logic ---
+                    if mcp_tool_ids_in_call and lc.mcp:
+                        # TOOL USAGE
+                        available_tools = lc.mcp.discover_tools(force_refresh=True)
+                        selected_tools = [tool for tool in available_tools if tool.get("name") in mcp_tool_ids_in_call]
+                        
+                        mcp_output_data = lc.generate_with_mcp(
+                            prompt=client_discussion.format_discussion(lc.default_ctx_size),
+                            images=final_image_references_for_message,
+                            tools=selected_tools,
+                            streaming_callback=llm_callback
+                        )
+                        mcp_output.append(mcp_output_data["final_answer"])
 
-                    if use_rag and safe_store:
+                    elif use_rag and safe_store:
+                        # RAG USAGE
                         effective_rag_datastore_id = rag_datastore_id_in_call or discussion_obj.rag_datastore_id
                         if not effective_rag_datastore_id:
-                            print(f"WARNING: RAG requested by {username} but no datastore specified for discussion.")
+                            print(f"WARNING: RAG requested by {username} but no datastore specified.")
                         
                         if effective_rag_datastore_id:
                             try:
@@ -553,60 +552,24 @@ async def chat_in_existing_discussion(
                                 classic_rag_result = lc.generate_text_with_rag(
                                         prompt=client_discussion.format_discussion(lc.default_ctx_size),
                                         system_prompt=client_discussion.system_prompt,
-                                        temperature=current_user.llm_temperature,
-                                        top_k=current_user.llm_top_k,
-                                        top_p=current_user.llm_top_p,
-                                        repeat_penalty=current_user.llm_repeat_penalty,
-                                        repeat_last_n=current_user.llm_repeat_last_n,
+                                        temperature=current_user.llm_temperature, top_k=current_user.llm_top_k, top_p=current_user.llm_top_p,
+                                        repeat_penalty=current_user.llm_repeat_penalty, repeat_last_n=current_user.llm_repeat_last_n,
                                         ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
-                                        rag_query_function=rqf,
-                                        rag_vectorizer_name=active_vectorizer_for_store,
+                                        rag_query_function=rqf, rag_vectorizer_name=active_vectorizer_for_store,
                                         max_rag_hops=current_user.rag_n_hops if current_user.rag_n_hops else 1,
                                         rag_top_k=current_user.rag_top_k if current_user.rag_top_k  else 10,
                                         rag_min_similarity_percent=current_user.rag_min_sim_percent if current_user.rag_min_sim_percent  else 0,
-                                        stream=True,
-                                        streaming_callback=llm_callback,
+                                        stream=True, streaming_callback=llm_callback,
                                     )
                                 sources_in_call += [{"document":Path(r["document"]).name,"similarity":r["similarity"],"content":r["content"]} for r in classic_rag_result.get("all_retrieved_sources", [])]
                             except Exception as ex:
                                 trace_exception(ex)
-                                # Fallback to non-RAG if RAG process fails
-                                lc.chat(
-                                        discussion=client_discussion,
-                                        stream=True,
-                                        temperature=current_user.llm_temperature,
-                                        top_k=current_user.llm_top_k,
-                                        top_p=current_user.llm_top_p,
-                                        repeat_penalty=current_user.llm_repeat_penalty,
-                                        repeat_last_n=current_user.llm_repeat_last_n,
-                                        ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
-                                        streaming_callback=llm_callback
-                                )
+                                lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
                         else:
-                            # Fallback to non-RAG if no datastore after all checks
-                                lc.chat(
-                                        discussion=client_discussion,
-                                        stream=True,
-                                        temperature=current_user.llm_temperature,
-                                        top_k=current_user.llm_top_k,
-                                        top_p=current_user.llm_top_p,
-                                        repeat_penalty=current_user.llm_repeat_penalty,
-                                        repeat_last_n=current_user.llm_repeat_last_n,
-                                        ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
-                                        streaming_callback=llm_callback
-                                )
+                                lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
                     else:
-                        lc.chat(
-                                discussion=client_discussion,
-                                stream=True,
-                                temperature=current_user.llm_temperature,
-                                top_k=current_user.llm_top_k,
-                                top_p=current_user.llm_top_p,
-                                repeat_penalty=current_user.llm_repeat_penalty,
-                                repeat_last_n=current_user.llm_repeat_last_n,
-                                ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
-                                streaming_callback=llm_callback
-                        )
+                        # STANDARD CHAT
+                        lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
 
                 except Exception as e_gen:
                     err_msg = f"LLM generation failed: {str(e_gen)}"
@@ -618,7 +581,7 @@ async def chat_in_existing_discussion(
                     if main_loop.is_running():
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
-            generation_thread = threading.Thread(target=blocking_call, args=[rag_datastore_id, sources], daemon=True)
+            generation_thread = threading.Thread(target=blocking_call, args=[rag_datastore_id, sources, mcp_tool_ids], daemon=True)
             generation_thread.start()
 
             while True:
@@ -627,14 +590,15 @@ async def chat_in_existing_discussion(
                 yield item
             if sources:
                 yield json.dumps({"type": "sources", "sources": sources}) + "\n"
-            ai_response_content = shared_state["accumulated_ai_response"]
+                
+            ai_response_content = shared_state["accumulated_ai_response"] or (len(mcp_output)>0 and mcp_output[0])
             if ai_response_content and not shared_state["generation_error"]:
                 ai_token_count = lc.binding.count_tokens(ai_response_content)
-                personality= current_user.active_personality_id
+                personality = current_user.active_personality_id
                 ai_message = discussion_obj.add_message(
                     sender=lc.ai_name, sender_type= personality if personality else "assistant", content=ai_response_content, parent_message_id=new_user_message.id,
                     binding_name=shared_state.get("binding_name"), model_name=shared_state.get("model_name"),
-                    token_count=ai_token_count, sources=sources
+                    token_count=ai_token_count, sources=sources, steps=steps
                 )
                 if shared_state.get("final_message_id"): 
                     ai_message.id = shared_state["final_message_id"]
@@ -706,8 +670,9 @@ async def grade_discussion_message(discussion_id: str, message_id: str, grade_up
     return MessageOutput(
         id=target_message.id, sender=target_message.sender, content=target_message.content,
         parent_message_id=target_message.parent_message_id, binding_name=target_message.binding_name,
-        model_name=target_message.model_name, token_count=target_message.token_count,
-        image_references=full_image_refs, user_grade=current_user_grade
+        model_name=target_message.model_name, token_count=target_message.token_count,sources=target_message.sources, steps=target_message.steps,
+        image_references=full_image_refs, user_grade=current_user_grade,
+        created_at=target_message.created_at
     )
 
 @discussion_router.put("/{discussion_id}/messages/{message_id}", response_model=MessageOutput)
@@ -734,8 +699,11 @@ async def update_discussion_message(discussion_id: str, message_id: str, payload
     return MessageOutput(
         id=updated_msg.id, sender=updated_msg.sender, content=updated_msg.content,
         parent_message_id=updated_msg.parent_message_id, binding_name=updated_msg.binding_name,
+        sources=updated_msg.sources,
+        steps=updated_msg.steps,
         model_name=updated_msg.model_name, token_count=updated_msg.token_count,
-        image_references=full_image_refs, user_grade=user_grade
+        image_references=full_image_refs, user_grade=user_grade,
+        created_at=updated_msg.created_at
     )
 
 @discussion_router.delete("/{discussion_id}/messages/{message_id}", status_code=200)
@@ -792,7 +760,7 @@ async def send_discussion_to_user(
 
     if target_username not in user_sessions:
         initial_lollms_model_target = target_user_db.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
-        llm_params_target_session = { # non-prefixed for session
+        llm_params_target_session = {
             "ctx_size": target_user_db.llm_ctx_size if target_user_db.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
             "temperature": target_user_db.llm_temperature if target_user_db.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
             "top_k": target_user_db.llm_top_k if target_user_db.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
@@ -862,7 +830,6 @@ async def export_user_data(export_request: DiscussionExportRequest, current_user
     user_db_record = db.query(DBUser).filter(DBUser.username == username).first()
     if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
 
-    # User settings are stored with llm_ prefix in DB, export them as is.
     user_settings = {
         "lollms_model_name": user_db_record.lollms_model_name,
         "safe_store_vectorizer": user_db_record.safe_store_vectorizer,
@@ -985,4 +952,3 @@ async def import_user_data(import_file: UploadFile = File(...), import_request_j
     try: db.commit()
     except Exception as e_db: db.rollback(); errors.append({"DB_COMMIT_ERROR": str(e_db)})
     return {"message": f"Import finished. Imported: {imported_count}, Skipped/Errors: {skipped_count}.", "imported_count": imported_count, "skipped_count": skipped_count, "errors": errors}
-

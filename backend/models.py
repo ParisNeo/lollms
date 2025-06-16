@@ -177,6 +177,7 @@ class MessageOutput(BaseModel):
     model_name: Optional[str] = None
     token_count: Optional[int] = None
     sources: Optional[List[Dict]] = None
+    steps: Optional[List[Dict]] = None
     image_references: List[str] = []
     user_grade: int = 0
     created_at: Optional[datetime.datetime] = None

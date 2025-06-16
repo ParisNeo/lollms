@@ -29,8 +29,6 @@
     --code-border-light: #dee2e6;
     --code-header-bg-light: #e9ecef;
     --code-header-text-light: #495057;
-    --code-copy-btn-bg-light: #f1f3f5;
-    --code-copy-btn-text-light: #495057;
 
     /* Dark Theme - Code Blocks */
     --code-bg-dark: #1E1E1E;
@@ -38,8 +36,6 @@
     --code-border-dark: #3c3c3c;
     --code-header-bg-dark: #252526;
     --code-header-text-dark: #CCCCCC;
-    --code-copy-btn-bg-dark: #333333;
-    --code-copy-btn-text-dark: #CCCCCC;
 }
 
 @layer base {
@@ -86,7 +82,11 @@ header, footer {
     line-height: 1.6;
     box-shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
     border: 1px solid transparent;
-    transition: box-shadow 0.2s ease-in-out;
+    transition: box-shadow 0.2s ease-in-out, max-width 0.3s ease-in-out;
+}
+
+.message-bubble.is-editing {
+    @apply max-w-[95%] md:max-w-[90%];
 }
 
 .message-bubble:hover {
@@ -158,24 +158,33 @@ header, footer {
     color: var(--code-header-text-dark);
 }
 
-.code-copy-btn {
+.code-block-wrapper {
+    @apply relative;
+}
+
+.code-block-wrapper:hover .code-action-buttons {
+    opacity: 1;
+}
+
+.code-action-buttons {
+    @apply absolute top-2 right-2 flex items-center gap-1 opacity-0 transition-opacity;
+}
+
+.code-action-btn {
     @apply flex items-center gap-1 px-2 py-1 rounded-md text-xs cursor-pointer border;
-    background: var(--code-copy-btn-bg-light);
-    color: var(--code-copy-btn-text-light);
-    border-color: #ced4da;
+    @apply bg-gray-200/80 text-gray-800 border-gray-300 backdrop-blur-sm;
+    @apply dark:bg-gray-900/70 dark:text-gray-200 dark:border-gray-600;
     transition: background-color 0.2s ease, transform 0.1s ease;
 }
-.dark .code-copy-btn {
-    background: var(--code-copy-btn-bg-dark);
-    color: var(--code-copy-btn-text-dark);
-    border-color: #454545;
+
+.code-action-btn:hover {
+    @apply bg-gray-300 dark:bg-gray-700;
 }
-.code-copy-btn:hover {
-    @apply bg-gray-200 dark:bg-gray-600;
-}
-.code-copy-btn:active {
+
+.code-action-btn:active {
     transform: scale(0.95);
 }
+
 
 .code-block {
     @apply m-0 p-4 text-sm overflow-x-auto;
@@ -186,6 +195,15 @@ header, footer {
 .dark .code-block {
     color: var(--code-text-dark);
     background: var(--code-bg-dark);
+}
+
+.code-execution-output {
+    @apply p-3 border-t text-xs font-mono whitespace-pre-wrap;
+    @apply bg-gray-100 text-gray-700 border-gray-200;
+    @apply dark:bg-black/20 dark:text-gray-300 dark:border-gray-700;
+}
+.code-execution-output.is-error {
+    @apply bg-red-50 text-red-800 dark:bg-red-900/20 dark:text-red-300;
 }
 
 /* Highlight.js theme overrides */
@@ -357,6 +375,39 @@ header, footer {
 .step-item-process .step-text {
     @apply text-gray-800 dark:text-gray-200;
 }
+
+
+/* CodeMirror Editor Styles */
+.cm-editor {
+    @apply text-sm;
+}
+.cm-scroller {
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
+    line-height: 1.6;
+}
+.dark .cm-editor {
+    background-color: transparent !important;
+}
+.cm-gutters {
+    background-color: transparent !important;
+    border-right: 1px solid var(--border-light);
+}
+.dark .cm-gutters {
+    border-right: 1px solid var(--border-dark);
+}
+.cm-content {
+    caret-color: var(--border-focus-light);
+}
+.dark .cm-content {
+    caret-color: var(--border-focus-dark);
+}
+.cm-selectionBackground {
+    background: #dbeafe !important; /* blue-100 */
+}
+.dark .cm-selectionBackground {
+    background: #3730a3 !important; /* indigo-800 */
+}
+
 
 /* ==========================================================================
    8. Animation Utilities

@@ -39,6 +39,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     function processMessages(messages) {
         const authStore = useAuthStore();
         return messages.map(msg => {
+            // --- DEBUG LOG ---
+            console.log('Backend message received:', msg);
+
             let senderType = 'assistant'; // Default to assistant
             const sender = msg.sender?.toLowerCase();
             const username = authStore.user?.username?.toLowerCase();
@@ -48,7 +51,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             } else if (sender === username || sender === 'user') {
                 senderType = 'user';
             }
-            console.log(msg)
             return {
                 ...msg,
                 sender_type: senderType, // 'user', 'assistant', or 'system'
@@ -351,26 +353,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const discId = activeDiscussion.value.id;
         const branchId = activeDiscussion.value.activeBranchId;
         try {
+            // A small delay to ensure the backend has committed the final message state.
             await new Promise(resolve => setTimeout(resolve, 250));
-            
-            const localBranch = discussions.value[discId]?.branches?.[branchId] || [];
             
             const response = await apiClient.get(`/api/discussions/${discId}?branch_id=${branchId}`);
             const finalMessages = processMessages(response.data);
-
-            const streamingMsgIndex = localBranch.findIndex(m => m.isStreaming);
             
-            if (streamingMsgIndex > -1) {
-                const tempMsg = localBranch[streamingMsgIndex];
-                const finalMsg = finalMessages[finalMessages.length - 1];
-
-                if (finalMsg) {
-                    if (tempMsg.steps?.length > 0 && !finalMsg.steps?.length) {
-                        finalMsg.steps = tempMsg.steps;
-                    }
-                }
-            }
-            
+            // The server response is now the source of truth, including for steps.
             discussions.value[discId].branches[branchId] = finalMessages;
 
         } catch(e) {

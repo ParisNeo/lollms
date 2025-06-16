@@ -9,12 +9,21 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@codemirror/commands": "^6.5.0",
+    "@codemirror/lang-javascript": "^6.2.2",
+    "@codemirror/lang-json": "^6.0.1",
+    "@codemirror/lang-markdown": "^6.2.5",
+    "@codemirror/lang-python": "^6.1.6",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/theme-one-dark": "^6.1.2",
+    "@codemirror/view": "^6.27.1",
     "axios": "^1.7.2",
     "highlight.js": "^11.9.0",
     "katex": "^0.16.10",
     "marked": "^13.0.0",
     "pinia": "^2.1.7",
     "vue": "^3.4.27",
+    "vue-codemirror": "^6.1.1",
     "vue-router": "^4.3.2"
   },
   "devDependencies": {
