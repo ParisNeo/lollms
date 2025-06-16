@@ -58,6 +58,10 @@ const toggleItem = (itemId) => {
   emit('update:modelValue', selected.value);
 };
 
+const toggleMenu = () => {
+    isOpen.value = !isOpen.value;
+}
+
 // v-on-click-outside directive to close the dropdown
 const vOnClickOutside = {
   mounted: (el, binding) => {
@@ -76,15 +80,25 @@ const vOnClickOutside = {
 
 <template>
   <div class="relative w-full" v-on-click-outside="() => isOpen = false">
-    <button 
-      @click="isOpen = !isOpen" 
-      class="w-full btn !justify-start !text-left !font-normal"
-      :class="[buttonClass, selected.length > 0 ? activeClass : inactiveClass]"
+    <slot 
+        name="button" 
+        :toggle="toggleMenu"
+        :selected="selected"
+        :activeClass="activeClass"
+        :inactiveClass="inactiveClass"
     >
-      <span class="truncate">{{ selectionText }}</span>
-      <svg class="absolute right-2 top-1/2 -mt-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
-    </button>
-    <div v-if="isOpen" class="absolute bottom-full mb-2 w-full bg-white dark:bg-gray-800 shadow-lg rounded-md border border-gray-300 dark:border-gray-600 max-h-60 overflow-y-auto z-10">
+      <!-- Fallback / Default Button -->
+      <button 
+        @click="toggleMenu" 
+        class="w-full btn !justify-start !text-left !font-normal"
+        :class="[buttonClass, selected.length > 0 ? activeClass : inactiveClass]"
+      >
+        <span class="truncate">{{ selectionText }}</span>
+        <svg class="absolute right-2 top-1/2 -mt-2 h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+      </button>
+    </slot>
+
+    <div v-if="isOpen" class="absolute bottom-full mb-2 w-64 bg-white dark:bg-gray-800 shadow-lg rounded-md border border-gray-300 dark:border-gray-600 max-h-60 overflow-y-auto z-10">
       <ul v-if="items.length > 0">
         <template v-for="(item, index) in items" :key="index">
             <!-- Render as a group header -->

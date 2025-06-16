@@ -56,6 +56,10 @@ global_default_vectorizer = "st:all-MiniLM-L6-v2" # Example Sentence Transformer
 # If set, requires 'safe_store[encryption]' -> 'cryptography' to be installed.
 encryption_key = "my_super_secret_safe_store_key_CHANGE_ME" # Or null/remove to disable encryption
 
+#[[default_mcps]]
+#name = "lollms_official_tools" # an alias fot he server
+#url = "http://lollms.org:9602" # the address of the server
+
 [[default_personas]]
 name = "Standard Assistant"
 category = "General"

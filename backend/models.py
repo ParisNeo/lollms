@@ -62,7 +62,7 @@ class UserBase(BaseModel):
     email: Optional[EmailStr] = None
     first_name: Optional[str] = None
     family_name: Optional[str] = None
-    birth_date: Optional[datetime.date] = None # Use datetime for date fields
+    birth_date: Optional[datetime.date] = None
 
 class UserCreate(UserBase):
     password: str
@@ -73,13 +73,12 @@ class UserAuthDetails(UserLLMParams):
     first_name: Optional[str] = None
     family_name: Optional[str] = None
     email: Optional[str] = None
-    birth_date: Optional[datetime.date] = None # Using datetime.date for date only
+    birth_date: Optional[datetime.date] = None
 
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
-    active_personality_id: Optional[str] = None # UUID string of active personality
+    active_personality_id: Optional[str] = None
 
-    # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
     rag_n_hops: Optional[int] = Field(None, ge=1)
@@ -87,7 +86,7 @@ class UserAuthDetails(UserLLMParams):
     rag_use_graph: bool = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
 
-    lollms_client_ai_name: Optional[str] = None # From LollmsClient, not a DB field
+    lollms_client_ai_name: Optional[str] = None
 
 class UserCreateAdmin(UserLLMParams):
     username: constr(min_length=3, max_length=50)
@@ -96,19 +95,18 @@ class UserCreateAdmin(UserLLMParams):
 
     first_name: Optional[str] = Field(None, max_length=100)
     family_name: Optional[str] = Field(None, max_length=100)
-    email: Optional[str] = Field(None, max_length=255) # Consider email validation if needed
+    email: Optional[str] = Field(None, max_length=255)
     birth_date: Optional[datetime.date] = None
 
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
-    active_personality_id: Optional[str] = None # Can be set on creation
+    active_personality_id: Optional[str] = None
 
-    # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
     rag_n_hops: Optional[int] = Field(None, ge=1)
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
-    rag_use_graph: Optional[bool] = False # Optional on create, will default in DB
+    rag_use_graph: Optional[bool] = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
 
 class UserPasswordResetAdmin(BaseModel):
@@ -117,6 +115,7 @@ class UserPasswordResetAdmin(BaseModel):
 class UserPasswordChange(BaseModel):
     current_password: str
     new_password: constr(min_length=8)
+
 class UserPublic(UserLLMParams):
     id: int
     username: str
@@ -124,14 +123,13 @@ class UserPublic(UserLLMParams):
 
     first_name: Optional[str] = None
     family_name: Optional[str] = None
-    email: Optional[str] = None # Be cautious about exposing email publicly
-    birth_date: Optional[datetime.date] = None # Also be cautious
+    email: Optional[str] = None
+    birth_date: Optional[datetime.date] = None
 
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
 
-    # RAG parameters
     rag_top_k: Optional[int] = None
     max_rag_len: Optional[int] = None
     rag_n_hops: Optional[int] = None
@@ -152,12 +150,13 @@ class DiscussionInfo(BaseModel):
     id: str
     title: str
     is_starred: bool
-    rag_datastore_id: Optional[str] = None # Datastore used for RAG in this discussion
+    rag_datastore_id: Optional[str] = None
+    active_tools: List[str] = Field(default_factory=list)
     created_at: Optional[datetime.datetime] = None
     last_activity_at: Optional[datetime.datetime] = None
     active_branch_id: Optional[str] = None
 
-class DiscussionBranchSwitchRequest(BaseModel): # NEW: For switching branches
+class DiscussionBranchSwitchRequest(BaseModel):
     active_branch_id: str
 
 class DiscussionTitleUpdate(BaseModel):
@@ -166,6 +165,8 @@ class DiscussionTitleUpdate(BaseModel):
 class DiscussionRagDatastoreUpdate(BaseModel):
     rag_datastore_id: Optional[str] = None
 
+class DiscussionToolsUpdate(BaseModel):
+    tools: List[str]
 
 class MessageOutput(BaseModel):
     id: str
@@ -179,45 +180,52 @@ class MessageOutput(BaseModel):
     image_references: List[str] = []
     user_grade: int = 0
     created_at: Optional[datetime.datetime] = None
-    # NEW Branching fields for the frontend
     branch_id: Optional[str] = None
-    branches: Optional[List[str]] = None # List of child branch IDs if this is a branch point
+    branches: Optional[List[str]] = None
     
     @field_validator('user_grade', mode='before')
     def provide_default_grade(cls, value):
         return value if value is not None else 0
 
-class MessageContentUpdate(BaseModel): content: str
+class MessageContentUpdate(BaseModel):
+    content: str
+
 class MessageGradeUpdate(BaseModel):
     change: int
     @field_validator('change')
     def change_must_be_one_or_minus_one(cls, value):
-        if value not in [1, -1]: raise ValueError('Grade change must be 1 or -1')
+        if value not in [1, -1]:
+            raise ValueError('Grade change must be 1 or -1')
         return value
 
-class SafeStoreDocumentInfo(BaseModel): filename: str
+class SafeStoreDocumentInfo(BaseModel):
+    filename: str
 
-class DiscussionExportRequest(BaseModel): discussion_ids: Optional[List[str]] = None
+class DiscussionExportRequest(BaseModel):
+    discussion_ids: Optional[List[str]] = None
+
 class ExportData(BaseModel):
     exported_by_user: str
     export_timestamp: str
     application_version: str
-    user_settings_at_export: Dict[str, Optional[Any]] # Includes LLM & RAG params, active_personality_id
+    user_settings_at_export: Dict[str, Optional[Any]]
     datastores_info: Dict[str, Any] = Field(default_factory=dict)
-    personalities_info: Dict[str, Any] = Field(default_factory=dict) # For owned and active
+    personalities_info: Dict[str, Any] = Field(default_factory=dict)
     discussions: List[Dict[str, Any]]
 
-class DiscussionImportRequest(BaseModel): discussion_ids_to_import: List[str]
+class DiscussionImportRequest(BaseModel):
+    discussion_ids_to_import: List[str]
 
 class DiscussionSendRequest(BaseModel):
     target_username: constr(min_length=3, max_length=50)
 
-# DataStore Pydantic Models
 class DataStoreBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
 
-class DataStoreCreate(DataStoreBase): pass
+class DataStoreCreate(DataStoreBase):
+    pass
+
 class DataStoreEdit(DataStoreBase):
     new_name: constr(min_length=1, max_length=100)
 
@@ -226,64 +234,77 @@ class DataStorePublic(DataStoreBase):
     owner_username: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    # Add shared_with: List[str] representing usernames shared with?
     model_config = {"from_attributes": True}
 
 class DataStoreShareRequest(BaseModel):
     target_username: constr(min_length=3, max_length=50)
-    permission_level: str = "read_query" # Default, can be extended
+    permission_level: str = "read_query"
 
     @validator('permission_level')
     def permission_level_must_be_valid(cls, value):
-        if value not in ["read_query"]: # Extend if more levels added
+        if value not in ["read_query"]:
             raise ValueError("Invalid permission level")
         return value
-
-
 
 class PersonalityBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     category: Optional[str] = Field(None, max_length=100)
     author: Optional[str] = Field(None, max_length=100)
     description: Optional[str] = Field(None, max_length=2000)
-    prompt_text: str # System prompt text
+    prompt_text: str
     disclaimer: Optional[str] = Field(None, max_length=1000)
-    script_code: Optional[str] = None # Python script
-    icon_base64: Optional[str] = None # Base64 encoded image string
+    script_code: Optional[str] = None
+    icon_base64: Optional[str] = None
 
 class PersonalityCreate(PersonalityBase):
-    is_public: Optional[bool] = False # For admin to create public ones, or user to create private
+    is_public: Optional[bool] = False
 
 class PersonalityUpdate(PersonalityBase):
-    # All fields from Base are optional for update
     name: Optional[constr(min_length=1, max_length=100)] = None
-    prompt_text: Optional[str] = None # Make prompt_text optional for update
-    # is_public can only be changed by admin for public personalities, or user for their own
+    prompt_text: Optional[str] = None
     is_public: Optional[bool] = None
 
-
 class PersonalityPublic(PersonalityBase):
-    id: str # UUID string
+    id: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
     is_public: bool
-    owner_username: Optional[str] = None # Username of the owner if not public/system
-
+    owner_username: Optional[str] = None
     model_config = {"from_attributes": True}
 
+class MCPBase(BaseModel):
+    name: constr(min_length=1, max_length=100)
+    url: str
+
+class MCPCreate(MCPBase):
+    pass
+
+class MCPUpdate(BaseModel):
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    url: Optional[str] = None
+
+class MCPPublic(MCPBase):
+    id: str
+    owner_username: Optional[str] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    model_config = {"from_attributes": True}
+
+class ToolInfo(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_active: bool = False
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100)
     family_name: Optional[str] = Field(None, max_length=100)
-    email: Optional[str] = Field(None, max_length=255) # Consider email validation
+    email: Optional[str] = Field(None, max_length=255)
     birth_date: Optional[datetime.date] = None
 
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
-    active_personality_id: Optional[str] = None # Allow setting to None or a valid ID
+    active_personality_id: Optional[str] = None
 
-    # LLM Params (can be updated here too)
-    
     llm_ctx_size: Optional[int] = Field(None, ge=0)
     llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
     llm_top_k: Optional[int] = Field(None, ge=1)
@@ -291,7 +312,6 @@ class UserUpdate(BaseModel):
     llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
     llm_repeat_last_n: Optional[int] = Field(None, ge=0)
 
-    # RAG parameters
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
     rag_n_hops: Optional[int] = Field(None, ge=1)
@@ -299,45 +319,35 @@ class UserUpdate(BaseModel):
     rag_use_graph: Optional[bool] = None
     rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")    
 
-
 class FriendshipBase(BaseModel):
-    pass # Might not be needed if creation is just target_username
+    pass
 
 class FriendRequestCreate(BaseModel):
     target_username: constr(min_length=3, max_length=50)
 
 class FriendshipAction(BaseModel):
-    action: str # e.g., "accept", "reject", "unfriend", "block", "unblock"
+    action: str
 
-class FriendPublic(BaseModel): # Represents a friend in a list
-    id: int # User ID of the friend
+class FriendPublic(BaseModel):
+    id: int
     username: str
-    # Optional: first_name, family_name, online_status (if you implement presence)
-    friendship_id: int # ID of the Friendship record
-    status_with_current_user: FriendshipStatus # e.g. ACCEPTED (for friend list)
-    # last_message_preview: Optional[str] = None # For friend list UI
-    # unread_message_count: int = 0 # For friend list UI
-
+    friendship_id: int
+    status_with_current_user: FriendshipStatus
     model_config = {"from_attributes": True}
 
-class FriendshipRequestPublic(BaseModel): # Represents a pending request
+class FriendshipRequestPublic(BaseModel):
     friendship_id: int
     requesting_user_id: int
     requesting_username: str
-    # Optional: requesting_user_first_name, etc.
     requested_at: datetime.datetime
-    status: FriendshipStatus # Should be PENDING
-
+    status: FriendshipStatus
     model_config = {"from_attributes": True}
-
-
 
 class DirectMessageBase(BaseModel):
     content: constr(min_length=1)
-    # image_references_json: Optional[str] = None # If supporting images
 
 class DirectMessageCreate(DirectMessageBase):
-    receiver_user_id: int # Send to userid
+    receiver_user_id: int
     image_references_json: Optional[str] = None
 
 class DirectMessagePublic(DirectMessageBase):
@@ -348,9 +358,7 @@ class DirectMessagePublic(DirectMessageBase):
     receiver_username: str
     sent_at: datetime.datetime
     read_at: Optional[datetime.datetime] = None
-
     model_config = {"from_attributes": True}
 
 class PersonalitySendRequest(BaseModel):
     target_username: constr(min_length=3, max_length=50)
-

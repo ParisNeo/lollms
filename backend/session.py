@@ -1,4 +1,3 @@
-
 # --- Helpers ---
 # Standard Library Imports
 import os
@@ -48,7 +47,7 @@ from werkzeug.utils import secure_filename
 from pydantic import BaseModel, Field, constr, field_validator, validator # Ensure these are imported
 import datetime # Ensure datetime is imported
 
-from backend.database_setup import Personality as DBPersonality # Add this import at the top of main.py
+from backend.database_setup import Personality as DBPersonality, MCP as DBMCP
 from backend.config import *
 # Local Application Imports
 from backend.database_setup import (
@@ -129,15 +128,6 @@ from backend.security import oauth2_scheme, jwt, JWTError, get_password_hash
 # --- Global User Session Management & Locks ---
 user_sessions: Dict[str, Dict[str, Any]] = {}
 message_grade_lock = threading.Lock()
-# security = HTTPBasic()
-
-# --- Authentication Dependencies ---
-# def get_current_db_user_from_token(credentials: HTTPBasicCredentials = Depends(security), db: Session = Depends(get_db)) -> DBUser:
-#     user = db.query(DBUser).filter(DBUser.username == credentials.username).first()
-#     if not user or not user.verify_password(credentials.password):
-#         raise HTTPException(status_code=401, detail="Incorrect username or password", headers={"WWW-Authenticate": "Basic"})
-#     return user
-
 
 def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
     return db.query(DBUser).filter(DBUser.username == username).first()
@@ -150,7 +140,7 @@ async def get_current_db_user_from_token(token: str = Depends(oauth2_scheme), db
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"}, # Note: Bearer, not Basic
+        headers={"WWW-Authenticate": "Bearer"},
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -161,9 +151,7 @@ async def get_current_db_user_from_token(token: str = Depends(oauth2_scheme), db
     except JWTError:
         raise credentials_exception
     
-    # In a real app, you might want to check if token is in a denylist here
-    
-    user = get_user_by_username(db, username=token_data.username) # You'll need this function
+    user = get_user_by_username(db, username=token_data.username)
     if user is None:
         raise credentials_exception
     return user
@@ -192,11 +180,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "active_vectorizer": initial_vectorizer, 
             "lollms_model_name": initial_lollms_model,
             "llm_params": session_llm_params,
-            # Session stores active personality details for quick access if needed by LollmsClient
             "active_personality_id": db_user.active_personality_id, 
-            "active_personality_prompt": None, # Will be loaded if personality is active
+            "active_personality_prompt": None,
         }
-        # If user has an active personality, load its prompt into session
         if db_user.active_personality_id:
             db_session_for_init = next(get_db())
             try:
@@ -220,7 +206,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         birth_date=db_user.birth_date,
         lollms_model_name=user_sessions[username]["lollms_model_name"],
         safe_store_vectorizer=user_sessions[username]["active_vectorizer"],
-        active_personality_id=user_sessions[username]["active_personality_id"], # from session
+        active_personality_id=user_sessions[username]["active_personality_id"],
         lollms_client_ai_name=ai_name_for_user,
         
         llm_ctx_size=current_session_llm_params.get("ctx_size"),
@@ -254,11 +240,6 @@ def get_user_lollms_client(username: str) -> LollmsClient:
     if not force_reinit and hasattr(session["lollms_client"], "model_name") and session["lollms_client"].model_name != current_model_name:
         force_reinit = True
     
-    # Check if other LLM parameters relevant to LollmsClient init have changed
-    # For instance, if session["llm_params"] differs from what the client was last initialized with.
-    # This simple check is for model_name, a more robust check would compare all relevant init params.
-    # For now, we assume if llm_params in session change, the lollms_client is set to None by set_user_llm_params
-    
     if force_reinit:
         model_name = session["lollms_model_name"]
         binding_name = LOLLMS_CLIENT_DEFAULTS.get("binding_name", "lollms")
@@ -270,25 +251,51 @@ def get_user_lollms_client(username: str) -> LollmsClient:
         user_name_conf = LOLLMS_CLIENT_DEFAULTS.get("user_name", "user")
         ai_name_conf = LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant")
         
-        # Get user-specific or default LLM parameters from session.
-        # These are already stored with non-prefixed keys (e.g., "temperature")
+        servers_infos = {}
+
+        # 1. Add default MCPs from config.toml
+        for mcp_config in DEFAULT_MCPS:
+            if "name" in mcp_config and "url" in mcp_config:
+                servers_infos[mcp_config["name"]] = {
+                    "server_url": mcp_config["url"],
+                    "auth_config": {}
+                }
+
+        # 2. Add user-specific MCPs from the database (overwrites defaults if names conflict)
+        db_session_for_mcp = next(get_db())
+        try:
+            user_db = db_session_for_mcp.query(DBUser).filter(DBUser.username == username).first()
+            if user_db:
+                personal_mcps = db_session_for_mcp.query(DBMCP).filter(DBMCP.owner_user_id == user_db.id).all()
+                for mcp in personal_mcps:
+                    servers_infos[mcp.name] = {
+                        "server_url": mcp.url,
+                        "auth_config": {}
+                    }
+        except Exception as e:
+            print(f"Error fetching personal MCPs for user {username}: {e}")
+        finally:
+            db_session_for_mcp.close()
+
         client_init_params = session.get("llm_params", {}).copy() 
-        
-        # Add other LollmsClient constructor parameters
+
         client_init_params.update({
             "binding_name": binding_name, "model_name": model_name, "host_address": host_address, "models_path": models_path,
             "ctx_size": ctx_size, "service_key": service_key, 
             "user_name": user_name_conf, "ai_name": ai_name_conf,
         })
+
+        if servers_infos:
+            mcp_binding_config = { "servers_infos": servers_infos }
+            client_init_params["mcp_binding_name"] = "remote_mcp"
+            client_init_params["mcp_binding_config"] = mcp_binding_config
         
-        # Ensure ELF_COMPLETION_FORMAT is set if applicable, or remove if None
         completion_format_str = LOLLMS_CLIENT_DEFAULTS.get("completion_format")
         if completion_format_str:
             try: client_init_params["completion_format"] = ELF_COMPLETION_FORMAT.from_string(completion_format_str)
             except ValueError: print(f"WARN: Invalid completion_format '{completion_format_str}' in config.")
         
         try:
-            # Filter out None values before passing to LollmsClient constructor
             final_client_init_params = {k: v for k, v in client_init_params.items() if v is not None}
             lc = LollmsClient(**final_client_init_params)
             session["lollms_client"] = lc
@@ -296,8 +303,6 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             traceback.print_exc()
             session["lollms_client"] = None
             print(f"Could not initialize LLM Client: {str(e)}")
-            # removed to unblock if lc wasn't created
-            # raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client: {str(e)}")
             
     return cast(LollmsClient, session["lollms_client"])
 
@@ -318,18 +323,18 @@ def get_safe_store_instance(requesting_user_username: str, datastore_id: str, db
         link = db.query(DBSharedDataStoreLink).filter_by(
             datastore_id=datastore_id, shared_with_user_id=requesting_user_record.id
         ).first()
-        if link and link.permission_level == "read_query": # Or other read-like permissions
+        if link and link.permission_level == "read_query":
             is_shared_with_requester = True
     
     if not is_owner and not is_shared_with_requester:
         raise HTTPException(status_code=403, detail="Access denied to this DataStore.")
 
-    session = user_sessions.get(requesting_user_username) # Use requester's session to cache their access
+    session = user_sessions.get(requesting_user_username)
     if not session: raise HTTPException(status_code=500, detail="User session not found for SafeStore access.")
     
     if datastore_id not in session["safe_store_instances"]:
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
-        encryption_key = SAFE_STORE_DEFAULTS.get("encryption_key") # Global key for now
+        encryption_key = SAFE_STORE_DEFAULTS.get("encryption_key")
         log_level_str = SAFE_STORE_DEFAULTS.get("log_level", "INFO").upper()
         ss_log_level = getattr(SafeStoreLogLevel, log_level_str, SafeStoreLogLevel.INFO) if SafeStoreLogLevel else None
         try:
@@ -385,7 +390,7 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
     if file_path.exists():
         disk_obj = AppLollmsDiscussion.load_from_disk(lc, file_path)
         if disk_obj:
-            disk_obj.discussion_id = discussion_id # Ensure ID matches expected
+            disk_obj.discussion_id = discussion_id
             session["discussions"][discussion_id] = disk_obj
             session["discussion_titles"][discussion_id] = disk_obj.title
             return disk_obj
@@ -434,14 +439,12 @@ def get_user_temp_uploads_path(username: str) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-def get_user_datastore_root_path(username: str) -> Path: # Path for datastores owned by this user
+def get_user_datastore_root_path(username: str) -> Path:
     path = get_user_data_root(username) / DATASTORES_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 
 def get_datastore_db_path(owner_username: str, datastore_id: str) -> Path:
-    # Ensure datastore_id is a valid UUID string for directory naming safety
     try: uuid.UUID(datastore_id)
     except ValueError: raise HTTPException(status_code=400, detail="Invalid datastore ID format.")
     return get_user_datastore_root_path(owner_username) / f"{datastore_id}.db"
-

@@ -95,3 +95,4 @@ ACCESS_TOKEN_EXPIRE_MINUTES = APP_SETTINGS.get("access_token_expires_mintes", os
 
 
 DEFAULT_PERSONALITIES = config.get("default_personas", {})
+DEFAULT_MCPS = config.get("default_mcps", [])
