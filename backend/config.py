@@ -50,7 +50,7 @@ import datetime # Ensure datetime is imported
 # --- Application Version ---
 APP_VERSION = "1.6.0"  # Updated version for LLM param name fix
 PROJECT_ROOT = Path(__file__).resolve().parent.parent 
-LOCALS_DIR = PROJECT_ROOT / "locals"
+LOCALS_DIR = PROJECT_ROOT / "frontend" / "legacy_webui" / "locals"
 
 # --- Configuration Loading ---
 CONFIG_PATH = Path("config.toml")
