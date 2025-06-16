@@ -64,23 +64,39 @@ export const usePyodideStore = defineStore('pyodide', () => {
     }
 
     async function runCode(code) {
+        const uiStore = useUiStore();
         if (!isReady.value) {
-            useUiStore().addNotification('Python runtime is not ready.', 'warning');
+            uiStore.addNotification('Python runtime is not ready.', 'warning');
             return { output: null, error: "Pyodide not initialized." };
         }
         
         stdout.value = ''; // Clear previous output
         try {
+            // --- NEW: Micropip Installation Logic ---
+            const micropipMatch = code.match(/^#\s*micropip:\s*install\s+(.+)$/m);
+            if (micropipMatch) {
+                const packagesToInstall = micropipMatch[1].split(/\s+/).filter(p => p);
+                if (packagesToInstall.length > 0) {
+                    uiStore.addNotification(`Loading installer...`, 'info', 3000);
+                    await pyodide.value.loadPackage('micropip');
+                    const micropip = pyodide.value.pyimport('micropip');
+                    
+                    uiStore.addNotification(`Installing: ${packagesToInstall.join(', ')}...`, 'info', 15000);
+                    await micropip.install(packagesToInstall);
+                    uiStore.addNotification('Installation complete.', 'success');
+                }
+            }
+            // --- End of Micropip Logic ---
+
             await pyodide.value.loadPackagesFromImports(code);
             const result = await pyodide.value.runPythonAsync(code);
-            // If the code returns a value, append it to the stdout
+            
             if (result !== undefined && result !== null) {
                 stdout.value += String(result);
             }
             return { output: stdout.value.trim(), error: null };
         } catch (error) {
             console.error("Pyodide execution error:", error);
-            // The error message is already captured by the redirected stderr
             return { output: null, error: stdout.value.trim() || error.toString() };
         }
     }

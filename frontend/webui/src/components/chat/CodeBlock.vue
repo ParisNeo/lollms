@@ -20,6 +20,7 @@ const pyodideStore = usePyodideStore();
 
 const copyStatus = ref('Copy');
 const executionOutput = ref('');
+const executionImage = ref(null);
 const isError = ref(false);
 const isExecuting = ref(false);
 
@@ -56,6 +57,7 @@ async function executeCode() {
     isExecuting.value = true;
     isError.value = false;
     executionOutput.value = `Executing ${props.language} code...`;
+    executionImage.value = null;
     
     try {
         if (props.language.toLowerCase() === 'python') {
@@ -66,8 +68,11 @@ async function executeCode() {
                 }
             }
             const result = await pyodideStore.runCode(props.code);
-            executionOutput.value = result.output || result.error || 'Execution finished with no output.';
+            executionOutput.value = result.output || (result.error ? '' : 'Execution finished with no text output.');
             isError.value = !!result.error;
+            if(result.image) {
+                executionImage.value = `data:image/png;base64,${result.image}`;
+            }
 
         } else if (props.language.toLowerCase() === 'javascript') {
             let capturedOutput = '';
@@ -121,8 +126,9 @@ async function executeCode() {
         </div>
     </div>
     <!-- Execution Output -->
-    <div v-if="executionOutput" class="code-execution-output" :class="{'is-error': isError}">
-        {{ executionOutput }}
+    <div v-if="executionOutput || executionImage" class="code-execution-output" :class="{'is-error': isError}">
+        <pre v-if="executionOutput">{{ executionOutput }}</pre>
+        <img v-if="executionImage" :src="executionImage" alt="Matplotlib plot" class="mt-2 max-w-full h-auto rounded-md bg-white">
     </div>
   </div>
 </template>
