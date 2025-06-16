@@ -22,7 +22,7 @@ import enum # For Python enum
 from backend.config import DATABASE_URL_CONFIG_KEY
 from backend.security import pwd_context
 
-CURRENT_DB_VERSION = "1.2.2"
+CURRENT_DB_VERSION = "1.3.0"
 
 Base = declarative_base()
 
@@ -84,7 +84,6 @@ class User(Base):
     max_rag_len = Column(Integer, nullable=True)
     rag_n_hops = Column(Integer, nullable=True)
     rag_min_sim_percent  = Column(Float, nullable=True)
-    max_rag_len = Column(Integer, nullable=True)
     rag_use_graph = Column(Boolean, default=False, nullable=False)
     rag_graph_response_type = Column(String, default="chunks_summary", nullable=True)
 
@@ -102,6 +101,11 @@ class User(Base):
         cascade="all, delete-orphan" 
     )
     active_personality = relationship("Personality", foreign_keys=[active_personality_id])
+    personal_mcps = relationship(
+        "MCP", 
+        back_populates="owner", 
+        cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'),
@@ -110,7 +114,6 @@ class User(Base):
     def verify_password(self, plain_password):
         return pwd_context.verify(plain_password, self.hashed_password)
 
-# ... (UserStarredDiscussion, UserMessageGrade, DataStore, SharedDataStoreLink, DatabaseVersion remain the same)
 class UserStarredDiscussion(Base):
     __tablename__ = "user_starred_discussions"
     id = Column(Integer, primary_key=True, index=True)
@@ -158,6 +161,29 @@ class SharedDataStoreLink(Base):
         UniqueConstraint('datastore_id', 'shared_with_user_id', name='uq_datastore_shared_user'),
         CheckConstraint(permission_level.in_(['read_query', 'read_write']), name='ck_permission_level_valid')
     )
+
+class MCP(Base):
+    __tablename__ = "mcps"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    name = Column(String, nullable=False, index=True) # Alias
+    url = Column(String, nullable=False)
+
+    # If owner_user_id is NULL, it's a default/global MCP defined by an admin.
+    owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_mcp_owner", ondelete="CASCADE"), nullable=True, index=True)
+    
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    owner = relationship("User", back_populates="personal_mcps")
+
+    __table_args__ = (
+        # A user cannot have two MCPs with the same name.
+        # This constraint works for user-owned MCPs. Uniqueness for default (NULL owner_id)
+        # MCPs should be handled at the application level.
+        UniqueConstraint('owner_user_id', 'name', name='uq_user_mcp_name'),
+    )
+
 
 class DatabaseVersion(Base):
     __tablename__ = "database_version"
@@ -239,6 +265,8 @@ def init_database(db_url: str):
     engine = create_engine(db_url, connect_args={"check_same_thread": False}, echo=False)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+    # This call creates all tables defined in Base's metadata that do not yet exist,
+    # including the new `mcps` table. It's the standard way to upgrade the schema.
     Base.metadata.create_all(bind=engine)
     print(f"INFO: Database tables checked/created using metadata at URL: {db_url}")
 
@@ -412,4 +440,3 @@ def get_friendship_record(db, user_id, other_user_id):
     ).first()
 
     return record
-
