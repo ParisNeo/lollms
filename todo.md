@@ -7,3 +7,4 @@ new ui:
 - fix delete message
 - fix branching
 - when generating, remove the input and show an animation instead
+- in chatinput, when we press shift+enter replace the input with a code mirror with a toolbar
