@@ -6,3 +6,4 @@ new ui:
 - add <think> block handling
 - fix delete message
 - fix branching
+- when generating, remove the input and show an animation instead
