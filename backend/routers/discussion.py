@@ -485,14 +485,8 @@ async def chat_in_existing_discussion(
                 steps.append({"type": "step", "content": chunk, "id": params["id"]})
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step", "content": chunk, "id": params["id"], "status":"done"}) + "\n")
             elif msg_type == MSG_TYPE.MSG_TYPE_TOOL_OUTPUT:
-                if params["output"]:
-                    if "error" in params["output"]:
-                        if params["output"] is dict:
-                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": params["output"]["error"] +"\n"}) + "\n")
-                        else:
-                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": str(params["output"]) +"\n"}) + "\n")
-                    else:
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step", "content": chunk, "id": "tool", "status":"done"}) + "\n")
+                steps.append({"type": "step", "content": str(params), "id": "tool_output"})
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step", "content": str(params) +"\n"}) + "\n")
             elif msg_type in (MSG_TYPE.MSG_TYPE_EXCEPTION, MSG_TYPE.MSG_TYPE_EXCEPTION):
                 err_content = f"LLM Error: {str(chunk)}"
                 shared_state["generation_error"] = err_content
