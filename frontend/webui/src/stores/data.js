@@ -253,6 +253,7 @@ export const useDataStore = defineStore('data', () => {
             await fetchMcpTools(); // Also refresh the tool list
             uiStore.addNotification('MCP services reloaded.', 'success');
         } catch (error) {
+            uiStore.addNotification('Failed to reload mcp services.', 'fail');
             console.error("Failed to trigger MCP reload:", error);
         }
     }
