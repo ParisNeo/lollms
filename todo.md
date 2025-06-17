@@ -9,3 +9,5 @@ new ui:
 - when generating, remove the input and show an animation instead
 - in chatinput, when we press shift+enter replace the input with a code mirror with a toolbar
 - if the generation fails, don't destroy the message
+- the steps must by default be closed
+- the steps content must not exceed some length in the title mode
