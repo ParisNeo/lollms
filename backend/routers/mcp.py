@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Body
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
+from backend.config import DEFAULT_MCPS
 
 from backend.database_setup import get_db, MCP as DBMCP, User as DBUser
 from backend.session import (
@@ -170,6 +171,27 @@ def reload_user_lollms_client(
     This is necessary after any MCP (Multi-Content-Processor) server
     configuration changes (add, update, delete).
     """
+    lc = get_user_lollms_client(current_user.username)
+    servers_infos = {}
+
+    # 1. Add default MCPs from config.toml
+    for mcp_config in DEFAULT_MCPS:
+        if "name" in mcp_config and "url" in mcp_config:
+            servers_infos[mcp_config["name"]] = {
+                "server_url": mcp_config["url"],
+                "auth_config": {}
+            }
+        user_db = db_session_for_mcp.query(DBUser).filter(DBUser.username == current_user.username).first()
+        if user_db:
+            db_session_for_mcp = next(get_db())    
+            personal_mcps = db_session_for_mcp.query(DBMCP).filter(DBMCP.owner_user_id == user_db.id).all()
+            for mcp in personal_mcps:
+                servers_infos[mcp.name] = {
+                    "server_url": mcp.url,
+                    "auth_config": {}
+                }
+
+    lc.update_mcp_binding("remote_mcp", config= { "servers_infos": servers_infos })
     # Placeholder for the actual backend logic to reload the user's lollms_client.
     # This might involve finding a client instance in a manager and calling a reload method.
     # e.g., lollms_clients_manager.reload_client(current_user.username)
