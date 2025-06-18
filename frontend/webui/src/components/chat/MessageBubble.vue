@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted, watch, nextTick } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
@@ -8,6 +8,8 @@ import { marked } from 'marked';
 
 // Import the interactive CodeBlock component
 import CodeBlock from './CodeBlock.vue';
+// Import the new StepDetail component
+import StepDetail from './StepDetail.vue';
 
 // CodeMirror imports for the editor
 import { Codemirror } from 'vue-codemirror';
@@ -69,26 +71,70 @@ const senderName = computed(() => {
     return props.message.sender || 'Unknown';
 });
 
-// NEW: Parse content into tokens for selective rendering
-const messageTokens = computed(() => {
-    if (!props.message.content) return [];
+const messageParts = computed(() => {
+    if (!props.message.content) return [{ type: 'content', content: '' }];
     
-    // Use marked's lexer to get a token stream
-    const tokens = marked.lexer(props.message.content);
-    
-    // marked.lexer() adds a `links` property to the array, which we don't want to render.
-    // So we filter it out and return a plain array.
-    return Array.from(tokens);
+    const parts = [];
+    const content = props.message.content;
+    const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = thinkRegex.exec(content)) !== null) {
+        if (match.index > lastIndex) {
+            parts.push({
+                type: 'content',
+                content: content.substring(lastIndex, match.index)
+            });
+        }
+        if (match[1] && match[1].trim()) {
+            parts.push({
+                type: 'think',
+                content: match[1].trim()
+            });
+        }
+        lastIndex = thinkRegex.lastIndex;
+    }
+
+    if (lastIndex < content.length) {
+        parts.push({
+            type: 'content',
+            content: content.substring(lastIndex)
+        });
+    }
+
+    return parts.length > 0 ? parts : [{ type: 'content', content }];
 });
 
+function getContentTokens(text) {
+    if (!text) return [];
+    const tokens = marked.lexer(text);
+    return Array.from(tokens);
+}
+
+// Helper to parse step content for JSON rendering
+function parseStepContent(content) {
+    if (typeof content !== 'string' || !content.trim().startsWith('{') && !content.trim().startsWith('[')) {
+        return { isJson: false, data: content };
+    }
+    try {
+        const parsed = JSON.parse(content);
+        return { isJson: true, data: parsed };
+    } catch (e) {
+        return { isJson: false, data: content };
+    }
+}
+
+// Helper to render plain text/markdown content
 const getStepContent = (content) => {
     if (!content) return '';
-    return marked.parse(content, { breaks: true });
+    return marked.parse(content, { gfm: true, breaks: true });
 }
 
 const latestStep = computed(() => {
     if (props.message.steps && props.message.steps.length > 0) {
-        return props.message.steps[props.message.steps.length - 1];
+        const reversedSteps = [...props.message.steps].reverse();
+        return reversedSteps.find(s => s.content) || null;
     }
     return null;
 });
@@ -101,6 +147,44 @@ const editorExtensions = computed(() => {
     return extensions;
 });
 
+// --- Branching Logic ---
+const discussion = computed(() => discussionsStore.activeDiscussion);
+
+const branchInfo = computed(() => {
+    if (!discussion.value || !props.message.parent_message_id) {
+        return null;
+    }
+
+    const parentMessage = discussionsStore.activeMessages.find(m => m.id === props.message.parent_message_id);
+    if (!parentMessage || parentMessage.children_count <= 1) {
+        return null;
+    }
+    
+    // Find all branches that stem from this message's parent
+    const siblingBranches = discussion.value.branches_info.filter(
+        branch => branch.parent_message_id === props.message.parent_message_id
+    );
+
+    if (siblingBranches.length <= 1) return null;
+    
+    const currentIndex = siblingBranches.findIndex(branch => branch.id === props.message.branch_id);
+
+    return {
+        isBranch: true,
+        current: currentIndex + 1,
+        total: siblingBranches.length,
+        branches: siblingBranches,
+        currentIndex: currentIndex,
+    };
+});
+
+function navigateBranch(direction) {
+    if (!branchInfo.value) return;
+    const { branches, currentIndex } = branchInfo.value;
+    const newIndex = (currentIndex + direction + branches.length) % branches.length;
+    const newBranchId = branches[newIndex].id;
+    discussionsStore.switchBranch(newBranchId);
+}
 
 // --- Edit Mode Logic ---
 function toggleEdit() {
@@ -167,18 +251,13 @@ function copyContent() {
 }
 
 async function handleDelete() {
-  const branchId = props.message.branch_id || discussionsStore.activeDiscussion?.activeBranchId;
-  if (!branchId) {
-      uiStore.addNotification('Cannot delete message: active branch not found.', 'error');
-      return;
-  }
   const confirmed = await uiStore.showConfirmation({
       title: 'Delete Message',
       message: 'Are you sure you want to delete this message and all subsequent replies?',
       confirmText: 'Delete'
   });
   if (confirmed) {
-    discussionsStore.deleteMessage({ messageId: props.message.id, branchId: branchId });
+    discussionsStore.deleteMessage({ messageId: props.message.id});
   }
 }
 
@@ -204,7 +283,7 @@ function getSimilarityColor(score) {
 </script>
 
 <template>
-  <div class="message-container group flex flex-col" :class="containerClass" :data-message-id="message.id">
+  <div class="message-container group flex flex-col w-full" :class="containerClass" :data-message-id="message.id">
     <div class="message-bubble" :class="bubbleClass">
         <!-- Default View -->
         <div v-if="!isEditing">
@@ -228,11 +307,24 @@ function getSimilarityColor(score) {
                 </div>
             </div>
 
-            <!-- Main Content - Token-based rendering -->
+            <!-- Main Content - Part-based rendering -->
             <div class="message-content text-sm prose prose-sm dark:prose-invert max-w-none">
-                <template v-for="(token, index) in messageTokens" :key="index">
-                    <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" />
-                    <div v-else v-html="marked.parse(token.raw, { gfm: true, breaks: true })"></div>
+                <template v-for="(part, index) in messageParts" :key="index">
+                    <!-- Render normal content -->
+                    <template v-if="part.type === 'content'">
+                        <template v-for="(token, tokenIndex) in getContentTokens(part.content)" :key="tokenIndex">
+                            <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" />
+                            <div v-else v-html="marked.parse(token.raw, { gfm: true, breaks: true })"></div>
+                        </template>
+                    </template>
+                    <!-- Render <think> blocks -->
+                    <details v-else-if="part.type === 'think'" class="think-block my-4">
+                        <summary class="think-summary">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                            <span>Thinking...</span>
+                        </summary>
+                        <div class="think-content p-3" v-html="marked.parse(part.content, { gfm: true, breaks: true })"></div>
+                    </details>
                 </template>
             </div>
             
@@ -275,29 +367,41 @@ function getSimilarityColor(score) {
       <div v-if="message.steps && message.steps.length > 0 && !isEditing" class="steps-container">
         <button @click="isStepsCollapsed = !isStepsCollapsed" class="text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 flex items-center w-full text-left mb-2 group/toggle">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 transition-transform flex-shrink-0 group-hover/toggle:text-gray-900 dark:group-hover/toggle:text-white" :class="{'rotate-90': !isStepsCollapsed, 'rotate-0': isStepsCollapsed}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
-            <div class="flex items-center space-x-2 overflow-hidden">
-                <div v-if="latestStep" class="step-icon">
+            <div class="flex items-center space-x-2 overflow-hidden flex-1 min-w-0">
+                <div v-if="latestStep" class="step-icon flex-shrink-0">
+                     <!-- This icon in the summary is always a process-type icon -->
                     <svg v-if="latestStep.status === 'done'" class="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
                     <svg v-else class="w-4 h-4 animate-spin text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                 </div>
-                <span v-if="isStepsCollapsed && latestStep" class="truncate">{{ latestStep.content }}</span>
+                <span v-if="isStepsCollapsed && latestStep" class="truncate" v-text="latestStep.content"></span>
                 <span v-else>Hide Steps</span>
             </div>
         </button>
         <div v-show="!isStepsCollapsed" class="space-y-2 pl-5 border-l-2 border-gray-200 dark:border-gray-700 ml-2">
-            <template v-for="step in message.steps" :key="step.id">
-                <div v-if="step.type === 'step'" class="step-item step-item-info">
+            <!-- CORRECTED STEP RENDERING LOOP -->
+            <template v-for="(step, index) in message.steps" :key="index">
+                <div v-if="step.content" class="step-item">
                     <div class="step-icon">
-                        <svg class="text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                        <!-- Type-specific icon rendering -->
+                        <template v-if="step.type === 'step'">
+                            <!-- Static Info Icon for 'step' type -->
+                            <svg class="text-blue-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                        </template>
+                        <template v-else>
+                            <!-- Spinner/Check for process steps (start_step, end_step, etc.) -->
+                            <svg v-if="step.status === 'done'" class="text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                            <svg v-else class="animate-spin text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        </template>
                     </div>
-                    <div class="step-text prose prose-sm dark:prose-invert max-w-none" v-html="getStepContent(step.content)"></div>
-                </div>
-                <div v-else class="step-item step-item-process" :class="{ 'status-pending': step.status !== 'done', 'status-done': step.status === 'done' }">
-                    <div class="step-icon">
-                        <svg v-if="step.status === 'done'" class="text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
-                        <svg v-else class="animate-spin text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <div class="step-content-wrapper">
+                        <!-- Universal content rendering (JSON or Markdown) -->
+                        <template v-if="parseStepContent(step.content).isJson">
+                            <StepDetail :data="parseStepContent(step.content).data" />
+                        </template>
+                        <template v-else>
+                            <div class="step-text prose prose-sm dark:prose-invert max-w-none" v-html="getStepContent(step.content)"></div>
+                        </template>
                     </div>
-                    <div class="step-text" v-html="getStepContent(step.content)"></div>
                 </div>
             </template>
         </div>
@@ -305,9 +409,24 @@ function getSimilarityColor(score) {
       
       <!-- Footer with Sources and Actions (visible in both modes) -->
       <div v-if="!isSystem" class="message-footer">
-        <div class="flex justify-between items-start gap-2">
-            <!-- Left Side: Details (Tokens, Sources) -->
+        <div class="flex justify-between items-center gap-2">
+            <!-- Left Side: Details & Branching -->
             <div class="flex items-center flex-wrap gap-2">
+                <!-- Branching UI -->
+                <div v-if="isUser && message.children_count > 1" class="detail-badge branch-badge">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.586 4.586a2 2 0 112.828 2.828l-3 3a2 2 0 01-2.828 0l-1.5-1.5a2 2 0 112.828-2.828l1.5 1.5l3-3a2 2 0 010-2.828z" clip-rule="evenodd" /><path fill-rule="evenodd" d="M6.586 15.414a2 2 0 11-2.828-2.828l3-3a2 2 0 012.828 0l1.5 1.5a2 2 0 11-2.828 2.828l-1.5-1.5-3 3a2 2 0 010 2.828z" clip-rule="evenodd" /></svg>
+                    <span>{{ message.children_count }} Branches</span>
+                </div>
+                <div v-if="isAi && branchInfo" class="detail-badge branch-badge-nav">
+                    <button @click="navigateBranch(-1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Previous Branch">
+                        <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                    </button>
+                    <span class="font-mono text-xs">{{ branchInfo.current }}/{{ branchInfo.total }}</span>
+                     <button @click="navigateBranch(1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Next Branch">
+                        <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4-4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
+                    </button>
+                </div>
+
                  <div v-if="message.token_count && !isEditing" class="detail-badge token-badge">
                     <svg class="w-3.5 h-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M15.988 3.012A2.25 2.25 0 0118 5.25v9.5A2.25 2.25 0 0115.75 17h-3.389a1.5 1.5 0 01-1.49-1.076L9.4 12.5H2.25a.75.75 0 010-1.5h7.15l1.45-3.868A1.5 1.5 0 0112.361 6h3.389A2.25 2.25 0 0115.988 3.012z" clip-rule="evenodd" /></svg>
                     <span>{{ message.token_count }}</span>
@@ -345,16 +464,50 @@ function getSimilarityColor(score) {
 .typing-indicator .dot:nth-of-type(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
 
-.step-text > :first-child { margin-top: 0; }
-.step-text > :last-child { margin-bottom: 0; }
+.step-text > :first-child, .step-text > :last-child { margin-top: 0; margin-bottom: 0; }
 
-.think-block summary {
-    list-style: none; /* Hide default triangle */
+.think-block {
+    @apply bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg;
 }
-.think-block summary::-webkit-details-marker {
+.think-block[open] .think-summary {
+    @apply border-b border-blue-200 dark:border-blue-800/50;
+}
+.think-summary {
+    @apply flex items-center p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none;
+    -webkit-tap-highlight-color: transparent;
+}
+.think-summary:focus-visible {
+    @apply ring-2 ring-blue-400 outline-none;
+}
+.think-summary::-webkit-details-marker {
     display: none;
 }
 .think-content {
-    @apply prose-sm max-w-none text-gray-600 dark:text-gray-400;
+    @apply prose-sm max-w-none text-gray-700 dark:text-gray-300;
+}
+
+.branch-badge, .branch-badge-nav {
+    @apply bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200;
+}
+.branch-badge-nav {
+    @apply flex items-center gap-1;
+}
+
+/* Corrected Step Rendering Styles */
+.step-item {
+    display: flex;
+    gap: 0.75rem; /* Increased gap for better alignment */
+    align-items: flex-start;
+}
+.step-icon {
+    flex-shrink: 0;
+    width: 1rem;
+    height: 1rem;
+    margin-top: 0.25rem; /* Align with first line of text/JSON */
+}
+.step-content-wrapper {
+    flex-grow: 1;
+    min-width: 0; /* Important for flexbox to allow content to wrap */
+    overflow: hidden;
 }
 </style>

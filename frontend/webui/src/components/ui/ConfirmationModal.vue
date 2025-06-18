@@ -5,15 +5,13 @@ import GenericModal from './GenericModal.vue';
 
 export default {
   name: 'ConfirmationModal',
-  components: {
-    GenericModal,
-  },
+  components: { GenericModal },
   computed: {
-    ...mapState(useUiStore, ['confirmationOptions']),
+    ...mapState(useUiStore, ['confirmationOptions'])
   },
   methods: {
-    ...mapActions(useUiStore, ['confirmAction', 'cancelAction']),
-  },
+    ...mapActions(useUiStore, ['confirmAction', 'cancelAction'])
+  }
 };
 </script>
 

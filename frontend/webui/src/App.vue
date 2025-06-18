@@ -22,7 +22,7 @@ import FileManagementModal from './components/modals/FileManagementModal.vue';
 // Import new Data modals
 import ExportModal from './components/modals/ExportModal.vue';
 import ImportModal from './components/modals/ImportModal.vue';
-
+import InteractiveOutputModal from './components/modals/InteractiveOutputModal.vue';
 import logoUrl from './assets/logo.png';
 
 const authStore = useAuthStore();
@@ -91,9 +91,10 @@ onMounted(async () => {
     <ImportModal v-if="isImportOpen" />
 
     <!-- UI Components -->
-    <ConfirmationModal v-if="uiStore.isConfirmationVisible" />
+    <ConfirmationModal />
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />
+    <InteractiveOutputModal />
   </div>
 </template>
 

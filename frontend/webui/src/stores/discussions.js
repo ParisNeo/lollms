@@ -21,6 +21,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const disc = activeDiscussion.value;
         if (!disc) return [];
         const branchId = disc.activeBranchId || 'main';
+        // Ensure the branch array exists before returning
         return disc.branches?.[branchId] || [];
     });
 
@@ -34,14 +35,12 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     /**
      * Processes raw message objects from the API, adding client-side metadata.
      * @param {Array} messages - The array of message objects.
+     * @param {string} branchId - The ID of the branch these messages belong to.
      * @returns {Array} The processed array of message objects.
      */
-    function processMessages(messages) {
+    function processMessages(messages, branchId) {
         const authStore = useAuthStore();
         return messages.map(msg => {
-            // --- DEBUG LOG ---
-            console.log('Backend message received:', msg);
-
             let senderType = 'assistant'; // Default to assistant
             const sender = msg.sender?.toLowerCase();
             const username = authStore.user?.username?.toLowerCase();
@@ -53,10 +52,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
             return {
                 ...msg,
-                sender_type: senderType, // 'user', 'assistant', or 'system'
+                branch_id: branchId,
+                sender_type: senderType,
                 steps: msg.steps || [],
                 sources: msg.sources || [],
-                metadata: msg.metadata || {}
+                metadata: msg.metadata || {},
+                // New property for branching UI
+                children_count: msg.children_count || 1,
             };
         });
     }
@@ -76,9 +78,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 loadedDiscussions[d.id] = {
                     ...d,
                     rag_datastore_id: d.rag_datastore_id,
-                    // Map `active_tools` from backend to `mcp_tool_ids` in frontend state
-                    mcp_tool_ids: d.active_tools || [], 
+                    mcp_tool_ids: d.active_tools || [],
                     branches: {},
+                    // Add branch info from backend, with a fallback for older versions
+                    branches_info: d.branches_info || [{ id: d.active_branch_id || 'main', name: 'Main Branch' }],
                     activeBranchId: d.active_branch_id || 'main',
                     messages_loaded_fully: {}
                 };
@@ -96,10 +99,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const disc = discussions.value[id];
         if (!disc) return;
         const branchId = disc.activeBranchId || 'main';
+        // Fetch messages for the active branch if not already loaded
         if (!disc.messages_loaded_fully[branchId]) {
             try {
                 const response = await apiClient.get(`/api/discussions/${id}?branch_id=${branchId}`);
-                const processedMessages = processMessages(response.data);
+                const processedMessages = processMessages(response.data, branchId);
                 disc.branches = { ...disc.branches, [branchId]: processedMessages };
                 disc.messages_loaded_fully[branchId] = true;
             } catch (error) {
@@ -118,6 +122,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 ...newDisc,
                 mcp_tool_ids: [],
                 branches: { 'main': [] },
+                branches_info: [{ id: 'main', name: 'Main Branch' }],
                 activeBranchId: 'main',
                 messages_loaded_fully: { 'main': true }
             };
@@ -126,7 +131,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             console.error(error);
         }
     }
-    
+
     async function deleteDiscussion(discussionId) {
         const disc = discussions.value[discussionId];
         if (!disc) return;
@@ -151,14 +156,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             // Handled by interceptor
         }
     }
-    
+
     async function toggleStarDiscussion(discussionId) {
         const disc = discussions.value[discussionId];
         if (!disc) return;
-        
+
         const isCurrentlyStarred = disc.is_starred;
         const method = isCurrentlyStarred ? 'DELETE' : 'POST';
-        
+
         disc.is_starred = !isCurrentlyStarred;
 
         try {
@@ -168,7 +173,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             discussions.value[discussionId].is_starred = isCurrentlyStarred;
         }
     }
-    
+
     async function updateDiscussionRagStore({ discussionId, ragDatastoreId }) {
         const disc = discussions.value[discussionId];
         if (!disc) return;
@@ -183,14 +188,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             disc.rag_datastore_id = originalStoreId;
         }
     }
-    
+
     async function renameDiscussion({ discussionId, newTitle }) {
         const disc = discussions.value[discussionId];
         if (!disc || !newTitle) return;
 
         const originalTitle = disc.title;
         disc.title = newTitle;
-        
+
         try {
             const response = await apiClient.put(`/api/discussions/${discussionId}/title`, { title: newTitle });
             disc.title = response.data.title;
@@ -199,7 +204,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             disc.title = originalTitle;
         }
     }
-    
+
     async function updateDiscussionMcps({ discussionId, mcp_tool_ids }) {
         const disc = discussions.value[discussionId];
         if (!disc) return;
@@ -208,7 +213,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         disc.mcp_tool_ids = mcp_tool_ids;
 
         try {
-            // Backend expects `tools` field
             await apiClient.put(`/api/discussions/${discussionId}/tools`, { tools: mcp_tool_ids });
             useUiStore().addNotification('Tools updated for this discussion.', 'success');
         } catch (error) {
@@ -224,9 +228,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
         generationInProgress.value = true;
         activeGenerationAbortController = new AbortController();
-        
-        const tempUserMessageId = `temp-user-${Date.now()}`;
+
+        // If this is a normal message (not a regeneration), add the user prompt to the view.
+        // For regenerations, the prompt is already visible.
         if (!payload.is_resend) {
+            const tempUserMessageId = `temp-user-${Date.now()}`;
             const userMessage = {
                 id: tempUserMessageId,
                 sender: authStore.user.username,
@@ -250,14 +256,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             isStreaming: true,
             created_at: new Date().toISOString(),
             steps: [],
-            metadata: { sources: [] },
+            sources: [],
+            metadata: {},
         };
         activeMessages.value.push(aiMessage);
 
         const formData = new FormData();
         formData.append('prompt', payload.prompt);
         formData.append('image_server_paths_json', JSON.stringify(payload.image_server_paths || []));
-        
+
         if (activeDiscussion.value.rag_datastore_id) {
             formData.append('rag_datastore_id', activeDiscussion.value.rag_datastore_id);
             formData.append('use_rag', 'true');
@@ -265,13 +272,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             formData.append('use_rag', 'false');
         }
 
-        // Send active tool IDs with the message
         if (activeDiscussion.value.mcp_tool_ids && activeDiscussion.value.mcp_tool_ids.length > 0) {
             formData.append('mcp_tool_ids_json', JSON.stringify(activeDiscussion.value.mcp_tool_ids));
         }
 
         if (payload.branch_from_message_id) {
             formData.append('branch_from_message_id', payload.branch_from_message_id);
+        }
+         // Tell backend this is a regeneration to create a new branch
+        if(payload.is_resend){
             formData.append('is_resend', 'true');
         }
 
@@ -284,7 +293,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             });
 
             if (!response.ok || !response.body) {
-                throw new Error(`HTTP error ${response.status}`);
+                const errorBody = await response.text();
+                throw new Error(`HTTP error ${response.status}: ${errorBody}`);
             }
 
             const reader = response.body.getReader();
@@ -292,30 +302,53 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-                
+
                 const textChunk = decoder.decode(value, { stream: true });
                 const lines = textChunk.split('\n').filter(line => line.trim() !== '');
-                
+
                 lines.forEach(line => {
                     try {
+                        if(line.startsWith("data: ")){
+                            line = line.substring(6)
+                        }
                         const data = JSON.parse(line);
                         const messageToUpdate = activeMessages.value.find(m => m.id === tempAiMessageId);
                         if (!messageToUpdate) return;
                         
+                        // Use a switch for cleaner handling of different event types
                         switch (data.type) {
                             case 'chunk': messageToUpdate.content += data.content; break;
                             case 'model_name': messageToUpdate.model_name = data.name; break;
                             case 'token_count': messageToUpdate.token_count = data.count; break;
-                            case 'step_start': messageToUpdate.steps.push({ id: data.id, content: data.content, status: 'pending', type: 'step_start' }); break;
-                            case 'step': messageToUpdate.steps.push({ id: data.id, content: data.content, status: 'done', type: 'step' }); break;
+                            case 'step_start':
+                                // To prevent duplicate steps on reconnect, find existing first
+                                const existingStep = messageToUpdate.steps.find(s => s.id === data.id);
+                                if (!existingStep) {
+                                    messageToUpdate.steps.push({ id: data.id, content: data.content, status: 'pending', type: data.type });
+                                }
+                                break;
+                            case 'step': 
+                                const stepToUpdate = messageToUpdate.steps.find(s => s.id === data.id);
+                                if(stepToUpdate) {
+                                    stepToUpdate.content = data.content; // update content for this step
+                                } else {
+                                    messageToUpdate.steps.push({ id: data.id, content: data.content, status: 'in_progress', type: data.type });
+                                }
+                                break;
                             case 'step_end': {
                                 const step = messageToUpdate.steps.find(s => s.id === data.id);
                                 if (step) { step.status = 'done'; if(data.content) step.content = data.content; }
                                 break;
                             }
-                            case 'sources': if (!messageToUpdate.metadata) { messageToUpdate.metadata = {}; } messageToUpdate.metadata.sources = data.sources || []; break;
+                            case 'sources': messageToUpdate.sources = data.sources || []; break;
                             case 'error': uiStore.addNotification(`LLM Error: ${data.content}`, 'error'); if (reader.cancel) reader.cancel(); break;
+                            default:
+                                if(data.message) { // Handle full message object for finalization
+                                    Object.assign(messageToUpdate, processMessages([data.message], activeDiscussion.value.activeBranchId)[0]);
+                                }
+                                break;
                         }
+
                     } catch (e) {
                         console.error("Error parsing stream line:", line, e);
                     }
@@ -325,17 +358,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             if (error.name !== 'AbortError') {
                 uiStore.addNotification('An error occurred during generation.', 'error');
                 console.error("sendMessage error:", error);
-                activeMessages.value.pop();
+                // Remove the temporary AI message on failure
+                const aiMessageIndex = activeMessages.value.findIndex(m => m.id === tempAiMessageId);
+                if (aiMessageIndex > -1) activeMessages.value.splice(aiMessageIndex, 1);
             }
         } finally {
             const messageToFinalize = activeMessages.value.find(m => m.id === tempAiMessageId);
             if(messageToFinalize) messageToFinalize.isStreaming = false;
             generationInProgress.value = false;
             activeGenerationAbortController = null;
-            await refreshActiveBranch();
+            // Refresh the entire discussion to get new branch info
+            await refreshActiveDiscussion();
         }
     }
-    
+
     async function stopGeneration() {
         if (activeGenerationAbortController) {
             activeGenerationAbortController.abort();
@@ -343,44 +379,64 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
         if(currentDiscussionId.value) {
             try {
+                // Also signal backend to stop, just in case.
                 await apiClient.post(`/api/discussions/${currentDiscussionId.value}/stop_generation`);
             } catch(e) { console.warn("Stop signal to backend failed, but was stopped client-side.", e)}
         }
     }
 
-    async function refreshActiveBranch() {
-        if (!activeDiscussion.value) return;
-        const discId = activeDiscussion.value.id;
-        const branchId = activeDiscussion.value.activeBranchId;
+    async function refreshActiveDiscussion() {
+        if (!currentDiscussionId.value) return;
+        const discId = currentDiscussionId.value;
+        const uiStore = useUiStore();
         try {
-            // A small delay to ensure the backend has committed the final message state.
+            // A small delay can help ensure the backend has processed the last action
             await new Promise(resolve => setTimeout(resolve, 250));
-            
-            const response = await apiClient.get(`/api/discussions/${discId}?branch_id=${branchId}`);
-            const finalMessages = processMessages(response.data);
-            
-            // The server response is now the source of truth, including for steps.
-            discussions.value[discId].branches[branchId] = finalMessages;
+
+            // Fetch the main discussion object to get the latest branch list and active branch ID
+            const discussionResponse = await apiClient.get(`/api/discussions/${discId}`);
+            const updatedDiscData = discussionResponse.data;
+            const currentDisc = discussions.value[discId];
+
+            const newActiveBranchId = updatedDiscData.active_branch_id || 'main';
+
+            // Smart merge to preserve already loaded messages in other branches
+            discussions.value[discId] = {
+                ...currentDisc,
+                ...updatedDiscData,
+                mcp_tool_ids: updatedDiscData.active_tools || [],
+                branches: currentDisc.branches, // Keep old branches for now
+                messages_loaded_fully: currentDisc.messages_loaded_fully,
+                branches_info: updatedDiscData.branches_info || [{ id: newActiveBranchId, name: 'Main Branch' }],
+                activeBranchId: newActiveBranchId,
+            };
+
+            // Now, fetch and update the messages for the (potentially new) active branch
+            const branchResponse = await apiClient.get(`/api/discussions/${discId}?branch_id=${newActiveBranchId}`);
+            const finalMessages = processMessages(branchResponse.data, newActiveBranchId);
+            discussions.value[discId].branches[newActiveBranchId] = finalMessages;
+            discussions.value[discId].messages_loaded_fully[newActiveBranchId] = true;
 
         } catch(e) {
-            useUiStore().addNotification('Failed to refresh conversation state.', 'warning');
+            uiStore.addNotification('Failed to refresh conversation state.', 'warning');
+            console.error('Refresh active discussion failed:', e);
         }
     }
-    
+
     async function updateMessageContent({ messageId, branchId, newContent }) {
         if (!currentDiscussionId.value) return;
         try {
             await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}?branch_id=${branchId}`, { content: newContent });
-            await refreshActiveBranch();
+            await refreshActiveDiscussion();
             useUiStore().addNotification('Message updated.', 'success');
         } catch(e) { /* error handled by interceptor */ }
     }
-    
-    async function deleteMessage({ messageId, branchId }) {
+
+    async function deleteMessage({ messageId }) {
         if (!currentDiscussionId.value) return;
         try {
-            await apiClient.delete(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}?branch_id=${branchId}`);
-            await refreshActiveBranch();
+            await apiClient.delete(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`);
+            await refreshActiveDiscussion();
             useUiStore().addNotification('Message deleted.', 'success');
         } catch(e) { /* handled by interceptor */ }
     }
@@ -396,27 +452,80 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     async function initiateBranch(message) {
         if (!activeDiscussion.value || generationInProgress.value) return;
+        const uiStore = useUiStore();
 
-        const branchId = message.branch_id || activeDiscussion.value.activeBranchId;
-        const branchMessages = activeDiscussion.value.branches[branchId];
+        const disc = activeDiscussion.value;
+        const branchId = message.branch_id || disc.activeBranchId;
+        const branchMessages = disc.branches[branchId];
+        if (!branchMessages) return;
+
         const messageIndex = branchMessages.findIndex(m => m.id === message.id);
         if (messageIndex === -1) {
-            useUiStore().addNotification('Cannot find message to branch from.', 'error');
+            uiStore.addNotification('Cannot find message to branch from.', 'error');
             return;
         }
 
-        activeDiscussion.value.branches[branchId] = branchMessages.slice(0, messageIndex);
-        
-        const parentMessageId = message.parent_message_id;
+        // Determine which user prompt to resend
+        let userPromptIndex = -1;
+        if (message.sender_type === 'assistant') {
+            userPromptIndex = messageIndex - 1; // Find the prompt before the AI message
+        } else if (message.sender_type === 'user') {
+            userPromptIndex = messageIndex; // Resend the user's own message
+        }
 
+        if (userPromptIndex < 0 || branchMessages[userPromptIndex]?.sender_type !== 'user') {
+            uiStore.addNotification('Could not find a valid user prompt to regenerate from.', 'error');
+            return;
+        }
+
+        const promptMessage = branchMessages[userPromptIndex];
+        const parentOfPromptMessageId = promptMessage.parent_message_id;
+
+        // Truncate the current view to just after the user prompt.
+        // This keeps the prompt visible and removes the old AI response(s).
+        disc.branches[branchId] = branchMessages.slice(0, userPromptIndex + 1);
+
+        // Call sendMessage to generate a new response from the chosen prompt.
+        // `is_resend: true` prevents it from re-adding the prompt to the view.
+        // `branch_from_message_id` tells the backend where to fork the conversation.
         await sendMessage({
-            prompt: message.content,
-            image_server_paths: message.server_image_paths || [],
-            localImageUrls: message.image_references || [],
+            prompt: promptMessage.content,
+            image_server_paths: promptMessage.server_image_paths || [],
+            localImageUrls: promptMessage.image_references || [],
             is_resend: true,
-            branch_from_message_id: parentMessageId,
+            branch_from_message_id: parentOfPromptMessageId,
         });
     }
+
+    async function switchBranch(branchId) {
+        if (!activeDiscussion.value || activeDiscussion.value.activeBranchId === branchId) return;
+
+        const disc = activeDiscussion.value;
+        const discId = disc.id;
+        const originalBranchId = disc.activeBranchId;
+        
+        try {
+            // Optimistically update UI
+            disc.activeBranchId = branchId;
+            useUiStore().addNotification(`Switched to branch: ${disc.branches_info.find(b => b.id === branchId)?.name || branchId}`, 'info');
+
+            // Inform backend
+            await apiClient.put(`/api/discussions/${discId}/branches/${branchId}/activate`);
+            
+            // Fetch messages for the new branch if not already loaded
+            if (!disc.messages_loaded_fully[branchId]) {
+                const response = await apiClient.get(`/api/discussions/${discId}?branch_id=${branchId}`);
+                const processedMessages = processMessages(response.data, branchId);
+                disc.branches = { ...disc.branches, [branchId]: processedMessages };
+                disc.messages_loaded_fully[branchId] = true;
+            }
+        } catch (error) {
+            // Revert on error
+            disc.activeBranchId = originalBranchId;
+            console.error("Failed to switch branch:", error);
+        }
+    }
+
 
     async function exportDiscussions(discussionIds) {
         const uiStore = useUiStore();
@@ -425,7 +534,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const requestBody = { discussion_ids: discussionIds.length > 0 ? discussionIds : null };
             const response = await apiClient.post('/api/discussions/export', requestBody, { responseType: 'blob' });
-            
+
             const blob = new Blob([response.data], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -449,9 +558,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const formData = new FormData();
             formData.append('import_file', file);
             formData.append('import_request_json', JSON.stringify({ discussion_ids_to_import: discussionIdsToImport }));
-            
+
             const response = await apiClient.post('/api/discussions/import', formData);
-            
+
             uiStore.addNotification(response.data.message || 'Import completed.', 'success');
             await loadDiscussions();
         } catch (error) {
@@ -467,6 +576,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         renameDiscussion,
         sendMessage, stopGeneration, updateMessageContent, gradeMessage, deleteMessage,
         initiateBranch,
+        switchBranch, // Expose the new action
         exportDiscussions, importDiscussions,
         updateDiscussionMcps,
     };
