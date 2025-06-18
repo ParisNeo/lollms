@@ -249,7 +249,7 @@ export const useDataStore = defineStore('data', () => {
         const uiStore = useUiStore();
         uiStore.addNotification('Reloading MCP services...', 'info');
         try {
-            await apiClient.put('/api/mcps/reload');
+            await apiClient.post('/api/mcps/reload');
             await fetchMcpTools(); // Also refresh the tool list
             uiStore.addNotification('MCP services reloaded.', 'success');
         } catch (error) {

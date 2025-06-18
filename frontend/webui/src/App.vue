@@ -94,7 +94,7 @@ onMounted(async () => {
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />
     <InteractiveOutputModal />
-    <ConfirmationModal />
+    <ConfirmationModal class="first-plan" />
   </div>
 </template>
 

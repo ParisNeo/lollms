@@ -162,7 +162,7 @@ def delete_mcp(
     db.commit()
     return None
 
-@mcp_router.put("/reload", status_code=200)
+@mcp_router.post("/reload", status_code=200)
 def reload_user_lollms_client(
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
@@ -181,15 +181,14 @@ def reload_user_lollms_client(
                 "server_url": mcp_config["url"],
                 "auth_config": {}
             }
-        user_db = db_session_for_mcp.query(DBUser).filter(DBUser.username == current_user.username).first()
-        if user_db:
-            db_session_for_mcp = next(get_db())    
-            personal_mcps = db_session_for_mcp.query(DBMCP).filter(DBMCP.owner_user_id == user_db.id).all()
-            for mcp in personal_mcps:
-                servers_infos[mcp.name] = {
-                    "server_url": mcp.url,
-                    "auth_config": {}
-                }
+    db_session_for_mcp = next(get_db())    
+    user_db = db_session_for_mcp.query(DBUser).filter(DBUser.username == current_user.username).first()
+    personal_mcps = db_session_for_mcp.query(DBMCP).filter(DBMCP.owner_user_id == user_db.id).all()
+    for mcp in personal_mcps:
+        servers_infos[mcp.name] = {
+            "server_url": mcp.url,
+            "auth_config": {}
+        }
 
     lc.update_mcp_binding("remote_mcp", config= { "servers_infos": servers_infos })
     # Placeholder for the actual backend logic to reload the user's lollms_client.

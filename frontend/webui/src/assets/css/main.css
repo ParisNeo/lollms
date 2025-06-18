@@ -425,3 +425,7 @@ header, footer {
     scroll-behavior: auto !important;
   }
 }
+
+.first-plan {
+    z-index: 99999;
+}
