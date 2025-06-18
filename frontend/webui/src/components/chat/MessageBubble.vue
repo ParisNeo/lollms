@@ -112,7 +112,7 @@ function getContentTokens(text) {
     return Array.from(tokens);
 }
 
-// CORRECTED: Helper to parse step content for JSON rendering, now handles Python dict strings
+// Helper to parse step content for JSON rendering, now handles Python dict strings
 function parseStepContent(content) {
     if (typeof content !== 'string') {
         return { isJson: false, data: content };
@@ -513,21 +513,26 @@ function getSimilarityColor(score) {
     @apply flex items-center gap-1;
 }
 
-/* Corrected Step Rendering Styles */
 .step-item {
     display: flex;
-    gap: 0.75rem; /* Increased gap for better alignment */
+    gap: 0.75rem;
     align-items: flex-start;
 }
 .step-icon {
     flex-shrink: 0;
     width: 1rem;
     height: 1rem;
-    margin-top: 0.25rem; /* Align with first line of text/JSON */
+    margin-top: 0.25rem;
 }
 .step-content-wrapper {
     flex-grow: 1;
-    min-width: 0; /* Important for flexbox to allow content to wrap */
+    min-width: 0;
     overflow: hidden;
+}
+
+/* FIX: Added new rule to constrain bubble width and prevent overflow */
+.message-bubble {
+  max-width: 90%;
+  word-break: break-word;
 }
 </style>

@@ -91,10 +91,10 @@ onMounted(async () => {
     <ImportModal v-if="isImportOpen" />
 
     <!-- UI Components -->
-    <ConfirmationModal />
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />
     <InteractiveOutputModal />
+    <ConfirmationModal />
   </div>
 </template>
 

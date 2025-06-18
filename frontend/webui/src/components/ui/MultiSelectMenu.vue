@@ -106,14 +106,20 @@ const vOnClickOutside = {
                 {{ item.label }}
             </li>
             <!-- Render a normal item -->
-            <li v-else @click="toggleItem(item.id)" class="px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center">
-              <input type="checkbox" :checked="isSelected(item.id)" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-3 pointer-events-none">
+            <li v-else @click="toggleItem(item.id)" class="px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between">
               <span class="text-sm text-gray-900 dark:text-gray-100">{{ item.name }}</span>
+              <!-- REPLACED checkbox with a switch -->
+              <div class="switch-toggle" :class="{'active': isSelected(item.id)}">
+                <div class="switch-handle"></div>
+              </div>
             </li>
             <!-- Render items inside a group -->
-            <li v-if="item.isGroup" v-for="subItem in item.items" :key="subItem.id" @click="toggleItem(subItem.id)" class="px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center pl-6">
-                <input type="checkbox" :checked="isSelected(subItem.id)" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-3 pointer-events-none">
+            <li v-if="item.isGroup" v-for="subItem in item.items" :key="subItem.id" @click="toggleItem(subItem.id)" class="px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between pl-6">
                 <span class="text-sm text-gray-900 dark:text-gray-100">{{ subItem.name }}</span>
+                <!-- REPLACED checkbox with a switch -->
+                <div class="switch-toggle" :class="{'active': isSelected(subItem.id)}">
+                  <div class="switch-handle"></div>
+                </div>
             </li>
         </template>
       </ul>
@@ -123,3 +129,38 @@ const vOnClickOutside = {
     </div>
   </div>
 </template>
+
+<style scoped>
+.switch-toggle {
+  position: relative;
+  display: inline-block;
+  width: 40px;
+  height: 22px;
+  background-color: #cbd5e1; /* gray-300 */
+  border-radius: 9999px;
+  transition: background-color 0.2s ease-in-out;
+  flex-shrink: 0;
+}
+.dark .switch-toggle {
+  background-color: #4a5568; /* gray-600 */
+}
+
+.switch-toggle.active {
+  background-color: #3b82f6; /* blue-500 */
+}
+
+.switch-handle {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background-color: white;
+  border-radius: 9999px;
+  transition: transform 0.2s ease-in-out;
+}
+
+.switch-toggle.active .switch-handle {
+  transform: translateX(18px);
+}
+</style>

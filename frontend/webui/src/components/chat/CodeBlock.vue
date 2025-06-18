@@ -61,7 +61,6 @@ function getMimeType(language) {
     }
 }
 
-// --- FIX: New helper function for correct file extensions ---
 function getDownloadExtension(language) {
     const lang = language.toLowerCase();
     if (lang === 'python') return 'py';
@@ -74,7 +73,6 @@ function downloadCode() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    // Use the new helper function
     a.download = `code.${getDownloadExtension(props.language)}`;
     document.body.appendChild(a);
     a.click();
@@ -119,7 +117,6 @@ async function executeCode() {
             window.open(url, '_blank');
             executionOutput.value = 'HTML content opened in a new tab.';
         } else if (lang === 'javascript') {
-            // JS execution...
             let capturedOutput = '';
             const originalLog = console.log;
             console.log = (...args) => { capturedOutput += args.map(String).join(' ') + '\n'; };
@@ -205,13 +202,21 @@ async function downloadCreatedFile(filename) {
 </template>
 
 <style scoped>
-/* Keeping styles from previous working version */
 .code-block-container { overflow: hidden; font-family: 'Fira Code', 'Courier New', monospace; border-radius: 8px; }
 .code-block-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; }
 .code-language { font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
 .code-action-btn { display: flex; align-items: center; gap: 6px; border-radius: 5px; padding: 4px 10px; font-size: 0.75rem; cursor: pointer; transition: background-color 0.2s, color 0.2s; }
 .code-action-btn:disabled { cursor: not-allowed; opacity: 0.6; }
-.code-block-scrollable { margin: 0; padding: 16px; max-height: 400px; overflow-y: auto; }
+
+/* FIX: Added overflow-x: auto to handle long lines of code */
+.code-block-scrollable { 
+  margin: 0; 
+  padding: 16px; 
+  max-height: 400px; 
+  overflow-y: auto; 
+  overflow-x: auto;
+}
+
 .code-block-scrollable > .hljs { background-color: transparent !important; padding: 0 !important; }
 .code-execution-output { padding: 12px; font-size: 0.8rem; }
 .code-execution-output pre { margin: 0; white-space: pre-wrap; word-break: break-word; }

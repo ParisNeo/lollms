@@ -20,7 +20,7 @@ export default {
     modalName="confirmation"
     :title="confirmationOptions.title || 'Are you sure?'"
     :allowOverlayClose="false"
-    maxWidthClass="max-w-md"
+    maxWidthClass="max-w-md z-[9999]"
   >
     <template #body>
       <div class="text-sm text-gray-700 dark:text-gray-300">
