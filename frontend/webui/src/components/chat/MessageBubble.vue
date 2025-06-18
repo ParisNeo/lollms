@@ -112,15 +112,36 @@ function getContentTokens(text) {
     return Array.from(tokens);
 }
 
-// Helper to parse step content for JSON rendering
+// CORRECTED: Helper to parse step content for JSON rendering, now handles Python dict strings
 function parseStepContent(content) {
-    if (typeof content !== 'string' || !content.trim().startsWith('{') && !content.trim().startsWith('[')) {
+    if (typeof content !== 'string') {
         return { isJson: false, data: content };
     }
+    let processedContent = content.trim();
+
+    // Bail early if it doesn't look like an object or array.
+    if (!((processedContent.startsWith('{') && processedContent.endsWith('}')) || (processedContent.startsWith('[') && processedContent.endsWith(']')))) {
+        return { isJson: false, data: content };
+    }
+
+    // Attempt 1: Parse as standard JSON
     try {
-        const parsed = JSON.parse(content);
-        return { isJson: true, data: parsed };
+        return { isJson: true, data: JSON.parse(processedContent) };
     } catch (e) {
+        // Not standard JSON, proceed to attempt repair
+    }
+
+    // Attempt 2: Repair and parse Python-style dict string
+    try {
+        const repaired = processedContent
+            .replace(/\bTrue\b/g, 'true')
+            .replace(/\bFalse\b/g, 'false')
+            .replace(/\bNone\b/g, 'null')
+            .replace(/'/g, '"'); // Convert single quotes to double quotes
+        
+        return { isJson: true, data: JSON.parse(repaired) };
+    } catch (e) {
+        // If repair and parse fails, it's just a string.
         return { isJson: false, data: content };
     }
 }
@@ -378,7 +399,6 @@ function getSimilarityColor(score) {
             </div>
         </button>
         <div v-show="!isStepsCollapsed" class="space-y-2 pl-5 border-l-2 border-gray-200 dark:border-gray-700 ml-2">
-            <!-- CORRECTED STEP RENDERING LOOP -->
             <template v-for="(step, index) in message.steps" :key="index">
                 <div v-if="step.content" class="step-item">
                     <div class="step-icon">
