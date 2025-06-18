@@ -104,13 +104,14 @@ const editorExtensions = computed(() => {
             key: 'Enter',
             run: (view) => {
                 const currentText = view.state.doc.toString();
+                // Check if send is disabled using the most current text
                 const isDisabled = generationInProgress.value || (currentText.trim() === '' && uploadedImages.value.length === 0);
 
                 if (isDisabled) {
-                    return true;
+                    return true; // Prevent newline but do nothing else
                 }
                 
-                // Manually sync the v-model ref to resolve the race condition
+                // Manually sync the v-model ref to resolve any race conditions
                 messageText.value = currentText;
 
                 handleSendMessage();
