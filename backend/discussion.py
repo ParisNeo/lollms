@@ -65,7 +65,8 @@ from backend.database_setup import (
 from lollms_client import (
     LollmsClient,
     MSG_TYPE,
-    LollmsDiscussion as LollmsClientDiscussion,
+    LollmsDiscussion,
+    DatabaseManager,
     ELF_COMPLETION_FORMAT, # For client params
 )
 
@@ -89,20 +90,21 @@ class AppLollmsDiscussion:
     def __init__(
         self,
         lollms_client_instance: LollmsClient,
+        db_manager: DatabaseManager,
         discussion_id: Optional[str] = None,
         title: Optional[str] = None,
     ):
         self.messages: List[AppLollmsMessage] = []
         self.lollms_client: LollmsClient = lollms_client_instance
-        self.discussion_id: str = discussion_id or str(uuid.uuid4())
-        raw_title = title or f"New Discussion {self.discussion_id[:8]}"
-        self.title: str = (
-            (raw_title[:250] + "...") if len(raw_title) > 253 else raw_title
-        )
         # RAG datastore to use for this discussion (can be set by user)
-        self.rag_datastore_id: Optional[str] = None
-        # NEW: ID of the tip message of the currently active branch
-        self.active_branch_id: Optional[str] = None
+        self.lollms_discussion = LollmsDiscussion.create_new(
+            lollms_client=self.lollms_client,
+            db_manager=db_manager,
+            autosave=True, # Recommended for interactive apps
+            title = title,
+            rag_datastore_ids=[]
+        )
+        
 
 
     def add_message(
@@ -118,17 +120,23 @@ class AppLollmsDiscussion:
         steps: Optional[List[Dict]] = None,
         image_references: Optional[List[str]] = None,
     ) -> AppLollmsMessage:
-        message = AppLollmsMessage(
+        
+        
+        id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+        discussion_id = Column(String, ForeignKey('discussions.id'), nullable=False)
+        parent_id = Column(String, ForeignKey('messages.id'), nullable=True)
+        sender = Column(String, nullable=False)
+        sender_type = Column(String, nullable=False)
+        content = Column(EncryptedText, nullable=False)
+        message_metadata = Column(JSON, nullable=True, default=dict)
+        images = Column(JSON, nullable=True, default=list)
+        created_at = Column(DateTime, default=datetime.utcnow)        
+        
+        message = self.lollms_discussion.add_message(
             sender=sender, 
             sender_type=sender_type,
             content=content, 
-            parent_message_id=parent_message_id,
-            binding_name=binding_name, 
-            model_name=model_name, 
-            token_count=token_count, 
-            sources=sources,
-            steps=steps,
-            image_references=image_references or []
+            parent_id=parent_message_id,
         )
         self.messages.append(message)
         return message
@@ -184,9 +192,10 @@ class AppLollmsDiscussion:
         return path[::-1] # Reverse to get root -> leaf order
 
     def _generate_title_from_messages_if_needed(self) -> None:
+        title = self.lollms_discussion.metadata.get("title", "New Discussion")
         is_generic_title = (
-            self.title.startswith("New Discussion") or self.title.startswith("Imported") or
-            self.title.startswith("Discussion ") or self.title.startswith("Sent: ") or not self.title.strip()
+            title.startswith("New Discussion") or title.startswith("Imported") or
+            title.startswith("Discussion ") or title.startswith("Sent: ") or not title.strip()
         )
         if is_generic_title and self.messages:
             first_user_message = next((m for m in self.messages if m.sender.lower() == self.lollms_client.user_name.lower()), None)
@@ -199,13 +208,14 @@ class AppLollmsDiscussion:
                     new_title_base = content_to_use.strip().split("\n")[0]
                     max_title_len = 50
                     new_title = (new_title_base[: max_title_len - 3] + "...") if len(new_title_base) > max_title_len else new_title_base
-                    if new_title: self.title = new_title
+                    if new_title: self.lollms_discussion.metadata["title"]= new_title
+                    
 
     def to_dict(self) -> Dict[str, Any]:
         self._generate_title_from_messages_if_needed()
         return {
             "discussion_id": self.discussion_id,
-            "title": self.title,
+            "title": self.lollms_discussion.get("title"),
             "messages": [message.to_dict() for message in self.messages],
             "rag_datastore_id": self.rag_datastore_id,
             "active_branch_id": self.active_branch_id # Persist active branch
@@ -219,7 +229,7 @@ class AppLollmsDiscussion:
 
     @classmethod
     def load_from_disk(
-        cls, lollms_client_instance: LollmsClient, file_path: Union[str, Path]
+        cls, lollms_client_instance: LollmsClient, db_manager:DatabaseManager, file_path: Union[str, Path]
     ) -> Optional["AppLollmsDiscussion"]:
         actual_path = Path(file_path)
         if not actual_path.exists():
@@ -244,7 +254,7 @@ class AppLollmsDiscussion:
 
         discussion_id = data.get("discussion_id", actual_path.stem)
         title = data.get("title", f"Imported {discussion_id[:8]}")
-        discussion = cls(lollms_client_instance, discussion_id=discussion_id, title=title)
+        discussion = cls(lollms_client_instance, db_manager = db_manager, discussion_id=discussion_id, title=title)
         discussion.rag_datastore_id = data.get("rag_datastore_id")
         discussion.active_branch_id = data.get("active_branch_id") # Load active branch
 
@@ -256,60 +266,10 @@ class AppLollmsDiscussion:
                 else:
                     print(f"WARNING: Skipping malformed message data in {actual_path}: {msg_data}")
         
-        if (not discussion.title or discussion.title.startswith("Imported ") or discussion.title.startswith("New Discussion ") or discussion.title.startswith("Sent: ")):
+        if (not discussion.lollms_discussion.metadata.get("title") or discussion.lollms_discussion.metadata.get("title").startswith("Imported ") or discussion.lollms_discussion.metadata.get("title").startswith("New Discussion ") or discussion.lollms_discussion.metadata.get("title").startswith("Sent: ")):
             discussion._generate_title_from_messages_if_needed()
         return discussion
 
-    def to_lollms_client_discussion(
-        self,
-        user_assets_path: Path,
-        branch_tip_id: Optional[str] = None
-    ) -> LollmsClientDiscussion:
-        """
-        Converts this AppLollmsDiscussion into a LollmsClientDiscussion object,
-        ready to be used with LollmsClient.chat(). If a branch_tip_id is provided,
-        it builds the history for that specific branch.
-        """
-        if branch_tip_id:
-            messages_to_convert = self.get_path_to_message(branch_tip_id)
-        else:
-            # Fallback for non-branch-aware calls, might not be ideal for complex trees
-            messages_to_convert = self.messages
-
-        client_discussion = LollmsClientDiscussion(self.lollms_client)
-        
-        user_name = self.lollms_client.user_name
-        ai_name = self.lollms_client.ai_name
-        
-        client_discussion.set_participants({
-            user_name: "user",
-            ai_name: "assistant"
-        })
-
-        for app_msg in messages_to_convert:
-            images_for_client = []
-            if app_msg.image_references:
-                discussion_assets_path = user_assets_path / self.discussion_id
-                for img_ref in app_msg.image_references:
-                    absolute_image_path = discussion_assets_path / img_ref
-                    if absolute_image_path.exists():
-                        images_for_client.append({
-                            "type": "base64",
-                            "data": base64.b64encode(absolute_image_path.read_bytes()).decode("utf-8")
-                        })
-                    else:
-                        print(f"Warning: Image reference not found, skipping: {absolute_image_path}")
-
-            client_discussion.add_message(
-                sender=app_msg.sender,
-                sender_type=app_msg.sender_type,
-                content=app_msg.content,
-                images=images_for_client if images_for_client else None,
-                parent_id=app_msg.parent_message_id,
-                override_id = app_msg.id
-            )
-            
-        return client_discussion
     
     def get_branch_tip(self, start_message_id: str) -> str:
         """
