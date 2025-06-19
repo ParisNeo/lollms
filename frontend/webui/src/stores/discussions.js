@@ -454,46 +454,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (!activeDiscussion.value || generationInProgress.value) return;
         const uiStore = useUiStore();
 
-        const disc = activeDiscussion.value;
-        const branchId = message.branch_id || disc.activeBranchId;
-        const branchMessages = disc.branches[branchId];
-        if (!branchMessages) return;
 
-        const messageIndex = branchMessages.findIndex(m => m.id === message.id);
-        if (messageIndex === -1) {
-            uiStore.addNotification('Cannot find message to branch from.', 'error');
-            return;
-        }
 
-        // Determine which user prompt to resend
-        let userPromptIndex = -1;
-        if (message.sender_type === 'assistant') {
-            userPromptIndex = messageIndex - 1; // Find the prompt before the AI message
-        } else if (message.sender_type === 'user') {
-            userPromptIndex = messageIndex; // Resend the user's own message
-        }
+        console.log("Branching")
 
-        if (userPromptIndex < 0 || branchMessages[userPromptIndex]?.sender_type !== 'user') {
-            uiStore.addNotification('Could not find a valid user prompt to regenerate from.', 'error');
-            return;
-        }
-
-        const promptMessage = branchMessages[userPromptIndex];
-        const parentOfPromptMessageId = promptMessage.parent_message_id;
-
-        // Truncate the current view to just after the user prompt.
-        // This keeps the prompt visible and removes the old AI response(s).
-        disc.branches[branchId] = branchMessages.slice(0, userPromptIndex + 1);
 
         // Call sendMessage to generate a new response from the chosen prompt.
         // `is_resend: true` prevents it from re-adding the prompt to the view.
         // `branch_from_message_id` tells the backend where to fork the conversation.
         await sendMessage({
-            prompt: promptMessage.content,
-            image_server_paths: promptMessage.server_image_paths || [],
-            localImageUrls: promptMessage.image_references || [],
+            prompt: message.content,
+            image_server_paths: message.server_image_paths || [],
+            localImageUrls: message.image_references || [],
             is_resend: true,
-            branch_from_message_id: parentOfPromptMessageId,
+            branch_from_message_id: message.id,
         });
     }
 
