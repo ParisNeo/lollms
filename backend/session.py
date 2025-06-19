@@ -65,7 +65,8 @@ from backend.database_setup import (
 from lollms_client import (
     LollmsClient,
     MSG_TYPE,
-    LollmsDiscussion as LollmsClientDiscussion,
+    LollmsDiscussion,
+    DatabaseManager,
     ELF_COMPLETION_FORMAT, # For client params
 )
 
@@ -124,10 +125,26 @@ except ImportError:
 from backend.message import AppLollmsMessage
 from backend.discussion import AppLollmsDiscussion
 from backend.security import oauth2_scheme, jwt, JWTError, get_password_hash
+from sqlalchemy import Column, String, Integer, JSON
 
 # --- Global User Session Management & Locks ---
 user_sessions: Dict[str, Dict[str, Any]] = {}
 message_grade_lock = threading.Lock()
+
+#Discussion and message mixins
+class LollmsChatDiscussionMixins:
+    # We want each discussion to have a 'title' that we can search for.
+    title = Column(String(100), index=True, nullable=False)
+    
+class LollmsChatMessageMixins:
+    # We want each discussion to have a 'title' that we can search for.
+    binding_name = Column(String, nullable=True)
+    model_name = Column(String, nullable=True)
+    token_count = Column(Integer, nullable=True)
+    sources= Column(JSON, nullable=True)
+    steps= Column(JSON, nullable=True)
+    image_references= Column(JSON, nullable=True)
+
 
 def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
     return db.query(DBUser).filter(DBUser.username == username).first()
@@ -175,7 +192,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         session_llm_params = {k: v for k, v in session_llm_params.items() if v is not None}
 
         user_sessions[username] = {
-            "lollms_client": None, "safe_store_instances": {}, 
+            "lollms_client": None, 
+            "safe_store_instances": {},
+            "lollms_db_manager": None,
             "discussions": {}, "discussion_titles": {},
             "active_vectorizer": initial_vectorizer, 
             "lollms_model_name": initial_lollms_model,
@@ -306,6 +325,29 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             
     return cast(LollmsClient, session["lollms_client"])
 
+def get_user_lollms_dbmanager(username: str) -> DatabaseManager:
+    session = user_sessions.get(username)
+    encryption_key = SAFE_STORE_DEFAULTS.get("encryption_key")
+    if not session: raise HTTPException(status_code=500, detail="User session not found for LollmsClient.")
+    
+    force_reinit = session.get("lollms_db_manager") is None
+    
+    if force_reinit:
+        try:
+            session["lollms_db_manager"] = DatabaseManager(            
+                                                           db_path="sqlite:///"+str(get_user_discussion_path(username)/"discussions.db"),
+                                                           discussion_mixin=LollmsChatDiscussionMixins,
+                                                           message_mixin=LollmsChatMessageMixins,
+                                                           encryption_key=encryption_key
+                                                        )
+        except Exception as e:
+            traceback.print_exc()
+            session["lollms_db_manager"] = None
+            print(f"Could not initialize Discussions database manager: {str(e)}")
+            
+    return cast(DatabaseManager, session["lollms_db_manager"])
+
+
 
 def get_safe_store_instance(requesting_user_username: str, datastore_id: str, db: Session) -> safe_store.SafeStore:
     if safe_store is None: raise HTTPException(status_code=501, detail="SafeStore library not installed. RAG is disabled.")
@@ -358,17 +400,18 @@ def _load_user_discussions(username: str) -> None:
         if username in user_sessions: user_sessions[username]["discussions"] = {}; user_sessions[username]["discussion_titles"] = {}
         return
     discussion_dir = get_user_discussion_path(username)
+    db_manager = get_user_lollms_dbmanager(username)
     session = user_sessions[username]
     session["discussions"] = {}; session["discussion_titles"] = {}
     loaded_count = 0
     for file_path in discussion_dir.glob("*.yaml"):
         if file_path.name.startswith('.'): continue
         discussion_id = file_path.stem
-        discussion_obj = AppLollmsDiscussion.load_from_disk(lc, file_path)
+        discussion_obj = AppLollmsDiscussion.load_from_disk(lc, db_manager, file_path)
         if discussion_obj:
             discussion_obj.discussion_id = discussion_id
             session["discussions"][discussion_id] = discussion_obj
-            session["discussion_titles"][discussion_id] = discussion_obj.title
+            session["discussion_titles"][discussion_id] = discussion_obj.lollms_discussion.metadata.get("title")
             loaded_count += 1
         else: print(f"WARNING: Failed to load discussion from {file_path} for user {username}.")
     print(f"INFO: Loaded {loaded_count} discussions for user {username}.")
@@ -410,7 +453,7 @@ def save_user_discussion(username: str, discussion_id: str, discussion_obj: AppL
     file_path = get_user_discussion_path(username) / safe_discussion_filename
     try:
         discussion_obj.save_to_disk(file_path)
-        if username in user_sessions: user_sessions[username]["discussion_titles"][discussion_id] = discussion_obj.title
+        if username in user_sessions: user_sessions[username]["discussion_titles"][discussion_id] = discussion_obj.lollms_discussion.metadata.get("title")
     except Exception as e: traceback.print_exc()
 
 
