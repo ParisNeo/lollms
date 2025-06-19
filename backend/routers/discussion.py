@@ -159,7 +159,7 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
     infos = []
     for disc_id, disc_obj in session_discussions.items():
         infos.append(DiscussionInfo(
-            id=disc_id, title=disc_obj.title, 
+            id=disc_id, title=disc_obj.lollms_discussion.metadata.get("title","New Discussion"), 
             is_starred=(disc_id in starred_ids),
             rag_datastore_id=disc_obj.rag_datastore_id,
             active_tools=getattr(disc_obj, 'active_tools', []),
@@ -563,7 +563,7 @@ async def chat_in_existing_discussion(
                                 lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
                     else:
                         # STANDARD CHAT
-                        lc.chat(discussion=client_discussion, stream=True, streaming_callback=llm_callback)
+                        lc.chat(discussion=client_discussion, branch_tip_id=branch_tip_for_context, stream=True, streaming_callback=llm_callback)
 
                 except Exception as e_gen:
                     err_msg = f"LLM generation failed: {str(e_gen)}"
