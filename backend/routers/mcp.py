@@ -252,8 +252,8 @@ async def update_discussion_tools(
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_db.id, discussion_id=discussion_id).first() is not None
 
     return DiscussionInfo(
-        id=discussion_obj.discussion_id,
-        title=discussion_obj.title,
+        id=discussion_obj.lollms_discussion.id,
+        title=discussion_obj.lollms_discussion.metadata.get("title"),
         is_starred=is_starred,
         rag_datastore_id=discussion_obj.rag_datastore_id,
         active_tools=update_request.tools,
