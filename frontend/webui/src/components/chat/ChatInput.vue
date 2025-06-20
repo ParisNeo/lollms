@@ -10,7 +10,7 @@ import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
 import { Codemirror } from 'vue-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorView, keymap } from '@codemirror/view'; // Import keymap
+import { EditorView, keymap } from '@codemirror/view';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -31,11 +31,9 @@ const isSendDisabled = computed(() => {
   return generationInProgress.value || (messageText.value.trim() === '' && uploadedImages.value.length === 0);
 });
 
-// --- RAG & MCP Selection Logic ---
 const ragStoreSelection = computed({
     get() {
-        const currentId = activeDiscussion.value?.rag_datastore_id;
-        return currentId ? [currentId] : [];
+        return activeDiscussion.value?.rag_datastore_id ? [activeDiscussion.value.rag_datastore_id] : [];
     },
     set(newIds) {
         if (activeDiscussion.value) {
@@ -52,7 +50,7 @@ const ragStoreSelection = computed({
 
 const mcpToolSelection = computed({
     get() {
-        return activeDiscussion.value?.mcp_tool_ids || [];
+        return activeDiscussion.value?.active_tools || [];
     },
     set(newIds) {
         if (activeDiscussion.value) {
@@ -66,25 +64,22 @@ const mcpToolSelection = computed({
 
 watch(activeDiscussion, (newDiscussion) => {
     if (newDiscussion) {
-        const currentRagId = newDiscussion.rag_datastore_id;
-        ragStoreSelection.value = currentRagId ? [currentRagId] : [];
-        mcpToolSelection.value = newDiscussion.mcp_tool_ids || [];
+        ragStoreSelection.value = newDiscussion.rag_datastore_id ? [newDiscussion.rag_datastore_id] : [];
+        mcpToolSelection.value = newDiscussion.active_tools || [];
     } else {
         ragStoreSelection.value = [];
         mcpToolSelection.value = [];
     }
 }, { immediate: true });
 
-// --- Message Sending Logic ---
+
 async function handleSendMessage() {
   if (isSendDisabled.value) return;
-
   const payload = {
     prompt: messageText.value,
     image_server_paths: uploadedImages.value.map(img => img.server_path),
     localImageUrls: uploadedImages.value.map(img => img.local_url),
   };
-
   try {
     await discussionsStore.sendMessage(payload);
     messageText.value = '';
@@ -95,7 +90,6 @@ async function handleSendMessage() {
   }
 }
 
-// --- Editor Logic ---
 const editorExtensions = computed(() => {
     const extensions = [
         markdown(), 
@@ -104,19 +98,12 @@ const editorExtensions = computed(() => {
             key: 'Enter',
             run: (view) => {
                 const currentText = view.state.doc.toString();
-                // Check if send is disabled using the most current text
-                const isDisabled = generationInProgress.value || (currentText.trim() === '' && uploadedImages.value.length === 0);
-
-                if (isDisabled) {
-                    return true; // Prevent newline but do nothing else
+                if (generationInProgress.value || (currentText.trim() === '' && uploadedImages.value.length === 0)) {
+                    return true;
                 }
-                
-                // Manually sync the v-model ref to resolve any race conditions
                 messageText.value = currentText;
-
                 handleSendMessage();
-                
-                return true; // We handled the event, so don't insert a newline
+                return true;
             },
         }])
     ];
@@ -133,12 +120,9 @@ function handleEditorReady(payload) {
 function insertTextAtCursor(before, after = '', placeholder = '') {
     const view = codeMirrorView.value;
     if (!view) return;
-
     const { from, to } = view.state.selection.main;
     const selectedText = view.state.doc.sliceString(from, to);
-
     let textToInsert, selectionOffsetStart, selectionOffsetEnd;
-
     if (selectedText) {
         textToInsert = `${before}${selectedText}${after}`;
         selectionOffsetStart = from + before.length;
@@ -148,7 +132,6 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
         selectionOffsetStart = from + before.length;
         selectionOffsetEnd = selectionOffsetStart + placeholder.length;
     }
-    
     view.dispatch({
         changes: { from, to, insert: textToInsert },
         selection: { anchor: selectionOffsetStart, head: selectionOffsetEnd }
@@ -156,7 +139,6 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
     view.focus();
 }
 
-// --- Image Handling ---
 function triggerImageUpload() {
   imageInput.value.click();
 }
@@ -168,15 +150,12 @@ async function handleImageSelection(event) {
         uiStore.addNotification('You can upload a maximum of 5 images.', 'warning');
         return;
     }
-
     isUploading.value = true;
     const formData = new FormData();
     files.forEach(file => formData.append('files', file));
-
     try {
         const response = await apiClient.post('/api/upload/chat_image', formData);
-        const newImages = response.data;
-        newImages.forEach(imgInfo => {
+        response.data.forEach(imgInfo => {
             const originalFile = files.find(f => f.name === imgInfo.filename);
             if(originalFile) {
                 uploadedImages.value.push({
@@ -186,9 +165,8 @@ async function handleImageSelection(event) {
                 });
             }
         });
-        uiStore.addNotification('Images uploaded and ready to send.', 'success');
-    } catch (error) {
-        console.error("Image upload failed:", error);
+        uiStore.addNotification('Images uploaded.', 'success');
+    } catch (error) { console.error("Image upload failed:", error);
     } finally {
         isUploading.value = false;
         event.target.value = ''; 
@@ -205,10 +183,13 @@ function removeImage(index) {
 <template>
   <footer class="border-t dark:border-gray-700 p-3 shadow-inner bg-white dark:bg-gray-800">
     <!-- Generation In Progress Animation -->
-    <div v-if="generationInProgress" class="flex flex-col items-center justify-center p-4 h-[120px]">
-        <svg class="animate-spin h-8 w-8 text-blue-500 mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-        <p class="text-sm font-semibold text-gray-600 dark:text-gray-300">Thinking...</p>
-        <button @click="discussionsStore.stopGeneration" class="btn btn-danger mt-4 !py-1 !px-3">Stop Generation</button>
+    <!-- FIX: Use flex-row for horizontal layout -->
+    <div v-if="generationInProgress" class="flex flex-row items-center justify-between p-2 h-[60px]">
+        <div class="flex items-center space-x-3">
+            <svg class="animate-spin h-6 w-6 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            <p class="text-sm font-semibold text-gray-600 dark:text-gray-300">Thinking...</p>
+        </div>
+        <button @click="discussionsStore.stopGeneration" class="btn btn-danger !py-1 !px-3">Stop Generation</button>
     </div>
 
     <!-- Main Input Area -->

@@ -111,7 +111,7 @@ DirectMessageCreate
 
 from backend.session import (get_current_active_user, get_current_db_user_from_token, get_user_lollms_client, get_user_temp_uploads_path, get_user_by_username, user_sessions)
 from backend.config import (LOLLMS_CLIENT_DEFAULTS, SAFE_STORE_DEFAULTS)
-from backend.security import pwd_context, verify_password, create_access_token
+from backend.security import get_password_hash, verify_password, create_access_token
 from backend.models import Token, TokenData
 
 auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
@@ -123,15 +123,41 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(), 
     db: Session = Depends(get_db)
 ):
+    """
+    Logs in a user and returns a JWT access token.
+    This function is designed to be resistant to timing attacks for username enumeration.
+    """
     user = get_user_by_username(db, username=form_data.username)
-    if not user or not verify_password(form_data.password, user.hashed_password):
+
+    # --- TIMING ATTACK MITIGATION ---
+    # We perform a password verification even if the user is not found.
+    # This prevents attackers from guessing valid usernames by measuring response times.
+    if user:
+        # User exists, use their actual hashed password.
+        hashed_password = user.hashed_password
+        is_user_valid = True
+    else:
+        # User does not exist. Create a dummy hash for a bogus comparison.
+        # The content of the string doesn't matter, as it will never match.
+        # This ensures the verify_password call takes a similar amount of time.
+        hashed_password = get_password_hash("dummy_password_for_timing_attack_mitigation")
+        is_user_valid = False
+
+    # Perform the verification. This call will now always execute.
+    is_password_correct = verify_password(form_data.password, hashed_password)
+
+    # Now, check the combined result.
+    if not is_user_valid or not is_password_correct:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"}, # For consistency, though login form won't use it directly
+            headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # If we reach here, both the user and password are valid.
+    # Proceed with token creation and session initialization as before.
     access_token = create_access_token(
-        data={"sub": user.username} 
+        data={"sub": user.username}
     )
     # Initialize user session upon successful login if not already present
     # This ensures that subsequent calls to get_current_active_user have a session to work with
@@ -307,31 +333,6 @@ async def update_my_details(
         db.rollback()
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-
-
-@auth_router.post("/logout")
-async def logout(response: Response, current_user: UserAuthDetails = Depends(get_current_active_user), background_tasks: BackgroundTasks = BackgroundTasks()) -> Dict[str, str]:
-    username = current_user.username
-    if username in user_sessions:
-        # Clean up temp uploads for the user
-        temp_dir = get_user_temp_uploads_path(username)
-        if temp_dir.exists():
-            background_tasks.add_task(shutil.rmtree, temp_dir, ignore_errors=True)
-        
-        # Close any open SafeStore instances for this user
-        # This might be too aggressive if other sessions are active, but for single-session logout it's okay
-        # More robust: reference counting or explicit close on instance when no longer needed.
-        if "safe_store_instances" in user_sessions[username]:
-            for ds_id, ss_instance in user_sessions[username]["safe_store_instances"].items():
-                if hasattr(ss_instance, 'close') and callable(ss_instance.close):
-                    try: background_tasks.add_task(ss_instance.close)
-                    except Exception as e_ss_close: print(f"Error closing SafeStore {ds_id} for {username} on logout: {e_ss_close}")
-        
-        del user_sessions[username]
-        print(f"INFO: User '{username}' session cleared (logged out). Temp files scheduled for cleanup.")
-    response.status_code = status.HTTP_401_UNAUTHORIZED
-    del response.headers['www-authenticate'] # Ensure no WWW-Authenticate header is sent
-    return response#{"message": "Logout successful. Session cleared."}
 
 
 @auth_router.post("/change-password")

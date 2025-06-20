@@ -83,62 +83,14 @@ except ImportError:
 
 # --- Pydantic Models for API ---
 from backend.models import (
-UserLLMParams,
 UserAuthDetails,
-UserCreateAdmin,
-UserPasswordResetAdmin,UserPasswordChange,
-UserPublic,
-DiscussionInfo,
-DiscussionTitleUpdate,
-DiscussionRagDatastoreUpdate,MessageOutput,
-MessageContentUpdate,
-MessageGradeUpdate,
 SafeStoreDocumentInfo,
-DiscussionExportRequest,
-ExportData,
-DiscussionImportRequest,
-DiscussionSendRequest,
-DataStoreBase,
-DataStoreCreate,
-DataStorePublic,
-DataStoreShareRequest,
-PersonalityBase,
-PersonalityCreate,
-PersonalityUpdate,
-PersonalityPublic,
-UserUpdate,
-FriendshipBase,
-FriendRequestCreate,
-FriendshipAction,
-FriendPublic,
-FriendshipRequestPublic,
-PersonalitySendRequest,
-
-DirectMessagePublic,
-DirectMessageCreate
-)
-from backend.config import (
-    TEMP_UPLOADS_DIR_NAME
 )
 from backend.session import (
     get_current_active_user,
-    get_current_admin_user,
-    get_current_db_user_from_token,
-    get_datastore_db_path,
     get_db, get_safe_store_instance,
-    get_user_data_root, get_user_datastore_root_path,
-    get_user_discussion, get_user_discussion_assets_path,
-    get_user_discussion_path,
-    get_user_lollms_client,
-    get_user_temp_uploads_path,
-    _load_user_discussions,
-    save_user_discussion,
-    
-    message_grade_lock,
-    user_sessions,
+    get_user_datastore_root_path,
     )
-from backend.config import (LOLLMS_CLIENT_DEFAULTS, SAFE_STORE_DEFAULTS)
-from backend.discussion import (AppLollmsDiscussion)
 
 
 

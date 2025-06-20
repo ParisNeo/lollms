@@ -19,8 +19,6 @@ const isSortMenuOpen = ref(false);
 const isSearchVisible = ref(false);
 const searchInput = ref(null);
 
-// --- Computed properties for v-model binding ---
-
 const activePersonalityId = computed({
     get: () => authStore.user?.active_personality_id || null,
     set: (value) => authStore.updateUserPreferences({ active_personality_id: value || null })
@@ -32,20 +30,21 @@ const activeModelName = computed({
 });
 
 const selectedPersonality = computed(() => {
-    return [...dataStore.userPersonalities, ...dataStore.publicPersonalities].find(p => p.id === activePersonalityId.value);
+    // Add a check to ensure the stores are populated
+    const allPersonalities = [...(dataStore.userPersonalities || []), ...(dataStore.publicPersonalities || [])];
+    return allPersonalities.find(p => p.id === activePersonalityId.value);
 });
 
-// Format items for the IconSelectMenu
 const personalityItems = computed(() => {
     const items = [];
-    if (dataStore.userPersonalities.length > 0) {
+    if (dataStore.userPersonalities && dataStore.userPersonalities.length > 0) {
         items.push({
             isGroup: true,
             label: "Your Personalities",
             items: dataStore.userPersonalities.map(p => ({ id: p.id, name: p.name, icon_base64: p.icon_base64 }))
         });
     }
-    if (dataStore.publicPersonalities.length > 0) {
+    if (dataStore.publicPersonalities && dataStore.publicPersonalities.length > 0) {
          items.push({
             isGroup: true,
             label: "Public Personalities",
@@ -56,6 +55,8 @@ const personalityItems = computed(() => {
 });
 
 const modelItems = computed(() => {
+    // Add a check here too
+    if (!dataStore.availableLollmsModels) return [];
     return dataStore.availableLollmsModels.map(m => ({ value: m.name, label: m.name }));
 });
 
@@ -68,33 +69,38 @@ const sortOptions = {
 
 watch(isSearchVisible, (isVisible) => {
     if(isVisible) {
-        nextTick(() => {
-            searchInput.value?.focus();
-        });
+        nextTick(() => { searchInput.value?.focus(); });
     } else {
-        searchQuery.value = ''; // Clear search when hiding
+        searchQuery.value = '';
     }
 });
 
 const filteredAndSortedDiscussions = computed(() => {
-  const all = Object.values(discussionsStore.discussions);
+  // --- THIS IS THE CRITICAL FIX ---
+  // Always ensure discussionsStore.discussions is an object before using Object.values
+  const all = discussionsStore.discussions ? Object.values(discussionsStore.discussions) : [];
   
+  if (all.length === 0) return []; // Return early if there's nothing to process
+
   const filtered = all.filter(d => 
-    (d.title || '').toLowerCase().includes(searchQuery.value.toLowerCase())
+    d && (d.title || '').toLowerCase().includes(searchQuery.value.toLowerCase())
   );
 
   return filtered.sort((a, b) => {
+    // Add checks for a and b to prevent errors during sorting if data is malformed
+    if (!a || !b) return 0;
     switch (sortMethod.value) {
-      case 'date_asc': return new Date(a.last_activity_at) - new Date(b.last_activity_at);
+      case 'date_asc': return new Date(a.last_activity_at || 0) - new Date(b.last_activity_at || 0);
       case 'title_asc': return (a.title || '').localeCompare(b.title || '');
       case 'title_za': return (b.title || '').localeCompare(a.title || '');
       case 'date_desc':
       default:
-        return new Date(b.last_activity_at) - new Date(a.last_activity_at);
+        return new Date(b.last_activity_at || 0) - new Date(a.last_activity_at || 0);
     }
   });
 });
 
+// These computed properties will now be safe because filteredAndSortedDiscussions always returns an array.
 const starredDiscussions = computed(() => filteredAndSortedDiscussions.value.filter(d => d.is_starred));
 const regularDiscussions = computed(() => filteredAndSortedDiscussions.value.filter(d => !d.is_starred));
 
@@ -104,6 +110,7 @@ function selectSort(method) {
 }
 </script>
 
+<!-- The <template> section of this file remains unchanged -->
 <template>
   <div class="flex flex-col h-full">
     <!-- Controls Area -->

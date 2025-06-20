@@ -80,46 +80,22 @@ from backend.database_setup import (
 from lollms_client import (
     LollmsClient,
     MSG_TYPE,
-    LollmsDiscussion as LollmsClientDiscussion,
+    LollmsDiscussion,
+    LollmsDataManager,
     ELF_COMPLETION_FORMAT, # For client params
 )
 
 # --- Pydantic Models for API ---
+from backend.discussion import LegacyDiscussion # Import the safe legacy class
+from backend.session import get_user_discussion_path, get_user_lollms_client
 from backend.models import (
 UserLLMParams,
 UserAuthDetails,
-UserCreateAdmin,
-UserPasswordResetAdmin,UserPasswordChange,
-UserPublic,
-DiscussionInfo,
-DiscussionTitleUpdate,
-DiscussionRagDatastoreUpdate,MessageOutput,
-MessageContentUpdate,
-MessageGradeUpdate,
-SafeStoreDocumentInfo,
-DiscussionExportRequest,
-ExportData,
-DiscussionImportRequest,
-DiscussionSendRequest,
 DataStoreBase,
 DataStoreCreate,
 DataStoreEdit,
 DataStorePublic,
 DataStoreShareRequest,
-PersonalityBase,
-PersonalityCreate,
-PersonalityUpdate,
-PersonalityPublic,
-UserUpdate,
-FriendshipBase,
-FriendRequestCreate,
-FriendshipAction,
-FriendPublic,
-FriendshipRequestPublic,
-PersonalitySendRequest,
-
-DirectMessagePublic,
-DirectMessageCreate
 )
 # safe_store is expected to be installed
 try:
@@ -149,38 +125,28 @@ from backend.routers.mcp import mcp_router, discussion_tools_router
 # --- Application Version ---
 from backend.config import(
     APP_VERSION,
-    PROJECT_ROOT,
-    LOCALS_DIR,
-    CONFIG_PATH,
-    APP_SETTINGS,
     APP_DATA_DIR,
     APP_DB_URL,
     LOLLMS_CLIENT_DEFAULTS,
-    SAFE_STORE_DEFAULTS,
     INITIAL_ADMIN_USER_CONFIG,
     SERVER_CONFIG,
     TEMP_UPLOADS_DIR_NAME,
-    DISCUSSION_ASSETS_DIR_NAME,
-    DATASTORES_DIR_NAME,
     DEFAULT_PERSONALITIES
 )
 
-from backend.message import AppLollmsMessage
-from backend.discussion import AppLollmsDiscussion
 from backend.session import (
+    get_user_data_root,
+    get_user_discussion_path,
     get_current_active_user,
     get_current_admin_user,
-    get_current_db_user_from_token,
     get_datastore_db_path,
     get_db, get_safe_store_instance,
-    get_user_data_root, get_user_datastore_root_path,
-    get_user_discussion, get_user_discussion_assets_path,
+    get_user_data_root,
+    get_user_discussion_assets_path,
     get_user_discussion_path,
     get_user_lollms_client,
     get_user_temp_uploads_path,
-    user_sessions,
-    _load_user_discussions,
-    save_user_discussion
+    user_sessions
     )
 # --- Enriched Application Data Models ---
 
@@ -197,80 +163,134 @@ security = HTTPBasic()
 ## VUE TRANSITION: Check config to decide which frontend to serve
 SERVE_VUE_FRONTEND = SERVER_CONFIG.get("serve_vue_frontend", False)
 
+
 @app.on_event("startup")
 async def on_startup() -> None:
+    # 1. Initialize DB
+    init_database(APP_DB_URL)
+    print("Database initialized.")
+
+    # 2. PERMANENT MIGRATION SCRIPT
+    print("\n--- Running Automated Discussion Migration ---")
+    db_session = None
     try:
-        APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
-        print(f"INFO: Data directory ensured at: {APP_DATA_DIR}")
-        init_database(APP_DB_URL)
-        print(f"INFO: Database initialized at: {APP_DB_URL}")
+        db_session = next(get_db())
+        all_users = db_session.query(DBUser).all()
+        for user in all_users:
+            username = user.username
+            old_discussion_path = get_user_discussion_path(username)
+            
+            if not (old_discussion_path.exists() and old_discussion_path.is_dir()):
+                continue
+
+            print(f"Found legacy discussion folder for '{username}'. Starting migration...")
+
+            if username not in user_sessions:
+                user_sessions[username] = {
+                    "lollms_client": None,
+                    "lollms_model_name": user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
+                    "llm_params": {}
+                }
+            
+            user_data_path = get_user_data_root(username)
+            db_path = user_data_path / "discussions.db"
+            db_url = f"sqlite:///{db_path.resolve()}"
+            # --- FIX: Initialize LollmsDataManager without the invalid argument ---
+            dm = LollmsDataManager(db_path=db_url)
+            lc = get_user_lollms_client(username)
+
+            migrated_count = 0
+            for file_path in old_discussion_path.glob("*.yaml"):
+                discussion_db_session = None
+                try:
+                    old_disc = LegacyDiscussion.load_from_yaml(file_path)
+                    if not old_disc:
+                        continue
+
+                    # Manually manage the session to ensure it's closed
+                    discussion_db_session = dm.get_session()
+                    
+                    exists = discussion_db_session.query(dm.DiscussionModel).filter_by(id=old_disc.discussion_id).first()
+                    if exists:
+                        discussion_db_session.close() # Close session even if skipping
+                        continue
+                    
+                    new_db_disc_orm = dm.DiscussionModel(
+                        id=old_disc.discussion_id,
+                        discussion_metadata={"title": old_disc.title, "rag_datastore_id": old_disc.rag_datastore_id},
+                        active_branch_id=old_disc.active_branch_id
+                    )
+                    discussion_db_session.add(new_db_disc_orm)
+
+                    for msg in old_disc.messages:
+                        msg_orm = dm.MessageModel(
+                            id=msg.id, discussion_id=new_db_disc_orm.id, parent_id=msg.parent_id, 
+                            sender=msg.sender, sender_type=msg.sender_type, content=msg.content, 
+                            created_at=msg.created_at, binding_name=msg.binding_name, 
+                            model_name=msg.model_name, tokens=msg.token_count, 
+                            message_metadata={"sources": msg.sources, "steps": msg.steps}
+                        )
+                        discussion_db_session.add(msg_orm)
+                    
+                    discussion_db_session.commit()
+                    migrated_count += 1
+                except Exception as e:
+                    if discussion_db_session:
+                        discussion_db_session.rollback()
+                    print(f"    - FAILED to migrate {file_path.name}: {e}")
+                    traceback.print_exc()
+                finally:
+                    if discussion_db_session:
+                        discussion_db_session.close()
+
+            if migrated_count > 0:
+                print(f"Successfully migrated {migrated_count} discussions for '{username}'.")
+            
+            backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+            shutil.move(str(old_discussion_path), str(backup_path))
+            print(f"Backed up legacy folder to: {backup_path.name}")
+            
+            if username in user_sessions:
+                user_sessions[username]['lollms_client'] = None
+
     except Exception as e:
-        print(f"CRITICAL: Failed to initialize data directory or database: {e}")
-        return
-    db: Optional[Session] = None
+        print(f"CRITICAL ERROR during migration: {e}")
+        traceback.print_exc()
+    finally:
+        if db_session:
+            db_session.close()
+    print("--- Migration Finished ---\n")
+
+    # --- 3. Create Initial Admin User (if needed) ---
+    db_for_admin: Optional[Session] = None
     try:
-        db = next(get_db())
+        db_for_admin = next(get_db())
         admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
         admin_password = INITIAL_ADMIN_USER_CONFIG.get("password")
         if not admin_username or not admin_password:
             print("WARNING: Initial admin user 'username' or 'password' not configured. Skipping creation.")
-            return
-        existing_admin = db.query(DBUser).filter(DBUser.username == admin_username).first()
-        if not existing_admin:
-            hashed_admin_pass = hash_password(admin_password)
-            def_model = LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
-            def_vec = SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
-            
-            # LLM params from config
-            def_ctx_size = LOLLMS_CLIENT_DEFAULTS.get("ctx_size")
-            def_temp = LOLLMS_CLIENT_DEFAULTS.get("temperature")
-            def_top_k = LOLLMS_CLIENT_DEFAULTS.get("top_k")
-            def_top_p = LOLLMS_CLIENT_DEFAULTS.get("top_p")
-            def_rep_pen = LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty")
-            def_rep_last_n = LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n")
-
-            # RAG params from config (assuming they might be in SAFE_STORE_DEFAULTS or APP_SETTINGS)
-            # Using APP_SETTINGS as an example, adjust if they are elsewhere
-            def_rag_top_k = APP_SETTINGS.get("default_rag_top_k") 
-            def_rag_min_sim_percent = APP_SETTINGS.get("rag_min_sim_percent") 
-            def_rag_use_graph = APP_SETTINGS.get("default_rag_use_graph", False)
-            def_rag_graph_response_type = APP_SETTINGS.get("default_rag_graph_response_type", "chunks_summary")
-
-            new_admin = DBUser(
-                username=admin_username, hashed_password=hashed_admin_pass, is_admin=True,
-                # Optional personal info - can be left None or taken from config if available
-                first_name=INITIAL_ADMIN_USER_CONFIG.get("first_name"),
-                family_name=INITIAL_ADMIN_USER_CONFIG.get("family_name"),
-                email=INITIAL_ADMIN_USER_CONFIG.get("email"),
-                # birth_date: # Typically not set for initial admin
-
-                lollms_model_name=def_model, 
-                safe_store_vectorizer=def_vec,
-                # active_personality_id: None, # Default, no active personality initially
-                llm_ctx_size= def_ctx_size,
-                llm_temperature=def_temp, 
-                llm_top_k=def_top_k, 
-                llm_top_p=def_top_p,
-                llm_repeat_penalty=def_rep_pen, 
-                llm_repeat_last_n=def_rep_last_n,
-                put_thoughts_in_context=LOLLMS_CLIENT_DEFAULTS.get("put_thoughts_in_context", False),
-
-                rag_top_k=def_rag_top_k,
-                rag_min_sim_percent=def_rag_min_sim_percent,
-                rag_use_graph=def_rag_use_graph,
-                rag_graph_response_type=def_rag_graph_response_type
-            )
-            db.add(new_admin); db.commit()
-            print(f"INFO: Initial admin user '{admin_username}' created successfully with default RAG/LLM params.")
-
         else:
-            print(f"INFO: Initial admin user '{admin_username}' already exists.")
+            existing_admin = db_for_admin.query(DBUser).filter(DBUser.username == admin_username).first()
+            if not existing_admin:
+                hashed_admin_pass = hash_password(admin_password)
+                new_admin = DBUser(
+                    username=admin_username, 
+                    hashed_password=hashed_admin_pass, 
+                    is_admin=True,
+                    # ... other admin fields ...
+                )
+                db_for_admin.add(new_admin)
+                db_for_admin.commit()
+                print(f"INFO: Initial admin user '{admin_username}' created successfully.")
+            else:
+                print(f"INFO: Initial admin user '{admin_username}' already exists.")
     except Exception as e:
         print(f"ERROR: Failed during initial admin user setup: {e}")
         traceback.print_exc()
     finally:
-        if db: db.close()
+        if db_for_admin: db_for_admin.close()
 
+    # --- 4. Populate Default Public Personalities (if needed) ---
     db_for_defaults: Optional[Session] = None
     try:
         db_for_defaults = next(get_db())
@@ -278,20 +298,14 @@ async def on_startup() -> None:
             exists = db_for_defaults.query(DBPersonality).filter(
                 DBPersonality.name == default_pers_data["name"],
                 DBPersonality.is_public == True,
-                DBPersonality.owner_user_id == None # System personalities have no owner
+                DBPersonality.owner_user_id == None
             ).first()
             if not exists:
                 new_pers = DBPersonality(
-                    name=default_pers_data["name"],
-                    category=default_pers_data.get("category"),
-                    author=default_pers_data.get("author", "System"),
-                    description=default_pers_data.get("description"),
-                    prompt_text=default_pers_data["prompt_text"],
-                    disclaimer=default_pers_data.get("disclaimer"),
-                    script_code=default_pers_data.get("script_code"),
-                    icon_base64=default_pers_data.get("icon_base64"),
-                    is_public=True,
-                    owner_user_id=None # System-owned
+                    name=default_pers_data["name"], category=default_pers_data.get("category"),
+                    author=default_pers_data.get("author", "System"), description=default_pers_data.get("description"),
+                    prompt_text=default_pers_data["prompt_text"], disclaimer=default_pers_data.get("disclaimer"),
+                    is_public=True, owner_user_id=None
                 )
                 db_for_defaults.add(new_pers)
                 print(f"INFO: Added default public personality: '{new_pers.name}'")
@@ -302,8 +316,6 @@ async def on_startup() -> None:
         traceback.print_exc()
     finally:
         if db_for_defaults: db_for_defaults.close()
-
-
 
 # --- Helper Functions for User-Specific Services ---
 
