@@ -9,19 +9,19 @@ export default defineConfig({
     // Proxy API requests to the backend server to avoid CORS issues during development
     proxy: {
       '/api': {
-        target: 'http://localhost:9601',
+        target: 'http://localhost:9642',
         changeOrigin: true,
       },
       '/admin': {
-        target: 'http://localhost:9601',
+        target: 'http://localhost:9642',
         changeOrigin: true,
       },
       '/locals': {
-        target: 'http://localhost:9601',
+        target: 'http://localhost:9642',
         changeOrigin: true,
       },
        '/favicon.ico': {
-        target: 'http://localhost:9601',
+        target: 'http://localhost:9642',
         changeOrigin: true,
       },
     },
