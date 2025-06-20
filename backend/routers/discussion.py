@@ -310,61 +310,98 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
+    # --- RAG Callback now handles multiple datastores ---
+    rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
+    def query_rag_callback(query: str) -> Optional[str]:
+        if not safe_store:
+            return None
 
+        # Get the list of datastore IDs from metadata
+        if not rag_datastore_ids:
+            return None
+
+        all_results = []
+        print(f"RAG Querying across {len(rag_datastore_ids)} datastores.")
+
+        for ds_id in rag_datastore_ids:
+            try:
+                ss = get_safe_store_instance(username, ds_id, db)
+                results = ss.query(
+                    query,
+                    vectorizer_name=db_user.safe_store_vectorizer,
+                    top_k=db_user.rag_top_k
+                )
+                # Add the source datastore ID to each result for context
+                for r in results:
+                    r['datastore_id'] = ds_id
+                all_results.extend(results)
+            except Exception as e:
+                trace_exception(e)
+                # Optionally add an error message to the context
+                return f"Error during RAG query on datastore {ds_id}: {e}"
+
+        # De-duplicate results based on chunk_text to avoid redundancy
+        unique_chunks = {}
+        for r in all_results:
+            if r['chunk_text'] not in unique_chunks:
+                unique_chunks[r['chunk_text']] = r
+
+        # Sort all unique results by similarity score, highest first
+        sorted_unique_results = sorted(unique_chunks.values(), key=lambda x: x['similarity_percent'], reverse=True)
+
+        # Combine the top results into a single context string
+        return "\n---\n".join([r['chunk_text'] for r in sorted_unique_results])
+    def create_generic_personality():
+        return LollmsPersonality(
+            name="Generic Personality",
+            author="System",
+            category="Default",
+            description="A generic personality for default operations.",
+            system_prompt="You are a helpful assistant.",
+            script="",
+            query_rag_callback=query_rag_callback
+        )
+
+    # Get the user's Lollms client and database user
     lc = get_user_lollms_client(username)
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
 
+    # Initialize active_personality to None
     active_personality = None
+
+    # Check if there is an active personality in the database
     if db_user.active_personality_id:
         db_pers = db.query(DBPersonality).filter(DBPersonality.id == db_user.active_personality_id).first()
         if db_pers:
-            # --- RAG Callback now handles multiple datastores ---
-            def query_rag_callback(query: str) -> Optional[str]:
-                if not safe_store: return None
-                
-                # Get the list of datastore IDs from metadata
-                rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
-                if not rag_datastore_ids: return None
-                
-                all_results = []
-                print(f"RAG Querying across {len(rag_datastore_ids)} datastores.")
-                
-                for ds_id in rag_datastore_ids:
-                    try:
-                        ss = get_safe_store_instance(username, ds_id, db)
-                        results = ss.query(
-                            query,
-                            vectorizer_name=db_user.safe_store_vectorizer,
-                            top_k=db_user.rag_top_k
-                        )
-                        # Add the source datastore ID to each result for context
-                        for r in results:
-                            r['datastore_id'] = ds_id
-                        all_results.extend(results)
-                    except Exception as e:
-                        trace_exception(e)
-                        # Optionally add an error message to the context
-                        return f"Error during RAG query on datastore {ds_id}: {e}"
-
-                # De-duplicate results based on chunk_text to avoid redundancy
-                unique_chunks = {}
-                for r in all_results:
-                    if r['chunk_text'] not in unique_chunks:
-                        unique_chunks[r['chunk_text']] = r
-                
-                # Sort all unique results by similarity score, highest first
-                sorted_unique_results = sorted(unique_chunks.values(), key=lambda x: x['similarity_percent'], reverse=True)
-
-                # Combine the top results into a single context string
-                return "\n---\n".join([r['chunk_text'] for r in sorted_unique_results])
-
             active_personality = LollmsPersonality(
-                name=db_pers.name, author=db_pers.author, category=db_pers.category,
-                description=db_pers.description, system_prompt=db_pers.prompt_text,
+                name=db_pers.name,
+                author=db_pers.author,
+                category=db_pers.category,
+                description=db_pers.description,
+                system_prompt=db_pers.prompt_text,
                 script=db_pers.script_code,
                 query_rag_callback=query_rag_callback
             )
+        else:
+            db_pers = None
+            active_personality = create_generic_personality()
+    else:
+        db_pers = None
+        active_personality = create_generic_personality()
 
+
+
+    # Use the active or generic personality
+    active_personality = LollmsPersonality(
+        name=db_pers.name if db_pers else "Generic Personality",
+        author=db_pers.author if db_pers else "System",
+        category=db_pers.category if db_pers else "Default",
+        description=db_pers.description if db_pers else "A generic personality for default operations.",
+        system_prompt=db_pers.prompt_text if db_pers else "You are a helpful assistant.",
+        script=db_pers.script_code if db_pers else "",
+        query_rag_callback=query_rag_callback
+    )
+        
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     stop_event = threading.Event()
@@ -379,6 +416,8 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
                 payload = {"type": "chunk", "content": chunk}
             elif msg_type == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK:
                 payload = {"type": "thought", "content": chunk}
+            elif msg_type == MSG_TYPE.MSG_TYPE_STEP:
+                payload = {"type": "step", "content": chunk, "status": "done"}
             elif msg_type == MSG_TYPE.MSG_TYPE_STEP_START:
                 payload = {"type": "step_start", "content": chunk, "id": params.get("id"), "status": "pending"}
             elif msg_type == MSG_TYPE.MSG_TYPE_STEP_END:
@@ -412,7 +451,27 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
                                 "data": b64_data, 
                                 "path": persistent_filename
                             })
-
+                if rag_datastore_ids and len(rag_datastore_ids)>0:
+                    final_content = lc.generate_text_with_rag(
+                                        prompt=discussion_obj.format_discussion(lc.default_ctx_size),
+                                        system_prompt=discussion_obj.system_prompt,
+                                        temperature=current_user.llm_temperature, top_k=current_user.llm_top_k, top_p=current_user.llm_top_p,
+                                        repeat_penalty=current_user.llm_repeat_penalty, repeat_last_n=current_user.llm_repeat_last_n,
+                                        ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
+                                        rag_query_function=query_rag_callback, rag_vectorizer_name=current_user.safe_store_vectorizer,
+                                        max_rag_hops=current_user.rag_n_hops if current_user.rag_n_hops else 1,
+                                        rag_top_k=current_user.rag_top_k if current_user.rag_top_k  else 10,
+                                        rag_min_similarity_percent=current_user.rag_min_sim_percent if current_user.rag_min_sim_percent  else 0,
+                                        stream=True, streaming_callback=llm_callback,
+                                    )
+                    sources = [{"document":Path(r["document"]).name,"similarity":r["similarity"],"content":r["content"]} for r in final_content.get("all_retrieved_sources", [])]      
+                    ai_message_obj = discussion_obj.add_message(
+                        sender="assistant", sender_type="assistant", content=final_content,
+                        raw_content=final_raw_response, thoughts="", tokens=token_count,
+                        binding_name=self.lollmsClient.binding.binding_name,
+                        model_name=self.lollmsClient.binding.model_name,
+                        generation_speed=tok_per_sec
+                    )              
                 if is_resend:
                     # For regeneration, the user message with images already exists.
                     # We just call regenerate_branch.
@@ -421,9 +480,6 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
                         streaming_callback=llm_callback
                     )
                 else:
-                    # --- THIS IS THE CRITICAL FIX ---
-                    # 1. First, add the user message with its content and images to the discussion.
-                    # The LollmsDiscussion.chat() method is designed to work on the *existing* history.
                     discussion_obj.add_message(
                         sender="user", 
                         sender_type="user", 
@@ -439,8 +495,6 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
                         streaming_callback=llm_callback,
                     )
                 
-                # The commit is now handled inside the LollmsDiscussion methods, so we can remove the explicit one here.
-                # discussion_obj.commit() <-- This can be removed as .chat() and .regenerate_branch() handle it.
 
             except Exception as e:
                 trace_exception(e)
