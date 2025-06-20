@@ -163,7 +163,7 @@ class DiscussionTitleUpdate(BaseModel):
     title: constr(min_length=1, max_length=255)
 
 class DiscussionRagDatastoreUpdate(BaseModel):
-    rag_datastore_id: Optional[str] = None
+    rag_datastore_ids: Optional[List[str]] = None
 
 class DiscussionToolsUpdate(BaseModel):
     tools: List[str]
