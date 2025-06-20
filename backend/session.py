@@ -111,7 +111,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         username=username, is_admin=db_user.is_admin, first_name=db_user.first_name,
         family_name=db_user.family_name, email=db_user.email, birth_date=db_user.birth_date,
         lollms_model_name=user_sessions[username]["lollms_model_name"],
-        safe_store_vectorizer=user_sessions[username]["active_vectorizer"],
+        safe_store_vectorizer=user_sessions[username].get("active_vectorizer","st:all-MiniLM-L6-v2"),
         active_personality_id=user_sessions[username]["active_personality_id"],
         lollms_client_ai_name=ai_name_for_user,
         llm_ctx_size=current_session_llm_params.get("ctx_size"),
