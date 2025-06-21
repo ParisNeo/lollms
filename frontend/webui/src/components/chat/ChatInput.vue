@@ -9,8 +9,11 @@ import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
 // CodeMirror imports
 import { Codemirror } from 'vue-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
+import { indentUnit } from '@codemirror/language'; // Correct import for indentUnit
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
+import { EditorState } from '@codemirror/state';
+import { defaultKeymap, indentWithTab, insertNewlineAndIndent } from '@codemirror/commands';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -21,6 +24,7 @@ const uploadedImages = ref([]);
 const isUploading = ref(false);
 const imageInput = ref(null);
 const codeMirrorView = ref(null);
+const isFormattingMenuOpen = ref(false);
 
 const generationInProgress = computed(() => discussionsStore.generationInProgress);
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
@@ -91,22 +95,32 @@ async function handleSendMessage() {
 }
 
 const editorExtensions = computed(() => {
+    // A custom keymap to handle Enter and Shift+Enter
+    const customKeymap = keymap.of([
+      {
+        key: 'Enter',
+        run: (view) => {
+          if (isSendDisabled.value) {
+            return true; 
+          }
+          messageText.value = view.state.doc.toString();
+          handleSendMessage();
+          return true; 
+        },
+        shift: insertNewlineAndIndent,
+      },
+      indentWithTab,
+    ]);
+
     const extensions = [
-        markdown(), 
         EditorView.lineWrapping,
-        keymap.of([{
-            key: 'Enter',
-            run: (view) => {
-                const currentText = view.state.doc.toString();
-                if (generationInProgress.value || (currentText.trim() === '' && uploadedImages.value.length === 0)) {
-                    return true;
-                }
-                messageText.value = currentText;
-                handleSendMessage();
-                return true;
-            },
-        }])
+        EditorState.tabSize.of(2),
+        indentUnit.of("  "),
+        customKeymap, 
+        keymap.of(defaultKeymap),
+        markdown(),
     ];
+    
     if (uiStore.currentTheme === 'dark') {
         extensions.push(oneDark);
     }
@@ -178,12 +192,32 @@ function removeImage(index) {
     URL.revokeObjectURL(imageToRemove.local_url);
     uploadedImages.value.splice(index, 1);
 }
+
+const formattingMenuItems = [
+    { type: 'header', label: 'Basic' },
+    { label: 'Bold', action: () => insertTextAtCursor('**', '**', 'bold text') },
+    { label: 'Italic', action: () => insertTextAtCursor('*', '*', 'italic text') },
+    { label: 'Inline Code', action: () => insertTextAtCursor('`', '`', 'code') },
+    { type: 'separator' },
+    { type: 'header', label: 'Math' },
+    { label: 'Inline Formula', action: () => insertTextAtCursor('$', '$', 'E=mc^2') },
+    { label: 'Display Formula', action: () => insertTextAtCursor('$$\n', '\n$$', 'x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}') },
+    { type: 'separator' },
+    { type: 'header', label: 'Elements' },
+    { label: 'Link', action: () => insertTextAtCursor('[', '](https://)', 'link text') },
+    { label: 'Table', action: () => insertTextAtCursor('| Header 1 | Header 2 |\n|---|---|\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |', '', '') },
+    { type: 'separator' },
+    { type: 'header', label: 'Code Blocks' },
+    { label: 'Python', action: () => insertTextAtCursor('```python\n', '\n```', '# Your code here') },
+    { label: 'JavaScript', action: () => insertTextAtCursor('```javascript\n', '\n```', '// Your code here') },
+    { label: 'JSON', action: () => insertTextAtCursor('```json\n', '\n```', '{\n  "key": "value"\n}') },
+    { label: 'Markdown', action: () => insertTextAtCursor('```markdown\n', '\n```', '## Example') },
+];
 </script>
 
 <template>
   <footer class="border-t dark:border-gray-700 p-3 shadow-inner bg-white dark:bg-gray-800">
     <!-- Generation In Progress Animation -->
-    <!-- FIX: Use flex-row for horizontal layout -->
     <div v-if="generationInProgress" class="flex flex-row items-center justify-between p-2 h-[60px]">
         <div class="flex items-center space-x-3">
             <svg class="animate-spin h-6 w-6 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
@@ -206,16 +240,24 @@ function removeImage(index) {
             </div>
         </div>
 
-        <div class="flex items-center space-x-1 border-b dark:border-gray-600 mb-2 pb-2">
-            <button @click="insertTextAtCursor('**', '**', 'bold text')" title="Bold" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm"><b>B</b></button>
-            <button @click="insertTextAtCursor('*', '*', 'italic text')" title="Italic" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm"><i>I</i></button>
-            <button @click="insertTextAtCursor('`', '`', 'code')" title="Inline Code" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm font-mono text-xs"></button>
-            <button @click="insertTextAtCursor('$$', '$$', 'latex')" title="LaTeX" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm">Σ</button>
-            <button @click="insertTextAtCursor('```python\n', '\n```')" title="Python Code Block" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm font-mono text-xs">Py</button>
-            <button @click="insertTextAtCursor('```json\n', '\n```')" title="JSON Code Block" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-sm font-mono text-xs">Json</button>
-        </div>
-
         <div class="flex items-end space-x-2">
+             <!-- Formatting Dropdown -->
+            <div class="relative self-end" v-on-click-outside="() => isFormattingMenuOpen = false">
+                <button @click="isFormattingMenuOpen = !isFormattingMenuOpen" class="btn btn-secondary !p-2.5" title="Formatting Options">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" /></svg>
+                </button>
+                <div v-if="isFormattingMenuOpen"
+                     class="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-xl z-20 py-1">
+                    <template v-for="(item, index) in formattingMenuItems" :key="index">
+                        <div v-if="item.type === 'separator'" class="my-1 h-px bg-gray-200 dark:bg-gray-600"></div>
+                        <div v-else-if="item.type === 'header'" class="px-3 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ item.label }}</div>
+                        <button v-else @click="item.action(); isFormattingMenuOpen = false" class="w-full text-left flex items-center px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-blue-500 hover:text-white">
+                            {{ item.label }}
+                        </button>
+                    </template>
+                </div>
+            </div>
+
             <button @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary !p-2.5 self-end disabled:opacity-50" title="Upload Images">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6"><path stroke-linecap="round" stroke-linejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" /></svg>
             </button>
@@ -230,8 +272,6 @@ function removeImage(index) {
                     placeholder="Type your message... (Shift+Enter for new line)"
                     :style="{ maxHeight: '200px' }"
                     :autofocus="true"
-                    :indent-with-tab="true"
-                    :tab-size="2"
                     :extensions="editorExtensions"
                     @ready="handleEditorReady"
                     class="cm-editor-container"

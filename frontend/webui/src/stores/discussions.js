@@ -150,29 +150,33 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         generationInProgress.value = true;
         activeGenerationAbortController = new AbortController();
 
-        if (!payload.is_resend) {
-            const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
-            messages.value.push({
-                id: `temp-user-${Date.now()}`, sender: authStore.user.username,
-                sender_type: 'user', content: payload.prompt,
-                image_references: payload.localImageUrls || [],
-                created_at: new Date().toISOString(),
-                parent_message_id: lastMessage ? lastMessage.id : null
-            });
-        }
+        const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
 
-        const tempAiMessageId = `temp-ai-${Date.now()}`;
-        messages.value.push({
-            id: tempAiMessageId, sender: 'assistant', sender_type: 'assistant',
+        const tempUserMessage = {
+            id: `temp-user-${Date.now()}`, sender: authStore.user.username,
+            sender_type: 'user', content: payload.prompt,
+            image_references: payload.localImageUrls || [],
+            created_at: new Date().toISOString(),
+            parent_message_id: lastMessage ? lastMessage.id : null
+        };
+
+        const tempAiMessage = {
+            id: `temp-ai-${Date.now()}`, sender: 'assistant', sender_type: 'assistant',
             content: '', isStreaming: true, created_at: new Date().toISOString(),
-            steps: [],
-        });
+            steps: []
+        };
+
+        if (!payload.is_resend) {
+            messages.value.push(tempUserMessage);
+        }
+        messages.value.push(tempAiMessage);
 
         const formData = new FormData();
         formData.append('prompt', payload.prompt);
         formData.append('image_server_paths_json', JSON.stringify(payload.image_server_paths || []));
         if (payload.is_resend) formData.append('is_resend', 'true');
 
+        let streamDidComplete = false;
         try {
             const response = await fetch(`/api/discussions/${currentDiscussionId.value}/chat`, {
                 method: 'POST', body: formData,
@@ -184,13 +188,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const decoder = new TextDecoder();
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                    streamDidComplete = true;
+                    break;
+                }
                 const textChunk = decoder.decode(value, { stream: true });
                 const lines = textChunk.split('\n').filter(line => line.trim() !== '');
                 lines.forEach(line => {
                     try {
                         const data = JSON.parse(line);
-                        const messageToUpdate = messages.value.find(m => m.id === tempAiMessageId);
+                        const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
                         if (!messageToUpdate) return;
                         switch (data.type) {
                             case 'chunk': messageToUpdate.content += data.content; break;
@@ -211,13 +218,50 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch (error) {
             if (error.name !== 'AbortError') {
                 uiStore.addNotification('An error occurred during generation.', 'error');
-                const aiMessageIndex = messages.value.findIndex(m => m.id === tempAiMessageId);
+                const aiMessageIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
                 if (aiMessageIndex > -1) messages.value.splice(aiMessageIndex, 1);
             }
         } finally {
             generationInProgress.value = false;
             activeGenerationAbortController = null;
-            if (currentDiscussionId.value) await selectDiscussion(currentDiscussionId.value);
+            
+            const aiMessageToFinalize = messages.value.find(m => m.id === tempAiMessage.id);
+            if(aiMessageToFinalize) aiMessageToFinalize.isStreaming = false;
+
+            if (streamDidComplete && currentDiscussionId.value) {
+                try {
+                    // Silent fetch to get final message IDs and details
+                    const finalMessagesData = await apiClient.get(`/api/discussions/${currentDiscussionId.value}`);
+                    const finalMessages = processMessages(finalMessagesData.data);
+                    
+                    const finalAiMessage = finalMessages.find(m => m.content === aiMessageToFinalize.content && m.sender_type === 'assistant');
+
+                    if (aiMessageToFinalize && finalAiMessage) {
+                        // MUTATE the object instead of replacing it to avoid re-render
+                        Object.assign(aiMessageToFinalize, finalAiMessage);
+                    }
+                    
+                    const userMessageToFinalize = messages.value.find(m => m.id === tempUserMessage.id);
+                    if (userMessageToFinalize) {
+                         const finalUserMessage = finalMessages.find(m => m.content === userMessageToFinalize.content && m.sender_type === 'user');
+                         if(finalUserMessage){
+                            Object.assign(userMessageToFinalize, finalUserMessage);
+                         }
+                    }
+
+                    // Also update discussion title if it changed
+                    const disc = discussions.value[currentDiscussionId.value];
+                    const firstMessage = messages.value.find(m=>m.sender_type==="user");
+                    if (disc && disc.title.startsWith("New Discussion") && firstMessage) {
+                        const newTitle = firstMessage.content.split('\n')[0].substring(0, 50);
+                        await renameDiscussion({discussionId: disc.id, newTitle: newTitle})
+                    }
+
+                } catch(e) {
+                    console.error("Silent update failed, falling back to full refresh.", e);
+                    if (currentDiscussionId.value) await selectDiscussion(currentDiscussionId.value);
+                }
+            }
         }
     }
 

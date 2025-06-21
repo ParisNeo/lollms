@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue';
+import { computed, ref, onMounted, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
@@ -27,16 +27,42 @@ const isStepsCollapsed = ref(!props.message.isStreaming);
 const isEditing = ref(false);
 const editedContent = ref('');
 const codeMirrorView = ref(null);
+const messageContentRef = ref(null);
+const isFormattingMenuOpen = ref(false);
 
-onMounted(() => {
-    isStepsCollapsed.value = !props.message.isStreaming;
-});
+// --- KaTeX Rendering ---
+// This function will be called whenever the message content changes.
+function renderMath() {
+  if (messageContentRef.value && window.renderMathInElement) {
+    window.renderMathInElement(messageContentRef.value, {
+      delimiters: [
+        { left: '$$', right: '$$', display: true },
+        { left: '$', right: '$', display: false },
+        { left: '\\(', right: '\\)', display: false },
+        { left: '\\[', right: '\\]', display: true }
+      ],
+      throwOnError: false
+    });
+  }
+}
 
-watch(() => props.message.content, () => {
+// Watch for changes in message content to re-render math.
+// This is crucial for streaming content.
+watch(() => props.message.content, async () => {
     if (isEditing.value) {
         isEditing.value = false;
     }
+    // Wait for Vue to update the DOM
+    await nextTick();
+    renderMath();
 });
+
+onMounted(() => {
+    isStepsCollapsed.value = !props.message.isStreaming;
+    // Initial render for existing messages
+    renderMath();
+});
+
 
 const isUser = computed(() => props.message.sender_type === 'user');
 const isAi = computed(() => props.message.sender_type === 'assistant');
@@ -221,6 +247,27 @@ function getSimilarityColor(score) {
   if (score >= 70) return 'bg-yellow-500';
   return 'bg-red-500';
 }
+
+const formattingMenuItems = [
+    { type: 'header', label: 'Basic' },
+    { label: 'Bold', action: () => insertTextAtCursor('**', '**', 'bold text') },
+    { label: 'Italic', action: () => insertTextAtCursor('*', '*', 'italic text') },
+    { label: 'Inline Code', action: () => insertTextAtCursor('`', '`', 'code') },
+    { type: 'separator' },
+    { type: 'header', label: 'Math' },
+    { label: 'Inline Formula', action: () => insertTextAtCursor('$', '$', 'E=mc^2') },
+    { label: 'Display Formula', action: () => insertTextAtCursor('$$\n', '\n$$', 'x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}') },
+    { type: 'separator' },
+    { type: 'header', label: 'Elements' },
+    { label: 'Link', action: () => insertTextAtCursor('[', '](https://)', 'link text') },
+    { label: 'Table', action: () => insertTextAtCursor('| Header 1 | Header 2 |\n|---|---|\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |', '', '') },
+    { type: 'separator' },
+    { type: 'header', label: 'Code Blocks' },
+    { label: 'Python', action: () => insertTextAtCursor('```python\n', '\n```', '# Your code here') },
+    { label: 'JavaScript', action: () => insertTextAtCursor('```javascript\n', '\n```', '// Your code here') },
+    { label: 'JSON', action: () => insertTextAtCursor('```json\n', '\n```', '{\n  "key": "value"\n}') },
+    { label: 'Markdown', action: () => insertTextAtCursor('```markdown\n', '\n```', '## Example') },
+];
 </script>
 
 <template>
@@ -241,7 +288,7 @@ function getSimilarityColor(score) {
                 </div>
             </div>
 
-            <div v-if="message.content || (isUser && !message.image_references?.length)" class="message-content text-sm prose prose-sm dark:prose-invert max-w-none">
+            <div v-if="message.content || (isUser && !message.image_references?.length)" ref="messageContentRef" class="message-content text-sm prose prose-sm dark:prose-invert max-w-none">
                 <template v-for="(part, index) in messageParts" :key="index">
                     <template v-if="part.type === 'content'">
                         <template v-for="(token, tokenIndex) in getContentTokens(part.content)" :key="tokenIndex">
@@ -267,11 +314,21 @@ function getSimilarityColor(score) {
         <!-- Editing View -->
         <div v-else class="w-full">
             <div class="flex items-center space-x-1 border-b dark:border-gray-600 mb-2 pb-2">
-                <button @click="insertTextAtCursor('**', '**', 'bold text')" title="Bold" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><b>B</b></button>
-                <button @click="insertTextAtCursor('*', '*', 'italic text')" title="Italic" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><i>I</i></button>
-                <button @click="insertTextAtCursor('`', '`', 'code')" title="Inline Code" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm font-mono text-xs"></button>
-                <button @click="insertTextAtCursor('$$', '$$', 'latex')" title="LaTeX" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">Σ</button>
-                <button @click="insertTextAtCursor('```python\n', '\n```')" title="Python Code Block" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm font-mono text-xs">Py</button>
+                 <div class="relative">
+                    <button @click="isFormattingMenuOpen = !isFormattingMenuOpen" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600" title="Formatting Options">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" /></svg>
+                    </button>
+                    <div v-if="isFormattingMenuOpen" v-on-click-outside="() => isFormattingMenuOpen = false"
+                         class="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-xl z-20 py-1">
+                        <template v-for="(item, index) in formattingMenuItems" :key="index">
+                            <div v-if="item.type === 'separator'" class="my-1 h-px bg-gray-200 dark:bg-gray-600"></div>
+                            <div v-else-if="item.type === 'header'" class="px-3 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ item.label }}</div>
+                            <button v-else @click="item.action(); isFormattingMenuOpen = false" class="w-full text-left flex items-center px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-blue-500 hover:text-white">
+                                {{ item.label }}
+                            </button>
+                        </template>
+                    </div>
+                </div>
             </div>
             <codemirror v-model="editedContent" placeholder="Enter your message..." :style="{ maxHeight: '500px' }" :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="editorExtensions" @ready="handleEditorReady" class="cm-editor-container"/>
             <div class="flex justify-end space-x-2 mt-2">

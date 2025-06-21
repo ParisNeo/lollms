@@ -62,62 +62,85 @@ export const usePyodideStore = defineStore('pyodide', () => {
         }
     }
 
-    function wrapCodeForExecution(code) {
-        // --- THIS IS THE NEW, ROBUST WRAPPER ---
+    async function installPackages(packages) {
+        if (!isReady.value || !packages || packages.length === 0) {
+            return false;
+        }
+
+        const uiStore = useUiStore();
+        uiStore.addNotification('Loading installer...', 'info', 3000);
+        try {
+            await pyodide.value.loadPackage('micropip');
+            const micropip = pyodide.value.pyimport('micropip');
+            
+            uiStore.addNotification(`Installing: ${packages.join(', ')}...`, 'info', 15000);
+            await micropip.install(packages);
+            uiStore.addNotification('Installation complete.', 'success');
+            return true;
+        } catch (error) {
+            console.error("Micropip installation error:", error);
+            
+            let userMessage = `Failed to install packages.`;
+            const errorString = error.message || '';
+
+            if (errorString.includes("Unsupported content type")) {
+                userMessage = "Installation failed: A package was not found on PyPI. Some packages require a direct URL to a wheel (.whl) file.";
+            } else if (errorString.includes("Can't find a pure Python 3 wheel")) {
+                userMessage = "An install failed: A required package may not be compatible with the browser environment (it's not a 'pure Python wheel').";
+            } else if (errorString.includes('ValueError:')) {
+                userMessage = `Installation error: ${errorString.split('ValueError: ')[1]}`;
+            } else {
+                 userMessage = `Installation error: ${errorString}`;
+            }
+
+            uiStore.addNotification(userMessage, 'error', 15000);
+            return false;
+        }
+    }
+
+    function createSyncWrapper(code) {
         const escapedCode = code.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-        
         return `
 import io
 import base64
 import os
 import sys
 
-def run_and_get_results():
-    result = {'image': None, 'new_files': []}
-    initial_files = set(os.listdir('.'))
+# Setup environment for non-interactive execution
+try:
+    import matplotlib
+    matplotlib.use('Agg')
+except ImportError:
+    pass
 
-    # Preemptively set Matplotlib backend to non-interactive 'Agg'
-    # if the user code seems to be using it. This prevents the rogue UI.
-    if 'matplotlib.pyplot' in """${escapedCode}""":
-        try:
-            import matplotlib
-            matplotlib.use('Agg')
-        except ImportError:
-            # If matplotlib isn't installed yet, that's fine, we'll catch it later
-            pass
+initial_files = set(os.listdir('.'))
 
-    # Now, execute the user's code
-    user_code = """${escapedCode}"""
-    exec(user_code)
-    
-    # After execution, find any new files that were created
-    final_files = set(os.listdir('.'))
-    new_files_list = list(final_files - initial_files)
-    
-    # Filter out internal cache directories
-    result['new_files'] = [f for f in new_files_list if f not in ['.matplotlib', '.config']]
+# --- Execute user code ---
+exec("""${escapedCode}""")
+# --- End user code ---
 
-    # Safely check if a plot was created and capture it
-    if 'matplotlib.pyplot' in sys.modules:
-        try:
-            import matplotlib.pyplot as plt
-            if plt.get_fignums():
-                buf = io.BytesIO()
-                plt.savefig(buf, format='png')
-                buf.seek(0)
-                result['image'] = base64.b64encode(buf.read()).decode('utf-8')
-                plt.close('all')
-        except Exception:
-            # Ignore if plot saving fails for any reason
-            pass
-    
-    return result
+# --- Capture results ---
+result = {'image': None, 'new_files': []}
+final_files = set(os.listdir('.'))
+new_files_list = list(final_files - initial_files)
+result['new_files'] = [f for f in new_files_list if f not in ['.matplotlib', '.config']]
 
-run_and_get_results()
+try:
+    import matplotlib.pyplot as plt
+    if 'matplotlib.pyplot' in sys.modules and plt.get_fignums():
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        result['image'] = base64.b64encode(buf.read()).decode('utf-8')
+        plt.close('all')
+except (ImportError, Exception):
+    pass
+
+result
 `;
     }
 
-    async function runCode(code, canvasSelector = null) {
+    async function runCode(code, { canvasSelector = null, files = [] } = {}) {
         const uiStore = useUiStore();
         if (!isReady.value) {
             return { output: null, error: "Pyodide not initialized.", image: null, usesCanvas: false, newFiles: [] };
@@ -127,52 +150,48 @@ run_and_get_results()
         activeCanvasSelector.value = canvasSelector;
 
         try {
-            // --- UNIFIED EXECUTION PIPELINE ---
+            // --- FEATURE: Write uploaded files to the VFS before execution ---
+            if (files && files.length > 0) {
+                uiStore.addNotification(`Loading ${files.length} file(s)...`, 'info');
+                for (const file of files) {
+                    const buffer = await file.arrayBuffer();
+                    pyodide.value.FS.writeFile(file.name, new Uint8Array(buffer));
+                }
+                uiStore.addNotification('Files loaded into environment.', 'success');
+            }
 
-            // 1. Install packages from #micropip comment (e.g., pygame-web, python-pptx)
             const micropipMatch = code.match(/^#\s*micropip:\s*install\s+(.+)$/m);
             if (micropipMatch) {
                 const packagesToInstall = micropipMatch[1].split(/\s+/).filter(p => p);
                 if (packagesToInstall.length > 0) {
-                    uiStore.addNotification(`Loading installer...`, 'info', 3000);
-                    await pyodide.value.loadPackage('micropip');
-                    const micropip = pyodide.value.pyimport('micropip');
-                    uiStore.addNotification(`Installing: ${packagesToInstall.join(', ')}...`, 'info', 15000);
-                    await micropip.install(packagesToInstall);
-                    uiStore.addNotification('Installation complete.', 'success');
+                    await installPackages(packagesToInstall);
                 }
             }
 
-            // 2. Load standard Pyodide packages from imports (e.g., numpy)
             await pyodide.value.loadPackagesFromImports(code);
 
             if (canvasSelector) {
                  pyodide.value.globals.set("pyodide_canvas_selector", canvasSelector);
             }
 
-            // 3. Determine if the app is interactive (needs modal)
-            const usesPygame = /import\s+pygame/.test(code);
+            const usesCanvas = /#\s*pyodide:\s*uses-canvas/.test(code);
+            const isAsyncScript = /import\s+asyncio/.test(code) && /async\s+def\s+main/.test(code);
 
-            // 4. Run the code and get results
-            let resultData;
-            // The single wrapper is now used for everything EXCEPT pygame
-            if (usesPygame) {
+            if (isAsyncScript) {
                 await pyodide.value.runPythonAsync(code);
-                // Assume Pygame doesn't create files in this simple model
-                resultData = new Map([['image', null], ['new_files', []]]);
+                return { output: stdout.value.trim(), error: null, image: null, usesCanvas: usesCanvas, newFiles: [] };
             } else {
-                const wrappedCode = wrapCodeForExecution(code);
+                const wrappedCode = createSyncWrapper(code);
                 const pyResult = await pyodide.value.runPythonAsync(wrappedCode);
-                resultData = pyResult.toJs();
+                const resultData = pyResult ? pyResult.toJs() : new Map();
+                return { 
+                    output: stdout.value.trim(), 
+                    error: null, 
+                    image: resultData.get('image'), 
+                    usesCanvas: usesCanvas,
+                    newFiles: resultData.get('new_files') || []
+                };
             }
-
-            return { 
-                output: stdout.value.trim(), 
-                error: null, 
-                image: resultData.get('image'), 
-                usesCanvas: usesPygame,
-                newFiles: resultData.get('new_files') || []
-            };
         } catch (error) {
             console.error("Pyodide execution error:", error);
             const errorMessage = error.name === 'PythonError' && error.message.includes('SystemExit')
@@ -201,5 +220,6 @@ run_and_get_results()
         initialize,
         runCode,
         readFile,
+        installPackages,
     };
 });

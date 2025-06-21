@@ -110,7 +110,6 @@ function selectSort(method) {
 }
 </script>
 
-<!-- The <template> section of this file remains unchanged -->
 <template>
   <div class="flex flex-col h-full">
     <!-- Controls Area -->
@@ -164,27 +163,28 @@ function selectSort(method) {
                 </SimpleSelectMenu>
             </div>
 
-            <div class="relative">
-            <button 
-                @click="isSortMenuOpen = !isSortMenuOpen"
-                title="Sort options" 
-                class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12" />
-                </svg>
-            </button>
-            <div v-if="isSortMenuOpen" v-on-click-outside="() => isSortMenuOpen = false" class="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-lg shadow-xl z-20">
-                <a 
-                v-for="(label, method) in sortOptions" 
-                :key="method" 
-                href="#"
-                @click.prevent="selectSort(method)"
-                class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-500 hover:text-white"
+            <!-- FIX: Apply v-on-click-outside to the parent div -->
+            <div class="relative" v-on-click-outside="() => isSortMenuOpen = false">
+                <button 
+                    @click="isSortMenuOpen = !isSortMenuOpen"
+                    title="Sort options" 
+                    class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
-                {{ label }}
-                </a>
-            </div>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5 text-gray-500 dark:text-gray-400">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 4.5h14.25M3 9h9.75M3 13.5h5.25m5.25-.75L17.25 9m0 0L21 12.75M17.25 9v12" />
+                    </svg>
+                </button>
+                <div v-if="isSortMenuOpen" class="absolute top-full right-0 mt-2 w-48 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-lg shadow-xl z-20">
+                    <a 
+                    v-for="(label, method) in sortOptions" 
+                    :key="method" 
+                    href="#"
+                    @click.prevent="selectSort(method)"
+                    class="block px-4 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-blue-500 hover:text-white"
+                    >
+                    {{ label }}
+                    </a>
+                </div>
             </div>
         </div>
       </div>
