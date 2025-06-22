@@ -208,7 +208,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 const textChunk = decoder.decode(value, { stream: true });
                 const lines = textChunk.split('\n').filter(line => line.trim() !== '');
                 lines.forEach(line => {
-                    console.log("here")
                     try {
                         const data = JSON.parse(line);
                         if (!messageToUpdate) return;
@@ -216,51 +215,49 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                             case 'chunk': contentBuffer += data.content; break;
                             case 'step_start': stepsBuffer.push({ id: data.id, content: data.content, status: 'pending' }); break;
                             case 'step': {
-                                // This event carries the main payload of a step (e.g., tool output).
-                                // We find the corresponding step and update its content.
-                                const step = messageToUpdate.steps.find(s => s.id === data.id) || stepsBuffer.find(s => s.id === data.id);
-                                if (step) {
-                                    step.content = data.content;
-                                    step.status = 'done'; // A 'step' event implies completion of that action.
-                                }
-                                break;
+                                stepsBuffer.push({ id: data.id, content: data.content, status: 'done' }); break;
                             }
                             case 'step_end': {
-                                // This event marks the end and can contain a final summary.
                                 const step = messageToUpdate.steps.find(s => s.id === data.id) || stepsBuffer.find(s => s.id === data.id);
                                 if (step) {
                                     step.status = 'done';
-                                    // If the step_end event has content, update the step with it.
-                                    // This is useful for replacing "Thinking..." with a final summary.
                                     if (data.content) {
                                         step.content = data.content;
                                     }
                                 }
                                 break;
                             }
-                            // --- NEW 'FINALIZE' EVENT HANDLER ---
+                            // --- 'FINALIZE' EVENT HANDLER WITH THE FIX ---
                             case 'finalize': {
                                 streamDidComplete = true;
                                 const finalData = data.data;
 
-                                // Find the temp AI message and update it with the final data from the server.
-                                // This mutates the object directly in the 'messages' array.
                                 const aiMessageToFinalize = messages.value.find(m => m.id === tempAiMessage.id);
                                 if (aiMessageToFinalize && finalData.ai_message) {
+                                    
+                                    // --- START OF THE FIX ---
+                                    
+                                    // 1. Preserve the steps that were collected during the stream.
+                                    const collectedSteps = aiMessageToFinalize.steps;
+
+                                    // 2. Update the message object with the final data from the server.
+                                    //    This will overwrite the 'steps' property if it's not in the final payload.
                                     Object.assign(aiMessageToFinalize, finalData.ai_message);
+
+                                    // 3. CRITICAL: Restore the collected steps to the updated message object.
+                                    aiMessageToFinalize.steps = collectedSteps;
+
+                                    // --- END OF THE FIX ---
                                 }
 
-                                // Do the same for the user message if it was newly created.
                                 const userMessageToFinalize = messages.value.find(m => m.id === tempUserMessage.id);
                                 if (userMessageToFinalize && finalData.user_message) {
                                      Object.assign(userMessageToFinalize, finalData.user_message);
                                 }
                                 
-                                // Also update discussion title if it changed
                                 const disc = discussions.value[currentDiscussionId.value];
                                 if (disc && disc.title.startsWith("New Discussion") && finalData.user_message) {
                                     const newTitle = finalData.user_message.content.split('\n')[0].substring(0, 50);
-                                    // This can run in the background
                                     renameDiscussion({discussionId: disc.id, newTitle: newTitle});
                                 }
                                 break;
@@ -288,11 +285,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             generationInProgress.value = false;
             activeGenerationAbortController = null;
             
-            // Find the AI message (its ID may have been updated by 'finalize') and set streaming to false.
-            // We can still use the messageToUpdate reference which points to the object in the array.
             if(messageToUpdate) messageToUpdate.isStreaming = false;
-
-            // The old silent refresh logic has been removed as it's no longer needed.
         }
     }
 
