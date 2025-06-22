@@ -101,17 +101,18 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch(error) { /* Handled */ }
     }
 
-    async function updateDiscussionRagStore({ discussionId, ragDatastoreId }) {
+    async function updateDiscussionRagStore({ discussionId, ragDatastoreIds }) {
+        console.log(ragDatastoreIds)
         const disc = discussions.value[discussionId];
         if (!disc) return;
-        const originalStoreId = disc.rag_datastore_id;
-        disc.rag_datastore_id = ragDatastoreId;
+        const originalStoreIds = disc.rag_datastore_ids;
+        disc.rag_datastore_ids = ragDatastoreIds;
         try {
-            // This endpoint should be correct now after consolidating routers.
-            await apiClient.put(`/api/discussions/${discussionId}/rag_datastore`, { rag_datastore_id: ragDatastoreId });
-            useUiStore().addNotification('RAG datastore updated.', 'success');
+            await apiClient.put(`/api/discussions/${discussionId}/rag_datastore`, { rag_datastore_ids: ragDatastoreIds });
+            useUiStore().addNotification('RAG datastores updated.', 'success');
         } catch (error) {
-            if (discussions.value[discussionId]) disc.rag_datastore_id = originalStoreId;
+            if (discussions.value[discussionId]) disc.rag_datastore_ids = originalStoreIds;
+            useUiStore().addNotification('Failed to update RAG datastores.', 'error');
         }
     }
 
@@ -152,6 +153,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
         const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
 
+        // Keep references to the temporary message objects
         const tempUserMessage = {
             id: `temp-user-${Date.now()}`, sender: authStore.user.username,
             sender_type: 'user', content: payload.prompt,
@@ -177,6 +179,19 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (payload.is_resend) formData.append('is_resend', 'true');
 
         let streamDidComplete = false;
+
+        const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
+        let contentBuffer = '';
+        let stepsBuffer = [];
+        let updateInterval = null;
+
+        if (messageToUpdate) {
+            updateInterval = setInterval(() => {
+                if (contentBuffer.length > 0) { messageToUpdate.content += contentBuffer; contentBuffer = ''; }
+                if (stepsBuffer.length > 0) { messageToUpdate.steps.push(...stepsBuffer); stepsBuffer = []; }
+            }, 100);
+        }
+
         try {
             const response = await fetch(`/api/discussions/${currentDiscussionId.value}/chat`, {
                 method: 'POST', body: formData,
@@ -188,23 +203,66 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const decoder = new TextDecoder();
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) {
-                    streamDidComplete = true;
-                    break;
-                }
+                if (done) { break; } // The 'finalize' event now signals completion
+                
                 const textChunk = decoder.decode(value, { stream: true });
                 const lines = textChunk.split('\n').filter(line => line.trim() !== '');
                 lines.forEach(line => {
+                    console.log("here")
                     try {
                         const data = JSON.parse(line);
-                        const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
                         if (!messageToUpdate) return;
                         switch (data.type) {
-                            case 'chunk': messageToUpdate.content += data.content; break;
-                            case 'step_start': messageToUpdate.steps.push({ id: data.id, content: data.content, status: 'pending' }); break;
+                            case 'chunk': contentBuffer += data.content; break;
+                            case 'step_start': stepsBuffer.push({ id: data.id, content: data.content, status: 'pending' }); break;
+                            case 'step': {
+                                // This event carries the main payload of a step (e.g., tool output).
+                                // We find the corresponding step and update its content.
+                                const step = messageToUpdate.steps.find(s => s.id === data.id) || stepsBuffer.find(s => s.id === data.id);
+                                if (step) {
+                                    step.content = data.content;
+                                    step.status = 'done'; // A 'step' event implies completion of that action.
+                                }
+                                break;
+                            }
                             case 'step_end': {
-                                const step = messageToUpdate.steps.find(s => s.id === data.id);
-                                if (step) step.status = 'done';
+                                // This event marks the end and can contain a final summary.
+                                const step = messageToUpdate.steps.find(s => s.id === data.id) || stepsBuffer.find(s => s.id === data.id);
+                                if (step) {
+                                    step.status = 'done';
+                                    // If the step_end event has content, update the step with it.
+                                    // This is useful for replacing "Thinking..." with a final summary.
+                                    if (data.content) {
+                                        step.content = data.content;
+                                    }
+                                }
+                                break;
+                            }
+                            // --- NEW 'FINALIZE' EVENT HANDLER ---
+                            case 'finalize': {
+                                streamDidComplete = true;
+                                const finalData = data.data;
+
+                                // Find the temp AI message and update it with the final data from the server.
+                                // This mutates the object directly in the 'messages' array.
+                                const aiMessageToFinalize = messages.value.find(m => m.id === tempAiMessage.id);
+                                if (aiMessageToFinalize && finalData.ai_message) {
+                                    Object.assign(aiMessageToFinalize, finalData.ai_message);
+                                }
+
+                                // Do the same for the user message if it was newly created.
+                                const userMessageToFinalize = messages.value.find(m => m.id === tempUserMessage.id);
+                                if (userMessageToFinalize && finalData.user_message) {
+                                     Object.assign(userMessageToFinalize, finalData.user_message);
+                                }
+                                
+                                // Also update discussion title if it changed
+                                const disc = discussions.value[currentDiscussionId.value];
+                                if (disc && disc.title.startsWith("New Discussion") && finalData.user_message) {
+                                    const newTitle = finalData.user_message.content.split('\n')[0].substring(0, 50);
+                                    // This can run in the background
+                                    renameDiscussion({discussionId: disc.id, newTitle: newTitle});
+                                }
                                 break;
                             }
                             case 'error':
@@ -222,46 +280,19 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 if (aiMessageIndex > -1) messages.value.splice(aiMessageIndex, 1);
             }
         } finally {
+            if (updateInterval) { clearInterval(updateInterval); }
+            if (messageToUpdate) {
+                if (contentBuffer.length > 0) messageToUpdate.content += contentBuffer;
+                if (stepsBuffer.length > 0) messageToUpdate.steps.push(...stepsBuffer);
+            }
             generationInProgress.value = false;
             activeGenerationAbortController = null;
             
-            const aiMessageToFinalize = messages.value.find(m => m.id === tempAiMessage.id);
-            if(aiMessageToFinalize) aiMessageToFinalize.isStreaming = false;
+            // Find the AI message (its ID may have been updated by 'finalize') and set streaming to false.
+            // We can still use the messageToUpdate reference which points to the object in the array.
+            if(messageToUpdate) messageToUpdate.isStreaming = false;
 
-            if (streamDidComplete && currentDiscussionId.value) {
-                try {
-                    // Silent fetch to get final message IDs and details
-                    const finalMessagesData = await apiClient.get(`/api/discussions/${currentDiscussionId.value}`);
-                    const finalMessages = processMessages(finalMessagesData.data);
-                    
-                    const finalAiMessage = finalMessages.find(m => m.content === aiMessageToFinalize.content && m.sender_type === 'assistant');
-
-                    if (aiMessageToFinalize && finalAiMessage) {
-                        // MUTATE the object instead of replacing it to avoid re-render
-                        Object.assign(aiMessageToFinalize, finalAiMessage);
-                    }
-                    
-                    const userMessageToFinalize = messages.value.find(m => m.id === tempUserMessage.id);
-                    if (userMessageToFinalize) {
-                         const finalUserMessage = finalMessages.find(m => m.content === userMessageToFinalize.content && m.sender_type === 'user');
-                         if(finalUserMessage){
-                            Object.assign(userMessageToFinalize, finalUserMessage);
-                         }
-                    }
-
-                    // Also update discussion title if it changed
-                    const disc = discussions.value[currentDiscussionId.value];
-                    const firstMessage = messages.value.find(m=>m.sender_type==="user");
-                    if (disc && disc.title.startsWith("New Discussion") && firstMessage) {
-                        const newTitle = firstMessage.content.split('\n')[0].substring(0, 50);
-                        await renameDiscussion({discussionId: disc.id, newTitle: newTitle})
-                    }
-
-                } catch(e) {
-                    console.error("Silent update failed, falling back to full refresh.", e);
-                    if (currentDiscussionId.value) await selectDiscussion(currentDiscussionId.value);
-                }
-            }
+            // The old silent refresh logic has been removed as it's no longer needed.
         }
     }
 

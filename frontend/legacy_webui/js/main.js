@@ -7,7 +7,7 @@ let availableLanguages = { 'en': 'English', 'fr': 'Français' };
 let currentUser = null;
 let currentDiscussionId = null;
 // --- NEW STATE for Branching ---
-let discussions = {}; // Enhanced: { discId: { title, is_starred, rag_datastore_id, last_activity_at, branches: { branchId: [messages] }, activeBranchId, messages_loaded_fully: {branchId: bool} } }
+let discussions = {}; // Enhanced: { discId: { title, is_starred, rag_datastore_ids, last_activity_at, branches: { branchId: [messages] }, activeBranchId, messages_loaded_fully: {branchId: bool} } }
 let currentMessages = []; // Points to discussions[currentDiscussionId].branches[activeBranchId]
 let activeBranchId = null; // Global active branch ID for the current discussion
 const backendCapabilities = { // NEW: To track backend features
@@ -677,7 +677,7 @@ window.onload = async () => {
             return;
         }
         const disc = discussions[currentDiscussionId];
-        const isCurrentlyOn = !!disc.rag_datastore_id;
+        const isCurrentlyOn = !!disc.rag_datastore_ids;
         let newRagDatastoreId = null;
 
         if (isCurrentlyOn) {
@@ -686,7 +686,7 @@ window.onload = async () => {
             newRagDatastoreId = ragDataStoreSelect.value || (availableDataStoresForRag[0] ? availableDataStoresForRag[0].id : null);
         }
         
-        disc.rag_datastore_id = newRagDatastoreId;
+        disc.rag_datastore_ids = newRagDatastoreId;
         updateDiscussionRagStoreOnBackend(currentDiscussionId, newRagDatastoreId);
         updateRagToggleButtonState();
         
@@ -698,7 +698,7 @@ window.onload = async () => {
     if (ragDataStoreSelect) ragDataStoreSelect.onchange = async () => {
         if (!currentDiscussionId || !discussions[currentDiscussionId]) return;
         const selectedDataStoreId = ragDataStoreSelect.value || null;
-        discussions[currentDiscussionId].rag_datastore_id = selectedDataStoreId;
+        discussions[currentDiscussionId].rag_datastore_ids = selectedDataStoreId;
         await updateDiscussionRagStoreOnBackend(currentDiscussionId, selectedDataStoreId);
         updateRagToggleButtonState(); // To update tooltip
     };
@@ -1056,7 +1056,7 @@ async function loadDiscussions() {
                 id: d_info.id,
                 title: d_info.title,
                 is_starred: d_info.is_starred,
-                rag_datastore_id: d_info.rag_datastore_id,
+                rag_datastore_ids: d_info.rag_datastore_ids,
                 last_activity_at: d_info.last_activity_at || d_info.created_at || `1970-01-01T00:00:00Z`,
                 branches: { main: [] }, // Initialize client-side branch structure
                 activeBranchId: d_info.active_branch_id || 'main', // Use from backend if available
@@ -1287,7 +1287,7 @@ if (newDiscussionBtn) newDiscussionBtn.onclick = async () => {
             id: newDiscussionInfo.id,
             title: newDiscussionInfo.title,
             is_starred: newDiscussionInfo.is_starred,
-            rag_datastore_id: newDiscussionInfo.rag_datastore_id,
+            rag_datastore_ids: newDiscussionInfo.rag_datastore_ids,
             last_activity_at: newDiscussionInfo.last_activity_at || new Date().toISOString(),
             branches: { main: [] }, // Initialize with an empty main branch
             activeBranchId: 'main',
@@ -1600,13 +1600,13 @@ async function sendMessage(branchFromUserMessageId = null, resendData = null) {
         currentMessages.push(userMessageData);
         renderMessage(userMessageData);
     }
-    const useRag = !!(currentDisc && currentDisc.rag_datastore_id);
+    const useRag = !!(currentDisc && currentDisc.rag_datastore_ids);
     const formData = new FormData();
     formData.append('prompt', prompt);
     formData.append('image_server_paths_json', JSON.stringify(imagePayloadForBackend));
     formData.append('use_rag', useRag.toString());
-    if (useRag && currentDisc.rag_datastore_id) {
-        formData.append('rag_datastore_id', currentDisc.rag_datastore_id);
+    if (useRag && currentDisc.rag_datastore_ids) {
+        formData.append('rag_datastore_ids', currentDisc.rag_datastore_ids);
     }
 
     const isBranchingOrResending = !!(resendData || branchFromUserMessageId);
@@ -3298,7 +3298,7 @@ async function regenerateMessage(messageId, branchId) {
 
 // --- Pyodide, Settings, Data Store, File Management, RAG Toggle (largely as provided, ensure IDs and branch awareness where needed) ---
 // ... (Keep your existing functions, ensure they don't conflict with new message rendering or state) ...
-// Example: `updateRagToggleButtonState` should consider `discussions[currentDiscussionId]?.rag_datastore_id`
+// Example: `updateRagToggleButtonState` should consider `discussions[currentDiscussionId]?.rag_datastore_ids`
 // `ragDataStoreSelect.onchange` should call `updateDiscussionRagStoreOnBackend`
 async function updateDiscussionRagStoreOnBackend(discussionId, ragDatastoreId) {
     if (!discussionId) return;
@@ -3306,7 +3306,7 @@ async function updateDiscussionRagStoreOnBackend(discussionId, ragDatastoreId) {
         await apiRequest(`/api/discussions/${discussionId}/rag_datastore`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ rag_datastore_id: ragDatastoreId })
+            body: JSON.stringify({ rag_datastore_ids: ragDatastoreId })
         });
         const dsName = ragDatastoreId ? (availableDataStoresForRag.find(ds => ds.id === ragDatastoreId)?.name || 'Unknown Store') : translate('none_text');
         showStatus(translate('status_rag_datastore_set', `RAG datastore for this discussion set to: ${dsName}.`, {name: dsName}), 'success');
@@ -3478,8 +3478,8 @@ function populateRagDataStoreSelect() {
         option.textContent = `${ds.name} (${ds.owner_username === currentUser.username ? translate('datastores_owned_by_you_suffix') : translate('datastores_shared_by_suffix', `Shared by ${ds.owner_username}`, {owner: ds.owner_username})})`;
         ragDataStoreSelect.appendChild(option);
     });
-    if (currentDiscussionId && discussions[currentDiscussionId] && discussions[currentDiscussionId].rag_datastore_id) {
-        ragDataStoreSelect.value = discussions[currentDiscussionId].rag_datastore_id;
+    if (currentDiscussionId && discussions[currentDiscussionId] && discussions[currentDiscussionId].rag_datastore_ids) {
+        ragDataStoreSelect.value = discussions[currentDiscussionId].rag_datastore_ids;
     }
 }
 
@@ -3488,8 +3488,8 @@ if (ragDataStoreSelect) ragDataStoreSelect.onchange = async () => {
     const disc = discussions[currentDiscussionId];
     const selectedDataStoreId = ragDataStoreSelect.value || null;
     
-    if (disc.rag_datastore_id !== selectedDataStoreId) {
-        disc.rag_datastore_id = selectedDataStoreId;
+    if (disc.rag_datastore_ids !== selectedDataStoreId) {
+        disc.rag_datastore_ids = selectedDataStoreId;
         await updateDiscussionRagStoreOnBackend(currentDiscussionId, selectedDataStoreId);
     }
     updateRagToggleButtonState();
@@ -3748,7 +3748,7 @@ function updateRagToggleButtonState() {
     
     const hasDataStores = availableDataStoresForRag.length > 0;
     const disc = currentDiscussionId ? discussions[currentDiscussionId] : null;
-    const ragIsOn = disc && disc.rag_datastore_id;
+    const ragIsOn = disc && disc.rag_datastore_ids;
 
     ragToggleBtn.disabled = !hasDataStores;
     
@@ -3765,7 +3765,7 @@ function updateRagToggleButtonState() {
     if (ragIsOn) {
         ragToggleBtn.classList.remove('rag-toggle-off');
         ragToggleBtn.classList.add('rag-toggle-on');
-        const selectedDS = availableDataStoresForRag.find(ds => ds.id === disc.rag_datastore_id);
+        const selectedDS = availableDataStoresForRag.find(ds => ds.id === disc.rag_datastore_ids);
         const datastoreNameText = selectedDS ? `(Using: ${selectedDS.name})` : '(Store selected)';
         ragToggleBtn.title = translate('rag_toggle_btn_title_on', `RAG Active ${datastoreNameText} - Click to disable`, {datastore_name: datastoreNameText});
     } else {
@@ -3775,7 +3775,7 @@ function updateRagToggleButtonState() {
     }
 
     if (disc) {
-        ragDataStoreSelect.value = disc.rag_datastore_id || "";
+        ragDataStoreSelect.value = disc.rag_datastore_ids || "";
     } else {
         ragDataStoreSelect.value = "";
     }
@@ -3999,7 +3999,7 @@ async function handleRagFileUpload(){
 function updateRagToggleButtonState() {
     if (!ragToggleBtn || !ragDataStoreSelect) return;
     const disc = currentDiscussionId ? discussions[currentDiscussionId] : null;
-    const currentDiscussionRagStore = disc ? disc.rag_datastore_id : null;
+    const currentDiscussionRagStore = disc ? disc.rag_datastore_ids : null;
 
     const hasDataStores = availableDataStoresForRag.length > 0;
     ragToggleBtn.disabled = !hasDataStores;
@@ -4009,8 +4009,8 @@ function updateRagToggleButtonState() {
         ragToggleBtn.classList.remove('rag-toggle-on'); ragToggleBtn.classList.add('rag-toggle-off');
         ragToggleBtn.title = translate('rag_toggle_btn_title_no_stores');
         isRagActive = false; // Force off if no stores
-        if (disc && disc.rag_datastore_id) { // If a store was set but now none available
-            disc.rag_datastore_id = null;
+        if (disc && disc.rag_datastore_ids) { // If a store was set but now none available
+            disc.rag_datastore_ids = null;
             updateDiscussionRagStoreOnBackend(currentDiscussionId, null);
         }
         return;
@@ -4032,7 +4032,7 @@ function updateRagToggleButtonState() {
             if(availableDataStoresForRag.length > 0){
                 const firstStoreId = availableDataStoresForRag[0].id;
                 ragDataStoreSelect.value = firstStoreId;
-                if(disc) disc.rag_datastore_id = firstStoreId; // Also update local state
+                if(disc) disc.rag_datastore_ids = firstStoreId; // Also update local state
                 updateDiscussionRagStoreOnBackend(currentDiscussionId, firstStoreId); // And backend
             }
         }

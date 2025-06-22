@@ -217,7 +217,7 @@ async def on_startup() -> None:
                     
                     new_db_disc_orm = dm.DiscussionModel(
                         id=old_disc.discussion_id,
-                        discussion_metadata={"title": old_disc.title, "rag_datastore_id": old_disc.rag_datastore_id},
+                        discussion_metadata={"title": old_disc.title, "rag_datastore_ids": old_disc.rag_datastore_ids},
                         active_branch_id=old_disc.active_branch_id
                     )
                     discussion_db_session.add(new_db_disc_orm)

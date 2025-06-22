@@ -72,7 +72,7 @@ class LegacyDiscussion:
         self.messages: List[_LegacyMessage] = []
         self.discussion_id: str = discussion_id or str(uuid.uuid4())
         self.title: str = title or f"Imported {self.discussion_id[:8]}"
-        self.rag_datastore_id: Optional[str] = None
+        self.rag_datastore_ids: Optional[str] = None
         self.active_branch_id: Optional[str] = None
 
     @staticmethod
@@ -97,7 +97,7 @@ class LegacyDiscussion:
             discussion_id=data.get("discussion_id", actual_path.stem),
             title=data.get("title")
         )
-        discussion.rag_datastore_id = data.get("rag_datastore_id")
+        discussion.rag_datastore_ids = data.get("rag_datastore_ids")
         discussion.active_branch_id = data.get("active_branch_id")
         
         for msg_data in data.get("messages", []):
@@ -131,14 +131,15 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
     """Gets a specific discussion object for a user from their database."""
     lc = get_user_lollms_client(username)
     dm = get_user_discussion_manager(username)
-    discussion = dm.get_discussion(lollms_client=lc, discussion_id=discussion_id)
+    discussion = dm.get_discussion(lollms_client=lc, discussion_id=discussion_id, autosave=True)
     
     if discussion:
         return discussion
     elif create_if_missing:
         new_discussion = LollmsDiscussion.create_new(
             lollms_client=lc, db_manager=dm, id=discussion_id,
-            discussion_metadata={"title": f"New Discussion {discussion_id[:8]}"}
+            autosave=True,
+            discussion_metadata={"title": f"New Discussion {discussion_id[:8]}"},
         )
         return new_discussion
     return None

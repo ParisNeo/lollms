@@ -37,17 +37,17 @@ const isSendDisabled = computed(() => {
 
 const ragStoreSelection = computed({
     get() {
-        return activeDiscussion.value?.rag_datastore_id ? [activeDiscussion.value.rag_datastore_id] : [];
+        // Return the array of IDs directly, or an empty array if none exist.
+        return activeDiscussion.value?.rag_datastore_ids || [];
     },
     set(newIds) {
         if (activeDiscussion.value) {
-            const singleIdToSet = newIds.length > 0 ? newIds[0] : null;
-            if (activeDiscussion.value.rag_datastore_id !== singleIdToSet) {
-                discussionsStore.updateDiscussionRagStore({
-                    discussionId: activeDiscussion.value.id,
-                    ragDatastoreId: singleIdToSet
-                });
-            }
+            // The component's v-model will provide the full array of selected IDs.
+            // Call the store action to update the discussion with the new array of datastore IDs.
+            discussionsStore.updateDiscussionRagStore({
+                discussionId: activeDiscussion.value.id,
+                ragDatastoreIds: newIds // Send the full array
+            });
         }
     }
 });
@@ -68,7 +68,7 @@ const mcpToolSelection = computed({
 
 watch(activeDiscussion, (newDiscussion) => {
     if (newDiscussion) {
-        ragStoreSelection.value = newDiscussion.rag_datastore_id ? [newDiscussion.rag_datastore_id] : [];
+        ragStoreSelection.value = newDiscussion.rag_datastore_ids ? [newDiscussion.rag_datastore_ids] : [];
         mcpToolSelection.value = newDiscussion.active_tools || [];
     } else {
         ragStoreSelection.value = [];

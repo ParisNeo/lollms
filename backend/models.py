@@ -150,7 +150,7 @@ class DiscussionInfo(BaseModel):
     id: str
     title: str
     is_starred: bool
-    rag_datastore_id: Optional[str] = None
+    rag_datastore_ids: Optional[List[str]] = None
     active_tools: List[str] = Field(default_factory=list)
     created_at: Optional[datetime.datetime] = None
     last_activity_at: Optional[datetime.datetime] = None

@@ -13,8 +13,9 @@ import asyncio
 import threading
 import traceback
 import base64
+from functools import partial
 from ascii_colors import trace_exception
-
+from fastapi.encoders import jsonable_encoder
 # Third-Party Imports
 from fastapi import (
     HTTPException, Depends, Request, File, UploadFile, Form,
@@ -29,9 +30,9 @@ from fastapi.responses import (
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from lollms_client import (
-    LollmsClient, MSG_TYPE, LollmsDiscussion, LollmsPersonality
+    LollmsClient, MSG_TYPE, LollmsDiscussion, LollmsPersonality, LollmsMessage
 )
-
+from ascii_colors import ASCIIColors, trace_exception
 # Local Application Imports
 from backend.database_setup import (
     User as DBUser, UserStarredDiscussion, UserMessageGrade, get_db,
@@ -79,7 +80,7 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
             id=disc_id,
             title=metadata.get('title', f"Discussion {disc_id[:8]}"),
             is_starred=(disc_id in starred_ids),
-            rag_datastore_id=metadata.get('rag_datastore_id'),
+            rag_datastore_ids=metadata.get('rag_datastore_ids'),
             active_branch_id=disc_data.get('active_branch_id'),
             created_at=disc_data.get('created_at'),
             last_activity_at=disc_data.get('updated_at')
@@ -99,7 +100,7 @@ async def create_new_discussion(current_user: UserAuthDetails = Depends(get_curr
         id=discussion_obj.id,
         title=metadata.get('title', f"New Discussion {discussion_id[:8]}"),
         is_starred=False,
-        rag_datastore_id=None,
+        rag_datastore_ids=None,
         active_branch_id=None,
         created_at=discussion_obj.created_at,
         last_activity_at=discussion_obj.updated_at
@@ -163,7 +164,7 @@ async def update_discussion_active_branch(discussion_id: str, branch_request: Di
         id=discussion_id,
         title=metadata.get('title', "Untitled"),
         is_starred=is_starred,
-        rag_datastore_id=metadata.get('rag_datastore_id'),
+        rag_datastore_ids=metadata.get('rag_datastore_ids'),
         active_branch_id=discussion_obj.active_branch_id,
         created_at=discussion_obj.created_at,
         last_activity_at=discussion_obj.updated_at
@@ -187,7 +188,7 @@ async def update_discussion_title(discussion_id: str, title_update: DiscussionTi
         id=discussion_id,
         title=title_update.title,
         is_starred=is_starred,
-        rag_datastore_id=discussion_obj.metadata.get('rag_datastore_id'),
+        rag_datastore_ids=discussion_obj.metadata.get('rag_datastore_ids'),
         active_branch_id=discussion_obj.active_branch_id,
         created_at=discussion_obj.created_at,
         last_activity_at=discussion_obj.updated_at
@@ -231,7 +232,7 @@ async def star_discussion(discussion_id: str, current_user: UserAuthDetails = De
         id=discussion_id,
         title=metadata.get('title', "Untitled"),
         is_starred=True,
-        rag_datastore_id=metadata.get('rag_datastore_id'),
+        rag_datastore_ids=metadata.get('rag_datastore_ids'),
         active_branch_id=discussion_obj.active_branch_id,
         created_at=discussion_obj.created_at,
         last_activity_at=discussion_obj.updated_at
@@ -255,7 +256,7 @@ async def unstar_discussion(discussion_id: str, current_user: UserAuthDetails = 
         id=discussion_id,
         title=metadata.get('title', "Untitled"),
         is_starred=False,
-        rag_datastore_id=metadata.get('rag_datastore_id'),
+        rag_datastore_ids=metadata.get('rag_datastore_ids'),
         active_branch_id=discussion_obj.active_branch_id,
         created_at=discussion_obj.created_at,
         last_activity_at=discussion_obj.updated_at
@@ -264,9 +265,9 @@ async def unstar_discussion(discussion_id: str, current_user: UserAuthDetails = 
 # --- FIX: Replace the existing update_discussion_rag_datastore endpoint ---
 @discussion_router.put("/{discussion_id}/rag_datastore", response_model=DiscussionInfo)
 async def update_discussion_rag_datastores(
-    discussion_id: str, 
-    update_payload: DiscussionRagDatastoreUpdate, 
-    current_user: UserAuthDetails = Depends(get_current_active_user), 
+    discussion_id: str,
+    update_payload: DiscussionRagDatastoreUpdate,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> DiscussionInfo:
     username = current_user.username
@@ -288,155 +289,119 @@ async def update_discussion_rag_datastores(
         discussion_obj.metadata = {}
     discussion_obj.metadata['rag_datastore_ids'] = update_payload.rag_datastore_ids
     discussion_obj.commit()
-    
+
     user_db = db.query(DBUser).filter(DBUser.username == username).one()
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_db.id, discussion_id=discussion_id).first() is not None
-    
+
     return DiscussionInfo(
         id=discussion_id,
         title=discussion_obj.metadata.get('title', "Untitled"),
         is_starred=is_starred,
-        rag_datastore_id=discussion_obj.metadata.get('rag_datastore_ids'), # Return the list
+        rag_datastore_ids=discussion_obj.metadata.get('rag_datastore_ids'),
         active_branch_id=discussion_obj.active_branch_id,
         created_at=discussion_obj.created_at,
         last_activity_at=discussion_obj.updated_at
     )
 
+def lollms_message_to_output(
+    msg: LollmsMessage,
+    username: str,
+    discussion_id: str,
+    branch_id: str,
+    user_grade: int = 0
+) -> MessageOutput:
+    full_image_refs = [f"/user_assets/{username}/{discussion_id}/{img['path']}" for img in (msg.images or []) if 'path' in img]
+    msg_metadata = msg.metadata or {}
+    return MessageOutput(
+        id=msg.id,
+        sender=msg.sender,
+        sender_type=msg.sender_type,
+        content=msg.content,
+        parent_message_id=msg.parent_id,
+        binding_name=msg.binding_name,
+        model_name=msg.model_name,
+        token_count=msg.tokens,
+        sources=msg_metadata.get('sources'),
+        steps=msg_metadata.get('steps'),
+        image_references=full_image_refs,
+        user_grade=user_grade,
+        created_at=msg.created_at,
+        branch_id=branch_id,
+        branches=None
+    )
+
 
 @discussion_router.post("/{discussion_id}/chat")
 async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...), image_server_paths_json: str = Form("[]"), is_resend: bool = Form(False), current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> StreamingResponse:
-    
+    # ... (all setup code remains the same until the `stream_generator` function)
     username = current_user.username
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
-    # --- RAG Callback now handles multiple datastores ---
+    def query_rag_callback(query: str, rag_top_k, rag_min_similarity_percent, ss) -> Optional[str]:
+        # ... RAG callback logic ...
+        if not safe_store: return None
+        try:
+            return ss.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
+        except Exception as e:
+            trace_exception(e)
+            return f"Error during RAG query on datastore {ss.id}: {e}"
     rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
-    def query_rag_callback(query: str) -> Optional[str]:
-        if not safe_store:
-            return None
-
-        # Get the list of datastore IDs from metadata
-        if not rag_datastore_ids:
-            return None
-
-        all_results = []
-        print(f"RAG Querying across {len(rag_datastore_ids)} datastores.")
-
-        for ds_id in rag_datastore_ids:
-            try:
-                ss = get_safe_store_instance(username, ds_id, db)
-                results = ss.query(
-                    query,
-                    vectorizer_name=db_user.safe_store_vectorizer,
-                    top_k=db_user.rag_top_k
-                )
-                # Add the source datastore ID to each result for context
-                for r in results:
-                    r['datastore_id'] = ds_id
-                all_results.extend(results)
-            except Exception as e:
-                trace_exception(e)
-                # Optionally add an error message to the context
-                return f"Error during RAG query on datastore {ds_id}: {e}"
-
-        # De-duplicate results based on chunk_text to avoid redundancy
-        unique_chunks = {}
-        for r in all_results:
-            if r['chunk_text'] not in unique_chunks:
-                unique_chunks[r['chunk_text']] = r
-
-        # Sort all unique results by similarity score, highest first
-        sorted_unique_results = sorted(unique_chunks.values(), key=lambda x: x['similarity_percent'], reverse=True)
-
-        # Combine the top results into a single context string
-        return "\n---\n".join([r['chunk_text'] for r in sorted_unique_results])
+    use_mcps = (discussion_obj.metadata or {}).get('active_tools', [])
+    
+    use_rag = {}
+    for ds_id in rag_datastore_ids:
+        ss = get_safe_store_instance(username, ds_id, db)
+        use_rag[ss.name]={"name":ss.name,"description":ss.description,"callable":partial(query_rag_callback, ss=ss)}
     def create_generic_personality():
-        return LollmsPersonality(
-            name="Generic Personality",
-            author="System",
-            category="Default",
-            description="A generic personality for default operations.",
-            system_prompt="You are a helpful assistant.",
-            script="",
-            query_rag_callback=query_rag_callback
-        )
-
-    # Get the user's Lollms client and database user
+        # ... generic personality creation ...
+        return LollmsPersonality(name="Generic Personality", author="System", category="Default", description="A generic personality for default operations.", system_prompt="You are a helpful assistant.", script="", query_rag_callback=None)
     lc = get_user_lollms_client(username)
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
-
-    # Initialize active_personality to None
     active_personality = None
-
-    # Check if there is an active personality in the database
     if db_user.active_personality_id:
         db_pers = db.query(DBPersonality).filter(DBPersonality.id == db_user.active_personality_id).first()
         if db_pers:
-            active_personality = LollmsPersonality(
-                name=db_pers.name,
-                author=db_pers.author,
-                category=db_pers.category,
-                description=db_pers.description,
-                system_prompt=db_pers.prompt_text,
-                script=db_pers.script_code,
-                query_rag_callback=query_rag_callback
-            )
-        else:
-            db_pers = None
-            active_personality = create_generic_personality()
-    else:
-        db_pers = None
-        active_personality = create_generic_personality()
-
-
-
-    # Use the active or generic personality
-    active_personality = LollmsPersonality(
-        name=db_pers.name if db_pers else "Generic Personality",
-        author=db_pers.author if db_pers else "System",
-        category=db_pers.category if db_pers else "Default",
-        description=db_pers.description if db_pers else "A generic personality for default operations.",
-        system_prompt=db_pers.prompt_text if db_pers else "You are a helpful assistant.",
-        script=db_pers.script_code if db_pers else "",
-        query_rag_callback=query_rag_callback
-    )
-        
+            active_personality = LollmsPersonality(name=db_pers.name, author=db_pers.author, category=db_pers.category, description=db_pers.description, system_prompt=db_pers.prompt_text, script=db_pers.script_code, query_rag_callback=None)
+        else: db_pers = None; active_personality = create_generic_personality()
+    else: db_pers = None; active_personality = create_generic_personality()
+    active_personality = LollmsPersonality(name=db_pers.name if db_pers else "Generic Personality", author=db_pers.author if db_pers else "System", category=db_pers.category if db_pers else "Default", description=db_pers.description if db_pers else "A generic personality for default operations.", system_prompt=db_pers.prompt_text if db_pers else "You are a helpful assistant.", script=db_pers.script_code if db_pers else "", query_rag_callback=None)
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     stop_event = threading.Event()
     user_sessions.setdefault(username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event
-
+    
     async def stream_generator() -> AsyncGenerator[str, None]:
-        def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs) -> bool:
-            if stop_event.is_set():
-                return False
+        def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None, turn_history =[], **kwargs) -> bool:
+            # ... (llm_callback remains the same) ...
+            if stop_event.is_set(): return False
             payload = {}
-            if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
+            if msg_type == MSG_TYPE.MSG_TYPE_CHUNK: 
                 payload = {"type": "chunk", "content": chunk}
-            elif msg_type == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK:
+            elif msg_type == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK: 
                 payload = {"type": "thought", "content": chunk}
-            elif msg_type == MSG_TYPE.MSG_TYPE_STEP:
+            elif msg_type == MSG_TYPE.MSG_TYPE_STEP or msg_type == MSG_TYPE.MSG_TYPE_INFO: 
+                ASCIIColors.magenta(f"STEP: {chunk}")
                 payload = {"type": "step", "content": chunk, "status": "done"}
-            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_START:
+            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_START: 
+                ASCIIColors.magenta(f"STEP start: {chunk}")
                 payload = {"type": "step_start", "content": chunk, "id": params.get("id"), "status": "pending"}
-            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_END:
+            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_END: 
+                ASCIIColors.magenta(f"STEP end: {chunk}")
                 payload = {"type": "step_end", "content": chunk, "id": params.get("id"), "status": "done"}
-            elif msg_type == MSG_TYPE.MSG_TYPE_EXCEPTION:
-                payload = {"type": "error", "content": f"LLM Error: {chunk}"}
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(payload) + "\n")
-                return False
-            else:
+            elif msg_type == MSG_TYPE.MSG_TYPE_EXCEPTION: 
+                payload = {"type": "error", "content": f"LLM Error: {chunk}"};
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(payload) + "\n"); return False
+            else: 
                 return True
             main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(payload) + "\n")
             return True
 
         def blocking_call():
             try:
-                # Handle image uploads and convert them to the format LollmsMessage expects
                 images_for_message = []
                 image_server_paths = json.loads(image_server_paths_json)
-                if image_server_paths:
+                if image_server_paths and not is_resend:
                     temp_path = get_user_temp_uploads_path(username)
                     assets_path = get_user_discussion_assets_path(username) / discussion_id
                     assets_path.mkdir(parents=True, exist_ok=True)
@@ -446,55 +411,44 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
                             persistent_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
                             shutil.move(str(temp_path/filename), str(assets_path/persistent_filename))
                             b64_data = base64.b64encode((assets_path/persistent_filename).read_bytes()).decode('utf-8')
-                            images_for_message.append({
-                                "type": "base64", 
-                                "data": b64_data, 
-                                "path": persistent_filename
-                            })
-                if rag_datastore_ids and len(rag_datastore_ids)>0:
-                    final_content = lc.generate_text_with_rag(
-                                        prompt=discussion_obj.format_discussion(lc.default_ctx_size),
-                                        system_prompt=discussion_obj.system_prompt,
-                                        temperature=current_user.llm_temperature, top_k=current_user.llm_top_k, top_p=current_user.llm_top_p,
-                                        repeat_penalty=current_user.llm_repeat_penalty, repeat_last_n=current_user.llm_repeat_last_n,
-                                        ctx_size =current_user.llm_ctx_size  if current_user.llm_ctx_size>0 else None,
-                                        rag_query_function=query_rag_callback, rag_vectorizer_name=current_user.safe_store_vectorizer,
-                                        max_rag_hops=current_user.rag_n_hops if current_user.rag_n_hops else 1,
-                                        rag_top_k=current_user.rag_top_k if current_user.rag_top_k  else 10,
-                                        rag_min_similarity_percent=current_user.rag_min_sim_percent if current_user.rag_min_sim_percent  else 0,
-                                        stream=True, streaming_callback=llm_callback,
-                                    )
-                    sources = [{"document":Path(r["document"]).name,"similarity":r["similarity"],"content":r["content"]} for r in final_content.get("all_retrieved_sources", [])]      
-                    ai_message_obj = discussion_obj.add_message(
-                        sender="assistant", sender_type="assistant", content=final_content,
-                        raw_content=final_raw_response, thoughts="", tokens=token_count,
-                        binding_name=self.lollmsClient.binding.binding_name,
-                        model_name=self.lollmsClient.binding.model_name,
-                        generation_speed=tok_per_sec
-                    )              
+                            images_for_message.append({"type": "base64", "data": b64_data, "path": persistent_filename})
+
                 if is_resend:
-                    # For regeneration, the user message with images already exists.
-                    # We just call regenerate_branch.
-                    discussion_obj.regenerate_branch(
-                        personality=active_personality, # Pass personality here too
+                    result = discussion_obj.regenerate_branch(
+                        personality=active_personality,
                         streaming_callback=llm_callback
                     )
                 else:
-                    discussion_obj.add_message(
-                        sender="user", 
-                        sender_type="user", 
-                        content=prompt,
-                        images=images_for_message if images_for_message else None
-                    )
-                    
-                    # 2. Now, call chat with an empty prompt. It will generate a response
-                    # to the last message we just added. We no longer pass the images argument here.
-                    discussion_obj.chat(
-                        user_message="", # The prompt is already in the history.
+                    result = discussion_obj.chat(
+                        user_message=prompt,
                         personality=active_personality,
+                        use_mcps=use_mcps,
+                        use_data_store=use_rag,
                         streaming_callback=llm_callback,
+                        images=images_for_message
                     )
                 
+                # --- FIX: Use jsonable_encoder for serialization ---
+                final_messages_payload = {}
+                ai_msg_output = lollms_message_to_output(
+                    result['ai_message'], username, discussion_id, discussion_obj.active_branch_id
+                )
+                final_messages_payload['ai_message'] = ai_msg_output # Keep as Pydantic model
+
+                # user_message is not created during a resend/regeneration
+                if not is_resend:
+                    user_msg_output = lollms_message_to_output(
+                        result['user_message'], username, discussion_id, discussion_obj.active_branch_id
+                    )
+                    final_messages_payload['user_message'] = user_msg_output # Keep as Pydantic model
+                
+                finalization_event = {"type": "finalize", "data": final_messages_payload}
+                
+                # Use jsonable_encoder to convert Pydantic models and datetimes into JSON-safe types
+                json_compatible_event = jsonable_encoder(finalization_event)
+                
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_event) + "\n")
+                # --- END FIX ---
 
             except Exception as e:
                 trace_exception(e)

@@ -193,7 +193,7 @@ async def update_discussion_tools(
         id=discussion_obj.id,
         title=discussion_obj.metadata.get('title', 'Untitled'),
         is_starred=is_starred,
-        rag_datastore_id=discussion_obj.metadata.get('rag_datastore_id'),
+        rag_datastore_ids=discussion_obj.metadata.get('rag_datastore_ids'),
         active_tools=update_request.tools,
         active_branch_id=discussion_obj.active_branch_id,
         created_at=discussion_obj.created_at,
