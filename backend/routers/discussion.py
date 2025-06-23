@@ -425,7 +425,9 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
                         use_mcps=use_mcps,
                         use_data_store=use_rag,
                         streaming_callback=llm_callback,
-                        images=images_for_message
+                        images=images_for_message,
+                        rag_top_k=current_user.rag_top_k,
+                        rag_min_similarity_percent=current_user.rag_min_sim_percent
                     )
                 
                 # --- FIX: Use jsonable_encoder for serialization ---
