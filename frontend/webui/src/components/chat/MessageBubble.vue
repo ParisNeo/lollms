@@ -421,9 +421,9 @@ const formattingMenuItems = [
 </template>
 
 <style scoped>
-/* No changes needed to styles */
 .message-container { animation: messageSlideIn 0.3s ease-out forwards; }
-.message-bubble { max-width: 90%; word-break: break-word; }
+/* Added min-width: 0 to prevent flex items from overflowing their container when content is too wide (e.g., code blocks) */
+.message-bubble { max-width: 90%; word-break: break-word; min-width: 0; }
 .typing-indicator .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background-color: currentColor; margin: 0 1px; animation: bounce 1.4s infinite ease-in-out both; }
 .typing-indicator .dot:nth-of-type(1) { animation-delay: -0.32s; }
 .typing-indicator .dot:nth-of-type(2) { animation-delay: -0.16s; }

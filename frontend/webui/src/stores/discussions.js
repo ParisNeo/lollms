@@ -214,6 +214,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                         switch (data.type) {
                             case 'chunk': contentBuffer += data.content; break;
                             case 'step_start': stepsBuffer.push({ id: data.id, content: data.content, status: 'pending' }); break;
+                            case 'thought': stepsBuffer.push({ id: data.id, content: data.content, status: 'done' }); break;
                             case 'step': {
                                 stepsBuffer.push({ id: data.id, content: data.content, status: 'done' }); break;
                             }

@@ -18,6 +18,7 @@ const dataType = computed(() => {
   return typeof props.data;
 });
 
+// This is no longer the primary logic for rendering, but kept for clarity
 const isExpandable = computed(() => dataType.value === 'object' || dataType.value === 'array');
 
 const isCollapsed = ref(props.level > 0); // Collapse all but the top level by default
@@ -64,28 +65,8 @@ const objectEntries = computed(() => {
 
 <template>
   <div class="step-ui-container" :class="{'is-root': level === 0}">
-    <!-- Object Renderer -->
-    <div v-if="dataType === 'object'">
-      <div v-for="([key, value]) in objectEntries" :key="key" class="ui-entry" :class="{ 'error-entry': isErrorKey(key) || isErrorValue(value) }">
-        <div class="ui-key">{{ key }}</div>
-        <div class="ui-value">
-          <StepDetail :data="value" :level="level + 1" />
-        </div>
-      </div>
-    </div>
-
-    <!-- Array Renderer -->
-    <div v-else-if="dataType === 'array'">
-      <div v-for="(item, index) in data" :key="index" class="ui-entry">
-        <div class="ui-key is-array-key">[{{ index }}]</div>
-        <div class="ui-value">
-          <StepDetail :data="item" :level="level + 1" />
-        </div>
-      </div>
-    </div>
-
-    <!-- Expandable/Collapsible Wrapper (for nested elements in parent) -->
-    <div v-else-if="isExpandable" class="collapsible-wrapper">
+    <!-- Expandable/Collapsible Wrapper (for nested elements) -->
+    <div v-if="isExpandable && level > 0" class="collapsible-wrapper">
       <div class="collapsible-header" @click="toggleCollapse">
         <span class="toggle-icon" :class="{'is-open': !isCollapsed}">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4-4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
@@ -93,10 +74,33 @@ const objectEntries = computed(() => {
         <span class="summary-text">{{ summaryText }}</span>
       </div>
       <div v-if="!isCollapsed" class="collapsible-content">
+        <!-- The actual renderer is now inside the collapsible content -->
         <StepDetail :data="data" :level="level" />
       </div>
     </div>
     
+    <!-- Object Renderer -->
+    <div v-else-if="dataType === 'object'" class="overflow-container">
+      <div v-for="([key, value]) in objectEntries" :key="key" class="ui-entry" :class="{ 'error-entry': isErrorKey(key) || isErrorValue(value) }">
+        <div class="ui-key">{{ key }}</div>
+        <div class="ui-value">
+          <!-- Recursive call for nested data -->
+          <StepDetail :data="value" :level="level + 1" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Array Renderer -->
+    <div v-else-if="dataType === 'array'" class="overflow-container">
+      <div v-for="(item, index) in data" :key="index" class="ui-entry">
+        <div class="ui-key is-array-key">[{{ index }}]</div>
+        <div class="ui-value">
+          <!-- Recursive call for nested data -->
+          <StepDetail :data="item" :level="level + 1" />
+        </div>
+      </div>
+    </div>
+
     <!-- Primitive Value Renderer -->
     <div v-else>
       <div v-if="isBase64Image" class="image-field">
@@ -106,6 +110,7 @@ const objectEntries = computed(() => {
     </div>
   </div>
 </template>
+
 
 <style scoped>
 .step-ui-container {
@@ -119,10 +124,27 @@ const objectEntries = computed(() => {
   border-radius: 8px;
   padding: 0.5rem;
 }
+/* This is the key fix: The container for the grid now handles its own overflow. */
+.overflow-container {
+  overflow-x: auto;
+  /* Add some subtle scrollbar styling */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0,0,0,0.2) transparent;
+}
+.overflow-container::-webkit-scrollbar {
+  height: 6px;
+}
+.overflow-container::-webkit-scrollbar-track {
+  background: transparent;
+}
+.overflow-container::-webkit-scrollbar-thumb {
+  background-color: rgba(0,0,0,0.2);
+  border-radius: 10px;
+}
 
 .ui-entry {
   display: grid;
-  grid-template-columns: minmax(100px, 1fr) 2fr;
+  grid-template-columns: minmax(120px, max-content) 1fr; /* Give key enough space */
   gap: 1rem;
   padding: 0.5rem;
   border-bottom: 1px solid rgba(0,0,0,0.08);
@@ -130,16 +152,11 @@ const objectEntries = computed(() => {
 .ui-entry:last-child {
   border-bottom: none;
 }
-.step-ui-container:not(.is-root) .ui-entry:first-child {
-    padding-top: 1rem;
-}
 
 .ui-key {
   font-weight: 500;
   color: #4a5568;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
+  white-space: nowrap; /* Key itself should not wrap */
   align-self: start;
 }
 .is-array-key {
@@ -147,7 +164,7 @@ const objectEntries = computed(() => {
   font-family: 'Fira Code', monospace;
 }
 .ui-value {
-  min-width: 0;
+  min-width: 0; /* Important for grid/flex items */
   word-break: break-word;
 }
 
@@ -181,34 +198,19 @@ const objectEntries = computed(() => {
   border-radius: 4px;
 }
 
-.collapsible-wrapper, 
-.ui-value > .step-ui-container > div[class$="-object"], 
-.ui-value > .step-ui-container > div[class$="-array"] {
+.collapsible-wrapper {
   border-left: 2px solid rgba(0,0,0,0.1);
   padding-left: 0.75rem;
-  margin-left: -0.75rem;
 }
 
 .step-ui-container > div[class^="value-"], .step-ui-container > .image-field {
   padding: 0.25rem 0.5rem;
 }
 
-.ui-value > .step-ui-container > div[class$="-object"], .ui-value > .step-ui-container > div[class$="-array"] {
-    border-left: none;
-    padding-left: 0;
-    margin-left: 0;
-}
-
 .ui-value > .step-ui-container.is-root {
     background: none;
     border: none;
     padding: 0;
-}
-
-.step-ui-container > .collapsible-wrapper{
-    border-left: none;
-    padding-left: 0;
-    margin-left: 0;
 }
 
 .collapsible-header {
@@ -219,6 +221,7 @@ const objectEntries = computed(() => {
   padding: 0.25rem 0.5rem;
   border-radius: 4px;
   transition: background-color 0.2s;
+  margin-left: -0.75rem;
 }
 .collapsible-header:hover {
   background-color: rgba(0,0,0,0.05);
@@ -240,10 +243,15 @@ const objectEntries = computed(() => {
 }
 
 /* --- DARK MODE STYLES --- */
-
 .dark .step-ui-container.is-root {
   background-color: rgba(255,255,255,0.05);
   border: 1px solid rgba(255,255,255,0.1);
+}
+.dark .overflow-container {
+   scrollbar-color: rgba(255,255,255,0.2) transparent;
+}
+.dark .overflow-container::-webkit-scrollbar-thumb {
+  background-color: rgba(255,255,255,0.2);
 }
 .dark .ui-entry {
   border-bottom: 1px solid rgba(255,255,255,0.1);
@@ -267,9 +275,7 @@ const objectEntries = computed(() => {
 .dark .image-field {
   background-color: rgba(255,255,255,0.05);
 }
-.dark .collapsible-wrapper, 
-.dark .ui-value > .step-ui-container > div[class$="-object"], 
-.dark .ui-value > .step-ui-container > div[class$="-array"] {
+.dark .collapsible-wrapper {
   border-left-color: rgba(255,255,255,0.1);
 }
 .dark .collapsible-header:hover {

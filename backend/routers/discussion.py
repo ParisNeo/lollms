@@ -330,75 +330,196 @@ def lollms_message_to_output(
         branches=None
     )
 
-
 @discussion_router.post("/{discussion_id}/chat")
-async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...), image_server_paths_json: str = Form("[]"), is_resend: bool = Form(False), current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> StreamingResponse:
-    # ... (all setup code remains the same until the `stream_generator` function)
+async def chat_in_existing_discussion(
+    discussion_id: str,
+    prompt: str = Form(...),
+    image_server_paths_json: str = Form("[]"),
+    is_resend: bool = Form(False),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> StreamingResponse:
+    """Handles a chat request within an existing discussion, supporting streaming and agentic capabilities.
+
+    This endpoint is the primary interaction point for a user's conversation.
+    It manages standard chat messages, message regeneration, and complex agentic
+    turns involving tools (MCP) and retrieval-augmented generation (RAG).
+
+    The function operates asynchronously, using a queue and a separate thread
+    to handle the potentially long-running blocking calls to the LLM, ensuring
+    the server remains responsive.
+
+    It streams results back to the client using a server-sent events (SSE) like
+    format (newline-delimited JSON), providing real-time updates:
+    - `chunk`: A piece of the final answer text.
+    - `thought`: A segment of the agent's internal reasoning.
+    - `step_start`/`step_end`: Notifications about the agent's high-level actions.
+    - `finalize`: A final message containing the complete, updated user and AI
+                  message objects, including all agentic metadata (scratchpad,
+                  tool calls, sources).
+
+    Args:
+        discussion_id: The ID of the discussion to interact with.
+        prompt: The user's text prompt.
+        image_server_paths_json: A JSON string array of temporary paths for
+                                 user-uploaded images.
+        is_resend: A boolean flag indicating if this is a request to regenerate
+                   the last AI response.
+        current_user: The authenticated user object, injected by FastAPI's
+                      dependency system.
+        db: The database session, injected by FastAPI's dependency system.
+
+    Returns:
+        A StreamingResponse that sends newline-delimited JSON objects to the client,
+        enabling a real-time conversational experience.
+    """
+    # --- 1. Setup and Authorization ---
     username = current_user.username
-    discussion_obj = get_user_discussion(username, discussion_id)
+    discussion_obj = get_user_discussion(username, discussion_id, db)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
-    def query_rag_callback(query: str, rag_top_k, rag_min_similarity_percent, ss) -> Optional[str]:
-        # ... RAG callback logic ...
-        if not safe_store: return None
+
+    # --- 2. Configure Agentic Capabilities (RAG & MCP) ---
+    def query_rag_callback(query: str, ss, rag_top_k, rag_min_similarity_percent) -> List[Dict]:
+        if not ss: return []
         try:
             return ss.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
         except Exception as e:
             trace_exception(e)
-            return f"Error during RAG query on datastore {ss.id}: {e}"
+            return [{"error": f"Error during RAG query on datastore {ss.id}: {e}"}]
+
+    db_user = db.query(DBUser).filter(DBUser.username == username).one()
     rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
     use_mcps = (discussion_obj.metadata or {}).get('active_tools', [])
-    
     use_rag = {}
     for ds_id in rag_datastore_ids:
         ss = get_safe_store_instance(username, ds_id, db)
-        use_rag[ss.name]={"name":ss.name,"description":ss.description,"callable":partial(query_rag_callback, ss=ss)}
-    def create_generic_personality():
-        # ... generic personality creation ...
-        return LollmsPersonality(name="Generic Personality", author="System", category="Default", description="A generic personality for default operations.", system_prompt="You are a helpful assistant.", script="", query_rag_callback=None)
+        if ss:
+            use_rag[ss.name] = {"name": ss.name, "description": ss.description, "callable": partial(query_rag_callback, ss=ss)}
+
+    # --- 3. Setup Personality and LLM Client ---
     lc = get_user_lollms_client(username)
-    db_user = db.query(DBUser).filter(DBUser.username == username).one()
     active_personality = None
+    db_pers = None
     if db_user.active_personality_id:
+        # Try to find the user's active personality in the database
         db_pers = db.query(DBPersonality).filter(DBPersonality.id == db_user.active_personality_id).first()
-        if db_pers:
-            active_personality = LollmsPersonality(name=db_pers.name, author=db_pers.author, category=db_pers.category, description=db_pers.description, system_prompt=db_pers.prompt_text, script=db_pers.script_code, query_rag_callback=None)
-        else: db_pers = None; active_personality = create_generic_personality()
-    else: db_pers = None; active_personality = create_generic_personality()
-    active_personality = LollmsPersonality(name=db_pers.name if db_pers else "Generic Personality", author=db_pers.author if db_pers else "System", category=db_pers.category if db_pers else "Default", description=db_pers.description if db_pers else "A generic personality for default operations.", system_prompt=db_pers.prompt_text if db_pers else "You are a helpful assistant.", script=db_pers.script_code if db_pers else "", query_rag_callback=None)
+
+    if db_pers:
+        # If found, create a LollmsPersonality instance from the DB record
+        active_personality = LollmsPersonality(
+            name=db_pers.name,
+            author=db_pers.author,
+            category=db_pers.category,
+            description=db_pers.description,
+            system_prompt=db_pers.prompt_text,
+            script=db_pers.script_code,
+            # query_rag_callback can be set here if personalities have their own RAG
+            query_rag_callback=None
+        )
+    else:
+        # If no active personality is set, or if it wasn't found, create a generic one
+        active_personality = LollmsPersonality(
+            name="Generic Assistant",
+            author="System",
+            category="Default",
+            description="A generic, helpful assistant.",
+            system_prompt="You are a helpful AI assistant, ready to answer questions and follow instructions.",
+            script="",
+            query_rag_callback=None
+        )
+    # --- 4. Asynchronous Streaming Setup ---
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     stop_event = threading.Event()
     user_sessions.setdefault(username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event
-    
     async def stream_generator() -> AsyncGenerator[str, None]:
-        def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None, turn_history =[], **kwargs) -> bool:
-            # ... (llm_callback remains the same) ...
-            if stop_event.is_set(): return False
-            payload = {}
-            if msg_type == MSG_TYPE.MSG_TYPE_CHUNK: 
-                payload = {"type": "chunk", "content": chunk}
-            elif msg_type == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK: 
-                payload = {"type": "thought", "content": chunk}
-            elif msg_type == MSG_TYPE.MSG_TYPE_STEP or msg_type == MSG_TYPE.MSG_TYPE_INFO: 
-                ASCIIColors.magenta(f"STEP: {chunk}")
-                payload = {"type": "step", "content": chunk, "status": "done"}
-            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_START: 
-                ASCIIColors.magenta(f"STEP start: {chunk}")
-                payload = {"type": "step_start", "content": chunk, "id": params.get("id"), "status": "pending"}
-            elif msg_type == MSG_TYPE.MSG_TYPE_STEP_END: 
-                ASCIIColors.magenta(f"STEP end: {chunk}")
-                payload = {"type": "step_end", "content": chunk, "id": params.get("id"), "status": "done"}
-            elif msg_type == MSG_TYPE.MSG_TYPE_EXCEPTION: 
-                payload = {"type": "error", "content": f"LLM Error: {chunk}"};
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(payload) + "\n"); return False
-            else: 
-                return True
-            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(payload) + "\n")
+        # Callback function passed to the LLM/agent to stream data back
+        def llm_callback(
+            chunk: str,
+            msg_type: MSG_TYPE,
+            params: Optional[Dict] = None,
+            **kwargs
+        ) -> bool:
+            """
+            This function is called by the LollmsClient/LollmsDiscussion from a
+            separate thread. It formats the received data into a JSON payload
+            and puts it onto the asyncio queue to be sent to the client.
+
+            Args:
+                chunk: The main text content of the event.
+                msg_type: An enum indicating the type of the message.
+                params: A dictionary containing metadata about the event,
+                        such as step IDs, types, and results.
+
+            Returns:
+                False if the generation should be stopped, True otherwise.
+            """
+            # 1. Handle Stop Event: Immediately stop if requested by the client.
+            if stop_event.is_set():
+                return False
+            
+            payload = None
+            params = params or {}
+
+            # 2. Dispatcher: Format payload based on message type.
+            # This now handles all the rich event types from our advanced agent.
+            match msg_type:
+                case MSG_TYPE.MSG_TYPE_CHUNK:
+                    # A piece of the final answer text.
+                    payload = {"type": "chunk", "content": chunk}
+                case MSG_TYPE.MSG_TYPE_INFO if params.get("type") == "thought":
+                    # An internal thought or reasoning step from the agent.
+                    payload = {"type": "thought", "content": chunk}
+
+                case MSG_TYPE.MSG_TYPE_STEP_START:
+                    # The beginning of a stateful, long-running step.
+                    # Includes the unique ID for frontend correlation.
+                    payload = {
+                        "type": "step_start",
+                        "content": chunk,  # The human-readable description
+                        "id": params["id"]     # Contains the unique 'id' and other metadata
+                    }
+                
+                case MSG_TYPE.MSG_TYPE_STEP_END:
+                    # The end of a stateful, long-running step.
+                    # Includes the same unique ID as the corresponding start event.
+                    payload = {
+                        "type": "step_end",
+                        "content": chunk,    # The same description as the start event
+                        "id": params["id"],     # Contains the unique 'id' and other metadata
+                        "status": "done"
+                    }
+                
+                case MSG_TYPE.MSG_TYPE_STEP:
+                    # A simple, instantaneous step that doesn't have a start/end duration.
+                    payload = {"type": "step", "content": chunk, "data": params}
+
+                case MSG_TYPE.MSG_TYPE_EXCEPTION:
+                    # An error occurred during generation.
+                    payload = {"type": "error", "content": f"LLM Error: {chunk}"}
+                    # Put the error on the queue and signal to stop generation.
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(payload) + "\n")
+                    return False
+                
+                case _:
+                    # For any other message types we don't explicitly handle,
+                    # we do nothing to keep the client-side stream clean.
+                    return True
+
+            # 3. Queue the Payload: Safely put the formatted payload onto the queue.
+            if payload:
+                # jsonable_encoder is used here to be safe, although for these
+                # simple payloads, it might not be strictly necessary. It's good practice.
+                json_compatible_payload = jsonable_encoder(payload)
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_payload) + "\n")
+            
             return True
 
+        # Function to run the blocking LLM call in a separate thread
         def blocking_call():
             try:
+                # --- Image Handling ---
                 images_for_message = []
                 image_server_paths = json.loads(image_server_paths_json)
                 if image_server_paths and not is_resend:
@@ -407,15 +528,18 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
                     assets_path.mkdir(parents=True, exist_ok=True)
                     for temp_rel_path in image_server_paths:
                         filename = Path(temp_rel_path).name
-                        if (temp_path/filename).exists():
+                        if (temp_path / filename).exists():
                             persistent_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
-                            shutil.move(str(temp_path/filename), str(assets_path/persistent_filename))
-                            b64_data = base64.b64encode((assets_path/persistent_filename).read_bytes()).decode('utf-8')
-                            images_for_message.append({"type": "base64", "data": b64_data, "path": persistent_filename})
+                            shutil.move(str(temp_path / filename), str(assets_path / persistent_filename))
+                            b64_data = base64.b64encode((assets_path / persistent_filename).read_bytes()).decode('utf-8')
+                            images_for_message.append(b64_data)
 
+                # --- Main Call to Discussion Logic ---
                 if is_resend:
                     result = discussion_obj.regenerate_branch(
                         personality=active_personality,
+                        use_mcps=use_mcps,
+                        use_data_store=use_rag,
                         streaming_callback=llm_callback
                     )
                 else:
@@ -424,33 +548,33 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
                         personality=active_personality,
                         use_mcps=use_mcps,
                         use_data_store=use_rag,
-                        streaming_callback=llm_callback,
                         images=images_for_message,
-                        rag_top_k=current_user.rag_top_k,
-                        rag_min_similarity_percent=current_user.rag_min_sim_percent
+                        streaming_callback=llm_callback,
+                        rag_top_k=db_user.rag_top_k,
+                        rag_min_similarity_percent=db_user.rag_min_sim_percent
                     )
                 
-                # --- FIX: Use jsonable_encoder for serialization ---
-                final_messages_payload = {}
-                ai_msg_output = lollms_message_to_output(
-                    result['ai_message'], username, discussion_id, discussion_obj.active_branch_id
+                # --- Finalization Event ---
+                def lollms_message_to_output(msg):
+                    # In a real app, this would return an instance of a Pydantic model
+                    return {
+                        "id": msg.id, "sender": msg.sender, "content": msg.content,
+                        "created_at": msg.created_at, "parent_id": msg.parent_id,
+                        "discussion_id": msg.discussion_id, "metadata": msg.metadata,
+                        "scratchpad": msg.scratchpad
+                    }
+                
+                final_messages_payload = {
+                    'ai_message': lollms_message_to_output(result['ai_message'])
+                }
+                if 'user_message' in result:
+                    final_messages_payload['user_message'] = lollms_message_to_output(result['user_message'])
+                
+                # Use jsonable_encoder to safely serialize the entire payload
+                json_compatible_event = jsonable_encoder(
+                    {"type": "finalize", "data": final_messages_payload}
                 )
-                final_messages_payload['ai_message'] = ai_msg_output # Keep as Pydantic model
-
-                # user_message is not created during a resend/regeneration
-                if not is_resend:
-                    user_msg_output = lollms_message_to_output(
-                        result['user_message'], username, discussion_id, discussion_obj.active_branch_id
-                    )
-                    final_messages_payload['user_message'] = user_msg_output # Keep as Pydantic model
-                
-                finalization_event = {"type": "finalize", "data": final_messages_payload}
-                
-                # Use jsonable_encoder to convert Pydantic models and datetimes into JSON-safe types
-                json_compatible_event = jsonable_encoder(finalization_event)
-                
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_event) + "\n")
-                # --- END FIX ---
 
             except Exception as e:
                 trace_exception(e)
@@ -458,11 +582,13 @@ async def chat_in_existing_discussion(discussion_id: str, prompt: str = Form(...
                 if main_loop.is_running():
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
             finally:
+                # Cleanup
                 if username in user_sessions and "active_generation_control" in user_sessions[username]:
                     user_sessions[username]["active_generation_control"].pop(discussion_id, None)
                 if main_loop.is_running():
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
         
+        # --- Start and Stream ---
         threading.Thread(target=blocking_call, daemon=True).start()
         while True:
             item = await stream_queue.get()

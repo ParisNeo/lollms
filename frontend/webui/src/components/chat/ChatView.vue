@@ -26,12 +26,16 @@ export default {
 </script>
 
 <template>
-  <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-gray-900">
+  <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
     <!-- Chat Header -->
     <ChatHeader v-if="activeDiscussion" :discussion="activeDiscussion" />
 
     <!-- Message Area -->
-    <MessageArea v-if="activeDiscussion" class="flex-1 overflow-y-auto" />
+    <!-- 
+      FIX: Added 'min-w-0' to allow this flex item to shrink and contain its oversized children,
+      which enables the horizontal scroll on the code blocks inside.
+    -->
+    <MessageArea v-if="activeDiscussion" class="flex-1 overflow-y-auto min-w-0" />
     
     <!-- Empty State Placeholder -->
     <div v-else class="flex-1 flex items-center justify-center text-center p-4">
