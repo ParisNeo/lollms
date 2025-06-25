@@ -549,6 +549,7 @@ async def chat_in_existing_discussion(
                 # --- Main Call to Discussion Logic ---
                 if is_resend:
                     result = discussion_obj.regenerate_branch(
+                        regenerate_branch=None,
                         personality=active_personality,
                         use_mcps=use_mcps,
                         use_data_store=use_rag,
@@ -562,6 +563,7 @@ async def chat_in_existing_discussion(
                         use_data_store=use_rag,
                         images=images_for_message,
                         streaming_callback=llm_callback,
+                        max_reasoning_steps=db_user.rag_n_hops,
                         rag_top_k=db_user.rag_top_k,
                         rag_min_similarity_percent=db_user.rag_min_sim_percent
                     )
