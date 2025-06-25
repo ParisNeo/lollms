@@ -349,37 +349,53 @@ const formattingMenuItems = [
             </div>
         </div>
 
-      <!-- Steps and Footer (FULL CODE RESTORED) -->
+      <!-- Steps and Footer -->
       <div v-if="!isEditing">
+        <!-- STEPS CONTAINER -->
         <div v-if="message.steps && message.steps.length > 0" class="steps-container mt-4">
-            <button @click="isStepsCollapsed = !isStepsCollapsed" class="text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 flex items-center w-full text-left mb-2 group/toggle">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 transition-transform flex-shrink-0" :class="{'rotate-90': !isStepsCollapsed}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
-                <div class="flex items-center space-x-2 overflow-hidden flex-1 min-w-0">
-                    <div v-if="latestStep" class="step-icon flex-shrink-0">
-                        <svg v-if="latestStep.status === 'done'" class="w-4 h-4 text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
-                        <svg v-else class="w-4 h-4 animate-spin text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            
+            <!-- Collapsed View: The "Thought Bubble" -->
+            <div v-if="isStepsCollapsed">
+                <button @click="isStepsCollapsed = !isStepsCollapsed" class="collapsed-steps-summary group/summary">
+                    <div class="step-icon flex-shrink-0">
+                        <!-- Spinner for step_start or any running state -->
+                        <svg v-if="latestStep && latestStep.status !== 'done'" class="w-4 h-4 animate-spin text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                        <!-- Thought bubble for completed steps -->
+                        <svg v-else class="w-4 h-4 text-gray-500 dark:text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M10 2.5a7.5 7.5 0 00-7.5 7.5c0 2.08.843 3.96 2.21 5.344l-1.078 3.233a.75.75 0 00.945.945l3.233-1.078A7.5 7.5 0 1010 2.5z" />
+                            <path d="M4.5 13.5a.5.5 0 01.5.5v.5a.5.5 0 01-1 0v-.5a.5.5 0 01.5-.5z" />
+                            <path d="M3 10.5a.5.5 0 01.5.5v.5a.5.5 0 01-1 0v-.5a.5.5 0 01.5-.5z" />
+                        </svg>
                     </div>
-                    <span v-if="isStepsCollapsed && latestStep" class="truncate" v-text="latestStep.content"></span>
-                    <span v-else>Hide Steps</span>
+                    <span v-if="latestStep" class="truncate" v-text="latestStep.content"></span>
+                    <span v-else>Show Steps</span>
+                </button>
+            </div>
+
+            <!-- Expanded View: The Detailed List -->
+            <div v-else>
+                 <button @click="isStepsCollapsed = !isStepsCollapsed" class="text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 flex items-center w-full text-left mb-2 group/toggle">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 transition-transform rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
+                    <span>Hide Steps</span>
+                </button>
+                <div class="space-y-2 pl-5 border-l-2 border-gray-200 dark:border-gray-700 ml-2">
+                    <template v-for="(step, index) in message.steps" :key="index">
+                        <div v-if="step && step.content" class="step-item">
+                            <div class="step-icon">
+                                <svg v-if="step.status === 'done'" class="text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                                <svg v-else class="animate-spin text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                            </div>
+                            <div class="step-content-wrapper">
+                                <template v-if="parseStepContent(step.content).isJson">
+                                    <StepDetail :data="parseStepContent(step.content).data" />
+                                </template>
+                                <template v-else>
+                                    <div class="step-text prose prose-sm dark:prose-invert max-w-none" v-html="getStepContent(step.content)"></div>
+                                </template>
+                            </div>
+                        </div>
+                    </template>
                 </div>
-            </button>
-            <div v-show="!isStepsCollapsed" class="space-y-2 pl-5 border-l-2 border-gray-200 dark:border-gray-700 ml-2">
-                <template v-for="(step, index) in message.steps" :key="index">
-                    <div v-if="step && step.content" class="step-item">
-                        <div class="step-icon">
-                            <svg v-if="step.status === 'done'" class="text-green-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
-                            <svg v-else class="animate-spin text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        </div>
-                        <div class="step-content-wrapper">
-                            <template v-if="parseStepContent(step.content).isJson">
-                                <StepDetail :data="parseStepContent(step.content).data" />
-                            </template>
-                            <template v-else>
-                                <div class="step-text prose prose-sm dark:prose-invert max-w-none" v-html="getStepContent(step.content)"></div>
-                            </template>
-                        </div>
-                    </div>
-                </template>
             </div>
         </div>
         
@@ -441,4 +457,17 @@ const formattingMenuItems = [
 .step-content-wrapper { flex-grow: 1; min-width: 0; overflow: hidden; }
 .cm-editor-container { border: 1px solid theme('colors.gray.300'); border-radius: theme('borderRadius.lg'); }
 .dark .cm-editor-container { border-color: theme('colors.gray.600'); }
+
+/* New styles for "Thought Bubble" summary */
+.collapsed-steps-summary {
+    @apply flex items-center w-full text-left p-2 space-x-2 rounded-lg
+           bg-gray-100 dark:bg-gray-700/50
+           border border-gray-200 dark:border-gray-700
+           text-xs text-gray-600 dark:text-gray-300
+           transition-colors duration-200
+           hover:bg-gray-200 dark:hover:bg-gray-700;
+}
+.collapsed-steps-summary .step-icon {
+    @apply mt-0; /* Override default margin-top for better alignment */
+}
 </style>
