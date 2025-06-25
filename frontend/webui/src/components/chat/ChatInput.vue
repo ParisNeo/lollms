@@ -70,7 +70,7 @@ watch(activeDiscussion, (newDiscussion) => {
     // Reset mode on discussion change
     isAdvancedMode.value = false;
     if (newDiscussion) {
-        ragStoreSelection.value = newDiscussion.rag_datastore_ids ? [newDiscussion.rag_datastore_ids] : [];
+        ragStoreSelection.value = newDiscussion.rag_datastore_ids || [];
         mcpToolSelection.value = newDiscussion.active_tools || [];
     } else {
         ragStoreSelection.value = [];
