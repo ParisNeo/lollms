@@ -149,6 +149,7 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             "host_address": LOLLMS_CLIENT_DEFAULTS.get("host_address", ""),
             "user_name": LOLLMS_CLIENT_DEFAULTS.get("user_name", "user"),
             "ai_name": LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"),
+            "service_key": LOLLMS_CLIENT_DEFAULTS.get("service_key")
         })
 
         # Add MCP tool servers
