@@ -383,7 +383,19 @@ async def chat_in_existing_discussion(
     def query_rag_callback(query: str, ss, rag_top_k, rag_min_similarity_percent) -> List[Dict]:
         if not ss: return []
         try:
-            return ss.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
+            retrieved_chunks = ss.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
+            
+            revamped_chunks=[]
+            for entry in retrieved_chunks:
+                revamped_entry = {}
+                if "file_path" in entry:
+                    revamped_entry["document"]=Path(entry["file_path"]).name
+                if "chunk_text" in entry:
+                    revamped_entry["content"]=entry["chunk_text"]
+                if "similarity_percent" in entry:
+                    revamped_entry["similarity_percent"]=entry["similarity_percent"]
+                revamped_chunks.append(revamped_entry)
+            return revamped_chunks
         except Exception as e:
             trace_exception(e)
             return [{"error": f"Error during RAG query on datastore {ss.id}: {e}"}]
