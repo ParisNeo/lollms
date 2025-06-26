@@ -6,8 +6,7 @@
 [server]
 host = "0.0.0.0"
 port = "9642"
-serve_vue_frontend = true # use the new vue front end
-
+debug = false
 [app_settings]
 data_dir = "data"  # For user-specific discussion files and SafeStore DBs
 database_url = "sqlite:///./data/app_main.db" # Central SQLite DB for users and app settings
