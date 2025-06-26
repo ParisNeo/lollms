@@ -26,6 +26,7 @@ onMounted(() => {
 
 // --- Computed Properties ---
 const isEditMode = computed(() => editingMcp.value !== null);
+const isReloading = ref(false);
 
 const sortedUserMcps = computed(() => {
     return userMcps.value
@@ -49,6 +50,16 @@ function startEditing(mcp) {
 function cancelEditing() {
     editingMcp.value = null;
     mcpForm.value = { name: '', url: '' }; // Clear the form
+}
+async function handleReloadServers() {
+    isReloading.value = true;
+    try {
+        await dataStore.triggerMcpReload();
+    } catch (error) {
+        // Error notification is handled globally
+    } finally {
+        isReloading.value = false;
+    }
 }
 
 async function handleFormSubmit() {
@@ -118,6 +129,10 @@ async function handleDeleteMcp(mcp) {
                     </button>
                 </div>
             </form>
+            <button @click="handleReloadServers()" class="btn btn-primary" :disabled="isReloading">
+                <span v-if="isReloading">Reloading...</span>
+                <span v-else>Reload</span>
+            </button>
         </section>
 
         <!-- Manage Your MCP Servers Section -->
