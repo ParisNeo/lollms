@@ -50,7 +50,7 @@ from backend.session import (
     user_sessions, get_safe_store_instance
 )
 from backend.discussion import get_user_discussion_manager, get_user_discussion
-from backend.config import APP_VERSION
+from backend.config import APP_VERSION, SERVER_CONFIG
 
 # safe_store is needed for RAG callbacks
 try:
@@ -565,7 +565,8 @@ async def chat_in_existing_discussion(
                         streaming_callback=llm_callback,
                         max_reasoning_steps=db_user.rag_n_hops,
                         rag_top_k=db_user.rag_top_k,
-                        rag_min_similarity_percent=db_user.rag_min_sim_percent
+                        rag_min_similarity_percent=db_user.rag_min_sim_percent,
+                        debug = SERVER_CONFIG.get("debug", False)
                     )
                 
                 # --- Finalization Event ---
