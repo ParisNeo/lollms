@@ -171,6 +171,7 @@ class DiscussionToolsUpdate(BaseModel):
 class MessageOutput(BaseModel):
     id: str
     sender: str
+    sender_type: str
     content: str
     parent_message_id: Optional[str] = None
     binding_name: Optional[str] = None
