@@ -6,6 +6,9 @@ new ui:
 - OK - add <think> block handling
 - OK when generating, remove the input and show an animation instead
 - OK in chatinput, when we press shift+enter replace the input with a code mirror with a toolbar
+- After generation, refresh discussion
+- After stopping, save current status and refresh discussion
+- Add personality description to the list
 - fix the return key not sending the message
 - fix delete message
 - fix branching
