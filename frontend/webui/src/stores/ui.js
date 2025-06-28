@@ -2,7 +2,6 @@ import { defineStore } from 'pinia';
 import apiClient from '../services/api';
 
 export const useUiStore = defineStore('ui', {
-  // State is a function that returns the initial state object
   state: () => ({
     currentTheme: 'dark',
     openModals: [],
@@ -17,13 +16,10 @@ export const useUiStore = defineStore('ui', {
     translations: {},
   }),
 
-  // Getters are like computed properties for the store
   getters: {
     isModalOpen: (state) => (modalName) => state.openModals.includes(modalName),
     modalData: (state) => (modalName) => state.modalDataStore[modalName],
     isImageViewerOpen: (state) => !!state.imageViewerSrc,
-    
-    // The translate getter
     translate: (state) => (key, fallback = null, vars = {}) => {
       let translation = state.translations[key] || fallback || key;
       for (const varKey in vars) {
@@ -33,7 +29,6 @@ export const useUiStore = defineStore('ui', {
     },
   },
 
-  // Actions are methods that can mutate the state
   actions: {
     initializeTheme() {
       const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -60,20 +55,19 @@ export const useUiStore = defineStore('ui', {
       }
     },
     closeModal(modalName) {
-      this.openModals = this.openModals.filter(m => m !== modalName);
+      this.openModals = this.openModals.filter((m) => m !== modalName);
       delete this.modalDataStore[modalName];
     },
-    addNotification(message, type = 'info', duration = 5000) {
+    addNotification(message, type = 'info', duration = 4000) {
       const id = this.nextNotificationId++;
-      this.notifications.push({ id, message, type });
-      setTimeout(() => this.removeNotification(id), duration);
+      this.notifications.push({ id, message, type, duration });
     },
     removeNotification(id) {
-      this.notifications = this.notifications.filter(n => n.id !== id);
+      this.notifications = this.notifications.filter((n) => n.id !== id);
     },
     showConfirmation(options = { title: 'Are you sure?', message: 'This action cannot be undone.' }) {
       this.confirmationOptions = options;
-      this.openModal('confirmation'); // Use the standard modal flow
+      this.openModal('confirmation');
       return new Promise((resolve) => {
         this.confirmationPromise = { resolve };
       });
@@ -97,8 +91,8 @@ export const useUiStore = defineStore('ui', {
         const response = await apiClient.get('/api/languages/');
         this.availableLanguages = response.data;
       } catch (error) {
-        console.error("Failed to fetch available languages:", error);
-        this.availableLanguages = { 'en': 'English' };
+        console.error('Failed to fetch available languages:', error);
+        this.availableLanguages = { en: 'English' };
       }
     },
     async loadTranslations(langCode) {
