@@ -1,18 +1,17 @@
 # backend/session.py
 
 # --- Standard Library Imports ---
-import os
-import shutil
-import uuid
 import json
+import traceback
+import datetime
 from pathlib import Path
 from typing import Dict, Optional, Any, cast
-import traceback
 
 # --- Third-Party Imports ---
 from fastapi import HTTPException, Depends, status
 from sqlalchemy.orm import Session, joinedload
 from werkzeug.utils import secure_filename
+from jose import jwt, JWTError
 
 # --- Local Application Imports ---
 from backend.database_setup import (
@@ -23,12 +22,9 @@ from backend.database_setup import (
     MCP as DBMCP,
     get_db,
 )
-from lollms_client import (
-    LollmsClient,
-    ELF_COMPLETION_FORMAT,
-)
+from lollms_client import LollmsClient
 from backend.models import UserAuthDetails, TokenData
-from backend.security import oauth2_scheme, jwt, JWTError, SECRET_KEY, ALGORITHM
+from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM
 from backend.config import (
     APP_DATA_DIR,
     LOLLMS_CLIENT_DEFAULTS,
@@ -42,11 +38,8 @@ from backend.config import (
 # --- safe_store is optional ---
 try:
     import safe_store
-    from safe_store import LogLevel as SafeStoreLogLevel
 except ImportError:
     safe_store = None
-    SafeStoreLogLevel = None
-
 
 # --- Global User Session Management ---
 user_sessions: Dict[str, Dict[str, Any]] = {}
@@ -55,9 +48,17 @@ user_sessions: Dict[str, Dict[str, Any]] = {}
 # --- User & Authentication Helpers ---
 
 def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
+    """Fetches a user from the database by their username."""
     return db.query(DBUser).filter(DBUser.username == username).first()
 
-async def get_current_db_user_from_token(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> DBUser:
+async def get_current_db_user_from_token(
+    token: str = Depends(oauth2_scheme), 
+    db: Session = Depends(get_db)
+) -> DBUser:
+    """
+    Decodes the JWT token to get the username, fetches the user from the database,
+    and updates their last activity timestamp.
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -66,7 +67,8 @@ async def get_current_db_user_from_token(token: str = Depends(oauth2_scheme), db
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: str = payload.get("sub")
-        if username is None: raise credentials_exception
+        if username is None:
+            raise credentials_exception
         token_data = TokenData(username=username)
     except JWTError:
         raise credentials_exception
@@ -74,15 +76,41 @@ async def get_current_db_user_from_token(token: str = Depends(oauth2_scheme), db
     user = get_user_by_username(db, username=token_data.username)
     if user is None:
         raise credentials_exception
+    
+    # --- MODIFIED: Fix for timezone awareness ---
+    now = datetime.datetime.now(datetime.timezone.utc)
+    last_activity_aware = None
+    
+    if user.last_activity_at:
+        # If the datetime from the DB is naive, make it aware of the UTC timezone.
+        # This is the standard practice when you know the DB stores UTC times without timezone info.
+        if user.last_activity_at.tzinfo is None:
+            last_activity_aware = user.last_activity_at.replace(tzinfo=datetime.timezone.utc)
+        else:
+            last_activity_aware = user.last_activity_at
+
+    # Now perform the comparison with two offset-aware datetimes
+    if last_activity_aware is None or (now - last_activity_aware) > datetime.timedelta(seconds=60):
+        user.last_activity_at = now
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"Warning: Could not update last_activity_at for user {user.username}: {e}")
+
     return user
 
 def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_token)) -> UserAuthDetails:
+    """
+    Takes a DB user record, ensures they are active, and constructs the detailed
+    UserAuthDetails model with data from both the DB and the active session.
+    """
+    if not db_user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive.")
+
     username = db_user.username
     if username not in user_sessions:
-        # Initialize the session for a user the first time they make a request
-        print(f"INFO: Initializing session state for user: {username}")
-        initial_lollms_model = db_user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
-        
+        print(f"INFO: Re-initializing session for {username} on first request after server start.")
         session_llm_params = {
             "ctx_size": db_user.llm_ctx_size if db_user.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
             "temperature": db_user.llm_temperature if db_user.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
@@ -92,26 +120,24 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "repeat_last_n": db_user.llm_repeat_last_n if db_user.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),
             "put_thoughts_in_context": db_user.put_thoughts_in_context
         }
-        
         user_sessions[username] = {
-            "lollms_client": None,
-            "discussion_manager": None, # Will be created on first use by get_user_discussion_manager
-            "safe_store_instances": {},
+            "lollms_client": None, "safe_store_instances": {},
             "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
-            "lollms_model_name": initial_lollms_model,
+            "lollms_model_name": db_user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
             "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
             "active_personality_id": db_user.active_personality_id,
         }
 
     lc = get_user_lollms_client(username)
     ai_name_for_user = getattr(lc, "ai_name", LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"))
-
     current_session_llm_params = user_sessions[username].get("llm_params", {})
+
     return UserAuthDetails(
-        username=username, is_admin=db_user.is_admin, first_name=db_user.first_name,
-        family_name=db_user.family_name, email=db_user.email, birth_date=db_user.birth_date,
+        id=db_user.id,
+        username=username, is_admin=db_user.is_admin, is_active=db_user.is_active,
+        first_name=db_user.first_name, family_name=db_user.family_name, email=db_user.email, birth_date=db_user.birth_date,
         lollms_model_name=user_sessions[username].get("lollms_model_name"),
-        safe_store_vectorizer=user_sessions[username].get("active_vectorizer","st:all-MiniLM-L6-v2"),
+        safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
         active_personality_id=user_sessions[username].get("active_personality_id"),
         lollms_client_ai_name=ai_name_for_user,
         llm_ctx_size=current_session_llm_params.get("ctx_size"),
@@ -127,12 +153,13 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     )
 
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
+    """Checks if the current active user has administrator privileges."""
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator privileges required.")
     return current_user
 
-# --- Service Instance Helpers ---
 
+# --- Service Instance Helpers ---
 def get_user_lollms_client(username: str) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
@@ -142,7 +169,6 @@ def get_user_lollms_client(username: str) -> LollmsClient:
         model_name = session["lollms_model_name"]
         client_init_params = session.get("llm_params", {}).copy()
         
-        # Add connection/default params from config
         client_init_params.update({
             "binding_name": LOLLMS_CLIENT_DEFAULTS.get("binding_name", "lollms"),
             "model_name": model_name,
@@ -152,7 +178,6 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             "service_key": LOLLMS_CLIENT_DEFAULTS.get("service_key")
         })
 
-        # Add MCP tool servers
         servers_infos = {mcp["name"]: {"server_url": mcp["url"]} for mcp in DEFAULT_MCPS}
         db_for_mcp = next(get_db())
         try:
@@ -213,7 +238,6 @@ def get_safe_store_instance(requesting_user_username: str, datastore_id: str, db
 
 
 # --- User-specific Path Helpers ---
-
 def get_user_data_root(username: str) -> Path:
     safe_username = secure_filename(username)
     path = APP_DATA_DIR / safe_username
@@ -221,7 +245,6 @@ def get_user_data_root(username: str) -> Path:
     return path
 
 def get_user_discussion_path(username: str) -> Path:
-    # This now points to the location of the OLD YAML files, for migration purposes.
     path = get_user_data_root(username) / "discussions"
     return path
 

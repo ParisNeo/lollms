@@ -1,52 +1,18 @@
-import os
-import shutil
-import uuid
-import json
-from pathlib import Path
-from typing import List, Dict, Optional, Any, cast, Union, Tuple, AsyncGenerator
+# backend/models.py
 import datetime
-import asyncio
-import threading
-import traceback
-import io
+from typing import List, Dict, Optional, Any
 
-# Third-Party Imports
-import toml
-import yaml
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends,
-    Request,
-    File,
-    UploadFile,
-    Form,
-    APIRouter,
-    Response,
-    Query,
-    BackgroundTasks
-)
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import (
-    HTMLResponse,
-    StreamingResponse,
-    JSONResponse,
-    FileResponse,
-)
-from backend.database_setup import (
-    User as DBUser,
-    UserStarredDiscussion,
-    UserMessageGrade,
-    FriendshipStatus,Friendship, 
-    DataStore as DBDataStore,
-    SharedDataStoreLink as DBSharedDataStoreLink,
-    init_database,
-    get_db,
-    hash_password,
-    DATABASE_URL_CONFIG_KEY,
-)
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, constr, field_validator, validator, EmailStr
+from backend.database_setup import FriendshipStatus
+
+# --- User Management & Authentication Models ---
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
 
 class UserLLMParams(BaseModel):
     llm_ctx_size: Optional[int] = Field(None, ge=0)
@@ -64,44 +30,23 @@ class UserBase(BaseModel):
     family_name: Optional[str] = None
     birth_date: Optional[datetime.date] = None
 
-class UserCreate(UserBase):
-    password: str
-
-class UserAuthDetails(UserLLMParams):
-    username: str
-    is_admin: bool
-    first_name: Optional[str] = None
-    family_name: Optional[str] = None
-    email: Optional[str] = None
-    birth_date: Optional[datetime.date] = None
-
-    lollms_model_name: Optional[str] = None
-    safe_store_vectorizer: Optional[str] = None
-    active_personality_id: Optional[str] = None
-
-    rag_top_k: Optional[int] = Field(None, ge=1)
-    max_rag_len: Optional[int] = Field(None, ge=1)
-    rag_n_hops: Optional[int] = Field(None, ge=1)
-    rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
-    rag_use_graph: bool = False
-    rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
-
-    lollms_client_ai_name: Optional[str] = None
+# --- NEW: Public User Registration Model ---
+class UserCreatePublic(BaseModel):
+    username: constr(min_length=3, max_length=50)
+    email: EmailStr
+    password: str = Field(..., min_length=8)
 
 class UserCreateAdmin(UserLLMParams):
     username: constr(min_length=3, max_length=50)
     password: constr(min_length=8)
     is_admin: bool = False
-
     first_name: Optional[str] = Field(None, max_length=100)
     family_name: Optional[str] = Field(None, max_length=100)
-    email: Optional[str] = Field(None, max_length=255)
+    email: Optional[EmailStr] = Field(None, max_length=255)
     birth_date: Optional[datetime.date] = None
-
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
-
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
     rag_n_hops: Optional[int] = Field(None, ge=1)
@@ -109,42 +54,90 @@ class UserCreateAdmin(UserLLMParams):
     rag_use_graph: Optional[bool] = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
 
-class UserPasswordResetAdmin(BaseModel):
-    new_password: constr(min_length=8)
-    
+class UserUpdate(BaseModel):
+    first_name: Optional[str] = Field(None, max_length=100)
+    family_name: Optional[str] = Field(None, max_length=100)
+    email: Optional[EmailStr] = Field(None, max_length=255)
+    birth_date: Optional[datetime.date] = None
+    lollms_model_name: Optional[str] = None
+    safe_store_vectorizer: Optional[str] = None
+    active_personality_id: Optional[str] = None
+    llm_ctx_size: Optional[int] = Field(None, ge=0)
+    llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
+    llm_top_k: Optional[int] = Field(None, ge=1)
+    llm_top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
+    llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
+    llm_repeat_last_n: Optional[int] = Field(None, ge=0)
+    put_thoughts_in_context: Optional[bool] = None
+    rag_top_k: Optional[int] = Field(None, ge=1)
+    max_rag_len: Optional[int] = Field(None, ge=1)
+    rag_n_hops: Optional[int] = Field(None, ge=1)
+    rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
+    rag_use_graph: Optional[bool] = None
+    rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")    
+
 class UserPasswordChange(BaseModel):
     current_password: str
+    new_password: constr(min_length=8)
+
+class UserPasswordResetAdmin(BaseModel):
     new_password: constr(min_length=8)
 
 class UserPublic(UserLLMParams):
     id: int
     username: str
     is_admin: bool
-
+    is_active: bool
+    last_activity_at: Optional[datetime.datetime] = None
+    icon: Optional[str] = None
     first_name: Optional[str] = None
     family_name: Optional[str] = None
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None
     birth_date: Optional[datetime.date] = None
-
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
-
     rag_top_k: Optional[int] = None
     max_rag_len: Optional[int] = None
     rag_n_hops: Optional[int] = None
     rag_min_sim_percent: Optional[float] = None
     rag_use_graph: bool
     rag_graph_response_type: Optional[str] = None
-
     model_config = {"from_attributes": True}
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str
+class UserAuthDetails(UserLLMParams):
+    username: str
+    is_admin: bool
+    is_active: bool
+    icon: Optional[str] = None 
+    first_name: Optional[str] = None
+    family_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    birth_date: Optional[datetime.date] = None
+    lollms_model_name: Optional[str] = None
+    safe_store_vectorizer: Optional[str] = None
+    active_personality_id: Optional[str] = None
+    rag_top_k: Optional[int] = Field(None, ge=1)
+    max_rag_len: Optional[int] = Field(None, ge=1)
+    rag_n_hops: Optional[int] = Field(None, ge=1)
+    rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
+    rag_use_graph: bool = False
+    rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
+    lollms_client_ai_name: Optional[str] = None
 
-class TokenData(BaseModel):
-    username: Optional[str] = None
+# --- Global Configuration Models ---
+
+class GlobalConfigPublic(BaseModel):
+    key: str
+    value: Any
+    type: str
+    description: Optional[str] = None
+    category: str
+
+class GlobalConfigUpdate(BaseModel):
+    configs: Dict[str, Any]
+
+# --- Discussion & Message Models ---
 
 class DiscussionInfo(BaseModel):
     id: str
@@ -200,6 +193,8 @@ class MessageGradeUpdate(BaseModel):
             raise ValueError('Grade change must be 1 or -1')
         return value
 
+# --- DataStore (SafeStore) Models ---
+
 class SafeStoreDocumentInfo(BaseModel):
     filename: str
 
@@ -248,6 +243,8 @@ class DataStoreShareRequest(BaseModel):
             raise ValueError("Invalid permission level")
         return value
 
+# --- Personality Models ---
+
 class PersonalityBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     category: Optional[str] = Field(None, max_length=100)
@@ -274,6 +271,11 @@ class PersonalityPublic(PersonalityBase):
     owner_username: Optional[str] = None
     model_config = {"from_attributes": True}
 
+class PersonalitySendRequest(BaseModel):
+    target_username: constr(min_length=3, max_length=50)
+
+# --- MCP (Multi-Computer-Protocol) Models ---
+
 class MCPBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     url: str
@@ -292,34 +294,14 @@ class MCPPublic(MCPBase):
     updated_at: datetime.datetime
     model_config = {"from_attributes": True}
 
+# --- Tool Models ---
+
 class ToolInfo(BaseModel):
     name: str
     description: Optional[str] = None
     is_active: bool = False
 
-class UserUpdate(BaseModel):
-    first_name: Optional[str] = Field(None, max_length=100)
-    family_name: Optional[str] = Field(None, max_length=100)
-    email: Optional[str] = Field(None, max_length=255)
-    birth_date: Optional[datetime.date] = None
-
-    lollms_model_name: Optional[str] = None
-    safe_store_vectorizer: Optional[str] = None
-    active_personality_id: Optional[str] = None
-
-    llm_ctx_size: Optional[int] = Field(None, ge=0)
-    llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
-    llm_top_k: Optional[int] = Field(None, ge=1)
-    llm_top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
-    llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
-    llm_repeat_last_n: Optional[int] = Field(None, ge=0)
-
-    rag_top_k: Optional[int] = Field(None, ge=1)
-    max_rag_len: Optional[int] = Field(None, ge=1)
-    rag_n_hops: Optional[int] = Field(None, ge=1)
-    rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
-    rag_use_graph: Optional[bool] = None
-    rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")    
+# --- Friendship Models ---
 
 class FriendshipBase(BaseModel):
     pass
@@ -345,6 +327,8 @@ class FriendshipRequestPublic(BaseModel):
     status: FriendshipStatus
     model_config = {"from_attributes": True}
 
+# --- Direct Message Models ---
+
 class DirectMessageBase(BaseModel):
     content: constr(min_length=1)
 
@@ -361,6 +345,3 @@ class DirectMessagePublic(DirectMessageBase):
     sent_at: datetime.datetime
     read_at: Optional[datetime.datetime] = None
     model_config = {"from_attributes": True}
-
-class PersonalitySendRequest(BaseModel):
-    target_username: constr(min_length=3, max_length=50)

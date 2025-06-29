@@ -1,58 +1,22 @@
+# config.py
 # Standard Library Imports
 import os
 import shutil
-import uuid
-import json
 from pathlib import Path
-from typing import List, Dict, Optional, Any, cast, Union, Tuple, AsyncGenerator
-import datetime
-import asyncio
-import threading
-import traceback
-import io
 
 # Third-Party Imports
 import toml
-import yaml
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends,
-    Request,
-    File,
-    UploadFile,
-    Form,
-    APIRouter,
-    Response,
-    Query,
-    BackgroundTasks
-)
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import (
-    HTMLResponse,
-    StreamingResponse,
-    JSONResponse,
-    FileResponse,
-)
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, constr, field_validator, validator
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy import (
-    or_, and_ # Add this line
-)
-from dataclasses import dataclass, field as dataclass_field
-from werkzeug.utils import secure_filename
-from pydantic import BaseModel, Field, constr, field_validator, validator # Ensure these are imported
-import datetime # Ensure datetime is imported
-
 
 # --- Application Version ---
-APP_VERSION = "1.6.0"  # Updated version for LLM param name fix
+APP_VERSION = "1.6.0"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent 
 LOCALS_DIR = PROJECT_ROOT / "frontend" / "webui" / "public" / "locals"
 
 # --- Configuration Loading ---
+# This section remains critical for the initial bootstrap. The values from this
+# file will be used to populate the `global_configs` table in the database
+# on the very first run. After that, the application will read these values
+# from the database via the new `backend.settings` module.
 CONFIG_PATH = Path("config.toml")
 if not CONFIG_PATH.exists():
     EXAMPLE_CONFIG_PATH = Path("config_example.toml")
@@ -73,11 +37,12 @@ else:
             f"CRITICAL: Error parsing config.toml: {e}. Please check the file for syntax errors."
         )
         config = {}
+
 DATABASE_URL_CONFIG_KEY = "database_url"
 
 APP_SETTINGS = config.get("app_settings", {})
 APP_DATA_DIR = Path(APP_SETTINGS.get("data_dir", "data")).resolve()
-APP_DB_URL = APP_SETTINGS.get(DATABASE_URL_CONFIG_KEY, "sqlite:///./data/app_main.db")
+APP_DB_URL = APP_SETTINGS.get(DATABASE_URL_CONFIG_KEY, f"sqlite:///{APP_DATA_DIR / 'app_main.db'}")
 
 LOLLMS_CLIENT_DEFAULTS = config.get("lollms_client_defaults", {})
 SAFE_STORE_DEFAULTS = config.get("safe_store_defaults", {})
@@ -88,11 +53,21 @@ SERVER_CONFIG = config.get("server", {})
 TEMP_UPLOADS_DIR_NAME = "temp_uploads"
 DISCUSSION_ASSETS_DIR_NAME = "discussion_assets"
 DATASTORES_DIR_NAME = "safestores"
+
+# --- Security Constants (Not moved to DB) ---
+# These are fundamental to the application's security posture and should
+# remain configured via environment or a secure file, not a dynamic DB setting.
 ALGORITHM = "HS256"
-SECRET_KEY = APP_SETTINGS.get("secret_key", os.environ.get("LOLLMS_SECRET_KEY","Some key"))
-ACCESS_TOKEN_EXPIRE_MINUTES = APP_SETTINGS.get("access_token_expires_mintes", os.environ.get("LOLLMS_ACCESS_TOKEN_EXPIRES_MINUTES", 30))
+SECRET_KEY = APP_SETTINGS.get("secret_key", os.environ.get("LOLLMS_SECRET_KEY", "a_very_secret_key_that_should_be_changed_for_production"))
 
-
+# --- REMOVED: ACCESS_TOKEN_EXPIRE_MINUTES ---
+# This value is now managed in the database via the GlobalConfig table.
+# It is bootstrapped from config.toml by `database_setup.py`.
+#
+# Example of settings to have in your config.toml under [app_settings]:
+# allow_new_registrations = true
+# registration_mode = "admin_approval"  # options: "direct", "admin_approval"
+# access_token_expire_minutes = 43200   # 30 days in minutes
 
 DEFAULT_PERSONALITIES = config.get("default_personas", {})
 DEFAULT_MCPS = config.get("default_mcps", [])
