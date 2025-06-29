@@ -41,7 +41,7 @@ const personalityItems = computed(() => {
         items.push({
             isGroup: true,
             label: "Your Personalities",
-            items: dataStore.userPersonalities.map(p => ({ id: p.id, name: p.name, icon_base64: p.icon_base64 }))
+            items: dataStore.userPersonalities.map(p => ({ id: p.id, name: p.name, icon_base64: p.icon_base64, description: p.description }))
         });
     }
     if (dataStore.publicPersonalities && dataStore.publicPersonalities.length > 0) {
@@ -66,6 +66,12 @@ const sortOptions = {
   title_asc: 'Title (A-Z)',
   title_za: 'Title (Z-A)',
 };
+
+
+function createNewDiscussion() {
+    uiStore.setMainView('chat');
+    discussionsStore.createNewDiscussion();
+}
 
 watch(isSearchVisible, (isVisible) => {
     if(isVisible) {
@@ -108,6 +114,10 @@ function selectSort(method) {
   sortMethod.value = method;
   isSortMenuOpen.value = false;
 }
+
+function setMainView(viewName) {
+    uiStore.setMainView(viewName);
+}
 </script>
 
 <template>
@@ -116,11 +126,33 @@ function selectSort(method) {
     <div class="p-3 border-b dark:border-gray-700 space-y-2 flex-shrink-0">
       <!-- Buttons Row -->
       <div class="flex items-center justify-between space-x-1">
-        <button @click="discussionsStore.createNewDiscussion()" title="New Discussion" class="btn btn-primary !p-2 flex-shrink-0">
+        <button @click="createNewDiscussion()" title="New Discussion" class="btn btn-primary !p-2 flex-shrink-0">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" /></svg>
         </button>
 
         <div class="flex-grow flex justify-end items-center space-x-1">
+            <button title="Feed" @click="setMainView('feed')" class="main-nav-btn" :class="{ 'active': mainView === 'feed' }">
+            <!-- Background card -->
+            <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none">
+              <!-- Outer rectangle (representing a feed card) -->
+              <rect x="3" y="3" width="18" height="18" rx="3" fill="#f5f5f5" stroke="#888" stroke-width="1.5"/>
+
+              <!-- Avatar circle -->
+              <circle cx="7" cy="8" r="1.5" fill="#888" />
+
+              <!-- Name line -->
+              <rect x="10" y="7" width="8" height="1.5" rx="0.75" fill="#bbb" />
+
+              <!-- Content lines -->
+              <rect x="5" y="11" width="14" height="1.5" rx="0.75" fill="#ccc" />
+              <rect x="5" y="14" width="12" height="1.5" rx="0.75" fill="#ccc" />
+
+              <!-- Action dots (like/comment) -->
+              <circle cx="8" cy="18" r="1" fill="#e74c3c"/>
+              <circle cx="12" cy="18" r="1" fill="#3498db"/>
+            </svg>
+            </button>
+
             <button 
             @click="isSearchVisible = !isSearchVisible"
             title="Search discussions" 

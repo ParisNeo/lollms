@@ -1,175 +1,219 @@
-
-# --- Authentication API ---
-# Standard Library Imports
-import os
-import shutil
-import uuid
 import json
-from pathlib import Path
-from typing import List, Dict, Optional, Any, cast, Union, Tuple, AsyncGenerator
-import datetime
-import asyncio
-import threading
+import shutil
 import traceback
-import io
+import uuid
+from pathlib import Path
+from typing import List, Dict
 
-# Third-Party Imports
-import toml
-import yaml
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends,
-    Request,
-    File,
-    UploadFile,
-    Form,
-    APIRouter,
-    Response,
-    Query,
-    BackgroundTasks
-)
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import (
-    HTMLResponse,
-    StreamingResponse,
-    JSONResponse,
-    FileResponse,
-)
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, constr, field_validator, validator
-from sqlalchemy.orm import Session, joinedload
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import (
-    or_, and_ # Add this line
-)
-from dataclasses import dataclass, field as dataclass_field
-from werkzeug.utils import secure_filename
-from pydantic import BaseModel, Field, constr, field_validator, validator # Ensure these are imported
-import datetime # Ensure datetime is imported
 
-from backend.database_setup import Personality as DBPersonality # Add this import at the top of main.py
-
-# Local Application Imports
 from backend.database_setup import (
     User as DBUser,
-    UserStarredDiscussion,
-    UserMessageGrade,
-    FriendshipStatus,Friendship, 
-    DataStore as DBDataStore,
-    SharedDataStoreLink as DBSharedDataStoreLink,
-    init_database,
+    GlobalConfig as DBGlobalConfig,
     get_db,
     hash_password,
-    DATABASE_URL_CONFIG_KEY,
 )
-
-# --- Pydantic Models for API ---
 from backend.models import (
-UserLLMParams,
-UserAuthDetails,
-UserCreateAdmin,
-UserPasswordResetAdmin,UserPasswordChange,
-UserPublic,
-DiscussionInfo,
-DiscussionTitleUpdate,
-DiscussionRagDatastoreUpdate,MessageOutput,
-MessageContentUpdate,
-MessageGradeUpdate,
-SafeStoreDocumentInfo,
-DiscussionExportRequest,
-ExportData,
-DiscussionImportRequest,
-DiscussionSendRequest,
-DataStoreBase,
-DataStoreCreate,
-DataStorePublic,
-DataStoreShareRequest,
-PersonalityBase,
-PersonalityCreate,
-PersonalityUpdate,
-PersonalityPublic,
-UserUpdate,
-FriendshipBase,
-FriendRequestCreate,
-FriendshipAction,
-FriendPublic,
-FriendshipRequestPublic,
-PersonalitySendRequest,
-
-DirectMessagePublic,
-DirectMessageCreate
+    UserAuthDetails,
+    UserCreateAdmin,
+    UserPasswordResetAdmin,
+    UserPublic,
+    GlobalConfigPublic,
+    GlobalConfigUpdate,
 )
-
 from backend.session import (
     get_user_data_root,
     get_current_admin_user,
-    get_current_active_user,
-    get_current_db_user_from_token,
-    get_user_lollms_client,
     get_user_temp_uploads_path,
-    user_sessions)
-from backend.config import (
-    LOLLMS_CLIENT_DEFAULTS,
-    INITIAL_ADMIN_USER_CONFIG,
-    SAFE_STORE_DEFAULTS)
+    user_sessions,
+)
+from backend.settings import settings
+from backend.config import INITIAL_ADMIN_USER_CONFIG
+from backend.migration_utils import run_openwebui_migration
 
-# --- Admin API ---
+
 admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependencies=[Depends(get_current_admin_user)])
 
+@admin_router.post("/import-openwebui", response_model=Dict[str, str])
+async def import_openwebui_data(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user)
+):
+    if not file:
+        raise HTTPException(status_code=400, detail="No file was uploaded.")
+    
+    if file.filename != "webui.db":
+        raise HTTPException(status_code=400, detail="Invalid file uploaded. Please upload the 'webui.db' file from OpenWebUI.")
+
+    temp_import_dir = get_user_temp_uploads_path(current_admin.username) / f"owui_import_{uuid.uuid4()}"
+    temp_import_dir.mkdir(parents=True, exist_ok=True)
+    
+    print(f"INFO: Staging OpenWebUI import file in: {temp_import_dir}")
+    
+    try:
+        file_path = temp_import_dir / file.filename
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    finally:
+        file.file.close()
+
+    background_tasks.add_task(run_openwebui_migration, str(temp_import_dir))
+
+    return {"message": "Migration process started in the background. Check server logs for progress."}
+
+@admin_router.get("/settings", response_model=List[GlobalConfigPublic])
+async def admin_get_global_settings(db: Session = Depends(get_db)):
+    db_configs = db.query(DBGlobalConfig).order_by(DBGlobalConfig.category, DBGlobalConfig.key).all()
+    response_models = []
+    for config in db_configs:
+        try:
+            stored_data = json.loads(config.value)
+            response_models.append(GlobalConfigPublic(
+                key=config.key,
+                value=stored_data.get('value'),
+                type=stored_data.get('type', 'unknown'),
+                description=config.description,
+                category=config.category,
+            ))
+        except (json.JSONDecodeError, TypeError):
+            response_models.append(GlobalConfigPublic(
+                key=config.key, value=None, type='error',
+                description=f"Error parsing value: {config.value}",
+                category=config.category,
+            ))
+    return response_models
+
+@admin_router.put("/settings", response_model=Dict[str, str])
+async def admin_update_global_settings(
+    update_data: GlobalConfigUpdate,
+    db: Session = Depends(get_db)
+):
+    updated_keys = []
+    try:
+        for key, new_value in update_data.configs.items():
+            db_config = db.query(DBGlobalConfig).filter(DBGlobalConfig.key == key).first()
+            if db_config:
+                stored_data = json.loads(db_config.value)
+                stored_data['value'] = new_value
+                db_config.value = json.dumps(stored_data)
+                updated_keys.append(key)
+            else:
+                print(f"WARNING: Admin tried to update non-existent setting key: {key}")
+
+        if updated_keys:
+            db.commit()
+            settings.refresh()
+            print(f"INFO: Admin updated global settings: {', '.join(updated_keys)}")
+        
+        return {"message": f"Successfully updated {len(updated_keys)} settings."}
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error while updating settings: {e}")
+
 @admin_router.get("/users", response_model=List[UserPublic])
-async def admin_get_all_users(db: Session = Depends(get_db)) -> List[DBUser]: return db.query(DBUser).all()
+async def admin_get_all_users(db: Session = Depends(get_db)) -> List[DBUser]:
+    return db.query(DBUser).all()
+
+@admin_router.get("/active-sessions", response_model=List[str])
+async def get_active_sessions():
+    return list(user_sessions.keys())
 
 @admin_router.post("/users", response_model=UserPublic, status_code=201)
 async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(get_db)) -> DBUser:
-    if db.query(DBUser).filter(DBUser.username == user_data.username).first(): raise HTTPException(status_code=400, detail="Username already registered.")
-    
-    # user_data has llm_prefixed params. DBUser also expects llm_prefixed params.
-    # Default values from LOLLMS_CLIENT_DEFAULTS are non-prefixed.
+    if db.query(DBUser).filter(DBUser.username == user_data.username).first():
+        raise HTTPException(status_code=400, detail="Username is already registered.")
+    if user_data.email and db.query(DBUser).filter(DBUser.email == user_data.email).first():
+        raise HTTPException(status_code=400, detail="Email is already in use by another account.")
+
     new_db_user = DBUser(
-        username=user_data.username, hashed_password=hash_password(user_data.password), 
-        is_admin=user_data.is_admin, 
-        lollms_model_name=user_data.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
-        safe_store_vectorizer=user_data.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
-        llm_ctx_size=user_data.llm_ctx_size if user_data.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
-        llm_temperature=user_data.llm_temperature if user_data.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
-        llm_top_k=user_data.llm_top_k if user_data.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
-        llm_top_p=user_data.llm_top_p if user_data.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
-        llm_repeat_penalty=user_data.llm_repeat_penalty if user_data.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
-        llm_repeat_last_n=user_data.llm_repeat_last_n if user_data.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),
-        put_thoughts_in_context=user_data.put_thoughts_in_context if user_data.put_thoughts_in_context is not None else LOLLMS_CLIENT_DEFAULTS.get("put_thoughts_in_context", False)
+        username=user_data.username,
+        hashed_password=hash_password(user_data.password),
+        is_admin=user_data.is_admin,
+        email=user_data.email,
+        lollms_model_name=user_data.lollms_model_name or settings.get("default_lollms_model_name"),
+        safe_store_vectorizer=user_data.safe_store_vectorizer or settings.get("default_safe_store_vectorizer"),
+        llm_ctx_size=user_data.llm_ctx_size if user_data.llm_ctx_size is not None else settings.get("default_llm_ctx_size"),
+        llm_temperature=user_data.llm_temperature if user_data.llm_temperature is not None else settings.get("default_llm_temperature"),
+        is_active=True
     )
-    try: db.add(new_db_user); db.commit(); db.refresh(new_db_user); return new_db_user
-    except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"DB error: {e}")
+    try:
+        db.add(new_db_user)
+        db.commit()
+        db.refresh(new_db_user)
+        return new_db_user
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"A user with that username or email already exists. Original error: {e.orig}")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
 
-@admin_router.post("/users/{user_id}/reset-password")
-async def admin_reset_user_password(user_id: int, payload: UserPasswordResetAdmin, db: Session = Depends(get_db)) -> Dict[str, str]:
-    user_to_update = db.query(DBUser).filter(DBUser.id == user_id).first()
-    if not user_to_update: raise HTTPException(status_code=404, detail="User not found.")
-    user_to_update.hashed_password = hash_password(payload.new_password)
-    try: db.commit(); return {"message": f"Password for user '{user_to_update.username}' reset."}
-    except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"DB error: {e}")
-
-@admin_router.delete("/users/{user_id}")
-async def admin_remove_user(user_id: int, db: Session = Depends(get_db), current_admin: UserAuthDetails = Depends(get_current_admin_user), background_tasks: BackgroundTasks = BackgroundTasks()) -> Dict[str, str]:
-    user_to_delete = db.query(DBUser).filter(DBUser.id == user_id).first()
-    if not user_to_delete: raise HTTPException(status_code=404, detail="User not found.")
-    initial_admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
-    if initial_admin_username and user_to_delete.username == initial_admin_username and user_to_delete.is_admin: raise HTTPException(status_code=403, detail="Initial superadmin cannot be deleted.")
-    if user_to_delete.username == current_admin.username: raise HTTPException(status_code=403, detail="Administrators cannot delete themselves.")
+@admin_router.post("/users/{user_id}/activate", response_model=UserPublic)
+async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
+    user_to_activate = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user_to_activate:
+        raise HTTPException(status_code=404, detail="User not found.")
     
-    user_data_dir_to_delete = get_user_data_root(user_to_delete.username) 
+    user_to_activate.is_active = True
+    user_to_activate.activation_token = None
+    
+    try:
+        db.commit()
+        db.refresh(user_to_activate)
+        return user_to_activate
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
+
+@admin_router.post("/users/{user_id}/reset-password", response_model=Dict[str, str])
+async def admin_reset_user_password(user_id: int, payload: UserPasswordResetAdmin, db: Session = Depends(get_db)):
+    user_to_update = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user_to_update:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    user_to_update.hashed_password = hash_password(payload.new_password)
+    try:
+        db.commit()
+        return {"message": f"Password for user '{user_to_update.username}' has been successfully reset."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
+
+@admin_router.delete("/users/{user_id}", response_model=Dict[str, str])
+async def admin_remove_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    user_to_delete = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user_to_delete:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    initial_admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
+    if initial_admin_username and user_to_delete.username == initial_admin_username:
+        raise HTTPException(status_code=403, detail="The initial superadmin account cannot be deleted.")
+    if user_to_delete.id == current_admin.id:
+        raise HTTPException(status_code=403, detail="Administrators cannot delete their own accounts.")
+    
+    user_data_dir_to_delete = get_user_data_root(user_to_delete.username)
 
     try:
         if user_to_delete.username in user_sessions:
             del user_sessions[user_to_delete.username]
 
-        db.delete(user_to_delete) 
+        db.delete(user_to_delete)
         db.commit()
         
         if user_data_dir_to_delete.exists():
             background_tasks.add_task(shutil.rmtree, user_data_dir_to_delete, ignore_errors=True)
             
-        return {"message": f"User '{user_to_delete.username}' and their data deleted."}
+        return {"message": f"User '{user_to_delete.username}' and their data have been deleted."}
     except Exception as e:
-        db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error or file system error during user deletion: {e}")
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"A database or file system error occurred during user deletion: {e}")

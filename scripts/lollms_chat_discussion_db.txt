@@ -1,0 +1,45 @@
+╔════════════════════════════════════════════╗
+║   Database Schema: discussions.db            ║
+╚════════════════════════════════════════════╝
+
+Found 2 table(s).
+
+
+────────────────── TABLE: discussions ──────────────────
+  Columns:
+    - id                   (VARCHAR)  [PRIMARY KEY]
+    - system_prompt        (TEXT)
+    - participants         (JSON)
+    - active_branch_id     (VARCHAR)
+    - discussion_metadata  (JSON)
+    - created_at           (DATETIME)
+    - updated_at           (DATETIME)
+    - pruning_summary      (TEXT)
+    - pruning_point_id     (VARCHAR)
+
+────────────────── TABLE: messages ──────────────────
+  Columns:
+    - id                   (VARCHAR)  [PRIMARY KEY]
+    - discussion_id        (VARCHAR)  [NOT NULL]
+    - parent_id            (VARCHAR)
+    - sender               (VARCHAR)  [NOT NULL]
+    - sender_type          (VARCHAR)  [NOT NULL]
+    - raw_content          (TEXT)
+    - thoughts             (TEXT)
+    - content              (TEXT)  [NOT NULL]
+    - scratchpad           (TEXT)
+    - tokens               (INTEGER)
+    - binding_name         (VARCHAR)
+    - model_name           (VARCHAR)
+    - generation_speed     (FLOAT)
+    - message_metadata     (JSON)
+    - images               (JSON)
+    - created_at           (DATETIME)
+
+  Relationships (Foreign Keys):
+    - parent_id  ───>  messages(id) [ON UPDATE NO ACTION, ON DELETE NO ACTION]
+    - discussion_id  ───>  discussions(id) [ON UPDATE NO ACTION, ON DELETE NO ACTION]
+
+  Indexes:
+    - ix_messages_discussion_id ( INDEX on discussion_id)
+    - ix_messages_parent_id     ( INDEX on parent_id)

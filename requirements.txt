@@ -29,6 +29,7 @@ ollama # for ollama
 # (Note: lollms-client itself pulls in requests, ascii-colors, pillow, pipmaster, yaml, pydantic, lollmsvectordb, numpy)
 pydantic
 pydantic[email] #for email validation
+Pillow
 
 # --- SafeStore Library and Common Features ---
 # Using safe_store[all] is a convenient way to get most features.
@@ -52,3 +53,6 @@ wcwidth
 # scikit-learn          # For TF-IDF vectorizers (if you plan to use them)
 
 python-multipart
+
+# for migrated databases 
+argon2-cffi

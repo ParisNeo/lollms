@@ -387,7 +387,12 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             await loadDiscussions();
         } catch (error) { console.error("Import failed:", error); }
     }
-
+    function $reset() {
+        discussions.value = {};
+        currentDiscussionId.value = null;
+        messages.value = [];
+        generationInProgress.value = false;
+    }
     return {
         discussions,
         currentDiscussionId,
@@ -412,5 +417,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         switchBranch,
         exportDiscussions,
         importDiscussions,
+        $reset,
     };
 });

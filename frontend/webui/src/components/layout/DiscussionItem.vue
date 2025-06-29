@@ -16,6 +16,7 @@ const uiStore = useUiStore();
 const isActive = computed(() => discussionsStore.currentDiscussionId === props.discussion.id);
 
 function selectDiscussion() {
+  uiStore.setMainView('chat');
   discussionsStore.selectDiscussion(props.discussion.id);
 }
 

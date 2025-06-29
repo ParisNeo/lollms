@@ -7,7 +7,7 @@ export const useAuthStore = defineStore('auth', () => {
     // STATE
     const user = ref(null);
     const token = ref(localStorage.getItem('lollms_token') || null);
-    const isAuthenticating = ref(true);
+    const isAuthenticating = ref(false);
 
     // GETTERS
     const isAuthenticated = computed(() => !!user.value);
@@ -25,16 +25,19 @@ export const useAuthStore = defineStore('auth', () => {
 
         if (token.value) {
             try {
+                // Set the authorization header for this initial request
+                apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
                 const response = await apiClient.get('/api/auth/me');
+                console.log(response.data)
                 user.value = response.data;
                 
-                // Dynamically import other stores here to avoid circular dependencies at module load time.
+                // Dynamically import other stores to avoid circular dependencies
                 const { useDiscussionsStore } = await import('./discussions');
                 const { useDataStore } = await import('./data');
                 const discussionsStore = useDiscussionsStore();
                 const dataStore = useDataStore();
                 
-                // Fetch all initial data needed for the app to function.
+                // Fetch all initial data needed for the app to function
                 await Promise.all([
                     discussionsStore.loadDiscussions(),
                     dataStore.loadAllInitialData()
@@ -75,41 +78,81 @@ export const useAuthStore = defineStore('auth', () => {
                 uiStore.closeModal('login');
                 uiStore.addNotification('Login successful!', 'success');
             } else {
+                 // This case might happen if token is valid but /me fails for some reason
                  throw new Error("Authentication succeeded but failed to fetch user data.");
             }
 
         } catch (error) {
-            const errorMessage = error.response?.data?.detail || "Invalid username or password.";
-            uiStore.addNotification(errorMessage, 'error');
-            throw error;
+            // Refined error handling to give user-specific feedback
+            const detail = error.response?.data?.detail || "An unknown error occurred.";
+            if (detail.includes("account is inactive")) {
+                 uiStore.addNotification(detail, 'warning');
+            } else {
+                 // Generic message for other failures like incorrect password
+                 uiStore.addNotification('Login failed: Incorrect username or password.', 'error');
+            }
+            throw new Error(detail); // Throw for component-level error state handling
         }
     }
 
     /**
-     * Clears all authentication-related state locally.
+     * Registers a new user account by calling the backend API.
+     * @param {object} registrationData - Object with { username, email, password }.
+     */
+    async function register(registrationData) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post('/api/auth/register', registrationData);
+            const registrationMode = response.data.is_active ? 'direct' : 'admin_approval';
+            
+            if (registrationMode === 'direct') {
+                uiStore.addNotification('Registration successful! You can now log in.', 'success');
+            } else {
+                uiStore.addNotification('Registration successful! Your account is now pending administrator approval.', 'info', 6000); // Longer duration
+            }
+            uiStore.closeModal('register');
+            uiStore.openModal('login'); // Guide user to the login screen
+        } catch (error) {
+            // The global API interceptor will show the error message from the backend
+            throw error; // Propagate error for component-level handling (e.g., stop loading spinner)
+        }
+    }
+
+    /**
+     * Clears all authentication-related state locally and from the apiClient header.
      */
     function clearAuthData() {
         user.value = null;
         token.value = null;
         localStorage.removeItem('lollms_token');
+        delete apiClient.defaults.headers.common['Authorization'];
     }
 
     /**
-     * Logs the user out, clears all local data, and shows the login modal.
+     * Logs the user out by clearing all local data, calling the backend logout endpoint, and showing the login modal.
      */
     async function logout() {
         const uiStore = useUiStore();
         
-        // Dynamically import other stores to reset them.
-        const { useDiscussionsStore } = await import('./discussions');
-        const { useDataStore } = await import('./data');
+        try {
+            // Call the backend logout endpoint to ensure server-side session is cleared.
+            await apiClient.post('/api/auth/logout');
+            uiStore.openModal('login');
+        } catch(error) {
+            // Log a warning but proceed with client-side cleanup regardless
+            console.warn("Could not reach logout endpoint, but proceeding with client-side logout.", error);
+        } finally {
+            const { useDiscussionsStore } = await import('./discussions');
+            const { useDataStore } = await import('./data');
 
-        clearAuthData();
-        useDiscussionsStore().$reset();
-        useDataStore().$reset();
+            clearAuthData();
+            // Reset all relevant stores to their initial state to prevent data leakage
+            useDiscussionsStore().$reset();
+            useDataStore().$reset();
 
-        uiStore.addNotification('You have been logged out.', 'info');
-        uiStore.openModal('login');
+            uiStore.addNotification('You have been logged out.', 'info');
+            uiStore.openModal('login');
+        }
     }
 
     /**
@@ -123,7 +166,6 @@ export const useAuthStore = defineStore('auth', () => {
             useUiStore().addNotification('Profile updated successfully.', 'success');
         } catch(error) {
             console.error("Failed to update user profile:", error);
-            // Error notification is handled by the API interceptor.
             throw error;
         }
     }
@@ -168,6 +210,7 @@ export const useAuthStore = defineStore('auth', () => {
         // Actions
         attemptInitialAuth,
         login,
+        register, // --- EXPOSED new action ---
         logout,
         updateUserProfile,
         updateUserPreferences,

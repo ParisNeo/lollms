@@ -1,123 +1,149 @@
 import { defineStore } from 'pinia';
-import apiClient from '../services/api';
+import { ref } from 'vue';
 
-export const useUiStore = defineStore('ui', {
-  state: () => ({
-    currentTheme: 'dark',
-    openModals: [],
-    modalDataStore: {},
-    notifications: [],
-    nextNotificationId: 0,
-    confirmationOptions: {},
-    confirmationPromise: null,
-    imageViewerSrc: null,
-    availableLanguages: {},
-    currentLanguage: localStorage.getItem('lollms_language') || 'en',
-    translations: {},
-  }),
+export const useUiStore = defineStore('ui', () => {
+    const mainView = ref('feed'); 
+    const activeModal = ref(null);
+    const modalProps = ref({});
+    const notifications = ref([]);
+    const currentTheme = ref(localStorage.getItem('lollms-theme') || 'light');
+    const currentLanguage = ref(localStorage.getItem('lollms-language') || 'en');
+    const isImageViewerOpen = ref(false);
+    const imageViewerSrc = ref('');
+    const isConfirmationOpen = ref(false);
+    const confirmationOptions = ref({
+        title: 'Are you sure?',
+        message: 'This action cannot be undone.',
+        confirmText: 'Confirm',
+        onConfirm: () => {},
+    });
+    // State to hold available languages fetched from the backend
+    const availableLanguages = ref({});
 
-  getters: {
-    isModalOpen: (state) => (modalName) => state.openModals.includes(modalName),
-    modalData: (state) => (modalName) => state.modalDataStore[modalName],
-    isImageViewerOpen: (state) => !!state.imageViewerSrc,
-    translate: (state) => (key, fallback = null, vars = {}) => {
-      let translation = state.translations[key] || fallback || key;
-      for (const varKey in vars) {
-        translation = translation.replace(new RegExp(`{{${varKey}}}`, 'g'), vars[varKey]);
-      }
-      return translation;
-    },
-  },
 
-  actions: {
-    initializeTheme() {
-      const savedTheme = localStorage.getItem('theme') || 'dark';
-      this.setTheme(savedTheme);
-    },
-    setTheme(theme) {
-      this.currentTheme = theme;
-      if (theme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-      localStorage.setItem('theme', theme);
-    },
-    toggleTheme() {
-      this.setTheme(this.currentTheme === 'dark' ? 'light' : 'dark');
-    },
-    openModal(modalName, data = null) {
-      if (!this.openModals.includes(modalName)) {
-        this.openModals.push(modalName);
-      }
-      if (data) {
-        this.modalDataStore[modalName] = data;
-      }
-    },
-    closeModal(modalName) {
-      this.openModals = this.openModals.filter((m) => m !== modalName);
-      delete this.modalDataStore[modalName];
-    },
-    addNotification(message, type = 'info', duration = 4000) {
-      const id = this.nextNotificationId++;
-      this.notifications.push({ id, message, type, duration });
-    },
-    removeNotification(id) {
-      this.notifications = this.notifications.filter((n) => n.id !== id);
-    },
-    showConfirmation(options = { title: 'Are you sure?', message: 'This action cannot be undone.' }) {
-      this.confirmationOptions = options;
-      this.openModal('confirmation');
-      return new Promise((resolve) => {
-        this.confirmationPromise = { resolve };
-      });
-    },
-    confirmAction() {
-      if (this.confirmationPromise) this.confirmationPromise.resolve(true);
-      this.closeModal('confirmation');
-    },
-    cancelAction() {
-      if (this.confirmationPromise) this.confirmationPromise.resolve(false);
-      this.closeModal('confirmation');
-    },
-    openImageViewer(src) {
-      this.imageViewerSrc = src;
-    },
-    closeImageViewer() {
-      this.imageViewerSrc = null;
-    },
-    async fetchAvailableLanguages() {
-      try {
-        const response = await apiClient.get('/api/languages/');
-        this.availableLanguages = response.data;
-      } catch (error) {
-        console.error('Failed to fetch available languages:', error);
-        this.availableLanguages = { en: 'English' };
-      }
-    },
-    async loadTranslations(langCode) {
-      try {
-        const response = await apiClient.get(`/locals/${langCode}.json`);
-        this.translations = response.data;
-        document.documentElement.lang = langCode.split('-')[0];
-      } catch (error) {
-        console.error(`Failed to load translations for ${langCode}:`, error);
-        if (langCode !== 'en') await this.loadTranslations('en');
-      }
-    },
-    async setLanguage(langCode) {
-      this.currentLanguage = langCode;
-      localStorage.setItem('lollms_language', langCode);
-      await this.loadTranslations(langCode);
-    },
-    async initializeLocalization() {
-      await this.fetchAvailableLanguages();
-      let langToLoad = localStorage.getItem('lollms_language');
-      if (!langToLoad || !this.availableLanguages[langToLoad]) {
-        const browserLang = navigator.language.split('-')[0];
-        langToLoad = this.availableLanguages[browserLang] ? browserLang : 'en';
-      }
-      await this.setLanguage(langToLoad);
-    },
-  },
+    function setMainView(viewName) {
+        if (['feed', 'chat'].includes(viewName)) {
+            mainView.value = viewName;
+        }
+    }
+
+    function openModal(name, props = {}) {
+        activeModal.value = name;
+        modalProps.value = props;
+    }
+
+    function closeModal(name) {
+        if (activeModal.value === name) {
+            activeModal.value = null;
+            modalProps.value = {};
+        }
+    }
+
+    function addNotification(message, type = 'info', duration = 3000) {
+        const id = Date.now() + Math.random();
+        notifications.value.push({ id, message, type, duration });
+    }
+
+    function removeNotification(id) {
+        notifications.value = notifications.value.filter(n => n.id !== id);
+    }
+    
+    function setTheme(theme) {
+        currentTheme.value = theme;
+        localStorage.setItem('lollms-theme', theme);
+        if (theme === 'dark') {
+            document.documentElement.classList.add('dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+        }
+    }
+
+    function toggleTheme() {
+        const newTheme = currentTheme.value === 'light' ? 'dark' : 'light';
+        setTheme(newTheme);
+    }
+    
+    function initializeTheme() {
+        setTheme(currentTheme.value);
+    }
+
+    function setLanguage(langCode) {
+        currentLanguage.value = langCode;
+        localStorage.setItem('lollms-language', langCode);
+        // Here you would typically also load the language file with a library like i18n
+        // For this simplified example, we'll just store the code.
+    }
+
+    function openImageViewer(src) {
+        imageViewerSrc.value = src;
+        isImageViewerOpen.value = true;
+    }
+
+    function closeImageViewer() {
+        isImageViewerOpen.value = false;
+        imageViewerSrc.value = '';
+    }
+
+    function showConfirmation(options) {
+        return new Promise((resolve) => {
+            confirmationOptions.value = {
+                title: options.title || 'Are you sure?',
+                message: options.message || 'This action cannot be undone.',
+                confirmText: options.confirmText || 'Confirm',
+                onConfirm: () => {
+                    isConfirmationOpen.value = false;
+                    resolve(true);
+                },
+                onCancel: () => {
+                    isConfirmationOpen.value = false;
+                    resolve(false);
+                }
+            };
+            isConfirmationOpen.value = true;
+        });
+    }
+
+    function confirmAction() {
+        if (confirmationOptions.value.onConfirm) {
+            confirmationOptions.value.onConfirm();
+        }
+    }
+
+    function cancelAction() {
+        if (confirmationOptions.value.onCancel) {
+            confirmationOptions.value.onCancel();
+        }
+    }
+
+    // --- NEW: Action to fetch languages ---
+    async function fetchLanguages() {
+        try {
+            // Lazy import to prevent circular dependencies if needed
+            const apiClient = (await import('../services/api')).default;
+            const response = await apiClient.get('/api/languages/');
+            availableLanguages.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch available languages:", error);
+            // Fallback to a default set
+            availableLanguages.value = { en: 'English' };
+        }
+    }
+    
+    function modalData(name) {
+        return activeModal.value === name ? modalProps.value : null;
+    }
+
+    function isModalOpen(name) {
+        return activeModal.value === name;
+    }
+
+    return {
+        mainView, activeModal, modalProps, notifications, currentTheme,
+        currentLanguage, availableLanguages,
+        isImageViewerOpen, imageViewerSrc, isConfirmationOpen, confirmationOptions,
+        setMainView, openModal, closeModal, addNotification, removeNotification,
+        setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages,
+        openImageViewer, closeImageViewer, showConfirmation, confirmAction, cancelAction,
+        isModalOpen, modalData
+    };
 });

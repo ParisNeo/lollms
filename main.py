@@ -120,6 +120,7 @@ from backend.routers.friends import friends_router
 from backend.routers.dm import dm_router
 from backend.routers.stores import store_files_router
 from backend.routers.mcp import mcp_router, discussion_tools_router
+from backend.routers.social import social_router
 
 
 # --- Application Version ---
@@ -716,13 +717,12 @@ app.include_router(datastore_router)
 app.include_router(store_files_router)
 app.include_router(admin_router)
 app.include_router(languages_router)
-# Add the router to the main app
 app.include_router(personalities_router)
-# Add the router to the main app
 app.include_router(friends_router)
 app.include_router(dm_router)
 app.include_router(mcp_router)
 app.include_router(discussion_tools_router)
+app.include_router(social_router)
 
 
 app.add_middleware(

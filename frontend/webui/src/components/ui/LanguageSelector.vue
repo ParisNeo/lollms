@@ -1,12 +1,20 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 
 const uiStore = useUiStore();
 const isOpen = ref(false);
 
+onMounted(() => {
+    // Fetch languages if they are not already loaded
+    if (Object.keys(uiStore.availableLanguages).length === 0) {
+        uiStore.fetchLanguages();
+    }
+});
+
 const currentLanguageLabel = computed(() => {
-  return uiStore.currentLanguage.toUpperCase();
+  // Defensive check to prevent crash if currentLanguage is not yet set
+  return (uiStore.currentLanguage || 'EN').toUpperCase();
 });
 
 const handleLanguageSelect = (langCode) => {
