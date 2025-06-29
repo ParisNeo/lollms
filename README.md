@@ -8,7 +8,7 @@
 
 A multi-user FastAPI backend and responsive HTML/Tailwind CSS frontend application designed to provide a chat interface powered by the [`lollms-client`](https://github.com/ParisNeo/lollms-client) library. It features integrated Retrieval-Augmented Generation (RAG) using [`safe_store`](https://github.com/ParisNeo/safe_store), multimodal chat, user personalities, a friend system, direct messaging, and enhanced sharing capabilities.
 
-**Live Project:** [https://github.com/ParisNeo/simplified_lollms](https://github.com/ParisNeo/simplified_lollms)
+**Live Project:** [https://github.com/ParisNeo/lollms_chat](https://github.com/ParisNeo/lollms_chat)
 
 ## Overview
 
@@ -95,8 +95,8 @@ This project aims to provide a self-hostable, user-friendly chat interface that 
 
 1.  **Clone:**
     ```bash
-    git clone https://github.com/ParisNeo/simplified_lollms.git
-    cd simplified_lollms
+    git clone https://github.com/ParisNeo/lollms_chat.git
+    cd lollms_chat
     ```
 2.  **Virtual Environment (Recommended):**
     ```bash
@@ -145,7 +145,7 @@ This project aims to provide a self-hostable, user-friendly chat interface that 
 ## 📁 Folder Structure
 
 ```text
-📁 simplified_lollms/
+📁 lollms_chat/
 ├─ 📁 data/                  # User data, DBs (created automatically)
 │  ├─ 📄 app_main.db         # Central SQLite DB
 │  └─ 📁 <username>/         # Per-user data

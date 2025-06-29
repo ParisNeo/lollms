@@ -13,6 +13,9 @@ const uiStore = useUiStore();
 const { user } = storeToRefs(authStore);
 const { userPersonalities, publicPersonalities } = storeToRefs(dataStore);
 
+// Define a key for localStorage
+const STARRED_LOCALSTORAGE_KEY = 'lollms-starred-personalities';
+
 const activePersonalityId = ref('');
 const savingPersonalityId = ref(null);
 const searchQuery = ref('');
@@ -61,55 +64,61 @@ const filteredPublicPersonalities = computed(() => filteredList.value.filter(p =
 
 onMounted(() => {
     dataStore.fetchPersonalities();
+
+    // Load starred IDs from localStorage
+    try {
+        const storedStarred = localStorage.getItem(STARRED_LOCALSTORAGE_KEY);
+        if (storedStarred) {
+            starredPersonalityIds.value = new Set(JSON.parse(storedStarred));
+        }
+    } catch (e) {
+        console.error("Failed to load starred personalities from localStorage:", e);
+        starredPersonalityIds.value = new Set();
+    }
+    
+    // Load other preferences from user object (backend)
     if (user.value) {
         activePersonalityId.value = user.value.active_personality_id || '';
-        starredPersonalityIds.value = new Set(user.value.starred_personality_ids || []);
         selectedCategory.value = user.value.personalities_view_category || 'All';
     }
 });
 
+// Watchers for backend-driven state
 watch(() => user.value?.active_personality_id, (newId) => {
     activePersonalityId.value = newId || '';
 });
-
-watch(() => user.value?.starred_personality_ids, (newIds) => {
-    starredPersonalityIds.value = new Set(newIds || []);
-}, { deep: true });
 
 watch(() => user.value?.personalities_view_category, (newCategory) => {
     selectedCategory.value = newCategory || 'All';
 });
 
+// Watcher for local state to save to backend
 watch(selectedCategory, (newCategory) => {
     if (user.value && newCategory !== (user.value.personalities_view_category || 'All')) {
         authStore.updateUserPreferences({ personalities_view_category: newCategory });
     }
 });
 
-
-// --- THIS IS THE CORRECTED FUNCTION ---
+// --- MODIFIED STARRING LOGIC ---
 async function handleToggleStar(personality) {
-    // 1. Keep a copy of the original state to revert to on failure.
-    const originalStarredSet = new Set(starredPersonalityIds.value);
-    
-    // 2. Create the new state.
-    const newStarredSet = new Set(originalStarredSet);
+    const newStarredSet = new Set(starredPersonalityIds.value);
     if (newStarredSet.has(personality.id)) {
         newStarredSet.delete(personality.id);
     } else {
         newStarredSet.add(personality.id);
     }
 
-    // 3. Apply the new state to the local UI immediately (Optimistic Update).
+    // Optimistically update the UI
     starredPersonalityIds.value = newStarredSet;
 
-    // 4. Try to save the change to the backend.
+    // Persist the change to localStorage
     try {
-        await authStore.updateUserPreferences({ starred_personality_ids: Array.from(newStarredSet) });
+        const idsToStore = Array.from(newStarredSet);
+        localStorage.setItem(STARRED_LOCALSTORAGE_KEY, JSON.stringify(idsToStore));
     } catch (error) {
-        // 5. If the save fails, revert the UI to the original state.
-        starredPersonalityIds.value = originalStarredSet;
-        uiStore.showToast({ message: 'Failed to update favorite status.', type: 'error' });
+        console.error("Failed to save starred personalities to localStorage:", error);
+        uiStore.showToast({ message: 'Could not save favorite status.', type: 'error' });
+        // Optional: revert UI on failure, though localStorage failures are rare.
     }
 }
 
@@ -167,6 +176,10 @@ async function handleDeletePersonality(personality) {
     if (confirmed) {
         if (activePersonalityId.value === personality.id) {
             await handleDeselectAll();
+        }
+        // Also remove from starred list if it's there
+        if (starredPersonalityIds.value.has(personality.id)) {
+            handleToggleStar(personality);
         }
         await dataStore.deletePersonality(personality.id);
     }
