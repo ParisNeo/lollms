@@ -319,6 +319,8 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
+    function $reset() {
+    }
     return {
         // State
         availableLollmsModels,
@@ -355,5 +357,6 @@ export const useDataStore = defineStore('data', () => {
         deleteMcp,
         fetchMcpTools,
         triggerMcpReload,
+        $reset
     };
 });

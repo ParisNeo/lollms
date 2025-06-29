@@ -135,6 +135,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     return UserAuthDetails(
         id=db_user.id,
         username=username, is_admin=db_user.is_admin, is_active=db_user.is_active,
+        icon=db_user.icon,
         first_name=db_user.first_name, family_name=db_user.family_name, email=db_user.email, birth_date=db_user.birth_date,
         lollms_model_name=user_sessions[username].get("lollms_model_name"),
         safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),

@@ -13,6 +13,8 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from PIL import Image
 # --- NEW: Import Argon2 for password verification ---
+import pipmaster as pm
+pm.ensure_packages(["argon2-cffi"])
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 

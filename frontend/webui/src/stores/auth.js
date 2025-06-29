@@ -28,6 +28,7 @@ export const useAuthStore = defineStore('auth', () => {
                 // Set the authorization header for this initial request
                 apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
                 const response = await apiClient.get('/api/auth/me');
+                console.log(response.data)
                 user.value = response.data;
                 
                 // Dynamically import other stores to avoid circular dependencies
@@ -136,6 +137,7 @@ export const useAuthStore = defineStore('auth', () => {
         try {
             // Call the backend logout endpoint to ensure server-side session is cleared.
             await apiClient.post('/api/auth/logout');
+            uiStore.openModal('login');
         } catch(error) {
             // Log a warning but proceed with client-side cleanup regardless
             console.warn("Could not reach logout endpoint, but proceeding with client-side logout.", error);

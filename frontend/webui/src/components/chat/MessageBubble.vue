@@ -11,6 +11,7 @@ import { Codemirror } from 'vue-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
+import UserAvatar from '../ui/UserAvatar.vue'; // --- NEW: Import the avatar component
 
 const props = defineProps({
   message: {
@@ -251,7 +252,7 @@ function getSimilarityColor(score) {
   if (score >= 70) return 'bg-yellow-500';
   return 'bg-red-500';
 }
-
+const user = computed(() => authStore.user);
 const formattingMenuItems = [
     { type: 'header', label: 'Basic' },
     { label: 'Bold', action: () => insertTextAtCursor('**', '**', 'bold text') },
@@ -282,6 +283,10 @@ const formattingMenuItems = [
             <div v-if="!isUser && !isSystem" class="flex items-center text-xs mb-2 text-gray-500 dark:text-gray-400">
                 <span class="font-semibold text-gray-700 dark:text-gray-300">{{ senderName }}</span>
                 <span v-if="isAi && message.model_name" class="ml-2">· {{ message.model_name }}</span>
+            </div>
+
+            <div v-if="isUser" class="flex-shrink-0 flex items-center space-x-2">
+                <UserAvatar v-if="user" :icon="user.icon" :username="user.username" size-class="h-10 w-10" /><span class="truncate max-w-[120px]">{{ user.username }}</span>
             </div>
 
             <div v-if="message.image_references && message.image_references.length > 0" 

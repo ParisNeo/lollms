@@ -41,7 +41,7 @@ apiClient.interceptors.response.use(
                 // If we get a 401 Unauthorized, it means the token is invalid or expired.
                 // We log the user out, which will clear the token and show the login modal.
                 uiStore.addNotification('Your session has expired. Please log in again.', 'error');
-                authStore.logout();
+                //authStore.logout();
             } else if (status === 403) {
                 // NEW: Handle 403 Forbidden errors gracefully without logging out.
                 uiStore.addNotification('Permission Denied. You do not have access to this resource.', 'error');

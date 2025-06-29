@@ -114,7 +114,7 @@ const uniqueId = `menu-trigger-${Math.random().toString(36).substr(2, 9)}`;
                   <div class="px-3 py-1 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
                       {{ item.label }}
                   </div>
-                  <li v-for="subItem in item.items" :key="subItem.id" @click="selectOption(subItem.id)" class="text-gray-900 dark:text-gray-100 cursor-pointer select-none relative py-2 pl-3 pr-9 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700">
+                  <li v-for="subItem in item.items" :title="subItem.description" :key="subItem.id" @click="selectOption(subItem.id)" class="text-gray-900 dark:text-gray-100 cursor-pointer select-none relative py-2 pl-3 pr-9 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700">
                       <div class="flex items-center space-x-2">
                           <img v-if="subItem.icon_base64" :src="subItem.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0"/>
                           <div v-else class="h-6 w-6 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0"></div>

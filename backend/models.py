@@ -4,7 +4,7 @@ from typing import List, Dict, Optional, Any
 
 from pydantic import BaseModel, Field, constr, field_validator, validator, EmailStr
 from backend.database_setup import FriendshipStatus
-
+from enum import Enum
 # --- User Management & Authentication Models ---
 
 class Token(BaseModel):
@@ -83,6 +83,39 @@ class UserPasswordChange(BaseModel):
 class UserPasswordResetAdmin(BaseModel):
     new_password: constr(min_length=8)
 
+class PostVisibility(str, Enum):
+    PUBLIC = "PUBLIC"
+    FOLLOWERS = "FOLLOWERS"
+    FRIENDS = "FRIENDS"
+
+
+class AuthorPublic(BaseModel):
+    id: int
+    username: str
+    icon: Optional[str] = None
+    model_config = {"from_attributes": True}
+
+class PostBase(BaseModel):
+    content: str = Field(..., max_length=10000)
+    visibility: PostVisibility = PostVisibility.PUBLIC
+
+class PostCreate(PostBase):
+    media: Optional[List[Dict[str, Any]]] = None # e.g., [{"type": "image", "url": "..."}, {"type": "link", "url": "..."}]
+
+class PostUpdate(BaseModel):
+    content: Optional[str] = Field(None, min_length=1, max_length=10000)
+    visibility: Optional[PostVisibility] = None
+
+class PostPublic(PostBase):
+    id: int
+    author: AuthorPublic
+    media: Optional[List[Dict[str, Any]]] = None
+    visibility: str  # 👈 fix here
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    model_config = {"from_attributes": True}
+
+
 class UserPublic(UserLLMParams):
     id: int
     username: str
@@ -106,6 +139,7 @@ class UserPublic(UserLLMParams):
     model_config = {"from_attributes": True}
 
 class UserAuthDetails(UserLLMParams):
+    id: int
     username: str
     is_admin: bool
     is_active: bool
