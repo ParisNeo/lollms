@@ -7,11 +7,13 @@ import json
 import time
 from pathlib import Path
 from datetime import datetime
+from ascii_colors import trace_exception
 from typing import List, Dict, Any
 
 import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, inspect
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from PIL import Image
 
@@ -19,7 +21,8 @@ from backend.database_setup import User as LollmsUser, get_db as get_lollms_db
 from backend.security import get_password_hash
 from backend.session import get_user_data_root
 from lollms_client import LollmsDiscussion
-
+from backend.session import get_user_discussion_path, get_user_lollms_client
+from backend.discussion import get_user_discussion_manager, get_user_discussion
 # --- Helper Functions ---
 
 def _fetch_and_process_icon(image_url: str) -> str | None:
@@ -46,161 +49,305 @@ def _fetch_and_process_icon(image_url: str) -> str | None:
         print(f"    - WARNING: Could not process icon from {image_url}. Error: {e}")
     return None
 
-def _migrate_discussions_for_user(user_name: str, openwebui_user_id: str, temp_dir: Path):
-    """Migrates all discussions for a single user."""
-    print(f"  - Searching for discussion database for user ID: {openwebui_user_id}")
-    
-    # OpenWebUI names discussion dbs like `discussions_db_13d71e21-....`
-    discussion_db_path = None
-    for f in temp_dir.iterdir():
-        if f.name.startswith("discussions_") and openwebui_user_id in f.name:
-            discussion_db_path = f
-            break
-            
-    if not discussion_db_path:
-        print(f"  - INFO: No discussion database found for user '{user_name}'. Skipping discussion migration.")
-        return 0
+def _migrate_discussions_for_user(user_id: str, temp_dir: Path):
+    """Migrates all discussions for a single user from the web_ui.db database."""
+    print(f"  - Searching for discussions for user ID: {user_id}")
 
-    print(f"  - Found discussion DB: {discussion_db_path.name}. Processing...")
-    discussion_engine = create_engine(f"sqlite:///{discussion_db_path}")
+    db_path = find_database_files(temp_dir)
+    if len(db_path) == 0:
+        print("CRITICAL: 'database.db' not found in uploaded files. Aborting migration.")
+        shutil.rmtree(temp_dir)
+        return
+
+    db_path = db_path[0]
+
+    print(f"  - Found database: {db_path.name}. Processing...")
+    discussion_engine = create_engine(f"sqlite:///{db_path}")
     DiscussionSession = sessionmaker(bind=discussion_engine)
     discussion_session = DiscussionSession()
+    result = discussion_session.execute(
+        text("SELECT id, name FROM user WHERE id = :user_id"),
+        {"user_id": user_id}
+    )
+    source_user = result.first()[1]
     
     try:
-        discussions_query = text("SELECT id, discussion_metadata FROM discussions")
-        messages_query = text("SELECT id, discussion_id, parent_id, sender, content, created_at FROM messages ORDER BY created_at ASC")
-
-        discussions = discussion_session.execute(discussions_query).fetchall()
-        messages = discussion_session.execute(messages_query).fetchall()
-        
-        messages_by_discussion: Dict[str, List[Dict[str, Any]]] = {}
-        for msg in messages:
-            if msg.discussion_id not in messages_by_discussion:
-                messages_by_discussion[msg.discussion_id] = []
-            messages_by_discussion[msg.discussion_id].append(dict(msg._mapping))
+        # Query the 'chat' table to get discussions for the user
+        discussions_query = text(
+            "SELECT id, chat FROM chat WHERE user_id = :user_id"
+        )
+        discussions = discussion_session.execute(discussions_query, {"user_id": user_id}).fetchall()
 
         migrated_discussions_count = 0
         for disc in discussions:
-            # Create a LollmsDiscussion object
             discussion_id = disc.id
-            metadata = json.loads(disc.discussion_metadata) if disc.discussion_metadata else {}
-            title = metadata.get("title", f"Imported Discussion {discussion_id[:8]}")
+            chat_data = json.loads(disc.chat)
+            if chat_data is None:
+                print(f"  - WARNING: No chat data found for discussion {discussion_id}. Skipping.")
+                continue
 
-            # Prepare the LollmsDiscussion object
-            lollms_discussion = LollmsDiscussion.create_discussion(
-                discussion_id=discussion_id,
-                title=title
+            try:
+                messages = chat_data.get("history",{}).get("messages", [])  # Access messages within chat data
+                title = chat_data.get("title", f"Imported Discussion {discussion_id[:8]}")
+            except AttributeError:
+                print(f"  - WARNING: Invalid chat data format for discussion {discussion_id}. Skipping.")
+                continue
+
+            # Create a LollmsDiscussion object
+            dm = get_user_discussion_manager(source_user)
+            lc = get_user_lollms_client(source_user)
+            lollms_discussion = LollmsDiscussion.create_new(
+                lollms_client=lc, db_manager=dm, id=discussion_id,
+                autosave=True,
+                discussion_metadata={"title": f"New Discussion {discussion_id[:8]}"},
             )
-            
+
             # Add messages to the discussion
-            discussion_messages = messages_by_discussion.get(discussion_id, [])
-            for msg_data in discussion_messages:
-                lollms_discussion.add_message(
-                    message_type=1 if msg_data["sender"].lower() == "user" else 2, # 1 for user, 2 for bot
-                    content=msg_data["content"],
-                    parent_message_id=msg_data["parent_id"],
-                    message_id=msg_data["id"],
-                    # Other fields can be added if needed
-                )
-            
+            for _, msg in messages.items():
+                try:
+                    content = msg.get("content", "")
+                    sender = msg.get("sender", "unknown")
+                    message_type = "user" if sender.lower() == "user" else "assistant"  # 1 for user, 2 for bot
+                    parent_message_id = msg.get("parent_id", None)
+                    message_id = msg.get("id", None)
+
+                    lollms_discussion.add_message(
+                        sender=sender,
+                        sender_type=message_type,
+                        message_type=message_type,
+                        content=content,
+                        parent_message_id=parent_message_id,
+                        message_id=message_id,
+                    )
+                except Exception as e:
+                    print(f"  - WARNING: Error processing message: {e}. Skipping.")
+
             # Save the discussion to the user's folder
-            user_discussions_path = get_user_data_root(user_name) / "discussions"
-            user_discussions_path.mkdir(parents=True, exist_ok=True)
-            lollms_discussion.save(user_discussions_path)
+            lollms_discussion.touch()
             migrated_discussions_count += 1
 
-        print(f"  - SUCCESS: Migrated {migrated_discussions_count} discussions for user '{user_name}'.")
+        print(f"  - SUCCESS: Migrated {migrated_discussions_count} discussions for user '{source_user}'.")
         return migrated_discussions_count
 
     except Exception as e:
-        print(f"  - ERROR: Failed to migrate discussions for user '{user_name}'. Error: {e}")
+        print(f"  - ERROR: Failed to migrate discussions for user '{source_user}'. Error: {e}")
         return 0
     finally:
         discussion_session.close()
 
 # --- Main Migration Function ---
+def find_database_files(directory):
+    # Ensure the directory exists
+    if not os.path.exists(directory):
+        print(f"The directory {directory} does not exist.")
+        return
 
+    # Use glob to find all .db and .sql3 files
+    db_files = list(Path(directory).glob('*.db'))
+    sql3_files = list(Path(directory).glob('*.sql3'))
+
+    # Combine the results
+    database_files = db_files + sql3_files
+
+    return database_files
+
+def discover_database_schema(db_path: str):
+    """
+    Discovers all tables in a SQLite database and their content,
+    outputting the schema in Markdown format.
+
+    Args:
+        db_path: The path to the SQLite database file.
+
+    Returns:
+        A string containing the Markdown representation of the database schema.
+        Returns None if there's an error connecting to the database.
+    """
+    try:
+        engine = create_engine(f"sqlite:///{db_path}")
+        inspector = inspect(engine)
+
+        markdown_output = "# Database Schema\n\n"
+
+        table_names = inspector.get_table_names()
+
+        if not table_names:
+            return "## No tables found in the database."
+
+        for table_name in table_names:
+            markdown_output += f"## Table: `{table_name}`\n\n"
+            columns = inspector.get_columns(table_name)
+
+            if not columns:
+                markdown_output += "  *No columns found.*\n\n"
+                continue
+
+            markdown_output += "| Column Name | Data Type | Nullable |\n"
+            markdown_output += "|---|---|---|\n"
+            for column in columns:
+                markdown_output += f"| `{column['name']}` | `{column['type']}` | `{column['nullable']}` |\n"
+            markdown_output += "\n"
+
+            # Fetch a few rows of data (limit to 5 for brevity)
+            # try:
+            #     with engine.connect() as connection:
+            #         result = connection.execute(text(f"SELECT * FROM {table_name} LIMIT 5"))
+            #         rows = result.fetchall()
+
+            #         if rows:
+            #             markdown_output += "### Sample Data:\n\n"
+            #             # Create a header row
+            #             header = [column['name'] for column in columns]
+            #             markdown_output += "| " + " | ".join(header) + " |\n"
+            #             markdown_output += "| " + " | ".join(["---"] * len(header)) + " |\n"
+
+            #             for row in rows:
+            #                 markdown_output += "| " + " | ".join(str(value) for value in row) + " |\n"
+            #             markdown_output += "\n"
+            #         else:
+            #             markdown_output += "  *No data found in the table.*\n\n"
+            # except Exception as e:
+            #     markdown_output += f"  *Error fetching data: {e}*\n\n"
+
+        with open("database_schema.log","w",encoding="utf8", errors="ignore") as f:
+            f.write(markdown_output)
+        return markdown_output
+
+    except Exception as e:
+        print(f"Error connecting to the database: {e}")
+        return None
+def timestamp_to_datetime(timestamp):
+  """
+  Converts an integer timestamp to a datetime object.
+
+  Args:
+    timestamp: An integer representing the timestamp.
+
+  Returns:
+    A datetime object representing the timestamp, or None if the input is invalid.
+  """
+  try:
+    dt_object = datetime.fromtimestamp(timestamp)
+    return dt_object
+  except (TypeError, ValueError) as e:
+    print(f"Error converting timestamp: {e}")
+    return None    
+    
 def run_openwebui_migration(temp_dir_str: str):
     """
     Main background task to perform the full OpenWebUI migration.
-    
+
     Args:
         temp_dir_str: The string path to the temporary directory with uploaded DB files.
     """
     temp_dir = Path(temp_dir_str)
     print("\n--- Background OpenWebUI Migration Process Started ---")
-    
+
     # Find the main user database file
-    db_path = temp_dir / "database.db"
-    if not db_path.exists():
+    db_path = find_database_files(temp_dir)
+    if len(db_path) == 0:
         print("CRITICAL: 'database.db' not found in uploaded files. Aborting migration.")
         shutil.rmtree(temp_dir)
         return
 
+    db_path = db_path[0]
+    schema = discover_database_schema(db_path)
+    # print(schema)
     source_engine = create_engine(f"sqlite:///{db_path}")
     SourceSession = sessionmaker(bind=source_engine)
     source_session = SourceSession()
-    
     lollms_db_session = next(get_lollms_db())
 
-    try:
-        source_users_query = text("SELECT id, name, email, password, role, profile_image_url, created_at, last_active_at FROM users")
-        source_users = source_session.execute(source_users_query).fetchall()
-        
-        print(f"INFO: Found {len(source_users)} users in 'database.db'.")
-        migrated_users_count = 0
-        skipped_users_count = 0
+    max_retries = 5
+    retry_delay = 0.5  # seconds
 
-        for user in source_users:
-            print(f"\nProcessing user: {user.name} ({user.email})")
-            
-            # Check if user already exists
-            existing_user = lollms_db_session.query(LollmsUser).filter(LollmsUser.email == user.email).first()
-            if existing_user:
-                print("  - INFO: User already exists. Skipping user data migration.")
-                skipped_users_count += 1
-                _migrate_discussions_for_user(existing_user.username, user.id, temp_dir)
-                continue
+    for attempt in range(max_retries):
+        try:
+            # Changed query to select from the 'auth' table
+            source_users_query = text("""
+SELECT 
+    u.id, 
+    u.name, 
+    u.email, 
+    a.password,  -- Replaces u.oauth_sub
+    u.role, 
+    u.profile_image_url, 
+    u.created_at, 
+    u.last_active_at
+FROM user u
+JOIN auth a ON u.email = a.email
+""")
+            source_users = source_session.execute(source_users_query).fetchall()
 
-            # Migrate user data
-            icon_b64 = _fetch_and_process_icon(user.profile_image_url)
-            password_hash_with_marker = f"argon2_hash:{user.password}"
-            
-            new_lollms_user = LollmsUser(
-                username=user.name,
-                email=user.email,
-                hashed_password=password_hash_with_marker,
-                is_admin=(user.role == 'admin'),
-                is_active=True,
-                created_at=user.created_at or datetime.utcnow(),
-                last_activity_at=user.last_active_at,
-                icon=icon_b64
-            )
-            
-            lollms_db_session.add(new_lollms_user)
+            print(f"INFO: Found {len(source_users)} users in 'database.db'.")
+            migrated_users_count = 0
+            skipped_users_count = 0
+
+            for user in source_users:
+                print(f"\nProcessing user: {user.name} ({user.email})")
+
+                # Check if user already exists
+                existing_user = lollms_db_session.query(LollmsUser).filter(LollmsUser.email == user.email).first()
+                if existing_user:
+                    print("  - INFO: User already exists. Skipping user data migration.")
+                    skipped_users_count += 1
+                    _migrate_discussions_for_user(user.id, temp_dir)
+                    continue
+
+                # Migrate user data
+                icon_b64 = _fetch_and_process_icon(user.profile_image_url)
+                password_hash_with_marker = f"argon2_hash:{user.password}"
+
+                new_lollms_user = LollmsUser(
+                    username=user.name,
+                    email=user.email,
+                    hashed_password=password_hash_with_marker,
+                    is_admin=(user.role == 'admin'),
+                    is_active=True,
+                    created_at=timestamp_to_datetime(user.created_at) or datetime.utcnow(),
+                    last_activity_at=timestamp_to_datetime(user.last_active_at),
+                    icon=icon_b64,
+                    lollms_model_name = "mistral-small3.1:latest"
+                )
+
+                lollms_db_session.add(new_lollms_user)
+                try:
+                    lollms_db_session.commit()
+                    print(f"  - SUCCESS: Migrated user '{user.name}'.")
+                    migrated_users_count += 1
+                    # Now migrate their discussions
+                    _migrate_discussions_for_user(  user.id, temp_dir)
+
+                except IntegrityError as e:
+                    trace_exception(e)
+                    lollms_db_session.rollback()
+                    print(f"  - ERROR: Failed to insert user '{user.name}'. Username might be a duplicate. Skipping. Error: {e.orig}")
+                    skipped_users_count += 1
+
+                time.sleep(0.1)
+
+            print("\n--- Migration Task Finished ---")
+            print(f"Migrated users: {migrated_users_count}")
+            print(f"Skipped users: {skipped_users_count}")
+            break  # Exit the retry loop if successful
+
+        except Exception as e:
+            trace_exception(e)  # Print the full traceback
+            print(f"Attempt {attempt + 1} failed: {e}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+            else:
+                print("CRITICAL: Migration failed after multiple retries.")
+                # Handle the error appropriately (e.g., log it, notify the user)
+                return
+
+        finally:
+            source_session.close()
+            lollms_db_session.close()
+            # Clean up the temporary directory
             try:
-                lollms_db_session.commit()
-                print(f"  - SUCCESS: Migrated user '{user.name}'.")
-                migrated_users_count += 1
-                # Now migrate their discussions
-                _migrate_discussions_for_user(new_lollms_user.username, user.id, temp_dir)
-
-            except IntegrityError as e:
-                lollms_db_session.rollback()
-                print(f"  - ERROR: Failed to insert user '{user.name}'. Username might be a duplicate. Skipping. Error: {e.orig}")
-                skipped_users_count += 1
-            
-            time.sleep(0.1)
-
-        print("\n--- Migration Task Finished ---")
-        print(f"Migrated users: {migrated_users_count}")
-        print(f"Skipped users: {skipped_users_count}")
-
-    except Exception as e:
-        print(f"CRITICAL: An uncaught error occurred during migration. {e}")
-    finally:
-        source_session.close()
-        lollms_db_session.close()
-        # Clean up the temporary directory
-        shutil.rmtree(temp_dir)
-        print(f"INFO: Cleaned up temporary directory: {temp_dir}")
+                shutil.rmtree(temp_dir)
+                print(f"INFO: Cleaned up temporary directory: {temp_dir}")
+            except Exception as e:
+                print(f"Error cleaning up temporary directory: {e}")
