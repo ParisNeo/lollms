@@ -34,7 +34,7 @@ from backend.config import (
     DISCUSSION_ASSETS_DIR_NAME,
     DATASTORES_DIR_NAME,
 )
-
+from backend.settings import settings
 # --- safe_store is optional ---
 try:
     import safe_store
@@ -167,7 +167,7 @@ def get_user_lollms_client(username: str) -> LollmsClient:
         raise HTTPException(status_code=500, detail="User session not found for LollmsClient.")
     
     if session.get("lollms_client") is None:
-        model_name = session["lollms_model_name"]
+        model_name = session.get("lollms_model_name", settings.get("default_lollms_model_name"))
         client_init_params = session.get("llm_params", {}).copy()
         
         client_init_params.update({
