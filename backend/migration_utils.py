@@ -97,16 +97,18 @@ def _migrate_discussions_for_user(user_id: str, temp_dir: Path):
             dm = get_user_discussion_manager(source_user)
             lc = get_user_lollms_client(source_user)
             lollms_discussion = LollmsDiscussion.create_new(
-                lollms_client=lc, db_manager=dm, id=discussion_id,
+                lollms_client=lc, 
+                db_manager=dm,
+                id=discussion_id,
                 autosave=True,
-                discussion_metadata={"title": f"New Discussion {discussion_id[:8]}"},
+                discussion_metadata={"title": title},
             )
 
             # Add messages to the discussion
             for _, msg in messages.items():
                 try:
                     content = msg.get("content", "")
-                    sender = msg.get("sender", "unknown")
+                    sender = msg.get("role", "unknown")
                     message_type = "user" if sender.lower() == "user" else "assistant"  # 1 for user, 2 for bot
                     parent_message_id = msg.get("parent_id", None)
                     message_id = msg.get("id", None)
