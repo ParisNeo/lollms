@@ -159,8 +159,8 @@ if [[ "$create_service" == "Y" || "$create_service" == "y" ]]; then
 
     # Create cache directory for the lollms user
     echo "🔧 Creating cache directory for the lollms user..."
-    sudo mkdir -p /home/lollms/.cache
-    sudo chown -R lollms:lollms /home/lollms/.cache
+    sudo mkdir -p /home/lollms/.cache 2>&1 >/dev/null || echo "Failed to create cache directory"
+    sudo chown -R lollms:lollms /home/lollms/.cache 2>&1 >/dev/null || echo "Failed to change ownership"
 
     # Make run.sh executable
     echo "🔧 Making run.sh executable..."
