@@ -131,6 +131,8 @@ if [ -f "venv/bin/activate" ]; then
     echo 'source ./venv/bin/activate'
 fi
 
+pip install -r requirements.txt
+
 echo "You can now start your application!"
 
 # Option to create a systemd service
