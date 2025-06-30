@@ -312,7 +312,7 @@ async def update_my_details(
             session["lollms_client"] = None # Force re-initialization on next use
     
     # Return the fully updated user details by re-running the dependency
-    return await get_current_active_user(db_user)
+    return get_current_active_user(db_user)
 
 
 @auth_router.post("/change-password", response_model=Dict[str, str])
