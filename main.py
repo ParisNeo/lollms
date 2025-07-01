@@ -2,20 +2,18 @@
 import os
 import shutil
 import uuid
-import json
 import datetime
 import traceback
 from pathlib import Path
-from typing import List, Dict, Optional, Any, cast
+from typing import List, Dict, Optional
 
 from fastapi import (
     FastAPI, HTTPException, Depends, Request, File, UploadFile,
-    Form, APIRouter, Response, Query, BackgroundTasks
+    Form, APIRouter
 )
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, constr
 from sqlalchemy.orm import Session
 from werkzeug.utils import secure_filename
 
@@ -31,11 +29,11 @@ from backend.database_setup import (
 from backend.discussion import LegacyDiscussion
 from backend.session import (
     get_user_data_root, get_user_discussion_path, get_current_active_user,
-    get_user_lollms_client, get_user_temp_uploads_path, user_sessions, get_safe_store_instance,
-    get_datastore_db_path
+    get_user_lollms_client, get_user_temp_uploads_path, user_sessions,
+    get_user_discussion_assets_path
 )
-from lollms_client import LollmsClient, LollmsDataManager
-from backend.models import UserLLMParams, UserAuthDetails, DataStoreCreate, DataStoreEdit, DataStoreShareRequest, DataStorePublic
+from lollms_client import LollmsDataManager
+from backend.models import UserLLMParams, UserAuthDetails
 
 from backend.routers.auth import auth_router
 from backend.routers.discussion import discussion_router
@@ -44,7 +42,7 @@ from backend.routers.languages import languages_router
 from backend.routers.personalities import personalities_router
 from backend.routers.friends import friends_router
 from backend.routers.dm import dm_router
-from backend.routers.stores import store_files_router
+from backend.routers.stores import store_files_router, datastore_router
 from backend.routers.mcp import mcp_router, discussion_tools_router
 from backend.routers.social import social_router
 from backend.routers.users import users_router
@@ -129,6 +127,32 @@ async def on_startup() -> None:
     finally:
         if db_for_defaults: db_for_defaults.close()
 
+# --- Root and Static File Endpoints ---
+
+# Serve discussion assets (uploaded images)
+user_assets_path_base = APP_DATA_DIR # Used to construct full path for StaticFiles
+# Mount dynamically if needed, or ensure user_assets_path_base/<username>/discussion_assets exists
+# For simplicity, assuming /user_assets/<username>/<discussion_id>/<filename> structure client-side
+# This requires a more dynamic way to serve files or a wildcard path.
+# For now, let client fetch from a dedicated endpoint if needed, or keep images as base64 in YAML (not ideal).
+# Let's make a dedicated endpoint.
+
+@app.get("/user_assets/{username}/{discussion_id}/{filename}", include_in_schema=False)
+async def get_discussion_asset(
+    username: str, discussion_id: str, filename: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+) -> FileResponse:
+    # Security: Ensure the currently logged-in user is requesting their own asset
+    # or an asset from a discussion they have access to (if sharing discussions is implemented broadly)
+    if current_user.username != username:
+        # Basic check: If a more complex sharing model for discussions is added, this needs adjustment
+        raise HTTPException(status_code=403, detail="Forbidden to access assets of another user.")
+
+    asset_path = get_user_discussion_assets_path(username) / discussion_id / secure_filename(filename)
+    if not asset_path.is_file():
+        raise HTTPException(status_code=404, detail="Asset not found.")
+    return FileResponse(asset_path)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -145,6 +169,9 @@ app.include_router(personalities_router)
 app.include_router(mcp_router)
 app.include_router(discussion_tools_router)
 app.include_router(store_files_router)
+app.include_router(datastore_router)
+
+
 app.include_router(social_router)
 app.include_router(friends_router)
 app.include_router(dm_router)
@@ -264,18 +291,8 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
     return {"message": "No changes to LLM parameters."}
 app.include_router(lollms_config_router)
 
-datastore_router = APIRouter(prefix="/api/datastores", tags=["RAG DataStores"])
-@datastore_router.post("", response_model=DataStorePublic, status_code=201)
-async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    if db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_create.name).first(): raise HTTPException(status_code=400, detail=f"DataStore '{ds_create.name}' already exists.")
-    new_ds_db_obj = DBDataStore(owner_user_id=user_db_record.id, name=ds_create.name, description=ds_create.description)
-    try:
-        db.add(new_ds_db_obj); db.commit(); db.refresh(new_ds_db_obj)
-        get_safe_store_instance(current_user.username, new_ds_db_obj.id, db)
-        return DataStorePublic.model_validate(new_ds_db_obj)
-    except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"DB error: {e}")
-app.include_router(datastore_router)
+
+
 
 VUE_APP_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 if VUE_APP_DIR.exists() and (VUE_APP_DIR / "index.html").exists():
