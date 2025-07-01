@@ -13,6 +13,9 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 const dataStore = useDataStore();
 
+// --- FIX: Create a computed property to read mainView from the uiStore ---
+const mainView = computed(() => uiStore.mainView);
+
 const searchQuery = ref('');
 const sortMethod = ref('date_desc');
 const isSortMenuOpen = ref(false);
@@ -30,7 +33,6 @@ const activeModelName = computed({
 });
 
 const selectedPersonality = computed(() => {
-    // Add a check to ensure the stores are populated
     const allPersonalities = [...(dataStore.userPersonalities || []), ...(dataStore.publicPersonalities || [])];
     return allPersonalities.find(p => p.id === activePersonalityId.value);
 });
@@ -55,7 +57,6 @@ const personalityItems = computed(() => {
 });
 
 const modelItems = computed(() => {
-    // Add a check here too
     if (!dataStore.availableLollmsModels) return [];
     return dataStore.availableLollmsModels.map(m => ({ value: m.name, label: m.name }));
 });
@@ -82,18 +83,14 @@ watch(isSearchVisible, (isVisible) => {
 });
 
 const filteredAndSortedDiscussions = computed(() => {
-  // --- THIS IS THE CRITICAL FIX ---
-  // Always ensure discussionsStore.discussions is an object before using Object.values
   const all = discussionsStore.discussions ? Object.values(discussionsStore.discussions) : [];
-  
-  if (all.length === 0) return []; // Return early if there's nothing to process
+  if (all.length === 0) return [];
 
   const filtered = all.filter(d => 
     d && (d.title || '').toLowerCase().includes(searchQuery.value.toLowerCase())
   );
 
   return filtered.sort((a, b) => {
-    // Add checks for a and b to prevent errors during sorting if data is malformed
     if (!a || !b) return 0;
     switch (sortMethod.value) {
       case 'date_asc': return new Date(a.last_activity_at || 0) - new Date(b.last_activity_at || 0);
@@ -106,7 +103,6 @@ const filteredAndSortedDiscussions = computed(() => {
   });
 });
 
-// These computed properties will now be safe because filteredAndSortedDiscussions always returns an array.
 const starredDiscussions = computed(() => filteredAndSortedDiscussions.value.filter(d => d.is_starred));
 const regularDiscussions = computed(() => filteredAndSortedDiscussions.value.filter(d => !d.is_starred));
 
@@ -132,22 +128,12 @@ function setMainView(viewName) {
 
         <div class="flex-grow flex justify-end items-center space-x-1">
             <button title="Feed" @click="setMainView('feed')" class="main-nav-btn" :class="{ 'active': mainView === 'feed' }">
-            <!-- Background card -->
             <svg width="24" height="24" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" fill="none">
-              <!-- Outer rectangle (representing a feed card) -->
               <rect x="3" y="3" width="18" height="18" rx="3" fill="#f5f5f5" stroke="#888" stroke-width="1.5"/>
-
-              <!-- Avatar circle -->
               <circle cx="7" cy="8" r="1.5" fill="#888" />
-
-              <!-- Name line -->
               <rect x="10" y="7" width="8" height="1.5" rx="0.75" fill="#bbb" />
-
-              <!-- Content lines -->
               <rect x="5" y="11" width="14" height="1.5" rx="0.75" fill="#ccc" />
               <rect x="5" y="14" width="12" height="1.5" rx="0.75" fill="#ccc" />
-
-              <!-- Action dots (like/comment) -->
               <circle cx="8" cy="18" r="1" fill="#e74c3c"/>
               <circle cx="12" cy="18" r="1" fill="#3498db"/>
             </svg>
@@ -195,7 +181,6 @@ function setMainView(viewName) {
                 </SimpleSelectMenu>
             </div>
 
-            <!-- FIX: Apply v-on-click-outside to the parent div -->
             <div class="relative" v-on-click-outside="() => isSortMenuOpen = false">
                 <button 
                     @click="isSortMenuOpen = !isSortMenuOpen"

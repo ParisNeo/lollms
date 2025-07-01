@@ -1,307 +1,100 @@
-# Standard Library Imports
-import os
-import shutil
-import uuid
-import json
-from pathlib import Path
-from typing import List, Dict, Optional, Any, cast, Union, Tuple, AsyncGenerator
-import datetime
-import asyncio
-import threading
-import traceback
-import io
-
-# Third-Party Imports
-import toml
-import yaml
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends,
-    Request,
-    File,
-    UploadFile,
-    Form,
-    APIRouter,
-    Response,
-    Query,
-    BackgroundTasks
-)
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import (
-    HTMLResponse,
-    StreamingResponse,
-    JSONResponse,
-    FileResponse,
-)
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, constr, field_validator, validator
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy import (
-    or_, and_ # Add this line
-)
-from dataclasses import dataclass, field as dataclass_field
-from werkzeug.utils import secure_filename
-from pydantic import BaseModel, Field, constr, field_validator, validator # Ensure these are imported
-import datetime # Ensure datetime is imported
+from sqlalchemy import or_, union, distinct, select
+from typing import List
 
-from backend.database_setup import Personality as DBPersonality # Add this import at the top of main.py
+from backend.database_setup import get_db, User as DBUser, DirectMessage as DBDirectMessage
+from backend.models import UserAuthDetails, UserPublic, DirectMessageCreate, DirectMessagePublic
+from backend.session import get_current_active_user
+from backend.ws_manager import manager
 
-# Local Application Imports
-from backend.database_setup import (
-    User as DBUser,
-    get_db,
-    get_friendship_record,
-    FriendshipStatus,Friendship,
-    DirectMessage
-)
-from lollms_client import (
-    LollmsClient,
-    MSG_TYPE,
-    LollmsDiscussion as LollmsClientDiscussion,
-    ELF_COMPLETION_FORMAT, # For client params
+dm_router = APIRouter(
+    prefix="/api/dm",
+    tags=["Direct Messages"],
+    dependencies=[Depends(get_current_active_user)]
 )
 
-# safe_store is expected to be installed
-try:
-    import safe_store
-    from safe_store import (
-        LogLevel as SafeStoreLogLevel,
-    )
-except ImportError:
-    print(
-        "WARNING: safe_store library not found. RAG features will be disabled. Install with: pip install safe_store[all]"
-    )
-    safe_store = None
-    SafeStoreLogLevel = None
-
-# --- Pydantic Models for API ---
-from backend.models import (
-DirectMessagePublic,
-DirectMessageCreate,
-
-)
-from backend.session import (
-
-    get_current_db_user_from_token,
-    get_db
-    )
-from backend.routers.friends import get_my_friends
-security = HTTPBasic()
-
-dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
-
-@dm_router.post("/send", response_model=DirectMessagePublic, status_code=201)
-async def send_direct_message(
-    dm_data: DirectMessageCreate,
-    current_db_user: DBUser = Depends(get_current_db_user_from_token),
-    db: Session = Depends(get_db)
-) -> DirectMessagePublic:
-    if current_db_user.id == dm_data.receiver_user_id:
-        raise HTTPException(status_code=400, detail="You cannot send a message to yourself.")
-
-    receiver_user = db.query(DBUser).filter(DBUser.id == dm_data.receiver_user_id).first()
-    if not receiver_user:
-        raise HTTPException(status_code=404, detail="Receiver user not found.")
-
-    # Check friendship status and blocks
-    friendship = get_friendship_record(db, current_db_user.id, receiver_user.id) # Uses helper from friends_router
-
-    if not friendship or friendship.status != FriendshipStatus.ACCEPTED:
-        # Check for blocks even if not "ACCEPTED" friends, as a block overrides everything
-        if friendship: # A record exists, check its status
-            if (friendship.status == FriendshipStatus.BLOCKED_BY_USER1 and friendship.user1_id == current_db_user.id) or \
-               (friendship.status == FriendshipStatus.BLOCKED_BY_USER2 and friendship.user2_id == current_db_user.id):
-                raise HTTPException(status_code=403, detail="You have blocked this user. Unblock them to send messages.")
-            if (friendship.status == FriendshipStatus.BLOCKED_BY_USER1 and friendship.user1_id == receiver_user.id) or \
-               (friendship.status == FriendshipStatus.BLOCKED_BY_USER2 and friendship.user2_id == receiver_user.id):
-                raise HTTPException(status_code=403, detail="You cannot send a message to this user as they have blocked you.")
-        # If no record or not accepted (and not blocked by receiver)
-        raise HTTPException(status_code=403, detail="You can only send messages to accepted friends who have not blocked you.")
-
-
-    new_dm = DirectMessage(
-        sender_id=current_db_user.id,
-        receiver_id=receiver_user.id,
-        content=dm_data.content
-        # image_references_json=dm_data.image_references_json # If supporting images
-    )
-    db.add(new_dm)
-    try:
-        db.commit()
-        db.refresh(new_dm)
-        # Eager load sender and receiver for username in response
-        db.refresh(new_dm, attribute_names=['sender', 'receiver'])
-        
-        return DirectMessagePublic(
-            id=new_dm.id,
-            sender_id=new_dm.sender_id,
-            sender_username=new_dm.sender.username,
-            receiver_id=new_dm.receiver_id,
-            receiver_username=new_dm.receiver.username,
-            content=new_dm.content,
-            sent_at=new_dm.sent_at,
-            read_at=new_dm.read_at
-            # image_references_json=new_dm.image_references_json
-        )
-    except Exception as e:
-        db.rollback()
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Database error sending message: {str(e)}")
-
-
-@dm_router.get("/conversation/{other_user_id_or_username}", response_model=List[DirectMessagePublic])
-async def get_dm_conversation(
-    other_user_id_or_username: str,
-    current_db_user: DBUser = Depends(get_current_db_user_from_token),
+@dm_router.get("/conversations", response_model=List[UserPublic])
+def get_user_conversations(
     db: Session = Depends(get_db),
-    before_message_id: Optional[int] = None, # For pagination: load messages before this ID
-    limit: int = Query(50, ge=1, le=100) # Pagination limit
-) -> List[DirectMessagePublic]:
-    other_user = None
-    try:
-        other_user_id_val = int(other_user_id_or_username)
-        other_user = db.query(DBUser).filter(DBUser.id == other_user_id_val).first()
-    except ValueError:
-        other_user = db.query(DBUser).filter(DBUser.username == other_user_id_or_username).first()
-
-    if not other_user:
-        raise HTTPException(status_code=404, detail="Other user not found.")
-    if other_user.id == current_db_user.id:
-        raise HTTPException(status_code=400, detail="Cannot fetch conversation with yourself.")
-
-    # Optional: Check friendship status before allowing to view conversation
-    # friendship = get_friendship_record(db, current_db_user.id, other_user.id)
-    # if not friendship or friendship.status != FriendshipStatus.ACCEPTED:
-    #     raise HTTPException(status_code=403, detail="You can only view conversations with accepted friends.")
-    # For now, allow viewing even if unfriended, but sending is restricted.
-
-    query = db.query(DirectMessage).options(
-        joinedload(DirectMessage.sender), joinedload(DirectMessage.receiver)
-    ).filter(
-        or_(
-            and_(DirectMessage.sender_id == current_db_user.id, DirectMessage.receiver_id == other_user.id),
-            and_(DirectMessage.sender_id == other_user.id, DirectMessage.receiver_id == current_db_user.id)
-        )
-    ).order_by(DirectMessage.sent_at.desc()) # Get newest first for pagination
-
-    if before_message_id:
-        before_message = db.query(DirectMessage).filter(DirectMessage.id == before_message_id).first()
-        if before_message:
-            query = query.filter(DirectMessage.sent_at < before_message.sent_at)
-        else: # Invalid before_message_id, return empty or error
-            return [] 
-            
-    messages_db = query.limit(limit).all()
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Retrieves a list of users with whom the current user has had a conversation.
+    """
+    sent_to_ids = select(distinct(DBDirectMessage.receiver_id)).where(DBDirectMessage.sender_id == current_user.id)
+    received_from_ids = select(distinct(DBDirectMessage.sender_id)).where(DBDirectMessage.receiver_id == current_user.id)
     
-    # Mark messages sent by the other user to current_user as read (if not already)
-    # This should ideally be a separate endpoint hit when user opens a conversation
-    unread_message_ids = [
-        msg.id for msg in messages_db 
-        if msg.receiver_id == current_db_user.id and msg.read_at is None
-    ]
-    if unread_message_ids:
-        db.query(DirectMessage).filter(
-            DirectMessage.id.in_(unread_message_ids)
-        ).update({"read_at": datetime.datetime.now(datetime.timezone.utc)}, synchronize_session=False)
-        db.commit()
-        # Re-fetch to get updated read_at times for the response (or update in-memory)
-        for msg in messages_db:
-            if msg.id in unread_message_ids:
-                msg.read_at = datetime.datetime.now(datetime.timezone.utc) # Approximate
+    # Create a union of the two queries
+    partner_ids_query = union(sent_to_ids, received_from_ids)
 
-    response_list = [
-        DirectMessagePublic(
-            id=msg.id,
-            sender_id=msg.sender_id,
-            sender_username=msg.sender.username,
-            receiver_id=msg.receiver_id,
-            receiver_username=msg.receiver.username,
-            content=msg.content,
-            sent_at=msg.sent_at,
-            read_at=msg.read_at
-            # image_references_json=msg.image_references_json
-        ) for msg in reversed(messages_db) # Reverse to show oldest first in the fetched page
-    ]
+    # FIX: Use the .subquery() method as required by SQLAlchemy for IN clauses.
+    # This turns the union into a proper subquery that can be used in the filter.
+    partners_subquery = partner_ids_query.subquery()
+    
+    partners_db = db.query(DBUser).filter(DBUser.id.in_(select(partners_subquery))).all()
+
+    # Explicitly convert each SQLAlchemy DBUser object into a Pydantic UserPublic model.
+    response_list = [UserPublic.model_validate(user) for user in partners_db]
+    
     return response_list
 
-# Endpoint to explicitly mark messages as read (better than doing it in GET)
-@dm_router.post("/conversation/{other_user_id}/mark_read", status_code=200)
-async def mark_dm_conversation_as_read(
+
+@dm_router.get("/conversation/{other_user_id}", response_model=List[DirectMessagePublic])
+def get_message_history(
     other_user_id: int,
-    current_db_user: DBUser = Depends(get_current_db_user_from_token),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    skip: int = 0,
+    limit: int = 50
 ):
-    # Mark all unread messages received by current_db_user from other_user_id as read
-    updated_count = db.query(DirectMessage).filter(
-        DirectMessage.sender_id == other_user_id,
-        DirectMessage.receiver_id == current_db_user.id,
-        DirectMessage.read_at == None
-    ).update({"read_at": datetime.datetime.now(datetime.timezone.utc)}, synchronize_session=False)
-    
-    db.commit()
-    return {"message": f"{updated_count} messages marked as read."}
-
-
-# Placeholder for listing DM conversations (threads)
-# This would typically involve getting the latest message from each unique correspondent.
-@dm_router.get("/conversations", response_model=List[Dict[str, Any]]) # Response model needs to be defined
-async def list_dm_conversations(
-    current_db_user: DBUser = Depends(get_current_db_user_from_token),
-    db: Session = Depends(get_db)
-):
-    # This is a complex query to get distinct conversation partners and last message.
-    # Using a subquery to get the latest message_id for each conversation pair.
-    # SQL might look like:
-    # SELECT dm.*, u.username as partner_username FROM direct_messages dm
-    # JOIN (
-    #   SELECT
-    #     CASE WHEN sender_id = :current_user_id THEN receiver_id ELSE sender_id END as partner_id,
-    #     MAX(id) as max_id
-    #   FROM direct_messages
-    #   WHERE sender_id = :current_user_id OR receiver_id = :current_user_id
-    #   GROUP BY partner_id
-    # ) latest_msg ON dm.id = latest_msg.max_id
-    # JOIN users u ON u.id = latest_msg.partner_id
-    # ORDER BY dm.sent_at DESC;
-
-    # SQLAlchemy equivalent is more involved. For now, a simplified version:
-    # Get all friends, then for each friend, get the last message. This is N+1.
-    # A more optimized query is needed for production.
-
-    # Simplified approach: Get all friends, then fetch last message for each.
-    friends_response = await get_my_friends(current_db_user, db) # Re-use existing friends list endpoint logic
-    
-    conversations = []
-    for friend in friends_response:
-        last_message = db.query(DirectMessage).filter(
+    """
+    Retrieves the message history between the current user and another user.
+    """
+    query = (
+        db.query(DBDirectMessage)
+        .options(joinedload(DBDirectMessage.sender), joinedload(DBDirectMessage.receiver))
+        .filter(
             or_(
-                and_(DirectMessage.sender_id == current_db_user.id, DirectMessage.receiver_id == friend.id),
-                and_(DirectMessage.sender_id == friend.id, DirectMessage.receiver_id == current_db_user.id)
+                (DBDirectMessage.sender_id == current_user.id) & (DBDirectMessage.receiver_id == other_user_id),
+                (DBDirectMessage.sender_id == other_user_id) & (DBDirectMessage.receiver_id == current_user.id)
             )
-        ).order_by(DirectMessage.sent_at.desc()).first()
-
-        unread_count = db.query(DirectMessage).filter(
-            DirectMessage.sender_id == friend.id, # Messages from friend
-            DirectMessage.receiver_id == current_db_user.id, # To me
-            DirectMessage.read_at == None
-        ).count() or 0
-
-        if last_message:
-            conversations.append({
-                "partner_user_id": friend.id,
-                "partner_username": friend.username,
-                "last_message_content": last_message.content[:50] + "..." if last_message.content and len(last_message.content) > 50 else last_message.content,
-                "last_message_sent_at": last_message.sent_at,
-                "last_message_sender_id": last_message.sender_id,
-                "unread_count": unread_count
-            })
-        # else: # Friend with no messages yet, could still be listed
-        #    conversations.append({ "partner_user_id": friend.id, "partner_username": friend.username, "unread_count": 0})
+        )
+        .order_by(DBDirectMessage.sent_at.desc())
+        .offset(skip)
+        .limit(limit)
+    )
+    messages = query.all()
+    
+    response_list = [DirectMessagePublic.model_validate(msg) for msg in messages]
+    
+    return response_list[::-1]
 
 
-    # Sort conversations by last message time, descending
-    conversations.sort(key=lambda x: x.get("last_message_sent_at", datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)), reverse=True)
-    return conversations
+@dm_router.post("/send", response_model=DirectMessagePublic, status_code=status.HTTP_201_CREATED)
+async def send_direct_message(
+    dm_data: DirectMessageCreate,
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Saves a direct message to the database and pushes it to the recipient
+    via WebSocket if they are connected.
+    """
+    if current_user.id == dm_data.receiver_user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot send a message to yourself.")
 
+    receiver = db.query(DBUser).filter(DBUser.id == dm_data.receiver_user_id).first()
+    if not receiver:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receiver user not found.")
+
+    new_message = DBDirectMessage(sender_id=current_user.id, receiver_id=dm_data.receiver_user_id, content=dm_data.content)
+    db.add(new_message)
+    db.commit()
+    db.refresh(new_message, ['sender', 'receiver'])
+    
+    response_data = DirectMessagePublic.model_validate(new_message)
+
+    await manager.send_personal_message(message_data=response_data.model_dump(mode="json"), user_id=dm_data.receiver_user_id)
+
+    return response_data

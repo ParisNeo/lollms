@@ -56,17 +56,26 @@ class PostVisibility(enum.Enum):
     PUBLIC = "public"
     FOLLOWERS = "followers"
     FRIENDS = "friends"
+class PostLike(Base):
+    __tablename__ = 'post_likes'
+    user_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"), primary_key=True)
+    post_id = Column(Integer, ForeignKey('posts.id', ondelete="CASCADE"), primary_key=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    __table_args__ = (UniqueConstraint('user_id', 'post_id', name='uq_user_post_like'),)
 
 class Post(Base):
     __tablename__ = 'posts'
     id = Column(Integer, primary_key=True, index=True)
     author_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"), nullable=False, index=True)
     content = Column(Text, nullable=False)
-    media = Column(JSON, nullable=True) # To store list of image URLs or link metadata
+    media = Column(JSON, nullable=True) 
     visibility = Column(SQLAlchemyEnum(PostVisibility), nullable=False, default=PostVisibility.PUBLIC, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     author = relationship("User", back_populates="posts")
+    comments = relationship("Comment", back_populates="post", cascade="all, delete-orphan")
+    likes = relationship("PostLike", cascade="all, delete-orphan")
 
 class User(Base):
     __tablename__ = "users"
@@ -213,6 +222,18 @@ class DirectMessage(Base):
     sender = relationship("User", foreign_keys=[sender_id], backref="sent_direct_messages")
     receiver = relationship("User", foreign_keys=[receiver_id], backref="received_direct_messages")
     __table_args__ = (Index('ix_dm_conversation', 'sender_id', 'receiver_id', 'sent_at'), Index('ix_dm_conversation_alt', 'receiver_id', 'sender_id', 'sent_at'))
+
+class Comment(Base):
+    __tablename__ = 'comments'
+    id = Column(Integer, primary_key=True, index=True)
+    post_id = Column(Integer, ForeignKey('posts.id', ondelete="CASCADE"), nullable=False, index=True)
+    author_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"), nullable=False, index=True)
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # Relationships
+    post = relationship("Post", back_populates="comments")
+    author = relationship("User") # A simple relationship to get the author's details
 
 engine = None
 SessionLocal = None

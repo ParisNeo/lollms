@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useSocialStore } from '../../stores/social';
 import UserAvatar from '../ui/UserAvatar.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 
 const authStore = useAuthStore();
 const socialStore = useSocialStore();
@@ -46,12 +47,7 @@ async function handleSubmit() {
       </div>
 
       <div class="flex-1 min-w-0">
-        <textarea
-          v-model="content"
-          class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 focus:ring-blue-500 focus:border-blue-500 transition"
-          rows="3"
-          placeholder="What's on your mind?"
-        ></textarea>
+        <CodeMirrorEditor v-model="content" />
         
         <div class="mt-3 flex justify-between items-center">
           <!-- Action buttons (e.g., for images, links) can go here -->

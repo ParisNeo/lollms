@@ -5,6 +5,7 @@ from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, constr, field_validator, validator, EmailStr
 from backend.database_setup import FriendshipStatus
 from enum import Enum
+from backend.database_setup import FriendshipStatus, PostVisibility as DBPostVisibility
 # --- User Management & Authentication Models ---
 
 class Token(BaseModel):
@@ -378,4 +379,53 @@ class DirectMessagePublic(DirectMessageBase):
     receiver_username: str
     sent_at: datetime.datetime
     read_at: Optional[datetime.datetime] = None
+    model_config = {"from_attributes": True}
+
+
+class RelationshipStatus(BaseModel):
+    """
+    Describes the relationship from the current user's perspective
+    to the user whose profile is being viewed.
+    """
+    is_following: bool
+    friendship_status: Optional[FriendshipStatus] = None
+
+class UserProfileResponse(BaseModel):
+    """
+    The complete data structure returned by the GET /api/users/{username} endpoint.
+    """
+    user: UserPublic
+    relationship: RelationshipStatus
+
+
+class CommentBase(BaseModel):
+    content: constr(min_length=1, max_length=2000)
+
+class CommentCreate(CommentBase):
+    pass
+
+class CommentPublic(CommentBase):
+    id: int
+    author: "AuthorPublic" # Forward reference to the existing AuthorPublic model
+    created_at: datetime.datetime
+    model_config = {"from_attributes": True}
+
+class PostVisibility(str, Enum):
+    PUBLIC = "public"
+    FOLLOWERS = "followers"
+    FRIENDS = "friends"
+
+class PostPublic(PostBase):
+    id: int
+    author: AuthorPublic
+    media: Optional[List[Dict[str, Any]]] = None
+    visibility: DBPostVisibility
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    comments: List[CommentPublic] = []
+    
+    # --- ADD THESE NEW FIELDS ---
+    like_count: int = 0
+    has_liked: bool = False
+    
     model_config = {"from_attributes": True}
