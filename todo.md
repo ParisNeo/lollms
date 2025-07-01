@@ -16,3 +16,11 @@ new ui:
 - the steps must by default be closed
 - the steps content must not exceed some length in the title mode
 - add information about left hops
+- add alias for models
+- setup default page (new discussion/social networks)
+- add single file add
+- level : 0 to 5
+- social activate/deactivate
+- move the button to the right
+- surbrillance du modèle
+- auto title
