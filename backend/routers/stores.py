@@ -4,6 +4,7 @@ import uuid
 from pathlib import Path
 from typing import List, Dict
 import traceback
+from ascii_colors import trace_exception
 
 # Third-Party Imports
 from fastapi import (
@@ -356,10 +357,16 @@ async def unshare_datastore(datastore_id: str, target_user_id_or_username: str, 
 @datastore_router.post("", response_model=DataStorePublic, status_code=201)
 async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DBDataStore:
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    if db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_create.name).first(): raise HTTPException(status_code=400, detail=f"DataStore '{ds_create.name}' already exists.")
+    if db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_create.name).first(): 
+        raise HTTPException(status_code=400, detail=f"DataStore '{ds_create.name}' already exists.")
     new_ds_db_obj = DBDataStore(owner_user_id=user_db_record.id, name=ds_create.name, description=ds_create.description)
     try:
-        db.add(new_ds_db_obj); db.commit(); db.refresh(new_ds_db_obj)
+        db.add(new_ds_db_obj)
+        db.commit()
+        db.refresh(new_ds_db_obj)
         get_safe_store_instance(current_user.username, new_ds_db_obj.id, db)
         return DataStorePublic.model_validate(new_ds_db_obj)
-    except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"DB error: {e}")
+    except Exception as e: 
+        trace_exception(e)
+        db.rollback(); 
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
