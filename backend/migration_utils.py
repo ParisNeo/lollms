@@ -309,7 +309,7 @@ JOIN auth a ON u.email = a.email
                     created_at=timestamp_to_datetime(user.created_at) or datetime.utcnow(),
                     last_activity_at=timestamp_to_datetime(user.last_active_at),
                     icon=icon_b64,
-                    lollms_model_name = "mistral-small3.1:latest"
+                    lollms_model_name = "gemma3:27b"
                 )
 
                 lollms_db_session.add(new_lollms_user)
