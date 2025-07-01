@@ -257,26 +257,38 @@ def unlike_post(
 # --- MODIFIED: Update post-fetching endpoints ---
 # You must update ALL endpoints that return posts (e.g., /feed, /posts/{id}, etc.)
 # Here is an example for the /feed endpoint.
-
 @social_router.get("/feed", response_model=List[PostPublic])
 def get_main_feed(
     db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    # This query is more complex to calculate like_count and has_liked
+    # Subquery to count likes for each post
     like_count_subquery = select(func.count(DBPostLike.user_id)).where(DBPostLike.post_id == DBPost.id).scalar_subquery()
-    has_liked_subquery = exists().where(and_(DBPostLike.post_id == DBPost.id, DBPostLike.user_id == current_user.id)).correlate(DBPost).as_scalar()
 
-    # The main query
+    # FIX: Subquery to check if the current user has liked the post
+    has_liked_subquery = select(
+        exists().where(
+            and_(
+                DBPostLike.post_id == DBPost.id,
+                DBPostLike.user_id == current_user.id
+            )
+        )
+    ).correlate(DBPost).scalar_subquery()
+
+    # The main query now correctly uses the subqueries
     results = db.query(
         DBPost,
         like_count_subquery.label("like_count"),
         has_liked_subquery.label("has_liked")
-    ).options(joinedload(DBPost.author), joinedload(DBPost.comments).joinedload(DBComment.author)).order_by(DBPost.created_at.desc()).limit(50).all()
+    ).options(
+        joinedload(DBPost.author),
+        joinedload(DBPost.comments).joinedload(DBComment.author)
+    ).order_by(DBPost.created_at.desc()).limit(50).all()
 
     # Manually construct the response to include the calculated fields
     response = []
     for post, like_count, has_liked in results:
+        # Use model_validate (Pydantic v2) or from_orm (Pydantic v1)
         post_public = PostPublic.model_validate(post)
         post_public.like_count = like_count
         post_public.has_liked = has_liked

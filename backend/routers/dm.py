@@ -93,7 +93,16 @@ async def send_direct_message(
     db.commit()
     db.refresh(new_message, ['sender', 'receiver'])
     
-    response_data = DirectMessagePublic.model_validate(new_message)
+    response_data = DirectMessagePublic(
+        id=new_message.id,
+        content=new_message.content,
+        sender_id=new_message.sender_id,
+        receiver_id=new_message.receiver_id,
+        sent_at=new_message.sent_at,
+        read_at=new_message.read_at,
+        sender_username=new_message.sender.username,
+        receiver_username=new_message.receiver.username,
+    )
 
     await manager.send_personal_message(message_data=response_data.model_dump(mode="json"), user_id=dm_data.receiver_user_id)
 

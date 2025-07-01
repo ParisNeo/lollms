@@ -277,20 +277,42 @@ export const useSocialStore = defineStore('social', () => {
         }
     }
     function closeConversation(otherUserId) { delete activeConversations.value[otherUserId]; }
+
     async function sendDirectMessage({ receiverUserId, content }) {
         if (!content.trim()) return;
         const convo = activeConversations.value[receiverUserId];
         if (!convo) return;
+        
         const authStore = useAuthStore();
-        const tempMessage = { id: `temp-${Date.now()}`, sender_id: authStore.user.id, sender_username: authStore.user.username, receiver_id: receiverUserId, receiver_username: convo.partner.username, content: content, sent_at: new Date().toISOString(), isTemporary: true, };
+        const tempMessage = {
+            id: `temp-${Date.now()}`,
+            sender_id: authStore.user.id,
+            sender_username: authStore.user.username,
+            receiver_id: receiverUserId,
+            receiver_username: convo.partner.username,
+            content: content,
+            sent_at: new Date().toISOString(),
+            isTemporary: true,
+        };
         convo.messages.push(tempMessage);
+
         try {
-            const response = await apiClient.post('/api/dm/send', { receiver_user_id: receiverUserId, content: content });
+            // --- FIX: Revert to sending a clean JS object with camelCase keys. ---
+            // The backend is now configured to handle this correctly via an alias.
+            const response = await apiClient.post('/api/dm/send', {
+                receiverUserId: receiverUserId,
+                content: content,
+            });
             const index = convo.messages.findIndex(m => m.id === tempMessage.id);
-            if (index !== -1) convo.messages.splice(index, 1, response.data);
+            if (index !== -1) {
+                convo.messages.splice(index, 1, response.data);
+            }
         } catch (error) {
+            console.error("Failed to send direct message:", error);
             const index = convo.messages.findIndex(m => m.id === tempMessage.id);
-            if (index !== -1) convo.messages[index].error = true;
+            if (index !== -1) {
+                 convo.messages[index].error = true;
+            }
             useUiStore().addNotification('Failed to send message.', 'error');
         }
     }

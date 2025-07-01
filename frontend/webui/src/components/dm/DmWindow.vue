@@ -79,7 +79,7 @@ function formatTimestamp(dateString) {
 </script>
 
 <template>
-  <div class="flex flex-col h-full bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-lg">
+  <div v-if="conversation && conversation.partner" class="flex flex-col h-full bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-lg">
     <!-- Header -->
     <header class="flex items-center p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
       <UserAvatar :icon="partner.icon" :username="partner.username" size-class="h-9 w-9" />

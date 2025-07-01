@@ -2,7 +2,7 @@
 import datetime
 from typing import List, Dict, Optional, Any
 
-from pydantic import BaseModel, Field, constr, field_validator, validator, EmailStr
+from pydantic import BaseModel, Field, constr, field_validator, validator, EmailStr, computed_field
 from backend.database_setup import FriendshipStatus
 from enum import Enum
 from backend.database_setup import FriendshipStatus, PostVisibility as DBPostVisibility
@@ -368,18 +368,20 @@ class DirectMessageBase(BaseModel):
     content: constr(min_length=1)
 
 class DirectMessageCreate(DirectMessageBase):
-    receiver_user_id: int
+    receiver_user_id: int = Field(..., alias='receiverUserId')
     image_references_json: Optional[str] = None
-
+    class Config:
+        # This allows Pydantic to work with aliases
+        populate_by_name = True
 class DirectMessagePublic(DirectMessageBase):
     id: int
     sender_id: int
-    sender_username: str
     receiver_id: int
-    receiver_username: str
     sent_at: datetime.datetime
     read_at: Optional[datetime.datetime] = None
-    model_config = {"from_attributes": True}
+    sender_username: str  # The API will provide this
+    receiver_username: str # The API will provide this
+
 
 
 class RelationshipStatus(BaseModel):

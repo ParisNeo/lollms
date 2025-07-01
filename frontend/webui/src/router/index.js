@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router';
 import HomeView from '../views/HomeView.vue';
 import ProfileView from '../views/ProfileView.vue';
 import SettingsView from '../views/SettingsView.vue';
+import MessagesView from '../views/MessagesView.vue'; // <-- Import the new view
 
 const routes = [
   {
@@ -21,6 +22,12 @@ const routes = [
     name: 'Settings',
     component: SettingsView,
     // meta: { requiresAuth: true }
+  },
+  {
+    path: '/messages',
+    name: 'Messages',
+    component: MessagesView,
+    meta: { requiresAuth: true } // Assuming you have an auth guard
   },
   // If you need an admin route, ensure the component exists.
   // For now, it's commented out as it's part of the settings view.
