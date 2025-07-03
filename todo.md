@@ -24,3 +24,5 @@ new ui:
 - move the button to the right
 - surbrillance du modèle
 - auto title
+- Add a upload to discussion button that uploads documents to the discussion and shows them to the user if needed
+- add protection for MCP output
