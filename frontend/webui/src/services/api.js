@@ -49,7 +49,12 @@ apiClient.interceptors.response.use(
             else {
                 // For other errors, we can show a generic notification.
                 const errorMessage = data?.detail || error.message || 'An unknown error occurred.';
-                uiStore.addNotification(`API Error: ${errorMessage}`, 'error');
+                console.error(errorMessage)
+                const displayMessage = typeof errorMessage === 'object' 
+                    ? JSON.stringify(errorMessage, null, 2) // Pretty-print the object
+                    : errorMessage;
+
+                uiStore.addNotification(`API Error: ${displayMessage}`, 'error');
             }
         } else if (error.request) {
             // The request was made but no response was received

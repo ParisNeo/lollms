@@ -119,6 +119,11 @@ class User(Base):
     rag_min_sim_percent = Column(Float, nullable=True)
     rag_use_graph = Column(Boolean, default=False, nullable=False)
     rag_graph_response_type = Column(String, default="chunks_summary", nullable=True)
+    auto_title = Column(Boolean, default=False, nullable=False)
+    user_ui_level = Column(Integer, default=0, nullable=True)
+    ai_response_language = Column(String, default=0, nullable=True)
+    fun_mode = Column(Boolean, default=False, nullable=True)
+    
     
     starred_discussions = relationship("UserStarredDiscussion", back_populates="user", cascade="all, delete-orphan")
     message_grades = relationship("UserMessageGrade", back_populates="user", cascade="all, delete-orphan")
@@ -314,6 +319,9 @@ def init_database(db_url: str):
                     "rag_min_sim_percent": "FLOAT", "rag_use_graph": "BOOLEAN DEFAULT 0",
                     "rag_graph_response_type": "VARCHAR DEFAULT 'chunks_summary'",
                     "put_thoughts_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
+                    "auto_title": "BOOLEAN DEFAULT 0 NOT NULL",
+                    "user_ui_level":"INTEGER", "ai_response_language":"VARCHAR DEFAULT 'auto'",
+                    "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL"
                 }
                 
                 added_cols = []

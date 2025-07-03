@@ -39,6 +39,11 @@ from backend.session import (
     get_user_by_username, 
     user_sessions,
 )
+
+from backend.config import (
+    LOLLMS_CLIENT_DEFAULTS,
+    SAFE_STORE_DEFAULTS
+)
 from backend.security import get_password_hash, verify_password, create_access_token
 from backend.settings import settings
 
@@ -114,9 +119,39 @@ async def login_for_access_token(
     access_token = create_access_token(data={"sub": user.username})
     
     if user.username not in user_sessions:
-        # (Session initialization logic remains the same)
         print(f"INFO: Initializing session state for user: {user.username}")
-        # ... your session init logic here ...
+        initial_lollms_model = user.lollms_model_name or settings.get("default_model_name", LOLLMS_CLIENT_DEFAULTS.get("default_model_name"))
+        initial_vectorizer = user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
+        
+        session_llm_params = {
+            "ctx_size": user.llm_ctx_size if user.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
+            "temperature": user.llm_temperature if user.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
+            "top_k": user.llm_top_k if user.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
+            "top_p": user.llm_top_p if user.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
+            "repeat_penalty": user.llm_repeat_penalty if user.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
+            "repeat_last_n": user.llm_repeat_last_n if user.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),
+        }
+        session_llm_params = {k: v for k, v in session_llm_params.items() if v is not None}
+
+        user_sessions[user.username] = {
+            "lollms_client": None, "safe_store_instances": {}, 
+            "discussions": {}, "discussion_titles": {},
+            "active_vectorizer": initial_vectorizer, 
+            "lollms_model_name": initial_lollms_model,
+            "llm_params": session_llm_params,
+            # Session stores active personality details for quick access if needed by LollmsClient
+            "active_personality_id": user.active_personality_id, 
+            "active_personality_prompt": None, # Will be loaded if personality is active
+        }
+        # If user has an active personality, load its prompt into session
+        if user.active_personality_id:
+            db_session_for_init = next(get_db())
+            try:
+                active_pers = db_session_for_init.query(DBPersonality.prompt_text).filter(DBPersonality.id == user.active_personality_id).scalar()
+                if active_pers:
+                    user_sessions[user.username]["active_personality_prompt"] = active_pers
+            finally:
+                db_session_for_init.close()
     
     return {"access_token": access_token, "token_type": "bearer"}
 

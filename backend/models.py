@@ -75,7 +75,12 @@ class UserUpdate(BaseModel):
     rag_n_hops: Optional[int] = Field(None, ge=1)
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: Optional[bool] = None
-    rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")    
+    rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")
+    auto_title: Optional[bool] = False
+    user_ui_level: Optional[int] = 0
+    ai_response_language: Optional[str] = "auto"
+    fun_mode: Optional[bool] = False
+
 
 class UserPasswordChange(BaseModel):
     current_password: str
@@ -159,6 +164,10 @@ class UserAuthDetails(UserLLMParams):
     rag_use_graph: bool = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
     lollms_client_ai_name: Optional[str] = None
+    auto_title: Optional[bool] = False
+    user_ui_level: Optional[int] = 0
+    ai_response_language: Optional[str] = "auto"
+    fun_mode: Optional[bool] = False
 
 # --- Global Configuration Models ---
 
@@ -206,7 +215,7 @@ class MessageOutput(BaseModel):
     model_name: Optional[str] = None
     token_count: Optional[int] = None
     sources: Optional[List[Dict]] = None
-    steps: Optional[List[Dict]] = None
+    events: Optional[List[Dict[str, Any]]] = None
     image_references: List[str] = []
     user_grade: int = 0
     created_at: Optional[datetime.datetime] = None

@@ -480,9 +480,10 @@ async def chat_in_existing_discussion(
                 case MSG_TYPE.MSG_TYPE_CHUNK:
                     # A piece of the final answer text.
                     payload = {"type": "chunk", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_INFO if params.get("type") == "thought":
-                    # An internal thought or reasoning step from the agent.
-                    payload = {"type": "thought", "content": chunk}
+
+                case MSG_TYPE.MSG_TYPE_STEP:
+                    # A simple, instantaneous step that doesn't have a start/end duration.
+                    payload = {"type": "step", "content": chunk, "data": params}
 
                 case MSG_TYPE.MSG_TYPE_STEP_START:
                     # The beginning of a stateful, long-running step.
@@ -502,17 +503,25 @@ async def chat_in_existing_discussion(
                         "id": params["id"],     # Contains the unique 'id' and other metadata
                         "status": "done"
                     }
-                
-                case MSG_TYPE.MSG_TYPE_STEP:
+                case MSG_TYPE.MSG_TYPE_INFO:
                     # A simple, instantaneous step that doesn't have a start/end duration.
-                    payload = {"type": "step", "content": chunk, "data": params}
+                    payload = {"type": "info", "content": chunk, "data": params}
+
+                case MSG_TYPE.MSG_TYPE_OBSERVATION:
+                    # A simple, instantaneous step that doesn't have a start/end duration.
+                    payload = {"type": "observation", "content": chunk, "data": params}
+
+                case MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT:
+                    # A simple, instantaneous step that doesn't have a start/end duration.
+                    payload = {"type": "thought", "content": chunk, "data": params}
 
                 case MSG_TYPE.MSG_TYPE_EXCEPTION:
-                    # An error occurred during generation.
-                    payload = {"type": "error", "content": f"LLM Error: {chunk}"}
-                    # Put the error on the queue and signal to stop generation.
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(payload) + "\n")
-                    return False
+                    # A simple, instantaneous step that doesn't have a start/end duration.
+                    payload = {"type": "exception", "content": chunk, "data": params}
+
+                case MSG_TYPE.MSG_TYPE_ERROR:
+                    # A simple, instantaneous step that doesn't have a start/end duration.
+                    payload = {"type": "error", "content": chunk, "data": params}
                 
                 case _:
                     # For any other message types we don't explicitly handle,
@@ -586,9 +595,23 @@ async def chat_in_existing_discussion(
                     final_messages_payload['user_message'] = lollms_message_to_output(result['user_message'])
                 
                 # Use jsonable_encoder to safely serialize the entire payload
-                json_compatible_event = jsonable_encoder(
-                    {"type": "finalize", "data": final_messages_payload}
-                )
+                if current_user.auto_title and (discussion_obj.metadata is None or discussion_obj.metadata['title'].startswith("New Discussion")):
+                    event_title_building = jsonable_encoder(
+                        {"type": "new_title_start"}
+                    )
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(event_title_building) + "\n")
+                    new_title = discussion_obj.auto_title()
+                    event_title_building = jsonable_encoder(
+                        {"type": "new_title_end", "new_title": new_title}
+                    )
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(event_title_building) + "\n")
+                    json_compatible_event = jsonable_encoder(
+                        {"type": "finalize", "data": final_messages_payload, "new_title":new_title}
+                    )
+                else:
+                    json_compatible_event = jsonable_encoder(
+                        {"type": "finalize", "data": final_messages_payload}
+                    )
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_event) + "\n")
 
             except Exception as e:

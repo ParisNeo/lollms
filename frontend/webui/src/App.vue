@@ -85,6 +85,6 @@ watch(
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />
-    <ConfirmationModal v-if="uiStore.isConfirmationOpen" />
+    <ConfirmationModal v-if="activeModal === 'confirmation'" />
   </div>
 </template>

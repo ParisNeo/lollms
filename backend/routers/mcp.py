@@ -18,6 +18,14 @@ from backend.discussion import get_user_discussion
 mcp_router = APIRouter(prefix="/api/mcps", tags=["MCPs and Tools"])
 discussion_tools_router = APIRouter(prefix="/api/discussions", tags=["MCPs and Tools"])
 
+def _invalidate_user_mcp_cache(username: str):
+    """Invalidates the lollms_client and tools cache for a given user."""
+    if username in user_sessions:
+        user_sessions[username]['lollms_client'] = None
+        if 'tools_cache' in user_sessions[username]:
+            user_sessions[username]['tools_cache'] = None
+            print(f"INFO: Invalidated tools cache for user: {username}")
+
 @mcp_router.post("/personal", response_model=MCPPublic, status_code=201)
 def create_personal_mcp(
     mcp_data: MCPCreate,
@@ -34,6 +42,9 @@ def create_personal_mcp(
         db.rollback()
         raise HTTPException(status_code=409, detail="An MCP with this name already exists for your account.")
     
+    # Invalidate client and tools cache since the MCP list has changed
+    _invalidate_user_mcp_cache(current_user.username)
+
     return MCPPublic(
         id=new_mcp.id, name=new_mcp.name, url=new_mcp.url,
         owner_username=user_db.username,
@@ -89,6 +100,9 @@ def update_mcp(
         db.rollback()
         raise HTTPException(status_code=409, detail="An MCP with the new name already exists.")
 
+    # Invalidate client and tools cache since the MCP list has changed
+    _invalidate_user_mcp_cache(current_user.username)
+
     return MCPPublic(
         id=mcp_db.id, name=mcp_db.name, url=mcp_db.url,
         owner_username=user_db.username,
@@ -113,37 +127,62 @@ def delete_mcp(
 
     db.delete(mcp_db)
     db.commit()
-    # Also force a reload of the lollms_client in the session
-    if current_user.username in user_sessions:
-        user_sessions[current_user.username]['lollms_client'] = None
+    # Invalidate client and tools cache since the MCP list has changed
+    _invalidate_user_mcp_cache(current_user.username)
     return None
 
 @mcp_router.post("/reload", status_code=200)
 def reload_user_lollms_client(current_user: UserAuthDetails = Depends(get_current_active_user)):
     """
-    Forces a re-initialization of the lollms_client for the current user.
+    Forces a re-initialization of the lollms_client and its associated tools cache for the current user.
     This should be called after any MCP server configuration change.
     """
-    if current_user.username in user_sessions:
-        user_sessions[current_user.username]['lollms_client'] = None
-    # The next call to get_user_lollms_client will automatically rebuild it.
+    _invalidate_user_mcp_cache(current_user.username)
+    
+    # The next call to get_user_lollms_client and list_all_available_tools will automatically rebuild.
+    # We can proactively rebuild the client here to be ready for the next call.
     get_user_lollms_client(current_user.username)
     print(f"INFO: Triggered lollms_client reload for user: {current_user.username}")
-    return {"status": "success", "message": "MCP client re-initialized."}
+    return {"status": "success", "message": "MCP client and tools cache re-initialized."}
 
 @mcp_router.get("/tools", response_model=List[ToolInfo])
 def list_all_available_tools(current_user: UserAuthDetails = Depends(get_current_active_user)):
+    """
+    Lists all available tools for the user.
+    Results are cached per user session and are re-fetched only when MCP configurations change
+    or a manual reload is triggered.
+    """
+    username = current_user.username
+    if username not in user_sessions:
+        user_sessions[username] = {}
+
+    # Check for a valid cache first
+    cached_tools = user_sessions[username].get('tools_cache')
+    if cached_tools is not None:
+        print(f"INFO: Serving cached tools for user: {username}")
+        return cached_tools
+
+    # If cache is invalid or missing, rebuild it
+    print(f"INFO: Building tools cache for user: {username}")
     try:
-        lc = get_user_lollms_client(current_user.username)
+        lc = get_user_lollms_client(username)
         if not hasattr(lc, 'mcp') or not lc.mcp:
+            # Cache an empty list to avoid re-fetching if there's no MCP
+            user_sessions[username]['tools_cache'] = []
             return []
         
+        # force_refresh=True ensures we get the latest from the MCP server itself
         tools = lc.mcp.discover_tools(force_refresh=True)
         all_tools = [ToolInfo(name=item["name"], description=item.get('description', '')) for item in tools]
-        return sorted(all_tools, key=lambda x: x.name)
+        sorted_tools = sorted(all_tools, key=lambda x: x.name)
+        
+        # Store the newly fetched tools in our cache
+        user_sessions[username]['tools_cache'] = sorted_tools
+        return sorted_tools
     except Exception as e:
-        print(f"Error discovering tools for user {current_user.username}: {e}")
-        # Return an empty list or raise an HTTPException if this is a critical failure
+        print(f"Error discovering tools for user {username}: {e}")
+        # In case of an error, return an empty list but do not update the cache.
+        # This allows for a retry on the next request.
         return []
 
 @discussion_tools_router.get("/{discussion_id}/tools", response_model=List[ToolInfo])
@@ -156,6 +195,7 @@ def get_discussion_tools(
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
+    # This call will now be much faster due to caching
     all_available_tools = list_all_available_tools(current_user)
     
     # Get active tools from the discussion's metadata

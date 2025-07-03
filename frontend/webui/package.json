@@ -21,6 +21,7 @@
     "@codemirror/state": "^6.4.1",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.38.0",
+    "@vueuse/core": "^13.5.0",
     "axios": "^1.7.2",
     "codemirror": "^6.0.2",
     "highlight.js": "^11.9.0",

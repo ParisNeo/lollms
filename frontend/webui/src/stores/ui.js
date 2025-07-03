@@ -10,7 +10,6 @@ export const useUiStore = defineStore('ui', () => {
     const currentLanguage = ref(localStorage.getItem('lollms-language') || 'en');
     const isImageViewerOpen = ref(false);
     const imageViewerSrc = ref('');
-    const isConfirmationOpen = ref(false);
     const confirmationOptions = ref({
         title: 'Are you sure?',
         message: 'This action cannot be undone.',
@@ -91,15 +90,15 @@ export const useUiStore = defineStore('ui', () => {
                 message: options.message || 'This action cannot be undone.',
                 confirmText: options.confirmText || 'Confirm',
                 onConfirm: () => {
-                    isConfirmationOpen.value = false;
                     resolve(true);
+                    closeModal("confirmation")
                 },
                 onCancel: () => {
-                    isConfirmationOpen.value = false;
                     resolve(false);
+                    closeModal("confirmation")
                 }
             };
-            isConfirmationOpen.value = true;
+            openModal("confirmation")
         });
     }
 
@@ -140,7 +139,7 @@ export const useUiStore = defineStore('ui', () => {
     return {
         mainView, activeModal, modalProps, notifications, currentTheme,
         currentLanguage, availableLanguages,
-        isImageViewerOpen, imageViewerSrc, isConfirmationOpen, confirmationOptions,
+        isImageViewerOpen, imageViewerSrc, confirmationOptions,
         setMainView, openModal, closeModal, addNotification, removeNotification,
         setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages,
         openImageViewer, closeImageViewer, showConfirmation, confirmAction, cancelAction,

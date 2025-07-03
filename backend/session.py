@@ -150,7 +150,11 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         put_thoughts_in_context=current_session_llm_params.get("put_thoughts_in_context"),
         rag_top_k=db_user.rag_top_k, max_rag_len=db_user.max_rag_len,
         rag_n_hops=db_user.rag_n_hops, rag_min_sim_percent=db_user.rag_min_sim_percent,
-        rag_use_graph=db_user.rag_use_graph, rag_graph_response_type=db_user.rag_graph_response_type
+        rag_use_graph=db_user.rag_use_graph, rag_graph_response_type=db_user.rag_graph_response_type,
+        auto_title=db_user.auto_title,
+        user_ui_level=db_user.user_ui_level,
+        ai_response_language=db_user.ai_response_language,
+        fun_mode=db_user.fun_mode
     )
 
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:

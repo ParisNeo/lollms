@@ -54,6 +54,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.get(`/api/discussions/${id}`);
             messages.value = processMessages(response.data);
+            console.log("Discussion Loaded")
         } catch (error) {
             useUiStore().addNotification('Failed to load messages.', 'error');
             currentDiscussionId.value = null;
@@ -213,11 +214,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                         if (!messageToUpdate) return;
                         switch (data.type) {
                             case 'chunk': contentBuffer += data.content; break;
-                            case 'step_start': stepsBuffer.push({ id: data.id, content: data.content, status: 'pending' }); break;
-                            case 'thought': stepsBuffer.push({ id: data.id, content: data.content, status: 'done' }); break;
                             case 'step': {
                                 stepsBuffer.push({ id: data.id, content: data.content, status: 'done' }); break;
                             }
+                            case 'thought': stepsBuffer.push({ id: data.id, content: data.content, status: 'done' }); break;
+                            case 'step_start': stepsBuffer.push({ id: data.id, content: data.content, status: 'pending' }); break;
                             case 'step_end': {
                                 const step = messageToUpdate.steps.find(s => s.id === data.id) || stepsBuffer.find(s => s.id === data.id);
                                 if (step) {
@@ -228,6 +229,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                                 }
                                 break;
                             }
+                            case 'new_title_start': uiStore.addNotification("Building title started ...", "info"); break;
+                            case 'new_title_end': uiStore.addNotification("Building title Done:\n"+data["new_title"], "info");break;
                             // --- 'FINALIZE' EVENT HANDLER WITH THE FIX ---
                             case 'finalize': {
                                 streamDidComplete = true;
@@ -257,9 +260,12 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                                 }
                                 
                                 const disc = discussions.value[currentDiscussionId.value];
-                                if (disc && disc.title.startsWith("New Discussion") && finalData.user_message) {
-                                    const newTitle = finalData.user_message.content.split('\n')[0].substring(0, 50);
-                                    renameDiscussion({discussionId: disc.id, newTitle: newTitle});
+                                if(data.new_title){
+                                    console.log("New title received")
+                                    console.log(data)
+                                    disc.title = data.new_title
+                                    renameDiscussion({discussionId: disc.id, newTitle: disc.title});
+                                    console.log(disc.title)
                                 }
                                 break;
                             }
