@@ -24,6 +24,7 @@
     "@vueuse/core": "^13.5.0",
     "axios": "^1.7.2",
     "codemirror": "^6.0.2",
+    "emoji-picker-element": "^1.26.3",
     "highlight.js": "^11.9.0",
     "katex": "^0.16.10",
     "marked": "^13.0.0",
