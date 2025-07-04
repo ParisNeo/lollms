@@ -17,7 +17,10 @@ import pipmaster as pm
 pm.ensure_packages(["argon2-cffi"])
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
+from typing import Optional
 
+from fastapi import Form, Depends, HTTPException, status
+from jose import JWTError, jwt
 
 # --- Local Application Imports ---
 from backend.database_setup import (
@@ -44,7 +47,7 @@ from backend.config import (
     LOLLMS_CLIENT_DEFAULTS,
     SAFE_STORE_DEFAULTS
 )
-from backend.security import get_password_hash, verify_password, create_access_token
+from backend.security import get_password_hash, verify_password, create_access_token, decode_access_token
 from backend.settings import settings
 
 # --- Auth API Router ---
@@ -142,6 +145,7 @@ async def login_for_access_token(
             # Session stores active personality details for quick access if needed by LollmsClient
             "active_personality_id": user.active_personality_id, 
             "active_personality_prompt": None, # Will be loaded if personality is active
+            "access_token":access_token
         }
         # If user has an active personality, load its prompt into session
         if user.active_personality_id:
@@ -155,6 +159,37 @@ async def login_for_access_token(
     
     return {"access_token": access_token, "token_type": "bearer"}
 
+@auth_router.post("/introspect")
+async def introspect_token(
+    token: str = Form(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Verifies a token (allows other apps to authenticate users over lollms).
+    """
+    payload = decode_access_token(token)
+    if payload is None:
+        return {"active": False}
+        
+    username: str = payload.get("sub")
+    if username is None:
+        return {"active": False}
+
+    user = get_user_by_username(db, username=username)
+    if not user or not user.is_active:
+        return {"active": False}
+
+    # --- LA PARTIE ENRICHIE ---
+    # Le token est valide. Retournons des informations utiles.
+    return {
+        "active": True,
+        "username": user.username,
+        "sub": user.username,
+        "exp": payload.get("exp"),
+        
+        "user_id": user.id,
+        # we can add more infos
+    }
 
 @auth_router.put("/me/icon", response_model=Dict[str, str])
 async def update_my_icon(
