@@ -186,7 +186,10 @@ class MCP(Base):
     owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_mcp_owner", ondelete="CASCADE"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    authentication_type = Column(String, default="None", nullable=False)
+    authentication_key = Column(String, nullable=True)    
     owner = relationship("User", back_populates="personal_mcps")
+    
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_mcp_name'),)
 
 class DatabaseVersion(Base):
@@ -342,6 +345,18 @@ def init_database(db_url: str):
                         print("INFO: Created unique index 'uq_user_email' on 'users.email'.")
                     except (OperationalError, IntegrityError) as e:
                         print(f"Warning: Could not create unique index on email. Error: {e}")
+            if inspector.has_table("mcps"):
+                user_columns_db = [col['name'] for col in inspector.get_columns('mcps')]
+                new_user_cols_defs = {
+                    "authentication_type": "VARCHAR", "authentication_key": "VARCHAR"
+                }
+                
+                added_cols = []
+                for col_name, col_sql_def in new_user_cols_defs.items():
+                    if col_name not in user_columns_db:
+                        connection.execute(text(f"ALTER TABLE mcps ADD COLUMN {col_name} {col_sql_def}"))
+                        print(f"INFO: Added missing column '{col_name}' to 'mcps' table.")
+                        added_cols.append(col_name)
 
             transaction.commit()
             print("INFO: Database schema migration/check completed successfully.")
