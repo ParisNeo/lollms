@@ -182,14 +182,56 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             "ai_name": LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"),
             "service_key": LOLLMS_CLIENT_DEFAULTS.get("service_key")
         })
-
-        servers_infos = {mcp["name"]: {"server_url": mcp["url"]} for mcp in DEFAULT_MCPS}
+        session = user_sessions[username]
+        servers_infos = {}
+        for mcp in DEFAULT_MCPS:
+            if mcp.get("authentication_type")=="lollms_chat_auth":
+                servers_infos[mcp.get("name")] = {
+                    "server_url": mcp.get("url"),
+                    "auth_config": {
+                        "type": "bearer",
+                        "token": session.get("access_token") # ou None
+                    }
+                }
+            elif mcp.authentication_type=="bearer":
+                servers_infos[mcp.get("name")] = {
+                    "server_url": mcp.get("url"),
+                    "auth_config": {
+                        "type": "bearer",
+                        "token": mcp.authentication_key
+                    }
+                }
+            else:
+                servers_infos[mcp.get("name")] = {
+                    "server_url": mcp.url
+                }
         db_for_mcp = next(get_db())
         try:
             user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
             if user_db:
+                
                 for mcp in user_db.personal_mcps:
-                    servers_infos[mcp.name] = {"server_url": mcp.url}
+                    if mcp.authentication_type=="lollms_chat_auth":
+                        servers_infos[mcp.name] = {
+                            "server_url": mcp.url,
+                            "auth_config": {
+                                "type": "bearer",
+                                "token": session.get("access_token") # ou None
+                            }
+                        }
+                    elif mcp.authentication_type=="bearer":
+                        servers_infos[mcp.name] = {
+                            "server_url": mcp.url,
+                            "auth_config": {
+                                "type": "bearer",
+                                "token": mcp.authentication_key
+                            }
+                        }
+                    else:
+                        servers_infos[mcp.name] = {
+                            "server_url": mcp.url
+                        }
+                    
         finally:
             db_for_mcp.close()
 
