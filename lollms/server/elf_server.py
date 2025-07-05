@@ -56,6 +56,8 @@ class LOLLMSElfServer(LollmsApplication):
         lollms_paths: LollmsPaths,
         load_binding=True,
         load_model=True,
+        load_voice_service=True,  
+        load_sd_service=True, 
         try_select_binding=False,
         try_select_model=False,
         callback=None,
