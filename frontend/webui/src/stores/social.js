@@ -99,7 +99,9 @@ export const useSocialStore = defineStore('social', () => {
     function connectWebSocket() {
         const authStore = useAuthStore();
         const uiStore = useUiStore();
-        if (!authStore.token || (socket.value && isSocketConnected.value)) return;
+        if (!authStore.token || !authStore.user?.chat_active || (socket.value && isSocketConnected.value)) {
+            return;
+        }
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/dm/${authStore.token}`;
         socket.value = new WebSocket(wsUrl);

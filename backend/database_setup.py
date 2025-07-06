@@ -92,6 +92,7 @@ class User(Base):
     email = Column(String, nullable=True, index=True, unique=True)
     birth_date = Column(Date, nullable=True)
     icon = Column(Text, nullable=True)
+
     
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
@@ -121,6 +122,8 @@ class User(Base):
     rag_graph_response_type = Column(String, default="chunks_summary", nullable=True)
     auto_title = Column(Boolean, default=False, nullable=False)
     user_ui_level = Column(Integer, default=0, nullable=True)
+    chat_active = Column(Integer, default=False, nullable=False)
+    first_page = Column(String, default="feed", nullable=False)
     ai_response_language = Column(String, default=0, nullable=True)
     fun_mode = Column(Boolean, default=False, nullable=True)
     
@@ -132,6 +135,7 @@ class User(Base):
     owned_personalities = relationship("Personality", foreign_keys="[Personality.owner_user_id]", back_populates="owner", cascade="all, delete-orphan")
     active_personality = relationship("Personality", foreign_keys=[active_personality_id])
     personal_mcps = relationship("MCP", back_populates="owner", cascade="all, delete-orphan")
+    personal_apps = relationship("App", back_populates="owner", cascade="all, delete-orphan")
     
     __table_args__ = (CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'), UniqueConstraint('email', name='uq_user_email'),)
     def verify_password(self, plain_password):
@@ -183,6 +187,8 @@ class MCP(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     name = Column(String, nullable=False, index=True)
     url = Column(String, nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    type = Column(String, default="system", nullable=False)
     owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_mcp_owner", ondelete="CASCADE"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -191,6 +197,22 @@ class MCP(Base):
     owner = relationship("User", back_populates="personal_mcps")
     
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_mcp_name'),)
+
+class App(Base):
+    __tablename__ = "apps"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    name = Column(String, nullable=False, index=True)
+    url = Column(String, nullable=False)
+    active = Column(Boolean, default=True, nullable=False)
+    type = Column(String, default="system", nullable=False)
+    owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_mcp_owner", ondelete="CASCADE"), nullable=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    authentication_type = Column(String, default="None", nullable=False)
+    authentication_key = Column(String, nullable=True)    
+    owner = relationship("User", back_populates="personal_apps")
+    
+    __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_app_name'),)
 
 class DatabaseVersion(Base):
     __tablename__ = "database_version"
@@ -324,7 +346,9 @@ def init_database(db_url: str):
                     "put_thoughts_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
                     "auto_title": "BOOLEAN DEFAULT 0 NOT NULL",
                     "user_ui_level":"INTEGER", "ai_response_language":"VARCHAR DEFAULT 'auto'",
-                    "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL"
+                    "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL",
+                    "chat_active": "BOOLEAN DEFAULT 0 NOT NULL",
+                    "first_page": "VARCHAR"
                 }
                 
                 added_cols = []
@@ -348,6 +372,8 @@ def init_database(db_url: str):
             if inspector.has_table("mcps"):
                 user_columns_db = [col['name'] for col in inspector.get_columns('mcps')]
                 new_user_cols_defs = {
+                    "active": "BOOLEAN DEFAULT 0 NOT NULL",
+                    "type": "VARCHAR",
                     "authentication_type": "VARCHAR", "authentication_key": "VARCHAR"
                 }
                 

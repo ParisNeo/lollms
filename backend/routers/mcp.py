@@ -66,6 +66,8 @@ def list_my_mcps(
     response = [
         MCPPublic(
             id=mcp.id, name=mcp.name, url=mcp.url,
+            active=mcp.active,
+            authentication_type = mcp.authentication_type, authentication_key = mcp.authentication_key,
             owner_username=mcp.owner.username if mcp.owner else None,
             created_at=mcp.created_at, updated_at=mcp.updated_at
         ) for mcp in mcps_db
@@ -105,7 +107,10 @@ def update_mcp(
 
     return MCPPublic(
         id=mcp_db.id, name=mcp_db.name, url=mcp_db.url,
+        active=mcp_db.active,
         owner_username=user_db.username,
+        authentication_type=mcp_db.authentication_type,
+        authentication_key=mcp_db.authentication_key,
         created_at=mcp_db.created_at, updated_at=mcp_db.updated_at
     )
 

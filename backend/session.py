@@ -153,6 +153,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         rag_use_graph=db_user.rag_use_graph, rag_graph_response_type=db_user.rag_graph_response_type,
         auto_title=db_user.auto_title,
         user_ui_level=db_user.user_ui_level,
+        chat_active=db_user.chat_active,
+        first_page= db_user.first_page,
         ai_response_language=db_user.ai_response_language,
         fun_mode=db_user.fun_mode
     )
@@ -184,53 +186,33 @@ def get_user_lollms_client(username: str) -> LollmsClient:
         })
         session = user_sessions[username]
         servers_infos = {}
-        for mcp in DEFAULT_MCPS:
-            if mcp.get("authentication_type")=="lollms_chat_auth":
-                servers_infos[mcp.get("name")] = {
-                    "server_url": mcp.get("url"),
-                    "auth_config": {
-                        "type": "bearer",
-                        "token": session.get("access_token") # ou None
-                    }
-                }
-            elif mcp.authentication_type=="bearer":
-                servers_infos[mcp.get("name")] = {
-                    "server_url": mcp.get("url"),
-                    "auth_config": {
-                        "type": "bearer",
-                        "token": mcp.authentication_key
-                    }
-                }
-            else:
-                servers_infos[mcp.get("name")] = {
-                    "server_url": mcp.url
-                }
         db_for_mcp = next(get_db())
         try:
             user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
             if user_db:
                 
                 for mcp in user_db.personal_mcps:
-                    if mcp.authentication_type=="lollms_chat_auth":
-                        servers_infos[mcp.name] = {
-                            "server_url": mcp.url,
-                            "auth_config": {
-                                "type": "bearer",
-                                "token": session.get("access_token") # ou None
+                    if mcp.active:
+                        if mcp.authentication_type=="lollms_chat_auth":
+                            servers_infos[mcp.name] = {
+                                "server_url": mcp.url,
+                                "auth_config": {
+                                    "type": "bearer",
+                                    "token": session.get("access_token") # ou None
+                                }
                             }
-                        }
-                    elif mcp.authentication_type=="bearer":
-                        servers_infos[mcp.name] = {
-                            "server_url": mcp.url,
-                            "auth_config": {
-                                "type": "bearer",
-                                "token": mcp.authentication_key
+                        elif mcp.authentication_type=="bearer":
+                            servers_infos[mcp.name] = {
+                                "server_url": mcp.url,
+                                "auth_config": {
+                                    "type": "bearer",
+                                    "token": mcp.authentication_key
+                                }
                             }
-                        }
-                    else:
-                        servers_infos[mcp.name] = {
-                            "server_url": mcp.url
-                        }
+                        else:
+                            servers_infos[mcp.name] = {
+                                "server_url": mcp.url
+                            }
                     
         finally:
             db_for_mcp.close()

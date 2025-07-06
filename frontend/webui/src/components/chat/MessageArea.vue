@@ -103,8 +103,9 @@ const formatDateSeparator = (dateStr) => {
     FIX: Added 'flex flex-col' to make this scrolling container a flex container.
     This forces its children (MessageBubbles) to be flex items, which correctly
     respects the width constraints and prevents them from overflowing.
+    Added 'pb-40' to prevent the floating chat input from obscuring the last message.
   -->
-  <div ref="messageContainer" class="flex flex-col p-4 space-y-2">
+  <div ref="messageContainer" class="flex flex-col p-4 space-y-2 pb-40">
     <template v-for="(messagesOnDate, date) in groupMessagesByDate(activeMessages)" :key="date">
       <!-- Date Separator -->
       <div class="date-separator flex items-center my-4 gap-4">

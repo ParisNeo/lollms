@@ -78,9 +78,10 @@ class UserUpdate(BaseModel):
     rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")
     auto_title: Optional[bool] = False
     user_ui_level: Optional[int] = 0
+    chat_active: Optional[bool] = False
+    first_page: Optional[str] = "feed"
     ai_response_language: Optional[str] = "auto"
     fun_mode: Optional[bool] = False
-
 
 class UserPasswordChange(BaseModel):
     current_password: str
@@ -166,6 +167,9 @@ class UserAuthDetails(UserLLMParams):
     lollms_client_ai_name: Optional[str] = None
     auto_title: Optional[bool] = False
     user_ui_level: Optional[int] = 0
+    chat_active: Optional[bool] = False
+    first_page: Optional[str] = "feed"
+
     ai_response_language: Optional[str] = "auto"
     fun_mode: Optional[bool] = False
 
@@ -323,6 +327,10 @@ class PersonalitySendRequest(BaseModel):
 class MCPBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     url: str
+    active: Optional[bool] = True
+    type: Optional[str] = "user"
+    authentication_type: Optional[str] = "none"
+    authentication_key: Optional[str] = ""
 
 class MCPCreate(MCPBase):
     pass
@@ -330,6 +338,11 @@ class MCPCreate(MCPBase):
 class MCPUpdate(BaseModel):
     name: Optional[constr(min_length=1, max_length=100)] = None
     url: Optional[str] = None
+    active: Optional[bool] = True
+    type: Optional[str] = "user"
+    authentication_type: Optional[str] = "none"
+    authentication_key: Optional[str] = ""
+
 
 class MCPPublic(MCPBase):
     id: str

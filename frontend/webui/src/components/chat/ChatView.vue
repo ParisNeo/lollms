@@ -5,7 +5,7 @@ import { useDiscussionsStore } from '../../stores/discussions';
 import ChatHeader from './ChatHeader.vue';
 import MessageArea from './MessageArea.vue';
 import ChatInput from './ChatInput.vue';
-import logoUrl from '../../assets/logo.png'; // <-- IMPORT THE LOGO
+import logoUrl from '../../assets/logo.png';
 
 export default {
   name: 'ChatView',
@@ -16,7 +16,7 @@ export default {
   },
   data() {
       return {
-          logoUrl, // <-- EXPOSE TO TEMPLATE
+          logoUrl,
       }
   },
   computed: {
@@ -34,21 +34,22 @@ export default {
     <!-- 
       FIX: Added 'min-w-0' to allow this flex item to shrink and contain its oversized children,
       which enables the horizontal scroll on the code blocks inside.
+      Added 'pb-40' to ensure the last message is not obscured by the floating chat input.
     -->
-    <MessageArea v-if="activeDiscussion" class="flex-1 overflow-y-auto min-w-0" />
+    <MessageArea v-if="activeDiscussion" class="flex-1 overflow-y-auto min-w-0 pb-40" />
     
     <!-- Empty State Placeholder -->
     <div v-else class="flex-1 flex items-center justify-center text-center p-4">
       <div class="max-w-md">
-        <img :src="logoUrl" alt="LoLLMs Logo" class="w-24 h-24 mx-auto mb-4 opacity-50" /> <!-- <-- BIND THE SRC -->
+        <img :src="logoUrl" alt="LoLLMs Logo" class="w-24 h-24 mx-auto mb-4 opacity-50" />
         <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-300">Welcome to LoLLMs Chat</h3>
         <p class="text-gray-500 dark:text-gray-400 mt-2">
-          Select a conversation from the sidebar or start a new one to begin.
+          Start a new conversation using the chat box, or select an existing one to begin.
         </p>
       </div>
     </div>
 
-    <!-- Chat Input Area -->
-    <ChatInput v-if="activeDiscussion" />
+    <!-- Chat Input is now always rendered and manages its own floating/positioning state -->
+    <ChatInput />
   </div>
 </template>

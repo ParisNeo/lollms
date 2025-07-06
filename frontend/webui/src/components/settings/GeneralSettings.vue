@@ -40,6 +40,13 @@ const settingsConfig = [
         defaultValue: true
     },
     {
+        key: 'chat_active',
+        type: 'toggle',
+        label: 'Activate chat',
+        description: 'If activated, the user will be able to communicate with other users via DMs.',
+        defaultValue: true
+    },
+    {
         key: 'user_ui_level',
         type: 'select',
         label: 'UI Level',

@@ -64,9 +64,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     async function createNewDiscussion() {
         try {
             const response = await apiClient.post('/api/discussions');
-            discussions.value[response.data.id] = response.data;
-            await selectDiscussion(response.data.id);
-        } catch (error) { console.error("Failed to create discussion:", error); }
+            const newDiscussion = response.data;
+            discussions.value[newDiscussion.id] = newDiscussion;
+            await selectDiscussion(newDiscussion.id);
+            return newDiscussion;
+        } catch (error) {
+            console.error("Failed to create discussion:", error);
+            useUiStore().addNotification('Failed to create new discussion.', 'error');
+            throw error;
+        }
     }
 
     async function deleteDiscussion(discussionId) {
@@ -146,15 +152,29 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     async function sendMessage(payload) {
-        if (!activeDiscussion.value) return;
-        const authStore = useAuthStore();
         const uiStore = useUiStore();
+
+        if (generationInProgress.value) {
+            uiStore.addNotification('A generation is already in progress.', 'warning');
+            return;
+        }
+
+        if (!currentDiscussionId.value) {
+            try {
+                await createNewDiscussion();
+            } catch (error) {
+                return;
+            }
+        }
+
+        if (!activeDiscussion.value) return;
+
+        const authStore = useAuthStore();
         generationInProgress.value = true;
         activeGenerationAbortController = new AbortController();
 
         const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
 
-        // Keep references to the temporary message objects
         const tempUserMessage = {
             id: `temp-user-${Date.now()}`, sender: authStore.user.username,
             sender_type: 'user', content: payload.prompt,
@@ -204,7 +224,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const decoder = new TextDecoder();
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) { break; } // The 'finalize' event now signals completion
+                if (done) { break; }
                 
                 const textChunk = decoder.decode(value, { stream: true });
                 const lines = textChunk.split('\n').filter(line => line.trim() !== '');
@@ -231,27 +251,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                             }
                             case 'new_title_start': uiStore.addNotification("Building title started ...", "info"); break;
                             case 'new_title_end': uiStore.addNotification("Building title Done:\n"+data["new_title"], "info");break;
-                            // --- 'FINALIZE' EVENT HANDLER WITH THE FIX ---
                             case 'finalize': {
                                 streamDidComplete = true;
                                 const finalData = data.data;
 
                                 const aiMessageToFinalize = messages.value.find(m => m.id === tempAiMessage.id);
                                 if (aiMessageToFinalize && finalData.ai_message) {
-                                    
-                                    // --- START OF THE FIX ---
-                                    
-                                    // 1. Preserve the steps that were collected during the stream.
                                     const collectedSteps = aiMessageToFinalize.steps;
-
-                                    // 2. Update the message object with the final data from the server.
-                                    //    This will overwrite the 'steps' property if it's not in the final payload.
                                     Object.assign(aiMessageToFinalize, finalData.ai_message);
-
-                                    // 3. CRITICAL: Restore the collected steps to the updated message object.
                                     aiMessageToFinalize.steps = collectedSteps;
-
-                                    // --- END OF THE FIX ---
                                 }
 
                                 const userMessageToFinalize = messages.value.find(m => m.id === tempUserMessage.id);

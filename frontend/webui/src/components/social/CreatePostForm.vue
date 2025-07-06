@@ -5,11 +5,13 @@ import { useSocialStore } from '../../stores/social';
 import UserAvatar from '../ui/UserAvatar.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 
+const emit = defineEmits(['posted', 'close']);
+
 const authStore = useAuthStore();
 const socialStore = useSocialStore();
 
 const content = ref('');
-const visibility = ref('PUBLIC'); // Default visibility
+const visibility = ref('PUBLIC');
 const isSubmitting = ref(false);
 
 const user = computed(() => authStore.user);
@@ -26,16 +28,19 @@ async function handleSubmit() {
     await socialStore.createPost({
       content: content.value,
       visibility: visibility.value,
-      // Media will be handled here in the future
     });
-    // Reset form on success
     content.value = '';
     visibility.value = 'PUBLIC';
+    emit('posted');
   } catch (error) {
     // Error notification is handled by the store
   } finally {
     isSubmitting.value = false;
   }
+}
+
+function handleCancel() {
+  emit('close');
 }
 </script>
 
@@ -50,20 +55,20 @@ async function handleSubmit() {
         <CodeMirrorEditor v-model="content" />
         
         <div class="mt-3 flex justify-between items-center">
-          <!-- Action buttons (e.g., for images, links) can go here -->
           <div class="flex items-center space-x-2">
-            <!-- Placeholder for future media buttons -->
           </div>
 
           <div class="flex items-center space-x-3">
-            <!-- Visibility Dropdown -->
             <select v-model="visibility" class="input-field !py-1.5 !px-2 text-sm">
               <option value="PUBLIC">Public</option>
               <option value="FOLLOWERS">Followers Only</option>
               <option value="FRIENDS">Friends Only</option>
             </select>
+            
+            <button type="button" @click="handleCancel" class="btn btn-secondary">
+              Cancel
+            </button>
 
-            <!-- Post Button -->
             <button
               @click="handleSubmit"
               :disabled="isPostDisabled"
