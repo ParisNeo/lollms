@@ -262,6 +262,7 @@ class DiscussionImportRequest(BaseModel):
     discussion_ids_to_import: List[str]
 
 class DiscussionSendRequest(BaseModel):
+    discussion_id: str
     target_username: constr(min_length=3, max_length=50)
 
 class DataStoreBase(BaseModel):

@@ -28,8 +28,10 @@ function renameDiscussion() {
     uiStore.openModal('renameDiscussion', { discussionId: props.discussion.id });
 }
 function sendDiscussion() { 
-    uiStore.addNotification('This feature is not yet implemented.', 'info');
-    console.log('Send:', props.discussion.id); 
+    uiStore.openModal('shareDiscussion', { 
+        discussionId: props.discussion.id,
+        discussionTitle: props.discussion.title 
+    });
 }
 function toggleStar() { 
     discussionsStore.toggleStarDiscussion(props.discussion.id);

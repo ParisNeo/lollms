@@ -20,6 +20,7 @@ import FileManagementModal from './components/modals/FileManagementModal.vue';
 import ExportModal from './components/modals/ExportModal.vue';
 import ImportModal from './components/modals/ImportModal.vue';
 import InteractiveOutputModal from './components/modals/InteractiveOutputModal.vue';
+import ShareDiscussionModal from './components/modals/ShareDiscussionModal.vue';
 import logoUrl from './assets/logo.png';
 
 const authStore = useAuthStore();
@@ -78,6 +79,7 @@ watch(
     <DataStoresModal v-if="activeModal === 'dataStores'" />
     <DataStoreEditorModal v-if="activeModal === 'dataStoreEditor'" />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
+    <ShareDiscussionModal v-if="activeModal === 'shareDiscussion'" />
     <FileManagementModal v-if="activeModal === 'fileManagement'" />
     <ExportModal v-if="activeModal === 'export'" />
     <ImportModal v-if="activeModal === 'import'" />

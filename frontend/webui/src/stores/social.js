@@ -20,6 +20,7 @@ export const useSocialStore = defineStore('social', () => {
     const isLoadingMessages = ref(false);
     const socket = ref(null);
     const isSocketConnected = ref(false);
+    const friends = ref([]);
 
     // --- GETTERS ---
     const getPostsByUsername = computed(() => (username) => userPosts.value[username] || []);
@@ -27,6 +28,17 @@ export const useSocialStore = defineStore('social', () => {
     const getCommentsForPost = computed(() => (postId) => comments.value[postId] || null);
 
     // --- ACTIONS ---
+
+    async function fetchFriends() {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.get('/api/friends');
+            friends.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Could not fetch friends list.', 'error');
+            console.error("Failed to fetch friends:", error);
+        }
+    }
 
     // -- User Profile & Friendship Actions --
     async function fetchUserProfile(username) {
@@ -353,7 +365,7 @@ export const useSocialStore = defineStore('social', () => {
         // State
         feedPosts, profiles, userPosts, pendingFriendRequests, isLoadingFeed, isLoadingProfile,
         conversations, activeConversations, isLoadingConversations, isLoadingMessages,
-        comments, isLoadingComments, isSocketConnected,
+        comments, isLoadingComments, isSocketConnected, friends,
         
         // Getters
         getPostsByUsername, getActiveConversation, getCommentsForPost,
@@ -365,5 +377,6 @@ export const useSocialStore = defineStore('social', () => {
         fetchComments, createComment, deleteComment,
         fetchConversations, openConversation, closeConversation, sendDirectMessage, fetchMoreMessages,
         connectWebSocket, disconnectWebSocket, toggleLike,
+        fetchFriends,
     };
 });

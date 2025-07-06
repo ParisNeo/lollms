@@ -32,6 +32,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     // --- ACTIONS ---
 
+    async function sendDiscussion({ discussionId, targetUsername }) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post(`/api/dm/send-discussion`, { discussion_id: discussionId, target_username: targetUsername });
+            uiStore.addNotification(response.data.message || `Discussion sent to ${targetUsername}!`, 'success');
+            uiStore.closeModal();
+        } catch (error) {
+            console.error("Failed to send discussion:", error);
+        }
+    }
+
     async function loadDiscussions() {
         try {
             const response = await apiClient.get('/api/discussions');
@@ -431,6 +442,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         switchBranch,
         exportDiscussions,
         importDiscussions,
+        sendDiscussion,
         $reset,
     };
 });

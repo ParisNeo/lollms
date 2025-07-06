@@ -1,11 +1,15 @@
+import uuid
+import yaml
+import traceback
+from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, union, distinct, select
 from typing import List
 
-from backend.database_setup import get_db, User as DBUser, DirectMessage as DBDirectMessage
-from backend.models import UserAuthDetails, UserPublic, DirectMessageCreate, DirectMessagePublic
-from backend.session import get_current_active_user
+from backend.database_setup import get_db, User as DBUser, DirectMessage as DBDirectMessage, FriendshipStatus, get_friendship_record
+from backend.models import UserAuthDetails, UserPublic, DirectMessageCreate, DirectMessagePublic, DiscussionSendRequest
+from backend.session import get_current_active_user, get_user_data_root, get_user_by_username
 from backend.ws_manager import manager
 
 dm_router = APIRouter(
@@ -13,6 +17,52 @@ dm_router = APIRouter(
     tags=["Direct Messages"],
     dependencies=[Depends(get_current_active_user)]
 )
+
+@dm_router.post("/send-discussion", status_code=200)
+async def send_discussion_to_friend(
+    payload: DiscussionSendRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    sender_user = db.query(DBUser).filter(DBUser.id == current_user.id).first()
+    receiver_user = get_user_by_username(db, payload.target_username)
+
+    if not receiver_user:
+        raise HTTPException(status_code=404, detail="Recipient user not found.")
+
+    if sender_user.id == receiver_user.id:
+        raise HTTPException(status_code=400, detail="Cannot send a discussion to yourself.")
+
+    friendship = get_friendship_record(db, sender_user.id, receiver_user.id)
+    if not friendship or friendship.status != FriendshipStatus.ACCEPTED:
+        raise HTTPException(status_code=403, detail="You can only send discussions to friends.")
+
+    sender_discussions_path = get_user_data_root(sender_user.username) / "discussions"
+    original_file_path = sender_discussions_path / f"{payload.discussion_id}.yaml"
+    if not original_file_path.exists():
+        raise HTTPException(status_code=404, detail="Original discussion not found.")
+
+    try:
+        with open(original_file_path, 'r', encoding='utf-8') as f:
+            discussion_data = yaml.safe_load(f)
+
+        new_discussion_id = str(uuid.uuid4())
+        discussion_data['id'] = new_discussion_id
+        original_title = discussion_data.get('title', 'Untitled')
+        discussion_data['title'] = f"[Shared from {sender_user.username}] {original_title}"
+        discussion_data['starred'] = False
+
+        receiver_discussions_path = get_user_data_root(receiver_user.username) / "discussions"
+        receiver_discussions_path.mkdir(parents=True, exist_ok=True)
+        new_file_path = receiver_discussions_path / f"{new_discussion_id}.yaml"
+
+        with open(new_file_path, 'w', encoding='utf-8') as f:
+            yaml.dump(discussion_data, f, allow_unicode=True, sort_keys=False)
+            
+        return {"message": f"Discussion successfully sent to {payload.target_username}."}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"An error occurred while sending the discussion: {e}")
 
 @dm_router.get("/conversations", response_model=List[UserPublic])
 def get_user_conversations(
