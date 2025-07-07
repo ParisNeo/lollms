@@ -1,22 +1,27 @@
 # backend/routers/mcp.py
+import traceback
+from typing import List, Dict
 
-from typing import List
 from fastapi import APIRouter, Depends, HTTPException
+# Correct import for or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_
 
-from backend.database_setup import get_db, MCP as DBMCP, User as DBUser, UserStarredDiscussion
+# Add DBApp and App models
+from backend.database_setup import get_db, MCP as DBMCP, App as DBApp, User as DBUser, UserStarredDiscussion
 from backend.session import get_current_active_user, get_user_lollms_client, user_sessions
 from backend.models import (
-    MCPCreate, MCPUpdate, MCPPublic, ToolInfo, 
+    MCPCreate, MCPUpdate, MCPPublic, ToolInfo,
+    AppCreate, AppUpdate, AppPublic,
     DiscussionToolsUpdate, DiscussionInfo, UserAuthDetails
 )
-# Import the new discussion helper
 from backend.discussion import get_user_discussion
 
-mcp_router = APIRouter(prefix="/api/mcps", tags=["MCPs and Tools"])
-discussion_tools_router = APIRouter(prefix="/api/discussions", tags=["MCPs and Tools"])
+# Routers from user's file + new apps_router
+mcp_router = APIRouter(prefix="/api/mcps", tags=["Services"])
+apps_router = APIRouter(prefix="/api/apps", tags=["Services"])
+discussion_tools_router = APIRouter(prefix="/api/discussions", tags=["Services"])
 
 def _invalidate_user_mcp_cache(username: str):
     """Invalidates the lollms_client and tools cache for a given user."""
@@ -26,53 +31,49 @@ def _invalidate_user_mcp_cache(username: str):
             user_sessions[username]['tools_cache'] = None
             print(f"INFO: Invalidated tools cache for user: {username}")
 
+# --- MCP LOGIC ---
+def _format_mcp_public(mcp: DBMCP) -> MCPPublic:
+    return MCPPublic(
+        id=mcp.id, name=mcp.name, url=mcp.url, icon=mcp.icon,
+        active=mcp.active, type=mcp.type,
+        authentication_type=mcp.authentication_type,
+        authentication_key="********" if mcp.authentication_key else "",
+        owner_username=mcp.owner.username if mcp.owner else "System",
+        created_at=mcp.created_at, updated_at=mcp.updated_at
+    )
+
 @mcp_router.post("/personal", response_model=MCPPublic, status_code=201)
 def create_personal_mcp(
     mcp_data: MCPCreate,
     db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
-    user_db = db.query(DBUser).filter(DBUser.username == current_user.username).one()
-    new_mcp = DBMCP(**mcp_data.model_dump(), owner_user_id=user_db.id)
+    if mcp_data.type == 'system' and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can create system MCPs.")
+    
+    owner_id = current_user.id if mcp_data.type == 'user' else None
+    
+    new_mcp = DBMCP(**mcp_data.model_dump(), owner_user_id=owner_id)
     db.add(new_mcp)
     try:
         db.commit()
-        db.refresh(new_mcp)
+        db.refresh(new_mcp, ["owner"])
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="An MCP with this name already exists for your account.")
     
-    # Invalidate client and tools cache since the MCP list has changed
     _invalidate_user_mcp_cache(current_user.username)
-
-    return MCPPublic(
-        id=new_mcp.id, name=new_mcp.name, url=new_mcp.url,
-        owner_username=user_db.username,
-        created_at=new_mcp.created_at, updated_at=new_mcp.updated_at
-    )
+    return _format_mcp_public(new_mcp)
 
 @mcp_router.get("", response_model=List[MCPPublic])
 def list_my_mcps(
     db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
-    user_db = db.query(DBUser).filter(DBUser.username == current_user.username).one()
-    
-    # Eagerly load the owner to avoid multiple queries in the loop
     mcps_db = db.query(DBMCP).options(joinedload(DBMCP.owner)).filter(
-        or_(DBMCP.owner_user_id == user_db.id, DBMCP.owner_user_id == None)
+        or_(DBMCP.owner_user_id == current_user.id, DBMCP.type == 'system')
     ).all()
-
-    response = [
-        MCPPublic(
-            id=mcp.id, name=mcp.name, url=mcp.url,
-            active=mcp.active,
-            authentication_type = mcp.authentication_type, authentication_key = mcp.authentication_key,
-            owner_username=mcp.owner.username if mcp.owner else None,
-            created_at=mcp.created_at, updated_at=mcp.updated_at
-        ) for mcp in mcps_db
-    ]
-    return response
+    return [_format_mcp_public(mcp) for mcp in mcps_db]
 
 @mcp_router.put("/{mcp_id}", response_model=MCPPublic)
 def update_mcp(
@@ -85,11 +86,11 @@ def update_mcp(
     if not mcp_db:
         raise HTTPException(status_code=404, detail="MCP not found.")
 
-    user_db = db.query(DBUser).filter(DBUser.username == current_user.username).one()
-    is_owner = mcp_db.owner_user_id == user_db.id
+    is_owner = mcp_db.owner_user_id == current_user.id
+    is_system_item = mcp_db.type == 'system'
 
-    if not is_owner:
-        raise HTTPException(status_code=403, detail="You can only edit your own MCPs.")
+    if not is_owner and not (is_system_item and current_user.is_admin):
+        raise HTTPException(status_code=403, detail="You are not authorized to edit this MCP.")
 
     update_data = mcp_update.model_dump(exclude_unset=True)
     for key, value in update_data.items():
@@ -97,22 +98,13 @@ def update_mcp(
     
     try:
         db.commit()
-        db.refresh(mcp_db)
+        db.refresh(mcp_db, ["owner"])
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="An MCP with the new name already exists.")
 
-    # Invalidate client and tools cache since the MCP list has changed
     _invalidate_user_mcp_cache(current_user.username)
-
-    return MCPPublic(
-        id=mcp_db.id, name=mcp_db.name, url=mcp_db.url,
-        active=mcp_db.active,
-        owner_username=user_db.username,
-        authentication_type=mcp_db.authentication_type,
-        authentication_key=mcp_db.authentication_key,
-        created_at=mcp_db.created_at, updated_at=mcp_db.updated_at
-    )
+    return _format_mcp_public(mcp_db)
 
 @mcp_router.delete("/{mcp_id}", status_code=204)
 def delete_mcp(
@@ -124,70 +116,127 @@ def delete_mcp(
     if not mcp_db:
         raise HTTPException(status_code=404, detail="MCP not found.")
 
-    user_db = db.query(DBUser).filter(DBUser.username == current_user.username).one()
-    is_owner = mcp_db.owner_user_id == user_db.id
-    
-    if not is_owner:
-        raise HTTPException(status_code=403, detail="You can only delete your own MCPs.")
+    is_owner = mcp_db.owner_user_id == current_user.id
+    is_system_item = mcp_db.type == 'system'
+
+    if not is_owner and not (is_system_item and current_user.is_admin):
+        raise HTTPException(status_code=403, detail="You are not authorized to delete this MCP.")
 
     db.delete(mcp_db)
     db.commit()
-    # Invalidate client and tools cache since the MCP list has changed
     _invalidate_user_mcp_cache(current_user.username)
     return None
 
+# --- APPS LOGIC ---
+def _format_app_public(app: DBApp) -> AppPublic:
+    return AppPublic(
+        id=app.id, name=app.name, url=app.url, icon=app.icon,
+        active=app.active, type=app.type,
+        authentication_type=app.authentication_type,
+        authentication_key="********" if app.authentication_key else "",
+        owner_username=app.owner.username if app.owner else "System",
+        created_at=app.created_at, updated_at=app.updated_at
+    )
+
+@apps_router.get("", response_model=List[AppPublic])
+def list_apps(db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
+    apps_db = db.query(DBApp).options(joinedload(DBApp.owner)).filter(
+        or_(DBApp.owner_user_id == current_user.id, DBApp.type == 'system')
+    ).all()
+    return [_format_app_public(app) for app in apps_db]
+
+@apps_router.post("/personal", response_model=AppPublic, status_code=201)
+def create_personal_app(app_data: AppCreate, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
+    if app_data.type == 'system' and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can create system apps.")
+    
+    owner_id = current_user.id if app_data.type == 'user' else None
+    
+    new_app = DBApp(**app_data.model_dump(), owner_user_id=owner_id)
+    db.add(new_app)
+    try:
+        db.commit()
+        db.refresh(new_app, ["owner"])
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="An app with this name already exists for your account.")
+    return _format_app_public(new_app)
+
+@apps_router.put("/{app_id}", response_model=AppPublic)
+def update_app(app_id: str, app_update: AppUpdate, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
+    app_db = db.query(DBApp).filter(DBApp.id == app_id).first()
+    if not app_db:
+        raise HTTPException(status_code=404, detail="App not found.")
+    
+    is_owner = app_db.owner_user_id == current_user.id
+    is_system_item = app_db.type == 'system'
+
+    if not is_owner and not (is_system_item and current_user.is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized to edit this app.")
+
+    update_data = app_update.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(app_db, key, value)
+    
+    try:
+        db.commit()
+        db.refresh(app_db, ["owner"])
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="An app with the new name already exists.")
+    return _format_app_public(app_db)
+
+@apps_router.delete("/{app_id}", status_code=204)
+def delete_app(app_id: str, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
+    app_db = db.query(DBApp).filter(DBApp.id == app_id).first()
+    if not app_db:
+        raise HTTPException(status_code=404, detail="App not found.")
+
+    is_owner = app_db.owner_user_id == current_user.id
+    is_system_item = app_db.type == 'system'
+
+    if not is_owner and not (is_system_item and current_user.is_admin):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this app.")
+
+    db.delete(app_db)
+    db.commit()
+    return None
+
+# --- TOOLS AND DISCUSSION LOGIC ---
+
 @mcp_router.post("/reload", status_code=200)
 def reload_user_lollms_client(current_user: UserAuthDetails = Depends(get_current_active_user)):
-    """
-    Forces a re-initialization of the lollms_client and its associated tools cache for the current user.
-    This should be called after any MCP server configuration change.
-    """
     _invalidate_user_mcp_cache(current_user.username)
-    
-    # The next call to get_user_lollms_client and list_all_available_tools will automatically rebuild.
-    # We can proactively rebuild the client here to be ready for the next call.
     get_user_lollms_client(current_user.username)
     print(f"INFO: Triggered lollms_client reload for user: {current_user.username}")
     return {"status": "success", "message": "MCP client and tools cache re-initialized."}
 
 @mcp_router.get("/tools", response_model=List[ToolInfo])
 def list_all_available_tools(current_user: UserAuthDetails = Depends(get_current_active_user)):
-    """
-    Lists all available tools for the user.
-    Results are cached per user session and are re-fetched only when MCP configurations change
-    or a manual reload is triggered.
-    """
     username = current_user.username
     if username not in user_sessions:
         user_sessions[username] = {}
 
-    # Check for a valid cache first
     cached_tools = user_sessions[username].get('tools_cache')
     if cached_tools is not None:
         print(f"INFO: Serving cached tools for user: {username}")
         return cached_tools
 
-    # If cache is invalid or missing, rebuild it
     print(f"INFO: Building tools cache for user: {username}")
     try:
         lc = get_user_lollms_client(username)
         if not hasattr(lc, 'mcp') or not lc.mcp:
-            # Cache an empty list to avoid re-fetching if there's no MCP
             user_sessions[username]['tools_cache'] = []
             return []
         
-        # force_refresh=True ensures we get the latest from the MCP server itself
         tools = lc.mcp.discover_tools(force_refresh=True)
         all_tools = [ToolInfo(name=item["name"], description=item.get('description', '')) for item in tools]
         sorted_tools = sorted(all_tools, key=lambda x: x.name)
         
-        # Store the newly fetched tools in our cache
         user_sessions[username]['tools_cache'] = sorted_tools
         return sorted_tools
     except Exception as e:
         print(f"Error discovering tools for user {username}: {e}")
-        # In case of an error, return an empty list but do not update the cache.
-        # This allows for a retry on the next request.
         return []
 
 @discussion_tools_router.get("/{discussion_id}/tools", response_model=List[ToolInfo])
@@ -195,21 +244,17 @@ def get_discussion_tools(
     discussion_id: str,
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
-    # Use the new discussion helper
     discussion_obj = get_user_discussion(current_user.username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    # This call will now be much faster due to caching
     all_available_tools = list_all_available_tools(current_user)
     
-    # Get active tools from the discussion's metadata
     metadata = discussion_obj.metadata or {}
     active_tool_names = set(metadata.get('active_tools', []))
 
     for tool in all_available_tools:
-        if tool.name in active_tool_names:
-            tool.is_active = True
+        tool.is_active = tool.name in active_tool_names
             
     return all_available_tools
 
@@ -220,19 +265,16 @@ async def update_discussion_tools(
     db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
-    # Use the new discussion helper
     discussion_obj = get_user_discussion(current_user.username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    # Store active tools in the discussion's metadata
     if discussion_obj.metadata is None:
         discussion_obj.metadata = {}
     discussion_obj.metadata['active_tools'] = update_request.tools
-    discussion_obj.commit() # Save changes to the discussion's database
+    discussion_obj.commit()
 
-    user_db = db.query(DBUser).filter(DBUser.username == current_user.username).one()
-    is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_db.id, discussion_id=discussion_id).first() is not None
+    is_starred = db.query(UserStarredDiscussion).filter_by(user_id=current_user.id, discussion_id=discussion_id).first() is not None
 
     return DiscussionInfo(
         id=discussion_obj.id,

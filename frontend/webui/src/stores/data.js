@@ -13,6 +13,8 @@ export const useDataStore = defineStore('data', () => {
     const publicPersonalities = ref([]);
     const userMcps = ref([]);
     const mcpTools = ref([]);
+    const userApps = ref([]);
+    const systemApps = ref([]);
 
     // GETTERS
     const availableRagStores = computed(() => {
@@ -66,6 +68,7 @@ export const useDataStore = defineStore('data', () => {
         fetchPersonalities();
         fetchMcps();
         fetchMcpTools();
+        fetchApps();
     }
 
     async function fetchAvailableLollmsModels() {
@@ -241,14 +244,12 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
-    // --- MCP Actions ---
-
     async function triggerMcpReload() {
         const uiStore = useUiStore();
         uiStore.addNotification('Reloading MCP services...', 'info');
         try {
             await apiClient.post('/api/mcps/reload');
-            await fetchMcpTools(); // Also refresh the tool list
+            await fetchMcpTools();
             uiStore.addNotification('MCP services reloaded.', 'success');
         } catch (error) {
             uiStore.addNotification('Failed to reload mcp services.', 'fail');
@@ -269,9 +270,9 @@ export const useDataStore = defineStore('data', () => {
     async function addMcp(mcpData) {
         const uiStore = useUiStore();
         try {
-            const response = await apiClient.post('/api/mcps/personal', mcpData);
-            userMcps.value.push(response.data);
+            await apiClient.post('/api/mcps/personal', mcpData);
             uiStore.addNotification('MCP server added successfully.', 'success');
+            await fetchMcps();
             await triggerMcpReload();
         } catch (error) {
             console.error("Failed to add MCP server:", error);
@@ -282,11 +283,9 @@ export const useDataStore = defineStore('data', () => {
     async function updateMcp(mcpId, mcpData) {
         const uiStore = useUiStore();
         try {
-            const response = await apiClient.put(`/api/mcps/${mcpId}`, mcpData);
-            userMcps.value = userMcps.value.map(mcp => 
-                mcp.id === mcpId ? response.data : mcp
-            );
+            await apiClient.put(`/api/mcps/${mcpId}`, mcpData);
             uiStore.addNotification('MCP server updated successfully.', 'success');
+            await fetchMcps();
             await triggerMcpReload();
         } catch (error) {
             console.error("Failed to update MCP server:", error);
@@ -298,8 +297,8 @@ export const useDataStore = defineStore('data', () => {
         const uiStore = useUiStore();
         try {
             await apiClient.delete(`/api/mcps/${mcpId}`);
-            userMcps.value = userMcps.value.filter(m => m.id !== mcpId);
             uiStore.addNotification('MCP server removed.', 'success');
+            await fetchMcps();
             await triggerMcpReload();
         } catch (error) {
             console.error("Failed to delete MCP server:", error);
@@ -342,46 +341,72 @@ export const useDataStore = defineStore('data', () => {
         }
     }
     
+    async function fetchApps() {
+        try {
+            const response = await apiClient.get('/api/apps');
+            const authStore = useAuthStore();
+            if (Array.isArray(response.data) && authStore.user) {
+                userApps.value = response.data.filter(app => app.type === 'user');
+                systemApps.value = response.data.filter(app => app.type === 'system');
+            }
+        } catch (error) {
+            console.error("Failed to load apps:", error);
+            userApps.value = [];
+            systemApps.value = [];
+        }
+    }
+
+    async function addApp(appData) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.post('/api/apps/personal', appData);
+            uiStore.addNotification('App added successfully.', 'success');
+            await fetchApps();
+        } catch (error) { throw error; }
+    }
+
+    async function updateApp(appId, appData) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.put(`/api/apps/${appId}`, appData);
+            uiStore.addNotification('App updated successfully.', 'success');
+            await fetchApps();
+        } catch (error) { throw error; }
+    }
+
+    async function deleteApp(appId) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.delete(`/api/apps/${appId}`);
+            uiStore.addNotification('App removed.', 'success');
+            await fetchApps();
+        } catch (error) { throw error; }
+    }
+
     function $reset() {
+        availableLollmsModels.value = [];
+        ownedDataStores.value = [];
+        sharedDataStores.value = [];
+        userPersonalities.value = [];
+        publicPersonalities.value = [];
+        userMcps.value = [];
+        mcpTools.value = [];
+        userApps.value = [];
+        systemApps.value = [];
     }
     return {
-        // State
-        availableLollmsModels,
-        ownedDataStores,
-        sharedDataStores,
-        userPersonalities,
-        publicPersonalities,
-        userMcps,
-        mcpTools,
-        
-        // Getters
-        availableRagStores,
-        availableMcpToolsForSelector,
-
-        // Actions
-        loadAllInitialData,
-        fetchAvailableLollmsModels,
-        fetchDataStores,
-        addDataStore,
-        updateDataStore,
-        deleteDataStore,
-        shareDataStore,
-        fetchStoreFiles,
-        fetchStoreVectorizers,
-        uploadFilesToStore,
-        deleteFileFromStore,
-        fetchPersonalities,
-        addPersonality,
-        updatePersonality,
-        deletePersonality,
-        fetchMcps,
-        addMcp,
-        updateMcp,
-        deleteMcp,
-        fetchMcpTools,
-        triggerMcpReload,
-        refreshMcps,
-        refreshRags,
+        availableLollmsModels, ownedDataStores, sharedDataStores,
+        userPersonalities, publicPersonalities, userMcps, mcpTools,
+        userApps, systemApps,
+        availableRagStores, availableMcpToolsForSelector,
+        loadAllInitialData, fetchAvailableLollmsModels, fetchDataStores,
+        addDataStore, updateDataStore, deleteDataStore, shareDataStore,
+        fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,
+        deleteFileFromStore, fetchPersonalities, addPersonality,
+        updatePersonality, deletePersonality, fetchMcps, addMcp,
+        updateMcp, deleteMcp, fetchMcpTools, triggerMcpReload,
+        refreshMcps, refreshRags,
+        fetchApps, addApp, updateApp, deleteApp,
         $reset
     };
 });

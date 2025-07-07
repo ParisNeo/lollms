@@ -187,6 +187,7 @@ class MCP(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     name = Column(String, nullable=False, index=True)
     url = Column(String, nullable=False)
+    icon = Column(Text, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
     type = Column(String, default="system", nullable=False)
     owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_mcp_owner", ondelete="CASCADE"), nullable=True, index=True)
@@ -203,9 +204,10 @@ class App(Base):
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     name = Column(String, nullable=False, index=True)
     url = Column(String, nullable=False)
+    icon = Column(Text, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
     type = Column(String, default="system", nullable=False)
-    owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_mcp_owner", ondelete="CASCADE"), nullable=True, index=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_app_owner", ondelete="CASCADE"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     authentication_type = Column(String, default="None", nullable=False)
@@ -369,20 +371,33 @@ def init_database(db_url: str):
                         print("INFO: Created unique index 'uq_user_email' on 'users.email'.")
                     except (OperationalError, IntegrityError) as e:
                         print(f"Warning: Could not create unique index on email. Error: {e}")
+            
             if inspector.has_table("mcps"):
-                user_columns_db = [col['name'] for col in inspector.get_columns('mcps')]
-                new_user_cols_defs = {
-                    "active": "BOOLEAN DEFAULT 0 NOT NULL",
+                mcp_columns_db = [col['name'] for col in inspector.get_columns('mcps')]
+                new_mcp_cols_defs = {
+                    "active": "BOOLEAN DEFAULT 1 NOT NULL",
+                    "type": "VARCHAR",
+                    "icon": "TEXT",
+                    "authentication_type": "VARCHAR", "authentication_key": "VARCHAR"
+                }
+                for col_name, col_sql_def in new_mcp_cols_defs.items():
+                    if col_name not in mcp_columns_db:
+                        connection.execute(text(f"ALTER TABLE mcps ADD COLUMN {col_name} {col_sql_def}"))
+                        print(f"INFO: Added missing column '{col_name}' to 'mcps' table.")
+
+            # NEW: Migration block for the 'apps' table
+            if inspector.has_table("apps"):
+                app_columns_db = [col['name'] for col in inspector.get_columns('apps')]
+                new_app_cols_defs = {
+                    "icon": "TEXT",
+                    "active": "BOOLEAN DEFAULT 1 NOT NULL",
                     "type": "VARCHAR",
                     "authentication_type": "VARCHAR", "authentication_key": "VARCHAR"
                 }
-                
-                added_cols = []
-                for col_name, col_sql_def in new_user_cols_defs.items():
-                    if col_name not in user_columns_db:
-                        connection.execute(text(f"ALTER TABLE mcps ADD COLUMN {col_name} {col_sql_def}"))
-                        print(f"INFO: Added missing column '{col_name}' to 'mcps' table.")
-                        added_cols.append(col_name)
+                for col_name, col_sql_def in new_app_cols_defs.items():
+                    if col_name not in app_columns_db:
+                        connection.execute(text(f"ALTER TABLE apps ADD COLUMN {col_name} {col_sql_def}"))
+                        print(f"INFO: Added missing column '{col_name}' to 'apps' table.")
 
             transaction.commit()
             print("INFO: Database schema migration/check completed successfully.")

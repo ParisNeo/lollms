@@ -317,6 +317,7 @@ class PersonalitySendRequest(BaseModel):
 class MCPBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     url: str
+    icon: Optional[str] = None
     active: Optional[bool] = True
     type: Optional[str] = "user"
     authentication_type: Optional[str] = "none"
@@ -328,6 +329,7 @@ class MCPCreate(MCPBase):
 class MCPUpdate(BaseModel):
     name: Optional[constr(min_length=1, max_length=100)] = None
     url: Optional[str] = None
+    icon: Optional[str] = None
     active: Optional[bool] = True
     type: Optional[str] = "user"
     authentication_type: Optional[str] = "none"
@@ -335,6 +337,36 @@ class MCPUpdate(BaseModel):
 
 
 class MCPPublic(MCPBase):
+    id: str
+    owner_username: Optional[str] = None
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    model_config = {"from_attributes": True}
+
+# --- App Models ---
+
+class AppBase(BaseModel):
+    name: constr(min_length=1, max_length=100)
+    url: str
+    icon: Optional[str] = None
+    active: Optional[bool] = True
+    type: Optional[str] = "user"
+    authentication_type: Optional[str] = "none"
+    authentication_key: Optional[str] = ""
+
+class AppCreate(AppBase):
+    pass
+
+class AppUpdate(BaseModel):
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    url: Optional[str] = None
+    icon: Optional[str] = None
+    active: Optional[bool] = True
+    type: Optional[str] = "user"
+    authentication_type: Optional[str] = "none"
+    authentication_key: Optional[str] = ""
+
+class AppPublic(AppBase):
     id: str
     owner_username: Optional[str] = None
     created_at: datetime.datetime
