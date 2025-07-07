@@ -33,7 +33,7 @@ from backend.database_setup import (
     get_db,
 )
 from backend.models import UserLLMParams, UserAuthDetails, DataStoreCreate, DataStoreEdit, DataStoreShareRequest, DataStorePublic, DataStoreBase
-
+from backend.session import get_datastore_db_path
 
 # safe_store is expected to be installed
 try:
