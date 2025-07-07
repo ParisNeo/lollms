@@ -12,6 +12,7 @@ new ui:
 - OK level : 0 to 5
 - OK social activate/deactivate
 - After generation, refresh discussion
+- Add the possibility to use multiple bindings at once with different configurations
 - After stopping, save current status and refresh discussion
 - Add personality description to the list
 - fix the return key not sending the message
