@@ -2,28 +2,10 @@
 import { ref, onMounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAuthStore } from '../../stores/auth';
-// useDataStore is not needed for these settings, but kept in case you add settings that need it.
-import { useDataStore } from '../../stores/data';
 
 const authStore = useAuthStore();
-const dataStore = useDataStore(); // Kept for future use
-
-// Use storeToRefs to get reactive state from the stores
 const { user } = storeToRefs(authStore);
 
-// ====================================================================================
-// Settings Configuration
-// To add a new setting, simply add a new object to this array.
-// The template will automatically generate the correct input field.
-//
-// Supported types: 'toggle', 'select'
-// - key: The property name in the user object and the form state.
-// - type: Determines the UI control to render.
-// - label: The main text label for the setting.
-// - description: Helper text shown below the label or control.
-// - defaultValue: The value to use if the setting is not present on the user object.
-// - options (for 'select' type): An array of { value, text } objects for the dropdown.
-// ====================================================================================
 const settingsConfig = [
     {
         key: 'auto_title',
@@ -35,23 +17,24 @@ const settingsConfig = [
     {
         key: 'fun_mode',
         type: 'toggle',
-        label: 'Fun mode',
-        description: 'If activated, the AI will be more funny.',
-        defaultValue: true
+        label: 'Fun Mode',
+        description: 'If activated, the AI will be more playful and creative.',
+        defaultValue: false
     },
     {
         key: 'chat_active',
         type: 'toggle',
-        label: 'Activate chat',
-        description: 'If activated, the user will be able to communicate with other users via DMs.',
-        defaultValue: true
+        label: 'Activate Social Chat',
+        description: 'Enable or disable direct messaging with other users.',
+        defaultValue: false,
+        minLevel: 2 // Requires Intermediate level or higher
     },
     {
         key: 'user_ui_level',
         type: 'select',
         label: 'UI Level',
         description: 'Adjust the complexity of the user interface. More advanced levels show more options.',
-        defaultValue: 0, // 'Beginner'
+        defaultValue: 0,
         options: [
             { value: 0, text: 'Beginner' },
             { value: 1, text: 'Novice' },
@@ -61,77 +44,72 @@ const settingsConfig = [
         ]
     },
     {
+        key: 'first_page',
+        type: 'select',
+        label: 'Home Page',
+        description: 'Choose the default page you see after logging in.',
+        defaultValue: 'feed',
+        options: [
+            { value: 'feed', text: 'Social Feed', minLevel: 2 },
+            { value: 'new_discussion', text: 'New Discussion' },
+            { value: 'last_discussion', text: 'Last Used Discussion' }
+        ]
+    },
+    {
         key: 'ai_response_language',
         type: 'select',
-        label: 'AI Response language',
+        label: 'AI Response Language',
         description: 'Changes the output language of the AI messages.',
-        defaultValue: 0, // 'Beginner'
+        defaultValue: 'auto',
         options: [
             { value: "auto", text: 'Auto' },
             { value: "en", text: 'English' },
             { value: "fr", text: 'French' },
             { value: "it", text: 'Italian' },
-            { value: "es", text: 'Espagnol' }
+            { value: "es", text: 'Spanish' } // Corrected typo
         ]
     }
-    // Future settings can be added here, e.g.:
-    // {
-    //     key: 'theme',
-    //     type: 'select',
-    //     label: 'Application Theme',
-    //     description: 'Choose your preferred color theme.',
-    //     defaultValue: 'system',
-    //     options: [
-    //         { value: 'light', text: 'Light' },
-    //         { value: 'dark', text: 'Dark' },
-    //         { value: 'system', text: 'System Default' }
-    //     ]
-    // }
 ];
 
-// Reactive form state, dynamically created from the config
 const form = ref({});
-
 const isLoading = ref(false);
 const hasChanges = ref(false);
-
-// A pristine copy to compare against for changes
 let pristineState = {};
 
-// Function to populate form from user state and set pristine state
 const populateForm = () => {
     if (user.value) {
         const newFormState = {};
-        console.log(settingsConfig)
-        console.log(user.value)
-        // Populate form based on the settingsConfig, using user values or defaults
         settingsConfig.forEach(setting => {
             newFormState[setting.key] = user.value[setting.key] ?? setting.defaultValue;
         });
         form.value = newFormState;
-
         pristineState = JSON.parse(JSON.stringify(form.value));
-        hasChanges.value = false; // Reset on populate
+        hasChanges.value = false;
     }
 };
 
-// Populate form on mount and when user data changes
 onMounted(populateForm);
 watch(user, populateForm, { deep: true });
 
-// Watch for changes in the form to enable/disable the save button
-watch(form, (newValue) => {
+watch(form, (newValue, oldValue) => {
     hasChanges.value = JSON.stringify(newValue) !== JSON.stringify(pristineState);
+
+    // Business rule: When switching to Novice, set default first page to 'new_discussion'
+    if (oldValue && newValue.user_ui_level === 1 && oldValue.user_ui_level !== 1) {
+        form.value.first_page = 'new_discussion';
+    }
+
+    // Business rule: If UI level is too low for the selected first page, reset it
+    if (newValue.user_ui_level < 2 && newValue.first_page === 'feed') {
+        form.value.first_page = 'new_discussion';
+    }
 }, { deep: true });
 
-// Handle form submission
 async function handleSave() {
     isLoading.value = true;
     try {
         await authStore.updateUserPreferences(form.value);
-        // The user watcher will repopulate the form and reset pristineState after the update is successful
     } catch (error) {
-        // Error notification is assumed to be handled by an API interceptor or store action
         console.error("Failed to save settings:", error);
     } finally {
         isLoading.value = false;
@@ -148,8 +126,7 @@ async function handleSave() {
             </p>
         </div>
         <div class="border-t border-gray-200 dark:border-gray-700">
-            <form @submit.prevent="handleSave" class="p-4 sm:p-6 space-y-8">
-                <!-- Dynamically generate form fields from settingsConfig -->
+            <form v-if="user" @submit.prevent="handleSave" class="p-4 sm:p-6 space-y-8">
                 <div v-for="setting in settingsConfig" :key="setting.key">
                     <!-- Renders a Select (Dropdown) Input -->
                     <div v-if="setting.type === 'select'">
@@ -158,10 +135,11 @@ async function handleSave() {
                         </label>
                         <select
                             :id="setting.key"
-                            v-model.number="form[setting.key]"
+                            v-model="form[setting.key]"
                             class="input-field mt-1"
+                            :value="form[setting.key]"
                         >
-                            <option v-for="option in setting.options" :key="option.value" :value="option.value">
+                            <option v-for="option in setting.options.filter(o => !o.minLevel || user.user_ui_level >= o.minLevel)" :key="option.value" :value="option.value">
                                 {{ option.text }}
                             </option>
                         </select>
@@ -169,7 +147,7 @@ async function handleSave() {
                     </div>
 
                     <!-- Renders a Toggle (Checkbox) Input -->
-                    <div v-if="setting.type === 'toggle'" class="relative flex items-start">
+                    <div v-if="setting.type === 'toggle' && (!setting.minLevel || user.user_ui_level >= setting.minLevel)" class="relative flex items-start">
                         <div class="flex h-6 items-center">
                             <input
                                 :id="setting.key"

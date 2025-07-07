@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
+import { useAuthStore } from '../../stores/auth';
 
 const props = defineProps({
   discussion: {
@@ -10,58 +11,118 @@ const props = defineProps({
   },
 });
 
-const discussionsStore = useDiscussionsStore();
+const store = useDiscussionsStore();
 const uiStore = useUiStore();
+const authStore = useAuthStore();
 
-const isActive = computed(() => discussionsStore.currentDiscussionId === props.discussion.id);
+const user = computed(() => authStore.user);
 
-function selectDiscussion() {
-  uiStore.setMainView('chat');
-  discussionsStore.selectDiscussion(props.discussion.id);
+const isSelected = computed(() => store.currentDiscussionId === props.discussion.id);
+const isActive = computed(() => store.generationInProgress && isSelected.value);
+
+function handleSelect() {
+  if (!isSelected.value) {
+    store.selectDiscussion(props.discussion.id);
+  }
 }
 
-function deleteDiscussion() {
-    discussionsStore.deleteDiscussion(props.discussion.id)
+function handleStar(event) {
+    event.stopPropagation();
+    store.toggleStarDiscussion(props.discussion.id);
 }
 
-function renameDiscussion() { 
-    uiStore.openModal('renameDiscussion', { discussionId: props.discussion.id });
+function handleDelete(event) {
+    event.stopPropagation();
+    store.deleteDiscussion(props.discussion.id);
 }
-function sendDiscussion() { 
-    uiStore.openModal('shareDiscussion', { 
+
+function handleRename(event) {
+    event.stopPropagation();
+    uiStore.openModal('renameDiscussion', {
         discussionId: props.discussion.id,
-        discussionTitle: props.discussion.title 
+        currentTitle: props.discussion.title
     });
 }
-function toggleStar() { 
-    discussionsStore.toggleStarDiscussion(props.discussion.id);
+
+function handleSend(event) {
+    event.stopPropagation();
+    uiStore.openModal('shareDiscussion', {
+        discussionId: props.discussion.id,
+        title: props.discussion.title
+    });
 }
+
+function handleAutoTitle(event) {
+    event.stopPropagation();
+    store.generateAutoTitle(props.discussion.id);
+}
+
 </script>
 
 <template>
-  <div
-    @click="selectDiscussion"
-    class="group p-2.5 rounded-lg cursor-pointer flex justify-between items-center text-sm transition-colors duration-150"
-    :class="isActive ? 'bg-blue-600 font-medium text-white' : 'hover:bg-gray-100 dark:hover:bg-gray-700'"
-  >
-    <span class="truncate mr-2 flex-1 text-xs">{{ discussion.title || 'Untitled Discussion' }}</span>
+  <div @click="handleSelect" 
+       :class="[
+            'discussion-item group',
+            { 'selected': isSelected },
+            { 'active-generation': isActive }
+       ]">
+    <div class="flex-grow truncate pr-2">
+      <p class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate" :title="discussion.title">
+        {{ discussion.title }}
+      </p>
+    </div>
     
-    <div class="flex items-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" :class="{'opacity-100': isActive}">
-      <!-- Actions: Send, Rename, Delete -->
-      <button @click.stop="sendDiscussion" title="Send Discussion" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" /></svg>
-      </button>
-      <button @click.stop="renameDiscussion" title="Rename Discussion" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600">
-        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L6.832 19.82a4.5 4.5 0 0 1-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 0 1 1.13-1.897L16.863 4.487Zm0 0L19.5 7.125" /></svg>
-      </button>
-      <button @click.stop="deleteDiscussion" title="Delete Discussion" class="p-1 rounded hover:bg-red-200 dark:hover:bg-red-700 text-red-500">
-         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-4 h-4"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12.508 0A48.067 48.067 0 0 1 7.8 5.397m7.454 0M12 10.75h.008v.008H12v-.008Z" /></svg>
-      </button>
-       <button @click.stop="toggleStar" title="Star Discussion" class="p-1 ml-1 rounded" :class="discussion.is_starred ? 'text-yellow-400' : 'text-gray-400 dark:text-gray-500'">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" :fill="discussion.is_starred ? 'currentColor' : 'none'" class="w-4 h-4" :stroke="discussion.is_starred ? 'none' : 'currentColor'">
-          <path fill-rule="evenodd" d="M10.788 3.21c.448-1.077 1.976-1.077 2.424 0l2.082 5.006 5.404.434c1.164.093 1.636 1.545.749 2.305l-4.117 3.527 1.257 5.273c.271 1.136-.964 2.033-1.96 1.425L12 18.354 7.373 21.18c-.996.608-2.231-.29-1.96-1.425l1.257-5.273-4.117-3.527c-.887-.76-.415-2.212.749-2.305l5.404-.434 2.082-5.005Z" clip-rule="evenodd" />
-        </svg>
-      </button>
+    <div class="flex items-center space-x-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+         :class="{ 'opacity-100': isSelected }">
+        
+        <button @click.stop.prevent="handleStar" class="p-1.5 rounded text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700" :title="discussion.is_starred ? 'Unstar' : 'Star'">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" :class="discussion.is_starred ? 'text-yellow-400' : 'text-gray-400'" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+            </svg>
+        </button>
+
+        <button v-if="user && user.user_ui_level >= 4" @click.stop.prevent="handleAutoTitle" class="p-1.5 rounded text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300" title="Auto Title">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.898 20.572L16.5 21.75l-.398-1.178a3.375 3.375 0 00-2.3-2.3L12.75 18l1.178-.398a3.375 3.375 0 002.3-2.3L16.5 14.25l.398 1.178a3.375 3.375 0 002.3 2.3l1.178.398-1.178.398a3.375 3.375 0 00-2.3 2.3z" />
+            </svg>
+        </button>
+
+        <button v-if="user && user.user_ui_level >= 4" @click.stop.prevent="handleSend" class="p-1.5 rounded text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300" title="Send Discussion">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 12L3.269 3.125A59.769 59.769 0 0121.485 12 59.768 59.768 0 013.27 20.875L5.999 12zm0 0h7.5" />
+            </svg>
+        </button>
+        
+        <button @click.stop.prevent="handleRename" class="p-1.5 rounded text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-600 dark:hover:text-gray-300" title="Rename">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+            </svg>
+        </button>
+
+        <button @click.stop.prevent="handleDelete" class="p-1.5 rounded text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-red-500 dark:hover:text-red-400" title="Delete">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+        </button>
     </div>
   </div>
 </template>
+
+<style scoped>
+.discussion-item {
+  @apply w-full text-left p-2.5 rounded-lg cursor-pointer flex justify-between items-center transition-colors duration-150
+         hover:bg-gray-100 dark:hover:bg-gray-700/80;
+}
+.discussion-item.selected {
+  @apply bg-blue-100 dark:bg-blue-900/60;
+}
+.discussion-item.active-generation {
+  animation: pulse-border 2s infinite;
+  border: 1px solid;
+}
+@keyframes pulse-border {
+  0% { border-color: transparent; }
+  50% { border-color: theme('colors.blue.400'); }
+  100% { border-color: transparent; }
+}
+</style>

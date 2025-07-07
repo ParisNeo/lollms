@@ -24,6 +24,7 @@ const isSubmitting = ref(false);
 const comments = computed(() => socialStore.getCommentsForPost(props.postId));
 const isLoading = computed(() => socialStore.isLoadingComments[props.postId] ?? false);
 const user = computed(() => authStore.user);
+const canComment = computed(() => user.value && user.value.user_ui_level >= 2);
 
 onMounted(() => {
   // Fetch comments only if they haven't been fetched yet
@@ -76,7 +77,7 @@ async function handleCommentSubmit() {
     </div>
 
     <!-- New Comment Form -->
-    <div class="mt-4 flex space-x-3 items-start">
+    <div v-if="canComment" class="mt-4 flex space-x-3 items-start">
       <div class="flex-shrink-0">
         <UserAvatar v-if="user" :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
       </div>

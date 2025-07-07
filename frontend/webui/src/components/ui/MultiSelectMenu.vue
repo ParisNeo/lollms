@@ -98,8 +98,8 @@ const vOnClickOutside = {
       </button>
     </slot>
 
-    <div v-if="isOpen" class="absolute bottom-full mb-2 w-64 bg-white dark:bg-gray-800 shadow-lg rounded-md border border-gray-300 dark:border-gray-600 max-h-60 overflow-y-auto z-10">
-      <ul v-if="items.length > 0">
+    <div v-if="isOpen" class="absolute bottom-full mb-2 w-64 bg-white dark:bg-gray-800 shadow-lg rounded-md border border-gray-300 dark:border-gray-600 flex flex-col max-h-80 z-10">
+      <ul v-if="items.length > 0" class="overflow-y-auto p-1">
         <template v-for="(item, index) in items" :key="index">
             <!-- Render as a group header -->
             <li v-if="item.isGroup" class="px-3 py-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 sticky top-0 bg-gray-50 dark:bg-gray-700">
@@ -125,6 +125,9 @@ const vOnClickOutside = {
       </ul>
       <div v-else class="px-3 py-2 text-sm text-gray-500 italic">
         No items available.
+      </div>
+       <div v-if="$slots.footer" class="mt-auto border-t border-gray-200 dark:border-gray-700">
+        <slot name="footer"></slot>
       </div>
     </div>
   </div>

@@ -1,15 +1,21 @@
 <script setup>
 import { onMounted, computed, ref } from 'vue';
 import { useSocialStore } from '../../stores/social';
+import { useAuthStore } from '../../stores/auth';
 import CreatePostForm from './CreatePostForm.vue';
 import PostCard from './PostCard.vue';
 import DmFooter from '../layout/DmFooter.vue';
 
 const socialStore = useSocialStore();
+const authStore = useAuthStore();
 const showCreateForm = ref(false);
 
+const user = computed(() => authStore.user);
 const feedPosts = computed(() => socialStore.feedPosts);
 const isLoading = computed(() => socialStore.isLoadingFeed);
+
+const canPost = computed(() => user.value && user.value.user_ui_level >= 2);
+const canChat = computed(() => user.value && user.value.chat_active && user.value.user_ui_level >= 2);
 
 onMounted(() => {
   if (feedPosts.value.length === 0) {
@@ -26,7 +32,7 @@ onMounted(() => {
           Home Feed
         </h1>
 
-        <div class="mb-6">
+        <div v-if="canPost" class="mb-6">
           <button 
             v-if="!showCreateForm" 
             @click="showCreateForm = true" 
@@ -64,6 +70,6 @@ onMounted(() => {
         </div>
       </div>
     </div>  
-    <DmFooter />
+    <DmFooter v-if="canChat" />
   </div>
 </template>

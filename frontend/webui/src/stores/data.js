@@ -61,13 +61,11 @@ export const useDataStore = defineStore('data', () => {
     // ACTIONS
 
     async function loadAllInitialData() {
-        await Promise.all([
-            fetchAvailableLollmsModels(),
-            fetchDataStores(),
-            fetchPersonalities(),
-            fetchMcps(),
-            fetchMcpTools()
-        ]);
+        fetchAvailableLollmsModels();
+        fetchDataStores();
+        fetchPersonalities();
+        fetchMcps();
+        fetchMcpTools();
     }
 
     async function fetchAvailableLollmsModels() {
@@ -319,6 +317,31 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
+    async function refreshMcps() {
+        const uiStore = useUiStore();
+        uiStore.addNotification('Refreshing MCPs...', 'info');
+        try {
+            await Promise.all([
+                fetchMcps(),
+                fetchMcpTools()
+            ]);
+            uiStore.addNotification('MCPs refreshed.', 'success');
+        } catch(e) {
+            uiStore.addNotification('Failed to refresh MCPs.', 'error');
+        }
+    }
+
+    async function refreshRags() {
+        const uiStore = useUiStore();
+        uiStore.addNotification('Refreshing RAG stores...', 'info');
+        try {
+            await fetchDataStores();
+            uiStore.addNotification('RAG stores refreshed.', 'success');
+        } catch(e) {
+            uiStore.addNotification('Failed to refresh RAG stores.', 'error');
+        }
+    }
+    
     function $reset() {
     }
     return {
@@ -357,6 +380,8 @@ export const useDataStore = defineStore('data', () => {
         deleteMcp,
         fetchMcpTools,
         triggerMcpReload,
+        refreshMcps,
+        refreshRags,
         $reset
     };
 });

@@ -19,22 +19,35 @@ const hasError = ref(false);
 let blobUrl = null;
 
 async function fetchImage() {
+  if (blobUrl) {
+    URL.revokeObjectURL(blobUrl);
+    blobUrl = null;
+  }
+  imageSrc.value = null;
+  
   if (!props.src) {
     hasError.value = true;
     isLoading.value = false;
     return;
   }
   
-  // Directly use non-relative URLs (like http, https, data:, blob:)
   if (!props.src.startsWith('/')) {
     imageSrc.value = props.src;
     isLoading.value = false;
+    hasError.value = false;
     return;
   }
 
   isLoading.value = true;
   hasError.value = false;
   
+  if (!authStore.token) {
+    console.error("AuthenticatedImage: No authentication token available.");
+    hasError.value = true;
+    isLoading.value = false;
+    return;
+  }
+
   try {
     const response = await fetch(props.src, {
       headers: {
@@ -43,14 +56,13 @@ async function fetchImage() {
     });
 
     if (!response.ok) {
-      throw new Error(`Failed to fetch image: ${response.statusText}`);
+      throw new Error(`Failed to fetch image: ${response.status} ${response.statusText}`);
     }
 
     const blob = await response.blob();
     
-    // Revoke the old blob URL if it exists to prevent memory leaks
-    if (blobUrl) {
-      URL.revokeObjectURL(blobUrl);
+    if (!blob.type.startsWith('image/')) {
+        throw new Error(`Fetched content is not an image: ${blob.type}`);
     }
     
     blobUrl = URL.createObjectURL(blob);
@@ -64,11 +76,9 @@ async function fetchImage() {
   }
 }
 
-// Fetch the image when the component is mounted or the src prop changes
 onMounted(fetchImage);
 watch(() => props.src, fetchImage);
 
-// Clean up the blob URL when the component is unmounted
 onUnmounted(() => {
     if (blobUrl) {
         URL.revokeObjectURL(blobUrl);

@@ -28,7 +28,6 @@ export const useAuthStore = defineStore('auth', () => {
                 // Set the authorization header for this initial request
                 apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
                 const response = await apiClient.get('/api/auth/me');
-                console.log(response.data)
                 user.value = response.data;
                 
                 // Dynamically import other stores to avoid circular dependencies
@@ -42,6 +41,31 @@ export const useAuthStore = defineStore('auth', () => {
                     discussionsStore.loadDiscussions(),
                     dataStore.loadAllInitialData()
                 ]);
+
+                // Handle first page redirect after all data is loaded
+                if (user.value) {
+                    let targetView = user.value.first_page;
+
+                    // For users with limited UI, override 'feed' to a sensible default
+                    if (user.value.user_ui_level < 2 && targetView === 'feed') {
+                        targetView = 'new_discussion'; 
+                    }
+                    
+                    uiStore.setMainView(targetView === 'feed' ? 'feed' : 'chat');
+
+                    if (targetView === 'last_discussion') {
+                        if (discussionsStore.sortedDiscussions.length > 0) {
+                            // First discussion in the list is the most recent one
+                            await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id);
+                        } else {
+                            // No discussions exist, so start a new one
+                            await discussionsStore.createNewDiscussion();
+                        }
+                    } else if (targetView === 'new_discussion') {
+                        await discussionsStore.createNewDiscussion();
+                    }
+                    // If targetView is 'feed', no specific discussion action is needed.
+                }
 
             } catch (error) {
                 console.error("Token validation failed, clearing token.", error);

@@ -91,9 +91,9 @@ class UserPasswordResetAdmin(BaseModel):
     new_password: constr(min_length=8)
 
 class PostVisibility(str, Enum):
-    PUBLIC = "PUBLIC"
-    FOLLOWERS = "FOLLOWERS"
-    FRIENDS = "FRIENDS"
+    PUBLIC = "public"
+    FOLLOWERS = "followers"
+    FRIENDS = "friends"
 
 
 class AuthorPublic(BaseModel):
@@ -112,16 +112,6 @@ class PostCreate(PostBase):
 class PostUpdate(BaseModel):
     content: Optional[str] = Field(None, min_length=1, max_length=10000)
     visibility: Optional[PostVisibility] = None
-
-class PostPublic(PostBase):
-    id: int
-    author: AuthorPublic
-    media: Optional[List[Dict[str, Any]]] = None
-    visibility: str  # 👈 fix here
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-    model_config = {"from_attributes": True}
-
 
 class UserPublic(UserLLMParams):
     id: int
@@ -169,7 +159,6 @@ class UserAuthDetails(UserLLMParams):
     user_ui_level: Optional[int] = 0
     chat_active: Optional[bool] = False
     first_page: Optional[str] = "feed"
-
     ai_response_language: Optional[str] = "auto"
     fun_mode: Optional[bool] = False
 
@@ -434,11 +423,6 @@ class CommentPublic(CommentBase):
     author: "AuthorPublic" # Forward reference to the existing AuthorPublic model
     created_at: datetime.datetime
     model_config = {"from_attributes": True}
-
-class PostVisibility(str, Enum):
-    PUBLIC = "public"
-    FOLLOWERS = "followers"
-    FRIENDS = "friends"
 
 class PostPublic(PostBase):
     id: int

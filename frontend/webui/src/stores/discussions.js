@@ -14,6 +14,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const generationInProgress = ref(false);
 
     // --- GETTERS ---
+    const sortedDiscussions = computed(() => {
+        return Object.values(discussions.value).sort((a, b) => {
+            const dateA = new Date(a.last_activity_at || a.created_at);
+            const dateB = new Date(b.last_activity_at || b.created_at);
+            return dateB - dateA;
+        });
+    });
     const activeDiscussion = computed(() => currentDiscussionId.value ? discussions.value[currentDiscussionId.value] : null);
     const activeMessages = computed(() => messages.value);
 
@@ -107,6 +114,41 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch(error) { /* Handled */ }
     }
 
+    async function pruneDiscussions() {
+        const uiStore = useUiStore();
+        const confirmed = await uiStore.showConfirmation({
+            title: 'Prune Discussions',
+            message: 'Are you sure you want to delete all empty and single-message discussions? This action cannot be undone.',
+            confirmText: 'Prune'
+        });
+        if (!confirmed) return;
+
+        uiStore.addNotification('Pruning discussions...', 'info');
+        try {
+            const response = await apiClient.post('/api/discussions/prune');
+            await loadDiscussions(); // Refresh the list from the server
+            uiStore.addNotification(response.data.message || 'Pruning complete.', 'success');
+        } catch (error) {
+            console.error("Failed to prune discussions:", error);
+            uiStore.addNotification('An error occurred while pruning.', 'error');
+        }
+    }
+
+    async function generateAutoTitle(discussionId) {
+        const uiStore = useUiStore();
+        uiStore.addNotification('Generating new title...', 'info');
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/auto-title`);
+            if (discussions.value[discussionId]) {
+                discussions.value[discussionId].title = response.data.title;
+            }
+            uiStore.addNotification('New title generated successfully!', 'success');
+        } catch (error) {
+            console.error("Failed to generate auto-title:", error);
+            uiStore.addNotification('Could not generate a new title.', 'error');
+        }
+    }
+
     async function toggleStarDiscussion(discussionId) {
         const disc = discussions.value[discussionId];
         if (!disc) return;
@@ -120,7 +162,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     async function updateDiscussionRagStore({ discussionId, ragDatastoreIds }) {
-        console.log(ragDatastoreIds)
         const disc = discussions.value[discussionId];
         if (!disc) return;
         const originalStoreIds = disc.rag_datastore_ids;
@@ -154,7 +195,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const originalTools = disc.active_tools;
         disc.active_tools = mcp_tool_ids;
         try {
-             // This endpoint should be correct now after consolidating routers.
             await apiClient.put(`/api/discussions/${discussionId}/tools`, { tools: mcp_tool_ids });
             useUiStore().addNotification('Tools updated.', 'success');
         } catch (error) {
@@ -425,10 +465,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         generationInProgress,
         activeDiscussion,
         activeMessages,
+        sortedDiscussions,
         loadDiscussions,
         selectDiscussion,
         createNewDiscussion,
         deleteDiscussion,
+        pruneDiscussions,
+        generateAutoTitle,
         toggleStarDiscussion,
         updateDiscussionRagStore,
         renameDiscussion,

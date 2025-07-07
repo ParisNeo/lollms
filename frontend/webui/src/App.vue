@@ -43,13 +43,16 @@ onMounted(async () => {
 watch(
   () => authStore.isAuthenticated,
   (isNowAuthenticated) => {
-    if (isNowAuthenticated) {
-      // User is logged in, establish the WebSocket connection.
-      console.log("User authenticated, connecting to real-time DM service...");
+    // Connect only if authenticated and user level allows chat/social features
+    const canUseChat = authStore.user?.chat_active && authStore.user?.user_ui_level >= 2;
+
+    if (isNowAuthenticated && canUseChat) {
+      // User is logged in and has permissions, establish the WebSocket connection.
+      console.log("User authenticated with chat permissions, connecting to real-time DM service...");
       socialStore.connectWebSocket();
     } else {
-      // User is logged out, close the connection.
-      console.log("User not authenticated, disconnecting from real-time DM service...");
+      // User is logged out or doesn't have permissions, close the connection.
+      console.log("User not authenticated or no chat permissions, disconnecting from real-time DM service...");
       socialStore.disconnectWebSocket();
     }
   },

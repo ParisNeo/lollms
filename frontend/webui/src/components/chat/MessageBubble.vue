@@ -11,7 +11,7 @@ import { Codemirror } from 'vue-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
-import UserAvatar from '../ui/UserAvatar.vue'; // --- NEW: Import the avatar component
+import UserAvatar from '../ui/UserAvatar.vue';
 
 const props = defineProps({
   message: {
@@ -31,7 +31,6 @@ const codeMirrorView = ref(null);
 const messageContentRef = ref(null);
 const isFormattingMenuOpen = ref(false);
 
-// --- KaTeX Rendering ---
 function renderMath() {
   if (messageContentRef.value && window.renderMathInElement) {
     window.renderMathInElement(messageContentRef.value, {
@@ -46,21 +45,29 @@ function renderMath() {
   }
 }
 
-// Watch for changes in message content to re-render math.
 watch(() => props.message.content, async () => {
     if (isEditing.value) {
         isEditing.value = false;
     }
     await nextTick();
     renderMath();
-}, { flush: 'post' }); // Use flush: 'post' to ensure it runs after DOM updates
+}, { flush: 'post' });
 
 onMounted(() => {
     isStepsCollapsed.value = !props.message.isStreaming;
     renderMath();
 });
 
-// A simple parser for streaming content. It handles basic markdown but avoids complex tokenization.
+const imagesToRender = computed(() => {
+    if (props.message.localImageUrls && props.message.localImageUrls.length > 0) {
+        return props.message.localImageUrls;
+    }
+    if (props.message.image_references && props.message.image_references.length > 0) {
+        return props.message.image_references;
+    }
+    return [];
+});
+
 const parsedStreamingContent = computed(() => {
     if (!props.message.content) return '';
     return marked.parse(props.message.content, { gfm: true, breaks: true });
@@ -88,7 +95,6 @@ const senderName = computed(() => {
 });
 
 const messageParts = computed(() => {
-    // This is now only calculated for non-streaming messages, which is safe.
     if (!props.message.content || props.message.isStreaming) return [];
     const parts = [];
     const content = props.message.content;
@@ -111,7 +117,7 @@ function parseStepContent(content) {
     if (!((processedContent.startsWith('{') && processedContent.endsWith('}')) || (processedContent.startsWith('[') && processedContent.endsWith(']')))) {
         return { isJson: false, data: content };
     }
-    try { return { isJson: true, data: JSON.parse(processedContent) }; } catch (e) { /* no-op */ }
+    try { return { isJson: true, data: JSON.parse(processedContent) }; } catch (e) { }
     try {
         const repaired = processedContent.replace(/\bTrue\b/g, 'true').replace(/\bFalse\b/g, 'false').replace(/\bNone\b/g, 'null').replace(/'/g, '"');
         return { isJson: true, data: JSON.parse(repaired) };
@@ -122,7 +128,6 @@ const getStepContent = (content) => content ? marked.parse(content, { gfm: true,
 
 const latestStep = computed(() => {
     if (props.message.steps && props.message.steps.length > 0) {
-        // The `s &&` guard prevents the error if an element in the array is null or undefined.
         return [...props.message.steps].reverse().find(s => s && s.content) || null;
     }
     return null;
@@ -133,7 +138,7 @@ const editorExtensions = computed(() => {
         markdown(),
         EditorView.lineWrapping,
         keymap.of([{
-            key: "Mod-Enter", // Ctrl/Cmd+Enter
+            key: "Mod-Enter",
             run: () => { handleSaveEdit(); return true; },
         }, {
             key: "Escape",
@@ -221,8 +226,6 @@ function handleGrade(change) {
 
 function handleBranchOrRegenerate() {
     let messageToBranchFrom = null;
-    console.log("sender type")
-    console.log(props.message.sender_type)
     if (props.message.sender_type === 'user') {
         messageToBranchFrom = props.message;
     } else {
@@ -278,7 +281,6 @@ const formattingMenuItems = [
 <template>
   <div class="message-container group w-full flex" :class="containerClass" :data-message-id="message.id">
     <div class="message-bubble" :class="bubbleClass">
-        <!-- Default View -->
         <div v-if="!isEditing">
             <div v-if="!isUser && !isSystem" class="flex items-center text-xs mb-2 text-gray-500 dark:text-gray-400">
                 <span class="font-semibold text-gray-700 dark:text-gray-300">{{ senderName }}</span>
@@ -289,20 +291,17 @@ const formattingMenuItems = [
                 <UserAvatar v-if="user" :icon="user.icon" :username="user.username" size-class="h-10 w-10" /><span class="truncate max-w-[120px]">{{ user.username }}</span>
             </div>
 
-            <div v-if="message.image_references && message.image_references.length > 0" 
+            <div v-if="imagesToRender.length > 0" 
                 class="my-2 grid gap-2"
-                :class="[message.image_references.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
-                <div v-for="(imgSrc, index) in message.image_references" :key="index" class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer" @click="uiStore.openImageViewer(imgSrc)">
+                :class="[imagesToRender.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
+                <div v-for="(imgSrc, index) in imagesToRender" :key="index" class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer" @click="uiStore.openImageViewer(imgSrc)">
                     <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain" />
                 </div>
             </div>
             
             <div :key="message.isStreaming ? 'streaming' : 'settled'" ref="messageContentRef">
-                <div v-if="message.content || (isUser && !message.image_references?.length)" class="message-content text-sm prose prose-sm dark:prose-invert max-w-none">
-                    <!-- A) STABLE RENDERER FOR STREAMING MESSAGES -->
+                <div v-if="message.content || (isUser && !imagesToRender.length)" class="message-content text-sm prose prose-sm dark:prose-invert max-w-none">
                     <div v-if="message.isStreaming" v-html="parsedStreamingContent"></div>
-
-                    <!-- B) FULL-FEATURED RENDERER FOR COMPLETED MESSAGES -->
                     <template v-else>
                         <template v-for="(part, index) in messageParts" :key="index">
                             <template v-if="part.type === 'content'">
@@ -323,12 +322,11 @@ const formattingMenuItems = [
                 </div>
             </div>
             
-            <div v-if="message.isStreaming && !message.content && (!message.image_references || message.image_references.length === 0)" class="typing-indicator">
+            <div v-if="message.isStreaming && !message.content && (!imagesToRender || imagesToRender.length === 0)" class="typing-indicator">
                 <span class="dot"></span><span class="dot"></span><span class="dot"></span>
             </div>
         </div>
 
-        <!-- Editing View -->
         <div v-else class="w-full">
             <div class="flex items-center space-x-1 border-b dark:border-gray-600 mb-2 pb-2">
                  <div class="relative">
@@ -354,18 +352,13 @@ const formattingMenuItems = [
             </div>
         </div>
 
-      <!-- Steps and Footer -->
       <div v-if="!isEditing">
-        <!-- STEPS CONTAINER -->
         <div v-if="message.steps && message.steps.length > 0" class="steps-container mt-4">
             
-            <!-- Collapsed View: The "Thought Bubble" -->
             <div v-if="isStepsCollapsed">
                 <button @click="isStepsCollapsed = !isStepsCollapsed" class="collapsed-steps-summary group/summary">
                     <div class="step-icon flex-shrink-0">
-                        <!-- Spinner for step_start or any running state -->
                         <svg v-if="latestStep && latestStep.status !== 'done'" class="w-4 h-4 animate-spin text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                        <!-- Thought bubble for completed steps -->
                         <svg v-else class="w-4 h-4 text-gray-500 dark:text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
                             <path d="M10 2.5a7.5 7.5 0 00-7.5 7.5c0 2.08.843 3.96 2.21 5.344l-1.078 3.233a.75.75 0 00.945.945l3.233-1.078A7.5 7.5 0 1010 2.5z" />
                             <path d="M4.5 13.5a.5.5 0 01.5.5v.5a.5.5 0 01-1 0v-.5a.5.5 0 01.5-.5z" />
@@ -377,7 +370,6 @@ const formattingMenuItems = [
                 </button>
             </div>
 
-            <!-- Expanded View: The Detailed List -->
             <div v-else>
                  <button @click="isStepsCollapsed = !isStepsCollapsed" class="text-xs font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 flex items-center w-full text-left mb-2 group/toggle">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2 transition-transform rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" /></svg>
@@ -443,7 +435,6 @@ const formattingMenuItems = [
 
 <style scoped>
 .message-container { animation: messageSlideIn 0.3s ease-out forwards; }
-/* Added min-width: 0 to prevent flex items from overflowing their container when content is too wide (e.g., code blocks) */
 .message-bubble { max-width: 90%; word-break: break-word; min-width: 0; }
 .typing-indicator .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background-color: currentColor; margin: 0 1px; animation: bounce 1.4s infinite ease-in-out both; }
 .typing-indicator .dot:nth-of-type(1) { animation-delay: -0.32s; }
@@ -462,8 +453,6 @@ const formattingMenuItems = [
 .step-content-wrapper { flex-grow: 1; min-width: 0; overflow: hidden; }
 .cm-editor-container { border: 1px solid theme('colors.gray.300'); border-radius: theme('borderRadius.lg'); }
 .dark .cm-editor-container { border-color: theme('colors.gray.600'); }
-
-/* New styles for "Thought Bubble" summary */
 .collapsed-steps-summary {
     @apply flex items-center w-full text-left p-2 space-x-2 rounded-lg
            bg-gray-100 dark:bg-gray-700/50
@@ -473,6 +462,6 @@ const formattingMenuItems = [
            hover:bg-gray-200 dark:hover:bg-gray-700;
 }
 .collapsed-steps-summary .step-icon {
-    @apply mt-0; /* Override default margin-top for better alignment */
+    @apply mt-0;
 }
 </style>

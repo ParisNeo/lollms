@@ -348,7 +348,7 @@ def init_database(db_url: str):
                     "user_ui_level":"INTEGER", "ai_response_language":"VARCHAR DEFAULT 'auto'",
                     "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL",
                     "chat_active": "BOOLEAN DEFAULT 0 NOT NULL",
-                    "first_page": "VARCHAR"
+                    "first_page": "VARCHAR DEFAULT 'feed' NOT NULL"
                 }
                 
                 added_cols = []
