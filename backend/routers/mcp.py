@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 # Add DBApp and App models
 from backend.database_setup import get_db, MCP as DBMCP, App as DBApp, User as DBUser, UserStarredDiscussion
-from backend.session import get_current_active_user, get_user_lollms_client, user_sessions
+from backend.session import get_current_active_user, get_user_lollms_client, user_sessions, load_mcps
 from backend.models import (
     MCPCreate, MCPUpdate, MCPPublic, ToolInfo,
     AppCreate, AppUpdate, AppPublic,
@@ -207,7 +207,14 @@ def delete_app(app_id: str, db: Session = Depends(get_db), current_user: UserAut
 @mcp_router.post("/reload", status_code=200)
 def reload_user_lollms_client(current_user: UserAuthDetails = Depends(get_current_active_user)):
     _invalidate_user_mcp_cache(current_user.username)
-    get_user_lollms_client(current_user.username)
+    lc = get_user_lollms_client(current_user.username)
+    lc.mcp = None
+    servers_infos=load_mcps(current_user.username)
+    lc.mcp = lc.mcp_binding_manager.create_binding(
+                "remote_mcp",
+                servers_infos = servers_infos
+            )
+
     print(f"INFO: Triggered lollms_client reload for user: {current_user.username}")
     return {"status": "success", "message": "MCP client and tools cache re-initialized."}
 
