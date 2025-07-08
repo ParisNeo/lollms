@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from werkzeug.utils import secure_filename
 
 from backend.config import (
-    APP_VERSION, APP_DATA_DIR, APP_DB_URL, LOLLMS_CLIENT_DEFAULTS,
+    APP_SETTINGS, APP_VERSION, APP_DATA_DIR, APP_DB_URL, LOLLMS_CLIENT_DEFAULTS,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG, TEMP_UPLOADS_DIR_NAME, DEFAULT_PERSONALITIES
 )
 from backend.database_setup import (
@@ -60,51 +60,57 @@ async def on_startup() -> None:
     print("Database initialized.")
     print("\n--- Running Automated Discussion Migration ---")
     db_session = None
-    try:
-        db_session = next(get_db())
-        all_users = db_session.query(DBUser).all()
-        for user in all_users:
-            username = user.username
-            old_discussion_path = get_user_discussion_path(username)
-            if not (old_discussion_path.exists() and old_discussion_path.is_dir()):
-                continue
-            print(f"Found legacy discussion folder for '{username}'. Starting migration...")
-            if username not in user_sessions:
-                user_sessions[username] = {"lollms_client": None, "lollms_model_name": user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name"), "llm_params": {}}
-            db_path = get_user_data_root(username) / "discussions.db"
-            dm = LollmsDataManager(db_path=f"sqlite:///{db_path.resolve()}")
-            migrated_count = 0
-            for file_path in old_discussion_path.glob("*.yaml"):
-                discussion_db_session = None
-                try:
-                    old_disc = LegacyDiscussion.load_from_yaml(file_path)
-                    if not old_disc: continue
-                    discussion_db_session = dm.get_session()
-                    if discussion_db_session.query(dm.DiscussionModel).filter_by(id=old_disc.discussion_id).first():
-                        discussion_db_session.close()
-                        continue
-                    new_db_disc_orm = dm.DiscussionModel(id=old_disc.discussion_id, discussion_metadata={"title": old_disc.title, "rag_datastore_ids": old_disc.rag_datastore_ids}, active_branch_id=old_disc.active_branch_id)
-                    discussion_db_session.add(new_db_disc_orm)
-                    for msg in old_disc.messages:
-                        msg_orm = dm.MessageModel(id=msg.id, discussion_id=new_db_disc_orm.id, parent_id=msg.parent_id, sender=msg.sender, sender_type=msg.sender_type, content=msg.content, created_at=msg.created_at, binding_name=msg.binding_name, model_name=msg.model_name, tokens=msg.token_count, message_metadata={"sources": msg.sources, "steps": msg.steps})
-                        discussion_db_session.add(msg_orm)
-                    discussion_db_session.commit()
-                    migrated_count += 1
-                except Exception as e:
-                    if discussion_db_session: discussion_db_session.rollback()
-                    print(f"    - FAILED to migrate {file_path.name}: {e}")
-                finally:
-                    if discussion_db_session: discussion_db_session.close()
-            if migrated_count > 0:
-                backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-                shutil.move(str(old_discussion_path), str(backup_path))
-                print(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
-            if username in user_sessions: user_sessions[username]['lollms_client'] = None
-    except Exception as e:
-        print(f"CRITICAL ERROR during migration: {e}")
-    finally:
-        if db_session: db_session.close()
-    print("--- Migration Finished ---\n")
+    if APP_SETTINGS.get("migrate"):
+        try:
+            db_session = next(get_db())
+            all_users = db_session.query(DBUser).all()
+            for user in all_users:
+                username = user.username
+                old_discussion_path = get_user_discussion_path(username)
+                if not (old_discussion_path.exists() and old_discussion_path.is_dir()):
+                    continue
+                print(f"Found legacy discussion folder for '{username}'. Starting migration...")
+                if username not in user_sessions:
+                    user_sessions[username] = {
+                                                "lollms_client": None, 
+                                                "lollms_model_name": user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
+                                                "llm_params": {}
+                                            }
+                db_path = get_user_data_root(username) / "discussions.db"
+                dm = LollmsDataManager(db_path=f"sqlite:///{db_path.resolve()}")
+                migrated_count = 0
+                for file_path in old_discussion_path.glob("*.yaml"):
+                    discussion_db_session = None
+                    try:
+                        old_disc = LegacyDiscussion.load_from_yaml(file_path)
+                        if not old_disc: continue
+                        discussion_db_session = dm.get_session()
+                        if discussion_db_session.query(dm.DiscussionModel).filter_by(id=old_disc.discussion_id).first():
+                            discussion_db_session.close()
+                            continue
+                        new_db_disc_orm = dm.DiscussionModel(id=old_disc.discussion_id, discussion_metadata={"title": old_disc.title, "rag_datastore_ids": old_disc.rag_datastore_ids}, active_branch_id=old_disc.active_branch_id)
+                        discussion_db_session.add(new_db_disc_orm)
+                        for msg in old_disc.messages:
+                            msg_orm = dm.MessageModel(id=msg.id, discussion_id=new_db_disc_orm.id, parent_id=msg.parent_id, sender=msg.sender, sender_type=msg.sender_type, content=msg.content, created_at=msg.created_at, binding_name=msg.binding_name, model_name=msg.model_name, tokens=msg.token_count, message_metadata={"sources": msg.sources, "steps": msg.steps})
+                            discussion_db_session.add(msg_orm)
+                        discussion_db_session.commit()
+                        migrated_count += 1
+                    except Exception as e:
+                        if discussion_db_session: discussion_db_session.rollback()
+                        print(f"    - FAILED to migrate {file_path.name}: {e}")
+                    finally:
+                        if discussion_db_session: discussion_db_session.close()
+                if migrated_count > 0:
+                    backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    shutil.move(str(old_discussion_path), str(backup_path))
+                    print(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
+                if username in user_sessions: user_sessions[username]['lollms_client'] = None
+            
+        except Exception as e:
+            print(f"CRITICAL ERROR during migration: {e}")
+        finally:
+            if db_session: db_session.close()
+        print("--- Migration Finished ---\n")
 
     db_for_defaults: Optional[Session] = None
     try:
