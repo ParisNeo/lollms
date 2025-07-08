@@ -7,6 +7,8 @@
 host = "0.0.0.0"
 port = "9642"
 debug = false
+migrate = false # micration from old version using yaml
+
 [app_settings]
 data_dir = "data"  # For user-specific discussion files and SafeStore DBs
 database_url = "sqlite:///./data/app_main.db" # Central SQLite DB for users and app settings
