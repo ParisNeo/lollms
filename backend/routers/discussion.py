@@ -18,7 +18,7 @@ from ascii_colors import trace_exception
 from fastapi.encoders import jsonable_encoder
 # Third-Party Imports
 from fastapi import (
-    HTTPException, Depends, Request, File, UploadFile, Form,
+    HTTPException, Depends, Form,
     APIRouter, Query, BackgroundTasks)
 from backend.models import DiscussionRagDatastoreUpdate # Make sure it's the updated one
 from fastapi.responses import (
@@ -157,7 +157,7 @@ async def generate_discussion_auto_title(discussion_id: str, current_user: UserA
     Generates and sets a new title for a discussion automatically based on its content.
     """
     username = current_user.username
-    discussion_obj = get_user_discussion(username, discussion_id, db)
+    discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
@@ -199,7 +199,17 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
     messages_output = []
     for msg in messages_in_branch:
         full_image_refs = [f"/user_assets/{username}/{discussion_id}/{img['path']}" for img in (msg.images or []) if 'path' in img]
-        msg_metadata = msg.metadata or {}
+        
+        # FIX: Defensively parse metadata which may be a string from some DB drivers/versions
+        msg_metadata_raw = msg.metadata
+        if isinstance(msg_metadata_raw, str):
+            try:
+                msg_metadata = json.loads(msg_metadata_raw) if msg_metadata_raw else {}
+            except json.JSONDecodeError:
+                msg_metadata = {}
+        else:
+            msg_metadata = msg_metadata_raw or {}
+
         messages_output.append(
             MessageOutput(
                 id=msg.id,
@@ -255,9 +265,9 @@ async def update_discussion_title(discussion_id: str, title_update: DiscussionTi
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    if discussion_obj.metadata is None:
-        discussion_obj.metadata = {}
-    discussion_obj.metadata['title'] = title_update.title
+    new_metadata = (discussion_obj.metadata or {}).copy()
+    new_metadata['title'] = title_update.title
+    discussion_obj.metadata = new_metadata
     discussion_obj.commit()
 
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
@@ -362,9 +372,9 @@ async def update_discussion_rag_datastores(
             except HTTPException as e:
                 raise HTTPException(status_code=400, detail=f"Invalid or inaccessible RAG datastore ID: {ds_id} ({e.detail})")
 
-    if discussion_obj.metadata is None:
-        discussion_obj.metadata = {}
-    discussion_obj.metadata['rag_datastore_ids'] = update_payload.rag_datastore_ids
+    new_metadata = (discussion_obj.metadata or {}).copy()
+    new_metadata['rag_datastore_ids'] = update_payload.rag_datastore_ids
+    discussion_obj.metadata = new_metadata
     discussion_obj.commit()
 
     user_db = db.query(DBUser).filter(DBUser.username == username).one()
@@ -391,13 +401,15 @@ async def chat_in_existing_discussion(
     db: Session = Depends(get_db)
 ) -> StreamingResponse:
     username = current_user.username
-    discussion_obj = get_user_discussion(username, discussion_id, db)
+    discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
 
     def query_rag_callback(query: str, ss, rag_top_k, rag_min_similarity_percent) -> List[Dict]:
         if not ss: return []
         try:
+            # According to safestore docs, this is what is returned.
+            # The similarity is a float 0-1, not a percentage.
             retrieved_chunks = ss.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
             
             revamped_chunks=[]
@@ -407,8 +419,9 @@ async def chat_in_existing_discussion(
                     revamped_entry["document"]=Path(entry["file_path"]).name
                 if "chunk_text" in entry:
                     revamped_entry["content"]=entry["chunk_text"]
-                if "similarity_percent" in entry:
-                    revamped_entry["similarity_percent"]=entry["similarity_percent"]
+                # The `safe_store` library returns 'similarity'. We calculate 'similarity_percent' for the UI.
+                if "similarity" in entry:
+                    revamped_entry["similarity_percent"] = entry["similarity"] * 100
                 revamped_chunks.append(revamped_entry)
             return revamped_chunks
         except Exception as e:
@@ -447,24 +460,38 @@ async def chat_in_existing_discussion(
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     stop_event = threading.Event()
     user_sessions.setdefault(username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event
+
     async def stream_generator() -> AsyncGenerator[str, None]:
+        all_steps = []
         def llm_callback(
             chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs
         ) -> bool:
-            if stop_event.is_set(): return False
+            if stop_event.is_set(): 
+                return False
+            
             payload = None
             params = params or {}
+            step_like_payload = None
+
             match msg_type:
                 case MSG_TYPE.MSG_TYPE_CHUNK: payload = {"type": "chunk", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_STEP: payload = {"type": "step", "content": chunk, "data": params}
-                case MSG_TYPE.MSG_TYPE_STEP_START: payload = {"type": "step_start", "content": chunk, "id": params["id"]}
-                case MSG_TYPE.MSG_TYPE_STEP_END: payload = {"type": "step_end", "content": chunk, "id": params["id"], "status": "done"}
-                case MSG_TYPE.MSG_TYPE_INFO: payload = {"type": "info", "content": chunk, "data": params}
-                case MSG_TYPE.MSG_TYPE_OBSERVATION: payload = {"type": "observation", "content": chunk, "data": params}
-                case MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT: payload = {"type": "thought", "content": chunk, "data": params}
-                case MSG_TYPE.MSG_TYPE_EXCEPTION: payload = {"type": "exception", "content": chunk, "data": params}
-                case MSG_TYPE.MSG_TYPE_ERROR: payload = {"type": "error", "content": chunk, "data": params}
+                case MSG_TYPE.MSG_TYPE_STEP: step_like_payload = {"type": "step", "content": chunk}
+                case MSG_TYPE.MSG_TYPE_STEP_START: step_like_payload = {"type": "step_start", "content": chunk, "id": params.get("id")}
+                case MSG_TYPE.MSG_TYPE_STEP_END: step_like_payload = {"type": "step_end", "content": chunk, "id": params.get("id"), "status": "done"}
+                case MSG_TYPE.MSG_TYPE_INFO: step_like_payload = {"type": "info", "content": chunk}
+                case MSG_TYPE.MSG_TYPE_OBSERVATION: step_like_payload = {"type": "observation", "content": chunk}
+                case MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT: step_like_payload = {"type": "thought", "content": chunk}
+                case MSG_TYPE.MSG_TYPE_REASONING: step_like_payload = {"type": "reasoning", "content": chunk}
+                case MSG_TYPE.MSG_TYPE_TOOL_CALL: step_like_payload = {"type": "tool_call", "content": chunk}                
+                case MSG_TYPE.MSG_TYPE_SCRATCHPAD: step_like_payload = {"type": "scratchpad", "content": chunk}
+                case MSG_TYPE.MSG_TYPE_EXCEPTION: payload = {"type": "exception", "content": chunk}
+                case MSG_TYPE.MSG_TYPE_ERROR: payload = {"type": "error", "content": chunk}
                 case _: return True
+            
+            if step_like_payload:
+                all_steps.append(step_like_payload)
+                payload = step_like_payload
+
             if payload:
                 json_compatible_payload = jsonable_encoder(payload)
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_payload) + "\n")
@@ -500,12 +527,21 @@ async def chat_in_existing_discussion(
                         debug = SERVER_CONFIG.get("debug", False)
                     )
                 
+                ai_message_obj = result.get('ai_message')
+                if ai_message_obj:
+                    new_metadata = (ai_message_obj.metadata or {}).copy()
+                    new_metadata['steps'] = all_steps
+                    ai_message_obj.metadata = new_metadata
+                    discussion_obj.commit()
+
                 def lollms_message_to_output(msg):
+                    if not msg: return None
                     return {
                         "id": msg.id, "sender": msg.sender, "content": msg.content,
                         "created_at": msg.created_at, "parent_id": msg.parent_id,
                         "discussion_id": msg.discussion_id, "metadata": msg.metadata,
-                        "scratchpad": msg.scratchpad
+                        "tokens": msg.tokens, "sender_type": msg.sender_type,
+                        "binding_name": msg.binding_name, "model_name": msg.model_name
                     }
                 
                 final_messages_payload = {'ai_message': lollms_message_to_output(result['ai_message'])}
@@ -532,7 +568,7 @@ async def chat_in_existing_discussion(
                 if main_loop.is_running():
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
         
-        threading.Thread(target=blocking_call, daemon=True).start()
+        threading.Thread(target=blocking_call, daemon=True).start()        
         while True:
             item = await stream_queue.get()
             if item is None: break

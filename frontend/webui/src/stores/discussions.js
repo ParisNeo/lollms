@@ -7,13 +7,12 @@ import { useAuthStore } from './auth';
 let activeGenerationAbortController = null;
 
 export const useDiscussionsStore = defineStore('discussions', () => {
-    // --- STATE ---
     const discussions = ref({});
     const currentDiscussionId = ref(null);
     const messages = ref([]);
     const generationInProgress = ref(false);
+    const titleGenerationInProgressId = ref(null);
 
-    // --- GETTERS ---
     const sortedDiscussions = computed(() => {
         return Object.values(discussions.value).sort((a, b) => {
             const dateA = new Date(a.last_activity_at || a.created_at);
@@ -24,7 +23,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const activeDiscussion = computed(() => currentDiscussionId.value ? discussions.value[currentDiscussionId.value] : null);
     const activeMessages = computed(() => messages.value);
 
-    // --- HELPERS ---
     function processMessages(rawMessages) {
         if (!Array.isArray(rawMessages)) return [];
         const authStore = useAuthStore();
@@ -36,8 +34,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             sources: msg.sources || [],
         }));
     }
-
-    // --- ACTIONS ---
 
     async function sendDiscussion({ discussionId, targetUsername }) {
         const uiStore = useUiStore();
@@ -63,12 +59,18 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     async function selectDiscussion(id) {
         if (!id || generationInProgress.value) return;
+        const uiStore = useUiStore();
+        if (currentDiscussionId.value === id) {
+            uiStore.setMainView('chat');
+            return; 
+        }
         currentDiscussionId.value = id;
         messages.value = [];
         if (!discussions.value[id]) {
             currentDiscussionId.value = null;
             return;
         }
+        uiStore.setMainView('chat');
         try {
             const response = await apiClient.get(`/api/discussions/${id}`);
             messages.value = processMessages(response.data);
@@ -111,7 +113,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 messages.value = [];
             }
             uiStore.addNotification('Discussion deleted.', 'success');
-        } catch(error) { /* Handled */ }
+        } catch(error) {}
     }
 
     async function pruneDiscussions() {
@@ -122,11 +124,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             confirmText: 'Prune'
         });
         if (!confirmed) return;
-
         uiStore.addNotification('Pruning discussions...', 'info');
         try {
             const response = await apiClient.post('/api/discussions/prune');
-            await loadDiscussions(); // Refresh the list from the server
+            await loadDiscussions();
             uiStore.addNotification(response.data.message || 'Pruning complete.', 'success');
         } catch (error) {
             console.error("Failed to prune discussions:", error);
@@ -136,16 +137,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     async function generateAutoTitle(discussionId) {
         const uiStore = useUiStore();
-        uiStore.addNotification('Generating new title...', 'info');
+        titleGenerationInProgressId.value = discussionId;
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/auto-title`);
             if (discussions.value[discussionId]) {
                 discussions.value[discussionId].title = response.data.title;
             }
-            uiStore.addNotification('New title generated successfully!', 'success');
         } catch (error) {
             console.error("Failed to generate auto-title:", error);
             uiStore.addNotification('Could not generate a new title.', 'error');
+        } finally {
+            titleGenerationInProgressId.value = null;
         }
     }
 
@@ -158,7 +160,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             if (discussions.value[discussionId]) {
                 discussions.value[discussionId].is_starred = response.data.is_starred;
             }
-        } catch(error) { /* Handled */ }
+        } catch(error) {}
     }
 
     async function updateDiscussionRagStore({ discussionId, ragDatastoreIds }) {
@@ -204,12 +206,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     async function sendMessage(payload) {
         const uiStore = useUiStore();
-
         if (generationInProgress.value) {
             uiStore.addNotification('A generation is already in progress.', 'warning');
             return;
         }
-
         if (!currentDiscussionId.value) {
             try {
                 await createNewDiscussion();
@@ -217,15 +217,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 return;
             }
         }
-
         if (!activeDiscussion.value) return;
-
         const authStore = useAuthStore();
         generationInProgress.value = true;
         activeGenerationAbortController = new AbortController();
-
         const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
-
         const tempUserMessage = {
             id: `temp-user-${Date.now()}`, sender: authStore.user.username,
             sender_type: 'user', content: payload.prompt,
@@ -233,37 +229,29 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             created_at: new Date().toISOString(),
             parent_message_id: lastMessage ? lastMessage.id : null
         };
-
         const tempAiMessage = {
             id: `temp-ai-${Date.now()}`, sender: 'assistant', sender_type: 'assistant',
             content: '', isStreaming: true, created_at: new Date().toISOString(),
             steps: []
         };
-
         if (!payload.is_resend) {
             messages.value.push(tempUserMessage);
         }
         messages.value.push(tempAiMessage);
-
         const formData = new FormData();
         formData.append('prompt', payload.prompt);
         formData.append('image_server_paths_json', JSON.stringify(payload.image_server_paths || []));
         if (payload.is_resend) formData.append('is_resend', 'true');
-
-        let streamDidComplete = false;
-
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
         let contentBuffer = '';
         let stepsBuffer = [];
         let updateInterval = null;
-
         if (messageToUpdate) {
             updateInterval = setInterval(() => {
                 if (contentBuffer.length > 0) { messageToUpdate.content += contentBuffer; contentBuffer = ''; }
                 if (stepsBuffer.length > 0) { messageToUpdate.steps.push(...stepsBuffer); stepsBuffer = []; }
             }, 100);
         }
-
         try {
             const response = await fetch(`/api/discussions/${currentDiscussionId.value}/chat`, {
                 method: 'POST', body: formData,
@@ -276,7 +264,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) { break; }
-                
                 const textChunk = decoder.decode(value, { stream: true });
                 const lines = textChunk.split('\n').filter(line => line.trim() !== '');
                 lines.forEach(line => {
@@ -285,46 +272,56 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                         if (!messageToUpdate) return;
                         switch (data.type) {
                             case 'chunk': contentBuffer += data.content; break;
-                            case 'step': {
-                                stepsBuffer.push({ id: data.id, content: data.content, status: 'done' }); break;
-                            }
-                            case 'thought': stepsBuffer.push({ id: data.id, content: data.content, status: 'done' }); break;
-                            case 'step_start': stepsBuffer.push({ id: data.id, content: data.content, status: 'pending' }); break;
+                            case 'step':
+                            case 'info':
+                            case 'observation':
+                            case 'thought':
+                                stepsBuffer.push({
+                                    id: data.id || `step-${Date.now()}-${Math.random()}`,
+                                    type: data.type,
+                                    content: data.content,
+                                    data: data.data,
+                                    status: 'done'
+                                });
+                                break;
+                            case 'step_start':
+                                stepsBuffer.push({
+                                    id: data.id,
+                                    type: data.type,
+                                    content: data.content,
+                                    status: 'pending'
+                                });
+                                break;
                             case 'step_end': {
                                 const step = messageToUpdate.steps.find(s => s.id === data.id) || stepsBuffer.find(s => s.id === data.id);
                                 if (step) {
                                     step.status = 'done';
-                                    if (data.content) {
-                                        step.content = data.content;
-                                    }
+                                    step.type = data.type;
+                                    if (data.content) step.content = data.content;
+                                } else {
+                                    stepsBuffer.push({ id: data.id, type: data.type, content: data.content, status: 'done' });
                                 }
                                 break;
                             }
                             case 'new_title_start': uiStore.addNotification("Building title started ...", "info"); break;
                             case 'new_title_end': uiStore.addNotification("Building title Done:\n"+data["new_title"], "info");break;
                             case 'finalize': {
-                                streamDidComplete = true;
                                 const finalData = data.data;
-
                                 const aiMessageToFinalize = messages.value.find(m => m.id === tempAiMessage.id);
                                 if (aiMessageToFinalize && finalData.ai_message) {
-                                    const collectedSteps = aiMessageToFinalize.steps;
-                                    Object.assign(aiMessageToFinalize, finalData.ai_message);
-                                    aiMessageToFinalize.steps = collectedSteps;
+                                    const backendMessage = finalData.ai_message;
+                                    Object.assign(aiMessageToFinalize, backendMessage);
+                                    const metadata = backendMessage.metadata || {};
+                                    aiMessageToFinalize.steps = metadata.steps || [];
+                                    aiMessageToFinalize.sources = metadata.sources || [];
                                 }
-
                                 const userMessageToFinalize = messages.value.find(m => m.id === tempUserMessage.id);
                                 if (userMessageToFinalize && finalData.user_message) {
                                      Object.assign(userMessageToFinalize, finalData.user_message);
                                 }
-                                
                                 const disc = discussions.value[currentDiscussionId.value];
-                                if(data.new_title){
-                                    console.log("New title received")
-                                    console.log(data)
-                                    disc.title = data.new_title
-                                    renameDiscussion({discussionId: disc.id, newTitle: disc.title});
-                                    console.log(disc.title)
+                                if(disc && data.new_title){
+                                    disc.title = data.new_title;
                                 }
                                 break;
                             }
@@ -343,15 +340,23 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 if (aiMessageIndex > -1) messages.value.splice(aiMessageIndex, 1);
             }
         } finally {
-            if (updateInterval) { clearInterval(updateInterval); }
+            if (updateInterval) {
+                clearInterval(updateInterval);
+            }
             if (messageToUpdate) {
-                if (contentBuffer.length > 0) messageToUpdate.content += contentBuffer;
-                if (stepsBuffer.length > 0) messageToUpdate.steps.push(...stepsBuffer);
+                if (contentBuffer.length > 0) {
+                    messageToUpdate.content += contentBuffer;
+                }
+                if (stepsBuffer.length > 0) {
+                    messageToUpdate.steps.push(...stepsBuffer);
+                }
+                messageToUpdate.isStreaming = false;
             }
             generationInProgress.value = false;
             activeGenerationAbortController = null;
-            
-            if(messageToUpdate) messageToUpdate.isStreaming = false;
+            if (currentDiscussionId.value) {
+                await selectDiscussion(currentDiscussionId.value);
+            }
         }
     }
 
@@ -369,7 +374,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`, { content: newContent });
             await selectDiscussion(currentDiscussionId.value);
             useUiStore().addNotification('Message updated.', 'success');
-        } catch(e) { /* handled */ }
+        } catch(e) {}
     }
 
     async function deleteMessage({ messageId }) {
@@ -378,7 +383,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             await apiClient.delete(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`);
             await selectDiscussion(currentDiscussionId.value);
             useUiStore().addNotification('Message and branch deleted.', 'success');
-        } catch(e) { /* handled */ }
+        } catch(e) {}
     }
 
     async function gradeMessage({ messageId, change }) {
@@ -387,7 +392,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/grade`, { change });
             const message = messages.value.find(m => m.id === messageId);
             if(message) message.user_grade = response.data.user_grade;
-        } catch (e) { /* handled */ }
+        } catch (e) {}
     }
 
     async function initiateBranch(userMessageToResend) {
@@ -463,6 +468,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         currentDiscussionId,
         messages,
         generationInProgress,
+        titleGenerationInProgressId,
         activeDiscussion,
         activeMessages,
         sortedDiscussions,
