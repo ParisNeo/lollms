@@ -35,6 +35,7 @@ from backend.config import (
     DATASTORES_DIR_NAME,
 )
 from backend.settings import settings
+from backend.security import create_access_token
 # --- safe_store is optional ---
 try:
     import safe_store
@@ -167,6 +168,41 @@ def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_a
 
 
 # --- Service Instance Helpers ---
+def load_mcps(username):
+    session = user_sessions[username]
+    servers_infos = {}
+    db_for_mcp = next(get_db())
+    try:
+        user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
+        if user_db:
+            session["access_token"] = create_access_token(data={"sub": user_db.username})
+            for mcp in user_db.personal_mcps:
+                if mcp.active:
+                    if mcp.authentication_type=="lollms_chat_auth":
+                        servers_infos[mcp.name] = {
+                            "server_url": mcp.url,
+                            "auth_config": {
+                                "type": "bearer",
+                                "token": session.get("access_token") # ou None
+                            }
+                        }
+                    elif mcp.authentication_type=="bearer":
+                        servers_infos[mcp.name] = {
+                            "server_url": mcp.url,
+                            "auth_config": {
+                                "type": "bearer",
+                                "token": mcp.authentication_key
+                            }
+                        }
+                    else:
+                        servers_infos[mcp.name] = {
+                            "server_url": mcp.url
+                        }
+                
+    finally:
+        db_for_mcp.close()
+    return servers_infos
+
 def get_user_lollms_client(username: str) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
@@ -185,39 +221,9 @@ def get_user_lollms_client(username: str) -> LollmsClient:
             "service_key": LOLLMS_CLIENT_DEFAULTS.get("service_key"),
             "verify_ssl_certificate": LOLLMS_CLIENT_DEFAULTS.get("verify_ssl_certificate", True)
         })
-        session = user_sessions[username]
-        servers_infos = {}
-        db_for_mcp = next(get_db())
-        try:
-            user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
-            if user_db:
-                
-                for mcp in user_db.personal_mcps:
-                    if mcp.active:
-                        if mcp.authentication_type=="lollms_chat_auth":
-                            servers_infos[mcp.name] = {
-                                "server_url": mcp.url,
-                                "auth_config": {
-                                    "type": "bearer",
-                                    "token": session.get("access_token") # ou None
-                                }
-                            }
-                        elif mcp.authentication_type=="bearer":
-                            servers_infos[mcp.name] = {
-                                "server_url": mcp.url,
-                                "auth_config": {
-                                    "type": "bearer",
-                                    "token": mcp.authentication_key
-                                }
-                            }
-                        else:
-                            servers_infos[mcp.name] = {
-                                "server_url": mcp.url
-                            }
-                    
-        finally:
-            db_for_mcp.close()
 
+        servers_infos=load_mcps(username)
+        
         if servers_infos:
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
