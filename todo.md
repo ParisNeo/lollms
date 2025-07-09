@@ -30,3 +30,4 @@ new ui:
 - add protection for MCP output
 - add tokens count to the chatinput
 - add current processes listing
+- add authenticate with email
