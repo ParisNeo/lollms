@@ -2,11 +2,6 @@
 import { mapState } from 'pinia';
 import { useAuthStore } from '../../stores/auth';
 
-/**
- * Formats a date into a user-friendly "time ago" string.
- * @param {string | Date} date - The date to format.
- * @returns {string} - A formatted string like "5m ago", "2h ago", or "Never".
- */
 function formatTimeAgo(date) {
   if (!date) return 'Never';
   
@@ -26,7 +21,6 @@ function formatTimeAgo(date) {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}d ago`;
 
-  // For older dates, return the locale-specific date string.
   return past.toLocaleDateString();
 }
 
@@ -46,15 +40,18 @@ export default {
       default: () => []
     }
   },
-  emits: ['delete-user', 'reset-password', 'activate-user'],
+  emits: ['delete-user', 'reset-password', 'activate-user', 'deactivate-user', 'edit-user'],
   computed: {
     ...mapState(useAuthStore, {
       currentUser: state => state.user,
     })
   },
   methods: {
-    // Make the helper function available in the template
-    formatTimeAgo
+    formatTimeAgo,
+    canPerformAction(user) {
+        if (!this.currentUser) return false;
+        return user.id !== this.currentUser.id;
+    }
   }
 };
 </script>
@@ -99,9 +96,11 @@ export default {
           </td>
           <td class="px-4 py-2 text-xs truncate text-gray-500 dark:text-gray-400" :title="user.lollms_model_name">{{ user.lollms_model_name || '-' }}</td>
           <td class="px-4 py-2 text-sm space-x-2 whitespace-nowrap">
+            <button @click="$emit('edit-user', user)" class="btn btn-primary !py-1 !px-2 text-xs" title="Edit User">Edit</button>
             <button v-if="!user.is_active" @click="$emit('activate-user', user.id)" class="btn btn-success !py-1 !px-2 text-xs" title="Activate User">Activate</button>
-            <button @click="$emit('reset-password', user.id)" :disabled="user.id === currentUser.id" class="btn btn-secondary !py-1 !px-2 text-xs" title="Reset Password">Reset Pass</button>
-            <button @click="$emit('delete-user', user.id)" :disabled="user.id === currentUser.id" class="btn btn-danger !py-1 !px-2 text-xs" title="Delete User">Delete</button>
+            <button v-if="user.is_active && canPerformAction(user)" @click="$emit('deactivate-user', user.id)" class="btn btn-warning !py-1 !px-2 text-xs" title="Deactivate User">Deactivate</button>
+            <button v-if="canPerformAction(user)" @click="$emit('reset-password', user.id)" class="btn btn-secondary !py-1 !px-2 text-xs" title="Reset Password">Reset Pass</button>
+            <button v-if="canPerformAction(user)" @click="$emit('delete-user', user.id)" class="btn btn-danger !py-1 !px-2 text-xs" title="Delete User">Delete</button>
           </td>
         </tr>
       </tbody>

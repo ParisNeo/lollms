@@ -1,4 +1,3 @@
-# backend/models.py
 import datetime
 from typing import List, Dict, Optional, Any
 
@@ -6,7 +5,6 @@ from pydantic import BaseModel, Field, constr, field_validator, validator, Email
 from backend.database_setup import FriendshipStatus
 from enum import Enum
 from backend.database_setup import FriendshipStatus, PostVisibility as DBPostVisibility
-# --- User Management & Authentication Models ---
 
 class Token(BaseModel):
     access_token: str
@@ -14,6 +12,11 @@ class Token(BaseModel):
 
 class TokenData(BaseModel):
     username: Optional[str] = None
+
+class ModelInfo(BaseModel):
+    name: str
+    id: Optional[str] = None
+    icon_base64: Optional[str] = None
 
 class UserLLMParams(BaseModel):
     llm_ctx_size: Optional[int] = Field(None, ge=0)
@@ -31,7 +34,6 @@ class UserBase(BaseModel):
     family_name: Optional[str] = None
     birth_date: Optional[datetime.date] = None
 
-# --- NEW: Public User Registration Model ---
 class UserCreatePublic(BaseModel):
     username: constr(min_length=3, max_length=50)
     email: EmailStr
@@ -83,6 +85,19 @@ class UserUpdate(BaseModel):
     ai_response_language: Optional[str] = "auto"
     fun_mode: Optional[bool] = False
 
+class AdminUserUpdate(BaseModel):
+    is_admin: Optional[bool] = None
+    is_active: Optional[bool] = None
+    lollms_model_name: Optional[str] = None
+    llm_ctx_size: Optional[int] = Field(None, ge=0)
+    safe_store_vectorizer: Optional[str] = None
+    class Config:
+        from_attributes = True
+
+class ForceSettingsPayload(BaseModel):
+    model_name: str
+    context_size: Optional[int] = None
+
 class UserPasswordChange(BaseModel):
     current_password: str
     new_password: constr(min_length=8)
@@ -107,7 +122,7 @@ class PostBase(BaseModel):
     visibility: PostVisibility = PostVisibility.PUBLIC
 
 class PostCreate(PostBase):
-    media: Optional[List[Dict[str, Any]]] = None # e.g., [{"type": "image", "url": "..."}, {"type": "link", "url": "..."}]
+    media: Optional[List[Dict[str, Any]]] = None
 
 class PostUpdate(BaseModel):
     content: Optional[str] = Field(None, min_length=1, max_length=10000)
@@ -162,8 +177,6 @@ class UserAuthDetails(UserLLMParams):
     ai_response_language: Optional[str] = "auto"
     fun_mode: Optional[bool] = False
 
-# --- Global Configuration Models ---
-
 class GlobalConfigPublic(BaseModel):
     key: str
     value: Any
@@ -173,8 +186,6 @@ class GlobalConfigPublic(BaseModel):
 
 class GlobalConfigUpdate(BaseModel):
     configs: Dict[str, Any]
-
-# --- Discussion & Message Models ---
 
 class DiscussionInfo(BaseModel):
     id: str
@@ -230,8 +241,6 @@ class MessageGradeUpdate(BaseModel):
             raise ValueError('Grade change must be 1 or -1')
         return value
 
-# --- DataStore (SafeStore) Models ---
-
 class SafeStoreDocumentInfo(BaseModel):
     filename: str
 
@@ -281,8 +290,6 @@ class DataStoreShareRequest(BaseModel):
             raise ValueError("Invalid permission level")
         return value
 
-# --- Personality Models ---
-
 class PersonalityBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     category: Optional[str] = Field(None, max_length=100)
@@ -311,8 +318,6 @@ class PersonalityPublic(PersonalityBase):
 
 class PersonalitySendRequest(BaseModel):
     target_username: constr(min_length=3, max_length=50)
-
-# --- MCP (Multi-Computer-Protocol) Models ---
 
 class MCPBase(BaseModel):
     name: constr(min_length=1, max_length=100)
@@ -343,8 +348,6 @@ class MCPPublic(MCPBase):
     updated_at: datetime.datetime
     model_config = {"from_attributes": True}
 
-# --- App Models ---
-
 class AppBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     url: str
@@ -373,14 +376,10 @@ class AppPublic(AppBase):
     updated_at: datetime.datetime
     model_config = {"from_attributes": True}
 
-# --- Tool Models ---
-
 class ToolInfo(BaseModel):
     name: str
     description: Optional[str] = None
     is_active: bool = False
-
-# --- Friendship Models ---
 
 class FriendshipBase(BaseModel):
     pass
@@ -406,8 +405,6 @@ class FriendshipRequestPublic(BaseModel):
     status: FriendshipStatus
     model_config = {"from_attributes": True}
 
-# --- Direct Message Models ---
-
 class DirectMessageBase(BaseModel):
     content: constr(min_length=1)
 
@@ -415,7 +412,6 @@ class DirectMessageCreate(DirectMessageBase):
     receiver_user_id: int = Field(..., alias='receiverUserId')
     image_references_json: Optional[str] = None
     class Config:
-        # This allows Pydantic to work with aliases
         populate_by_name = True
 class DirectMessagePublic(DirectMessageBase):
     id: int
@@ -423,23 +419,14 @@ class DirectMessagePublic(DirectMessageBase):
     receiver_id: int
     sent_at: datetime.datetime
     read_at: Optional[datetime.datetime] = None
-    sender_username: str  # The API will provide this
-    receiver_username: str # The API will provide this
-
-
+    sender_username: str
+    receiver_username: str
 
 class RelationshipStatus(BaseModel):
-    """
-    Describes the relationship from the current user's perspective
-    to the user whose profile is being viewed.
-    """
     is_following: bool
     friendship_status: Optional[FriendshipStatus] = None
 
 class UserProfileResponse(BaseModel):
-    """
-    The complete data structure returned by the GET /api/users/{username} endpoint.
-    """
     user: UserPublic
     relationship: RelationshipStatus
 
@@ -452,7 +439,7 @@ class CommentCreate(CommentBase):
 
 class CommentPublic(CommentBase):
     id: int
-    author: "AuthorPublic" # Forward reference to the existing AuthorPublic model
+    author: "AuthorPublic"
     created_at: datetime.datetime
     model_config = {"from_attributes": True}
 
@@ -465,7 +452,6 @@ class PostPublic(PostBase):
     updated_at: datetime.datetime
     comments: List[CommentPublic] = []
     
-    # --- ADD THESE NEW FIELDS ---
     like_count: int = 0
     has_liked: bool = False
     

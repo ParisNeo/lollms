@@ -305,6 +305,18 @@ def _bootstrap_global_settings(connection):
         "default_personalities": {
             "value": config.get("default_personas", []),
             "type": "json", "description": "List of default personalities available to all users.", "category": "Defaults"
+        },
+        "force_model_mode": {
+            "value": "disabled",
+            "type": "string", "description": "Global model override mode: 'disabled', 'force_once' (sets user pref), 'force_always' (overrides session).", "category": "Global LLM Overrides"
+        },
+        "force_model_name": {
+            "value": "",
+            "type": "string", "description": "The model name to force on all users. (e.g., 'ollama/llama3').", "category": "Global LLM Overrides"
+        },
+        "force_context_size": {
+            "value": 4096,
+            "type": "integer", "description": "The context size (in tokens) to force on all users.", "category": "Global LLM Overrides"
         }
     }
     

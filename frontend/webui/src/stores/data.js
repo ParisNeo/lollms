@@ -5,62 +5,42 @@ import { useAuthStore } from './auth';
 import { useUiStore } from './ui';
 
 export const useDataStore = defineStore('data', () => {
-    // STATE
     const availableLollmsModels = ref([]);
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
     const userPersonalities = ref([]);
     const publicPersonalities = ref([]);
     const userMcps = ref([]);
+    const systemMcps = ref([]);
     const mcpTools = ref([]);
     const userApps = ref([]);
     const systemApps = ref([]);
 
-    // GETTERS
+    const isLoadingLollmsModels = ref(false);
+
     const availableRagStores = computed(() => {
         const authStore = useAuthStore();
         if (!authStore.user) return [];
-
-        const owned = ownedDataStores.value.map(ds => ({
-            id: ds.id,
-            name: `${ds.name} (You)`
-        }));
-        const shared = sharedDataStores.value.map(ds => ({
-            id: ds.id,
-            name: `${ds.name} (from ${ds.owner_username})`
-        }));
-        
+        const owned = ownedDataStores.value.map(ds => ({ id: ds.id, name: `${ds.name} (You)` }));
+        const shared = sharedDataStores.value.map(ds => ({ id: ds.id, name: `${ds.name} (from ${ds.owner_username})` }));
         return [...owned, ...shared].sort((a, b) => a.name.localeCompare(b.name));
     });
 
     const availableMcpToolsForSelector = computed(() => {
         if (!Array.isArray(mcpTools.value) || mcpTools.value.length === 0) return [];
-        
         const grouped = mcpTools.value.reduce((acc, tool) => {
             const parts = tool.name.split('::');
             if (parts.length !== 2) return acc;
-
             const mcpName = parts[0];
             const toolName = parts[1];
-            
             if (!acc[mcpName]) {
                 acc[mcpName] = [];
             }
-            
             acc[mcpName].push({ id: tool.name, name: toolName });
             return acc;
         }, {});
-
-        return Object.entries(grouped)
-            .map(([mcpName, tools]) => ({
-                isGroup: true,
-                label: mcpName,
-                items: tools.sort((a, b) => a.name.localeCompare(b.name))
-            }))
-            .sort((a,b) => a.label.localeCompare(b.label));
+        return Object.entries(grouped).map(([mcpName, tools]) => ({ isGroup: true, label: mcpName, items: tools.sort((a, b) => a.name.localeCompare(b.name))})).sort((a,b) => a.label.localeCompare(b.label));
     });
-
-    // ACTIONS
 
     async function loadAllInitialData() {
         fetchAvailableLollmsModels();
@@ -72,12 +52,28 @@ export const useDataStore = defineStore('data', () => {
     }
 
     async function fetchAvailableLollmsModels() {
+        isLoadingLollmsModels.value = true;
         try {
             const response = await apiClient.get('/api/config/lollms-models');
-            availableLollmsModels.value = Array.isArray(response.data) ? response.data : [];
+            availableLollmsModels.value = Array.isArray(response.data) ? response.data.map(m => ({name:m.name, icon_base64:null, id:m.name})) : [];
         } catch (error) {
             console.error("Failed to load LLM models:", error);
             availableLollmsModels.value = [];
+        } finally {
+            isLoadingLollmsModels.value = false;
+        }
+    }
+
+    async function fetchAdminAvailableLollmsModels() {
+        isLoadingLollmsModels.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/available-models');
+            availableLollmsModels.value = Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            console.error("Failed to load Admin LLM models:", error);
+            availableLollmsModels.value = [];
+        } finally {
+            isLoadingLollmsModels.value = false;
         }
     }
 
@@ -115,7 +111,7 @@ export const useDataStore = defineStore('data', () => {
         const uiStore = useUiStore();
         try {
             await apiClient.put(`/api/datastores/${storeData.id}`, storeData);
-            await fetchDataStores(); // Refetch to get updated list
+            await fetchDataStores();
             uiStore.addNotification('Data store updated successfully.', 'success');
         } catch(error) {
             console.error("Failed to update data store:", error);
@@ -170,7 +166,7 @@ export const useDataStore = defineStore('data', () => {
         const uiStore = useUiStore();
         try {
             const response = await apiClient.post(`/api/store/${storeId}/upload-files`, formData);
-            if (response.status === 207) { // Partial success
+            if (response.status === 207) { 
                 uiStore.addNotification(response.data.message || 'Upload completed with some errors.', 'warning');
             } else {
                 uiStore.addNotification(response.data.message || 'Files uploaded successfully.', 'success');
@@ -398,8 +394,9 @@ export const useDataStore = defineStore('data', () => {
         availableLollmsModels, ownedDataStores, sharedDataStores,
         userPersonalities, publicPersonalities, userMcps, mcpTools,
         userApps, systemApps,
+        isLoadingLollmsModels,
         availableRagStores, availableMcpToolsForSelector,
-        loadAllInitialData, fetchAvailableLollmsModels, fetchDataStores,
+        loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,
         fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,
         deleteFileFromStore, fetchPersonalities, addPersonality,

@@ -474,7 +474,54 @@ const formattingMenuItems = [
 .branch-badge-nav { @apply flex items-center gap-1; }
 .step-item { display: flex; gap: 0.75rem; align-items: flex-start; }
 .step-icon { flex-shrink: 0; width: 1rem; height: 1rem; margin-top: 0.25rem; }
-.step-content-wrapper { flex-grow: 1; min-width: 0; overflow: hidden; }
+.step-content-wrapper {
+  flex-grow: 1;
+  min-width: 0;
+  /* overflow: hidden;  <-- We are replacing this */
+}
+
+/* --- Additions for Max Height and Scrolling --- */
+.step-content-wrapper {
+  /* Set a maximum height. Adjust this value to your needs. */
+  max-height: 500px; 
+
+  /* 
+    Allow vertical scrolling ONLY when content overflows.
+    'auto' is better than 'scroll' because it hides the scrollbar
+    if it's not needed.
+  */
+  overflow-y: auto;
+
+  /* You might want to keep horizontal overflow hidden */
+  overflow-x: hidden;
+
+  /* --- "Beautiful Scrollbar" Styling --- */
+
+  /* For Firefox */
+  scrollbar-width: thin;
+  scrollbar-color: #A9A9A9 #F1F1F1;
+
+}
+
+/* For Webkit browsers (Chrome, Safari, Edge, Opera) */
+.step-content-wrapper::-webkit-scrollbar {
+  width: 8px; /* Width of the entire scrollbar */
+}
+
+.step-content-wrapper::-webkit-scrollbar-track {
+  background: #F1F1F1; /* Color of the tracking area */
+  border-radius: 10px;
+}
+
+.step-content-wrapper::-webkit-scrollbar-thumb {
+  background-color: #A9A9A9; /* Color of the scroll thumb */
+  border-radius: 10px;       /* Roundness of the scroll thumb */
+  border: 2px solid #F1F1F1; /* Creates padding around the thumb */
+}
+
+.step-content-wrapper::-webkit-scrollbar-thumb:hover {
+  background-color: #555; /* Color of the thumb on hover */
+}
 .cm-editor-container { border: 1px solid theme('colors.gray.300'); border-radius: theme('borderRadius.lg'); }
 .dark .cm-editor-container { border-color: theme('colors.gray.600'); }
 .collapsed-steps-summary {

@@ -209,7 +209,23 @@ def get_user_lollms_client(username: str) -> LollmsClient:
         raise HTTPException(status_code=500, detail="User session not found for LollmsClient.")
     
     if session.get("lollms_client") is None:
-        model_name = session.get("lollms_model_name", settings.get("default_lollms_model_name"))
+        # Check for admin-forced model settings
+        force_mode = settings.get("force_model_mode", "disabled")
+        if force_mode == "force_always":
+            model_name = settings.get("force_model_name")
+            ctx_size_override = settings.get("force_context_size")
+            if not model_name:
+                print("WARNING: Admin model forcing is enabled, but no model name is set. Falling back to user/default.")
+                model_name = session.get("lollms_model_name", settings.get("default_lollms_model_name"))
+            
+            # Update session params for this session only
+            session_params = session.get("llm_params", {}).copy()
+            if ctx_size_override is not None:
+                session_params["ctx_size"] = ctx_size_override
+            session["llm_params"] = session_params
+        else:
+            model_name = session.get("lollms_model_name", settings.get("default_lollms_model_name"))
+
         client_init_params = session.get("llm_params", {}).copy()
         
         client_init_params.update({

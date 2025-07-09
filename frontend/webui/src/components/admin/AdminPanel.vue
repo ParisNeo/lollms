@@ -1,222 +1,301 @@
-<script>
+<script setup>
+import { ref, onMounted, computed, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import apiClient from '../../services/api';
 import { useUiStore } from '../../stores/ui';
+import { useDataStore } from '../../stores/data';
 import UserTable from './UserTable.vue';
 
-export default {
-  name: 'AdminPanel',
-  components: {
-    UserTable
-  },
-  data() {
-    return {
-      users: [],
-      activeSessions: [],
-      isLoadingUsers: false,
-      newUser: {
-        username: '',
-        password: '',
-        email: '',
-        lollms_model_name: '',
-        safe_store_vectorizer: '',
-        is_admin: false,
-      },
-      settings: {},
-      originalSettings: {},
-      isLoadingSettings: false,
-      importFile: null,
-      isImporting: false,
-      activeTab: 'users',
-    };
-  },
-  computed: {
-    isSettingsChanged() {
-      for (const key in this.settings) {
-        if (this.settings[key] !== this.originalSettings[key]?.value) {
-          return true;
-        }
-      }
-      return false;
-    },
-    categorizedSettings() {
-      const categories = {};
-      const sortedKeys = Object.keys(this.originalSettings).sort();
-      for (const key of sortedKeys) {
-        const setting = this.originalSettings[key];
-        if (!categories[setting.category]) {
-          categories[setting.category] = [];
-        }
-        categories[setting.category].push(setting);
-      }
-      return categories;
-    }
-  },
-  created() {
-    this.fetchDataForActiveTab();
-  },
-  methods: {
-    async setActiveTab(tabName) {
-      if (this.activeTab === tabName) return;
-      this.activeTab = tabName;
-      await this.fetchDataForActiveTab();
-    },
-    async fetchDataForActiveTab() {
-      if (this.activeTab === 'users') {
-        await this.fetchUsers();
-      } else if (this.activeTab === 'settings') {
-        await this.fetchSettings();
-      }
-    },
-    async fetchUsers() {
-      this.isLoadingUsers = true;
-      try {
-        const [usersResponse, sessionsResponse] = await Promise.all([
-          apiClient.get('/api/admin/users'),
-          apiClient.get('/api/admin/active-sessions')
-        ]);
-        this.users = usersResponse.data;
-        this.activeSessions = sessionsResponse.data;
-      } catch (error) {
-        useUiStore().addNotification('Failed to load user data.', 'error');
-      } finally {
-        this.isLoadingUsers = false;
-      }
-    },
-    async fetchSettings() {
-      this.isLoadingSettings = true;
-      try {
-        const response = await apiClient.get('/api/admin/settings');
-        const settingsData = response.data;
-        const newSettingsValues = {};
-        const newOriginalSettings = {};
-        
-        settingsData.forEach(setting => {
-          newSettingsValues[setting.key] = setting.value;
-          newOriginalSettings[setting.key] = { ...setting };
-        });
+const uiStore = useUiStore();
+const dataStore = useDataStore();
 
-        this.settings = newSettingsValues;
-        this.originalSettings = newOriginalSettings;
-      } catch (error) {
-        useUiStore().addNotification('Failed to load global settings.', 'error');
-      } finally {
-        this.isLoadingSettings = false;
-      }
-    },
-    resetSettings() {
-      const newSettings = {};
-      for (const key in this.originalSettings) {
-        newSettings[key] = this.originalSettings[key].value;
-      }
-      this.settings = newSettings;
-      useUiStore().addNotification('Changes have been discarded.', 'info');
-    },
-    async saveSettings() {
-      const uiStore = useUiStore();
-      if (!this.isSettingsChanged) {
-        uiStore.addNotification('No changes to save.', 'info');
-        return;
-      }
-      this.isLoadingSettings = true;
-      try {
-        await apiClient.put('/api/admin/settings', { configs: this.settings });
-        uiStore.addNotification('Global settings updated successfully.', 'success', 6000);
-        await this.fetchSettings();
-      } catch (error) {
-        // Handled by interceptor
-      } finally {
-        this.isLoadingSettings = false;
-      }
-    },
-    async addUser() {
-      const uiStore = useUiStore();
-      if (!this.newUser.username || !this.newUser.password || !this.newUser.email) {
-        uiStore.addNotification('Username, email, and password are required.', 'warning');
-        return;
-      }
-      this.isLoadingUsers = true;
-      try {
-        await apiClient.post('/api/admin/users', this.newUser);
-        uiStore.addNotification(`User '${this.newUser.username}' created successfully.`, 'success');
-        this.resetNewUserForm();
-        await this.fetchUsers();
-      } catch (error) {
-        // Handled by interceptor
-      } finally {
-        this.isLoadingUsers = false;
-      }
-    },
-    async deleteUser(userId) {
-      const uiStore = useUiStore();
-      if (confirm('Are you sure you want to delete this user? This will also remove all their data and cannot be undone.')) {
-        this.isLoadingUsers = true;
-        try {
-          await apiClient.delete(`/api/admin/users/${userId}`);
-          uiStore.addNotification('User deleted successfully.', 'success');
-          await this.fetchUsers();
-        } catch(error) { /* Handled by interceptor */ }
-        finally { this.isLoadingUsers = false; }
-      }
-    },
-    async resetPassword(userId) {
-      const uiStore = useUiStore();
-      const newPassword = prompt('Enter a new password for the user (min 8 characters):');
-      if (!newPassword || newPassword.length < 8) {
-        uiStore.addNotification('Password reset cancelled or password too short.', 'warning');
-        return;
-      }
-      try {
-        await apiClient.post(`/api/admin/users/${userId}/reset-password`, { new_password: newPassword });
-        uiStore.addNotification("User's password has been reset.", 'success');
-      } catch (error) { /* Handled by interceptor */ }
-    },
-    async activateUser(userId) {
-      this.isLoadingUsers = true;
-      const uiStore = useUiStore();
-      try {
-        await apiClient.post(`/api/admin/users/${userId}/activate`);
-        uiStore.addNotification("User has been activated successfully.", 'success');
-        await this.fetchUsers();
-      } catch (error) { /* Handled by interceptor */ }
-      finally { this.isLoadingUsers = false; }
-    },
-    resetNewUserForm() {
-      this.newUser = { username: '', password: '', email: '', lollms_model_name: '', safe_store_vectorizer: '', is_admin: false };
-    },
-    handleFileSelect(event) {
-      this.importFile = event.target.files[0] || null;
-    },
-    async handleImport() {
-      const uiStore = useUiStore();
-      if (!this.importFile) {
-        uiStore.addNotification('Please select a file to import.', 'warning');
-        return;
-      }
+const { availableLollmsModels, isLoadingLollmsModels } = storeToRefs(dataStore);
 
-      if (this.importFile.name !== 'webui.db') {
-        uiStore.addNotification("Invalid file name. Please select the 'webui.db' file.", 'error');
-        return;
-      }
+const users = ref([]);
+const activeSessions = ref([]);
+const isLoadingUsers = ref(false);
+const showAddUserForm = ref(false);
 
-      this.isImporting = true;
-      const formData = new FormData();
-      formData.append('file', this.importFile);
+const newUser = ref({
+  username: '',
+  password: '',
+  email: '',
+  lollms_model_name: '',
+  safe_store_vectorizer: '',
+  is_admin: false,
+});
+const settings = ref({});
+const originalSettings = ref({});
+const isLoadingSettings = ref(false);
+const importFile = ref(null);
+const isImporting = ref(false);
+const activeTab = ref('users');
+const fileInputRef = ref(null);
 
-      try {
-        const response = await apiClient.post('/api/admin/import-openwebui', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        uiStore.addNotification(response.data.message, 'success', 8000);
-        this.importFile = null;
-        if (this.$refs.fileInput) this.$refs.fileInput.value = '';
-      } catch (error) {
-        // Handled by interceptor
-      } finally {
-        this.isImporting = false;
-      }
+const isSettingsChanged = computed(() => {
+  if (isLoadingSettings.value) return false;
+  for (const key in settings.value) {
+    if (settings.value[key] !== originalSettings.value[key]?.value) {
+      return true;
     }
   }
-};
+  return false;
+});
+
+const categorizedSettings = computed(() => {
+  const categories = {};
+  if (!originalSettings.value) return {};
+  const sortedKeys = Object.keys(originalSettings.value).sort((a,b)=>a.localeCompare(b));
+  for (const key of sortedKeys) {
+    const setting = originalSettings.value[key];
+    if (!setting) continue;
+    if (!categories[setting.category]) {
+      categories[setting.category] = [];
+    }
+    categories[setting.category].push(setting);
+  }
+  return categories;
+});
+
+async function setActiveTab(tabName) {
+  if (activeTab.value === tabName) return;
+  activeTab.value = tabName;
+  await fetchDataForActiveTab();
+}
+
+async function fetchDataForActiveTab() {
+  if (activeTab.value === 'users') {
+    await fetchUsers();
+    await fetchSettings();
+    if (availableLollmsModels.value.length === 0) {
+      dataStore.fetchAdminAvailableLollmsModels();
+    }
+  } else if (activeTab.value === 'settings') {
+    await fetchSettings();
+  }
+}
+
+async function fetchUsers() {
+  isLoadingUsers.value = true;
+  try {
+    const [usersResponse, sessionsResponse] = await Promise.all([
+      apiClient.get('/api/admin/users'),
+      apiClient.get('/api/admin/active-sessions')
+    ]);
+    users.value = usersResponse.data;
+    activeSessions.value = sessionsResponse.data;
+  } catch (error) {
+    uiStore.addNotification('Failed to load user data.', 'error');
+  } finally {
+    isLoadingUsers.value = false;
+  }
+}
+
+async function fetchSettings() {
+  isLoadingSettings.value = true;
+  try {
+    const response = await apiClient.get('/api/admin/settings');
+    const settingsData = response.data;
+    const newSettingsValues = {};
+    const newOriginalSettings = {};
+    settingsData.forEach(setting => {
+      newSettingsValues[setting.key] = setting.value;
+      newOriginalSettings[setting.key] = { ...setting };
+    });
+    settings.value = newSettingsValues;
+    originalSettings.value = newOriginalSettings;
+  } catch (error) {
+    uiStore.addNotification('Failed to load global settings.', 'error');
+  } finally {
+    isLoadingSettings.value = false;
+  }
+}
+
+function resetSettings() {
+  const newSettings = {};
+  for (const key in originalSettings.value) {
+    newSettings[key] = originalSettings.value[key].value;
+  }
+  settings.value = newSettings;
+  uiStore.addNotification('Changes have been discarded.', 'info');
+}
+
+async function saveSettings() {
+  if (!isSettingsChanged.value) {
+    uiStore.addNotification('No changes to save.', 'info');
+    return false; // Return status
+  }
+  isLoadingSettings.value = true;
+  try {
+    await apiClient.put('/api/admin/settings', { configs: settings.value });
+    uiStore.addNotification('Global settings updated successfully.', 'success');
+    await fetchSettings();
+    return true; // Return status
+  } catch (error) {
+    return false; // Return status
+  } finally {
+    isLoadingSettings.value = false;
+  }
+}
+
+async function addUser() {
+  if (!newUser.value.username || !newUser.value.password || !newUser.value.email) {
+    uiStore.addNotification('Username, email, and password are required.', 'warning');
+    return;
+  }
+  isLoadingUsers.value = true;
+  try {
+    await apiClient.post('/api/admin/users', newUser.value);
+    uiStore.addNotification(`User '${newUser.value.username}' created successfully.`, 'success');
+    resetNewUserForm();
+    await fetchUsers();
+  } catch (error) { /* Handled by interceptor */ } 
+  finally {
+    isLoadingUsers.value = false;
+  }
+}
+
+function editUser(userToEdit) {
+    uiStore.openModal('adminUserEdit', {
+        user: userToEdit,
+        onUserUpdated: () => {
+            fetchUsers(); 
+        }
+    });
+}
+
+async function deleteUser(userId) {
+  const confirmed = await uiStore.showConfirmation({
+    title: "Delete User",
+    message: 'Are you sure you want to delete this user? This will also remove all their data and cannot be undone.',
+    confirmText: "Delete",
+    confirmClass: "btn-danger"
+  });
+  if (confirmed) {
+    isLoadingUsers.value = true;
+    try {
+      await apiClient.delete(`/api/admin/users/${userId}`);
+      uiStore.addNotification('User deleted successfully.', 'success');
+      await fetchUsers();
+    } catch(error) { /* Handled by interceptor */ }
+    finally { isLoadingUsers.value = false; }
+  }
+}
+
+async function resetPassword(userId) {
+  const newPassword = prompt('Enter a new password for the user (min 8 characters):');
+  if (newPassword && newPassword.length >= 8) {
+    try {
+      await apiClient.post(`/api/admin/users/${userId}/reset-password`, { new_password: newPassword });
+      uiStore.addNotification("User's password has been reset.", 'success');
+    } catch (error) { /* Handled by interceptor */ }
+  } else if (newPassword !== null) {
+      uiStore.addNotification('Password reset cancelled or password too short.', 'warning');
+  }
+}
+
+async function activateUser(userId) {
+  isLoadingUsers.value = true;
+  try {
+    await apiClient.post(`/api/admin/users/${userId}/activate`);
+    uiStore.addNotification("User has been activated successfully.", 'success');
+    await fetchUsers();
+  } catch (error) { /* Handled by interceptor */ }
+  finally { isLoadingUsers.value = false; }
+}
+
+async function deactivateUser(userId) {
+  isLoadingUsers.value = true;
+  try {
+    await apiClient.post(`/api/admin/users/${userId}/deactivate`);
+    uiStore.addNotification("User has been deactivated successfully.", 'success');
+    await fetchUsers();
+  } catch (error) { /* Handled by interceptor */ }
+  finally { isLoadingUsers.value = false; }
+}
+
+function resetNewUserForm() {
+  newUser.value = { username: '', password: '', email: '', lollms_model_name: '', safe_store_vectorizer: '', is_admin: false };
+  showAddUserForm.value = false;
+}
+
+function handleFileSelect(event) {
+  importFile.value = event.target.files[0] || null;
+}
+
+async function handleImport() {
+  if (!importFile.value) {
+    uiStore.addNotification('Please select a file to import.', 'warning');
+    return;
+  }
+  if (importFile.value.name !== 'webui.db') {
+    uiStore.addNotification("Invalid file name. Please select the 'webui.db' file.", 'error');
+    return;
+  }
+  isImporting.value = true;
+  const formData = new FormData();
+  formData.append('file', importFile.value);
+  try {
+    const response = await apiClient.post('/api/admin/import-openwebui', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+    uiStore.addNotification(response.data.message, 'success', 8000);
+    importFile.value = null;
+    if (fileInputRef.value) fileInputRef.value.value = '';
+  } catch (error) { /* Handled by interceptor */ } 
+  finally { isImporting.value = false; }
+}
+
+function emailAllUsers() {
+  const emails = users.value.map(u => u.email).filter(Boolean).join(',');
+  if (emails) {
+    window.location.href = `mailto:${emails}`;
+  } else {
+    uiStore.addNotification('No users with email addresses found.', 'warning');
+  }
+}
+
+async function handleForceSettingsOnce() {
+  const modelToForce = settings.value.force_model_name;
+  if (!modelToForce) {
+    uiStore.addNotification('Please select a model to force first in the settings below.', 'warning');
+    return;
+  }
+
+  if (isSettingsChanged.value) {
+    uiStore.addNotification('You have unsaved changes. Saving settings before applying...', 'info');
+    const saved = await saveSettings();
+    if (!saved) {
+      uiStore.addNotification('Could not save settings. Aborting force apply.', 'error');
+      return;
+    }
+  }
+
+  const confirmed = await uiStore.showConfirmation({
+    title: "Force Settings on All Users?",
+    message: `This will overwrite the current model and context size for ALL users with the values you've configured (${modelToForce}). This action cannot be undone. Are you sure?`,
+    confirmText: "Yes, Force Settings",
+    confirmClass: "btn-warning",
+  });
+
+  if (confirmed) {
+    isLoadingSettings.value = true;
+    const payload = {
+      model_name: modelToForce,
+      context_size: settings.value.force_context_size,
+    };
+    try {
+      await apiClient.post('/api/admin/force-settings-once', payload);
+      uiStore.addNotification("Settings have been applied to all users.", "success");
+    } catch (e) {
+      // Error is handled by the global interceptor
+    } finally {
+      isLoadingSettings.value = false;
+    }
+  }
+}
+
+onMounted(() => {
+  fetchDataForActiveTab();
+});
 </script>
 
 <template>
@@ -244,7 +323,11 @@ export default {
     </div>
 
     <div v-if="activeTab === 'users'">
-      <section class="bg-gray-100 dark:bg-gray-700/50 p-4 rounded-lg shadow-sm mb-6">
+      <div v-if="!showAddUserForm" class="flex justify-end mb-6">
+        <button @click="showAddUserForm = true" class="btn btn-primary">Add New User</button>
+      </div>
+
+      <section v-if="showAddUserForm" class="bg-gray-100 dark:bg-gray-700/50 p-4 rounded-lg shadow-sm mb-6">
         <h2 class="text-md font-semibold mb-3 border-b dark:border-gray-600 pb-2">Add New User</h2>
         <form @submit.prevent="addUser" class="space-y-4">
           <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -260,40 +343,72 @@ export default {
               <label for="newPassword" class="block text-sm font-medium">Password (min 8 chars)</label>
               <input type="password" v-model="newUser.password" id="newPassword" required minlength="8" class="input-field mt-1">
             </div>
-            <div>
-              <label for="newLollmsModel" class="block text-sm font-medium">Default LoLLMs Model (Optional)</label>
-              <input type="text" v-model="newUser.lollms_model_name" id="newLollmsModel" class="input-field mt-1" placeholder="Uses global default if empty">
-            </div>
-            <div>
-              <label for="newSafeStoreVectorizer" class="block text-sm font-medium">Default Vectorizer (Optional)</label>
-              <input type="text" v-model="newUser.safe_store_vectorizer" id="newSafeStoreVectorizer" class="input-field mt-1" placeholder="Uses global default if empty">
-            </div>
           </div>
           <div class="flex items-center">
             <input type="checkbox" v-model="newUser.is_admin" id="newUserIsAdmin" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
             <label for="newUserIsAdmin" class="ml-2 block text-sm">Grant Administrator Privileges</label>
           </div>
-          <div class="text-right">
+          <div class="text-right space-x-2">
+            <button type="button" @click="resetNewUserForm" class="btn btn-secondary">Cancel</button>
             <button type="submit" class="btn btn-primary" :disabled="isLoadingUsers">Add User</button>
           </div>
         </form>
       </section>
 
+      <section class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6">
+        <h2 class="text-md font-semibold mb-3 border-b dark:border-gray-600 pb-2">Global User Overrides</h2>
+        <div class="space-y-4">
+          <div>
+            <label for="forceMode" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Force Model Mode</label>
+            <select id="forceMode" v-model="settings.force_model_mode" class="input-field mt-1 max-w-md">
+              <option value="disabled">Disabled</option>
+              <option value="force_once">Force Once (Set User Preference)</option>
+              <option value="force_always">Force Always (Session Override)</option>
+            </select>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label for="forceModelName" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Model to Force</label>
+              <select id="forceModelName" v-model="settings.force_model_name" class="input-field mt-1" :disabled="isLoadingLollmsModels || (settings.force_model_mode === 'disabled')">
+                  <option v-if="isLoadingLollmsModels" disabled value="">Loading models...</option>
+                  <option v-else-if="availableLollmsModels.length === 0" disabled value="">No models available</option>
+                  <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
+              </select>
+            </div>
+            <div>
+              <label for="forceCtxSize" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Context Size to Force</label>
+              <input type="number" id="forceCtxSize" v-model.number="settings.force_context_size" class="input-field mt-1" :disabled="settings.force_model_mode === 'disabled'">
+            </div>
+          </div>
+          <div class="flex justify-end items-center space-x-4">
+              <button v-if="settings.force_model_mode === 'force_once'" type="button" @click="handleForceSettingsOnce" class="btn btn-warning" :disabled="isLoadingSettings">
+                  Apply to All Users Now
+              </button>
+              <button @click="saveSettings" class="btn btn-primary" :disabled="!isSettingsChanged || isLoadingSettings">Save Overrides</button>
+          </div>
+        </div>
+      </section>
+
       <section class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
         <div class="flex justify-between items-center mb-3 border-b dark:border-gray-600 pb-2">
           <h2 class="text-md font-semibold">Manage Existing Users</h2>
-          <button @click="fetchUsers" class="btn btn-secondary !py-1 !px-2 text-xs" :disabled="isLoadingUsers">
-            <span v-if="isLoadingUsers">Refreshing...</span>
-            <span v-else>Refresh List</span>
-          </button>
+          <div class="flex items-center space-x-2">
+            <button @click="emailAllUsers" class="btn btn-secondary !py-1 !px-2 text-xs">Email All Users</button>
+            <button @click="fetchUsers" class="btn btn-secondary !py-1 !px-2 text-xs" :disabled="isLoadingUsers">
+                <span v-if="isLoadingUsers">Refreshing...</span>
+                <span v-else>Refresh List</span>
+            </button>
+          </div>
         </div>
         <UserTable 
           :users="users" 
           :active-sessions="activeSessions"
           :isLoading="isLoadingUsers" 
+          @edit-user="editUser"
           @delete-user="deleteUser" 
           @reset-password="resetPassword" 
           @activate-user="activateUser"
+          @deactivate-user="deactivateUser"
         />
       </section>
     </div>
@@ -315,33 +430,32 @@ export default {
         </div>
         <form v-else @submit.prevent="saveSettings" class="space-y-8">
           <div v-for="(group, category) in categorizedSettings" :key="category">
-            <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">{{ category }}</h3>
-            <div class="space-y-6 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-md">
-              <div v-for="setting in group" :key="setting.key">
-                <label :for="`setting-${setting.key}`" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
-                
-                <div class="mt-2">
-                  <label v-if="setting.type === 'boolean'" :for="`setting-${setting.key}`" class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="settings[setting.key]" class="sr-only peer" :id="`setting-${setting.key}`">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-500 peer-checked:bg-blue-600"></div>
-                    <span class="ml-3 text-sm font-medium text-gray-900 dark:text-gray-200">{{ settings[setting.key] ? 'Enabled' : 'Disabled' }}</span>
-                  </label>
-
-                  <select v-else-if="setting.key === 'registration_mode'" v-model="settings[setting.key]" :id="`setting-${setting.key}`" class="input-field max-w-sm">
-                    <option value="direct">Direct (instantly active)</option>
-                    <option value="admin_approval">Admin Approval</option>
-                  </select>
-
-                  <input v-else
-                        :type="setting.type === 'string' ? 'text' : 'number'"
-                        :step="setting.type === 'float' ? '0.1' : '1'"
-                        v-model.number="settings[setting.key]"
-                        :id="`setting-${setting.key}`"
-                        class="input-field max-w-sm">
+             <template v-if="category !== 'Global LLM Overrides'">
+                <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">{{ category }}</h3>
+                <div class="space-y-6 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-md">
+                <div v-for="setting in group" :key="setting.key">
+                    <label :for="`setting-${setting.key}`" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
+                    <div class="mt-2">
+                    <label v-if="setting.type === 'boolean'" :for="`setting-${setting.key}`" class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="settings[setting.key]" class="sr-only peer" :id="`setting-${setting.key}`">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-500 peer-checked:bg-blue-600"></div>
+                        <span class="ml-3 text-sm font-medium text-gray-900 dark:text-gray-200">{{ settings[setting.key] ? 'Enabled' : 'Disabled' }}</span>
+                    </label>
+                    <select v-else-if="setting.key === 'registration_mode'" v-model="settings[setting.key]" :id="`setting-${setting.key}`" class="input-field max-w-sm">
+                        <option value="direct">Direct (instantly active)</option>
+                        <option value="admin_approval">Admin Approval</option>
+                    </select>
+                    <input v-else
+                            :type="setting.type === 'string' ? 'text' : 'number'"
+                            :step="setting.type === 'float' ? '0.1' : '1'"
+                            v-model.number="settings[setting.key]"
+                            :id="`setting-${setting.key}`"
+                            class="input-field max-w-sm">
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Key: <code class="bg-gray-200 dark:bg-gray-600 px-1 rounded">{{ setting.key }}</code></p>
                 </div>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Key: <code class="bg-gray-200 dark:bg-gray-600 px-1 rounded">{{ setting.key }}</code></p>
-              </div>
-            </div>
+                </div>
+             </template>
           </div>
         </form>
       </section>
@@ -353,7 +467,6 @@ export default {
             <p class="mt-2 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
                 Migrate users and their discussion histories from an OpenWebUI instance.
             </p>
-
             <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
                 <div class="prose dark:prose-invert text-sm max-w-none">
                     <p><strong>Instructions:</strong></p>
@@ -374,7 +487,7 @@ export default {
                     </label>
                     <div class="mt-2 flex items-center">
                         <input
-                            ref="fileInput"
+                            ref="fileInputRef"
                             @change="handleFileSelect"
                             type="file"
                             accept=".db"
@@ -399,6 +512,5 @@ export default {
             </div>
         </section>
     </div>
-
   </div>
 </template>

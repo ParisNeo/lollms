@@ -1,14 +1,15 @@
 <script setup>
-import { computed, onMounted, watch } from 'vue'; // Added 'watch'
+import { computed, onMounted, watch } from 'vue';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
 import { usePyodideStore } from './stores/pyodide';
-import { useSocialStore } from './stores/social'; // Added social store import
+import { useSocialStore } from './stores/social';
 
 import LoginModal from './components/modals/LoginModal.vue';
 import RegisterModal from './components/modals/RegisterModal.vue';
 import RenameDiscussionModal from './components/modals/RenameDiscussionModal.vue';
 import PersonalityEditorModal from './components/modals/PersonalityEditorModal.vue';
+import AdminUserEditModal from './components/modals/AdminUserEditModal.vue';
 import ConfirmationModal from './components/ui/ConfirmationModal.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
 import SourceModal from './components/modals/SourceModal.vue';
@@ -26,7 +27,7 @@ import logoUrl from './assets/logo.png';
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
-const socialStore = useSocialStore(); // Added social store instance
+const socialStore = useSocialStore();
 
 const activeModal = computed(() => uiStore.activeModal);
 
@@ -38,27 +39,20 @@ onMounted(async () => {
     }
 });
 
-// --- NEW: WebSocket Lifecycle Management ---
-// Watch the authentication status to connect/disconnect the real-time service.
 watch(
   () => authStore.isAuthenticated,
   (isNowAuthenticated) => {
-    // Connect only if authenticated and user level allows chat/social features
     const canUseChat = authStore.user?.chat_active && authStore.user?.user_ui_level >= 2;
 
     if (isNowAuthenticated && canUseChat) {
-      // User is logged in and has permissions, establish the WebSocket connection.
       console.log("User authenticated with chat permissions, connecting to real-time DM service...");
       socialStore.connectWebSocket();
     } else {
-      // User is logged out or doesn't have permissions, close the connection.
       console.log("User not authenticated or no chat permissions, disconnecting from real-time DM service...");
       socialStore.disconnectWebSocket();
     }
   },
   {
-    // This runs the watcher immediately on component mount, ensuring that if
-    // the user is already logged in, the connection is established right away.
     immediate: true,
   }
 );
@@ -78,6 +72,7 @@ watch(
     <RegisterModal v-if="activeModal === 'register'" />
     <RenameDiscussionModal v-if="activeModal === 'renameDiscussion'" />
     <PersonalityEditorModal v-if="activeModal === 'personalityEditor'" />
+    <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />
     <SourceModal v-if="activeModal === 'sourceViewer'" />
     <DataStoresModal v-if="activeModal === 'dataStores'" />
     <DataStoreEditorModal v-if="activeModal === 'dataStoreEditor'" />

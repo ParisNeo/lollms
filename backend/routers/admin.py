@@ -3,7 +3,7 @@ import shutil
 import traceback
 import uuid
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
 from sqlalchemy.orm import Session
@@ -22,12 +22,16 @@ from backend.models import (
     UserPublic,
     GlobalConfigPublic,
     GlobalConfigUpdate,
+    AdminUserUpdate,
+    ModelInfo,
+    ForceSettingsPayload
 )
 from backend.session import (
     get_user_data_root,
     get_current_admin_user,
     get_user_temp_uploads_path,
     user_sessions,
+    get_user_lollms_client,
 )
 from backend.settings import settings
 from backend.config import INITIAL_ADMIN_USER_CONFIG
@@ -35,6 +39,62 @@ from backend.migration_utils import run_openwebui_migration
 
 
 admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependencies=[Depends(get_current_admin_user)])
+
+@admin_router.get("/available-models", response_model=List[ModelInfo])
+async def get_available_models(current_admin: UserAuthDetails = Depends(get_current_admin_user)):
+    try:
+        lc = get_user_lollms_client(current_admin.username)
+        models = lc.listModels()
+        
+        formatted_models = []
+        if isinstance(models, list):
+            for item in models:
+                if isinstance(item, str):
+                    formatted_models.append({"name": item, "id": item, "icon_base64": None})
+                elif isinstance(item, dict):
+                    name = item.get("name") or item.get("id") or item.get("model_name")
+                    if name:
+                        formatted_models.append({
+                            "name": name,
+                            "id": item.get("id", name),
+                            "icon_base64": item.get("icon") or item.get("icon_base64")
+                        })
+        
+        unique_models = {m["id"]: m for m in formatted_models}
+        sorted_models = sorted(list(unique_models.values()), key=lambda x: x['name'])
+
+        if not sorted_models:
+             raise HTTPException(status_code=404, detail="No models found or invalid response from binding.")
+        
+        return sorted_models
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch models from binding: {e}")
+
+@admin_router.post("/force-settings-once", response_model=Dict[str, str])
+async def force_settings_once(payload: ForceSettingsPayload, db: Session = Depends(get_db)):
+    forced_model = payload.model_name
+    forced_ctx = payload.context_size
+
+    if not forced_model:
+        raise HTTPException(status_code=400, detail="A model name must be provided in the payload.")
+
+    try:
+        users = db.query(DBUser).all()
+        for user in users:
+            user.lollms_model_name = forced_model
+            if forced_ctx is not None:
+                user.llm_ctx_size = forced_ctx
+        
+        db.commit()
+        
+        user_sessions.clear()
+        
+        return {"message": f"Successfully applied model '{forced_model}' and context size '{forced_ctx or 'N/A'}' to {len(users)} users."}
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Database error while forcing settings: {e}")
 
 @admin_router.post("/import-openwebui", response_model=Dict[str, str])
 async def import_openwebui_data(
@@ -152,6 +212,36 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         db.rollback()
         raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
 
+@admin_router.put("/users/{user_id}", response_model=UserPublic)
+async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Session = Depends(get_db), current_admin: UserAuthDetails = Depends(get_current_admin_user)):
+    user_to_update = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user_to_update:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    if user_to_update.id == current_admin.id and update_data.is_admin is False:
+        raise HTTPException(status_code=403, detail="Administrators cannot revoke their own admin status.")
+    
+    initial_admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
+    if initial_admin_username and user_to_update.username == initial_admin_username and update_data.is_admin is False:
+        raise HTTPException(status_code=403, detail="The initial superadmin account cannot have its admin status revoked.")
+    
+    update_dict = update_data.model_dump(exclude_unset=True)
+    for key, value in update_dict.items():
+        setattr(user_to_update, key, value)
+    
+    try:
+        db.commit()
+        db.refresh(user_to_update)
+        
+        if user_to_update.username in user_sessions:
+            user_sessions[user_to_update.username]["lollms_client"] = None
+        
+        return user_to_update
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
+
 @admin_router.post("/users/{user_id}/activate", response_model=UserPublic)
 async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
     user_to_activate = db.query(DBUser).filter(DBUser.id == user_id).first()
@@ -165,6 +255,27 @@ async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(user_to_activate)
         return user_to_activate
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
+
+@admin_router.post("/users/{user_id}/deactivate", response_model=UserPublic)
+async def admin_deactivate_user(user_id: int, db: Session = Depends(get_db), current_admin: UserAuthDetails = Depends(get_current_admin_user)):
+    user_to_deactivate = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user_to_deactivate:
+        raise HTTPException(status_code=404, detail="User not found.")
+    
+    if user_to_deactivate.id == current_admin.id:
+        raise HTTPException(status_code=403, detail="Administrators cannot deactivate their own accounts.")
+    
+    user_to_deactivate.is_active = False
+    
+    try:
+        db.commit()
+        db.refresh(user_to_deactivate)
+        if user_to_deactivate.username in user_sessions:
+            del user_sessions[user_to_deactivate.username]
+        return user_to_deactivate
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
