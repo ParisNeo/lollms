@@ -11,6 +11,7 @@ new ui:
 - OK add information about left hops
 - OK level : 0 to 5
 - OK social activate/deactivate
+- OK fix rag store building
 - After generation, refresh discussion
 - Add the possibility to use multiple bindings at once with different configurations
 - After stopping, save current status and refresh discussion
@@ -33,6 +34,6 @@ new ui:
 - add current processes listing
 - add authenticate with email
 - use the name of the personality in bubble instead of assistant also add its icon if applicable
-- add a reset my password button that sends a notification to the administrator.
+- add a forgot my password button to the login modal that sends a notification to the administrator.
 - refresh mcps must be converted to reload mcps
-- fix rag store building
+- refresh discussion after generation

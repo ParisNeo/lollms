@@ -22,6 +22,7 @@ import ExportModal from './components/modals/ExportModal.vue';
 import ImportModal from './components/modals/ImportModal.vue';
 import InteractiveOutputModal from './components/modals/InteractiveOutputModal.vue';
 import ShareDiscussionModal from './components/modals/ShareDiscussionModal.vue';
+import ResetPasswordModal from './components/modals/ResetPasswordModal.vue';
 import logoUrl from './assets/logo.png';
 
 const authStore = useAuthStore();
@@ -82,6 +83,7 @@ watch(
     <ExportModal v-if="activeModal === 'export'" />
     <ImportModal v-if="activeModal === 'import'" />
     <InteractiveOutputModal v-if="activeModal === 'interactiveOutput'" />
+    <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

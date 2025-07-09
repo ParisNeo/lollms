@@ -11,9 +11,8 @@ const dataStore = useDataStore();
 
 const { availableLollmsModels, isLoadingLollmsModels } = storeToRefs(dataStore);
 
-const modalData = computed(() => uiStore.modalProps);
-const user = computed(() => modalData.value?.user);
-const onUserUpdated = computed(() => modalData.value?.onUserUpdated);
+const user = computed(() => uiStore.modalProps?.user);
+const onUserUpdated = computed(() => uiStore.modalProps?.onUserUpdated);
 
 const form = ref({
     is_admin: false,
@@ -25,15 +24,23 @@ const form = ref({
 
 const isLoading = ref(false);
 
-function populateForm() {
-    if (user.value) {
-        form.value.is_admin = user.value.is_admin;
-        form.value.is_active = user.value.is_active;
-        form.value.lollms_model_name = user.value.lollms_model_name || '';
-        form.value.llm_ctx_size = user.value.llm_ctx_size;
-        form.value.safe_store_vectorizer = user.value.safe_store_vectorizer || '';
-    }
-}
+// This watcher now correctly observes the user object passed via props
+watch(
+    user,
+    (newUser) => {
+        if (newUser) {
+            // When the user prop is available, populate the form
+            form.value = {
+                is_admin: newUser.is_admin,
+                is_active: newUser.is_active,
+                lollms_model_name: newUser.lollms_model_name || '',
+                llm_ctx_size: newUser.llm_ctx_size,
+                safe_store_vectorizer: newUser.safe_store_vectorizer || '',
+            };
+        }
+    },
+    { immediate: true } // Run immediately to catch the initial state
+);
 
 async function handleSubmit() {
     if (!user.value || !user.value.id) return;
@@ -60,12 +67,6 @@ async function handleSubmit() {
     }
 }
 
-watch(user, (newUser) => {
-    if (newUser) {
-        populateForm();
-    }
-}, { immediate: true });
-
 onMounted(() => {
     if (availableLollmsModels.value.length === 0) {
         dataStore.fetchAdminAvailableLollmsModels();
@@ -75,55 +76,57 @@ onMounted(() => {
 
 <template>
     <GenericModal :modal-name="'adminUserEdit'" :title="user ? `Edit User: ${user.username}` : 'Edit User'" @close="uiStore.closeModal('adminUserEdit')">
-        <form v-if="user" @submit.prevent="handleSubmit" class="p-6 space-y-6">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <span class="flex-grow flex flex-col">
-                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Administrator</span>
-                        <span class="text-sm text-gray-500 dark:text-gray-400">Grants full system access.</span>
-                    </span>
-                    <button @click="form.is_admin = !form.is_admin" type="button" :class="[form.is_admin ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
-                        <span :class="[form.is_admin ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
-                    </button>
+        <template #body>
+            <form v-if="user" @submit.prevent="handleSubmit" class="p-6 space-y-6">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <span class="flex-grow flex flex-col">
+                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Administrator</span>
+                            <span class="text-sm text-gray-500 dark:text-gray-400">Grants full system access.</span>
+                        </span>
+                        <button @click="form.is_admin = !form.is_admin" type="button" :class="[form.is_admin ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                            <span :class="[form.is_admin ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                        </button>
+                    </div>
+
+                    <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <span class="flex-grow flex flex-col">
+                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Account Active</span>
+                            <span class="text-sm text-gray-500 dark:text-gray-400">Allows the user to log in.</span>
+                        </span>
+                        <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                            <span :class="[form.is_active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                        </button>
+                    </div>
                 </div>
 
-                <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <span class="flex-grow flex flex-col">
-                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Account Active</span>
-                        <span class="text-sm text-gray-500 dark:text-gray-400">Allows the user to log in.</span>
-                    </span>
-                    <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
-                        <span :class="[form.is_active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
-                    </button>
+                <div class="space-y-4 pt-4 border-t dark:border-gray-600">
+                    <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">Core Assignments</h3>
+                    <div>
+                        <label for="lollmsModelSelect" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Default LLM Model</label>
+                        <select id="lollmsModelSelect" v-model="form.lollms_model_name" class="input-field mt-1" :disabled="isLoadingLollmsModels">
+                            <option v-if="isLoadingLollmsModels" disabled value="">Loading models...</option>
+                            <option v-else-if="availableLollmsModels.length === 0" disabled value="">No models available</option>
+                            <option value="">(Use System Default)</option>
+                            <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="contextSize" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Context Size Override</label>
+                        <input type="number" id="contextSize" v-model.number="form.llm_ctx_size" class="input-field mt-1" placeholder="e.g., 4096">
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Leave blank to use the system or user's default setting.</p>
+                    </div>
+                    <div>
+                        <label for="vectorizer" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Default Vectorizer</label>
+                        <input type="text" id="vectorizer" v-model="form.safe_store_vectorizer" class="input-field mt-1" placeholder="e.g., st:all-MiniLM-L6-v2">
+                        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The default vectorizer for new data stores created by this user.</p>
+                    </div>
                 </div>
+            </form>
+            <div v-else class="p-6 text-center text-gray-500">
+                Loading user data...
             </div>
-
-            <div class="space-y-4 pt-4 border-t dark:border-gray-600">
-                <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">Core Assignments</h3>
-                <div>
-                    <label for="lollmsModelSelect" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Default LLM Model</label>
-                    <select id="lollmsModelSelect" v-model="form.lollms_model_name" class="input-field mt-1" :disabled="isLoadingLollmsModels">
-                        <option v-if="isLoadingLollmsModels" disabled value="">Loading models...</option>
-                        <option v-else-if="availableLollmsModels.length === 0" disabled value="">No models available</option>
-                        <option value="">(Use System Default)</option>
-                        <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="contextSize" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Context Size Override</label>
-                    <input type="number" id="contextSize" v-model.number="form.llm_ctx_size" class="input-field mt-1" placeholder="e.g., 4096">
-                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Leave blank to use the system or user's default setting.</p>
-                </div>
-                <div>
-                    <label for="vectorizer" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Default Vectorizer</label>
-                    <input type="text" id="vectorizer" v-model="form.safe_store_vectorizer" class="input-field mt-1" placeholder="e.g., st:all-MiniLM-L6-v2">
-                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The default vectorizer for new data stores created by this user.</p>
-                </div>
-            </div>
-        </form>
-         <div v-else class="p-6 text-center text-gray-500">
-            Loading user data...
-        </div>
+        </template>
         <template #footer>
             <div class="flex justify-end space-x-3">
                 <button type="button" class="btn btn-secondary" @click="uiStore.closeModal('adminUserEdit')">Cancel</button>

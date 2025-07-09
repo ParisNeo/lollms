@@ -1,43 +1,35 @@
-<script>
-import { mapState, mapGetters, mapActions } from 'pinia';
+<script setup>
+import { computed, onMounted, onUnmounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 
-export default {
-  name: 'GenericModal',
-  props: {
-    modalName: { type: String, required: true },
-    title: { type: String, default: 'Modal' },
-    allowOverlayClose: { type: Boolean, default: true },
-    maxWidthClass: { type: String, default: 'max-w-xl' }
-  },
-  computed: {
-    // Map the getter from the store
-    ...mapGetters(useUiStore, ['isModalOpen']),
-    // Use the mapped getter to create a local computed property
-    isVisible() {
-      return this.isModalOpen(this.modalName);
-    }
-  },
-  methods: {
-    // Map the action from the store
-    ...mapActions(useUiStore, ['closeModal']),
-    handleClose() {
-      // Call the mapped action
-      this.closeModal(this.modalName);
-    },
-    handleKeydown(e) {
-      if (e.key === 'Escape' && this.isVisible) {
-        this.handleClose();
-      }
-    }
-  },
-  mounted() {
-    document.addEventListener('keydown', this.handleKeydown);
-  },
-  unmounted() {
-    document.removeEventListener('keydown', this.handleKeydown);
+const props = defineProps({
+  modalName: { type: String, required: true },
+  title: { type: String, default: 'Modal' },
+  allowOverlayClose: { type: Boolean, default: true },
+  maxWidthClass: { type: String, default: 'max-w-xl' }
+});
+
+const uiStore = useUiStore();
+
+const isVisible = computed(() => uiStore.isModalOpen(props.modalName));
+
+function handleClose() {
+  uiStore.closeModal(props.modalName);
+}
+
+function handleKeydown(e) {
+  if (e.key === 'Escape' && isVisible.value) {
+    handleClose();
   }
-};
+}
+
+onMounted(() => {
+  document.addEventListener('keydown', handleKeydown);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeydown);
+});
 </script>
 
 <template>

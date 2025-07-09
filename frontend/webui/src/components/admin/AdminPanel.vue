@@ -182,16 +182,13 @@ async function deleteUser(userId) {
   }
 }
 
-async function resetPassword(userId) {
-  const newPassword = prompt('Enter a new password for the user (min 8 characters):');
-  if (newPassword && newPassword.length >= 8) {
-    try {
-      await apiClient.post(`/api/admin/users/${userId}/reset-password`, { new_password: newPassword });
-      uiStore.addNotification("User's password has been reset.", 'success');
-    } catch (error) { /* Handled by interceptor */ }
-  } else if (newPassword !== null) {
-      uiStore.addNotification('Password reset cancelled or password too short.', 'warning');
-  }
+function resetPassword(userId) {
+    const userToReset = users.value.find(u => u.id === userId);
+    if (userToReset) {
+        uiStore.openModal('resetPassword', { user: userToReset });
+    } else {
+        uiStore.addNotification('Could not find the specified user to reset password.', 'error');
+    }
 }
 
 async function activateUser(userId) {
