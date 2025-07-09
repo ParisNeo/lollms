@@ -365,7 +365,18 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
         db.commit()
         db.refresh(new_ds_db_obj)
         get_safe_store_instance(current_user.username, new_ds_db_obj.id, db)
-        return DataStorePublic.model_validate(new_ds_db_obj)
+        
+        # Construct DataStorePublic object with necessary fields
+        data_store_public = DataStorePublic(
+            name=new_ds_db_obj.name,
+            description=new_ds_db_obj.description,
+            id=new_ds_db_obj.id,
+            owner_username=current_user.username,
+            created_at=new_ds_db_obj.created_at,
+            updated_at=new_ds_db_obj.updated_at
+        )
+
+        return data_store_public
     except Exception as e: 
         trace_exception(e)
         db.rollback(); 
