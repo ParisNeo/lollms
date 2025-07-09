@@ -31,3 +31,5 @@ new ui:
 - add tokens count to the chatinput
 - add current processes listing
 - add authenticate with email
+- use the name of the personality in bubble instead of assistant also add its icon if applicable
+- Add a reset my password button that sends a notification to the administrator.
