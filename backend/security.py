@@ -71,15 +71,10 @@ def _convert_html_to_text(html_string: str) -> str:
     
     text = html.unescape(html_string)
 
-    # Replace block-level tags with double newlines
     text = re.sub(r'</(p|div|h[1-6]|blockquote|tr|li)>', '\n\n', text, flags=re.IGNORECASE)
-    # Handle line breaks
     text = re.sub(r'<(br)\s*/?>', '\n', text, flags=re.IGNORECASE)
-    # Handle list items with a prepended star
     text = re.sub(r'<li[^>]*>', '* ', text, flags=re.IGNORECASE)
-    # Strip all remaining HTML tags
     text = re.sub(r'<[^>]+>', '', text)
-    # Consolidate whitespace
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
     
@@ -107,8 +102,8 @@ def _get_full_html_email(body: str, background_color: Optional[str]) -> str:
 </html>
 """
 
-def _send_email_smtp(to_email: str, subject: str, html_content: str, text_content: str):
-    """Sends a multipart email using a configured SMTP server."""
+def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], text_content: str):
+    """Sends an email using a configured SMTP server. It can be text-only or multipart."""
     smtp_host = settings.get("smtp_host")
     smtp_port = settings.get("smtp_port", 587)
     smtp_user = settings.get("smtp_user")
@@ -117,90 +112,75 @@ def _send_email_smtp(to_email: str, subject: str, html_content: str, text_conten
     use_tls = settings.get("smtp_use_tls", True)
 
     if not all([smtp_host, smtp_port, smtp_user, smtp_password, from_email]):
-        print("ERROR: SMTP settings are incomplete. Cannot send email.")
         raise ValueError("SMTP settings are not fully configured.")
 
-    msg = MIMEMultipart('alternative')
+    if html_content:
+        msg = MIMEMultipart('alternative')
+        part1 = MIMEText(text_content, 'plain', 'utf-8')
+        part2 = MIMEText(html_content, 'html', 'utf-8')
+        msg.attach(part1)
+        msg.attach(part2)
+    else:
+        msg = MIMEText(text_content, 'plain', 'utf-8')
+
     msg['Subject'] = subject
     msg['From'] = from_email
     msg['To'] = to_email
-
-    part1 = MIMEText(text_content, 'plain', 'utf-8')
-    part2 = MIMEText(html_content, 'html', 'utf-8')
-
-    msg.attach(part1)
-    msg.attach(part2)
     
     try:
         with smtplib.SMTP(smtp_host, smtp_port) as server:
-            if use_tls:
-                server.starttls()
+            if use_tls: server.starttls()
             server.login(smtp_user, smtp_password)
             server.sendmail(from_email, [to_email], msg.as_string())
-        print(f"INFO: Email (SMTP) with subject '{subject}' sent successfully to {to_email}")
+        print(f"INFO: Email (SMTP) sent to {to_email}")
     except Exception as e:
-        print(f"CRITICAL: Failed to send SMTP email to {to_email}. Error: {e}")
+        print(f"CRITICAL: Failed to send SMTP email. Error: {e}")
         raise
 
-def _send_email_system_mail(to_email: str, subject: str, html_content: str, text_content: str):
-    """
-    Sends a multipart/alternative email using the system's `mailx` command.
-    This approach is more robust for HTML content than piping to `mail`.
-    """
+def _send_email_system_mail_html(to_email: str, subject: str, html_content: str, text_content: str):
+    """Sends a multipart/alternative email using the system's `mailx` command."""
     if not shutil.which("mailx"):
-        print("CRITICAL: The 'mailx' command was not found. Please install mailx or a similar package (e.g., bsd-mailx).")
         raise FileNotFoundError("The 'mailx' command not found. Please install mailx.")
 
     boundary = f"----=_NextPart_{secrets.token_hex(16)}"
-    
-    # Construct the full multipart body
     multipart_body = (
         f"This is a multi-part message in MIME format.\n"
         f"--{boundary}\n"
-        f"Content-Type: text/plain; charset=utf-8\n"
-        f"Content-Transfer-Encoding: 7bit\n\n"
+        f"Content-Type: text/plain; charset=utf-8\n\n"
         f"{text_content}\n\n"
         f"--{boundary}\n"
-        f"Content-Type: text/html; charset=utf-8\n"
-        f"Content-Transfer-Encoding: 7bit\n\n"
+        f"Content-Type: text/html; charset=utf-8\n\n"
         f"<html><body>{html_content}</body></html>\n\n"
         f"--{boundary}--\n"
     )
-
-    sanitized_subject = subject.replace('\n', ' ').replace('\r', ' ')
-    
     command = [
-        'mailx',
-        '-s', sanitized_subject,
+        'mailx', '-s', subject.replace('\n', ' ').replace('\r', ' '),
         '-a', f'Content-Type: multipart/alternative; boundary="{boundary}"',
         to_email
     ]
-
-    print(f"DEBUG: Executing system mail command: {' '.join(command)}")
-
     try:
-        process = subprocess.run(
-            command,
-            input=multipart_body,
-            capture_output=True,
-            text=True,
-            check=False,
-            encoding='utf-8'
-        )
-        if process.returncode != 0:
-            error_message = f"System 'mailx' command failed. Stderr: {process.stderr}"
-            print(f"ERROR: {error_message}")
-            raise subprocess.CalledProcessError(process.returncode, command, stderr=process.stderr)
-        
-        print(f"INFO: Email (system mailx) with subject '{subject}' sent to {to_email}.")
-    except Exception as e:
-        print(f"CRITICAL: An unexpected error occurred sending system mail: {e}")
+        process = subprocess.run(command, input=multipart_body, capture_output=True, text=True, check=True, encoding='utf-8')
+        print(f"INFO: Email (HTML system mail) sent to {to_email}.")
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: System 'mailx' command failed. Stderr: {e.stderr}")
+        raise
+
+def _send_email_system_mail_text(to_email: str, subject: str, text_content: str):
+    """Sends a simple plain text email using the system's `mail` command."""
+    if not shutil.which("mail"):
+        raise FileNotFoundError("The 'mail' command not found. Please install mailutils.")
+    
+    command = ['mail', '-s', subject.replace('\n', ' ').replace('\r', ' '), to_email]
+    try:
+        process = subprocess.run(command, input=text_content, capture_output=True, text=True, check=True, encoding='utf-8')
+        print(f"INFO: Email (Text system mail) sent to {to_email}.")
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: System 'mail' command failed. Stderr: {e.stderr}")
         raise
 
 def send_generic_email(to_email: str, subject: str, body: str, background_color: Optional[str] = "#f4f4f4", send_as_text: bool = False):
     """
-    Prepares content and sends a generic email to a user, choosing the
-    sending method based on global settings.
+    Prepares and sends a generic email, handling both HTML and plain text modes correctly.
     """
     recovery_mode = settings.get("password_recovery_mode", "manual")
     if recovery_mode not in ["automatic", "system_mail"]:
@@ -208,26 +188,19 @@ def send_generic_email(to_email: str, subject: str, body: str, background_color:
         return
 
     text_content = _convert_html_to_text(body)
-    html_content = _get_full_html_email(body, background_color)
 
     if send_as_text:
-        # If sending as plain text, we create a simple MIMEText message
-        # instead of a multipart one. Both smtp and mailx can handle this.
-        msg = MIMEText(text_content, 'plain', 'utf-8')
-        msg['Subject'] = subject
-        msg['From'] = settings.get("smtp_from_email", "noreply@localhost")
-        msg['To'] = to_email
-        
         if recovery_mode == "automatic":
-            _send_email_smtp(to_email, subject, text_content, True) # SMTP can handle this simply
-        else: # system_mail
-             _send_email_system_mail(to_email, subject, "This email is in plain text format.", text_content)
-
-    else: # Send as multipart HTML
-        if recovery_mode == "automatic":
-            _send_email_smtp(to_email, subject, html_content, text_content)
+            _send_email_smtp(to_email, subject, None, text_content)
         elif recovery_mode == "system_mail":
-            _send_email_system_mail(to_email, subject, body, text_content)
+            _send_email_system_mail_text(to_email, subject, text_content)
+    else: # Send as HTML
+        html_content_full = _get_full_html_email(body, background_color)
+        if recovery_mode == "automatic":
+            _send_email_smtp(to_email, subject, html_content_full, text_content)
+        elif recovery_mode == "system_mail":
+            # Pass the raw body fragment to the mailer, which wraps it in <html><body>
+            _send_email_system_mail_html(to_email, subject, body, text_content)
 
 def send_password_reset_email(to_email: str, reset_link: str, username: str):
     """Prepares and sends a password reset email using the configured method."""
