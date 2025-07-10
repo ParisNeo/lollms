@@ -9,10 +9,12 @@ from typing import List, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from lollms_client.lollms_llm_binding import get_available_bindings
 
 from backend.database_setup import (
     User as DBUser,
     GlobalConfig as DBGlobalConfig,
+    LLMBinding as DBLLMBinding,
     get_db,
     hash_password,
 )
@@ -30,6 +32,9 @@ from backend.models import (
     AdminDashboardStats,
     EnhanceEmailRequest,
     EnhancedEmailResponse,
+    LLMBindingCreate,
+    LLMBindingUpdate,
+    LLMBindingPublic,
 )
 from backend.session import (
     get_user_data_root,
@@ -45,6 +50,84 @@ from backend.migration_utils import run_openwebui_migration
 
 
 admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependencies=[Depends(get_current_admin_user)])
+
+# --- Bindings Management Endpoints ---
+
+@admin_router.get("/bindings/available_types", response_model=List[str])
+async def get_available_binding_types():
+    try:
+        return get_available_bindings()
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to get available binding types: {e}")
+
+@admin_router.get("/bindings", response_model=List[LLMBindingPublic])
+async def get_all_bindings(db: Session = Depends(get_db)):
+    return db.query(DBLLMBinding).all()
+
+@admin_router.post("/bindings", response_model=LLMBindingPublic, status_code=201)
+async def create_binding(binding_data: LLMBindingCreate, db: Session = Depends(get_db)):
+    if db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_data.alias).first():
+        raise HTTPException(status_code=400, detail="A binding with this alias already exists.")
+    
+    new_binding = DBLLMBinding(**binding_data.model_dump())
+    try:
+        db.add(new_binding)
+        db.commit()
+        db.refresh(new_binding)
+        return new_binding
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="A binding with this alias already exists.")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@admin_router.put("/bindings/{binding_id}", response_model=LLMBindingPublic)
+async def update_binding(binding_id: int, update_data: LLMBindingUpdate, db: Session = Depends(get_db)):
+    binding_to_update = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
+    if not binding_to_update:
+        raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    if update_data.alias and update_data.alias != binding_to_update.alias:
+        if db.query(DBLLMBinding).filter(DBLLMBinding.alias == update_data.alias).first():
+            raise HTTPException(status_code=400, detail="A binding with the new alias already exists.")
+
+    update_dict = update_data.model_dump(exclude_unset=True)
+    if 'service_key' in update_dict and not update_dict['service_key']:
+        del update_dict['service_key']
+
+    for key, value in update_dict.items():
+        setattr(binding_to_update, key, value)
+    
+    try:
+        db.commit()
+        db.refresh(binding_to_update)
+        # Invalidate cached clients
+        for session in user_sessions.values():
+            if "lollms_clients" in session and binding_to_update.alias in session["lollms_clients"]:
+                del session["lollms_clients"][binding_to_update.alias]
+        return binding_to_update
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@admin_router.delete("/bindings/{binding_id}", response_model=Dict[str, str])
+async def delete_binding(binding_id: int, db: Session = Depends(get_db)):
+    binding_to_delete = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
+    if not binding_to_delete:
+        raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    try:
+        db.delete(binding_to_delete)
+        db.commit()
+        return {"message": "Binding deleted successfully."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+
+# --- Existing Admin Endpoints ---
 
 @admin_router.get("/stats", response_model=AdminDashboardStats)
 async def get_dashboard_stats(db: Session = Depends(get_db)):
@@ -115,6 +198,7 @@ async def enhance_email_with_ai(
     current_admin: UserAuthDetails = Depends(get_current_admin_user)
 ):
     try:
+        # This will use the admin's default model for now.
         lc = get_user_lollms_client(current_admin.username)
         
         if payload.prompt and payload.prompt.strip():
@@ -178,37 +262,41 @@ Current Background Color:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"An error occurred while enhancing the email: {e}")
 
-
 @admin_router.get("/available-models", response_model=List[ModelInfo])
-async def get_available_models(current_admin: UserAuthDetails = Depends(get_current_admin_user)):
-    try:
-        lc = get_user_lollms_client(current_admin.username)
-        models = lc.listModels()
-        
-        formatted_models = []
-        if isinstance(models, list):
-            for item in models:
-                if isinstance(item, str):
-                    formatted_models.append({"name": item, "id": item, "icon_base64": None})
-                elif isinstance(item, dict):
-                    name = item.get("name") or item.get("id") or item.get("model_name")
-                    if name:
-                        formatted_models.append({
-                            "name": name,
-                            "id": item.get("id", name),
-                            "icon_base64": item.get("icon") or item.get("icon_base64")
-                        })
-        
-        unique_models = {m["id"]: m for m in formatted_models}
-        sorted_models = sorted(list(unique_models.values()), key=lambda x: x['name'])
+async def get_available_models(current_admin: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    all_models = []
+    active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
 
-        if not sorted_models:
-             raise HTTPException(status_code=404, detail="No models found or invalid response from binding.")
-        
-        return sorted_models
-    except Exception as e:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to fetch models from binding: {e}")
+    for binding in active_bindings:
+        try:
+            # We get a client instance specifically for this binding to list its models
+            lc = get_user_lollms_client(current_admin.username, binding.alias)
+            models = lc.listModels()
+            
+            if isinstance(models, list):
+                for item in models:
+                    model_id = None
+                    if isinstance(item, str):
+                        model_id = item
+                    elif isinstance(item, dict):
+                        model_id = item.get("name") or item.get("id") or item.get("model_name")
+                    
+                    if model_id:
+                        all_models.append({
+                            "id": f"{binding.alias}/{model_id}",
+                            "name": f"{binding.alias}/{model_id}"
+                        })
+        except Exception as e:
+            print(f"WARNING: Could not fetch models from binding '{binding.alias}': {e}")
+            continue
+
+    unique_models = {m["id"]: m for m in all_models}
+    sorted_models = sorted(list(unique_models.values()), key=lambda x: x['name'])
+
+    if not sorted_models:
+        raise HTTPException(status_code=404, detail="No models found from any active bindings.")
+    
+    return sorted_models
 
 @admin_router.post("/force-settings-once", response_model=Dict[str, str])
 async def force_settings_once(payload: ForceSettingsPayload, db: Session = Depends(get_db)):
@@ -335,7 +423,7 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         hashed_password=hash_password(user_data.password),
         is_admin=user_data.is_admin,
         email=user_data.email,
-        lollms_model_name=user_data.lollms_model_name or settings.get("default_lollms_model_name"),
+        lollms_model_name=user_data.lollms_model_name,
         safe_store_vectorizer=user_data.safe_store_vectorizer or settings.get("default_safe_store_vectorizer"),
         llm_ctx_size=user_data.llm_ctx_size if user_data.llm_ctx_size is not None else settings.get("default_llm_ctx_size"),
         llm_temperature=user_data.llm_temperature if user_data.llm_temperature is not None else settings.get("default_llm_temperature"),
@@ -375,7 +463,7 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
         db.refresh(user_to_update)
         
         if user_to_update.username in user_sessions:
-            user_sessions[user_to_update.username]["lollms_client"] = None
+            user_sessions[user_to_update.username]["lollms_clients"] = {}
         
         return user_to_update
     except Exception as e:

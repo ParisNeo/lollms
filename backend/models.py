@@ -6,6 +6,34 @@ from backend.database_setup import FriendshipStatus
 from enum import Enum
 from backend.database_setup import FriendshipStatus, PostVisibility as DBPostVisibility
 
+class LLMBindingBase(BaseModel):
+    alias: constr(min_length=1, max_length=100)
+    name: constr(min_length=1, max_length=100)
+    host_address: Optional[str] = None
+    models_path: Optional[str] = None
+    default_model_name: Optional[str] = None
+    is_active: bool = True
+
+class LLMBindingCreate(LLMBindingBase):
+    service_key: Optional[str] = None
+
+class LLMBindingUpdate(BaseModel):
+    alias: Optional[constr(min_length=1, max_length=100)] = None
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    host_address: Optional[str] = None
+    models_path: Optional[str] = None
+    service_key: Optional[str] = None
+    default_model_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class LLMBindingPublic(LLMBindingBase):
+    id: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
 class Token(BaseModel):
     access_token: str
     token_type: str
@@ -149,7 +177,8 @@ class AuthorPublic(BaseModel):
     id: int
     username: str
     icon: Optional[str] = None
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 class PostBase(BaseModel):
     content: str = Field(..., max_length=10000)
@@ -185,7 +214,8 @@ class UserPublic(UserLLMParams):
     rag_min_sim_percent: Optional[float] = None
     rag_use_graph: bool
     rag_graph_response_type: Optional[str] = None
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 class UserAuthDetails(UserLLMParams):
     id: int
@@ -316,7 +346,8 @@ class DataStorePublic(DataStoreBase):
     owner_username: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 class DataStoreShareRequest(BaseModel):
     target_username: constr(min_length=3, max_length=50)
@@ -352,7 +383,8 @@ class PersonalityPublic(PersonalityBase):
     updated_at: datetime.datetime
     is_public: bool
     owner_username: Optional[str] = None
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 class PersonalitySendRequest(BaseModel):
     target_username: constr(min_length=3, max_length=50)
@@ -384,7 +416,8 @@ class MCPPublic(MCPBase):
     owner_username: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 class AppBase(BaseModel):
     name: constr(min_length=1, max_length=100)
@@ -412,7 +445,8 @@ class AppPublic(AppBase):
     owner_username: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 class ToolInfo(BaseModel):
     name: str
@@ -433,7 +467,8 @@ class FriendPublic(BaseModel):
     username: str
     friendship_id: int
     status_with_current_user: FriendshipStatus
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 class FriendshipRequestPublic(BaseModel):
     friendship_id: int
@@ -441,7 +476,8 @@ class FriendshipRequestPublic(BaseModel):
     requesting_username: str
     requested_at: datetime.datetime
     status: FriendshipStatus
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 class DirectMessageBase(BaseModel):
     content: constr(min_length=1)
@@ -479,7 +515,8 @@ class CommentPublic(CommentBase):
     id: int
     author: "AuthorPublic"
     created_at: datetime.datetime
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True
 
 class PostPublic(PostBase):
     id: int
@@ -493,4 +530,5 @@ class PostPublic(PostBase):
     like_count: int = 0
     has_liked: bool = False
     
-    model_config = {"from_attributes": True}
+    class Config:
+        from_attributes = True

@@ -13,12 +13,25 @@ from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 from sqlalchemy.exc import OperationalError, IntegrityError
 from sqlalchemy import Enum as SQLAlchemyEnum
 
-from backend.config import DATABASE_URL_CONFIG_KEY, config
+from backend.config import DATABASE_URL_CONFIG_KEY, config, LOLLMS_CLIENT_DEFAULTS
 from backend.security import pwd_context
 
-CURRENT_DB_VERSION = "1.6.0"
+CURRENT_DB_VERSION = "1.7.0"
 
 Base = declarative_base()
+
+class LLMBinding(Base):
+    __tablename__ = "llm_bindings"
+    id = Column(Integer, primary_key=True, index=True)
+    alias = Column(String, unique=True, nullable=False, index=True)
+    name = Column(String, nullable=False)
+    host_address = Column(String)
+    models_path = Column(String)
+    service_key = Column(String)
+    default_model_name = Column(String)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 class GlobalConfig(Base):
     __tablename__ = "global_configs"
@@ -322,10 +335,6 @@ def _bootstrap_global_settings(connection):
             "value": True,
             "type": "boolean", "description": "Use TLS for the SMTP connection.", "category": "Email Settings"
         },
-        "lollms_binding_config": {
-            "value": config.get("lollms_client_defaults", {}),
-            "type": "json", "description": "Configuration for the default LoLLMs binding.", "category": "LoLLMs Binding"
-        },
         "default_safe_store_vectorizer": {
             "value": config.get("safe_store_defaults", {}).get("global_default_vectorizer", "st:all-MiniLM-L6-v2"),
             "type": "string", "description": "Default vectorizer assigned to newly created users.", "category": "Defaults"
@@ -396,6 +405,38 @@ def init_database(db_url: str):
         try:
             if inspector.has_table("global_configs"):
                 _bootstrap_global_settings(connection)
+
+            if inspector.has_table("llm_bindings"):
+                binding_count_res = connection.execute(text("SELECT COUNT(id) FROM llm_bindings")).scalar_one_or_none()
+                if binding_count_res == 0:
+                    print("INFO: 'llm_bindings' table is empty. Attempting to seed from config.toml.")
+                    if LOLLMS_CLIENT_DEFAULTS.get("binding_name"):
+                        alias = LOLLMS_CLIENT_DEFAULTS["binding_name"].lower().replace(" ", "_")
+                        
+                        existing_alias = connection.execute(
+                            text("SELECT id FROM llm_bindings WHERE alias = :alias"),
+                            {"alias": alias}
+                        ).first()
+
+                        if not existing_alias:
+                            connection.execute(
+                                LLMBinding.__table__.insert(),
+                                [{
+                                    "alias": alias,
+                                    "name": LOLLMS_CLIENT_DEFAULTS.get("binding_name"),
+                                    "host_address": LOLLMS_CLIENT_DEFAULTS.get("host_address"),
+                                    "models_path": LOLLMS_CLIENT_DEFAULTS.get("models_path"),
+                                    "service_key": LOLLMS_CLIENT_DEFAULTS.get("service_key"),
+                                    "default_model_name": LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
+                                    "is_active": True
+                                }]
+                            )
+                            print(f"INFO: Successfully created initial binding '{alias}' from config.toml.")
+                        else:
+                            print(f"INFO: Binding with alias '{alias}' already exists. Skipping seed from config.")
+                    else:
+                        print("WARNING: No 'binding_name' found in [lollms_client_defaults] in config.toml. Cannot seed initial binding.")
+
 
             if inspector.has_table("users"):
                 user_columns_db = [col['name'] for col in inspector.get_columns('users')]

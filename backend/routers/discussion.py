@@ -92,6 +92,7 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
 async def create_new_discussion(current_user: UserAuthDetails = Depends(get_current_active_user)) -> DiscussionInfo:
     username = current_user.username
     discussion_id = str(uuid.uuid4())
+    # This will use the default client, which is fine for creating an empty discussion.
     discussion_obj = get_user_discussion(username, discussion_id, create_if_missing=True)
     if not discussion_obj:
         raise HTTPException(status_code=500, detail="Failed to create new discussion.")
@@ -116,7 +117,7 @@ async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_cu
     username = current_user.username
     dm = get_user_discussion_manager(username)
     all_discs_infos = dm.list_discussions()
-    lc = get_user_lollms_client(username)
+    lc = get_user_lollms_client(username) # A default client is fine for just checking message counts
     deleted_count = 0
     discussions_to_delete = []
 
@@ -401,7 +402,24 @@ async def chat_in_existing_discussion(
     db: Session = Depends(get_db)
 ) -> StreamingResponse:
     username = current_user.username
-    discussion_obj = get_user_discussion(username, discussion_id)
+
+    # --- NEW: Select client based on user's model preference ---
+    user_model_full = current_user.lollms_model_name
+    binding_alias = None
+    if user_model_full and '/' in user_model_full:
+        binding_alias, _ = user_model_full.split('/', 1)
+    
+    try:
+        lc = get_user_lollms_client(username, binding_alias)
+    except HTTPException as e:
+        # If the specific binding fails, send a clear error message in the stream
+        async def error_stream():
+            yield json.dumps({"type": "error", "content": f"Failed to get LLM Client: {e.detail}"}) + "\n"
+        return StreamingResponse(error_stream(), media_type="application/x-ndjson")
+
+    discussion_obj = get_user_discussion(username, discussion_id, lollms_client=lc)
+    # --- END NEW ---
+
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
 
@@ -437,7 +455,6 @@ async def chat_in_existing_discussion(
         if ss:
             use_rag[ss.name] = {"name": ss.name, "description": ss.description, "callable": partial(query_rag_callback, ss=ss)}
 
-    lc = get_user_lollms_client(username)
     active_personality = None
     db_pers = None
     if db_user.active_personality_id:

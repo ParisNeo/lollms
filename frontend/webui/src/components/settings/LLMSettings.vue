@@ -1,17 +1,16 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { ref, onMounted, watch, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
+import IconSelectMenu from '../ui/IconSelectMenu.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore();
 
-// Use storeToRefs to get reactive state from the stores
 const { user } = storeToRefs(authStore);
-const { availableLollmsModels } = storeToRefs(dataStore);
+const { availableLollmsModelsGrouped, isLoadingLollmsModels } = storeToRefs(dataStore);
 
-// Form state
 const form = ref({
     lollms_model_name: '',
     llm_ctx_size: 4096,
@@ -24,11 +23,13 @@ const form = ref({
 });
 const isLoading = ref(false);
 const hasChanges = ref(false);
-
-// A pristine copy to compare against for changes
 let pristineState = {};
 
-// Function to populate form from user state and set pristine state
+const activeModelName = computed({
+    get: () => form.value.lollms_model_name,
+    set: (name) => form.value.lollms_model_name = name
+});
+
 const populateForm = () => {
     if (user.value) {
         form.value = {
@@ -42,27 +43,29 @@ const populateForm = () => {
             put_thoughts_in_context: user.value.put_thoughts_in_context || false
         };
         pristineState = JSON.parse(JSON.stringify(form.value));
-        hasChanges.value = false; // Reset on populate
+        hasChanges.value = false;
     }
 };
 
-// Populate form on mount and when user data changes
-onMounted(populateForm);
+onMounted(() => {
+    if (dataStore.availableLollmsModels.length === 0) {
+        dataStore.fetchAvailableLollmsModels();
+    }
+    populateForm();
+});
+
 watch(user, populateForm, { deep: true });
 
-// Watch for changes in the form to enable/disable the save button
 watch(form, (newValue) => {
     hasChanges.value = JSON.stringify(newValue) !== JSON.stringify(pristineState);
 }, { deep: true });
 
-// Handle form submission
 async function handleSave() {
     isLoading.value = true;
     try {
         await authStore.updateUserPreferences(form.value);
-        // The user watcher will repopulate the form and reset pristineState
     } catch (error) {
-        // Error notification handled by the API interceptor
+        // Handled by API interceptor
     } finally {
         isLoading.value = false;
     }
@@ -82,12 +85,13 @@ async function handleSave() {
                 <!-- Model Selection -->
                 <div>
                     <label for="lollmsModelSelect" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Default LLM Model</label>
-                    <select id="lollmsModelSelect" v-model="form.lollms_model_name" class="input-field mt-1">
-                        <option v-if="!availableLollmsModels || availableLollmsModels.length === 0" disabled value="">Loading models...</option>
-                        <option v-for="model in availableLollmsModels" :key="model.name" :value="model.name">
-                            {{ model.name }}
-                        </option>
-                    </select>
+                     <IconSelectMenu 
+                        v-model="activeModelName" 
+                        :items="availableLollmsModelsGrouped"
+                        :is-loading="isLoadingLollmsModels"
+                        placeholder="Select a model"
+                        class="mt-1"
+                    />
                 </div>
 
                 <!-- Generation Parameters -->

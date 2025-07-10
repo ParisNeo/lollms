@@ -42,6 +42,42 @@ export const useDataStore = defineStore('data', () => {
         return Object.entries(grouped).map(([mcpName, tools]) => ({ isGroup: true, label: mcpName, items: tools.sort((a, b) => a.name.localeCompare(b.name))})).sort((a,b) => a.label.localeCompare(b.label));
     });
 
+    const availableLollmsModelsGrouped = computed(() => {
+        if (!Array.isArray(availableLollmsModels.value) || availableLollmsModels.value.length === 0) {
+            return [];
+        }
+
+        const grouped = availableLollmsModels.value.reduce((acc, model) => {
+            if (!model || typeof model.id !== 'string') {
+                console.warn("Skipping invalid model entry in availableLollmsModels:", model);
+                return acc;
+            }
+            
+            const [bindingAlias, ...modelNameParts] = model.id.split('/');
+            const modelName = modelNameParts.join('/');
+            
+            if (!acc[bindingAlias]) {
+                acc[bindingAlias] = {
+                    isGroup: true,
+                    label: bindingAlias,
+                    items: []
+                };
+            }
+            acc[bindingAlias].items.push({
+                id: model.id,
+                name: modelName || bindingAlias
+            });
+            return acc;
+        }, {});
+
+        Object.values(grouped).forEach(group => {
+            group.items.sort((a, b) => a.name.localeCompare(b.name));
+        });
+
+        return Object.values(grouped).sort((a, b) => a.label.localeCompare(b.label));
+    });
+
+
     async function loadAllInitialData() {
         fetchAvailableLollmsModels();
         fetchDataStores();
@@ -55,7 +91,7 @@ export const useDataStore = defineStore('data', () => {
         isLoadingLollmsModels.value = true;
         try {
             const response = await apiClient.get('/api/config/lollms-models');
-            availableLollmsModels.value = Array.isArray(response.data) ? response.data.map(m => ({name:m.name, icon_base64:null, id:m.name})) : [];
+            availableLollmsModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             console.error("Failed to load LLM models:", error);
             availableLollmsModels.value = [];
@@ -395,7 +431,7 @@ export const useDataStore = defineStore('data', () => {
         userPersonalities, publicPersonalities, userMcps, mcpTools,
         userApps, systemApps,
         isLoadingLollmsModels,
-        availableRagStores, availableMcpToolsForSelector,
+        availableRagStores, availableMcpToolsForSelector, availableLollmsModelsGrouped,
         loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,
         fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,

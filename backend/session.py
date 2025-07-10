@@ -20,6 +20,7 @@ from backend.database_setup import (
     SharedDataStoreLink as DBSharedDataStoreLink,
     Personality as DBPersonality,
     MCP as DBMCP,
+    LLMBinding as DBLLMBinding,
     get_db,
 )
 from lollms_client import LollmsClient
@@ -27,9 +28,7 @@ from backend.models import UserAuthDetails, TokenData
 from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM
 from backend.config import (
     APP_DATA_DIR,
-    LOLLMS_CLIENT_DEFAULTS,
     SAFE_STORE_DEFAULTS,
-    DEFAULT_MCPS,
     TEMP_UPLOADS_DIR_NAME,
     DISCUSSION_ASSETS_DIR_NAME,
     DATASTORES_DIR_NAME,
@@ -109,28 +108,28 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     if username not in user_sessions:
         print(f"INFO: Re-initializing session for {username} on first request after server start.")
         session_llm_params = {
-            "ctx_size": db_user.llm_ctx_size if db_user.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
-            "temperature": db_user.llm_temperature if db_user.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
-            "top_k": db_user.llm_top_k if db_user.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
-            "top_p": db_user.llm_top_p if db_user.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
-            "repeat_penalty": db_user.llm_repeat_penalty if db_user.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
-            "repeat_last_n": db_user.llm_repeat_last_n if db_user.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),
+            "ctx_size": db_user.llm_ctx_size,
+            "temperature": db_user.llm_temperature,
+            "top_k": db_user.llm_top_k,
+            "top_p": db_user.llm_top_p,
+            "repeat_penalty": db_user.llm_repeat_penalty,
+            "repeat_last_n": db_user.llm_repeat_last_n,
             "put_thoughts_in_context": db_user.put_thoughts_in_context
         }
         user_sessions[username] = {
-            "lollms_client": None, "safe_store_instances": {},
+            "lollms_clients": {},
+            "safe_store_instances": {},
             "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
-            "lollms_model_name": db_user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
+            "lollms_model_name": db_user.lollms_model_name,
             "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
             "active_personality_id": db_user.active_personality_id,
         }
 
-    lc = get_user_lollms_client(username)
-    ai_name_for_user = getattr(lc, "ai_name", LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"))
+    # Use the first available binding as a "default" client for general UI info.
+    lc = get_user_lollms_client(username) 
+    ai_name_for_user = getattr(lc, "ai_name", "assistant")
     current_session_llm_params = user_sessions[username].get("llm_params", {})
 
-    # --- THIS IS THE FIX ---
-    # The UserAuthDetails model is now populated with all required fields directly from the db_user object.
     return UserAuthDetails(
         id=db_user.id,
         username=username,
@@ -141,7 +140,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         family_name=db_user.family_name,
         email=db_user.email,
         birth_date=db_user.birth_date,
-        receive_notification_emails=db_user.receive_notification_emails, # This was the missing field
+        receive_notification_emails=db_user.receive_notification_emails,
         lollms_model_name=user_sessions[username].get("lollms_model_name"),
         safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
         active_personality_id=user_sessions[username].get("active_personality_id"),
@@ -190,7 +189,7 @@ def load_mcps(username):
                             "server_url": mcp.url,
                             "auth_config": {
                                 "type": "bearer",
-                                "token": session.get("access_token") # ou None
+                                "token": session.get("access_token") 
                             }
                         }
                     elif mcp.authentication_type=="bearer":
@@ -210,55 +209,74 @@ def load_mcps(username):
         db_for_mcp.close()
     return servers_infos
 
-def get_user_lollms_client(username: str) -> LollmsClient:
+def get_user_lollms_client(username: str, binding_alias: Optional[str] = None) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
         raise HTTPException(status_code=500, detail="User session not found for LollmsClient.")
     
-    if session.get("lollms_client") is None:
-        # Check for admin-forced model settings
+    if "lollms_clients" not in session:
+        session["lollms_clients"] = {}
+
+    db = next(get_db())
+    try:
+        binding_to_use = None
+        if binding_alias:
+            binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
+            if not binding_to_use:
+                raise HTTPException(status_code=404, detail=f"Binding with alias '{binding_alias}' not found.")
+        else:
+            binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+            if not binding_to_use:
+                raise HTTPException(status_code=404, detail="No active LLM bindings are configured.")
+        
+        alias = binding_to_use.alias
+        if alias in session["lollms_clients"]:
+            return cast(LollmsClient, session["lollms_clients"][alias])
+        
+        user_model_full = session.get("lollms_model_name")
+        selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
+
+        if selected_binding_alias == alias:
+            model_name_for_binding = selected_model_name
+        else:
+            model_name_for_binding = binding_to_use.default_model_name
+
         force_mode = settings.get("force_model_mode", "disabled")
         if force_mode == "force_always":
-            model_name = settings.get("force_model_name")
+            forced_model_full = settings.get("force_model_name")
+            forced_binding_alias, forced_model_name = (forced_model_full.split('/', 1) + [None])[:2] if forced_model_full else (None, None)
+            if forced_binding_alias == alias:
+                model_name_for_binding = forced_model_name
             ctx_size_override = settings.get("force_context_size")
-            if not model_name:
-                print("WARNING: Admin model forcing is enabled, but no model name is set. Falling back to user/default.")
-                model_name = session.get("lollms_model_name", settings.get("default_lollms_model_name"))
-            
-            # Update session params for this session only
-            session_params = session.get("llm_params", {}).copy()
             if ctx_size_override is not None:
-                session_params["ctx_size"] = ctx_size_override
-            session["llm_params"] = session_params
-        else:
-            model_name = session.get("lollms_model_name", settings.get("default_lollms_model_name"))
+                session.get("llm_params", {})["ctx_size"] = ctx_size_override
 
         client_init_params = session.get("llm_params", {}).copy()
-        
         client_init_params.update({
-            "binding_name": LOLLMS_CLIENT_DEFAULTS.get("binding_name", "lollms"),
-            "model_name": model_name,
-            "host_address": LOLLMS_CLIENT_DEFAULTS.get("host_address", ""),
-            "user_name": LOLLMS_CLIENT_DEFAULTS.get("user_name", "user"),
-            "ai_name": LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"),
-            "service_key": LOLLMS_CLIENT_DEFAULTS.get("service_key"),
-            "verify_ssl_certificate": LOLLMS_CLIENT_DEFAULTS.get("verify_ssl_certificate", True)
+            "binding_name": binding_to_use.name,
+            "model_name": model_name_for_binding,
+            "host_address": binding_to_use.host_address,
+            "models_path": binding_to_use.models_path,
+            "service_key": binding_to_use.service_key,
+            "user_name": "user",
+            "ai_name": "assistant",
         })
 
-        servers_infos=load_mcps(username)
-        
+        servers_infos = load_mcps(username)
         if servers_infos:
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
-        
+
         try:
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
-            session["lollms_client"] = lc
+            session["lollms_clients"][alias] = lc
+            return lc
         except Exception as e:
             traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client: {str(e)}")
-            
-    return cast(LollmsClient, session["lollms_client"])
+            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{alias}': {str(e)}")
+    finally:
+        db.close()
+
 
 def get_safe_store_instance(requesting_user_username: str, datastore_id: str, db: Session) -> safe_store.SafeStore:
     if safe_store is None:

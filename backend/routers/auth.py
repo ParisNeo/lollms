@@ -21,6 +21,7 @@ from backend.database_setup import (
     User as DBUser,
     Personality as DBPersonality,
     get_db,
+    LLMBinding as DBLLMBinding,
 )
 from backend.models import (
     Token,
@@ -38,7 +39,7 @@ from backend.session import (
     get_user_by_username, 
     user_sessions,
 )
-from backend.config import LOLLMS_CLIENT_DEFAULTS, SAFE_STORE_DEFAULTS
+from backend.config import SAFE_STORE_DEFAULTS
 from backend.security import get_password_hash, verify_password, create_access_token, decode_access_token, create_reset_token, send_password_reset_email
 from backend.settings import settings
 from backend.ws_manager import manager
@@ -99,24 +100,30 @@ async def login_for_access_token(
     
     if user.username not in user_sessions:
         print(f"INFO: Initializing session state for user: {user.username}")
-        initial_lollms_model = user.lollms_model_name or settings.get("default_model_name", LOLLMS_CLIENT_DEFAULTS.get("default_model_name"))
+        
+        default_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+        initial_model_name = user.lollms_model_name
+        if not initial_model_name and default_binding:
+            initial_model_name = f"{default_binding.alias}/{default_binding.default_model_name}"
+
         initial_vectorizer = user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
         
         session_llm_params = {
-            "ctx_size": user.llm_ctx_size if user.llm_ctx_size is not None else LOLLMS_CLIENT_DEFAULTS.get("ctx_size"),
-            "temperature": user.llm_temperature if user.llm_temperature is not None else LOLLMS_CLIENT_DEFAULTS.get("temperature"),
-            "top_k": user.llm_top_k if user.llm_top_k is not None else LOLLMS_CLIENT_DEFAULTS.get("top_k"),
-            "top_p": user.llm_top_p if user.llm_top_p is not None else LOLLMS_CLIENT_DEFAULTS.get("top_p"),
-            "repeat_penalty": user.llm_repeat_penalty if user.llm_repeat_penalty is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_penalty"),
-            "repeat_last_n": user.llm_repeat_last_n if user.llm_repeat_last_n is not None else LOLLMS_CLIENT_DEFAULTS.get("repeat_last_n"),
+            "ctx_size": user.llm_ctx_size,
+            "temperature": user.llm_temperature,
+            "top_k": user.llm_top_k,
+            "top_p": user.llm_top_p,
+            "repeat_penalty": user.llm_repeat_penalty,
+            "repeat_last_n": user.llm_repeat_last_n,
         }
         session_llm_params = {k: v for k, v in session_llm_params.items() if v is not None}
 
         user_sessions[user.username] = {
-            "lollms_client": None, "safe_store_instances": {}, 
+            "lollms_clients": {}, 
+            "safe_store_instances": {},
             "discussions": {}, "discussion_titles": {},
             "active_vectorizer": initial_vectorizer, 
-            "lollms_model_name": initial_lollms_model,
+            "lollms_model_name": initial_model_name,
             "llm_params": session_llm_params,
             "active_personality_id": user.active_personality_id, 
             "active_personality_prompt": None,
@@ -308,7 +315,7 @@ async def update_my_details(
         session["llm_params"] = {k: v for k, v in session_llm_params.items() if v is not None}
         
         if client_needs_reinit:
-            session["lollms_client"] = None
+            session["lollms_clients"] = {} # Invalidate all cached clients
     
     return get_current_active_user(db_user)
 

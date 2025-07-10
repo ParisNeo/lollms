@@ -18,13 +18,13 @@ from sqlalchemy.orm import Session
 from werkzeug.utils import secure_filename
 
 from backend.config import (
-    APP_SETTINGS, APP_VERSION, APP_DATA_DIR, APP_DB_URL, LOLLMS_CLIENT_DEFAULTS,
+    APP_SETTINGS, APP_VERSION, APP_DATA_DIR, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG, TEMP_UPLOADS_DIR_NAME, DEFAULT_PERSONALITIES
 )
 from backend.database_setup import (
     init_database, get_db, hash_password,
     User as DBUser, Personality as DBPersonality, DataStore as DBDataStore,
-    SharedDataStoreLink as DBSharedDataStoreLink
+    SharedDataStoreLink as DBSharedDataStoreLink, LLMBinding as DBLLMBinding
 )
 from backend.discussion import LegacyDiscussion
 from backend.session import (
@@ -33,7 +33,7 @@ from backend.session import (
     get_user_discussion_assets_path
 )
 from lollms_client import LollmsDataManager
-from backend.models import UserLLMParams, UserAuthDetails
+from backend.models import UserLLMParams, UserAuthDetails, ModelInfo
 
 from backend.routers.auth import auth_router
 from backend.routers.discussion import discussion_router
@@ -72,8 +72,8 @@ async def on_startup() -> None:
                 print(f"Found legacy discussion folder for '{username}'. Starting migration...")
                 if username not in user_sessions:
                     user_sessions[username] = {
-                                                "lollms_client": None, 
-                                                "lollms_model_name": user.lollms_model_name or LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
+                                                "lollms_clients": {}, 
+                                                "lollms_model_name": user.lollms_model_name,
                                                 "llm_params": {}
                                             }
                 db_path = get_user_data_root(username) / "discussions.db"
@@ -104,7 +104,7 @@ async def on_startup() -> None:
                     backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                     shutil.move(str(old_discussion_path), str(backup_path))
                     print(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
-                if username in user_sessions: user_sessions[username]['lollms_client'] = None
+                if username in user_sessions: user_sessions[username]['lollms_clients'] = {}
             
         except Exception as e:
             print(f"CRITICAL ERROR during migration: {e}")
@@ -135,23 +135,12 @@ async def on_startup() -> None:
 
 # --- Root and Static File Endpoints ---
 
-# Serve discussion assets (uploaded images)
-user_assets_path_base = APP_DATA_DIR # Used to construct full path for StaticFiles
-# Mount dynamically if needed, or ensure user_assets_path_base/<username>/discussion_assets exists
-# For simplicity, assuming /user_assets/<username>/<discussion_id>/<filename> structure client-side
-# This requires a more dynamic way to serve files or a wildcard path.
-# For now, let client fetch from a dedicated endpoint if needed, or keep images as base64 in YAML (not ideal).
-# Let's make a dedicated endpoint.
-
 @app.get("/user_assets/{username}/{discussion_id}/{filename}", include_in_schema=False)
 async def get_discussion_asset(
     username: str, discussion_id: str, filename: str,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ) -> FileResponse:
-    # Security: Ensure the currently logged-in user is requesting their own asset
-    # or an asset from a discussion they have access to (if sharing discussions is implemented broadly)
     if current_user.username != username:
-        # Basic check: If a more complex sharing model for discussions is added, this needs adjustment
         raise HTTPException(status_code=403, detail="Forbidden to access assets of another user.")
 
     asset_path = get_user_discussion_assets_path(username) / discussion_id / secure_filename(filename)
@@ -172,14 +161,11 @@ app.include_router(discussion_router)
 app.include_router(admin_router)
 app.include_router(languages_router)
 app.include_router(personalities_router)
-
 app.include_router(apps_router)
 app.include_router(mcp_router)
 app.include_router(discussion_tools_router)
 app.include_router(store_files_router)
 app.include_router(datastore_router)
-
-
 app.include_router(social_router)
 app.include_router(friends_router)
 app.include_router(dm_router)
@@ -216,55 +202,39 @@ app.include_router(upload_router)
 # --- LoLLMs Configuration API ---
 lollms_config_router = APIRouter(prefix="/api/config", tags=["LoLLMs Configuration"])
 
-@lollms_config_router.get("/lollms-models", response_model=List[Dict[str, str]])
-async def get_available_lollms_models(current_user: UserAuthDetails = Depends(get_current_active_user)):
-    """
-    Safely retrieves a list of available LLM models from the LollmsClient,
-    with improved error handling and more robust parsing.
-    """
-    lc = get_user_lollms_client(current_user.username)
-    models_set = set()
+@lollms_config_router.get("/lollms-models", response_model=List[ModelInfo])
+async def get_available_lollms_models(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    all_models = []
+    active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
 
-    # --- Step 1: Try to get models from the binding ---
-    try:
-        binding_models = lc.listModels()
-        if isinstance(binding_models, list):
-            # Use a clear for-loop for robust parsing
-            for item in binding_models:
-                if isinstance(item, str):
-                    models_set.add(item)
-                elif isinstance(item, dict):
-                    # Handle different possible keys for the model name
-                    model_name = item.get("name") or item.get("id") or item.get("model_name")
+    for binding in active_bindings:
+        try:
+            lc = get_user_lollms_client(current_user.username, binding.alias)
+            models = lc.listModels()
+            
+            if isinstance(models, list):
+                for item in models:
+                    model_name = None
+                    if isinstance(item, str):
+                        model_name = item
+                    elif isinstance(item, dict):
+                        model_name = item.get("name") or item.get("id") or item.get("model_name")
+                    
                     if model_name:
-                        models_set.add(model_name)
-    except Exception as e:
-        print(f"CRITICAL ERROR: Could not list models from the LollmsClient binding. Please check your backend LLM service.")
-        print("Full error details:")
-        traceback.print_exc() # This will print the full stack trace for debugging
+                        # Ensure every entry has a consistent structure with a fully qualified ID
+                        all_models.append({
+                            "id": f"{binding.alias}/{model_name}",
+                            "name": model_name
+                        })
+        except Exception as e:
+            print(f"WARNING: Could not fetch models from binding '{binding.alias}': {e}")
+            continue
 
-    # --- Step 2: Ensure user's selected model and the default are included as fallbacks ---
-    user_model = user_sessions[current_user.username].get("lollms_model_name")
-    default_model = LOLLMS_CLIENT_DEFAULTS.get("default_model_name")
-    if user_model:
-        models_set.add(user_model)
-    if default_model:
-        models_set.add(default_model)
-
-    # --- Step 3: Clean up any invalid entries ---
-    models_set.discard(None)
-    models_set.discard("")
-
-    # --- Step 4: Provide a hardcoded list for OpenAI if the set is still empty ---
-    if not models_set and lc.binding and "openai" in lc.binding.binding_name.lower():
-        print("INFO: No models found, providing default OpenAI models as a fallback.")
-        models_set.update(["gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"])
-
-    # --- Step 5: Format and return the final list ---
-    if not models_set:
-        return [{"name": "No models found"}]
+    if not all_models:
+        raise HTTPException(status_code=404, detail="No models found from any active bindings.")
     
-    return [{"name": name} for name in sorted(list(models_set))]
+    unique_models = {m["id"]: m for m in all_models}
+    return sorted(list(unique_models.values()), key=lambda x: x['id'])
 
 
 @lollms_config_router.post("/lollms-model")
@@ -272,7 +242,7 @@ async def set_user_lollms_model(model_name: str = Form(...), current_user: UserA
     db_user_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not db_user_record: raise HTTPException(status_code=404, detail="User not found.")
     user_sessions[current_user.username]["lollms_model_name"] = model_name
-    user_sessions[current_user.username]["lollms_client"] = None
+    user_sessions[current_user.username]["lollms_clients"] = {} # Invalidate all clients
     db_user_record.lollms_model_name = model_name
     try: db.commit()
     except Exception as e: db.rollback(); raise HTTPException(status_code=500, detail=f"DB error: {e}")
@@ -294,13 +264,10 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
         except: db.rollback(); raise
     if session_updated:
         user_sessions[current_user.username]["llm_params"] = {k: v for k, v in session_llm_params.items() if v is not None}
-        user_sessions[current_user.username]["lollms_client"] = None
+        user_sessions[current_user.username]["lollms_clients"] = {} # Invalidate all clients
         return {"message": "LLM parameters updated. Client will re-initialize."}
     return {"message": "No changes to LLM parameters."}
 app.include_router(lollms_config_router)
-
-
-
 
 VUE_APP_DIR = Path(__file__).resolve().parent / "frontend" / "dist"
 if VUE_APP_DIR.exists() and (VUE_APP_DIR / "index.html").exists():

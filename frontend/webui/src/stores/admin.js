@@ -2,15 +2,20 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
+import { useDataStore } from './data';
 
 export const useAdminStore = defineStore('admin', () => {
     const uiStore = useUiStore();
+    const dataStore = useDataStore();
 
     // --- STATE ---
     const allUsers = ref([]);
     const globalSettings = ref([]);
+    const bindings = ref([]);
+    const availableBindingTypes = ref([]);
     const isLoadingUsers = ref(false);
     const isLoadingSettings = ref(false);
+    const isLoadingBindings = ref(false);
     const isImporting = ref(false);
     const isEnhancingEmail = ref(false);
 
@@ -33,6 +38,62 @@ export const useAdminStore = defineStore('admin', () => {
     });
 
     // --- ACTIONS ---
+
+    // -- Bindings Management --
+    async function fetchBindings() {
+        isLoadingBindings.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/bindings');
+            bindings.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Failed to fetch LLM bindings.', 'error');
+        } finally {
+            isLoadingBindings.value = false;
+        }
+    }
+
+    async function fetchAvailableBindingTypes() {
+        try {
+            const response = await apiClient.get('/api/admin/bindings/available_types');
+            availableBindingTypes.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Failed to fetch available binding types.', 'error');
+        }
+    }
+    
+    async function addBinding(bindingData) {
+        try {
+            await apiClient.post('/api/admin/bindings', bindingData);
+            uiStore.addNotification('Binding created successfully.', 'success');
+            await fetchBindings();
+            await dataStore.fetchAvailableLollmsModels();
+        } catch (error) {
+            throw error;
+        }
+    }
+    
+    async function updateBinding(bindingId, updateData) {
+        try {
+            await apiClient.put(`/api/admin/bindings/${bindingId}`, updateData);
+            uiStore.addNotification('Binding updated successfully.', 'success');
+            await fetchBindings();
+            await dataStore.fetchAvailableLollmsModels();
+        } catch (error) {
+            throw error;
+        }
+    }
+    
+    async function deleteBinding(bindingId) {
+        try {
+            await apiClient.delete(`/api/admin/bindings/${bindingId}`);
+            uiStore.addNotification('Binding deleted successfully.', 'success');
+            await fetchBindings();
+            await dataStore.fetchAvailableLollmsModels();
+        } catch (error) {
+            throw error;
+        }
+    }
+
 
     // -- User Management --
     async function fetchAllUsers() {
@@ -130,10 +191,13 @@ export const useAdminStore = defineStore('admin', () => {
 
     return {
         // State
-        allUsers, globalSettings, isLoadingUsers, isLoadingSettings, isImporting, isEnhancingEmail,
+        allUsers, globalSettings, bindings, availableBindingTypes, 
+        isLoadingUsers, isLoadingSettings, isLoadingBindings, isImporting, isEnhancingEmail,
         // Getters
         settingsByCategory, isSmtpConfigured,
         // Actions
-        fetchAllUsers, fetchGlobalSettings, updateGlobalSettings, importOpenWebUIData, sendEmailToUsers, enhanceEmail
+        fetchAllUsers, fetchGlobalSettings, updateGlobalSettings, 
+        importOpenWebUIData, sendEmailToUsers, enhanceEmail,
+        fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding
     };
 });

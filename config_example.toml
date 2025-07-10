@@ -23,6 +23,11 @@ access_token_expires_mintes = 44640 # How many minutes the access token stays al
 username = "superadmin"
 password = "CHANGE_ME_TO_A_STRONG_PASSWORD" # This will be hashed on first setup
 
+# --- IMPORTANT ---
+# This section is now used ONLY for the very first startup to create an initial
+# LLM binding in the database. After the first run, all binding configurations
+# are managed exclusively through the Admin Panel in the web UI.
+# Any changes made to this section after the first run will have NO EFFECT.
 [lollms_client_defaults] # Global defaults, can be overridden by user settings in DB
 # ollama
 # binding_name = "ollama" # Example: "ollama", "openai", "lollms", "transformers", "litellm", "gemini"

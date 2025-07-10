@@ -127,13 +127,18 @@ def get_user_discussion_manager(username: str) -> LollmsDataManager:
         user_sessions[username] = {"discussion_manager": manager}
     return manager
 
-def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False) -> Optional[LollmsDiscussion]:
-    """Gets a specific discussion object for a user from their database."""
-    lc = get_user_lollms_client(username)
+def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False, lollms_client: Optional[LollmsClient] = None) -> Optional[LollmsDiscussion]:
+    """
+    Gets a specific discussion object for a user from their database.
+    If a lollms_client is provided, it's used; otherwise, the default client is fetched.
+    """
+    lc = lollms_client if lollms_client is not None else get_user_lollms_client(username)
     dm = get_user_discussion_manager(username)
     discussion = dm.get_discussion(lollms_client=lc, discussion_id=discussion_id, autosave=True)
     
     if discussion:
+        # Ensure the discussion object is using the correct (potentially newly provided) client
+        discussion.lollms_client = lc
         return discussion
     elif create_if_missing:
         new_discussion = LollmsDiscussion.create_new(

@@ -48,14 +48,9 @@ const availablePersonalities = computed(() => {
     ].filter(group => group.items.length > 0);
 });
 
-const formattedAvailableModels = computed(() => {
-    if (!Array.isArray(dataStore.availableLollmsModels)) return [];
-    return dataStore.availableLollmsModels.map(model => ({
-        id: model.name,
-        name: model.name,
-        icon_base64: null 
-    }));
-});
+// Use the new grouped models computed property from the data store
+const formattedAvailableModels = computed(() => dataStore.availableLollmsModelsGrouped);
+
 
 function handleNewDiscussion() {
     store.createNewDiscussion();
@@ -115,14 +110,19 @@ onMounted(() => {
             <!-- Collapsible Toolbox for Experts -->
             <div v-if="user && user.user_ui_level >= 4 && showToolbox" class="p-2 bg-gray-50 dark:bg-gray-900/50 rounded-lg space-y-3">
                 <div class="grid grid-cols-2 gap-2">
-                    <IconSelectMenu v-model="activeModelName" :items="formattedAvailableModels" placeholder="Default Model">
+                    <IconSelectMenu 
+                        v-model="activeModelName" 
+                        :items="formattedAvailableModels"
+                        :is-loading="dataStore.isLoadingLollmsModels"
+                        placeholder="Default Model"
+                    >
                         <template #button="{ toggle, selectedItem }">
                              <button @click="toggle" class="toolbox-select truncate w-full flex items-center justify-between">
                                 <div class="flex items-center space-x-2 truncate">
                                     <span class="w-4 h-4 flex-shrink-0 text-gray-500 dark:text-gray-400">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 21v-1.5M15.75 3v1.5M19.5 8.25h1.5M19.5 12h1.5m-3.75 3.75h1.5M15.75 21v-1.5m-7.5-6h7.5" /></svg>
                                     </span>
-                                    <span class="truncate">{{ selectedItem?.name || 'Default Model' }}</span>
+                                    <span class="truncate">{{ selectedItem?.id || 'Default Model' }}</span>
                                 </div>
                                 <svg class="w-4 h-4 text-gray-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                             </button>
