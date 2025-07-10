@@ -202,15 +202,25 @@ def send_generic_email(to_email: str, subject: str, body: str, background_color:
     """
     recovery_mode = settings.get("password_recovery_mode", "manual")
     
-    if send_as_text:
-        content_to_send = _convert_html_to_text(body)
-    else:
-        content_to_send = _get_full_html_email(body, background_color)
+    content_to_send = ""
+    is_text_only_final = send_as_text
 
     if recovery_mode == "automatic":
-        _send_email_smtp(to_email, subject, content_to_send, is_text_only=send_as_text)
+        if send_as_text:
+            content_to_send = _convert_html_to_text(body)
+        else:
+            content_to_send = _get_full_html_email(body, background_color)
     elif recovery_mode == "system_mail":
-        _send_email_system_mail(to_email, subject, content_to_send, is_text_only=send_as_text)
+        if send_as_text:
+            content_to_send = _convert_html_to_text(body)
+        else:
+            # For system mail, send only the core HTML fragment, not a full document.
+            content_to_send = body
+    
+    if recovery_mode == "automatic":
+        _send_email_smtp(to_email, subject, content_to_send, is_text_only=is_text_only_final)
+    elif recovery_mode == "system_mail":
+        _send_email_system_mail(to_email, subject, content_to_send, is_text_only=is_text_only_final)
     else:
         print(f"WARNING: Email sending is set to '{recovery_mode}', which is not an automatic mode. Cannot send email to {to_email}.")
 
