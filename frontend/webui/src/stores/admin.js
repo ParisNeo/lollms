@@ -108,10 +108,15 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
-    async function enhanceEmail(subject, body, backgroundColor) {
+    async function enhanceEmail(subject, body, backgroundColor, customPrompt = '') {
         isEnhancingEmail.value = true;
         try {
-            const response = await apiClient.post('/api/admin/enhance-email', { subject:subject, body:body, background_color: backgroundColor });
+            const response = await apiClient.post('/api/admin/enhance-email', {
+                subject: subject,
+                body: body,
+                background_color: backgroundColor,
+                prompt: customPrompt
+            });
             uiStore.addNotification('Email content enhanced by AI.', 'success');
             return response.data;
         } catch (error) {

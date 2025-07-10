@@ -26,6 +26,7 @@ import InteractiveOutputModal from './components/modals/InteractiveOutputModal.v
 import ShareDiscussionModal from './components/modals/ShareDiscussionModal.vue';
 import ResetPasswordModal from './components/modals/ResetPasswordModal.vue';
 import EmailAllUsersModal from './components/modals/EmailAllUsersModal.vue';
+import EmailUserModal from './components/modals/EmailUserModal.vue';
 import EmailListModal from './components/modals/EmailListModal.vue';
 import logoUrl from './assets/logo.png';
 
@@ -92,6 +93,7 @@ watch(
     <InteractiveOutputModal v-if="activeModal === 'interactiveOutput'" />
     <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     <EmailAllUsersModal v-if="activeModal === 'emailAllUsers'" />
+    <EmailUserModal v-if="activeModal === 'adminUserEmail'" />
     <EmailListModal v-if="activeModal === 'emailList'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />

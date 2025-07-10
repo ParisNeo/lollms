@@ -110,7 +110,26 @@ async def enhance_email_with_ai(
     try:
         lc = get_user_lollms_client(current_admin.username)
         
-        prompt = f"""You are an expert copywriter and designer. Your task is to enhance the following email draft to make it more engaging, professional, and clear.
+        if payload.prompt and payload.prompt.strip():
+            prompt = f"""{payload.prompt.strip()}
+
+You must return ONLY a single valid JSON object with three keys: "subject", "body", and "background_color".
+Do not add any text or explanation before or after the JSON object.
+
+Here is the email content to work on:
+---
+Original Subject:
+{payload.subject}
+
+Original Body:
+{payload.body}
+
+Current Background Color:
+{payload.background_color or "#FFFFFF"}
+---
+"""
+        else:
+            prompt = f"""You are an expert copywriter and designer. Your task is to enhance the following email draft to make it more engaging, professional, and clear.
 You must also suggest a suitable HTML background color for the email's theme.
 Return ONLY a single valid JSON object with three keys: "subject", "body", and "background_color". The background_color should be a valid hex code (e.g., "#f0f4f8").
 Do not add any text or explanation before or after the JSON object.

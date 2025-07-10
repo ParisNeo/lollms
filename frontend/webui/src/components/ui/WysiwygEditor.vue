@@ -1,6 +1,7 @@
 <script setup>
-import { ref } from 'vue';
+import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { useEditor, EditorContent } from '@tiptap/vue-3';
+import { marked } from 'marked';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Table from '@tiptap/extension-table';
@@ -8,25 +9,27 @@ import TableRow from '@tiptap/extension-table-row';
 import TableCell from '@tiptap/extension-table-cell';
 import TableHeader from '@tiptap/extension-table-header';
 import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-
-// --- FIX: Import the `createLowlight` factory function ---
 import { createLowlight } from 'lowlight';
-
-// Import languages from highlight.js
-import html from 'highlight.js/lib/languages/xml'; // xml handles html
+import html from 'highlight.js/lib/languages/xml';
 import css from 'highlight.js/lib/languages/css';
 import js from 'highlight.js/lib/languages/javascript';
 import python from 'highlight.js/lib/languages/python';
 import json from 'highlight.js/lib/languages/json';
 import 'highlight.js/styles/github-dark.css';
 
-// --- FIX: Create a lowlight instance and register languages at creation time ---
 const lowlight = createLowlight({
   html,
   css,
-  javascript: js, // The key is the name you'll use, the value is the imported language definition
+  javascript: js,
   python,
   json,
+});
+
+marked.setOptions({
+  gfm: true,
+  breaks: true,
+  mangle: false,
+  headerIds: false,
 });
 
 const props = defineProps({
@@ -38,23 +41,17 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue']);
 
+const showPasteOptions = ref(false);
+const pasteMenuRef = ref(null);
+
 const editor = useEditor({
   content: props.modelValue,
   extensions: [
     StarterKit,
-    Link.configure({
-      openOnClick: false,
-    }),
-    Table.configure({
-      resizable: true,
-    }),
-    TableRow,
-    TableHeader,
-    TableCell,
-    // Pass the correctly configured lowlight instance
-    CodeBlockLowlight.configure({
-      lowlight,
-    }),
+    Link.configure({ openOnClick: false }),
+    Table.configure({ resizable: true }),
+    TableRow, TableHeader, TableCell,
+    CodeBlockLowlight.configure({ lowlight }),
   ],
   onUpdate: () => {
     emit('update:modelValue', editor.value.getHTML());
@@ -64,17 +61,105 @@ const editor = useEditor({
       class: 'prose dark:prose-invert prose-sm sm:prose-base lg:prose-lg xl:prose-2xl m-5 focus:outline-none min-h-[200px]',
     },
     handlePaste(view, event) {
-      const html = event.clipboardData?.getData('text/html');
+      const htmlContent = event.clipboardData?.getData('text/html');
       
-      if (html) {
-        editor.value.chain().focus().insertContent(html).run();
+      if (htmlContent) {
+        editor.value.chain().focus().insertContent(htmlContent).run();
         return true;
       }
-      
+
+      const textContent = event.clipboardData?.getData('text/plain');
+      if (textContent) {
+        const htmlFromMarkdown = marked.parse(textContent);
+        editor.value.chain().focus().insertContent(htmlFromMarkdown).run();
+        return true;
+      }
+
       return false;
     },
   },
 });
+
+watch(() => props.modelValue, (newValue) => {
+    if (editor.value && editor.value.getHTML() !== newValue) {
+        editor.value.commands.setContent(newValue, false);
+    }
+});
+
+onUnmounted(() => {
+    if (editor.value) {
+        editor.value.destroy();
+    }
+    document.removeEventListener('click', handleClickOutside);
+});
+
+const handlePasteAction = async (action) => {
+  try {
+    switch (action) {
+      case 'html':
+        await pasteAsHtml();
+        break;
+      case 'text':
+        await pasteAsText();
+        break;
+      case 'code':
+        await pasteAsCode();
+        break;
+    }
+  } catch (err) {
+    console.error('Failed to read clipboard contents: ', err);
+    alert('Failed to paste. Please ensure you have granted clipboard permissions.');
+  }
+  showPasteOptions.value = false;
+  editor.value.chain().focus().run();
+};
+
+const pasteAsHtml = async () => {
+  const clipboardItems = await navigator.clipboard.read();
+  let htmlContent = '';
+  for (const item of clipboardItems) {
+    if (item.types.includes('text/html')) {
+      const blob = await item.getType('text/html');
+      htmlContent = await blob.text();
+      break;
+    }
+  }
+  if (!htmlContent) {
+    htmlContent = await navigator.clipboard.readText();
+  }
+  editor.value.commands.insertContent(htmlContent);
+};
+
+const pasteAsText = async () => {
+  const text = await navigator.clipboard.readText();
+  editor.value.commands.insertContent(text);
+};
+
+const pasteAsCode = async () => {
+  const text = await navigator.clipboard.readText();
+  const codeBlockHtml = `<pre><code>${escapeHtml(text)}</code></pre>`;
+  editor.value.commands.insertContent(codeBlockHtml);
+};
+
+const escapeHtml = (unsafe) => {
+  return unsafe
+    .replace(/&/g, "&")
+    .replace(/</g, "<")
+    .replace(/>/g, ">")
+    .replace(/"/g, "\"")
+    .replace(/'/g, "'");
+}
+
+const handleClickOutside = (event) => {
+  if (pasteMenuRef.value && !pasteMenuRef.value.contains(event.target)) {
+    showPasteOptions.value = false;
+  }
+};
+
+onMounted(() => {
+  document.addEventListener('click', handleClickOutside);
+});
+
 
 const setLink = () => {
   const previousUrl = editor.value.getAttributes('link').href;
@@ -91,6 +176,8 @@ const toolbarActions = ref([
     { type: 'divider' },
     { icon: 'undo', action: () => editor.value.chain().focus().undo().run(), title: 'Undo' },
     { icon: 'redo', action: () => editor.value.chain().focus().redo().run(), title: 'Redo' },
+    { type: 'divider' },
+    { type: 'paste-menu' },
     { type: 'divider' },
     { icon: 'bold', action: () => editor.value.chain().focus().toggleBold().run(), isActive: () => editor.value?.isActive('bold'), title: 'Bold' },
     { icon: 'italic', action: () => editor.value.chain().focus().toggleItalic().run(), isActive: () => editor.value?.isActive('italic'), title: 'Italic' },
@@ -116,6 +203,20 @@ const toolbarActions = ref([
     <div class="toolbar flex items-center p-2 border-b border-gray-300 dark:border-gray-600 space-x-1 bg-gray-50 dark:bg-gray-700/50 rounded-t-md flex-wrap">
       <template v-for="(action, index) in toolbarActions" :key="index">
         <div v-if="action.type === 'divider'" class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></div>
+        
+        <div v-else-if="action.type === 'paste-menu'" ref="pasteMenuRef" class="relative">
+          <button @click="showPasteOptions = !showPasteOptions" type="button" class="toolbar-btn" title="Paste Options">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" />
+            </svg>
+          </button>
+          <div v-if="showPasteOptions" class="paste-menu-dropdown">
+            <button @click="handlePasteAction('html')" class="paste-menu-item">Paste as HTML</button>
+            <button @click="handlePasteAction('text')" class="paste-menu-item">Paste as Plain Text</button>
+            <button @click="handlePasteAction('code')" class="paste-menu-item">Paste as Code Block</button>
+          </div>
+        </div>
+        
         <button v-else @click="action.action" type="button" class="toolbar-btn" :class="{'is-active': action.isActive && action.isActive()}" :title="action.title">
           <span v-if="action.icon === 'bold'" class="font-bold">B</span>
           <span v-else-if="action.icon === 'italic'" class="italic">I</span>
@@ -140,7 +241,24 @@ const toolbarActions = ref([
 </template>
 
 <style>
-/* ... your styles remain the same ... */
+.toolbar-btn {
+    @apply p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center h-8 w-8;
+}
+.toolbar-btn.is-active {
+    @apply bg-blue-500 text-white hover:bg-blue-600;
+}
+.paste-menu-dropdown {
+  @apply absolute top-full left-0 mt-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-md shadow-lg z-10;
+}
+.paste-menu-item {
+  @apply block w-full text-left px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700;
+}
+.paste-menu-item:first-child {
+  @apply rounded-t-md;
+}
+.paste-menu-item:last-child {
+  @apply rounded-b-md;
+}
 .prose {
     max-width: none;
 }
@@ -165,10 +283,10 @@ const toolbarActions = ref([
   background-color: #f1f3f5;
 }
 .dark .tiptap table th {
-    background-color: #374151; /* gray-700 */
+    background-color: #374151;
 }
 .dark .tiptap table td, .dark .tiptap table th {
-    border: 2px solid #4b5563; /* gray-600 */
+    border: 2px solid #4b5563;
 }
 .tiptap .column-resizer {
   position: absolute;
@@ -184,15 +302,6 @@ const toolbarActions = ref([
   padding: 1rem 0;
   overflow-x: auto;
 }
-
-.toolbar-btn {
-    @apply p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center justify-center h-8 w-8;
-}
-.toolbar-btn.is-active {
-    @apply bg-blue-500 text-white;
-}
-
-/* Syntax Highlighting Styles */
 .tiptap pre {
   background: #0d1117;
   color: #c9d1d9;

@@ -131,6 +131,7 @@ class EnhanceEmailRequest(BaseModel):
     subject: str
     body: str
     background_color: Optional[str] = None
+    prompt: Optional[str] = None
 
 class EnhancedEmailResponse(BaseModel):
     subject: str
