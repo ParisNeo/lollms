@@ -1,56 +1,55 @@
 <script setup>
 import { ref, computed, watch } from 'vue';
-import GenericModal from '../ui/GenericModal.vue';
 import { useUiStore } from '../../stores/ui';
 import apiClient from '../../services/api';
+import GenericModal from '../ui/GenericModal.vue';
 
 const uiStore = useUiStore();
 
-const user = computed(() => uiStore.modalProps?.user);
+const props = computed(() => uiStore.modalProps);
+const user = computed(() => props.value?.user);
+const onPasswordReset = computed(() => props.value?.onPasswordReset);
 
 const newPassword = ref('');
+const confirmPassword = ref('');
+const isPasswordVisible = ref(false);
 const isLoading = ref(false);
-const passwordCopied = ref(false);
+const errorMessage = ref('');
 
-const generatePassword = () => {
-    const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+~`|}{[]:;?><,./-=";
-    let password = "";
-    for (let i = 0; i < 16; i++) {
-        password += charset.charAt(Math.floor(Math.random() * charset.length));
+watch(user, (newUser) => {
+  if (newUser) {
+    newPassword.value = '';
+    confirmPassword.value = '';
+    errorMessage.value = '';
+  }
+});
+
+const handleReset = async () => {
+    if (newPassword.value.length < 8) {
+        errorMessage.value = 'New password must be at least 8 characters long.';
+        return;
     }
-    newPassword.value = password;
-    passwordCopied.value = false; // Reset copied state when new password is generated
-};
-
-watch(
-    () => uiStore.isModalOpen('resetPassword'),
-    (isOpen) => {
-        if (isOpen) {
-            generatePassword();
-        }
-    },
-    { immediate: true }
-);
-
-const copyPassword = () => {
-    navigator.clipboard.writeText(newPassword.value).then(() => {
-        passwordCopied.value = true;
-        setTimeout(() => {
-            passwordCopied.value = false;
-        }, 2000);
-    });
-};
-
-async function handleSubmit() {
-    if (!user.value || !user.value.id || !newPassword.value) return;
+    if (newPassword.value !== confirmPassword.value) {
+        errorMessage.value = 'Passwords do not match.';
+        return;
+    }
 
     isLoading.value = true;
+    errorMessage.value = '';
+    
     try {
-        await apiClient.post(`/api/admin/users/${user.value.id}/reset-password`, { new_password: newPassword.value });
+        await apiClient.post(`/api/admin/users/${user.value.id}/reset-password`, {
+            new_password: newPassword.value
+        });
         uiStore.addNotification(`Password for ${user.value.username} has been reset.`, 'success');
+
+        if (onPasswordReset.value && typeof onPasswordReset.value === 'function') {
+          onPasswordReset.value();
+        }
+
         uiStore.closeModal('resetPassword');
     } catch (error) {
-        // Error is handled by global interceptor
+        errorMessage.value = error.response?.data?.detail || 'An unexpected error occurred.';
     } finally {
         isLoading.value = false;
     }
@@ -58,54 +57,61 @@ async function handleSubmit() {
 </script>
 
 <template>
-    <GenericModal 
-        :modal-name="'resetPassword'" 
-        :title="user ? `Reset Password for ${user.username}` : 'Reset Password'" 
-        @close="uiStore.closeModal('resetPassword')"
-        max-width-class="max-w-md"
-    >
-        <template #body>
-            <div v-if="user" class="p-6 space-y-4">
-                <p class="text-sm text-gray-600 dark:text-gray-300">
-                    A new secure password has been generated. Copy the password and provide it to the user. Once you confirm, the user's old password will no longer work.
-                </p>
-
-                <div>
-                    <label for="new-password-display" class="block text-sm font-medium text-gray-700 dark:text-gray-200">New Password</label>
-                    <div class="mt-1 relative rounded-md shadow-sm">
-                        <input 
-                            id="new-password-display"
-                            type="text" 
-                            :value="newPassword" 
-                            readonly 
-                            class="input-field w-full pr-24 font-mono"
-                        />
-                        <div class="absolute inset-y-0 right-0 flex items-center">
-                             <button @click="generatePassword" type="button" class="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" title="Generate New Password">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5M4 4l16 16" />
-                                </svg>
-                            </button>
-                            <button @click="copyPassword" type="button" class="p-2 mr-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" title="Copy Password">
-                                <svg v-if="!passwordCopied" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                                </svg>
-                                <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
-                                </svg>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </template>
-        <template #footer>
-            <div class="flex justify-end space-x-3">
-                <button type="button" class="btn btn-secondary" @click="uiStore.closeModal('resetPassword')">Cancel</button>
-                <button type="button" class="btn btn-warning" :disabled="isLoading" @click="handleSubmit">
-                    {{ isLoading ? 'Resetting...' : 'Confirm Reset' }}
-                </button>
-            </div>
-        </template>
-    </GenericModal>
+  <GenericModal
+    modalName="resetPassword"
+    :title="user ? `Reset Password for ${user.username}` : 'Reset Password'"
+    maxWidthClass="max-w-md"
+    @close="uiStore.closeModal('resetPassword')"
+  >
+    <template #body>
+      <form v-if="user" @submit.prevent="handleReset" class="space-y-4">
+        <div>
+          <label for="admin-new-password" class="block text-sm font-medium">New Password</label>
+          <div class="relative mt-1">
+            <input
+              v-model="newPassword"
+              :type="isPasswordVisible ? 'text' : 'password'"
+              id="admin-new-password"
+              required
+              minlength="8"
+              :disabled="isLoading"
+              class="input-field w-full pr-10"
+              placeholder="Enter new password"
+            />
+            <button
+              type="button"
+              @click="isPasswordVisible = !isPasswordVisible"
+              class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700"
+            >
+              <svg v-if="isPasswordVisible" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a9.97 9.97 0 01-1.563 3.029m-2.135-2.135A6.978 6.978 0 0112 17c-1.855 0-3.56-.736-4.807-1.938" /></svg>
+              <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+            </button>
+          </div>
+        </div>
+        <div>
+          <label for="admin-confirm-password" class="block text-sm font-medium">Confirm New Password</label>
+          <input
+            v-model="confirmPassword"
+            :type="isPasswordVisible ? 'text' : 'password'"
+            id="admin-confirm-password"
+            required
+            :disabled="isLoading"
+            class="input-field mt-1 w-full"
+            placeholder="Confirm new password"
+          />
+        </div>
+        <div v-if="errorMessage" class="text-red-600 text-sm text-center p-2 bg-red-100 dark:bg-red-900/50 rounded-md" role="alert">
+          {{ errorMessage }}
+        </div>
+      </form>
+    </template>
+    <template #footer>
+      <div class="flex justify-end space-x-3">
+        <button type="button" class="btn btn-secondary" @click="uiStore.closeModal('resetPassword')">Cancel</button>
+        <button type="button" class="btn btn-danger" @click="handleReset" :disabled="isLoading">
+            {{ isLoading ? 'Resetting...' : 'Reset Password' }}
+        </button>
+      </div>
+    </template>
+  </GenericModal>
 </template>

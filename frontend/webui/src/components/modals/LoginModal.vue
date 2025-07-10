@@ -53,6 +53,11 @@ const openRegisterModal = () => {
     uiStore.closeModal('login');
     uiStore.openModal('register');
 };
+
+const openForgotPasswordModal = () => {
+  uiStore.closeModal('login');
+  uiStore.openModal('forgotPassword');
+};
 </script>
 
 <template>
@@ -85,15 +90,26 @@ const openRegisterModal = () => {
         </div>
 
         <div>
-          <label for="password" class="block text-sm font-medium">Password</label>
-          <div class="relative">
+          <div class="flex items-center justify-between">
+            <label for="password" class="block text-sm font-medium">Password</label>
+            <div class="text-sm">
+              <button
+                type="button"
+                @click="openForgotPasswordModal"
+                class="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Forgot your password?
+              </button>
+            </div>
+          </div>
+          <div class="relative mt-1">
             <input
               v-model="password"
               :type="isPasswordVisible ? 'text' : 'password'"
               id="password"
               required
               :disabled="isLoading"
-              class="input-field mt-1 w-full pr-10"
+              class="input-field w-full pr-10"
               placeholder="Enter your password"
               autocomplete="current-password"
             />

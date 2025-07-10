@@ -23,13 +23,12 @@ const form = ref({
 });
 
 const isLoading = ref(false);
+const isGeneratingLink = ref(false);
 
-// This watcher now correctly observes the user object passed via props
 watch(
     user,
     (newUser) => {
         if (newUser) {
-            // When the user prop is available, populate the form
             form.value = {
                 is_admin: newUser.is_admin,
                 is_active: newUser.is_active,
@@ -39,7 +38,7 @@ watch(
             };
         }
     },
-    { immediate: true } // Run immediately to catch the initial state
+    { immediate: true }
 );
 
 async function handleSubmit() {
@@ -64,6 +63,31 @@ async function handleSubmit() {
     } catch (error) {
     } finally {
         isLoading.value = false;
+    }
+}
+
+function openResetPasswordModal() {
+    uiStore.openModal('resetPassword', {
+        user: user.value,
+        onPasswordReset: () => {
+            uiStore.closeModal('adminUserEdit');
+        }
+    });
+}
+
+async function generateResetLink() {
+    if (!user.value?.id) return;
+    isGeneratingLink.value = true;
+    try {
+        const response = await apiClient.post(`/api/admin/users/${user.value.id}/generate-reset-link`);
+        uiStore.openModal('passwordResetLink', {
+            username: user.value.username,
+            link: response.data.reset_link
+        });
+    } catch (error) {
+        uiStore.addNotification('Failed to generate reset link.', 'error');
+    } finally {
+        isGeneratingLink.value = false;
     }
 }
 
@@ -120,6 +144,17 @@ onMounted(() => {
                         <label for="vectorizer" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Default Vectorizer</label>
                         <input type="text" id="vectorizer" v-model="form.safe_store_vectorizer" class="input-field mt-1" placeholder="e.g., st:all-MiniLM-L6-v2">
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The default vectorizer for new data stores created by this user.</p>
+                    </div>
+                </div>
+                 <div class="space-y-4 pt-4 border-t dark:border-gray-600">
+                    <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">Password Management</h3>
+                    <div class="flex flex-col sm:flex-row gap-4">
+                        <button type="button" @click="openResetPasswordModal" class="btn btn-warning flex-1">
+                            Reset Password...
+                        </button>
+                        <button type="button" @click="generateResetLink" class="btn btn-secondary flex-1" :disabled="isGeneratingLink">
+                            {{ isGeneratingLink ? 'Generating...' : 'Generate Reset Link...' }}
+                        </button>
                     </div>
                 </div>
             </form>

@@ -122,11 +122,23 @@ export const useSocialStore = defineStore('social', () => {
             const message = JSON.parse(event.data);
             const currentUser = authStore.user;
             if (!currentUser) return;
+
+            // Handle system-wide admin notifications for password resets etc.
+            if (message.sender_username === 'System Alert') {
+                if (currentUser.is_admin) {
+                    uiStore.addNotification(message.content, 'warning', 10000); // 10 second duration
+                }
+                return; // Stop processing, this is not a user-to-user DM
+            }
+
+            // Handle standard direct messages
             const otherUserId = message.sender_id === currentUser.id ? message.receiver_id : message.sender_id;
             if (activeConversations.value[otherUserId]) {
                 activeConversations.value[otherUserId].messages.push(message);
             } else {
-                uiStore.addNotification(`New message from ${message.sender_username}`, 'info');
+                 if (message.sender_id !== currentUser.id) {
+                    uiStore.addNotification(`New message from ${message.sender_username}`, 'info');
+                }
             }
         };
         socket.value.onclose = () => { isSocketConnected.value = false; socket.value = null; };
@@ -311,8 +323,6 @@ export const useSocialStore = defineStore('social', () => {
         convo.messages.push(tempMessage);
 
         try {
-            // --- FIX: Revert to sending a clean JS object with camelCase keys. ---
-            // The backend is now configured to handle this correctly via an alias.
             const response = await apiClient.post('/api/dm/send', {
                 receiverUserId: receiverUserId,
                 content: content,
@@ -331,11 +341,9 @@ export const useSocialStore = defineStore('social', () => {
         }
     }
     async function toggleLike(postId) {
-        // Find the post in the local state
         const post = this.feedPosts.find(p => p.id === postId) || (this.userPosts[this.profiles[authStore.user.username]?.user?.username] || []).find(p => p.id === postId);
         if (!post) return;
 
-        // Optimistic update
         const originalHasLiked = post.has_liked;
         const originalLikeCount = post.like_count;
 
@@ -355,22 +363,16 @@ export const useSocialStore = defineStore('social', () => {
             }
         } catch (error) {
             console.error("Failed to toggle like:", error);
-            // Revert on failure
             post.has_liked = originalHasLiked;
             post.like_count = originalLikeCount;
             useUiStore().addNotification("Couldn't update like status.", "error");
         }
     }
     return {
-        // State
         feedPosts, profiles, userPosts, pendingFriendRequests, isLoadingFeed, isLoadingProfile,
         conversations, activeConversations, isLoadingConversations, isLoadingMessages,
         comments, isLoadingComments, isSocketConnected, friends,
-        
-        // Getters
         getPostsByUsername, getActiveConversation, getCommentsForPost,
-        
-        // Actions
         fetchUserProfile, sendFriendRequest, removeFriend, fetchPendingRequests, acceptFriendRequest,
         fetchFeed, fetchUserPosts, createPost, deletePost,
         followUser, unfollowUser,

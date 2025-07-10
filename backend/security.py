@@ -1,6 +1,7 @@
 # backend/security.py
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+import secrets
 
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
@@ -8,15 +9,10 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 from backend.config import SECRET_KEY, ALGORITHM
-# --- MODIFIED: Import the new settings manager ---
 from backend.settings import settings
 
-# --- Password Hashing Context ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-# --- OAuth2 Scheme ---
-# This tells FastAPI where to look for the token. The `tokenUrl` points to our
-# login endpoint in `routers/auth.py`.
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
 
@@ -44,13 +40,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        # --- MODIFIED: Get expiration from the database-backed settings ---
-        # The default value of 30 is a fallback in case the settings system
-        # fails to load, ensuring the app doesn't crash. The primary default
-        # is set during the database bootstrap process from config.toml.
         expire_minutes = settings.get("access_token_expire_minutes", 30)
         try:
-            # Ensure the value is an integer
             minutes = int(expire_minutes)
         except (ValueError, TypeError):
             print(f"WARNING: Invalid 'access_token_expire_minutes' value ({expire_minutes}). Using fallback of 30 minutes.")
@@ -62,9 +53,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
+def create_reset_token() -> str:
+    """Generates a secure, URL-safe random token for password resets."""
+    return secrets.token_urlsafe(32)
+
 def decode_access_token(token: str) -> Optional[dict]:
     try:
-        # Remplacez par votre clé secrète et algorithme
         payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
         return payload
     except JWTError:

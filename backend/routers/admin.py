@@ -2,10 +2,11 @@ import json
 import shutil
 import traceback
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
@@ -33,6 +34,7 @@ from backend.session import (
     user_sessions,
     get_user_lollms_client,
 )
+from backend.security import create_reset_token
 from backend.settings import settings
 from backend.config import INITIAL_ADMIN_USER_CONFIG
 from backend.migration_utils import run_openwebui_migration
@@ -156,6 +158,8 @@ async def admin_update_global_settings(
         for key, new_value in update_data.configs.items():
             db_config = db.query(DBGlobalConfig).filter(DBGlobalConfig.key == key).first()
             if db_config:
+                if key == 'smtp_password' and not new_value:
+                    continue
                 stored_data = json.loads(db_config.value)
                 stored_data['value'] = new_value
                 db_config.value = json.dumps(stored_data)
@@ -250,7 +254,9 @@ async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
     
     user_to_activate.is_active = True
     user_to_activate.activation_token = None
-    
+    user_to_activate.password_reset_token = None
+    user_to_activate.reset_token_expiry = None
+
     try:
         db.commit()
         db.refresh(user_to_activate)
@@ -287,9 +293,31 @@ async def admin_reset_user_password(user_id: int, payload: UserPasswordResetAdmi
         raise HTTPException(status_code=404, detail="User not found.")
     
     user_to_update.hashed_password = hash_password(payload.new_password)
+    user_to_update.password_reset_token = None
+    user_to_update.reset_token_expiry = None
+
     try:
         db.commit()
         return {"message": f"Password for user '{user_to_update.username}' has been successfully reset."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
+
+@admin_router.post("/users/{user_id}/generate-reset-link", response_model=Dict[str, str])
+async def admin_generate_password_reset_link(user_id: int, request: Request, db: Session = Depends(get_db)):
+    user_to_update = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user_to_update:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    token = create_reset_token()
+    user_to_update.password_reset_token = token
+    user_to_update.reset_token_expiry = datetime.now(timezone.utc) + timedelta(hours=1)
+    
+    try:
+        db.commit()
+        base_url = str(request.base_url).strip('/')
+        reset_link = f"{base_url}reset-password?token={token}"
+        return {"reset_link": reset_link}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")

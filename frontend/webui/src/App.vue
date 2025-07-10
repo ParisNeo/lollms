@@ -7,6 +7,8 @@ import { useSocialStore } from './stores/social';
 
 import LoginModal from './components/modals/LoginModal.vue';
 import RegisterModal from './components/modals/RegisterModal.vue';
+import ForgotPasswordModal from './components/modals/ForgotPasswordModal.vue';
+import PasswordResetLinkModal from './components/modals/PasswordResetLinkModal.vue';
 import RenameDiscussionModal from './components/modals/RenameDiscussionModal.vue';
 import PersonalityEditorModal from './components/modals/PersonalityEditorModal.vue';
 import AdminUserEditModal from './components/modals/AdminUserEditModal.vue';
@@ -44,12 +46,13 @@ watch(
   () => authStore.isAuthenticated,
   (isNowAuthenticated) => {
     const canUseChat = authStore.user?.chat_active && authStore.user?.user_ui_level >= 2;
+    const isAdmin = authStore.user?.is_admin;
 
-    if (isNowAuthenticated && canUseChat) {
-      console.log("User authenticated with chat permissions, connecting to real-time DM service...");
+    if (isNowAuthenticated && (canUseChat || isAdmin)) {
+      console.log("User authenticated with permissions, connecting to real-time service...");
       socialStore.connectWebSocket();
     } else {
-      console.log("User not authenticated or no chat permissions, disconnecting from real-time DM service...");
+      console.log("User not authenticated or no permissions, disconnecting from real-time service...");
       socialStore.disconnectWebSocket();
     }
   },
@@ -71,6 +74,8 @@ watch(
 
     <LoginModal v-if="activeModal === 'login'" />
     <RegisterModal v-if="activeModal === 'register'" />
+    <ForgotPasswordModal v-if="activeModal === 'forgotPassword'" />
+    <PasswordResetLinkModal v-if="activeModal === 'passwordResetLink'" />
     <RenameDiscussionModal v-if="activeModal === 'renameDiscussion'" />
     <PersonalityEditorModal v-if="activeModal === 'personalityEditor'" />
     <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />

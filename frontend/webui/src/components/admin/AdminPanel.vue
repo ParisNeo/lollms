@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import apiClient from '../../services/api';
 import { useUiStore } from '../../stores/ui';
@@ -32,30 +32,67 @@ const isImporting = ref(false);
 const activeTab = ref('users');
 const fileInputRef = ref(null);
 
-const isSettingsChanged = computed(() => {
-  if (isLoadingSettings.value) return false;
-  for (const key in settings.value) {
-    if (settings.value[key] !== originalSettings.value[key]?.value) {
-      return true;
+const sortKey = ref('event');
+const sortDir = ref('desc');
+
+const sortedUsers = computed(() => {
+  const usersCopy = [...users.value];
+  
+  const getEventScore = (user) => {
+    if (user.password_reset_token) return 3; // Highest priority
+    if (!user.is_active) return 2; // Next priority
+    if (activeSessions.value.includes(user.username)) return 1; // Online users
+    return 0; // Everyone else
+  };
+
+  usersCopy.sort((a, b) => {
+    const dir = sortDir.value === 'asc' ? 1 : -1;
+
+    if (sortKey.value === 'event') {
+      const scoreA = getEventScore(a);
+      const scoreB = getEventScore(b);
+      if (scoreA !== scoreB) {
+        return (scoreB - scoreA) * dir; // Always descending for event priority
+      }
+      // Fallback to last_activity_at for users with same score
+      const dateA = a.last_activity_at ? new Date(a.last_activity_at) : 0;
+      const dateB = b.last_activity_at ? new Date(b.last_activity_at) : 0;
+      return (dateB - dateA) * dir;
     }
-  }
-  return false;
+
+    let valA, valB;
+    switch(sortKey.value) {
+      case 'id':
+        return (a.id - b.id) * dir;
+      case 'username':
+        valA = a.username.toLowerCase();
+        valB = b.username.toLowerCase();
+        break;
+      case 'last_activity_at':
+        valA = a.last_activity_at ? new Date(a.last_activity_at) : 0;
+        valB = b.last_activity_at ? new Date(b.last_activity_at) : 0;
+        break;
+      default:
+        valA = a[sortKey.value];
+        valB = b[sortKey.value];
+    }
+
+    if (valA < valB) return -1 * dir;
+    if (valA > valB) return 1 * dir;
+    return 0;
+  });
+
+  return usersCopy;
 });
 
-const categorizedSettings = computed(() => {
-  const categories = {};
-  if (!originalSettings.value) return {};
-  const sortedKeys = Object.keys(originalSettings.value).sort((a,b)=>a.localeCompare(b));
-  for (const key of sortedKeys) {
-    const setting = originalSettings.value[key];
-    if (!setting) continue;
-    if (!categories[setting.category]) {
-      categories[setting.category] = [];
-    }
-    categories[setting.category].push(setting);
+function handleSort(key) {
+  if (sortKey.value === key) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortKey.value = key;
+    sortDir.value = 'desc';
   }
-  return categories;
-});
+}
 
 async function setActiveTab(tabName) {
   if (activeTab.value === tabName) return;
@@ -99,7 +136,11 @@ async function fetchSettings() {
     const newSettingsValues = {};
     const newOriginalSettings = {};
     settingsData.forEach(setting => {
-      newSettingsValues[setting.key] = setting.value;
+      if (setting.key.includes('password')) {
+          newSettingsValues[setting.key] = '';
+      } else {
+          newSettingsValues[setting.key] = setting.value;
+      }
       newOriginalSettings[setting.key] = { ...setting };
     });
     settings.value = newSettingsValues;
@@ -114,7 +155,11 @@ async function fetchSettings() {
 function resetSettings() {
   const newSettings = {};
   for (const key in originalSettings.value) {
-    newSettings[key] = originalSettings.value[key].value;
+    if (key.includes('password')) {
+        newSettings[key] = '';
+    } else {
+        newSettings[key] = originalSettings.value[key].value;
+    }
   }
   settings.value = newSettings;
   uiStore.addNotification('Changes have been discarded.', 'info');
@@ -123,16 +168,21 @@ function resetSettings() {
 async function saveSettings() {
   if (!isSettingsChanged.value) {
     uiStore.addNotification('No changes to save.', 'info');
-    return false; // Return status
+    return false;
   }
   isLoadingSettings.value = true;
   try {
-    await apiClient.put('/api/admin/settings', { configs: settings.value });
+    const payload = { ...settings.value };
+    if (payload.smtp_password === '') {
+        delete payload.smtp_password;
+    }
+
+    await apiClient.put('/api/admin/settings', { configs: payload });
     uiStore.addNotification('Global settings updated successfully.', 'success');
     await fetchSettings();
-    return true; // Return status
+    return true;
   } catch (error) {
-    return false; // Return status
+    return false;
   } finally {
     isLoadingSettings.value = false;
   }
@@ -185,9 +235,24 @@ async function deleteUser(userId) {
 function resetPassword(userId) {
     const userToReset = users.value.find(u => u.id === userId);
     if (userToReset) {
-        uiStore.openModal('resetPassword', { user: userToReset });
+        uiStore.openModal('resetPassword', { user: userToReset, onPasswordReset: fetchUsers });
     } else {
         uiStore.addNotification('Could not find the specified user to reset password.', 'error');
+    }
+}
+
+async function getResetLink(userId, username) {
+    isLoadingUsers.value = true;
+    try {
+        const response = await apiClient.post(`/api/admin/users/${userId}/generate-reset-link`);
+        uiStore.openModal('passwordResetLink', {
+            link: response.data.reset_link,
+            username: username
+        });
+        await fetchUsers();
+    } catch (error) {
+    } finally {
+        isLoadingUsers.value = false;
     }
 }
 
@@ -283,7 +348,6 @@ async function handleForceSettingsOnce() {
       await apiClient.post('/api/admin/force-settings-once', payload);
       uiStore.addNotification("Settings have been applied to all users.", "success");
     } catch (e) {
-      // Error is handled by the global interceptor
     } finally {
       isLoadingSettings.value = false;
     }
@@ -398,12 +462,16 @@ onMounted(() => {
           </div>
         </div>
         <UserTable 
-          :users="users" 
+          :users="sortedUsers" 
           :active-sessions="activeSessions"
-          :isLoading="isLoadingUsers" 
+          :isLoading="isLoadingUsers"
+          :sort-key="sortKey"
+          :sort-dir="sortDir"
+          @sort-by="handleSort"
           @edit-user="editUser"
           @delete-user="deleteUser" 
           @reset-password="resetPassword" 
+          @get-reset-link="getResetLink"
           @activate-user="activateUser"
           @deactivate-user="deactivateUser"
         />
@@ -438,16 +506,19 @@ onMounted(() => {
                         <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-500 peer-checked:bg-blue-600"></div>
                         <span class="ml-3 text-sm font-medium text-gray-900 dark:text-gray-200">{{ settings[setting.key] ? 'Enabled' : 'Disabled' }}</span>
                     </label>
-                    <select v-else-if="setting.key === 'registration_mode'" v-model="settings[setting.key]" :id="`setting-${setting.key}`" class="input-field max-w-sm">
-                        <option value="direct">Direct (instantly active)</option>
-                        <option value="admin_approval">Admin Approval</option>
+                    <select v-else-if="setting.key === 'registration_mode' || setting.key === 'password_recovery_mode'" v-model="settings[setting.key]" :id="`setting-${setting.key}`" class="input-field max-w-sm">
+                        <option v-if="setting.key === 'registration_mode'" value="direct">Direct (instantly active)</option>
+                        <option v-if="setting.key === 'registration_mode'" value="admin_approval">Admin Approval</option>
+                        <option v-if="setting.key === 'password_recovery_mode'" value="manual">Manual (Admin Notified)</option>
+                        <option v-if="setting.key === 'password_recovery_mode'" value="automatic">Automatic (Email)</option>
                     </select>
                     <input v-else
-                            :type="setting.type === 'string' ? 'text' : 'number'"
-                            :step="setting.type === 'float' ? '0.1' : '1'"
-                            v-model.number="settings[setting.key]"
-                            :id="`setting-${setting.key}`"
-                            class="input-field max-w-sm">
+                           :type="setting.key.includes('password') ? 'password' : (setting.type === 'string' ? 'text' : 'number')"
+                           :step="setting.type === 'float' ? '0.1' : '1'"
+                           v-model="settings[setting.key]"
+                           :placeholder="setting.key.includes('password') ? 'Enter new password to change' : ''"
+                           :id="`setting-${setting.key}`"
+                           class="input-field max-w-sm">
                     </div>
                     <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Key: <code class="bg-gray-200 dark:bg-gray-600 px-1 rounded">{{ setting.key }}</code></p>
                 </div>

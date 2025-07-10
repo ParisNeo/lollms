@@ -87,6 +87,8 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_activity_at = Column(DateTime(timezone=True), nullable=True, index=True)
     activation_token = Column(String, nullable=True, index=True, unique=True)
+    password_reset_token = Column(String, nullable=True, unique=True, index=True)
+    reset_token_expiry = Column(DateTime, nullable=True)
     first_name = Column(String, nullable=True)
     family_name = Column(String, nullable=True)
     email = Column(String, nullable=True, index=True, unique=True)
@@ -263,9 +265,8 @@ class Comment(Base):
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    # Relationships
     post = relationship("Post", back_populates="comments")
-    author = relationship("User") # A simple relationship to get the author's details
+    author = relationship("User") 
 
 engine = None
 SessionLocal = None
@@ -289,6 +290,34 @@ def _bootstrap_global_settings(connection):
         "access_token_expire_minutes": {
             "value": config.get("app_settings", {}).get("access_token_expires_mintes", 43200),
             "type": "integer", "description": "Duration in minutes a user's login session remains valid.", "category": "Authentication"
+        },
+        "password_recovery_mode": {
+            "value": "manual",
+            "type": "string", "description": "Password recovery mode: 'manual' (admins are notified) or 'automatic' (emails are sent).", "category": "Authentication"
+        },
+        "smtp_host": {
+            "value": "",
+            "type": "string", "description": "SMTP server address for sending password recovery emails.", "category": "Email Settings"
+        },
+        "smtp_port": {
+            "value": 587,
+            "type": "integer", "description": "SMTP server port.", "category": "Email Settings"
+        },
+        "smtp_user": {
+            "value": "",
+            "type": "string", "description": "Username for SMTP authentication.", "category": "Email Settings"
+        },
+        "smtp_password": {
+            "value": "",
+            "type": "string", "description": "Password for SMTP authentication. (Stored in plaintext, use with caution)", "category": "Email Settings"
+        },
+        "smtp_from_email": {
+            "value": "",
+            "type": "string", "description": "The 'From' email address for password recovery emails.", "category": "Email Settings"
+        },
+        "smtp_use_tls": {
+            "value": True,
+            "type": "boolean", "description": "Use TLS for the SMTP connection.", "category": "Email Settings"
         },
         "lollms_binding_config": {
             "value": config.get("lollms_client_defaults", {}),
@@ -351,6 +380,7 @@ def init_database(db_url: str):
                 new_user_cols_defs = {
                     "is_active": "BOOLEAN DEFAULT 1 NOT NULL", "created_at": "DATETIME", 
                     "last_activity_at": "DATETIME", "activation_token": "VARCHAR",
+                    "password_reset_token": "VARCHAR", "reset_token_expiry": "DATETIME",
                     "icon": "TEXT",
                     "active_personality_id": "VARCHAR", "first_name": "VARCHAR", "family_name": "VARCHAR", 
                     "email": "VARCHAR", "birth_date": "DATE", "llm_ctx_size": "INTEGER",
@@ -383,7 +413,15 @@ def init_database(db_url: str):
                         print("INFO: Created unique index 'uq_user_email' on 'users.email'.")
                     except (OperationalError, IntegrityError) as e:
                         print(f"Warning: Could not create unique index on email. Error: {e}")
-            
+                
+                if 'password_reset_token' in new_user_cols_defs and not any(c['name'] == 'uq_password_reset_token' for c in user_constraints):
+                    try:
+                        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_password_reset_token ON users (password_reset_token) WHERE password_reset_token IS NOT NULL"))
+                        print("INFO: Created unique index 'uq_password_reset_token' on 'users.password_reset_token'.")
+                    except (OperationalError, IntegrityError) as e:
+                        print(f"Warning: Could not create unique index on password_reset_token. Error: {e}")
+
+
             if inspector.has_table("mcps"):
                 mcp_columns_db = [col['name'] for col in inspector.get_columns('mcps')]
                 new_mcp_cols_defs = {
@@ -397,7 +435,6 @@ def init_database(db_url: str):
                         connection.execute(text(f"ALTER TABLE mcps ADD COLUMN {col_name} {col_sql_def}"))
                         print(f"INFO: Added missing column '{col_name}' to 'mcps' table.")
 
-            # NEW: Migration block for the 'apps' table
             if inspector.has_table("apps"):
                 app_columns_db = [col['name'] for col in inspector.get_columns('apps')]
                 new_app_cols_defs = {

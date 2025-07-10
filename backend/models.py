@@ -105,6 +105,10 @@ class UserPasswordChange(BaseModel):
 class ForgotPasswordRequest(BaseModel):
     username_or_email: str
 
+class PasswordResetRequest(BaseModel):
+    token: str
+    new_password: constr(min_length=8)
+
 class UserPasswordResetAdmin(BaseModel):
     new_password: constr(min_length=8)
 
