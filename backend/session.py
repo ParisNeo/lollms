@@ -78,19 +78,15 @@ async def get_current_db_user_from_token(
     if user is None:
         raise credentials_exception
     
-    # --- MODIFIED: Fix for timezone awareness ---
     now = datetime.datetime.now(datetime.timezone.utc)
     last_activity_aware = None
     
     if user.last_activity_at:
-        # If the datetime from the DB is naive, make it aware of the UTC timezone.
-        # This is the standard practice when you know the DB stores UTC times without timezone info.
         if user.last_activity_at.tzinfo is None:
             last_activity_aware = user.last_activity_at.replace(tzinfo=datetime.timezone.utc)
         else:
             last_activity_aware = user.last_activity_at
 
-    # Now perform the comparison with two offset-aware datetimes
     if last_activity_aware is None or (now - last_activity_aware) > datetime.timedelta(seconds=60):
         user.last_activity_at = now
         try:
@@ -133,11 +129,19 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     ai_name_for_user = getattr(lc, "ai_name", LOLLMS_CLIENT_DEFAULTS.get("ai_name", "assistant"))
     current_session_llm_params = user_sessions[username].get("llm_params", {})
 
+    # --- THIS IS THE FIX ---
+    # The UserAuthDetails model is now populated with all required fields directly from the db_user object.
     return UserAuthDetails(
         id=db_user.id,
-        username=username, is_admin=db_user.is_admin, is_active=db_user.is_active,
+        username=username,
+        is_admin=db_user.is_admin,
+        is_active=db_user.is_active,
         icon=db_user.icon,
-        first_name=db_user.first_name, family_name=db_user.family_name, email=db_user.email, birth_date=db_user.birth_date,
+        first_name=db_user.first_name,
+        family_name=db_user.family_name,
+        email=db_user.email,
+        birth_date=db_user.birth_date,
+        receive_notification_emails=db_user.receive_notification_emails, # This was the missing field
         lollms_model_name=user_sessions[username].get("lollms_model_name"),
         safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
         active_personality_id=user_sessions[username].get("active_personality_id"),
@@ -149,13 +153,16 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         llm_repeat_penalty=current_session_llm_params.get("repeat_penalty"),
         llm_repeat_last_n=current_session_llm_params.get("repeat_last_n"),
         put_thoughts_in_context=current_session_llm_params.get("put_thoughts_in_context"),
-        rag_top_k=db_user.rag_top_k, max_rag_len=db_user.max_rag_len,
-        rag_n_hops=db_user.rag_n_hops, rag_min_sim_percent=db_user.rag_min_sim_percent,
-        rag_use_graph=db_user.rag_use_graph, rag_graph_response_type=db_user.rag_graph_response_type,
+        rag_top_k=db_user.rag_top_k,
+        max_rag_len=db_user.max_rag_len,
+        rag_n_hops=db_user.rag_n_hops,
+        rag_min_sim_percent=db_user.rag_min_sim_percent,
+        rag_use_graph=db_user.rag_use_graph,
+        rag_graph_response_type=db_user.rag_graph_response_type,
         auto_title=db_user.auto_title,
         user_ui_level=db_user.user_ui_level,
         chat_active=db_user.chat_active,
-        first_page= db_user.first_page,
+        first_page=db_user.first_page,
         ai_response_language=db_user.ai_response_language,
         fun_mode=db_user.fun_mode
     )

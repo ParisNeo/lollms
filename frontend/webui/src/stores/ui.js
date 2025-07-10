@@ -16,7 +16,6 @@ export const useUiStore = defineStore('ui', () => {
         confirmText: 'Confirm',
         onConfirm: () => {},
     });
-    // State to hold available languages fetched from the backend
     const availableLanguages = ref({});
 
 
@@ -69,8 +68,6 @@ export const useUiStore = defineStore('ui', () => {
     function setLanguage(langCode) {
         currentLanguage.value = langCode;
         localStorage.setItem('lollms-language', langCode);
-        // Here you would typically also load the language file with a library like i18n
-        // For this simplified example, we'll just store the code.
     }
 
     function openImageViewer(src) {
@@ -114,16 +111,13 @@ export const useUiStore = defineStore('ui', () => {
         }
     }
 
-    // --- NEW: Action to fetch languages ---
     async function fetchLanguages() {
         try {
-            // Lazy import to prevent circular dependencies if needed
             const apiClient = (await import('../services/api')).default;
             const response = await apiClient.get('/api/languages/');
             availableLanguages.value = response.data;
         } catch (error) {
             console.error("Failed to fetch available languages:", error);
-            // Fallback to a default set
             availableLanguages.value = { en: 'English' };
         }
     }

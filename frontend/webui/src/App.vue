@@ -25,6 +25,8 @@ import ImportModal from './components/modals/ImportModal.vue';
 import InteractiveOutputModal from './components/modals/InteractiveOutputModal.vue';
 import ShareDiscussionModal from './components/modals/ShareDiscussionModal.vue';
 import ResetPasswordModal from './components/modals/ResetPasswordModal.vue';
+import EmailAllUsersModal from './components/modals/EmailAllUsersModal.vue';
+import EmailListModal from './components/modals/EmailListModal.vue';
 import logoUrl from './assets/logo.png';
 
 const authStore = useAuthStore();
@@ -89,6 +91,8 @@ watch(
     <ImportModal v-if="activeModal === 'import'" />
     <InteractiveOutputModal v-if="activeModal === 'interactiveOutput'" />
     <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
+    <EmailAllUsersModal v-if="activeModal === 'emailAllUsers'" />
+    <EmailListModal v-if="activeModal === 'emailList'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

@@ -1,584 +1,105 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
-import { storeToRefs } from 'pinia';
-import apiClient from '../../services/api';
+import { ref, computed, defineAsyncComponent, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
-import { useDataStore } from '../../stores/data';
-import UserTable from './UserTable.vue';
+import { useAdminStore } from '../../stores/admin';
+import { storeToRefs } from 'pinia';
+
+// --- Components ---
+const Dashboard = defineAsyncComponent(() => import('./Dashboard.vue'));
+const UserTable = defineAsyncComponent(() => import('./UserTable.vue'));
+const GlobalSettings = defineAsyncComponent(() => import('./GlobalSettings.vue'));
+const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
+const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
 
 const uiStore = useUiStore();
-const dataStore = useDataStore();
+const adminStore = useAdminStore();
 
-const { availableLollmsModels, isLoadingLollmsModels } = storeToRefs(dataStore);
+const { isSmtpConfigured, allUsers } = storeToRefs(adminStore);
 
-const users = ref([]);
-const activeSessions = ref([]);
-const isLoadingUsers = ref(false);
-const showAddUserForm = ref(false);
+const activeTab = ref('dashboard'); // Default to the new dashboard
 
-const newUser = ref({
-  username: '',
-  password: '',
-  email: '',
-  lollms_model_name: '',
-  safe_store_vectorizer: '',
-  is_admin: false,
-});
-const settings = ref({});
-const originalSettings = ref({});
-const isLoadingSettings = ref(false);
-const importFile = ref(null);
-const isImporting = ref(false);
-const activeTab = ref('users');
-const fileInputRef = ref(null);
+const tabs = [
+    { id: 'dashboard', label: 'Dashboard', component: Dashboard },
+    { id: 'users', label: 'User Management', component: UserTable },
+    { id: 'global_settings', label: 'Global Settings', component: GlobalSettings },
+    { id: 'email', label: 'Email Settings', component: EmailSettings },
+    { id: 'import', label: 'Import', component: ImportTools }
+];
 
-const sortKey = ref('event');
-const sortDir = ref('desc');
-
-const sortedUsers = computed(() => {
-  const usersCopy = [...users.value];
-  
-  const getEventScore = (user) => {
-    if (user.password_reset_token) return 3; // Highest priority
-    if (!user.is_active) return 2; // Next priority
-    if (activeSessions.value.includes(user.username)) return 1; // Online users
-    return 0; // Everyone else
-  };
-
-  usersCopy.sort((a, b) => {
-    const dir = sortDir.value === 'asc' ? 1 : -1;
-
-    if (sortKey.value === 'event') {
-      const scoreA = getEventScore(a);
-      const scoreB = getEventScore(b);
-      if (scoreA !== scoreB) {
-        return (scoreB - scoreA) * dir; // Always descending for event priority
-      }
-      // Fallback to last_activity_at for users with same score
-      const dateA = a.last_activity_at ? new Date(a.last_activity_at) : 0;
-      const dateB = b.last_activity_at ? new Date(b.last_activity_at) : 0;
-      return (dateB - dateA) * dir;
-    }
-
-    let valA, valB;
-    switch(sortKey.value) {
-      case 'id':
-        return (a.id - b.id) * dir;
-      case 'username':
-        valA = a.username.toLowerCase();
-        valB = b.username.toLowerCase();
-        break;
-      case 'last_activity_at':
-        valA = a.last_activity_at ? new Date(a.last_activity_at) : 0;
-        valB = b.last_activity_at ? new Date(b.last_activity_at) : 0;
-        break;
-      default:
-        valA = a[sortKey.value];
-        valB = b[sortKey.value];
-    }
-
-    if (valA < valB) return -1 * dir;
-    if (valA > valB) return 1 * dir;
-    return 0;
-  });
-
-  return usersCopy;
+const activeComponent = computed(() => {
+    return tabs.find(tab => tab.id === activeTab.value)?.component || null;
 });
 
-function handleSort(key) {
-  if (sortKey.value === key) {
-    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc';
-  } else {
-    sortKey.value = key;
-    sortDir.value = 'desc';
-  }
-}
-
-async function setActiveTab(tabName) {
-  if (activeTab.value === tabName) return;
-  activeTab.value = tabName;
-  await fetchDataForActiveTab();
-}
-
-async function fetchDataForActiveTab() {
-  if (activeTab.value === 'users') {
-    await fetchUsers();
-    await fetchSettings();
-    if (availableLollmsModels.value.length === 0) {
-      dataStore.fetchAdminAvailableLollmsModels();
-    }
-  } else if (activeTab.value === 'settings') {
-    await fetchSettings();
-  }
-}
-
-async function fetchUsers() {
-  isLoadingUsers.value = true;
-  try {
-    const [usersResponse, sessionsResponse] = await Promise.all([
-      apiClient.get('/api/admin/users'),
-      apiClient.get('/api/admin/active-sessions')
-    ]);
-    users.value = usersResponse.data;
-    activeSessions.value = sessionsResponse.data;
-  } catch (error) {
-    uiStore.addNotification('Failed to load user data.', 'error');
-  } finally {
-    isLoadingUsers.value = false;
-  }
-}
-
-async function fetchSettings() {
-  isLoadingSettings.value = true;
-  try {
-    const response = await apiClient.get('/api/admin/settings');
-    const settingsData = response.data;
-    const newSettingsValues = {};
-    const newOriginalSettings = {};
-    settingsData.forEach(setting => {
-      if (setting.key.includes('password')) {
-          newSettingsValues[setting.key] = '';
-      } else {
-          newSettingsValues[setting.key] = setting.value;
-      }
-      newOriginalSettings[setting.key] = { ...setting };
-    });
-    settings.value = newSettingsValues;
-    originalSettings.value = newOriginalSettings;
-  } catch (error) {
-    uiStore.addNotification('Failed to load global settings.', 'error');
-  } finally {
-    isLoadingSettings.value = false;
-  }
-}
-
-function resetSettings() {
-  const newSettings = {};
-  for (const key in originalSettings.value) {
-    if (key.includes('password')) {
-        newSettings[key] = '';
+function handleEmailAllUsers() {
+    if (isSmtpConfigured.value) {
+        uiStore.openModal('emailAllUsers');
     } else {
-        newSettings[key] = originalSettings.value[key].value;
+        const emails = allUsers.value
+            .filter(user => user.email && user.receive_notification_emails)
+            .map(user => user.email);
+            
+        uiStore.openModal('emailList', { emails });
     }
-  }
-  settings.value = newSettings;
-  uiStore.addNotification('Changes have been discarded.', 'info');
-}
-
-async function saveSettings() {
-  if (!isSettingsChanged.value) {
-    uiStore.addNotification('No changes to save.', 'info');
-    return false;
-  }
-  isLoadingSettings.value = true;
-  try {
-    const payload = { ...settings.value };
-    if (payload.smtp_password === '') {
-        delete payload.smtp_password;
-    }
-
-    await apiClient.put('/api/admin/settings', { configs: payload });
-    uiStore.addNotification('Global settings updated successfully.', 'success');
-    await fetchSettings();
-    return true;
-  } catch (error) {
-    return false;
-  } finally {
-    isLoadingSettings.value = false;
-  }
-}
-
-async function addUser() {
-  if (!newUser.value.username || !newUser.value.password || !newUser.value.email) {
-    uiStore.addNotification('Username, email, and password are required.', 'warning');
-    return;
-  }
-  isLoadingUsers.value = true;
-  try {
-    await apiClient.post('/api/admin/users', newUser.value);
-    uiStore.addNotification(`User '${newUser.value.username}' created successfully.`, 'success');
-    resetNewUserForm();
-    await fetchUsers();
-  } catch (error) { /* Handled by interceptor */ } 
-  finally {
-    isLoadingUsers.value = false;
-  }
-}
-
-function editUser(userToEdit) {
-    uiStore.openModal('adminUserEdit', {
-        user: userToEdit,
-        onUserUpdated: () => {
-            fetchUsers(); 
-        }
-    });
-}
-
-async function deleteUser(userId) {
-  const confirmed = await uiStore.showConfirmation({
-    title: "Delete User",
-    message: 'Are you sure you want to delete this user? This will also remove all their data and cannot be undone.',
-    confirmText: "Delete",
-    confirmClass: "btn-danger"
-  });
-  if (confirmed) {
-    isLoadingUsers.value = true;
-    try {
-      await apiClient.delete(`/api/admin/users/${userId}`);
-      uiStore.addNotification('User deleted successfully.', 'success');
-      await fetchUsers();
-    } catch(error) { /* Handled by interceptor */ }
-    finally { isLoadingUsers.value = false; }
-  }
-}
-
-function resetPassword(userId) {
-    const userToReset = users.value.find(u => u.id === userId);
-    if (userToReset) {
-        uiStore.openModal('resetPassword', { user: userToReset, onPasswordReset: fetchUsers });
-    } else {
-        uiStore.addNotification('Could not find the specified user to reset password.', 'error');
-    }
-}
-
-async function getResetLink(userId, username) {
-    isLoadingUsers.value = true;
-    try {
-        const response = await apiClient.post(`/api/admin/users/${userId}/generate-reset-link`);
-        uiStore.openModal('passwordResetLink', {
-            link: response.data.reset_link,
-            username: username
-        });
-        await fetchUsers();
-    } catch (error) {
-    } finally {
-        isLoadingUsers.value = false;
-    }
-}
-
-async function activateUser(userId) {
-  isLoadingUsers.value = true;
-  try {
-    await apiClient.post(`/api/admin/users/${userId}/activate`);
-    uiStore.addNotification("User has been activated successfully.", 'success');
-    await fetchUsers();
-  } catch (error) { /* Handled by interceptor */ }
-  finally { isLoadingUsers.value = false; }
-}
-
-async function deactivateUser(userId) {
-  isLoadingUsers.value = true;
-  try {
-    await apiClient.post(`/api/admin/users/${userId}/deactivate`);
-    uiStore.addNotification("User has been deactivated successfully.", 'success');
-    await fetchUsers();
-  } catch (error) { /* Handled by interceptor */ }
-  finally { isLoadingUsers.value = false; }
-}
-
-function resetNewUserForm() {
-  newUser.value = { username: '', password: '', email: '', lollms_model_name: '', safe_store_vectorizer: '', is_admin: false };
-  showAddUserForm.value = false;
-}
-
-function handleFileSelect(event) {
-  importFile.value = event.target.files[0] || null;
-}
-
-async function handleImport() {
-  if (!importFile.value) {
-    uiStore.addNotification('Please select a file to import.', 'warning');
-    return;
-  }
-  if (importFile.value.name !== 'webui.db') {
-    uiStore.addNotification("Invalid file name. Please select the 'webui.db' file.", 'error');
-    return;
-  }
-  isImporting.value = true;
-  const formData = new FormData();
-  formData.append('file', importFile.value);
-  try {
-    const response = await apiClient.post('/api/admin/import-openwebui', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-    uiStore.addNotification(response.data.message, 'success', 8000);
-    importFile.value = null;
-    if (fileInputRef.value) fileInputRef.value.value = '';
-  } catch (error) { /* Handled by interceptor */ } 
-  finally { isImporting.value = false; }
-}
-
-function emailAllUsers() {
-  const emails = users.value.map(u => u.email).filter(Boolean).join(',');
-  if (emails) {
-    window.location.href = `mailto:${emails}`;
-  } else {
-    uiStore.addNotification('No users with email addresses found.', 'warning');
-  }
-}
-
-async function handleForceSettingsOnce() {
-  const modelToForce = settings.value.force_model_name;
-  if (!modelToForce) {
-    uiStore.addNotification('Please select a model to force first in the settings below.', 'warning');
-    return;
-  }
-
-  if (isSettingsChanged.value) {
-    uiStore.addNotification('You have unsaved changes. Saving settings before applying...', 'info');
-    const saved = await saveSettings();
-    if (!saved) {
-      uiStore.addNotification('Could not save settings. Aborting force apply.', 'error');
-      return;
-    }
-  }
-
-  const confirmed = await uiStore.showConfirmation({
-    title: "Force Settings on All Users?",
-    message: `This will overwrite the current model and context size for ALL users with the values you've configured (${modelToForce}). This action cannot be undone. Are you sure?`,
-    confirmText: "Yes, Force Settings",
-    confirmClass: "btn-warning",
-  });
-
-  if (confirmed) {
-    isLoadingSettings.value = true;
-    const payload = {
-      model_name: modelToForce,
-      context_size: settings.value.force_context_size,
-    };
-    try {
-      await apiClient.post('/api/admin/force-settings-once', payload);
-      uiStore.addNotification("Settings have been applied to all users.", "success");
-    } catch (e) {
-    } finally {
-      isLoadingSettings.value = false;
-    }
-  }
 }
 
 onMounted(() => {
-  fetchDataForActiveTab();
+    adminStore.fetchAllUsers();
+    adminStore.fetchGlobalSettings();
 });
 </script>
 
 <template>
-  <div>
-    <h4 class="text-lg font-semibold mb-4">Administration</h4>
-    
-    <div class="border-b border-gray-200 dark:border-gray-700 mb-6">
-      <nav class="-mb-px flex space-x-6" aria-label="Tabs">
-        <button @click="setActiveTab('users')"
-                :class="[activeTab === 'users' ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-300' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-500']"
-                class="whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors duration-200">
-          User Management
-        </button>
-        <button @click="setActiveTab('settings')"
-                :class="[activeTab === 'settings' ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-300' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-500']"
-                class="whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors duration-200">
-          Global Settings
-        </button>
-        <button @click="setActiveTab('import')"
-                :class="[activeTab === 'import' ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-300' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-500']"
-                class="whitespace-nowrap py-3 px-1 border-b-2 font-medium text-sm transition-colors duration-200">
-          Data Import
-        </button>
-      </nav>
-    </div>
-
-    <div v-if="activeTab === 'users'">
-      <div v-if="!showAddUserForm" class="flex justify-end mb-6">
-        <button @click="showAddUserForm = true" class="btn btn-primary">Add New User</button>
-      </div>
-
-      <section v-if="showAddUserForm" class="bg-gray-100 dark:bg-gray-700/50 p-4 rounded-lg shadow-sm mb-6">
-        <h2 class="text-md font-semibold mb-3 border-b dark:border-gray-600 pb-2">Add New User</h2>
-        <form @submit.prevent="addUser" class="space-y-4">
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="space-y-8">
+        <!-- Header -->
+        <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <label for="newUsername" class="block text-sm font-medium">Username</label>
-              <input type="text" v-model="newUser.username" id="newUsername" required minlength="3" class="input-field mt-1">
+                <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Admin Dashboard</h1>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Manage users, system settings, and application configurations.
+                </p>
             </div>
             <div>
-              <label for="newEmail" class="block text-sm font-medium">Email</label>
-              <input type="email" v-model="newUser.email" id="newEmail" required class="input-field mt-1">
+                <button
+                    type="button"
+                    class="btn btn-primary"
+                    @click="handleEmailAllUsers"
+                >
+                    Email All Users
+                </button>
             </div>
-            <div>
-              <label for="newPassword" class="block text-sm font-medium">Password (min 8 chars)</label>
-              <input type="password" v-model="newUser.password" id="newPassword" required minlength="8" class="input-field mt-1">
-            </div>
-          </div>
-          <div class="flex items-center">
-            <input type="checkbox" v-model="newUser.is_admin" id="newUserIsAdmin" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-            <label for="newUserIsAdmin" class="ml-2 block text-sm">Grant Administrator Privileges</label>
-          </div>
-          <div class="text-right space-x-2">
-            <button type="button" @click="resetNewUserForm" class="btn btn-secondary">Cancel</button>
-            <button type="submit" class="btn btn-primary" :disabled="isLoadingUsers">Add User</button>
-          </div>
-        </form>
-      </section>
-
-      <section class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6">
-        <h2 class="text-md font-semibold mb-3 border-b dark:border-gray-600 pb-2">Global User Overrides</h2>
-        <div class="space-y-4">
-          <div>
-            <label for="forceMode" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Force Model Mode</label>
-            <select id="forceMode" v-model="settings.force_model_mode" class="input-field mt-1 max-w-md">
-              <option value="disabled">Disabled</option>
-              <option value="force_once">Force Once (Set User Preference)</option>
-              <option value="force_always">Force Always (Session Override)</option>
-            </select>
-          </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label for="forceModelName" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Model to Force</label>
-              <select id="forceModelName" v-model="settings.force_model_name" class="input-field mt-1" :disabled="isLoadingLollmsModels || (settings.force_model_mode === 'disabled')">
-                  <option v-if="isLoadingLollmsModels" disabled value="">Loading models...</option>
-                  <option v-else-if="availableLollmsModels.length === 0" disabled value="">No models available</option>
-                  <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
-              </select>
-            </div>
-            <div>
-              <label for="forceCtxSize" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Context Size to Force</label>
-              <input type="number" id="forceCtxSize" v-model.number="settings.force_context_size" class="input-field mt-1" :disabled="settings.force_model_mode === 'disabled'">
-            </div>
-          </div>
-          <div class="flex justify-end items-center space-x-4">
-              <button v-if="settings.force_model_mode === 'force_once'" type="button" @click="handleForceSettingsOnce" class="btn btn-warning" :disabled="isLoadingSettings">
-                  Apply to All Users Now
-              </button>
-              <button @click="saveSettings" class="btn btn-primary" :disabled="!isSettingsChanged || isLoadingSettings">Save Overrides</button>
-          </div>
         </div>
-      </section>
 
-      <section class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-        <div class="flex justify-between items-center mb-3 border-b dark:border-gray-600 pb-2">
-          <h2 class="text-md font-semibold">Manage Existing Users</h2>
-          <div class="flex items-center space-x-2">
-            <button @click="emailAllUsers" class="btn btn-secondary !py-1 !px-2 text-xs">Email All Users</button>
-            <button @click="fetchUsers" class="btn btn-secondary !py-1 !px-2 text-xs" :disabled="isLoadingUsers">
-                <span v-if="isLoadingUsers">Refreshing...</span>
-                <span v-else>Refresh List</span>
-            </button>
-          </div>
+        <!-- Tab Navigation -->
+        <div class="border-b border-gray-200 dark:border-gray-700">
+            <nav class="-mb-px flex space-x-6 overflow-x-auto" aria-label="Tabs">
+                <button
+                    v-for="tab in tabs"
+                    :key="tab.id"
+                    @click="activeTab = tab.id"
+                    :class="[
+                        activeTab === tab.id
+                            ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-300'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-500',
+                        'whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors'
+                    ]"
+                >
+                    {{ tab.label }}
+                </button>
+            </nav>
         </div>
-        <UserTable 
-          :users="sortedUsers" 
-          :active-sessions="activeSessions"
-          :isLoading="isLoadingUsers"
-          :sort-key="sortKey"
-          :sort-dir="sortDir"
-          @sort-by="handleSort"
-          @edit-user="editUser"
-          @delete-user="deleteUser" 
-          @reset-password="resetPassword" 
-          @get-reset-link="getResetLink"
-          @activate-user="activateUser"
-          @deactivate-user="deactivateUser"
-        />
-      </section>
-    </div>
-    
-    <div v-if="activeTab === 'settings'">
-      <section class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm">
-        <div class="flex justify-between items-center mb-4 border-b dark:border-gray-600 pb-3">
-          <h2 class="text-md font-semibold">Application Settings</h2>
-          <div class="space-x-2">
-            <button @click="resetSettings" class="btn btn-secondary" :disabled="!isSettingsChanged || isLoadingSettings">Reset</button>
-            <button @click="saveSettings" class="btn btn-primary" :disabled="!isSettingsChanged || isLoadingSettings">
-              <span v-if="isLoadingSettings">Saving...</span>
-              <span v-else>Save Changes</span>
-            </button>
-          </div>
-        </div>
-        <div v-if="isLoadingSettings" class="text-center p-8 text-gray-500">
-          Loading settings...
-        </div>
-        <form v-else @submit.prevent="saveSettings" class="space-y-8">
-          <div v-for="(group, category) in categorizedSettings" :key="category">
-             <template v-if="category !== 'Global LLM Overrides'">
-                <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4">{{ category }}</h3>
-                <div class="space-y-6 bg-gray-50 dark:bg-gray-700/50 p-4 rounded-md">
-                <div v-for="setting in group" :key="setting.key">
-                    <label :for="`setting-${setting.key}`" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
-                    <div class="mt-2">
-                    <label v-if="setting.type === 'boolean'" :for="`setting-${setting.key}`" class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" v-model="settings[setting.key]" class="sr-only peer" :id="`setting-${setting.key}`">
-                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-500 peer-checked:bg-blue-600"></div>
-                        <span class="ml-3 text-sm font-medium text-gray-900 dark:text-gray-200">{{ settings[setting.key] ? 'Enabled' : 'Disabled' }}</span>
-                    </label>
-                    <select v-else-if="setting.key === 'registration_mode' || setting.key === 'password_recovery_mode'" v-model="settings[setting.key]" :id="`setting-${setting.key}`" class="input-field max-w-sm">
-                        <option v-if="setting.key === 'registration_mode'" value="direct">Direct (instantly active)</option>
-                        <option v-if="setting.key === 'registration_mode'" value="admin_approval">Admin Approval</option>
-                        <option v-if="setting.key === 'password_recovery_mode'" value="manual">Manual (Admin Notified)</option>
-                        <option v-if="setting.key === 'password_recovery_mode'" value="automatic">Automatic (Email)</option>
-                    </select>
-                    <input v-else
-                           :type="setting.key.includes('password') ? 'password' : (setting.type === 'string' ? 'text' : 'number')"
-                           :step="setting.type === 'float' ? '0.1' : '1'"
-                           v-model="settings[setting.key]"
-                           :placeholder="setting.key.includes('password') ? 'Enter new password to change' : ''"
-                           :id="`setting-${setting.key}`"
-                           class="input-field max-w-sm">
+
+        <!-- Tab Content -->
+        <div>
+            <Suspense>
+                <template #default>
+                    <component :is="activeComponent" />
+                </template>
+                <template #fallback>
+                    <div class="text-center py-10">
+                        <p class="text-gray-500 dark:text-gray-400">Loading component...</p>
                     </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">Key: <code class="bg-gray-200 dark:bg-gray-600 px-1 rounded">{{ setting.key }}</code></p>
-                </div>
-                </div>
-             </template>
-          </div>
-        </form>
-      </section>
+                </template>
+            </Suspense>
+        </div>
     </div>
-
-    <div v-if="activeTab === 'import'">
-        <section class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-sm">
-            <h2 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">Import from OpenWebUI</h2>
-            <p class="mt-2 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
-                Migrate users and their discussion histories from an OpenWebUI instance.
-            </p>
-            <div class="mt-6 border-t border-gray-200 dark:border-gray-700 pt-6">
-                <div class="prose dark:prose-invert text-sm max-w-none">
-                    <p><strong>Instructions:</strong></p>
-                    <ol>
-                        <li>Locate your OpenWebUI data directory (e.g., inside the Docker container at <code>/app/backend/data</code>).</li>
-                        <li>Find the main database file named <strong><code>webui.db</code></strong>.</li>
-                        <li>Click "Select File" and upload that single <code>webui.db</code> file.</li>
-                        <li>Click "Start Import". The process runs in the background and may take several minutes. Check the server logs for detailed progress.</li>
-                    </ol>
-                    <p class="font-semibold text-yellow-600 dark:text-yellow-400">
-                      Important: This tool migrates users based on their email. If a user with the same email already exists, their core data will be skipped, but their discussions will still be imported. Passwords will be migrated seamlessly.
-                    </p>
-                </div>
-                
-                <div class="mt-6">
-                    <label for="file-upload" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        OpenWebUI Database File
-                    </label>
-                    <div class="mt-2 flex items-center">
-                        <input
-                            ref="fileInputRef"
-                            @change="handleFileSelect"
-                            type="file"
-                            accept=".db"
-                            class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/50 dark:file:text-blue-300 dark:hover:file:bg-blue-900"
-                        />
-                    </div>
-                     <div v-if="importFile" class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-                        Selected: <strong>{{ importFile.name }}</strong>
-                    </div>
-                </div>
-
-                <div class="mt-6 flex justify-end">
-                    <button
-                        @click="handleImport"
-                        :disabled="isImporting || !importFile"
-                        class="btn btn-primary"
-                    >
-                        <span v-if="isImporting">Importing...</span>
-                        <span v-else>Start Import</span>
-                    </button>
-                </div>
-            </div>
-        </section>
-    </div>
-  </div>
 </template>

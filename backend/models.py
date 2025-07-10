@@ -18,6 +18,13 @@ class ModelInfo(BaseModel):
     id: Optional[str] = None
     icon_base64: Optional[str] = None
 
+class AdminDashboardStats(BaseModel):
+    total_users: int
+    active_users_24h: int
+    new_users_7d: int
+    pending_approval: int
+    pending_password_resets: int
+
 class UserLLMParams(BaseModel):
     llm_ctx_size: Optional[int] = Field(None, ge=0)
     llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
@@ -47,6 +54,7 @@ class UserCreateAdmin(UserLLMParams):
     family_name: Optional[str] = Field(None, max_length=100)
     email: Optional[EmailStr] = Field(None, max_length=255)
     birth_date: Optional[datetime.date] = None
+    receive_notification_emails: bool = True
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
@@ -62,6 +70,7 @@ class UserUpdate(BaseModel):
     family_name: Optional[str] = Field(None, max_length=100)
     email: Optional[EmailStr] = Field(None, max_length=255)
     birth_date: Optional[datetime.date] = None
+    receive_notification_emails: Optional[bool] = None
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
@@ -112,6 +121,10 @@ class PasswordResetRequest(BaseModel):
 class UserPasswordResetAdmin(BaseModel):
     new_password: constr(min_length=8)
 
+class EmailAllUsersRequest(BaseModel):
+    subject: constr(min_length=1)
+    body: constr(min_length=1)
+
 class PostVisibility(str, Enum):
     PUBLIC = "public"
     FOLLOWERS = "followers"
@@ -146,6 +159,9 @@ class UserPublic(UserLLMParams):
     family_name: Optional[str] = None
     email: Optional[EmailStr] = None
     birth_date: Optional[datetime.date] = None
+    receive_notification_emails: bool
+    password_reset_token: Optional[str] = None
+    reset_token_expiry: Optional[datetime.datetime] = None
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
@@ -167,6 +183,7 @@ class UserAuthDetails(UserLLMParams):
     family_name: Optional[str] = None
     email: Optional[EmailStr] = None
     birth_date: Optional[datetime.date] = None
+    receive_notification_emails: bool
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None

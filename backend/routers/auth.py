@@ -5,7 +5,7 @@ import base64
 import io
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Response, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Response, UploadFile, File, Form, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -39,7 +39,7 @@ from backend.session import (
     user_sessions,
 )
 from backend.config import LOLLMS_CLIENT_DEFAULTS, SAFE_STORE_DEFAULTS
-from backend.security import get_password_hash, verify_password, create_access_token, decode_access_token, create_reset_token
+from backend.security import get_password_hash, verify_password, create_access_token, decode_access_token, create_reset_token, send_password_reset_email
 from backend.settings import settings
 from backend.ws_manager import manager
 
@@ -335,31 +335,49 @@ async def change_user_password(
         raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
 
 @auth_router.post("/forgot-password", status_code=status.HTTP_200_OK)
-async def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
+async def forgot_password(
+    request: ForgotPasswordRequest,
+    fastapi_request: Request,
+    db: Session = Depends(get_db),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
     user = db.query(DBUser).filter(
         or_(DBUser.username == request.username_or_email, DBUser.email == request.username_or_email)
     ).first()
 
     if user:
         recovery_mode = settings.get("password_recovery_mode", "manual")
+        smtp_host = settings.get("smtp_host")
         
-        if recovery_mode == 'manual':
-            # Simulate a DM from a system user to all admins
+        is_automatic_possible = recovery_mode == 'automatic' and smtp_host and user.email
+
+        if is_automatic_possible:
+            token = create_reset_token()
+            user.password_reset_token = token
+            user.reset_token_expiry = datetime.datetime.now(timezone.utc) + timedelta(hours=1)
+            try:
+                db.commit()
+                base_url = str(fastapi_request.base_url).strip('/')
+                reset_link = f"{base_url}/reset-password?token={token}"
+                background_tasks.add_task(send_password_reset_email, user.email, reset_link, user.username)
+            except Exception as e:
+                db.rollback()
+                # Fallback to manual mode on DB or mail error
+                await manager.broadcast_to_admins({
+                    "id": 0, "sender_id": 0, "sender_username": "System Alert",
+                    "receiver_id": -1, "receiver_username": "Admins",
+                    "content": f"User '{user.username}' (ID: {user.id}) tried an automatic password reset, but it failed. Please assist them manually. Error: {e}",
+                    "sent_at": datetime.datetime.now(timezone.utc).isoformat()
+                })
+
+        else: # Manual mode or automatic is not possible
             dm_notification = {
-                "id": 0, # Placeholder ID
-                "sender_id": 0, # System User ID
-                "receiver_id": -1, # Broadcast marker, handled by manager
-                "sender_username": "System Alert",
-                "receiver_username": "Admins",
-                "content": f"User '{user.username}' (ID: {user.id}) has requested a password reset. Please go to the admin panel to assist them.",
+                "id": 0, "sender_id": 0, "sender_username": "System Alert",
+                "receiver_id": -1, "receiver_username": "Admins",
+                "content": f"User '{user.username}' (ID: {user.id}) has requested a password reset. Please go to the admin panel to generate a reset link for them.",
                 "sent_at": datetime.datetime.now(timezone.utc).isoformat()
             }
             await manager.broadcast_to_admins(dm_notification)
-
-        elif recovery_mode == 'automatic':
-            # This is where you would implement automatic email sending
-            # For now, it does nothing
-            pass
     
     return {"message": "If an account with that username or email exists, a password reset process has been initiated."}
 

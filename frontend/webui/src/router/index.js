@@ -20,6 +20,7 @@ const routes = [
     path: '/settings',
     name: 'Settings',
     component: SettingsView,
+    meta: { requiresAuth: true }
   },
   {
     path: '/messages',
@@ -31,7 +32,7 @@ const routes = [
     path: '/reset-password',
     name: 'ResetPassword',
     component: ResetPasswordView,
-    meta: { requiresGuest: true } // A page for non-authenticated users
+    meta: { requiresGuest: true }
   },
 ];
 

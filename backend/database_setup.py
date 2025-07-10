@@ -94,6 +94,7 @@ class User(Base):
     email = Column(String, nullable=True, index=True, unique=True)
     birth_date = Column(Date, nullable=True)
     icon = Column(Text, nullable=True)
+    receive_notification_emails = Column(Boolean, default=True, nullable=False)
 
     
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
@@ -272,13 +273,15 @@ engine = None
 SessionLocal = None
 
 def _bootstrap_global_settings(connection):
-    count_query = text("SELECT COUNT(*) FROM global_configs")
-    if connection.execute(count_query).scalar_one() > 0:
-        return
-
-    print("INFO: Bootstrapping global settings from config.toml into the database.")
+    """
+    Ensures all necessary global settings exist in the database.
+    It reads all possible settings from a template, checks which ones are missing
+    from the database, and inserts them with default values.
+    This makes the system robust against configuration changes over time.
+    """
+    print("INFO: Checking and bootstrapping global settings in the database.")
     
-    settings_to_bootstrap = {
+    all_possible_settings = {
         "allow_new_registrations": {
             "value": config.get("app_settings", {}).get("allow_new_registrations", True),
             "type": "boolean", "description": "Allow new users to register an account.", "category": "Registration"
@@ -293,7 +296,7 @@ def _bootstrap_global_settings(connection):
         },
         "password_recovery_mode": {
             "value": "manual",
-            "type": "string", "description": "Password recovery mode: 'manual' (admins are notified) or 'automatic' (emails are sent).", "category": "Authentication"
+            "type": "string", "description": "Password recovery mode: 'manual', 'automatic' (SMTP), or 'system_mail' (uses server's 'mail' command).", "category": "Authentication"
         },
         "smtp_host": {
             "value": "",
@@ -348,16 +351,36 @@ def _bootstrap_global_settings(connection):
             "type": "integer", "description": "The context size (in tokens) to force on all users.", "category": "Global LLM Overrides"
         }
     }
+
+    select_keys_query = text("SELECT key FROM global_configs")
+    existing_keys = {row[0] for row in connection.execute(select_keys_query).fetchall()}
     
+    missing_keys = set(all_possible_settings.keys()) - existing_keys
+
+    if not missing_keys:
+        print("INFO: All global settings are already present in the database.")
+        return
+
+    print(f"INFO: Found {len(missing_keys)} missing global settings. Adding them to the database.")
+
     insert_stmt = GlobalConfig.__table__.insert()
     configs_to_insert = [
-        {"key": key, "value": json.dumps({"value": data["value"], "type": data["type"]}), "description": data["description"], "category": data["category"]}
-        for key, data in settings_to_bootstrap.items()
+        {
+            "key": key,
+            "value": json.dumps({
+                "value": all_possible_settings[key]["value"],
+                "type": all_possible_settings[key]["type"]
+            }),
+            "description": all_possible_settings[key]["description"],
+            "category": all_possible_settings[key]["category"]
+        }
+        for key in missing_keys
     ]
 
     if configs_to_insert:
         connection.execute(insert_stmt, configs_to_insert)
-        print(f"INFO: Successfully bootstrapped {len(configs_to_insert)} global settings.")
+        print(f"INFO: Successfully bootstrapped {len(configs_to_insert)} new global settings.")
+
 
 def init_database(db_url: str):
     global engine, SessionLocal
@@ -392,7 +415,8 @@ def init_database(db_url: str):
                     "user_ui_level":"INTEGER", "ai_response_language":"VARCHAR DEFAULT 'auto'",
                     "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL",
                     "chat_active": "BOOLEAN DEFAULT 0 NOT NULL",
-                    "first_page": "VARCHAR DEFAULT 'feed' NOT NULL"
+                    "first_page": "VARCHAR DEFAULT 'feed' NOT NULL",
+                    "receive_notification_emails": "BOOLEAN DEFAULT 1 NOT NULL"
                 }
                 
                 added_cols = []

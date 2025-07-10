@@ -25,7 +25,9 @@ from backend.models import (
     GlobalConfigUpdate,
     AdminUserUpdate,
     ModelInfo,
-    ForceSettingsPayload
+    ForceSettingsPayload,
+    EmailAllUsersRequest,
+    AdminDashboardStats
 )
 from backend.session import (
     get_user_data_root,
@@ -34,13 +36,68 @@ from backend.session import (
     user_sessions,
     get_user_lollms_client,
 )
-from backend.security import create_reset_token
+from backend.security import create_reset_token, send_generic_email
 from backend.settings import settings
 from backend.config import INITIAL_ADMIN_USER_CONFIG
 from backend.migration_utils import run_openwebui_migration
 
 
 admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependencies=[Depends(get_current_admin_user)])
+
+@admin_router.get("/stats", response_model=AdminDashboardStats)
+async def get_dashboard_stats(db: Session = Depends(get_db)):
+    now = datetime.now(timezone.utc)
+    
+    total_users = db.query(DBUser).count()
+    
+    active_24h_threshold = now - timedelta(hours=24)
+    active_users_24h = db.query(DBUser).filter(DBUser.last_activity_at > active_24h_threshold).count()
+
+    new_7d_threshold = now - timedelta(days=7)
+    new_users_7d = db.query(DBUser).filter(DBUser.created_at > new_7d_threshold).count()
+    
+    registration_mode = settings.get("registration_mode", "admin_approval")
+    pending_approval = 0
+    if registration_mode == "admin_approval":
+        pending_approval = db.query(DBUser).filter(DBUser.is_active == False, DBUser.activation_token.isnot(None)).count()
+    
+    pending_password_resets = db.query(DBUser).filter(
+        DBUser.password_reset_token.isnot(None), 
+        DBUser.reset_token_expiry > now
+    ).count()
+
+    return AdminDashboardStats(
+        total_users=total_users,
+        active_users_24h=active_users_24h,
+        new_users_7d=new_users_7d,
+        pending_approval=pending_approval,
+        pending_password_resets=pending_password_resets
+    )
+
+@admin_router.post("/email-all-users", status_code=202)
+async def email_all_users(
+    payload: EmailAllUsersRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    email_mode = settings.get("password_recovery_mode")
+    if email_mode not in ["automatic", "system_mail"]:
+        raise HTTPException(status_code=412, detail=f"Email sending is not enabled or is set to manual. Current mode: '{email_mode}'.")
+
+    users_to_email = db.query(DBUser).filter(
+        DBUser.is_active == True,
+        DBUser.receive_notification_emails == True,
+        DBUser.email.isnot(None)
+    ).all()
+
+    if not users_to_email:
+        return {"message": "No active users found who have opted-in to receive emails."}
+
+    for user in users_to_email:
+        background_tasks.add_task(send_generic_email, user.email, payload.subject, payload.body)
+    
+    return {"message": f"Email sending initiated for {len(users_to_email)} users."}
+
 
 @admin_router.get("/available-models", response_model=List[ModelInfo])
 async def get_available_models(current_admin: UserAuthDetails = Depends(get_current_admin_user)):

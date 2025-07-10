@@ -22,12 +22,19 @@ const settingsConfig = [
         defaultValue: false
     },
     {
+        key: 'receive_notification_emails',
+        type: 'toggle',
+        label: 'Receive Notification Emails',
+        description: 'Allow the system to send you emails for announcements or other notifications.',
+        defaultValue: true
+    },
+    {
         key: 'chat_active',
         type: 'toggle',
         label: 'Activate Social Chat',
         description: 'Enable or disable direct messaging with other users.',
         defaultValue: false,
-        minLevel: 2 // Requires Intermediate level or higher
+        minLevel: 2
     },
     {
         key: 'user_ui_level',
@@ -66,7 +73,7 @@ const settingsConfig = [
             { value: "en", text: 'English' },
             { value: "fr", text: 'French' },
             { value: "it", text: 'Italian' },
-            { value: "es", text: 'Spanish' } // Corrected typo
+            { value: "es", text: 'Spanish' }
         ]
     }
 ];
@@ -94,12 +101,10 @@ watch(user, populateForm, { deep: true });
 watch(form, (newValue, oldValue) => {
     hasChanges.value = JSON.stringify(newValue) !== JSON.stringify(pristineState);
 
-    // Business rule: When switching to Novice, set default first page to 'new_discussion'
     if (oldValue && newValue.user_ui_level === 1 && oldValue.user_ui_level !== 1) {
         form.value.first_page = 'new_discussion';
     }
 
-    // Business rule: If UI level is too low for the selected first page, reset it
     if (newValue.user_ui_level < 2 && newValue.first_page === 'feed') {
         form.value.first_page = 'new_discussion';
     }
@@ -109,6 +114,8 @@ async function handleSave() {
     isLoading.value = true;
     try {
         await authStore.updateUserPreferences(form.value);
+        pristineState = JSON.parse(JSON.stringify(form.value));
+        hasChanges.value = false;
     } catch (error) {
         console.error("Failed to save settings:", error);
     } finally {
@@ -128,7 +135,6 @@ async function handleSave() {
         <div class="border-t border-gray-200 dark:border-gray-700">
             <form v-if="user" @submit.prevent="handleSave" class="p-4 sm:p-6 space-y-8">
                 <div v-for="setting in settingsConfig" :key="setting.key">
-                    <!-- Renders a Select (Dropdown) Input -->
                     <div v-if="setting.type === 'select'">
                         <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
                             {{ setting.label }}
@@ -146,7 +152,6 @@ async function handleSave() {
                         <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ setting.description }}</p>
                     </div>
 
-                    <!-- Renders a Toggle (Checkbox) Input -->
                     <div v-if="setting.type === 'toggle' && (!setting.minLevel || user.user_ui_level >= setting.minLevel)" class="relative flex items-start">
                         <div class="flex h-6 items-center">
                             <input
@@ -165,7 +170,6 @@ async function handleSave() {
                     </div>
                 </div>
 
-                <!-- Save Button -->
                 <div class="flex justify-end pt-4">
                     <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">
                         <span v-if="isLoading">Saving...</span>
