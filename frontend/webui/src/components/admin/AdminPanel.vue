@@ -11,6 +11,7 @@ const GlobalSettings = defineAsyncComponent(() => import('./GlobalSettings.vue')
 const BindingsSettings = defineAsyncComponent(() => import('./BindingsSettings.vue'));
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
 const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
+const ServicesSettings = defineAsyncComponent(() => import('./ServicesSettings.vue')); // Added
 
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
@@ -28,6 +29,7 @@ const tabs = [
     { id: 'dashboard', label: 'Dashboard', component: Dashboard },
     { id: 'users', label: 'User Management', component: UserTable },
     { id: 'bindings', label: 'LLM Bindings', component: BindingsSettings },
+    { id: 'services', label: 'Services (MCP/Apps)', component: ServicesSettings }, // Added
     { id: 'global_settings', label: 'Global Settings', component: GlobalSettings },
     { id: 'email', label: 'Email Settings', component: EmailSettings },
     { id: 'import', label: 'Import', component: ImportTools }

@@ -1,203 +1,197 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
-import { useDataStore } from './data';
 
 export const useAdminStore = defineStore('admin', () => {
     const uiStore = useUiStore();
-    const dataStore = useDataStore();
 
-    // --- STATE ---
+    // --- State ---
     const allUsers = ref([]);
-    const globalSettings = ref([]);
-    const bindings = ref([]);
-    const availableBindingTypes = ref([]);
     const isLoadingUsers = ref(false);
-    const isLoadingSettings = ref(false);
+
+    const bindings = ref([]);
     const isLoadingBindings = ref(false);
+    const availableBindingTypes = ref([]);
+
+    const globalSettings = ref([]);
+    const isLoadingSettings = ref(false);
+
     const isImporting = ref(false);
-    const isEnhancingEmail = ref(false);
-
-    // --- GETTERS ---
-    const settingsByCategory = computed(() => {
-        if (!globalSettings.value.length) return {};
-        return globalSettings.value.reduce((acc, setting) => {
-            const category = setting.category || 'General';
-            if (!acc[category]) {
-                acc[category] = [];
-            }
-            acc[category].push(setting);
-            return acc;
-        }, {});
-    });
-
-    const isSmtpConfigured = computed(() => {
-        const smtpHostSetting = globalSettings.value.find(s => s.key === 'smtp_host');
-        return smtpHostSetting && smtpHostSetting.value;
-    });
-
-    // --- ACTIONS ---
-
-    // -- Bindings Management --
-    async function fetchBindings() {
-        isLoadingBindings.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/bindings');
-            bindings.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Failed to fetch LLM bindings.', 'error');
-        } finally {
-            isLoadingBindings.value = false;
-        }
-    }
-
-    async function fetchAvailableBindingTypes() {
-        try {
-            const response = await apiClient.get('/api/admin/bindings/available_types');
-            availableBindingTypes.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Failed to fetch available binding types.', 'error');
-        }
-    }
     
-    async function addBinding(bindingData) {
-        try {
-            await apiClient.post('/api/admin/bindings', bindingData);
-            uiStore.addNotification('Binding created successfully.', 'success');
-            await fetchBindings();
-            await dataStore.fetchAvailableLollmsModels();
-        } catch (error) {
-            throw error;
-        }
-    }
-    
-    async function updateBinding(bindingId, updateData) {
-        try {
-            await apiClient.put(`/api/admin/bindings/${bindingId}`, updateData);
-            uiStore.addNotification('Binding updated successfully.', 'success');
-            await fetchBindings();
-            await dataStore.fetchAvailableLollmsModels();
-        } catch (error) {
-            throw error;
-        }
-    }
-    
-    async function deleteBinding(bindingId) {
-        try {
-            await apiClient.delete(`/api/admin/bindings/${bindingId}`);
-            uiStore.addNotification('Binding deleted successfully.', 'success');
-            await fetchBindings();
-            await dataStore.fetchAvailableLollmsModels();
-        } catch (error) {
-            throw error;
-        }
-    }
+    const mcps = ref([]);
+    const apps = ref([]);
+    const isLoadingServices = ref(false);
 
 
-    // -- User Management --
+    // --- Actions ---
+
+    // Users
     async function fetchAllUsers() {
         isLoadingUsers.value = true;
         try {
             const response = await apiClient.get('/api/admin/users');
             allUsers.value = response.data;
         } catch (error) {
-            uiStore.addNotification('Failed to fetch users.', 'error');
-            allUsers.value = [];
+            console.error("Failed to fetch users:", error);
+            uiStore.addNotification('Could not load user list.', 'error');
         } finally {
             isLoadingUsers.value = false;
         }
     }
+    
+    async function sendEmailToUsers(subject, body, user_ids) {
+        try {
+            const payload = {
+                subject,
+                body,
+                user_ids,
+                send_as_text: false, 
+                background_color: '#f0f4f8'
+            };
+            const response = await apiClient.post('/api/admin/email-users', payload);
+            uiStore.addNotification(response.data.message || 'Email task started.', 'success');
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
 
-    // -- Global Settings --
+    // Bindings
+    async function fetchBindings() {
+        isLoadingBindings.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/bindings');
+            bindings.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Could not load LLM bindings.', 'error');
+        } finally {
+            isLoadingBindings.value = false;
+        }
+    }
+    async function fetchAvailableBindingTypes() {
+        try {
+            const response = await apiClient.get('/api/admin/bindings/available_types');
+            availableBindingTypes.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Could not load available binding types.', 'error');
+        }
+    }
+    async function addBinding(payload) {
+        const response = await apiClient.post('/api/admin/bindings', payload);
+        bindings.value.push(response.data);
+        uiStore.addNotification(`Binding '${response.data.alias}' created.`, 'success');
+    }
+    async function updateBinding(id, payload) {
+        const response = await apiClient.put(`/api/admin/bindings/${id}`, payload);
+        const index = bindings.value.findIndex(b => b.id === id);
+        if (index !== -1) {
+            bindings.value[index] = response.data;
+        }
+        uiStore.addNotification(`Binding '${response.data.alias}' updated.`, 'success');
+    }
+    async function deleteBinding(id) {
+        await apiClient.delete(`/api/admin/bindings/${id}`);
+        bindings.value = bindings.value.filter(b => b.id !== id);
+        uiStore.addNotification('Binding deleted successfully.', 'success');
+    }
+
+    // Global Settings
     async function fetchGlobalSettings() {
         isLoadingSettings.value = true;
         try {
             const response = await apiClient.get('/api/admin/settings');
             globalSettings.value = response.data;
         } catch (error) {
-            uiStore.addNotification('Failed to load global settings.', 'error');
-            globalSettings.value = [];
+            uiStore.addNotification('Could not load global settings.', 'error');
         } finally {
             isLoadingSettings.value = false;
         }
+    }
+    async function updateGlobalSettings(configs) {
+        const response = await apiClient.put('/api/admin/settings', { configs });
+        await fetchGlobalSettings();
+        uiStore.addNotification(response.data.message, 'success');
     }
 
-    async function updateGlobalSettings(configsToUpdate) {
-        isLoadingSettings.value = true;
-        try {
-            await apiClient.put('/api/admin/settings', { configs: configsToUpdate });
-            await fetchGlobalSettings(); // Re-fetch to ensure consistency
-            uiStore.addNotification('Global settings updated successfully.', 'success');
-        } catch (error) {
-            throw error;
-        } finally {
-            isLoadingSettings.value = false;
-        }
-    }
-    
-    // -- Data Import --
+    // Import
     async function importOpenWebUIData(file) {
         isImporting.value = true;
         const formData = new FormData();
         formData.append('file', file);
         try {
-            const response = await apiClient.post('/api/admin/import-openwebui', formData, {
-                headers: { 'Content-Type': 'multipart/form-data' },
-            });
-            uiStore.addNotification(response.data.message, 'info', 6000);
-        } catch (error) {
-            throw error;
+            const response = await apiClient.post('/api/admin/import-openwebui', formData);
+            uiStore.addNotification(response.data.message, 'success', { duration: 5000 });
         } finally {
             isImporting.value = false;
         }
     }
-
-
-    // -- Mass Email --
-    async function sendEmailToUsers(subject, body, userIds, backgroundColor, sendAsText = false) {
+    
+    // MCPs
+    async function fetchMcps() {
+        isLoadingServices.value = true;
         try {
-            const response = await apiClient.post('/api/admin/email-users', { 
-                subject, 
-                body, 
-                user_ids: userIds,
-                background_color: backgroundColor,
-                send_as_text: sendAsText
-            });
-            uiStore.addNotification(response.data.message, 'success');
+            const response = await apiClient.get('/api/mcps');
+            mcps.value = response.data;
         } catch (error) {
-            throw error;
+            uiStore.addNotification('Could not load MCPs.', 'error');
+        } finally {
+            isLoadingServices.value = false;
         }
     }
+    async function addMcp(payload) {
+        const response = await apiClient.post('/api/mcps', payload);
+        mcps.value.push(response.data);
+        uiStore.addNotification(`MCP '${response.data.name}' created successfully.`, 'success');
+    }
+    async function updateMcp(id, payload) {
+        const response = await apiClient.put(`/api/mcps/${id}`, payload);
+        const index = mcps.value.findIndex(m => m.id === id);
+        if (index !== -1) mcps.value[index] = response.data;
+        uiStore.addNotification(`MCP '${response.data.name}' updated successfully.`, 'success');
+    }
+    async function deleteMcp(id) {
+        await apiClient.delete(`/api/mcps/${id}`);
+        mcps.value = mcps.value.filter(m => m.id !== id);
+        uiStore.addNotification('MCP deleted successfully.', 'success');
+    }
 
-    async function enhanceEmail(subject, body, backgroundColor, customPrompt = '') {
-        isEnhancingEmail.value = true;
+    // Apps
+    async function fetchApps() {
+        isLoadingServices.value = true;
         try {
-            const response = await apiClient.post('/api/admin/enhance-email', {
-                subject: subject,
-                body: body,
-                background_color: backgroundColor,
-                prompt: customPrompt
-            });
-            uiStore.addNotification('Email content enhanced by AI.', 'success');
-            return response.data;
+            const response = await apiClient.get('/api/apps');
+            apps.value = response.data;
         } catch (error) {
-            // Global handler will show the notification
-            throw error;
+            uiStore.addNotification('Could not load Apps.', 'error');
         } finally {
-            isEnhancingEmail.value = false;
+            isLoadingServices.value = false;
         }
+    }
+    async function addApp(payload) {
+        const response = await apiClient.post('/api/apps', payload);
+        apps.value.push(response.data);
+        uiStore.addNotification(`App '${response.data.name}' created successfully.`, 'success');
+    }
+    async function updateApp(id, payload) {
+        const response = await apiClient.put(`/api/apps/${id}`, payload);
+        const index = apps.value.findIndex(a => a.id === id);
+        if (index !== -1) apps.value[index] = response.data;
+        uiStore.addNotification(`App '${response.data.name}' updated successfully.`, 'success');
+    }
+    async function deleteApp(id) {
+        await apiClient.delete(`/api/apps/${id}`);
+        apps.value = apps.value.filter(a => a.id !== id);
+        uiStore.addNotification('App deleted successfully.', 'success');
     }
 
     return {
-        // State
-        allUsers, globalSettings, bindings, availableBindingTypes, 
-        isLoadingUsers, isLoadingSettings, isLoadingBindings, isImporting, isEnhancingEmail,
-        // Getters
-        settingsByCategory, isSmtpConfigured,
-        // Actions
-        fetchAllUsers, fetchGlobalSettings, updateGlobalSettings, 
-        importOpenWebUIData, sendEmailToUsers, enhanceEmail,
-        fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding
+        allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers,
+        bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
+        globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings,
+        isImporting, importOpenWebUIData,
+        mcps, apps, isLoadingServices,
+        fetchMcps, addMcp, updateMcp, deleteMcp,
+        fetchApps, addApp, updateApp, deleteApp
     };
 });

@@ -134,7 +134,7 @@ class User(Base):
     max_rag_len = Column(Integer, nullable=True)
     rag_n_hops = Column(Integer, nullable=True)
     rag_min_sim_percent = Column(Float, nullable=True)
-    rag_use_graph = Column(Boolean, default=False, nullable=False)
+    rag_use_graph = Column(Boolean, default=False, nullable=True)
     rag_graph_response_type = Column(String, default="chunks_summary", nullable=True)
     auto_title = Column(Boolean, default=False, nullable=False)
     user_ui_level = Column(Integer, default=0, nullable=True)
@@ -231,6 +231,18 @@ class App(Base):
     owner = relationship("User", back_populates="personal_apps")
     
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_app_name'),)
+
+class SystemApp(Base):
+    __tablename__ = "system_apps"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
+    name = Column(String, unique=True, nullable=False, index=True)
+    url = Column(String, nullable=False)
+    icon = Column(Text, nullable=True)
+    active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    authentication_type = Column(String, default="None", nullable=False)
+    authentication_key = Column(String, nullable=True)
 
 class DatabaseVersion(Base):
     __tablename__ = "database_version"
