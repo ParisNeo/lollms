@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, 
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import or_
 from PIL import Image
 # --- NEW: Import Argon2 for password verification ---
 import pipmaster as pm
@@ -66,7 +67,12 @@ async def login_for_access_token(
     Logs in a user, handling both native bcrypt and migrated argon2 passwords.
     If a migrated password is used, it's automatically upgraded to bcrypt.
     """
-    user = get_user_by_username(db, username=form_data.username)
+    user = db.query(DBUser).filter(
+        or_(
+            DBUser.username == form_data.username,
+            DBUser.email == form_data.username
+        )
+    ).first()
 
     is_password_correct = False
     

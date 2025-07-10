@@ -8,7 +8,7 @@ import appLogo from '../../assets/logo.png';
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 
-const username = ref('');
+const usernameOrEmail = ref('');
 const password = ref('');
 const isLoading = ref(false);
 const errorMessage = ref('');
@@ -16,7 +16,6 @@ const isPasswordVisible = ref(false);
 
 const usernameInput = ref(null);
 
-// Watch for the modal becoming active to focus the input
 watch(() => uiStore.activeModal, (newModalName) => {
     if (newModalName === 'login') {
         nextTick(() => {
@@ -32,28 +31,24 @@ const togglePasswordVisibility = () => {
 const handleLogin = async () => {
     errorMessage.value = '';
 
-    if (!username.value || !password.value) {
-        errorMessage.value = 'Username and password are required.';
+    if (!usernameOrEmail.value || !password.value) {
+        errorMessage.value = 'Username/Email and password are required.';
         return;
     }
 
     isLoading.value = true;
     try {
-        await authStore.login(username.value, password.value);
-        // On success, the auth store closes the modal and shows a success notification.
-        // We can clear the form fields on successful login.
-        username.value = '';
+        await authStore.login(usernameOrEmail.value, password.value);
+        usernameOrEmail.value = '';
         password.value = '';
     } catch (error) {
-        // The auth store now provides more specific error messages
         errorMessage.value = error.message || 'An unknown error occurred.';
-        password.value = ''; // Clear password field on failure
+        password.value = '';
     } finally {
         isLoading.value = false;
     }
 };
 
-// --- NEW: Function to switch to the registration modal ---
 const openRegisterModal = () => {
     uiStore.closeModal('login');
     uiStore.openModal('register');
@@ -75,16 +70,16 @@ const openRegisterModal = () => {
 
       <form @submit.prevent="handleLogin" class="space-y-4">
         <div>
-          <label for="username" class="block text-sm font-medium">Username</label>
+          <label for="username" class="block text-sm font-medium">Username or Email</label>
           <input
             ref="usernameInput"
-            v-model="username"
+            v-model="usernameOrEmail"
             type="text"
             id="username"
             required
             :disabled="isLoading"
             class="input-field mt-1 w-full"
-            placeholder="Enter your username"
+            placeholder="Enter your username or email"
             autocomplete="username"
           />
         </div>
@@ -133,7 +128,6 @@ const openRegisterModal = () => {
       </form>
     </template>
     
-    <!-- MODIFIED: Footer now links to the registration modal -->
     <template #footer>
         <div class="text-center text-sm">
             <p>
