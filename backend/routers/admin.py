@@ -27,7 +27,9 @@ from backend.models import (
     ModelInfo,
     ForceSettingsPayload,
     EmailUsersRequest,
-    AdminDashboardStats
+    AdminDashboardStats,
+    EnhanceEmailRequest,
+    EnhancedEmailResponse,
 )
 from backend.session import (
     get_user_data_root,
@@ -100,6 +102,45 @@ async def email_users(
             sent_count += 1
     
     return {"message": f"Email sending initiated for {sent_count} users."}
+
+@admin_router.post("/enhance-email", response_model=EnhancedEmailResponse)
+async def enhance_email_with_ai(
+    payload: EnhanceEmailRequest,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user)
+):
+    try:
+        lc = get_user_lollms_client(current_admin.username)
+        
+        prompt = f"""You are an expert copywriter. Your task is to enhance the following email draft to make it more engaging, professional, and clear.
+Return ONLY a single valid JSON object with two keys: "subject" and "body". Do not add any text or explanation before or after the JSON object.
+
+Original Subject:
+{payload.subject}
+
+Original Body:
+{payload.body}
+"""
+        
+        enhanced_data = lc.generate_structured_content(prompt, output_format={
+            "subject":"the subject of the email",
+            "body":"The content of the email"
+        }, stream=False)
+
+
+        try:
+            if "subject" not in enhanced_data or "body" not in enhanced_data:
+                 raise ValueError("The JSON response from the AI is missing 'subject' or 'body' keys.")
+            return EnhancedEmailResponse(
+                subject=enhanced_data.get("subject", payload.subject),
+                body=enhanced_data.get("body", payload.body)
+            )
+        except (json.JSONDecodeError, ValueError) as e:
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Failed to parse AI response: {e}")
+
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"An error occurred while enhancing the email: {e}")
 
 
 @admin_router.get("/available-models", response_model=List[ModelInfo])
@@ -376,7 +417,7 @@ async def admin_generate_password_reset_link(user_id: int, request: Request, db:
     try:
         db.commit()
         base_url = str(request.base_url).strip('/')
-        reset_link = f"{base_url}reset-password?token={token}"
+        reset_link = f"{base_url}/reset-password?token={token}"
         return {"reset_link": reset_link}
     except Exception as e:
         db.rollback()

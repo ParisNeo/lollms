@@ -12,6 +12,7 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingUsers = ref(false);
     const isLoadingSettings = ref(false);
     const isImporting = ref(false);
+    const isEnhancingEmail = ref(false);
 
     // --- GETTERS ---
     const settingsByCategory = computed(() => {
@@ -93,21 +94,35 @@ export const useAdminStore = defineStore('admin', () => {
 
 
     // -- Mass Email --
-    async function sendEmailToAllUsers(subject, body) {
+    async function sendEmailToUsers(subject, body, userIds) {
         try {
-            const response = await apiClient.post('/api/admin/email-all-users', { subject, body });
+            const response = await apiClient.post('/api/admin/email-users', { subject, body, user_ids: userIds });
             uiStore.addNotification(response.data.message, 'success');
         } catch (error) {
             throw error;
         }
     }
 
+    async function enhanceEmail(subject, body) {
+        isEnhancingEmail.value = true;
+        try {
+            const response = await apiClient.post('/api/admin/enhance-email', { subject, body });
+            uiStore.addNotification('Email content enhanced by AI.', 'success');
+            return response.data;
+        } catch (error) {
+            // Global handler will show the notification
+            throw error;
+        } finally {
+            isEnhancingEmail.value = false;
+        }
+    }
+
     return {
         // State
-        allUsers, globalSettings, isLoadingUsers, isLoadingSettings, isImporting,
+        allUsers, globalSettings, isLoadingUsers, isLoadingSettings, isImporting, isEnhancingEmail,
         // Getters
         settingsByCategory, isSmtpConfigured,
         // Actions
-        fetchAllUsers, fetchGlobalSettings, updateGlobalSettings, importOpenWebUIData, sendEmailToAllUsers
+        fetchAllUsers, fetchGlobalSettings, updateGlobalSettings, importOpenWebUIData, sendEmailToUsers, enhanceEmail
     };
 });

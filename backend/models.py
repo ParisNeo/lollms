@@ -126,6 +126,14 @@ class EmailUsersRequest(BaseModel):
     body: constr(min_length=1)
     user_ids: List[int]
 
+class EnhanceEmailRequest(BaseModel):
+    subject: str
+    body: str
+
+class EnhancedEmailResponse(BaseModel):
+    subject: str
+    body: str
+
 class PostVisibility(str, Enum):
     PUBLIC = "public"
     FOLLOWERS = "followers"
