@@ -96,8 +96,15 @@ async def email_users(
 
     sent_count = 0
     for user in users_to_email:
-        if user.email:
-            background_tasks.add_task(send_generic_email, user.email, payload.subject, payload.body, payload.background_color)
+        if user.email and user.receive_notification_emails:
+            background_tasks.add_task(
+                send_generic_email, 
+                user.email, 
+                payload.subject, 
+                payload.body, 
+                payload.background_color,
+                payload.send_as_text
+            )
             sent_count += 1
     
     return {"message": f"Email sending initiated for {sent_count} users."}

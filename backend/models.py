@@ -126,6 +126,7 @@ class EmailUsersRequest(BaseModel):
     body: constr(min_length=1)
     user_ids: List[int]
     background_color: Optional[str] = None
+    send_as_text: bool = False
 
 class EnhanceEmailRequest(BaseModel):
     subject: str

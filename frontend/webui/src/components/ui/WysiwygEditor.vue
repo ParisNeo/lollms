@@ -199,8 +199,8 @@ const toolbarActions = ref([
 </script>
 
 <template>
-  <div v-if="editor" class="border border-gray-300 dark:border-gray-600 rounded-md">
-    <div class="toolbar flex items-center p-2 border-b border-gray-300 dark:border-gray-600 space-x-1 bg-gray-50 dark:bg-gray-700/50 rounded-t-md flex-wrap">
+  <div v-if="editor" class="border border-gray-300 dark:border-gray-600 rounded-md flex flex-col h-full max-h-[50vh]">
+    <div class="toolbar flex items-center p-2 border-b border-gray-300 dark:border-gray-600 space-x-1 bg-gray-50 dark:bg-gray-700/50 rounded-t-md flex-wrap flex-shrink-0">
       <template v-for="(action, index) in toolbarActions" :key="index">
         <div v-if="action.type === 'divider'" class="w-px h-5 bg-gray-300 dark:bg-gray-600 mx-1"></div>
         
@@ -236,7 +236,9 @@ const toolbarActions = ref([
         </button>
       </template>
     </div>
-    <editor-content :editor="editor" />
+    <div class="overflow-y-auto flex-grow">
+      <editor-content :editor="editor" />
+    </div>
   </div>
 </template>
 

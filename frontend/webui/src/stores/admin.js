@@ -94,13 +94,14 @@ export const useAdminStore = defineStore('admin', () => {
 
 
     // -- Mass Email --
-    async function sendEmailToUsers(subject, body, userIds, backgroundColor) {
+    async function sendEmailToUsers(subject, body, userIds, backgroundColor, sendAsText = false) {
         try {
             const response = await apiClient.post('/api/admin/email-users', { 
                 subject, 
                 body, 
                 user_ids: userIds,
-                background_color: backgroundColor
+                background_color: backgroundColor,
+                send_as_text: sendAsText
             });
             uiStore.addNotification(response.data.message, 'success');
         } catch (error) {
