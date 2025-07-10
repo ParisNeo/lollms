@@ -4,6 +4,7 @@ import ProfileView from '../views/ProfileView.vue';
 import SettingsView from '../views/SettingsView.vue';
 import MessagesView from '../views/MessagesView.vue';
 import ResetPasswordView from '../views/ResetPasswordView.vue';
+import AdminView from '../views/AdminView.vue';
 
 const routes = [
   {
@@ -21,6 +22,12 @@ const routes = [
     name: 'Settings',
     component: SettingsView,
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/admin',
+    name: 'Admin',
+    component: AdminView,
+    meta: { requiresAuth: true, requiresAdmin: true }
   },
   {
     path: '/messages',
