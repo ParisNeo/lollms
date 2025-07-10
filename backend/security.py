@@ -86,27 +86,50 @@ def _send_email_smtp(to_email: str, subject: str, html_content: str):
         raise
 
 def _send_email_system_mail(to_email: str, subject: str, body: str):
-    """Sends an email using the system's `mail` command."""
+    """Sends an email using the system's `mail` command with enhanced debugging."""
     if not shutil.which("mail"):
+        print("CRITICAL: The 'mail' command was not found on the system. Please install mailutils or a similar package.")
         raise FileNotFoundError("The 'mail' command was not found on the system. Please install mailutils or similar package.")
     
+    command = [
+        'mail',
+        '-s', subject,
+        '-a', 'Content-Type: text/html; charset=UTF-8',
+        to_email
+    ]
+    
+    print(f"DEBUG: Executing system mail command: {' '.join(command)}")
+    
     try:
-        # The `mail` command typically expects the body on stdin.
-        # We also need to set the Content-Type for HTML emails.
-        command = [
-            'mail',
-            '-s', subject,
-            '-a', 'Content-Type: text/html; charset=UTF-8',
-            to_email
-        ]
-        process = subprocess.Popen(command, stdin=subprocess.PIPE, text=True)
-        process.communicate(input=body)
+        process = subprocess.run(
+            command,
+            input=body,
+            capture_output=True,
+            text=True,
+            check=False  # We will check the return code manually
+        )
+
+        print(f"DEBUG: System mail command finished with exit code: {process.returncode}")
+        if process.stdout:
+            print(f"DEBUG: System mail command STDOUT:\n---_---_---\n{process.stdout}\n---_---_---")
+        if process.stderr:
+            print(f"WARNING: System mail command STDERR:\n---_---_---\n{process.stderr}\n---_---_---")
+
         if process.returncode != 0:
-            raise subprocess.CalledProcessError(process.returncode, command)
-        print(f"INFO: Email (system mail) with subject '{subject}' sent successfully to {to_email}")
-    except Exception as e:
-        print(f"CRITICAL: Failed to send system mail to {to_email}. Error: {e}")
+            error_message = f"System 'mail' command failed with exit code {process.returncode}."
+            if process.stderr:
+                error_message += f" Stderr: {process.stderr}"
+            raise subprocess.CalledProcessError(process.returncode, command, output=process.stdout, stderr=process.stderr)
+
+        print(f"INFO: Email (system mail) with subject '{subject}' sent to {to_email}. Exit code {process.returncode}.")
+    
+    except FileNotFoundError:
+        print("CRITICAL: The 'mail' command could not be found. Is it installed and in the system's PATH?")
         raise
+    except Exception as e:
+        print(f"CRITICAL: An unexpected error occurred while trying to send system mail to {to_email}. Error: {e}")
+        raise
+
 
 def send_generic_email(to_email: str, subject: str, body: str):
     """
