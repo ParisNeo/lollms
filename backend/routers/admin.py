@@ -87,18 +87,17 @@ async def email_users(
         raise HTTPException(status_code=412, detail=f"Email sending is not enabled or is set to manual. Current mode: '{email_mode}'.")
 
     if not payload.user_ids:
-        return {"message": "No users selected to email."}
+        raise HTTPException(status_code=400, detail="No users selected to email.")
 
-    # Fetch only the users that were selected in the frontend
     users_to_email = db.query(DBUser).filter(DBUser.id.in_(payload.user_ids)).all()
 
     if not users_to_email:
-        return {"message": "No valid users found for the provided IDs."}
+        raise HTTPException(status_code=404, detail="No valid users found for the provided IDs.")
 
     sent_count = 0
     for user in users_to_email:
         if user.email:
-            background_tasks.add_task(send_generic_email, user.email, payload.subject, payload.body)
+            background_tasks.add_task(send_generic_email, user.email, payload.subject, payload.body, payload.background_color)
             sent_count += 1
     
     return {"message": f"Email sending initiated for {sent_count} users."}
@@ -111,28 +110,39 @@ async def enhance_email_with_ai(
     try:
         lc = get_user_lollms_client(current_admin.username)
         
-        prompt = f"""You are an expert copywriter. Your task is to enhance the following email draft to make it more engaging, professional, and clear.
-Return ONLY a single valid JSON object with two keys: "subject" and "body". Do not add any text or explanation before or after the JSON object.
+        prompt = f"""You are an expert copywriter and designer. Your task is to enhance the following email draft to make it more engaging, professional, and clear.
+You must also suggest a suitable HTML background color for the email's theme.
+Return ONLY a single valid JSON object with three keys: "subject", "body", and "background_color". The background_color should be a valid hex code (e.g., "#f0f4f8").
+Do not add any text or explanation before or after the JSON object.
 
 Original Subject:
 {payload.subject}
 
 Original Body:
 {payload.body}
+
+Current Background Color:
+{payload.background_color or "#FFFFFF"}
 """
         
-        enhanced_data = lc.generate_structured_content(prompt, output_format={
-            "subject":"the subject of the email",
-            "body":"The content of the email"
-        }, stream=False)
+        raw_response = lc.generate_text(prompt, stream=False)
 
+        json_start = raw_response.find('{')
+        json_end = raw_response.rfind('}') + 1
+        
+        if json_start == -1 or json_end == 0:
+            raise HTTPException(status_code=500, detail="AI did not return a valid JSON object.")
+            
+        json_string = raw_response[json_start:json_end]
 
         try:
+            enhanced_data = json.loads(json_string)
             if "subject" not in enhanced_data or "body" not in enhanced_data:
                  raise ValueError("The JSON response from the AI is missing 'subject' or 'body' keys.")
             return EnhancedEmailResponse(
                 subject=enhanced_data.get("subject", payload.subject),
-                body=enhanced_data.get("body", payload.body)
+                body=enhanced_data.get("body", payload.body),
+                background_color=enhanced_data.get("background_color", payload.background_color)
             )
         except (json.JSONDecodeError, ValueError) as e:
             traceback.print_exc()

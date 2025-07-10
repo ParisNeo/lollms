@@ -13,6 +13,7 @@ const { allUsers, isEnhancingEmail } = storeToRefs(adminStore);
 
 const subject = ref('');
 const body = ref('');
+const backgroundColor = ref('#f4f4f8');
 const isLoading = ref(false);
 const selectedUserIds = ref([]);
 const selectAll = ref(true);
@@ -25,7 +26,6 @@ onMounted(() => {
     if (allUsers.value.length === 0) {
         adminStore.fetchAllUsers();
     }
-    // Pre-select all eligible users by default
     selectedUserIds.value = eligibleUsers.value.map(u => u.id);
 });
 
@@ -43,10 +43,11 @@ async function handleEnhance() {
         return;
     }
     try {
-        const enhanced = await adminStore.enhanceEmail(subject.value, body.value);
+        const enhanced = await adminStore.enhanceEmail(subject.value, body.value, backgroundColor.value);
         if (enhanced) {
             subject.value = enhanced.subject;
             body.value = enhanced.body;
+            backgroundColor.value = enhanced.background_color || backgroundColor.value;
         }
     } catch (error) {
         // Error already handled by store/interceptor
@@ -65,7 +66,7 @@ async function handleSubmit() {
 
     isLoading.value = true;
     try {
-        await adminStore.sendEmailToUsers(subject.value, body.value, selectedUserIds.value);
+        await adminStore.sendEmailToUsers(subject.value, body.value, selectedUserIds.value, backgroundColor.value);
         uiStore.closeModal('emailAllUsers');
     } catch (error) {
         // The admin store now uses the global handler
@@ -80,20 +81,28 @@ async function handleSubmit() {
         modal-name="emailAllUsers"
         title="Email Users"
         @close="uiStore.closeModal('emailAllUsers')"
-        maxWidthClass="max-w-4xl"
+        maxWidthClass="max-w-5xl"
     >
         <template #body>
             <form @submit.prevent="handleSubmit" class="p-6 space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <!-- Left side: Form -->
                     <div class="space-y-6 md:col-span-2">
-                        <div>
-                            <label for="email-subject" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Subject</label>
-                            <input id="email-subject" v-model="subject" type="text" class="input-field mt-1" required />
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div class="sm:col-span-2">
+                                <label for="email-subject" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Subject</label>
+                                <input id="email-subject" v-model="subject" type="text" class="input-field mt-1" required />
+                            </div>
+                            <div>
+                                <label for="email-bg-color" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Background</label>
+                                <input id="email-bg-color" v-model="backgroundColor" type="color" class="w-full h-10 mt-1 p-1 border border-gray-300 dark:border-gray-600 rounded-md cursor-pointer" />
+                            </div>
                         </div>
-                        <div>
+                        <div class="flex flex-col">
                             <label for="email-body" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Body</label>
-                            <WysiwygEditor v-model="body" />
+                            <div class="max-h-[50vh] overflow-y-auto">
+                                <WysiwygEditor v-model="body" />
+                            </div>
                         </div>
                     </div>
 

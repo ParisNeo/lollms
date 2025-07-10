@@ -7,6 +7,7 @@ import subprocess
 import shutil
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import re
 
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
@@ -54,6 +55,28 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def create_reset_token() -> str:
     """Generates a secure, URL-safe random token for password resets."""
     return secrets.token_urlsafe(32)
+
+def _get_full_html_email(body: str, background_color: Optional[str]) -> str:
+    """Wraps the email body in a full HTML document with a background color."""
+    safe_bg_color = "#f4f4f4" # Default light gray background
+    if background_color and re.match(r'^#(?:[0-9a-fA-F]{3}){1,2}$', background_color):
+        safe_bg_color = background_color
+    
+    return f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email</title>
+</head>
+<body style="margin: 0; padding: 20px; font-family: sans-serif; background-color: {safe_bg_color};">
+    <div style="max-width: 600px; margin: auto; background: #ffffff; padding: 20px; border-radius: 8px;">
+        {body}
+    </div>
+</body>
+</html>
+"""
 
 def _send_email_smtp(to_email: str, subject: str, html_content: str):
     """Sends an email using a configured SMTP server."""
@@ -106,7 +129,7 @@ def _send_email_system_mail(to_email: str, subject: str, body: str):
             input=body,
             capture_output=True,
             text=True,
-            check=False  # We will check the return code manually
+            check=False
         )
 
         print(f"DEBUG: System mail command finished with exit code: {process.returncode}")
@@ -131,37 +154,33 @@ def _send_email_system_mail(to_email: str, subject: str, body: str):
         raise
 
 
-def send_generic_email(to_email: str, subject: str, body: str):
+def send_generic_email(to_email: str, subject: str, body: str, background_color: Optional[str] = "#f4f4f4"):
     """
     Sends a generic HTML email to a user, automatically choosing the
     sending method based on global settings.
     """
     recovery_mode = settings.get("password_recovery_mode", "manual")
+    full_html_body = _get_full_html_email(body, background_color)
 
     if recovery_mode == "automatic":
-        _send_email_smtp(to_email, subject, body)
+        _send_email_smtp(to_email, subject, full_html_body)
     elif recovery_mode == "system_mail":
-        _send_email_system_mail(to_email, subject, body)
+        _send_email_system_mail(to_email, subject, full_html_body)
     else:
-        # Fallback for manual or misconfigured modes.
         print(f"WARNING: Email sending is set to '{recovery_mode}', which is not an automatic mode. Cannot send email to {to_email}.")
 
 
 def send_password_reset_email(to_email: str, reset_link: str, username: str):
     """Prepares and sends a password reset email using the configured method."""
     subject = "Password Reset Request"
-    html_content = f"""
-    <html>
-    <body>
-        <p>Hello {username},</p>
-        <p>You requested a password reset for your account. Please click the link below to set a new password:</p>
-        <p><a href="{reset_link}">Reset Your Password</a></p>
-        <p>This link will expire in 1 hour.</p>
-        <p>If you did not request a password reset, please ignore this email.</p>
-    </body>
-    </html>
+    body_content = f"""
+    <p>Hello {username},</p>
+    <p>You requested a password reset for your account. Please click the link below to set a new password:</p>
+    <p><a href="{reset_link}" style="color: #ffffff; background-color: #007bff; padding: 10px 15px; text-decoration: none; border-radius: 5px; display: inline-block;">Reset Your Password</a></p>
+    <p>This link will expire in 1 hour.</p>
+    <p>If you did not request a password reset, please ignore this email.</p>
     """
-    send_generic_email(to_email, subject, html_content)
+    send_generic_email(to_email, subject, body_content)
 
 
 def decode_access_token(token: str) -> Optional[dict]:

@@ -125,14 +125,17 @@ class EmailUsersRequest(BaseModel):
     subject: constr(min_length=1)
     body: constr(min_length=1)
     user_ids: List[int]
+    background_color: Optional[str] = None
 
 class EnhanceEmailRequest(BaseModel):
     subject: str
     body: str
+    background_color: Optional[str] = None
 
 class EnhancedEmailResponse(BaseModel):
     subject: str
     body: str
+    background_color: Optional[str] = None
 
 class PostVisibility(str, Enum):
     PUBLIC = "public"

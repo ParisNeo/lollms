@@ -94,19 +94,24 @@ export const useAdminStore = defineStore('admin', () => {
 
 
     // -- Mass Email --
-    async function sendEmailToUsers(subject, body, userIds) {
+    async function sendEmailToUsers(subject, body, userIds, backgroundColor) {
         try {
-            const response = await apiClient.post('/api/admin/email-users', { subject, body, user_ids: userIds });
+            const response = await apiClient.post('/api/admin/email-users', { 
+                subject, 
+                body, 
+                user_ids: userIds,
+                background_color: backgroundColor
+            });
             uiStore.addNotification(response.data.message, 'success');
         } catch (error) {
             throw error;
         }
     }
 
-    async function enhanceEmail(subject, body) {
+    async function enhanceEmail(subject, body, backgroundColor) {
         isEnhancingEmail.value = true;
         try {
-            const response = await apiClient.post('/api/admin/enhance-email', { subject, body });
+            const response = await apiClient.post('/api/admin/enhance-email', { subject:subject, body:body, background_color: backgroundColor });
             uiStore.addNotification('Email content enhanced by AI.', 'success');
             return response.data;
         } catch (error) {
