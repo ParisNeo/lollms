@@ -116,7 +116,6 @@ def _send_email_smtp(to_email: str, subject: str, content: str, is_text_only: bo
     if is_text_only:
         msg = MIMEText(content, 'plain', 'utf-8')
     else:
-        # Create a multipart message for HTML compatibility
         msg = MIMEMultipart('alternative')
         text_part = MIMEText(_convert_html_to_text(content), 'plain', 'utf-8')
         html_part = MIMEText(content, 'html', 'utf-8')
@@ -138,13 +137,25 @@ def _send_email_smtp(to_email: str, subject: str, content: str, is_text_only: bo
         print(f"CRITICAL: Failed to send SMTP email to {to_email}. Error: {e}")
         raise
 
+def _sanitize_for_system_mail(body: str) -> str:
+    """
+    Escapes characters that have special meaning to the `mail` command-line utility.
+    The primary issue is a tilde (~) at the beginning of a line.
+    """
+    if body.startswith('~'):
+        body = '~' + body
+    return re.sub(r'\n~', '\n~~', body)
+
 def _send_email_system_mail(to_email: str, subject: str, body: str, is_text_only: bool):
     """Sends an email using the system's `mail` command with enhanced debugging."""
     if not shutil.which("mail"):
         print("CRITICAL: The 'mail' command was not found on the system. Please install mailutils or a similar package.")
         raise FileNotFoundError("The 'mail' command was not found on the system. Please install mailutils or similar package.")
     
-    command = ['mail', '-s', subject]
+    sanitized_subject = subject.replace('\n', ' ').replace('\r', ' ')
+    sanitized_body = _sanitize_for_system_mail(body)
+
+    command = ['mail', '-s', sanitized_subject]
     
     if not is_text_only:
         command.extend(['-a', 'Content-Type: text/html; charset=UTF-8'])
@@ -156,7 +167,7 @@ def _send_email_system_mail(to_email: str, subject: str, body: str, is_text_only
     try:
         process = subprocess.run(
             command,
-            input=body,
+            input=sanitized_body,
             capture_output=True,
             text=True,
             check=False,
@@ -214,7 +225,6 @@ def send_password_reset_email(to_email: str, reset_link: str, username: str):
     <p>This link will expire in 1 hour.</p>
     <p>If you did not request a password reset, please ignore this email.</p>
     """
-    # Password reset emails should always be HTML for better presentation and security.
     send_generic_email(to_email, subject, body_content, send_as_text=False)
 
 
