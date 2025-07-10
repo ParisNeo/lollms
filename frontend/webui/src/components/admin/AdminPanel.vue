@@ -14,9 +14,14 @@ const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
 
-const { isSmtpConfigured, allUsers } = storeToRefs(adminStore);
+const { globalSettings, allUsers } = storeToRefs(adminStore);
 
-const activeTab = ref('dashboard'); // Default to the new dashboard
+const activeTab = ref('dashboard');
+
+const emailMode = computed(() => {
+    const setting = globalSettings.value.find(s => s.key === 'password_recovery_mode');
+    return setting ? setting.value : 'manual';
+});
 
 const tabs = [
     { id: 'dashboard', label: 'Dashboard', component: Dashboard },
@@ -31,14 +36,12 @@ const activeComponent = computed(() => {
 });
 
 function handleEmailAllUsers() {
-    if (isSmtpConfigured.value) {
-        uiStore.openModal('emailAllUsers');
+    const eligibleUsers = allUsers.value.filter(u => u.is_active && u.receive_notification_emails && u.email);
+
+    if (emailMode.value === 'manual') {
+        uiStore.openModal('emailList', { users: eligibleUsers });
     } else {
-        const emails = allUsers.value
-            .filter(user => user.email && user.receive_notification_emails)
-            .map(user => user.email);
-            
-        uiStore.openModal('emailList', { emails });
+        uiStore.openModal('emailAllUsers');
     }
 }
 
@@ -64,7 +67,7 @@ onMounted(() => {
                     class="btn btn-primary"
                     @click="handleEmailAllUsers"
                 >
-                    Email All Users
+                    Email Users
                 </button>
             </div>
         </div>

@@ -121,9 +121,10 @@ class PasswordResetRequest(BaseModel):
 class UserPasswordResetAdmin(BaseModel):
     new_password: constr(min_length=8)
 
-class EmailAllUsersRequest(BaseModel):
+class EmailUsersRequest(BaseModel):
     subject: constr(min_length=1)
     body: constr(min_length=1)
+    user_ids: List[int]
 
 class PostVisibility(str, Enum):
     PUBLIC = "public"

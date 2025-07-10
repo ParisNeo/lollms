@@ -26,7 +26,7 @@ from backend.models import (
     AdminUserUpdate,
     ModelInfo,
     ForceSettingsPayload,
-    EmailAllUsersRequest,
+    EmailUsersRequest,
     AdminDashboardStats
 )
 from backend.session import (
@@ -74,9 +74,9 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
         pending_password_resets=pending_password_resets
     )
 
-@admin_router.post("/email-all-users", status_code=202)
-async def email_all_users(
-    payload: EmailAllUsersRequest,
+@admin_router.post("/email-users", status_code=202)
+async def email_users(
+    payload: EmailUsersRequest,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
@@ -84,19 +84,22 @@ async def email_all_users(
     if email_mode not in ["automatic", "system_mail"]:
         raise HTTPException(status_code=412, detail=f"Email sending is not enabled or is set to manual. Current mode: '{email_mode}'.")
 
-    users_to_email = db.query(DBUser).filter(
-        DBUser.is_active == True,
-        DBUser.receive_notification_emails == True,
-        DBUser.email.isnot(None)
-    ).all()
+    if not payload.user_ids:
+        return {"message": "No users selected to email."}
+
+    # Fetch only the users that were selected in the frontend
+    users_to_email = db.query(DBUser).filter(DBUser.id.in_(payload.user_ids)).all()
 
     if not users_to_email:
-        return {"message": "No active users found who have opted-in to receive emails."}
+        return {"message": "No valid users found for the provided IDs."}
 
+    sent_count = 0
     for user in users_to_email:
-        background_tasks.add_task(send_generic_email, user.email, payload.subject, payload.body)
+        if user.email:
+            background_tasks.add_task(send_generic_email, user.email, payload.subject, payload.body)
+            sent_count += 1
     
-    return {"message": f"Email sending initiated for {len(users_to_email)} users."}
+    return {"message": f"Email sending initiated for {sent_count} users."}
 
 
 @admin_router.get("/available-models", response_model=List[ModelInfo])
