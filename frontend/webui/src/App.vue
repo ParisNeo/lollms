@@ -27,7 +27,8 @@ import ShareDiscussionModal from './components/modals/ShareDiscussionModal.vue';
 import ResetPasswordModal from './components/modals/ResetPasswordModal.vue';
 import EmailAllUsersModal from './components/modals/EmailAllUsersModal.vue';
 import EmailUserModal from './components/modals/EmailUserModal.vue';
-import EmailListModal from './components/modals/EmailListModal.vue';
+import InsertImageModal from './components/modals/InsertImageModal.vue';
+
 import logoUrl from './assets/logo.png';
 
 const authStore = useAuthStore();
@@ -94,7 +95,7 @@ watch(
     <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     <EmailAllUsersModal v-if="activeModal === 'emailAllUsers'" />
     <EmailUserModal v-if="activeModal === 'adminUserEmail'" />
-    <EmailListModal v-if="activeModal === 'emailList'" />
+    <InsertImageModal v-if="activeModal === 'insertImage'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

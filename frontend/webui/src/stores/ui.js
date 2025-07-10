@@ -1,9 +1,9 @@
+import { ref, computed } from 'vue';
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
 
 export const useUiStore = defineStore('ui', () => {
-    const mainView = ref('feed'); 
-    const activeModal = ref(null);
+    const mainView = ref('feed');
+    const modalStack = ref([]);
     const modalProps = ref({});
     const notifications = ref([]);
     const currentTheme = ref(localStorage.getItem('lollms-theme') || 'light');
@@ -18,6 +18,20 @@ export const useUiStore = defineStore('ui', () => {
     });
     const availableLanguages = ref({});
 
+    // --- NEW: Centralized state for email modals ---
+    const emailModalSubject = ref('');
+    const emailModalBody = ref('');
+    const emailModalBackgroundColor = ref('#f4f4f8');
+    const emailModalSendAsText = ref(false);
+
+    const activeModal = computed(() => modalStack.value.length > 0 ? modalStack.value[modalStack.value.length - 1] : null);
+
+    function initEmailModalState() {
+        emailModalSubject.value = '';
+        emailModalBody.value = '';
+        emailModalBackgroundColor.value = '#f4f4f8';
+        emailModalSendAsText.value = false;
+    }
 
     function setMainView(viewName) {
         if (['feed', 'chat'].includes(viewName)) {
@@ -26,14 +40,17 @@ export const useUiStore = defineStore('ui', () => {
     }
 
     function openModal(name, props = {}) {
-        activeModal.value = name;
-        modalProps.value = props;
+        modalStack.value.push(name);
+        modalProps.value[name] = props;
     }
 
-    function closeModal(name) {
-        if (activeModal.value === name) {
-            activeModal.value = null;
-            modalProps.value = {};
+    function closeModal(name = null) {
+        if (name && activeModal.value !== name) {
+            return;
+        }
+        if (modalStack.value.length > 0) {
+            const closedModalName = modalStack.value.pop();
+            delete modalProps.value[closedModalName];
         }
     }
 
@@ -123,7 +140,7 @@ export const useUiStore = defineStore('ui', () => {
     }
     
     function modalData(name) {
-        return activeModal.value === name ? modalProps.value : null;
+        return modalProps.value[name] || null;
     }
 
     function isModalOpen(name) {
@@ -134,6 +151,10 @@ export const useUiStore = defineStore('ui', () => {
         mainView, activeModal, modalProps, notifications, currentTheme,
         currentLanguage, availableLanguages,
         isImageViewerOpen, imageViewerSrc, confirmationOptions,
+        // New Email State
+        emailModalSubject, emailModalBody, emailModalBackgroundColor, emailModalSendAsText,
+        initEmailModalState,
+        // Actions
         setMainView, openModal, closeModal, addNotification, removeNotification,
         setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages,
         openImageViewer, closeImageViewer, showConfirmation, confirmAction, cancelAction,
