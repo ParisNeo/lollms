@@ -12,6 +12,7 @@ class LLMBindingBase(BaseModel):
     host_address: Optional[str] = None
     models_path: Optional[str] = None
     default_model_name: Optional[str] = None
+    verify_ssl_certificate: Optional[bool] = True
     is_active: bool = True
 
 class LLMBindingCreate(LLMBindingBase):
@@ -24,6 +25,7 @@ class LLMBindingUpdate(BaseModel):
     models_path: Optional[str] = None
     service_key: Optional[str] = None
     default_model_name: Optional[str] = None
+    verify_ssl_certificate: Optional[bool] = True
     is_active: Optional[bool] = None
 
 class LLMBindingPublic(LLMBindingBase):
