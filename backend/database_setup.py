@@ -29,6 +29,7 @@ class LLMBinding(Base):
     models_path = Column(String)
     service_key = Column(String)
     default_model_name = Column(String)
+    verify_ssl_certificate = Column(Boolean, default=True, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -441,6 +442,7 @@ def init_database(db_url: str):
                                     "models_path": LOLLMS_CLIENT_DEFAULTS.get("models_path"),
                                     "service_key": LOLLMS_CLIENT_DEFAULTS.get("service_key"),
                                     "default_model_name": LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
+                                    "verify_ssl_certificate": LOLLMS_CLIENT_DEFAULTS.get("verify_ssl_certificate"),
                                     "is_active": True
                                 }]
                             )
@@ -449,6 +451,14 @@ def init_database(db_url: str):
                             print(f"INFO: Binding with alias '{alias}' already exists. Skipping seed from config.")
                     else:
                         print("WARNING: No 'binding_name' found in [lollms_client_defaults] in config.toml. Cannot seed initial binding.")
+                llm_bindings_columns_db = [col['name'] for col in inspector.get_columns('llm_bindings')]                        
+                new_llm_bindings_cols_defs = {
+                    "verify_ssl_certificate": "BOOLEAN DEFAULT 1 NOT NULL"
+                }
+                for col_name, col_sql_def in new_llm_bindings_cols_defs.items():
+                    if col_name not in llm_bindings_columns_db:
+                        connection.execute(text(f"ALTER TABLE llm_bindings ADD COLUMN {col_name} {col_sql_def}"))
+                        print(f"INFO: Added missing column '{col_name}' to 'llm_bindings' table.")
 
 
             if inspector.has_table("users"):
