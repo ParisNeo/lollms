@@ -10,80 +10,39 @@ const currentDiscussionId = computed(() => discussionsStore.currentDiscussionId)
 const messageContainer = ref(null);
 const isNearBottom = ref(true);
 
-// --- SCROLLING LOGIC ---
-
-// Helper to scroll the container to the bottom
 const scrollToBottom = (smooth = true) => {
   nextTick(() => {
     const el = messageContainer.value;
     if (el) {
-      el.scrollTo({
-        top: el.scrollHeight,
-        behavior: smooth ? 'smooth' : 'auto',
-      });
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
     }
   });
 };
 
-// Event handler to check if the user has scrolled away from the bottom
 const handleScroll = () => {
     const el = messageContainer.value;
     if (el) {
-        // A threshold to consider "near" the bottom, to account for various UI elements/paddings
         const threshold = 50; 
-        const isScrolledToBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-        if (isNearBottom.value !== isScrolledToBottom) {
-            isNearBottom.value = isScrolledToBottom;
-        }
+        isNearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
     }
 };
 
-// Attach/detach scroll listeners
-onMounted(() => {
-  messageContainer.value?.addEventListener('scroll', handleScroll);
-});
+onMounted(() => messageContainer.value?.addEventListener('scroll', handleScroll));
+onUnmounted(() => messageContainer.value?.removeEventListener('scroll', handleScroll));
 
-onUnmounted(() => {
-  messageContainer.value?.removeEventListener('scroll', handleScroll);
-});
-
-// Watcher for discussion changes to force-scroll to the bottom
 watch(currentDiscussionId, (newId) => {
     if (newId) {
-        // When a new discussion is selected, we want to be at the bottom by default.
         isNearBottom.value = true;
-        scrollToBottom(false); // Use 'auto' behavior for instant scrolling
+        scrollToBottom(false);
     }
 });
 
-// Watcher for new messages to implement "smart" scrolling
 watch(activeMessages, () => {
-    // If the user is near the bottom, auto-scroll with new messages.
-    // If they have scrolled up to read history, don't interrupt them.
     if (isNearBottom.value) {
         scrollToBottom(true);
     }
-}, { deep: true }); // Deep watch is crucial for detecting streaming content changes within a message
+}, { deep: true });
 
-
-// --- MESSAGE GROUPING LOGIC ---
-
-// Groups messages by date for rendering separators.
-const groupMessagesByDate = (messages) => {
-    if (!messages) return {};
-    const groups = {};
-    messages.forEach(message => {
-        const date = new Date(message.created_at || Date.now());
-        const dateKey = date.toDateString();
-        if (!groups[dateKey]) {
-            groups[dateKey] = [];
-        }
-        groups[dateKey].push(message);
-    });
-    return groups;
-};
-
-// Formats the date for the separator.
 const formatDateSeparator = (dateStr) => {
     const date = new Date(dateStr);
     const today = new Date();
@@ -96,27 +55,68 @@ const formatDateSeparator = (dateStr) => {
         weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
     });
 };
+
+// Flatten the grouped messages into a single array for TransitionGroup
+const displayItems = computed(() => {
+    if (!activeMessages.value) return [];
+    const items = [];
+    const groups = activeMessages.value.reduce((acc, message) => {
+        const dateKey = new Date(message.created_at || Date.now()).toDateString();
+        if (!acc[dateKey]) acc[dateKey] = [];
+        acc[dateKey].push(message);
+        return acc;
+    }, {});
+
+    for (const date in groups) {
+        items.push({ type: 'separator', id: `sep-${date}`, date: date });
+        groups[date].forEach(message => {
+            items.push({ type: 'message', id: message.id, data: message });
+        });
+    }
+    return items;
+});
 </script>
 
 <template>
-  <!-- 
-    FIX: Added 'flex flex-col' to make this scrolling container a flex container.
-    This forces its children (MessageBubbles) to be flex items, which correctly
-    respects the width constraints and prevents them from overflowing.
-    Added 'pb-40' to prevent the floating chat input from obscuring the last message.
-  -->
-  <div ref="messageContainer" class="flex flex-col p-4 space-y-2 pb-40">
-    <template v-for="(messagesOnDate, date) in groupMessagesByDate(activeMessages)" :key="date">
-      <!-- Date Separator -->
-      <div class="date-separator flex items-center my-4 gap-4">
-        <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
-        <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
-          {{ formatDateSeparator(date) }}
+  <div ref="messageContainer" class="flex-1 overflow-y-auto min-w-0 p-4">
+    <TransitionGroup name="list" tag="div" class="relative flex flex-col gap-4 pb-40">
+      <div v-for="item in displayItems" :key="item.id">
+        <!-- Date Separator -->
+        <div v-if="item.type === 'separator'" class="date-separator">
+            <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
+            <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+              {{ formatDateSeparator(item.date) }}
+            </div>
+            <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
         </div>
-        <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
+        <!-- Message -->
+        <MessageBubble v-else-if="item.type === 'message'" :message="item.data" />
       </div>
-      <!-- Messages for that date -->
-      <MessageBubble v-for="message in messagesOnDate" :key="message.id" :message="message" />
-    </template>
+    </TransitionGroup>
   </div>
 </template>
+
+<style scoped>
+.date-separator {
+    @apply flex items-center my-4 gap-4;
+}
+
+/* Transitions for list items (messages and separators) */
+.list-move,
+.list-enter-active,
+.list-leave-active {
+    transition: all 0.5s ease;
+}
+.list-enter-from {
+    opacity: 0;
+    transform: translateY(30px);
+}
+.list-leave-to {
+    opacity: 0;
+    transform: translateX(30px);
+}
+.list-leave-active {
+    position: absolute;
+    width: calc(100% - 2rem); /* Match padding of container */
+}
+</style>

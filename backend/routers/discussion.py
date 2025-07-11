@@ -241,7 +241,7 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
                 model_name=msg.model_name,
                 token_count=msg.tokens,
                 sources=msg_metadata.get('sources'),
-                steps=msg_metadata.get('steps'),
+                events=msg_metadata.get('events'),
                 image_references=full_image_refs,
                 user_grade=user_grades.get(msg.id, 0),
                 created_at=msg.created_at,
@@ -421,8 +421,6 @@ async def chat_in_existing_discussion(
     db: Session = Depends(get_db)
 ) -> StreamingResponse:
     username = current_user.username
-
-    # --- NEW: Select client based on user's model preference ---
     user_model_full = current_user.lollms_model_name
     binding_alias = None
     if user_model_full and '/' in user_model_full:
@@ -431,24 +429,18 @@ async def chat_in_existing_discussion(
     try:
         lc = get_user_lollms_client(username, binding_alias)
     except HTTPException as e:
-        # If the specific binding fails, send a clear error message in the stream
         async def error_stream():
             yield json.dumps({"type": "error", "content": f"Failed to get LLM Client: {e.detail}"}) + "\n"
         return StreamingResponse(error_stream(), media_type="application/x-ndjson")
 
     discussion_obj = get_user_discussion(username, discussion_id, lollms_client=lc)
-    # --- END NEW ---
-
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
 
     def query_rag_callback(query: str, ss, rag_top_k, rag_min_similarity_percent) -> List[Dict]:
         if not ss: return []
         try:
-            # According to safestore docs, this is what is returned.
-            # The similarity is a float 0-1, not a percentage.
             retrieved_chunks = ss.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
-            
             revamped_chunks=[]
             for entry in retrieved_chunks:
                 revamped_entry = {}
@@ -456,14 +448,13 @@ async def chat_in_existing_discussion(
                     revamped_entry["document"]=Path(entry["file_path"]).name
                 if "chunk_text" in entry:
                     revamped_entry["content"]=entry["chunk_text"]
-                # The `safe_store` library returns 'similarity'. We calculate 'similarity_percent' for the UI.
                 if "similarity" in entry:
                     revamped_entry["similarity_percent"] = entry["similarity"] * 100
                 revamped_chunks.append(revamped_entry)
             return revamped_chunks
         except Exception as e:
             trace_exception(e)
-            return [{"error": f"Error during RAG query on datastore {ss.id}: {e}"}]
+            return [{"error": f"Error during RAG query on datastore {ss.name}: {e}"}]
 
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
     rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
@@ -474,61 +465,46 @@ async def chat_in_existing_discussion(
         if ss:
             use_rag[ss.name] = {"name": ss.name, "description": ss.description, "callable": partial(query_rag_callback, ss=ss)}
 
-    active_personality = None
-    db_pers = None
-    if db_user.active_personality_id:
-        db_pers = db.query(DBPersonality).filter(DBPersonality.id == db_user.active_personality_id).first()
-
-    if db_pers:
-        active_personality = LollmsPersonality(
-            name=db_pers.name, author=db_pers.author, category=db_pers.category,
-            description=db_pers.description, system_prompt=db_pers.prompt_text,
-            script=db_pers.script_code, query_rag_callback=None
-        )
-    else:
-        active_personality = LollmsPersonality(
-            name="Generic Assistant", author="System", category="Default",
-            description="A generic, helpful assistant.",
-            system_prompt="You are a helpful AI assistant, ready to answer questions and follow instructions.",
-            script="", query_rag_callback=None
-        )
+    db_pers = db.query(DBPersonality).filter(DBPersonality.id == db_user.active_personality_id).first() if db_user.active_personality_id else None
+    active_personality = LollmsPersonality(
+        name=db_pers.name, author=db_pers.author, category=db_pers.category,
+        description=db_pers.description, system_prompt=db_pers.prompt_text,
+        script=db_pers.script_code
+    ) if db_pers else LollmsPersonality(
+        name="Generic Assistant", author="System", category="Default",
+        description="A generic, helpful assistant.",
+        system_prompt="You are a helpful AI assistant, ready to answer questions and follow instructions."
+    )
+    
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     stop_event = threading.Event()
     user_sessions.setdefault(username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event
 
     async def stream_generator() -> AsyncGenerator[str, None]:
-        all_steps = []
-        def llm_callback(
-            chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs
-        ) -> bool:
-            if stop_event.is_set(): 
-                return False
+        all_events = []
+        def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs) -> bool:
+            if stop_event.is_set(): return False
+            if not params: params = {}
             
-            payload = None
-            params = params or {}
-            step_like_payload = None
-
-            match msg_type:
-                case MSG_TYPE.MSG_TYPE_CHUNK: payload = {"type": "chunk", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_STEP: step_like_payload = {"type": "step", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_STEP_START: step_like_payload = {"type": "step_start", "content": chunk, "id": params.get("id")}
-                case MSG_TYPE.MSG_TYPE_STEP_END: step_like_payload = {"type": "step_end", "content": chunk, "id": params.get("id"), "status": "done"}
-                case MSG_TYPE.MSG_TYPE_INFO: step_like_payload = {"type": "info", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_OBSERVATION: step_like_payload = {"type": "observation", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT: step_like_payload = {"type": "thought", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_REASONING: step_like_payload = {"type": "reasoning", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_TOOL_CALL: step_like_payload = {"type": "tool_call", "content": chunk}                
-                case MSG_TYPE.MSG_TYPE_SCRATCHPAD: step_like_payload = {"type": "scratchpad", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_EXCEPTION: payload = {"type": "exception", "content": chunk}
-                case MSG_TYPE.MSG_TYPE_ERROR: payload = {"type": "error", "content": chunk}
-                case _: return True
+            payload_map = {
+                MSG_TYPE.MSG_TYPE_CHUNK: {"type": "chunk", "content": chunk},
+                MSG_TYPE.MSG_TYPE_STEP_START: {"type": "step_start", "content": chunk, "id": params.get("id")},
+                MSG_TYPE.MSG_TYPE_STEP_END: {"type": "step_end", "content": chunk, "id": params.get("id"), "status": "done"},
+                MSG_TYPE.MSG_TYPE_INFO: {"type": "info", "content": chunk},
+                MSG_TYPE.MSG_TYPE_OBSERVATION: {"type": "observation", "content": chunk},
+                MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT: {"type": "thought", "content": chunk},
+                MSG_TYPE.MSG_TYPE_REASONING: {"type": "reasoning", "content": chunk},
+                MSG_TYPE.MSG_TYPE_TOOL_CALL: {"type": "tool_call", "content": chunk},
+                MSG_TYPE.MSG_TYPE_SCRATCHPAD: {"type": "scratchpad", "content": chunk},
+                MSG_TYPE.MSG_TYPE_EXCEPTION: {"type": "exception", "content": chunk},
+                MSG_TYPE.MSG_TYPE_ERROR: {"type": "error", "content": chunk}
+            }
             
-            if step_like_payload:
-                all_steps.append(step_like_payload)
-                payload = step_like_payload
-
+            payload = payload_map.get(msg_type)
             if payload:
+                if payload['type']!="chunk":
+                    all_events.append(payload)
                 json_compatible_payload = jsonable_encoder(payload)
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_payload) + "\n")
             return True
@@ -550,23 +526,20 @@ async def chat_in_existing_discussion(
                             images_for_message.append(b64_data)
 
                 if is_resend:
-                    result = discussion_obj.regenerate_branch(
-                        regenerate_branch=None, personality=active_personality, use_mcps=use_mcps,
-                        use_data_store=use_rag, streaming_callback=llm_callback
-                    )
+                    result = discussion_obj.regenerate_branch(personality=active_personality, use_mcps=use_mcps, use_data_store=use_rag, streaming_callback=llm_callback)
                 else:
                     result = discussion_obj.chat(
                         user_message=prompt, personality=active_personality, use_mcps=use_mcps,
                         use_data_store=use_rag, images=images_for_message,
                         streaming_callback=llm_callback, max_reasoning_steps=db_user.rag_n_hops,
                         rag_top_k=db_user.rag_top_k, rag_min_similarity_percent=db_user.rag_min_sim_percent,
-                        debug = SERVER_CONFIG.get("debug", False)
+                        debug=SERVER_CONFIG.get("debug", False)
                     )
                 
                 ai_message_obj = result.get('ai_message')
                 if ai_message_obj:
                     new_metadata = (ai_message_obj.metadata or {}).copy()
-                    new_metadata['steps'] = all_steps
+                    new_metadata['events'] = all_events
                     ai_message_obj.metadata = new_metadata
                     discussion_obj.commit()
 
@@ -574,24 +547,29 @@ async def chat_in_existing_discussion(
                     if not msg: return None
                     return {
                         "id": msg.id, "sender": msg.sender, "content": msg.content,
-                        "created_at": msg.created_at, "parent_id": msg.parent_id,
+                        "created_at": msg.created_at, "parent_message_id": msg.parent_id,
                         "discussion_id": msg.discussion_id, "metadata": msg.metadata,
                         "tokens": msg.tokens, "sender_type": msg.sender_type,
                         "binding_name": msg.binding_name, "model_name": msg.model_name
                     }
                 
-                final_messages_payload = {'ai_message': lollms_message_to_output(result['ai_message'])}
-                if 'user_message' in result: final_messages_payload['user_message'] = lollms_message_to_output(result['user_message'])
+                final_messages_payload = {
+                    'user_message': lollms_message_to_output(result.get('user_message')),
+                    'ai_message': lollms_message_to_output(result.get('ai_message'))
+                }
                 
-                if current_user.auto_title and (discussion_obj.metadata is None or discussion_obj.metadata['title'].startswith("New Discussion")):
+                new_title = None
+                if current_user.auto_title and (discussion_obj.metadata is None or discussion_obj.metadata.get('title',"").startswith("New Discussion")):
                     event_title_building = jsonable_encoder({"type": "new_title_start"})
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(event_title_building) + "\n")
                     new_title = discussion_obj.auto_title()
                     event_title_building = jsonable_encoder({"type": "new_title_end", "new_title": new_title})
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(event_title_building) + "\n")
-                    json_compatible_event = jsonable_encoder({"type": "finalize", "data": final_messages_payload, "new_title":new_title})
-                else:
-                    json_compatible_event = jsonable_encoder({"type": "finalize", "data": final_messages_payload})
+                
+                finalize_payload = {"type": "finalize", "data": final_messages_payload}
+                if new_title:
+                    finalize_payload["new_title"] = new_title
+                json_compatible_event = jsonable_encoder(finalize_payload)
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_event) + "\n")
             except Exception as e:
                 trace_exception(e)
@@ -645,7 +623,7 @@ async def grade_discussion_message(discussion_id: str, message_id: str, grade_up
     return MessageOutput(
         id=target_message.id, sender=target_message.sender, sender_type=target_message.sender_type, content=target_message.content,
         parent_message_id=target_message.parent_id, binding_name=target_message.binding_name, model_name=target_message.model_name,
-        token_count=target_message.tokens, sources=msg_metadata.get('sources'), steps=msg_metadata.get('steps'),
+        token_count=target_message.tokens, sources=msg_metadata.get('sources'), events=msg_metadata.get('events'),
         image_references=full_image_refs, user_grade=current_grade, created_at=target_message.created_at,
         branch_id=discussion_obj.active_branch_id, branches=None
     )
@@ -667,7 +645,7 @@ async def update_discussion_message(discussion_id: str, message_id: str, payload
     return MessageOutput(
         id=target_message.id, sender=target_message.sender, sender_type=target_message.sender_type, content=target_message.content,
         parent_message_id=target_message.parent_id, binding_name=target_message.binding_name, model_name=target_message.model_name,
-        token_count=target_message.tokens, sources=msg_metadata.get('sources'), steps=msg_metadata.get('steps'),
+        token_count=target_message.tokens, sources=msg_metadata.get('sources'), events=msg_metadata.get('events'),
         image_references=full_image_refs, user_grade=grade, created_at=target_message.created_at,
         branch_id=discussion_obj.active_branch_id, branches=None
     )

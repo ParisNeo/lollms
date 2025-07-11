@@ -91,6 +91,13 @@ export const useDataStore = defineStore('data', () => {
         return Object.values(grouped).sort((a, b) => a.label.localeCompare(b.label));
     });
 
+    // --- NEW Getters for Phase 2 ---
+    const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
+    const getPersonalityById = computed(() => {
+        return (id) => allPersonalities.value.find(p => p.id === id);
+    });
+    // --- End New Getters ---
+
     // --- Actions ---
 
     // NEW ACTION for fetching languages
@@ -452,6 +459,11 @@ export const useDataStore = defineStore('data', () => {
         userApps, systemApps,
         isLoadingLollmsModels,
         availableRagStores, availableMcpToolsForSelector, availableLollmsModelsGrouped,
+
+        // --- NEW Getters for Phase 2 ---
+        allPersonalities,
+        getPersonalityById,
+        
         loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,
         fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,

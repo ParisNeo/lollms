@@ -6,6 +6,20 @@ import { useAuthStore } from './auth';
 
 let activeGenerationAbortController = null;
 
+// Helper to process message objects consistently
+function processSingleMessage(msg) {
+    if (!msg) return null;
+    const authStore = useAuthStore();
+    const username = authStore.user?.username?.toLowerCase();
+    return {
+        ...msg,
+        sender_type: msg.sender_type || (msg.sender?.toLowerCase() === username ? 'user' : 'assistant'),
+        events: msg.events || (msg.metadata?.events) || [],
+        sources: msg.sources || (msg.metadata?.sources) || [],
+    };
+}
+
+
 export const useDiscussionsStore = defineStore('discussions', () => {
     const discussions = ref({});
     const currentDiscussionId = ref(null);
@@ -25,14 +39,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     function processMessages(rawMessages) {
         if (!Array.isArray(rawMessages)) return [];
-        const authStore = useAuthStore();
-        const username = authStore.user?.username?.toLowerCase();
-        return rawMessages.map(msg => ({
-            ...msg,
-            sender_type: msg.sender_type || (msg.sender?.toLowerCase() === username ? 'user' : 'assistant'),
-            steps: msg.steps || [],
-            sources: msg.sources || [],
-        }));
+        return rawMessages.map(msg => processSingleMessage(msg));
     }
 
     async function sendDiscussion({ discussionId, targetUsername }) {
@@ -74,7 +81,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.get(`/api/discussions/${id}`);
             messages.value = processMessages(response.data);
-            console.log("Discussion Loaded")
         } catch (error) {
             useUiStore().addNotification('Failed to load messages.', 'error');
             currentDiscussionId.value = null;
@@ -222,6 +228,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         generationInProgress.value = true;
         activeGenerationAbortController = new AbortController();
         const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
+        
         const tempUserMessage = {
             id: `temp-user-${Date.now()}`, sender: authStore.user.username,
             sender_type: 'user', content: payload.prompt,
@@ -232,100 +239,92 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const tempAiMessage = {
             id: `temp-ai-${Date.now()}`, sender: 'assistant', sender_type: 'assistant',
             content: '', isStreaming: true, created_at: new Date().toISOString(),
-            steps: []
+            events: []
         };
+
         if (!payload.is_resend) {
             messages.value.push(tempUserMessage);
         }
         messages.value.push(tempAiMessage);
+
         const formData = new FormData();
         formData.append('prompt', payload.prompt);
         formData.append('image_server_paths_json', JSON.stringify(payload.image_server_paths || []));
         if (payload.is_resend) formData.append('is_resend', 'true');
+
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
-        let contentBuffer = '';
-        let stepsBuffer = [];
-        let updateInterval = null;
-        if (messageToUpdate) {
-            updateInterval = setInterval(() => {
-                if (contentBuffer.length > 0) { messageToUpdate.content += contentBuffer; contentBuffer = ''; }
-                if (stepsBuffer.length > 0) { messageToUpdate.steps.push(...stepsBuffer); stepsBuffer = []; }
-            }, 100);
-        }
+        
         try {
             const response = await fetch(`/api/discussions/${currentDiscussionId.value}/chat`, {
                 method: 'POST', body: formData,
                 headers: { 'Authorization': `Bearer ${authStore.token}` },
                 signal: activeGenerationAbortController.signal,
             });
+
             if (!response.ok || !response.body) throw new Error(`HTTP error ${response.status}`);
+            
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) { break; }
+                if (done) break;
+                
                 const textChunk = decoder.decode(value, { stream: true });
                 const lines = textChunk.split('\n').filter(line => line.trim() !== '');
+
                 lines.forEach(line => {
                     try {
                         const data = JSON.parse(line);
                         if (!messageToUpdate) return;
+
                         switch (data.type) {
-                            case 'chunk': contentBuffer += data.content; break;
+                            case 'chunk':
+                                messageToUpdate.content += data.content;
+                                break;
                             case 'step':
                             case 'info':
                             case 'observation':
                             case 'thought':
-                                stepsBuffer.push({
-                                    id: data.id || `step-${Date.now()}-${Math.random()}`,
-                                    type: data.type,
-                                    content: data.content,
-                                    data: data.data,
-                                    status: 'done'
-                                });
-                                break;
+                            case 'reasoning':
+                            case 'tool_call':
+                            case 'scratchpad':
+                            case 'exception':
+                            case 'error':
                             case 'step_start':
-                                stepsBuffer.push({
-                                    id: data.id,
-                                    type: data.type,
-                                    content: data.content,
-                                    status: 'pending'
-                                });
+                            case 'step_end':
+                                messageToUpdate.events = [...messageToUpdate.events, data];
                                 break;
-                            case 'step_end': {
-                                const step = messageToUpdate.steps.find(s => s.id === data.id) || stepsBuffer.find(s => s.id === data.id);
-                                if (step) {
-                                    step.status = 'done';
-                                    step.type = data.type;
-                                    if (data.content) step.content = data.content;
-                                } else {
-                                    stepsBuffer.push({ id: data.id, type: data.type, content: data.content, status: 'done' });
-                                }
+                            case 'new_title_start':
+                                uiStore.addNotification("Building title...", "info");
                                 break;
-                            }
-                            case 'new_title_start': uiStore.addNotification("Building title started ...", "info"); break;
-                            case 'new_title_end': uiStore.addNotification("Building title Done:\n"+data["new_title"], "info");break;
+                            case 'new_title_end':
+                                uiStore.addNotification(`Title set to: ${data.new_title}`, "success");
+                                break;
                             case 'finalize': {
                                 const finalData = data.data;
-                                const aiMessageToFinalize = messages.value.find(m => m.id === tempAiMessage.id);
-                                if (aiMessageToFinalize && finalData.ai_message) {
-                                    const backendMessage = finalData.ai_message;
-                                    Object.assign(aiMessageToFinalize, backendMessage);
-                                    const metadata = backendMessage.metadata || {};
-                                    aiMessageToFinalize.steps = metadata.steps || [];
-                                    aiMessageToFinalize.sources = metadata.sources || [];
+                                
+                                if (finalData.ai_message) {
+                                    const aiMsgIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
+                                    if (aiMsgIndex !== -1) {
+                                        messages.value.splice(aiMsgIndex, 1, processSingleMessage(finalData.ai_message));
+                                    }
                                 }
-                                const userMessageToFinalize = messages.value.find(m => m.id === tempUserMessage.id);
-                                if (userMessageToFinalize && finalData.user_message) {
-                                     Object.assign(userMessageToFinalize, finalData.user_message);
+                                
+                                if (finalData.user_message) {
+                                    const userMsgIndex = messages.value.findIndex(m => m.id === tempUserMessage.id);
+                                    if (userMsgIndex !== -1) {
+                                        messages.value.splice(userMsgIndex, 1, processSingleMessage(finalData.user_message));
+                                    }
                                 }
+
                                 const disc = discussions.value[currentDiscussionId.value];
-                                if(disc && data.new_title){
+                                if (disc && data.new_title) {
                                     disc.title = data.new_title;
                                 }
                                 break;
                             }
-                            case 'error':
+                            case 'error': // This handles explicit backend errors, not just exceptions
                                 uiStore.addNotification(`LLM Error: ${data.content}`, 'error');
                                 if (reader.cancel) reader.cancel();
                                 break;
@@ -340,39 +339,52 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 if (aiMessageIndex > -1) messages.value.splice(aiMessageIndex, 1);
             }
         } finally {
-            if (updateInterval) {
-                clearInterval(updateInterval);
-            }
             if (messageToUpdate) {
-                if (contentBuffer.length > 0) {
-                    messageToUpdate.content += contentBuffer;
-                }
-                if (stepsBuffer.length > 0) {
-                    messageToUpdate.steps.push(...stepsBuffer);
-                }
                 messageToUpdate.isStreaming = false;
             }
             generationInProgress.value = false;
             activeGenerationAbortController = null;
-            if (currentDiscussionId.value) {
-                await selectDiscussion(currentDiscussionId.value);
-            }
+            loadDiscussions();
         }
     }
 
     async function stopGeneration() {
-        if (activeGenerationAbortController) activeGenerationAbortController.abort();
-        if(currentDiscussionId.value) {
-            try { await apiClient.post(`/api/discussions/${currentDiscussionId.value}/stop_generation`); }
-            catch(e) { console.warn("Backend stop signal failed.", e)}
+        const uiStore = useUiStore();
+        if (activeGenerationAbortController) {
+            activeGenerationAbortController.abort();
         }
+
+        if (currentDiscussionId.value) {
+            try { 
+                await apiClient.post(`/api/discussions/${currentDiscussionId.value}/stop_generation`); 
+            } catch(e) { 
+                console.warn("Backend stop signal failed, but proceeding with client-side cleanup.", e);
+            }
+        }
+
+        const streamingMessage = messages.value.find(m => m.isStreaming);
+        if (streamingMessage) {
+            streamingMessage.isStreaming = false;
+        }
+
+        generationInProgress.value = false;
+        activeGenerationAbortController = null;
+
+        await loadDiscussions(); 
+        
+        if (currentDiscussionId.value) {
+            await selectDiscussion(currentDiscussionId.value);
+        }
+
+        uiStore.addNotification('Generation stopped.', 'info');
     }
 
     async function updateMessageContent({ messageId, newContent }) {
         if (!currentDiscussionId.value) return;
         try {
             await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`, { content: newContent });
-            await selectDiscussion(currentDiscussionId.value);
+            const message = messages.value.find(m => m.id === messageId);
+            if (message) message.content = newContent;
             useUiStore().addNotification('Message updated.', 'success');
         } catch(e) {}
     }
@@ -381,8 +393,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (!currentDiscussionId.value) return;
         try {
             await apiClient.delete(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`);
-            await selectDiscussion(currentDiscussionId.value);
-            useUiStore().addNotification('Message and branch deleted.', 'success');
+            const index = messages.value.findIndex(m => m.id === messageId);
+            if (index !== -1) {
+                messages.value.splice(index, 1);
+            }
+            useUiStore().addNotification('Message deleted.', 'success');
         } catch(e) {}
     }
 
@@ -464,34 +479,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         generationInProgress.value = false;
     }
     return {
-        discussions,
-        currentDiscussionId,
-        messages,
-        generationInProgress,
-        titleGenerationInProgressId,
-        activeDiscussion,
-        activeMessages,
-        sortedDiscussions,
-        loadDiscussions,
-        selectDiscussion,
-        createNewDiscussion,
-        deleteDiscussion,
-        pruneDiscussions,
-        generateAutoTitle,
-        toggleStarDiscussion,
-        updateDiscussionRagStore,
-        renameDiscussion,
-        updateDiscussionMcps,
-        sendMessage,
-        stopGeneration,
-        updateMessageContent,
-        gradeMessage,
-        deleteMessage,
-        initiateBranch,
-        switchBranch,
-        exportDiscussions,
-        importDiscussions,
-        sendDiscussion,
-        $reset,
+        discussions, currentDiscussionId, messages, generationInProgress,
+        titleGenerationInProgressId, activeDiscussion, activeMessages,
+        sortedDiscussions, loadDiscussions, selectDiscussion, createNewDiscussion,
+        deleteDiscussion, pruneDiscussions, generateAutoTitle, toggleStarDiscussion,
+        updateDiscussionRagStore, renameDiscussion, updateDiscussionMcps,
+        sendMessage, stopGeneration, updateMessageContent, gradeMessage,
+        deleteMessage, initiateBranch, switchBranch, exportDiscussions,
+        importDiscussions, sendDiscussion, $reset,
     };
 });
