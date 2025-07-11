@@ -257,6 +257,7 @@ def get_user_lollms_client(username: str, binding_alias: Optional[str] = None) -
             "model_name": model_name_for_binding,
             "host_address": binding_to_use.host_address,
             "models_path": binding_to_use.models_path,
+            "verify_ssl_certificate": binding_to_use.verify_ssl_certificate,
             "service_key": binding_to_use.service_key,
             "user_name": "user",
             "ai_name": "assistant",
