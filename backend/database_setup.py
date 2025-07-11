@@ -442,7 +442,7 @@ def init_database(db_url: str):
                                     "models_path": LOLLMS_CLIENT_DEFAULTS.get("models_path"),
                                     "service_key": LOLLMS_CLIENT_DEFAULTS.get("service_key"),
                                     "default_model_name": LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
-                                    "verify_ssl_certificate": LOLLMS_CLIENT_DEFAULTS.get("verify_ssl_certificate"),
+                                    "verify_ssl_certificate": LOLLMS_CLIENT_DEFAULTS.get("verify_ssl_certificate",True),
                                     "is_active": True
                                 }]
                             )
