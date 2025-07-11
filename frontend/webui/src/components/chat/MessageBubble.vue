@@ -27,7 +27,7 @@ import IconThumbDown from '../../assets/icons/IconThumbDown.vue';
 import IconToken from '../../assets/icons/IconToken.vue';
 import IconFormat from '../../assets/icons/IconFormat.vue';
 
-// Event Icon Imports (NEW)
+// Event Icon Imports
 import IconThinking from '../../assets/icons/IconThinking.vue';
 import IconTool from '../../assets/icons/IconTool.vue';
 import IconObservation from '../../assets/icons/IconObservation.vue';
@@ -35,6 +35,8 @@ import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconError from '../../assets/icons/IconError.vue';
 import IconScratchpad from '../../assets/icons/IconScratchpad.vue';
 import IconEventDefault from '../../assets/icons/IconEventDefault.vue';
+import IconStepStart from '../../assets/icons/IconStepStart.vue'; // NEW
+import IconStepEnd from '../../assets/icons/IconStepEnd.vue';     // NEW
 
 
 const props = defineProps({
@@ -151,7 +153,7 @@ const lastEventSummary = computed(() => {
     return summary;
 });
 
-// NEW: Map event types to imported components
+// UPDATED: Map event types to imported components
 const eventIconMap = {
   'thought': IconThinking,
   'tool_call': IconTool,
@@ -160,14 +162,18 @@ const eventIconMap = {
   'exception': IconError,
   'error': IconError,
   'scratchpad': IconScratchpad,
+  'step_start': IconStepStart, // NEW
+  'step_end': IconStepEnd,     // NEW
   'default': IconEventDefault
-  // Note: 'reasoning', 'step_start', 'step_end' will use the default icon.
-  // You can create and map specific icons for them if needed.
 };
 
 function getEventIcon(type) {
   const lowerType = type?.toLowerCase() || 'default';
-  const key = Object.keys(eventIconMap).find(k => lowerType.includes(k) && k !== 'default');
+  // Use exact match first, then fallback to `includes`
+  if (eventIconMap[lowerType]) {
+    return eventIconMap[lowerType];
+  }
+  const key = Object.keys(eventIconMap).find(k => k !== 'default' && lowerType.includes(k));
   return eventIconMap[key || 'default'];
 }
 
@@ -355,7 +361,6 @@ const formattingMenuItems = [
             </summary>
             <div class="events-content">
                 <div v-for="(event, index) in message.events" :key="index" class="event-item">
-                    <!-- CHANGED: Using dynamic component instead of v-html -->
                     <div class="event-icon-container" :title="event.type">
                       <component :is="getEventIcon(event.type)" />
                     </div>
