@@ -26,6 +26,7 @@ from backend.models import (
     GlobalConfigPublic,
     GlobalConfigUpdate,
     AdminUserUpdate,
+    BatchUsersSettingsUpdate,
     ModelInfo,
     ForceSettingsPayload,
     EmailUsersRequest,
@@ -470,6 +471,43 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
         db.rollback()
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
+
+@admin_router.post("/users/batch-update-settings", response_model=Dict[str, str])
+async def admin_batch_update_user_settings(
+    update_data: BatchUsersSettingsUpdate,
+    db: Session = Depends(get_db),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user)
+):
+    if not update_data.user_ids:
+        raise HTTPException(status_code=400, detail="No user IDs provided for the update.")
+
+    users_to_update = db.query(DBUser).filter(DBUser.id.in_(update_data.user_ids)).all()
+    if not users_to_update:
+        raise HTTPException(status_code=404, detail="No valid users found for the provided IDs.")
+
+    update_fields = update_data.model_dump(exclude={"user_ids"}, exclude_unset=True)
+    if not update_fields:
+        raise HTTPException(status_code=400, detail="No settings provided to update.")
+
+    updated_usernames = []
+    for user in users_to_update:
+        for key, value in update_fields.items():
+            setattr(user, key, value)
+        updated_usernames.append(user.username)
+
+    try:
+        db.commit()
+
+        for username in updated_usernames:
+            if username in user_sessions:
+                user_sessions[username]["lollms_clients"] = {}
+                print(f"INFO: Invalidated LLM client cache for user '{username}' due to batch settings update.")
+
+        return {"message": f"Successfully updated settings for {len(users_to_update)} users."}
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"A database error occurred during batch update: {e}")
 
 @admin_router.post("/users/{user_id}/activate", response_model=UserPublic)
 async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):

@@ -22,6 +22,10 @@ export const useAdminStore = defineStore('admin', () => {
     const mcps = ref([]);
     const apps = ref([]);
     const isLoadingServices = ref(false);
+    
+    // New state for "Force Settings" modal
+    const adminAvailableLollmsModels = ref([]);
+    const isLoadingLollmsModels = ref(false);
 
 
     // --- Actions ---
@@ -54,6 +58,33 @@ export const useAdminStore = defineStore('admin', () => {
             return true;
         } catch (error) {
             return false;
+        }
+    }
+    
+    // New action for batch updating user settings
+    async function batchUpdateUsers(payload) {
+        try {
+            const response = await apiClient.post('/api/admin/users/batch-update-settings', payload);
+            uiStore.addNotification(response.data.message || 'Settings applied successfully.', 'success');
+            await fetchAllUsers(); // Refresh user list to reflect changes
+        } catch (error) {
+            // Error is handled by the global interceptor, re-throw to inform the component
+            throw error;
+        }
+    }
+    
+    // New action to fetch models specifically for the admin panel
+    async function fetchAdminAvailableLollmsModels() {
+        if (adminAvailableLollmsModels.value.length > 0) return;
+        isLoadingLollmsModels.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/available-models');
+            adminAvailableLollmsModels.value = response.data;
+        } catch (error) {
+            uiStore.addNotification("Could not fetch available LLM models for admin.", 'error');
+            adminAvailableLollmsModels.value = [];
+        } finally {
+            isLoadingLollmsModels.value = false;
         }
     }
 
@@ -186,12 +217,19 @@ export const useAdminStore = defineStore('admin', () => {
     }
 
     return {
+        // Existing
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers,
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings,
         isImporting, importOpenWebUIData,
         mcps, apps, isLoadingServices,
         fetchMcps, addMcp, updateMcp, deleteMcp,
-        fetchApps, addApp, updateApp, deleteApp
+        fetchApps, addApp, updateApp, deleteApp,
+
+        // New
+        adminAvailableLollmsModels,
+        isLoadingLollmsModels,
+        fetchAdminAvailableLollmsModels,
+        batchUpdateUsers
     };
 });

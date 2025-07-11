@@ -20,6 +20,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import (
     HTTPException, Depends, Form,
     APIRouter, Query, BackgroundTasks)
+from pydantic import BaseModel
 from backend.models import DiscussionRagDatastoreUpdate # Make sure it's the updated one
 from fastapi.responses import (
     HTMLResponse,
@@ -62,6 +63,24 @@ except ImportError:
 message_grade_lock = threading.Lock()
 
 discussion_router = APIRouter(prefix="/api/discussions", tags=["Discussions"])
+
+class TokenizeRequest(BaseModel):
+    text: str
+
+@discussion_router.post("/tokenize", response_model=Dict[str, int])
+async def tokenize_text(
+    request: TokenizeRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Tokenizes text using the user's current LLM client."""
+    try:
+        lc = get_user_lollms_client(current_user.username)
+        tokens = lc.tokenize(request.text)
+        return {"tokens": len(tokens)}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to tokenize text: {e}")
+
 
 @discussion_router.get("", response_model=List[DiscussionInfo])
 async def list_all_discussions(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DiscussionInfo]:

@@ -12,6 +12,7 @@ import PasswordResetLinkModal from './components/modals/PasswordResetLinkModal.v
 import RenameDiscussionModal from './components/modals/RenameDiscussionModal.vue';
 import PersonalityEditorModal from './components/modals/PersonalityEditorModal.vue';
 import AdminUserEditModal from './components/modals/AdminUserEditModal.vue';
+import ForceSettingsModal from './components/modals/ForceSettingsModal.vue';
 import ConfirmationModal from './components/ui/ConfirmationModal.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
 import SourceModal from './components/modals/SourceModal.vue';
@@ -83,6 +84,7 @@ watch(
     <RenameDiscussionModal v-if="activeModal === 'renameDiscussion'" />
     <PersonalityEditorModal v-if="activeModal === 'personalityEditor'" />
     <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />
+    <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <SourceModal v-if="activeModal === 'sourceViewer'" />
     <DataStoresModal v-if="activeModal === 'dataStores'" />
     <DataStoreEditorModal v-if="activeModal === 'dataStoreEditor'" />

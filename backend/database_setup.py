@@ -142,6 +142,7 @@ class User(Base):
     first_page = Column(String, default="feed", nullable=False)
     ai_response_language = Column(String, default=0, nullable=True)
     fun_mode = Column(Boolean, default=False, nullable=True)
+    show_token_counter = Column(Boolean, default=True, nullable=False)
     
     
     starred_discussions = relationship("UserStarredDiscussion", back_populates="user", cascade="all, delete-orphan")
@@ -469,7 +470,8 @@ def init_database(db_url: str):
                     "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL",
                     "chat_active": "BOOLEAN DEFAULT 0 NOT NULL",
                     "first_page": "VARCHAR DEFAULT 'feed' NOT NULL",
-                    "receive_notification_emails": "BOOLEAN DEFAULT 1 NOT NULL"
+                    "receive_notification_emails": "BOOLEAN DEFAULT 1 NOT NULL",
+                    "show_token_counter": "BOOLEAN DEFAULT 1 NOT NULL"
                 }
                 
                 added_cols = []

@@ -84,16 +84,16 @@ function openEditModal(user) {
     });
 }
 
-// This function opens a conceptual modal (e.g., 'adminUserEmail')
-// that would contain form fields for subject and body.
-// Upon submission, the modal would call the `onSend` callback.
+function openForceSettingsModal() {
+    uiStore.openModal('forceSettings', {
+        onSettingsApplied: () => adminStore.fetchAllUsers()
+    });
+}
+
 function openEmailModal(user) {
     uiStore.openModal('adminUserEmail', {
         user,
         onSend: async ({ subject, body }) => {
-            // This assumes `sendEmailToUsers` is an action in your adminStore.
-            // It is implemented there as requested.
-            // The store action should handle API calls and notifications.
             await adminStore.sendEmailToUsers(subject, body, [user.id]);
         }
     });
@@ -139,9 +139,14 @@ async function deleteUser(user) {
 <template>
     <div class="bg-white dark:bg-gray-800 shadow-sm rounded-lg overflow-hidden">
         <div class="px-4 py-5 sm:p-6 space-y-4">
-            <div>
-                <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">All Users</h3>
-                <p class="mt-1 max-w-2xl text-sm text-gray-500 dark:text-gray-400">A sortable and searchable list of all registered users.</p>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">All Users</h3>
+                    <p class="mt-1 max-w-2xl text-sm text-gray-500 dark:text-gray-400">A sortable and searchable list of all registered users.</p>
+                </div>
+                <button @click="openForceSettingsModal" class="btn btn-secondary">
+                    Force Settings
+                </button>
             </div>
             <input 
                 type="text" 
@@ -161,29 +166,32 @@ async function deleteUser(user) {
                 <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                     <thead class="bg-gray-50 dark:bg-gray-700/50">
                         <tr>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                            <th scope="col" class="table-header">
                                 <button @click="handleSort('username')" class="flex items-center gap-1">
                                     User
                                     <span v-if="sortKey === 'username'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
                                 </button>
                             </th>
-                             <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                             <th scope="col" class="table-header">
+                                Model/Binding
+                            </th>
+                             <th scope="col" class="table-header">
+                                Vectorizer
+                            </th>
+                             <th scope="col" class="table-header">
+                                Context Size
+                            </th>
+                             <th scope="col" class="table-header">
                                 <button @click="handleSort('last_activity_at')" class="flex items-center gap-1">
                                     Last Seen
                                     <span v-if="sortKey === 'last_activity_at'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
                                 </button>
                             </th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                <button @click="handleSort('is_active')" class="flex items-center gap-1">
-                                    Status
-                                    <span v-if="sortKey === 'is_active'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                                </button>
+                            <th scope="col" class="table-header">
+                                Status
                             </th>
-                            <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                                <button @click="handleSort('is_admin')" class="flex items-center gap-1">
-                                    Role
-                                    <span v-if="sortKey === 'is_admin'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span>
-                                </button>
+                            <th scope="col" class="table-header">
+                                Role
                             </th>
                             <th scope="col" class="relative px-6 py-3">
                                 <span class="sr-only">Actions</span>
@@ -192,7 +200,7 @@ async function deleteUser(user) {
                     </thead>
                     <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                         <tr v-for="user in filteredAndSortedUsers" :key="user.id" class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                            <td class="px-6 py-4 whitespace-nowrap">
+                            <td class="table-cell">
                                 <div class="flex items-center">
                                     <div class="ml-4">
                                         <div class="text-sm font-medium text-gray-900 dark:text-white">{{ user.username }}</div>
@@ -200,41 +208,43 @@ async function deleteUser(user) {
                                     </div>
                                 </div>
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                             <td class="table-cell text-sm text-gray-500 dark:text-gray-400">
+                                {{ user.lollms_model_name || 'Not Set' }}
+                            </td>
+                            <td class="table-cell text-sm text-gray-500 dark:text-gray-400">
+                                {{ user.safe_store_vectorizer || 'Not Set' }}
+                            </td>
+                            <td class="table-cell text-sm text-gray-500 dark:text-gray-400">
+                                {{ user.llm_ctx_size || 'Default' }}
+                            </td>
+                            <td class="table-cell text-sm text-gray-500 dark:text-gray-400">
                                 {{ formatLastSeen(user.last_activity_at) }}
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap">
+                            <td class="table-cell">
                                 <div class="flex flex-col gap-1 items-start">
-                                    <span :class="user.is_active ? 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300'" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full">
+                                    <span :class="user.is_active ? 'status-badge-green' : 'status-badge-red'" class="status-badge">
                                         {{ user.is_active ? 'Active' : 'Inactive' }}
                                     </span>
-                                     <span v-if="hasPasswordResetRequest(user)" class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300" title="This user has requested a password reset.">
+                                     <span v-if="hasPasswordResetRequest(user)" class="status-badge status-badge-yellow" title="This user has requested a password reset.">
                                         Reset Pending
                                     </span>
                                 </div>
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                            <td class="table-cell text-sm text-gray-500 dark:text-gray-400">
                                 {{ user.is_admin ? 'Admin' : 'User' }}
                             </td>
-                            <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <td class="table-cell text-right text-sm font-medium">
                                 <div class="flex items-center justify-end space-x-3">
-                                    <button @click="openEditModal(user)" title="Edit User" class="text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
-                                        <span class="sr-only">Edit {{ user.username }}</span>
+                                    <button @click="openEditModal(user)" title="Edit User" class="action-icon">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10" /></svg>
                                     </button>
-                                     <button @click="openEmailModal(user)" title="Email User" class="text-gray-400 hover:text-blue-600 dark:hover:text-blue-400">
-                                        <span class="sr-only">Email {{ user.username }}</span>
+                                     <button @click="openEmailModal(user)" title="Email User" class="action-icon">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" /></svg>
                                     </button>
-                                    <button @click="toggleUserStatus(user)" :title="user.is_active ? 'Deactivate User' : 'Activate User'" :class="{
-                                        'text-green-500 hover:text-yellow-600 dark:text-green-400 dark:hover:text-yellow-400': user.is_active,
-                                        'text-red-500 hover:text-green-600 dark:text-red-400 dark:hover:text-green-400': !user.is_active
-                                    }">
-                                        <span class="sr-only">{{ user.is_active ? 'Deactivate' : 'Activate' }} {{ user.username }}</span>
+                                    <button @click="toggleUserStatus(user)" :title="user.is_active ? 'Deactivate User' : 'Activate User'" :class="user.is_active ? 'action-icon-toggle-active' : 'action-icon-toggle-inactive'">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M5.636 5.636a9 9 0 1 0 12.728 0M12 3v9" /></svg>
                                     </button>
-                                    <button @click="deleteUser(user)" title="Delete User" class="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
-                                        <span class="sr-only">Delete {{ user.username }}</span>
+                                    <button @click="deleteUser(user)" title="Delete User" class="action-icon-delete">
                                         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" /></svg>
                                     </button>
                                 </div>
@@ -246,3 +256,15 @@ async function deleteUser(user) {
         </div>
     </div>
 </template>
+<style scoped>
+.table-header { @apply px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider; }
+.table-cell { @apply px-6 py-4 whitespace-nowrap; }
+.status-badge { @apply px-2 inline-flex text-xs leading-5 font-semibold rounded-full; }
+.status-badge-green { @apply bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300; }
+.status-badge-red { @apply bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300; }
+.status-badge-yellow { @apply bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300; }
+.action-icon { @apply text-gray-400 hover:text-blue-600 dark:hover:text-blue-400; }
+.action-icon-toggle-active { @apply text-green-500 hover:text-yellow-600 dark:text-green-400 dark:hover:text-yellow-400; }
+.action-icon-toggle-inactive { @apply text-red-500 hover:text-green-600 dark:text-red-400 dark:hover:text-green-400; }
+.action-icon-delete { @apply text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300; }
+</style>

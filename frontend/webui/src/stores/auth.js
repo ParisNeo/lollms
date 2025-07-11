@@ -201,10 +201,15 @@ export const useAuthStore = defineStore('auth', () => {
     async function updateUserPreferences(preferences) {
         try {
             const response = await apiClient.put('/api/auth/me', preferences);
-            user.value = { ...user.value, ...response.data };
+            // --- THIS IS THE KEY CORRECTION ---
+            // Merge the server's response back into the user state to ensure UI consistency.
+            if (user.value) {
+                Object.assign(user.value, response.data);
+            }
             useUiStore().addNotification('Settings saved successfully.', 'success');
         } catch(error) {
             console.error("Failed to update user preferences:", error);
+            useUiStore().addNotification('Failed to save settings.', 'error');
             throw error;
         }
     }
@@ -234,7 +239,7 @@ export const useAuthStore = defineStore('auth', () => {
         // Actions
         attemptInitialAuth,
         login,
-        register, // --- EXPOSED new action ---
+        register,
         logout,
         updateUserProfile,
         updateUserPreferences,

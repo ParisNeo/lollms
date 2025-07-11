@@ -121,6 +121,7 @@ class UserUpdate(BaseModel):
     first_page: Optional[str] = "feed"
     ai_response_language: Optional[str] = "auto"
     fun_mode: Optional[bool] = False
+    show_token_counter: Optional[bool] = None
 
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
@@ -130,6 +131,12 @@ class AdminUserUpdate(BaseModel):
     safe_store_vectorizer: Optional[str] = None
     class Config:
         from_attributes = True
+
+class BatchUsersSettingsUpdate(BaseModel):
+    user_ids: List[int]
+    lollms_model_name: Optional[str] = None
+    llm_ctx_size: Optional[int] = Field(None, ge=0)
+    safe_store_vectorizer: Optional[str] = None
 
 class ForceSettingsPayload(BaseModel):
     model_name: str
@@ -244,6 +251,7 @@ class UserAuthDetails(UserLLMParams):
     first_page: Optional[str] = "feed"
     ai_response_language: Optional[str] = "auto"
     fun_mode: Optional[bool] = False
+    show_token_counter: Optional[bool] = True
 
 class GlobalConfigPublic(BaseModel):
     key: str

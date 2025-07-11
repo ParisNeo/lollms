@@ -37,6 +37,11 @@ const isEmojiPickerOpen = ref(false);
 const isRefreshingMcps = ref(false);
 const isRefreshingRags = ref(false);
 
+// --- Token Count State ---
+const tokenCount = ref(0);
+const isTokenizing = ref(false);
+let debounceTimer = null;
+
 // --- STATE FOR FLOATING/MOVABLE BEHAVIOR ---
 const isShrunk = ref(false);
 const chatbarRef = ref(null);
@@ -56,11 +61,16 @@ const isSendDisabled = computed(() => {
   return generationInProgress.value || (messageText.value.trim() === '' && uploadedImages.value.length === 0);
 });
 
+// --- Visibility logic for token counter ---
+const showTokenCounter = computed(() => {
+    if (!user.value) return false;
+    return user.value.show_token_counter && user.value.user_ui_level >= 2;
+});
+
 // --- COMPUTED PROPERTIES FOR FLOATING BEHAVIOR ---
 const headerTitle = computed(() => activeDiscussion.value?.title || "New Chat");
 
 const chatbarStyle = computed(() => {
-    // If it has been moved by the user, respect that position.
     if (isPositionModified.value && currentChatboxPos.value) {
         return {
             left: `${currentChatboxPos.value.x}px`,
@@ -69,7 +79,6 @@ const chatbarStyle = computed(() => {
             transform: 'none',
         };
     }
-    // Default position: centered at the bottom.
     return {
         left: '50%',
         bottom: '1rem',
@@ -151,6 +160,45 @@ function handleResize() {
     }
 }
 
+// --- Token Counting Logic ---
+async function fetchTokenCount(force = false) {
+    if (!showTokenCounter.value) return;
+    if (!messageText.value) {
+        tokenCount.value = 0;
+        return;
+    }
+    if (isTokenizing.value && !force) return;
+
+    isTokenizing.value = true;
+    try {
+        const response = await apiClient.post('/api/discussions/tokenize', { text: messageText.value });
+        tokenCount.value = response.data.tokens;
+    } catch (error) {
+        console.error("Tokenization failed:", error);
+        tokenCount.value = -1;
+    } finally {
+        isTokenizing.value = false;
+    }
+}
+
+watch(messageText, (newValue) => {
+    clearTimeout(debounceTimer);
+    if (!newValue.trim()) {
+        tokenCount.value = 0;
+    } else {
+        if (showTokenCounter.value) {
+            debounceTimer = setTimeout(() => {
+                fetchTokenCount();
+            }, 1500);
+        }
+    }
+});
+
+watch(activeDiscussion, () => {
+    clearTimeout(debounceTimer);
+    tokenCount.value = 0;
+});
+
 onMounted(() => {
     const storedShrunk = localStorage.getItem('lollms_chatbarShrunk');
     if (storedShrunk) isShrunk.value = JSON.parse(storedShrunk);
@@ -160,7 +208,7 @@ onMounted(() => {
     if (storedPosModified === 'true' && storedPos) {
         isPositionModified.value = true;
         currentChatboxPos.value = JSON.parse(storedPos);
-        handleResize(); // Clamp position on initial load in case window size changed
+        handleResize();
     }
     
     window.addEventListener('resize', handleResize);
@@ -170,6 +218,7 @@ onUnmounted(() => {
     window.removeEventListener('resize', handleResize);
     window.removeEventListener('mousemove', onMouseMove);
     window.removeEventListener('mouseup', onMouseUp);
+    clearTimeout(debounceTimer);
 });
 
 
@@ -185,7 +234,6 @@ const mcpToolSelection = computed({
 
 watch(activeDiscussion, (newDiscussion) => {
     isAdvancedMode.value = false;
-    // Reset position if a new discussion is selected and the box wasn't manually moved
     if (newDiscussion && !isPositionModified.value) {
         currentChatboxPos.value = null; 
     }
@@ -193,7 +241,7 @@ watch(activeDiscussion, (newDiscussion) => {
         ragStoreSelection.value = newDiscussion.rag_datastore_ids || [];
         mcpToolSelection.value = newDiscussion.active_tools || [];
     } else {
-        isPositionModified.value = false; // Center the box when there's no discussion
+        isPositionModified.value = false;
         ragStoreSelection.value = [];
         mcpToolSelection.value = [];
     }
@@ -279,7 +327,6 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
 
 function triggerImageUpload() { imageInput.value.click(); }
 
-// --- IMAGE UPLOAD LOGIC (REFACTORED) ---
 async function uploadFiles(files) {
     if (files.length === 0) return;
     if (uploadedImages.value.length + files.length > 5) {
@@ -320,13 +367,11 @@ async function handleImageSelection(event) {
 async function handlePaste(event) {
     const items = (event.clipboardData || window.clipboardData).items;
     if (!items) return;
-
     const imageFiles = [];
     for (const item of items) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
             const file = item.getAsFile();
             if (file) {
-                // Sanitize file type and create a unique name for pasted images
                 const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
                 const uniqueName = `pasted_image_${Date.now()}.${extension}`;
                 const newFile = new File([file], uniqueName, { type: file.type });
@@ -334,9 +379,8 @@ async function handlePaste(event) {
             }
         }
     }
-
     if (imageFiles.length > 0) {
-        event.preventDefault(); // Prevent pasting the image as text
+        event.preventDefault();
         await uploadFiles(imageFiles);
     }
 }
@@ -376,8 +420,22 @@ function handleEmojiSelect(event) {
         
         <!-- Draggable Header -->
         <div @mousedown.prevent="onMouseDown" class="flex items-center justify-between h-10 px-4 border-b border-gray-200 dark:border-gray-700 rounded-t-xl" :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'">
-          <h3 class="text-sm font-semibold truncate text-gray-800 dark:text-gray-100 select-none">{{ headerTitle }}</h3>
-          <button @click.stop="toggleShrink" @mousedown.stop class="p-1 rounded-full text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600" title="Shrink Chat"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M18 12H6" /></svg></button>
+            <div class="flex items-center gap-x-3">
+                <h3 class="text-sm font-semibold truncate text-gray-800 dark:text-gray-100 select-none">{{ headerTitle }}</h3>
+                 <!-- Subtle Token Counter in Header -->
+                <button 
+                    v-if="showTokenCounter && messageText"
+                    @click="fetchTokenCount(true)" 
+                    class="flex items-center gap-1.5 text-xs font-mono px-2 py-0.5 rounded-md transition-colors"
+                    :class="isTokenizing ? 'text-blue-500 bg-blue-100 dark:bg-blue-900/50' : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'"
+                    title="Click to refresh token count"
+                >
+                    <svg v-if="isTokenizing" class="animate-spin h-3 w-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span v-else-if="tokenCount === -1" class="text-red-500">!</span>
+                    <span>{{ tokenCount >= 0 ? tokenCount : '' }} T</span>
+                </button>
+            </div>
+            <button @click.stop="toggleShrink" @mousedown.stop class="p-1 rounded-full text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600" title="Shrink Chat"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M18 12H6" /></svg></button>
         </div>
 
         <!-- Inner content area -->

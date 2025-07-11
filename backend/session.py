@@ -125,7 +125,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "active_personality_id": db_user.active_personality_id,
         }
 
-    # Use the first available binding as a "default" client for general UI info.
     lc = get_user_lollms_client(username) 
     ai_name_for_user = getattr(lc, "ai_name", "assistant")
     current_session_llm_params = user_sessions[username].get("llm_params", {})
@@ -163,7 +162,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         chat_active=db_user.chat_active,
         first_page=db_user.first_page,
         ai_response_language=db_user.ai_response_language,
-        fun_mode=db_user.fun_mode
+        fun_mode=db_user.fun_mode,
+        show_token_counter=db_user.show_token_counter
     )
 
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:

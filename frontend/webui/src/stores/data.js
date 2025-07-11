@@ -5,6 +5,7 @@ import { useAuthStore } from './auth';
 import { useUiStore } from './ui';
 
 export const useDataStore = defineStore('data', () => {
+    // --- Existing State ---
     const availableLollmsModels = ref([]);
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
@@ -15,9 +16,36 @@ export const useDataStore = defineStore('data', () => {
     const mcpTools = ref([]);
     const userApps = ref([]);
     const systemApps = ref([]);
-
     const isLoadingLollmsModels = ref(false);
 
+    // --- NEW STATE FOR LANGUAGES ---
+    const _languages = ref([]);
+    const isLoadingLanguages = ref(false);
+
+    // --- NEW: Default list to use as a fallback ---
+    const defaultLanguages = [
+        { label: 'English', value: 'en' },
+        { label: 'French', value: 'fr' },
+        { label: 'German', value: 'de' },
+        { label: 'Spanish', value: 'es' },
+        { label: 'Italian', value: 'it' },
+        { label: 'Portuguese', value: 'pt' },
+        { label: 'Russian', value: 'ru' },
+        { label: 'Chinese', value: 'zh' },
+        { label: 'Japanese', value: 'ja' },
+        { label: 'Korean', value: 'ko' },
+        { label: 'Arabic', value: 'ar' },
+    ];
+
+    // --- NEW GETTER for languages with fallback and sorting ---
+    const languages = computed(() => {
+        // Use fetched languages if available, otherwise use the hardcoded default list.
+        const sourceList = _languages.value.length > 0 ? _languages.value : defaultLanguages;
+        // The component will prepend 'Auto-detect'
+        return sourceList;
+    });
+
+    // --- Existing Computed Properties (Unchanged) ---
     const availableRagStores = computed(() => {
         const authStore = useAuthStore();
         if (!authStore.user) return [];
@@ -25,7 +53,6 @@ export const useDataStore = defineStore('data', () => {
         const shared = sharedDataStores.value.map(ds => ({ id: ds.id, name: `${ds.name} (from ${ds.owner_username})` }));
         return [...owned, ...shared].sort((a, b) => a.name.localeCompare(b.name));
     });
-
     const availableMcpToolsForSelector = computed(() => {
         if (!Array.isArray(mcpTools.value) || mcpTools.value.length === 0) return [];
         const grouped = mcpTools.value.reduce((acc, tool) => {
@@ -41,43 +68,53 @@ export const useDataStore = defineStore('data', () => {
         }, {});
         return Object.entries(grouped).map(([mcpName, tools]) => ({ isGroup: true, label: mcpName, items: tools.sort((a, b) => a.name.localeCompare(b.name))})).sort((a,b) => a.label.localeCompare(b.label));
     });
-
     const availableLollmsModelsGrouped = computed(() => {
         if (!Array.isArray(availableLollmsModels.value) || availableLollmsModels.value.length === 0) {
             return [];
         }
-
         const grouped = availableLollmsModels.value.reduce((acc, model) => {
             if (!model || typeof model.id !== 'string') {
                 console.warn("Skipping invalid model entry in availableLollmsModels:", model);
                 return acc;
             }
-            
             const [bindingAlias, ...modelNameParts] = model.id.split('/');
             const modelName = modelNameParts.join('/');
-            
             if (!acc[bindingAlias]) {
-                acc[bindingAlias] = {
-                    isGroup: true,
-                    label: bindingAlias,
-                    items: []
-                };
+                acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
             }
-            acc[bindingAlias].items.push({
-                id: model.id,
-                name: modelName || bindingAlias
-            });
+            acc[bindingAlias].items.push({ id: model.id, name: modelName || bindingAlias });
             return acc;
         }, {});
-
         Object.values(grouped).forEach(group => {
             group.items.sort((a, b) => a.name.localeCompare(b.name));
         });
-
         return Object.values(grouped).sort((a, b) => a.label.localeCompare(b.label));
     });
 
+    // --- Actions ---
 
+    // NEW ACTION for fetching languages
+    async function fetchLanguages() {
+        if (_languages.value.length > 0 || isLoadingLanguages.value) return;
+        isLoadingLanguages.value = true;
+        try {
+            const response = await apiClient.get('/api/languages');
+            // Ensure the response is an array before setting it
+            if (Array.isArray(response.data)) {
+                _languages.value = response.data;
+            } else {
+                console.error("API did not return an array for languages.");
+                _languages.value = []; // This will trigger the fallback to defaultLanguages
+            }
+        } catch (error) {
+            console.error("Failed to fetch languages, will use default list.", error);
+            _languages.value = []; // This will trigger the fallback to defaultLanguages
+        } finally {
+            isLoadingLanguages.value = false;
+        }
+    }
+
+    // UPDATED to include fetchLanguages
     async function loadAllInitialData() {
         fetchAvailableLollmsModels();
         fetchDataStores();
@@ -85,8 +122,10 @@ export const useDataStore = defineStore('data', () => {
         fetchMcps();
         fetchMcpTools();
         fetchApps();
+        fetchLanguages(); // <-- ADDED
     }
-
+    
+    // (All other actions remain unchanged)
     async function fetchAvailableLollmsModels() {
         isLoadingLollmsModels.value = true;
         try {
@@ -99,7 +138,6 @@ export const useDataStore = defineStore('data', () => {
             isLoadingLollmsModels.value = false;
         }
     }
-
     async function fetchAdminAvailableLollmsModels() {
         isLoadingLollmsModels.value = true;
         try {
@@ -112,7 +150,6 @@ export const useDataStore = defineStore('data', () => {
             isLoadingLollmsModels.value = false;
         }
     }
-
     async function fetchDataStores() {
         try {
             const response = await apiClient.get('/api/datastores');
@@ -130,7 +167,6 @@ export const useDataStore = defineStore('data', () => {
             sharedDataStores.value = [];
         }
     }
-    
     async function addDataStore(storeData) {
         const uiStore = useUiStore();
         try {
@@ -142,7 +178,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function updateDataStore(storeData) {
         const uiStore = useUiStore();
         try {
@@ -154,7 +189,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function deleteDataStore(storeId) {
         const uiStore = useUiStore();
         try {
@@ -166,7 +200,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-    
     async function shareDataStore({ storeId, username }) {
         const uiStore = useUiStore();
         try {
@@ -177,7 +210,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-    
     async function fetchStoreFiles(storeId) {
         try {
             const response = await apiClient.get(`/api/store/${storeId}/files`);
@@ -187,7 +219,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function fetchStoreVectorizers(storeId) {
         try {
             const response = await apiClient.get(`/api/store/${storeId}/vectorizers`);
@@ -197,7 +228,6 @@ export const useDataStore = defineStore('data', () => {
             return [];
         }
     }
-
     async function uploadFilesToStore({ storeId, formData }) {
         const uiStore = useUiStore();
         try {
@@ -212,7 +242,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function deleteFileFromStore({ storeId, filename }) {
         const uiStore = useUiStore();
         try {
@@ -223,7 +252,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function fetchPersonalities() {
          try {
             const [ownedRes, publicRes] = await Promise.all([
@@ -238,7 +266,6 @@ export const useDataStore = defineStore('data', () => {
             publicPersonalities.value = [];
         }
     }
-    
     async function addPersonality(personalityData) {
         try {
             await apiClient.post('/api/personalities', personalityData);
@@ -249,7 +276,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function updatePersonality(personalityData) {
         if (!personalityData.id) {
             console.error("Update failed: Personality ID is missing.");
@@ -264,7 +290,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-    
     async function deletePersonality(personalityId) {
         try {
             await apiClient.delete(`/api/personalities/${personalityId}`);
@@ -275,7 +300,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function triggerMcpReload() {
         const uiStore = useUiStore();
         uiStore.addNotification('Reloading MCP services...', 'info');
@@ -288,7 +312,6 @@ export const useDataStore = defineStore('data', () => {
             console.error("Failed to trigger MCP reload:", error);
         }
     }
-
     async function fetchMcps() {
         try {
             const response = await apiClient.get('/api/mcps');
@@ -298,7 +321,6 @@ export const useDataStore = defineStore('data', () => {
             userMcps.value = [];
         }
     }
-
     async function addMcp(mcpData) {
         const uiStore = useUiStore();
         try {
@@ -311,7 +333,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function updateMcp(mcpId, mcpData) {
         const uiStore = useUiStore();
         try {
@@ -324,7 +345,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function deleteMcp(mcpId) {
         const uiStore = useUiStore();
         try {
@@ -337,7 +357,6 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-
     async function fetchMcpTools() {
         try {
             const response = await apiClient.get('/api/mcps/tools');
@@ -347,7 +366,6 @@ export const useDataStore = defineStore('data', () => {
             mcpTools.value = [];
         }
     }
-
     async function refreshMcps() {
         const uiStore = useUiStore();
         uiStore.addNotification('Refreshing MCPs...', 'info');
@@ -361,7 +379,6 @@ export const useDataStore = defineStore('data', () => {
             uiStore.addNotification('Failed to refresh MCPs.', 'error');
         }
     }
-
     async function refreshRags() {
         const uiStore = useUiStore();
         uiStore.addNotification('Refreshing RAG stores...', 'info');
@@ -372,7 +389,6 @@ export const useDataStore = defineStore('data', () => {
             uiStore.addNotification('Failed to refresh RAG stores.', 'error');
         }
     }
-    
     async function fetchApps() {
         try {
             const response = await apiClient.get('/api/apps');
@@ -387,7 +403,6 @@ export const useDataStore = defineStore('data', () => {
             systemApps.value = [];
         }
     }
-
     async function addApp(appData) {
         const uiStore = useUiStore();
         try {
@@ -396,7 +411,6 @@ export const useDataStore = defineStore('data', () => {
             await fetchApps();
         } catch (error) { throw error; }
     }
-
     async function updateApp(appId, appData) {
         const uiStore = useUiStore();
         try {
@@ -405,7 +419,6 @@ export const useDataStore = defineStore('data', () => {
             await fetchApps();
         } catch (error) { throw error; }
     }
-
     async function deleteApp(appId) {
         const uiStore = useUiStore();
         try {
@@ -414,7 +427,6 @@ export const useDataStore = defineStore('data', () => {
             await fetchApps();
         } catch (error) { throw error; }
     }
-
     function $reset() {
         availableLollmsModels.value = [];
         ownedDataStores.value = [];
@@ -425,8 +437,16 @@ export const useDataStore = defineStore('data', () => {
         mcpTools.value = [];
         userApps.value = [];
         systemApps.value = [];
+        _languages.value = []; // Reset languages
     }
+
     return {
+        // --- EXPORT NEW STATE AND ACTION ---
+        languages,
+        isLoadingLanguages,
+        fetchLanguages,
+
+        // --- All existing exports ---
         availableLollmsModels, ownedDataStores, sharedDataStores,
         userPersonalities, publicPersonalities, userMcps, mcpTools,
         userApps, systemApps,
