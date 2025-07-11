@@ -16,7 +16,7 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
 import UserAvatar from '../ui/UserAvatar.vue';
 
-// Icon Imports
+// Action & UI Icon Imports
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
@@ -25,6 +25,17 @@ import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconThumbUp from '../../assets/icons/IconThumbUp.vue';
 import IconThumbDown from '../../assets/icons/IconThumbDown.vue';
 import IconToken from '../../assets/icons/IconToken.vue';
+import IconFormat from '../../assets/icons/IconFormat.vue';
+
+// Event Icon Imports (NEW)
+import IconThinking from '../../assets/icons/IconThinking.vue';
+import IconTool from '../../assets/icons/IconTool.vue';
+import IconObservation from '../../assets/icons/IconObservation.vue';
+import IconInfo from '../../assets/icons/IconInfo.vue';
+import IconError from '../../assets/icons/IconError.vue';
+import IconScratchpad from '../../assets/icons/IconScratchpad.vue';
+import IconEventDefault from '../../assets/icons/IconEventDefault.vue';
+
 
 const props = defineProps({
   message: {
@@ -43,6 +54,7 @@ const isEditing = ref(false);
 const editedContent = ref('');
 const codeMirrorView = ref(null);
 const messageContentRef = ref(null);
+const isFormattingMenuOpen = ref(false);
 
 const areActionsDisabled = computed(() => discussionsStore.generationInProgress);
 const user = computed(() => authStore.user);
@@ -84,12 +96,25 @@ const imagesToRender = computed(() => {
 
 const parsedMarkdown = (content) => {
     if (typeof content !== 'string') return '';
-    const dirty = marked.parse(content, { gfm: true, breaks: true });
-    // In a real production app, you MUST sanitize this HTML before rendering to prevent XSS.
-    // Libraries like DOMPurify are recommended for this purpose.
-    return dirty;
+    return marked.parse(content, { gfm: true, breaks: true });
 }
 
+const messageParts = computed(() => {
+    if (!props.message.content || props.message.isStreaming) return [];
+    const parts = [];
+    const content = props.message.content;
+    const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/g;
+    let lastIndex = 0, match;
+    while ((match = thinkRegex.exec(content)) !== null) {
+        if (match.index > lastIndex) parts.push({ type: 'content', content: content.substring(lastIndex, match.index) });
+        if (match[1] && match[1].trim()) parts.push({ type: 'think', content: match[1].trim() });
+        lastIndex = thinkRegex.lastIndex;
+    }
+    if (lastIndex < content.length) parts.push({ type: 'content', content: content.substring(lastIndex) });
+    return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
+});
+
+const getContentTokens = (text) => text ? Array.from(marked.lexer(text)) : [];
 const parsedStreamingContent = computed(() => parsedMarkdown(props.message.content));
 
 const isUser = computed(() => props.message.sender_type === 'user');
@@ -126,24 +151,48 @@ const lastEventSummary = computed(() => {
     return summary;
 });
 
+// NEW: Map event types to imported components
 const eventIconMap = {
-  'thought': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.311a14.994 14.994 0 01-3.75 0M9.75 10.5a3 3 0 116 0 3 3 0 01-6 0z" /></svg>`,
-  'reasoning': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" /></svg>`,
-  'tool_call': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M11.42 15.17L17.25 21A2.652 2.652 0 0021 17.25l-5.877-5.877M11.42 15.17l2.472-2.472a3.375 3.375 0 00-4.773-4.773L6.75 15.75l2.472 2.472a3.375 3.375 0 004.773-4.773z" /></svg>`,
-  'observation': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>`,
-  'step_start': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" /></svg>`,
-  'step_end': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" /></svg>`,
-  'info': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>`,
-  'exception': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>`,
-  'error': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" /></svg>`,
-  'scratchpad': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 7.125l-8.932 8.931m0 0L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" /></svg>`,
-  'default': `<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-full h-full"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" /></svg>`
+  'thought': IconThinking,
+  'tool_call': IconTool,
+  'observation': IconObservation,
+  'info': IconInfo,
+  'exception': IconError,
+  'error': IconError,
+  'scratchpad': IconScratchpad,
+  'default': IconEventDefault
+  // Note: 'reasoning', 'step_start', 'step_end' will use the default icon.
+  // You can create and map specific icons for them if needed.
 };
 
 function getEventIcon(type) {
   const lowerType = type?.toLowerCase() || 'default';
-  const key = Object.keys(eventIconMap).find(k => lowerType.includes(k));
+  const key = Object.keys(eventIconMap).find(k => lowerType.includes(k) && k !== 'default');
   return eventIconMap[key || 'default'];
+}
+
+const branchInfo = computed(() => {
+    const hasMultipleBranches = props.message.branches && props.message.branches.length > 1;
+    if (!hasMultipleBranches || props.message.sender_type !== 'user') return null;
+    const currentMessages = discussionsStore.activeMessages;
+    const currentMessageIndex = currentMessages.findIndex(m => m.id === props.message.id);
+    const nextMessage = currentMessages[currentMessageIndex + 1];
+    let activeBranchIndex = nextMessage ? props.message.branches.findIndex(id => id === nextMessage.id) : -1;
+    if (activeBranchIndex === -1) activeBranchIndex = 0;
+    return {
+        isBranchPoint: true,
+        current: activeBranchIndex + 1,
+        total: props.message.branches.length,
+        branchIds: props.message.branches,
+        currentIndex: activeBranchIndex,
+    };
+});
+
+function navigateBranch(direction) {
+    if (!branchInfo.value) return;
+    const { branchIds, currentIndex } = branchInfo.value;
+    const newIndex = (currentIndex + direction + branchIds.length) % branchIds.length;
+    discussionsStore.switchBranch(branchIds[newIndex]);
 }
 
 const editorExtensions = computed(() => [
@@ -157,7 +206,10 @@ const editorExtensions = computed(() => [
 
 function toggleEdit() {
     isEditing.value = !isEditing.value;
-    if (isEditing.value) editedContent.value = props.message.content;
+    if (isEditing.value) {
+        editedContent.value = props.message.content;
+        isFormattingMenuOpen.value = false;
+    }
 }
 
 async function handleSaveEdit() {
@@ -167,20 +219,9 @@ async function handleSaveEdit() {
 
 function handleCancelEdit() { isEditing.value = false; }
 function handleEditorReady(payload) { codeMirrorView.value = payload.view; }
-
-function copyContent() {
-  navigator.clipboard.writeText(props.message.content);
-  uiStore.addNotification('Content copied!', 'success');
-}
-
-async function handleDelete() {
-  const confirmed = await uiStore.showConfirmation({ title: 'Delete Message', message: 'This will delete the message and its entire branch.', confirmText: 'Delete' });
-  if (confirmed) discussionsStore.deleteMessage({ messageId: props.message.id});
-}
-
-function handleGrade(change) {
-  discussionsStore.gradeMessage({ messageId: props.message.id, change });
-}
+function copyContent() { navigator.clipboard.writeText(props.message.content); uiStore.addNotification('Content copied!', 'success'); }
+async function handleDelete() { const confirmed = await uiStore.showConfirmation({ title: 'Delete Message', message: 'This will delete the message and its entire branch.', confirmText: 'Delete' }); if (confirmed) discussionsStore.deleteMessage({ messageId: props.message.id}); }
+function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.message.id, change }); }
 
 function handleBranchOrRegenerate() {
     let messageToBranchFrom = props.message.sender_type === 'user' ? props.message : null;
@@ -195,9 +236,7 @@ function handleBranchOrRegenerate() {
     else uiStore.addNotification('Could not find a valid user prompt to regenerate from.', 'error');
 }
 
-function showSourceDetails(source) {
-    uiStore.openModal('sourceViewer', source);
-}
+function showSourceDetails(source) { uiStore.openModal('sourceViewer', source); }
 
 function getSimilarityColor(score) {
   if (score === undefined || score === null) return 'bg-gray-400 dark:bg-gray-600';
@@ -205,6 +244,24 @@ function getSimilarityColor(score) {
   if (score >= 70) return 'bg-yellow-500';
   return 'bg-red-500';
 }
+
+function insertTextAtCursor(before, after = '', placeholder = '') {
+    const view = codeMirrorView.value; if (!view) return;
+    const { from, to } = view.state.selection.main;
+    const selectedText = view.state.doc.sliceString(from, to);
+    let textToInsert, selStart, selEnd;
+    if (selectedText) { textToInsert = `${before}${selectedText}${after}`; selStart = from + before.length; selEnd = selStart + selectedText.length; } 
+    else { textToInsert = `${before}${placeholder}${after}`; selStart = from + before.length; selEnd = selStart + placeholder.length; }
+    view.dispatch({ changes: { from, to, insert: textToInsert }, selection: { anchor: selStart, head: selEnd } });
+    view.focus();
+}
+
+const formattingMenuItems = [
+    { type: 'header', label: 'Basic' }, { label: 'Bold', action: () => insertTextAtCursor('**', '**', 'bold text') }, { label: 'Italic', action: () => insertTextAtCursor('*', '*', 'italic text') }, { label: 'Inline Code', action: () => insertTextAtCursor('`', '`', 'code') },
+    { type: 'separator' }, { type: 'header', label: 'Math' }, { label: 'Inline Formula', action: () => insertTextAtCursor('$', '$', 'E=mc^2') }, { label: 'Display Formula', action: () => insertTextAtCursor('$$\n', '\n$$', 'x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}') },
+    { type: 'separator' }, { type: 'header', label: 'Elements' }, { label: 'Link', action: () => insertTextAtCursor('[', '](https://)', 'link text') }, { label: 'Table', action: () => insertTextAtCursor('| Header 1 | Header 2 |\n|---|---|\n| Cell 1 | Cell 2 |\n| Cell 3 | Cell 4 |', '', '') },
+    { type: 'separator' }, { type: 'header', label: 'Code Blocks' }, { label: 'Python', action: () => insertTextAtCursor('```python\n', '\n```', '# Your code here') }, { label: 'JavaScript', action: () => insertTextAtCursor('```javascript\n', '\n```', '// Your code here') },
+];
 </script>
 
 <template>
@@ -236,7 +293,26 @@ function getSimilarityColor(score) {
                 </div>
                 
                 <div :key="message.isStreaming ? 'streaming' : 'settled'" ref="messageContentRef">
-                    <div v-if="message.content || (isUser && !imagesToRender.length)" class="message-prose" v-html="parsedStreamingContent"></div>
+                    <div v-if="message.content || (isUser && !imagesToRender.length)" class="message-prose">
+                        <div v-if="message.isStreaming" v-html="parsedStreamingContent"></div>
+                        <template v-else>
+                            <template v-for="(part, index) in messageParts" :key="index">
+                                <template v-if="part.type === 'content'">
+                                    <template v-for="(token, tokenIndex) in getContentTokens(part.content)" :key="tokenIndex">
+                                        <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" />
+                                        <div v-else v-html="parsedMarkdown(token.raw)"></div>
+                                    </template>
+                                </template>
+                                <details v-else-if="part.type === 'think'" class="think-block my-4" open>
+                                    <summary class="think-summary">
+                                        <IconThinking class="h-5 w-5 flex-shrink-0" />
+                                        <span>Thinking...</span>
+                                    </summary>
+                                    <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
+                                </details>
+                            </template>
+                        </template>
+                    </div>
                 </div>
                 
                 <div v-if="message.isStreaming && !message.content && (!imagesToRender || imagesToRender.length === 0)" class="typing-indicator">
@@ -245,6 +321,23 @@ function getSimilarityColor(score) {
             </div>
 
             <div v-else class="w-full">
+                <div class="flex items-center space-x-1 border-b dark:border-gray-600 mb-2 pb-2">
+                    <div class="relative">
+                        <button @click="isFormattingMenuOpen = !isFormattingMenuOpen" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600" title="Formatting Options">
+                            <IconFormat class="w-5 h-5" />
+                        </button>
+                        <div v-if="isFormattingMenuOpen" v-on-click-outside="() => isFormattingMenuOpen = false"
+                            class="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-xl z-20 py-1">
+                            <template v-for="(item, index) in formattingMenuItems" :key="index">
+                                <div v-if="item.type === 'separator'" class="my-1 h-px bg-gray-200 dark:bg-gray-600"></div>
+                                <div v-else-if="item.type === 'header'" class="px-3 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ item.label }}</div>
+                                <button v-else @click="item.action(); isFormattingMenuOpen = false" class="w-full text-left flex items-center px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-blue-500 hover:text-white">
+                                    {{ item.label }}
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                </div>
                 <codemirror v-model="editedContent" placeholder="Enter your message..." :style="{ maxHeight: '500px' }" :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="editorExtensions" @ready="handleEditorReady" class="cm-editor-container"/>
                 <div class="flex justify-end space-x-2 mt-2">
                     <button @click="handleCancelEdit" class="btn btn-secondary !py-1 !px-3">Cancel</button>
@@ -262,7 +355,10 @@ function getSimilarityColor(score) {
             </summary>
             <div class="events-content">
                 <div v-for="(event, index) in message.events" :key="index" class="event-item">
-                    <div class="event-icon-container" :title="event.type" v-html="getEventIcon(event.type)"></div>
+                    <!-- CHANGED: Using dynamic component instead of v-html -->
+                    <div class="event-icon-container" :title="event.type">
+                      <component :is="getEventIcon(event.type)" />
+                    </div>
                     <div class="event-details">
                         <div class="event-title">{{ event.type }}</div>
                         <div class="event-body">
@@ -277,6 +373,11 @@ function getSimilarityColor(score) {
         <!-- Footer with Actions -->
         <div v-if="!isSystem" class="message-footer">
             <div class="flex-grow flex items-center flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <div v-if="branchInfo" class="detail-badge branch-badge-nav">
+                    <button @click="navigateBranch(-1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Previous Branch"><IconChevronRight class="w-3.5 h-3.5 rotate-180" /></button>
+                    <span class="font-mono text-xs">{{ branchInfo.current }}/{{ branchInfo.total }}</span>
+                    <button @click="navigateBranch(1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Next Branch"><IconChevronRight class="w-3.5 h-3.5" /></button>
+                </div>
                 <div v-if="isAi && message.token_count" class="detail-badge">
                     <IconToken class="w-3.5 h-3.5" />
                     <span>{{ message.token_count }}</span>
@@ -324,30 +425,34 @@ function getSimilarityColor(score) {
 .typing-indicator .dot:nth-of-type(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
 
-/* Events Section - NEW ORGANIC STYLES */
+.think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
+.user-bubble .think-block { @apply bg-blue-400/50 border-blue-300/50; }
+details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
+.user-bubble details[open] > .think-summary { @apply border-b-blue-300/50; }
+.think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
+.user-bubble .think-summary { @apply text-blue-100; }
+.think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
+.think-summary::-webkit-details-marker { display: none; }
+.think-content { @apply p-3; }
+
 .events-container { @apply mt-2 border-t border-black/10 dark:border-white/10 pt-2; }
 .user-bubble .events-container { @apply border-white/20; }
 .events-summary { @apply flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer list-none select-none; }
 .user-bubble .events-summary { @apply text-blue-200; }
 .events-summary::-webkit-details-marker { display: none; }
-.events-summary .toggle-icon { @apply transition-transform duration-200; }
+.events-summary .toggle-icon { @apply transition-transform duration-200 w-4 h-4; }
 details[open] > summary .toggle-icon { @apply rotate-90; }
 .last-event-snippet { @apply ml-auto text-gray-400 dark:text-gray-500 font-normal italic truncate pl-4; }
 .user-bubble .last-event-snippet { @apply text-blue-300; }
 
 .events-content { @apply mt-2 space-y-3; }
 .event-item { @apply flex items-start gap-3; }
-.event-icon-container { @apply flex-shrink-0 w-5 h-5 mt-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 p-0.5; }
-.user-bubble .event-icon-container { @apply bg-white/20 text-blue-200; }
+.event-icon-container { @apply flex-shrink-0 w-5 h-5 mt-0.5 text-gray-600 dark:text-gray-300; }
+.user-bubble .event-icon-container { @apply text-blue-200; }
 .event-details { @apply flex-1 min-w-0; }
 .event-title { @apply text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400; }
 .event-body { @apply mt-1 text-sm; }
-
-/* Prose inside event body should not have its own margins */
-.event-body .message-prose :where(p, ul, ol, pre) {
-    margin-top: 0.25em;
-    margin-bottom: 0.25em;
-}
+.event-body .message-prose :where(p, ul, ol, pre) { margin-top: 0.25em; margin-bottom: 0.25em; }
 
 .cm-editor-container { border: 1px solid theme('colors.gray.300'); border-radius: theme('borderRadius.lg'); }
 .dark .cm-editor-container { border-color: theme('colors.gray.600'); }
@@ -355,6 +460,8 @@ details[open] > summary .toggle-icon { @apply rotate-90; }
 .user-bubble .message-footer { @apply border-white/20; }
 .detail-badge { @apply flex items-center gap-1.5 px-2 py-1 rounded-full bg-gray-200/50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 font-mono; }
 .user-bubble .detail-badge { @apply bg-white/20 text-blue-100; }
+.branch-badge-nav { @apply flex items-center gap-1 p-0; }
+.user-bubble .branch-badge-nav { @apply bg-white/20 text-blue-100; }
 .source-badge { @apply cursor-pointer hover:bg-gray-300/70 dark:hover:bg-gray-600/70 transition-colors; }
 .source-badge .similarity-chip { @apply w-2 h-2 rounded-full flex-shrink-0; }
 .action-btn { @apply p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed; }
