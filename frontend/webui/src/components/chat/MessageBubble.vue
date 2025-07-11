@@ -225,7 +225,29 @@ async function handleSaveEdit() {
 
 function handleCancelEdit() { isEditing.value = false; }
 function handleEditorReady(payload) { codeMirrorView.value = payload.view; }
-function copyContent() { navigator.clipboard.writeText(props.message.content); uiStore.addNotification('Content copied!', 'success'); }
+function copyContent() {
+  navigator.clipboard.writeText(props.message.content)
+    .then(() => {
+      uiStore.addNotification('Content copied!', 'success');
+    })
+    .catch(err => {
+      console.error("Clipboard write failed:", err);
+      // Fallback mechanism:  Create a temporary textarea, copy to it, select, and copy.
+      const tempArea = document.createElement('textarea');
+      tempArea.value = props.message.content;
+      document.body.appendChild(tempArea);
+      tempArea.select();
+      try {
+        document.execCommand('copy'); // Deprecated, but widely supported fallback
+        uiStore.addNotification('Content copied (fallback)!', 'success');
+      } catch (err2) {
+        console.error("Fallback copy failed:", err2);
+        uiStore.addNotification('Failed to copy content.', 'error');
+      } finally {
+        document.body.removeChild(tempArea); // Clean up
+      }
+    });
+}
 async function handleDelete() { const confirmed = await uiStore.showConfirmation({ title: 'Delete Message', message: 'This will delete the message and its entire branch.', confirmText: 'Delete' }); if (confirmed) discussionsStore.deleteMessage({ messageId: props.message.id}); }
 function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.message.id, change }); }
 
