@@ -21,6 +21,7 @@ const getInitialFormState = () => ({
     models_path: '',
     service_key: '',
     default_model_name: '',
+    verify_ssl_certificate: true,
     is_active: true
 });
 
@@ -122,7 +123,17 @@ async function handleDelete(binding) {
                     <label for="default_model_name" class="block text-sm font-medium">Default Model Name</label>
                     <input type="text" id="default_model_name" v-model="form.default_model_name" class="input-field mt-1" placeholder="e.g., phi3:latest or gpt-4o-mini">
                 </div>
-                 <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                    <span class="flex-grow flex flex-col">
+                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Verify SSL certificate</span>
+                        <span class="text-sm text-gray-500 dark:text-gray-400">Verifies SSL certificates. This is advises to avoid man in the middle attacks. If your server has no certificate or there is no authority that can validate it, you can deactivate this setting. But stay caucious.</span>
+                    </span>
+                    <button @click="form.verify_ssl_certificate = !form.verify_ssl_certificate" type="button" :class="[form.verify_ssl_certificate ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                        <span :class="[form.verify_ssl_certificate ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                    </button>
+                </div>
+
+                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                     <span class="flex-grow flex flex-col">
                         <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Active</span>
                         <span class="text-sm text-gray-500 dark:text-gray-400">If disabled, users cannot see or use models from this binding.</span>
