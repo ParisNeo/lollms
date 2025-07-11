@@ -177,7 +177,12 @@ async def generate_discussion_auto_title(discussion_id: str, current_user: UserA
     Generates and sets a new title for a discussion automatically based on its content.
     """
     username = current_user.username
-    discussion_obj = get_user_discussion(username, discussion_id)
+    user_model_full = current_user.lollms_model_name
+    binding_alias = None
+    if user_model_full and '/' in user_model_full:
+        binding_alias, _ = user_model_full.split('/', 1)
+    lc = get_user_lollms_client(username, binding_alias)
+    discussion_obj = get_user_discussion(username, discussion_id, lollms_client=lc)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
