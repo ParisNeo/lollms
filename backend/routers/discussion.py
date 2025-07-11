@@ -290,10 +290,7 @@ async def update_discussion_title(discussion_id: str, title_update: DiscussionTi
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    new_metadata = (discussion_obj.metadata or {}).copy()
-    new_metadata['title'] = title_update.title
-    discussion_obj.metadata = new_metadata
-    discussion_obj.commit()
+    discussion_obj.set_metadata_item('title',title_update.title)
 
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
@@ -397,10 +394,7 @@ async def update_discussion_rag_datastores(
             except HTTPException as e:
                 raise HTTPException(status_code=400, detail=f"Invalid or inaccessible RAG datastore ID: {ds_id} ({e.detail})")
 
-    new_metadata = (discussion_obj.metadata or {}).copy()
-    new_metadata['rag_datastore_ids'] = update_payload.rag_datastore_ids
-    discussion_obj.metadata = new_metadata
-    discussion_obj.commit()
+    discussion_obj.set_metadata_item('rag_datastore_ids', update_payload.rag_datastore_ids)
 
     user_db = db.query(DBUser).filter(DBUser.username == username).one()
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_db.id, discussion_id=discussion_id).first() is not None
@@ -543,10 +537,7 @@ async def chat_in_existing_discussion(
                 
                 ai_message_obj = result.get('ai_message')
                 if ai_message_obj:
-                    new_metadata = (ai_message_obj.metadata or {}).copy()
-                    new_metadata['events'] = all_events
-                    ai_message_obj.metadata = new_metadata
-                    discussion_obj.commit()
+                    ai_message_obj.set_metadata_item('events', all_events, discussion_obj)
 
                 def lollms_message_to_output(msg):
                     if not msg: return None
