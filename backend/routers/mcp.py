@@ -264,13 +264,18 @@ async def update_discussion_tools(
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
     from backend.database_setup import UserStarredDiscussion
-    discussion_obj = get_user_discussion(current_user.username, discussion_id)
+    user_model_full = current_user.lollms_model_name
+    binding_alias = None
+    if user_model_full and '/' in user_model_full:
+        binding_alias, _ = user_model_full.split('/', 1)
+    lc = get_user_lollms_client(current_user.username, binding_alias)    
+    discussion_obj = get_user_discussion(current_user.username, discussion_id, lollms_client=lc)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    if discussion_obj.metadata is None:
-        discussion_obj.metadata = {}
-    discussion_obj.metadata['active_tools'] = update_request.tools
+    new_metadata = (discussion_obj.metadata or {}).copy()
+    new_metadata['active_tools'] = update_request.tools
+    discussion_obj.metadata = new_metadata
     discussion_obj.commit()
 
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=current_user.id, discussion_id=discussion_id).first() is not None
@@ -280,7 +285,7 @@ async def update_discussion_tools(
         title=discussion_obj.metadata.get('title', 'Untitled'),
         is_starred=is_starred,
         rag_datastore_ids=discussion_obj.metadata.get('rag_datastore_ids'),
-        active_tools=update_request.tools,
+        active_tools=discussion_obj.metadata.get('active_tools'),
         active_branch_id=discussion_obj.active_branch_id,
         created_at=discussion_obj.created_at,
         last_activity_at=discussion_obj.updated_at
