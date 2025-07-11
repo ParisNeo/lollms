@@ -12,7 +12,7 @@ new ui:
 - OK level : 0 to 5
 - OK social activate/deactivate
 - OK fix rag store building
-- After generation, refresh discussion
+- OK refresh discussion after generation
 - Add the possibility to use multiple bindings at once with different configurations
 - After stopping, save current status and refresh discussion
 - Add personality description to the list
@@ -36,4 +36,4 @@ new ui:
 - use the name of the personality in bubble instead of assistant also add its icon if applicable
 - add a forgot my password button to the login modal that sends a notification to the administrator.
 - refresh mcps must be converted to reload mcps
-- refresh discussion after generation
+- add context progressbar
