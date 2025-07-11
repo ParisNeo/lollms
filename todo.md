@@ -36,4 +36,4 @@ new ui:
 - use the name of the personality in bubble instead of assistant also add its icon if applicable
 - add a forgot my password button to the login modal that sends a notification to the administrator.
 - refresh mcps must be converted to reload mcps
-- add context progressbar
+- add context progressbar with scratchpad summary button
