@@ -17,6 +17,7 @@ from jose import jwt, JWTError
 from backend.database_setup import (
     User as DBUser,
     DataStore as DBDataStore,
+    MCP as DBMCP,
     SharedDataStoreLink as DBSharedDataStoreLink,
     Personality as DBPersonality,
     MCP as DBMCP,
@@ -179,9 +180,33 @@ def load_mcps(username):
     servers_infos = {}
     db_for_mcp = next(get_db())
     try:
+        system_mcps = db_for_mcp.query(DBMCP).filter(DBMCP.type == 'system').all()
         user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
         if user_db:
             session["access_token"] = create_access_token(data={"sub": user_db.username})
+            for mcp in system_mcps:
+                if mcp.active:
+                    if mcp.authentication_type=="lollms_chat_auth":
+                        servers_infos[mcp.name] = {
+                            "server_url": mcp.url,
+                            "auth_config": {
+                                "type": "bearer",
+                                "token": session.get("access_token") 
+                            }
+                        }
+                    elif mcp.authentication_type=="bearer":
+                        servers_infos[mcp.name] = {
+                            "server_url": mcp.url,
+                            "auth_config": {
+                                "type": "bearer",
+                                "token": mcp.authentication_key
+                            }
+                        }
+                    else:
+                        servers_infos[mcp.name] = {
+                            "server_url": mcp.url
+                        }
+                
             for mcp in user_db.personal_mcps:
                 if mcp.active:
                     if mcp.authentication_type=="lollms_chat_auth":
