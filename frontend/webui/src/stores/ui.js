@@ -17,14 +17,44 @@ export const useUiStore = defineStore('ui', () => {
         onConfirm: () => {},
     });
     const availableLanguages = ref({});
-
-    // --- NEW: Centralized state for email modals ---
     const emailModalSubject = ref('');
     const emailModalBody = ref('');
     const emailModalBackgroundColor = ref('#f4f4f8');
     const emailModalSendAsText = ref(false);
 
     const activeModal = computed(() => modalStack.value.length > 0 ? modalStack.value[modalStack.value.length - 1] : null);
+
+    // --- NEW: Robust Clipboard Function ---
+    async function copyToClipboard(textToCopy, successMessage = 'Copied to clipboard!') {
+        try {
+            // Try the modern Clipboard API first
+            if (navigator.clipboard && window.isSecureContext) {
+                await navigator.clipboard.writeText(textToCopy);
+            } else {
+                // Fallback for insecure contexts or older browsers
+                const textArea = document.createElement("textarea");
+                textArea.value = textToCopy;
+                textArea.style.position = "fixed"; // Prevent scrolling to bottom of page in MS Edge.
+                textArea.style.left = "-9999px";
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                } catch (err) {
+                    throw new Error('Fallback copy command failed.');
+                }
+                document.body.removeChild(textArea);
+            }
+            if (successMessage) {
+                addNotification(successMessage, 'success');
+            }
+        } catch (error) {
+            console.error('Copy to clipboard failed:', error);
+            addNotification('Could not copy text.', 'error');
+        }
+    }
+
 
     function initEmailModalState() {
         emailModalSubject.value = '';
@@ -134,7 +164,6 @@ export const useUiStore = defineStore('ui', () => {
             const response = await apiClient.get('/api/languages/');
             availableLanguages.value = response.data;
         } catch (error) {
-            console.error("Failed to fetch available languages:", error);
             availableLanguages.value = { en: 'English' };
         }
     }
@@ -151,13 +180,12 @@ export const useUiStore = defineStore('ui', () => {
         mainView, activeModal, modalProps, notifications, currentTheme,
         currentLanguage, availableLanguages,
         isImageViewerOpen, imageViewerSrc, confirmationOptions,
-        // New Email State
         emailModalSubject, emailModalBody, emailModalBackgroundColor, emailModalSendAsText,
         initEmailModalState,
-        // Actions
         setMainView, openModal, closeModal, addNotification, removeNotification,
         setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages,
         openImageViewer, closeImageViewer, showConfirmation, confirmAction, cancelAction,
-        isModalOpen, modalData
+        isModalOpen, modalData,
+        copyToClipboard // Expose the new function
     };
 });

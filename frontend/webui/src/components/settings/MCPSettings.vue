@@ -5,6 +5,9 @@ import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import McpCard from '../ui/McpCard.vue';
+import IconWrenchScrewdriver from '../../assets/icons/IconWrenchScrewdriver.vue';
+import IconEye from '../../assets/icons/IconEye.vue';
+import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
@@ -227,7 +230,7 @@ function handleFileSelect(event) {
                             <div class="mt-2 flex items-center gap-x-4">
                                 <div class="h-16 w-16 rounded-md bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
                                     <img v-if="form.icon && !formIconLoadFailed" :src="form.icon" @error="handleFormIconError" alt="Icon Preview" class="h-full w-full object-cover">
-                                    <svg v-else class="w-8 h-8 text-gray-500 dark:text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M21.75 17.25v-.228a4.5 4.5 0 0 0-.12-1.03l-2.268-9.64a3.375 3.375 0 0 0-3.285-2.602H7.923a3.375 3.375 0 0 0-3.285 2.602l-2.268 9.64a4.5 4.5 0 0 0-.12 1.03v.228m19.5 0a3 3 0 0 1-3 3H5.25a3 3 0 0 1-3-3m19.5 0a3 3 0 0 0-3-3H5.25a3 3 0 0 0-3 3m16.5 0h.008v.008h-.008v-.008Z" /></svg>
+                                    <IconWrenchScrewdriver v-else class="w-8 h-8 text-gray-500 dark:text-gray-400" />
                                 </div>
                                 <div class="flex-grow space-y-2">
                                     <input type="text" v-model="form.icon" class="input-field" placeholder="Paste image URL or upload a file">
@@ -264,8 +267,8 @@ function handleFileSelect(event) {
                                 <label for="formKey" class="sr-only">Authentication Key</label>
                                 <input :type="showKey ? 'text' : 'password'" id="formKey" v-model="form.authentication_key" class="input-field pr-10" placeholder="Paste your Bearer token here">
                                 <button type="button" @click="showKey = !showKey" class="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                                    <svg v-if="!showKey" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                    <svg v-else xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.243 4.243L6.228 6.228" /></svg>
+                                    <IconEyeOff v-if="showKey" class="w-5 h-5" />
+                                    <IconEye v-else class="w-5 h-5" />
                                 </button>
                             </div>
                         </fieldset>

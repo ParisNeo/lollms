@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
+import IconClose from '../../assets/icons/IconClose.vue';
 
 const props = defineProps({
   modalName: { type: String, required: true },
@@ -58,7 +59,7 @@ onUnmounted(() => {
           <header class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
             <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ title }}</h2>
             <button @click="handleClose" class="p-1 rounded-full text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              <IconClose class="w-6 h-6" />
             </button>
           </header>
           <main class="p-6 overflow-y-auto flex-1"><slot name="body"></slot></main>

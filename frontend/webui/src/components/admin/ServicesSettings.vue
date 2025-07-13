@@ -8,16 +8,21 @@ import McpCard from '../ui/McpCard.vue';
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
 
-const { mcps, apps, isLoadingServices } = storeToRefs(adminStore);
+const { mcps, apps, isLoadingServices, globalSettings } = storeToRefs(adminStore);
 
 const activeTab = ref('mcps');
+
+// New form state for the service settings
+const servicesForm = ref({
+    openai_api_service_enabled: false
+});
 
 const getInitialFormState = (type = 'mcps') => ({
     name: '',
     url: '',
     icon: '',
     active: true,
-    type: 'system', // Admin form defaults to creating 'system' items
+    type: 'system',
     authentication_type: 'none',
     authentication_key: ''
 });
@@ -30,57 +35,72 @@ const fileInput = ref(null);
 const formIconLoadFailed = ref(false);
 const isFormVisible = ref(false);
 
+const isServiceEnabled = computed({
+    get: () => servicesForm.value.openai_api_service_enabled,
+    set: (value) => {
+        if (servicesForm.value.openai_api_service_enabled !== value) {
+            servicesForm.value.openai_api_service_enabled = value;
+            handleServiceSettingChange();
+        }
+    }
+});
+
+function populateServicesForm() {
+    const setting = globalSettings.value.find(s => s.key === 'openai_api_service_enabled');
+    if (setting) {
+        servicesForm.value.openai_api_service_enabled = setting.value;
+    }
+}
+
+async function handleServiceSettingChange() {
+    await adminStore.updateGlobalSettings({
+        openai_api_service_enabled: servicesForm.value.openai_api_service_enabled
+    });
+}
+
 onMounted(() => {
     adminStore.fetchMcps();
     adminStore.fetchApps();
+    if (globalSettings.value.length > 0) {
+        populateServicesForm();
+    }
 });
 
-watch(() => form.value.icon, () => {
-    formIconLoadFailed.value = false;
-});
-
+watch(globalSettings, populateServicesForm, { deep: true });
+watch(() => form.value.icon, () => { formIconLoadFailed.value = false; });
 const isEditMode = computed(() => editingItem.value !== null);
-
 const sortedSystemMcps = computed(() => mcps.value.filter(m => m.type === 'system').sort((a, b) => a.name.localeCompare(b.name)));
 const sortedUserMcps = computed(() => mcps.value.filter(m => m.type === 'user').sort((a, b) => a.name.localeCompare(b.name)));
 const sortedSystemApps = computed(() => apps.value.filter(a => a.type === 'system').sort((a, b) => a.name.localeCompare(b.name)));
 const sortedUserApps = computed(() => apps.value.filter(a => a.type === 'user').sort((a, b) => a.name.localeCompare(b.name)));
 
 function showAddForm(type) {
-    if (isEditMode.value) {
-        cancelEditing();
-    }
+    if (isEditMode.value) cancelEditing();
     activeTab.value = type;
     form.value = getInitialFormState(type);
     isFormVisible.value = true;
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
-
 function startEditing(item, type) {
     activeTab.value = type;
-    editingItem.value = { ...item, _type: type }; // Use a temporary property to track type
+    editingItem.value = { ...item, _type: type };
     form.value.name = item.name;
     form.value.url = item.url;
     form.value.icon = item.icon || '';
     form.value.active = typeof item.active === 'boolean' ? item.active : true;
-    form.value.type = item.type; // Preserve the original type
+    form.value.type = item.type;
     form.value.authentication_type = item.authentication_type || 'none';
-    form.value.authentication_key = ''; // Never pre-fill the key
+    form.value.authentication_key = '';
     isFormVisible.value = true;
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
-
 function cancelEditing() {
     editingItem.value = null;
     form.value = getInitialFormState(activeTab.value);
     showKey.value = false;
     isFormVisible.value = false;
 }
-
-function handleFormIconError() {
-    formIconLoadFailed.value = true;
-}
-
+function handleFormIconError() { formIconLoadFailed.value = true; }
 async function handleFormSubmit() {
     if (!form.value.name || !form.value.url) {
         uiStore.addNotification('Name and URL are required.', 'warning');
@@ -90,7 +110,6 @@ async function handleFormSubmit() {
     try {
         const payload = { ...form.value };
         const isApp = activeTab.value === 'apps';
-        
         if (isEditMode.value) {
             await (isApp ? adminStore.updateApp(editingItem.value.id, payload) : adminStore.updateMcp(editingItem.value.id, payload));
         } else {
@@ -101,7 +120,6 @@ async function handleFormSubmit() {
         isLoading.value = false;
     }
 }
-
 async function handleDeleteItem(item, type) {
     const confirmed = await uiStore.showConfirmation({
         title: `Delete '${item.name}'?`,
@@ -109,17 +127,11 @@ async function handleDeleteItem(item, type) {
         confirmText: 'Delete'
     });
     if (confirmed) {
-        if (editingItem.value && editingItem.value.id === item.id) {
-            cancelEditing();
-        }
+        if (editingItem.value && editingItem.value.id === item.id) cancelEditing();
         await (type === 'apps' ? adminStore.deleteApp(item.id) : adminStore.deleteMcp(item.id));
     }
 }
-
-function triggerFileInput() {
-    fileInput.value.click();
-}
-
+function triggerFileInput() { fileInput.value.click(); }
 function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -128,7 +140,7 @@ function handleFileSelect(event) {
         uiStore.addNotification('Invalid file type. Please select an image.', 'error');
         return;
     }
-    if (file.size > 1 * 1024 * 1024) { // 1MB limit
+    if (file.size > 1 * 1024 * 1024) {
         uiStore.addNotification('File is too large. Maximum size is 1MB.', 'error');
         return;
     }
@@ -166,6 +178,24 @@ function handleFileSelect(event) {
 
 <template>
     <div class="space-y-10">
+        <!-- New OpenAI Service Card -->
+        <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
+             <div class="px-4 py-5 sm:p-6">
+                <h3 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">OpenAI-Compatible API</h3>
+                <div class="mt-4 flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-4 rounded-md">
+                    <span class="flex-grow flex flex-col pr-4">
+                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable API Service</span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400">
+                            Allows users to generate and use API keys to connect with this backend as if it were an OpenAI server.
+                        </span>
+                    </span>
+                    <button @click="isServiceEnabled = !isServiceEnabled" type="button" :class="[isServiceEnabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                        <span :class="[isServiceEnabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
         <!-- TABS for MCPs and Apps -->
         <div class="border-b border-gray-200 dark:border-gray-700">
             <nav class="-mb-px flex space-x-6" aria-label="Tabs">

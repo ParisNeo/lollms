@@ -1,6 +1,6 @@
 # backend/security.py
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Tuple
 import secrets
 import smtplib
 import subprocess
@@ -23,6 +23,8 @@ from backend.settings import settings
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
@@ -34,6 +36,22 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def get_password_hash(password: str) -> str:
     """Hashes a plain password."""
     return pwd_context.hash(password)
+
+def generate_api_key() -> Tuple[str, str]:
+    """Generates a secure API key and its non-secret prefix."""
+    prefix = "lollms_" + secrets.token_urlsafe(6)  # e.g., lollms_aBcDeF12
+    key = secrets.token_urlsafe(32)
+    full_key = f"{prefix}_{key}"
+    return full_key, prefix
+
+def hash_api_key(api_key: str) -> str:
+    """Hashes a plain text API key for storage."""
+    return api_key_context.hash(api_key)
+
+def verify_api_key(plain_key: str, hashed_key: str) -> bool:
+    """Verifies a plain text API key against a stored hash."""
+    return api_key_context.verify(plain_key, hashed_key)
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """

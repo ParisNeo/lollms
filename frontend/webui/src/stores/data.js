@@ -5,7 +5,6 @@ import { useAuthStore } from './auth';
 import { useUiStore } from './ui';
 
 export const useDataStore = defineStore('data', () => {
-    // --- Existing State ---
     const availableLollmsModels = ref([]);
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
@@ -17,12 +16,10 @@ export const useDataStore = defineStore('data', () => {
     const userApps = ref([]);
     const systemApps = ref([]);
     const isLoadingLollmsModels = ref(false);
-
-    // --- NEW STATE FOR LANGUAGES ---
     const _languages = ref([]);
     const isLoadingLanguages = ref(false);
+    const apiKeys = ref([]); // New state for API keys
 
-    // --- NEW: Default list to use as a fallback ---
     const defaultLanguages = [
         { label: 'English', value: 'en' },
         { label: 'French', value: 'fr' },
@@ -37,15 +34,11 @@ export const useDataStore = defineStore('data', () => {
         { label: 'Arabic', value: 'ar' },
     ];
 
-    // --- NEW GETTER for languages with fallback and sorting ---
     const languages = computed(() => {
-        // Use fetched languages if available, otherwise use the hardcoded default list.
         const sourceList = _languages.value.length > 0 ? _languages.value : defaultLanguages;
-        // The component will prepend 'Auto-detect'
         return sourceList;
     });
 
-    // --- Existing Computed Properties (Unchanged) ---
     const availableRagStores = computed(() => {
         const authStore = useAuthStore();
         if (!authStore.user) return [];
@@ -90,38 +83,64 @@ export const useDataStore = defineStore('data', () => {
         });
         return Object.values(grouped).sort((a, b) => a.label.localeCompare(b.label));
     });
-
-    // --- NEW Getters for Phase 2 ---
     const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
     const getPersonalityById = computed(() => {
         return (id) => allPersonalities.value.find(p => p.id === id);
     });
-    // --- End New Getters ---
 
-    // --- Actions ---
-
-    // NEW ACTION for fetching languages
     async function fetchLanguages() {
         if (_languages.value.length > 0 || isLoadingLanguages.value) return;
         isLoadingLanguages.value = true;
         try {
             const response = await apiClient.get('/api/languages');
-            // Ensure the response is an array before setting it
             if (Array.isArray(response.data)) {
                 _languages.value = response.data;
             } else {
-                console.error("API did not return an array for languages.");
-                _languages.value = []; // This will trigger the fallback to defaultLanguages
+                _languages.value = [];
             }
         } catch (error) {
-            console.error("Failed to fetch languages, will use default list.", error);
-            _languages.value = []; // This will trigger the fallback to defaultLanguages
+            _languages.value = [];
         } finally {
             isLoadingLanguages.value = false;
         }
     }
 
-    // UPDATED to include fetchLanguages
+    // --- API Key Actions ---
+    async function fetchApiKeys() {
+        try {
+            const response = await apiClient.get('/api/api-keys');
+            apiKeys.value = response.data;
+        } catch (error) {
+            if (error.response?.status !== 403) { // Don't show error if service is just disabled
+                useUiStore().addNotification('Could not fetch API keys.', 'error');
+            }
+            apiKeys.value = [];
+        }
+    }
+
+    async function addApiKey(alias) {
+        try {
+            const response = await apiClient.post('/api/api-keys', { alias });
+            // The full key is in response.data.full_key
+            // We return it so the component can show it once.
+            await fetchApiKeys(); // Refresh the list
+            return response.data;
+        } catch (error) {
+            // The global handler will show the notification
+            throw error;
+        }
+    }
+
+    async function deleteApiKey(keyId) {
+        try {
+            await apiClient.delete(`/api/api-keys/${keyId}`);
+            apiKeys.value = apiKeys.value.filter(key => key.id !== keyId);
+            useUiStore().addNotification('API Key deleted successfully.', 'success');
+        } catch (error) {
+            throw error;
+        }
+    }
+
     async function loadAllInitialData() {
         fetchAvailableLollmsModels();
         fetchDataStores();
@@ -129,17 +148,16 @@ export const useDataStore = defineStore('data', () => {
         fetchMcps();
         fetchMcpTools();
         fetchApps();
-        fetchLanguages(); // <-- ADDED
+        fetchLanguages();
+        fetchApiKeys(); // Fetch keys on initial load
     }
     
-    // (All other actions remain unchanged)
     async function fetchAvailableLollmsModels() {
         isLoadingLollmsModels.value = true;
         try {
             const response = await apiClient.get('/api/config/lollms-models');
             availableLollmsModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
-            console.error("Failed to load LLM models:", error);
             availableLollmsModels.value = [];
         } finally {
             isLoadingLollmsModels.value = false;
@@ -151,7 +169,6 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/admin/available-models');
             availableLollmsModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
-            console.error("Failed to load Admin LLM models:", error);
             availableLollmsModels.value = [];
         } finally {
             isLoadingLollmsModels.value = false;
@@ -169,7 +186,6 @@ export const useDataStore = defineStore('data', () => {
                 sharedDataStores.value = [];
             }
         } catch (error) {
-            console.error("Failed to load data stores:", error);
             ownedDataStores.value = [];
             sharedDataStores.value = [];
         }
@@ -181,7 +197,6 @@ export const useDataStore = defineStore('data', () => {
             ownedDataStores.value.push(response.data);
             uiStore.addNotification('Data store created successfully.', 'success');
         } catch(error) {
-            console.error("Failed to add data store:", error);
             throw error;
         }
     }
@@ -192,7 +207,6 @@ export const useDataStore = defineStore('data', () => {
             await fetchDataStores();
             uiStore.addNotification('Data store updated successfully.', 'success');
         } catch(error) {
-            console.error("Failed to update data store:", error);
             throw error;
         }
     }
@@ -203,7 +217,6 @@ export const useDataStore = defineStore('data', () => {
             ownedDataStores.value = ownedDataStores.value.filter(s => s.id !== storeId);
             uiStore.addNotification('Data store deleted.', 'success');
         } catch(error) {
-            console.error("Failed to delete data store:", error);
             throw error;
         }
     }
@@ -213,7 +226,6 @@ export const useDataStore = defineStore('data', () => {
             await apiClient.post(`/api/datastores/${storeId}/share`, { target_username: username, permission_level: "read_query" });
             uiStore.addNotification(`Store shared with ${username}.`, 'success');
         } catch(error) {
-            console.error("Failed to share data store:", error);
             throw error;
         }
     }
@@ -222,7 +234,6 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get(`/api/store/${storeId}/files`);
             return response.data || [];
         } catch(error) {
-            console.error(`Failed to fetch files for store ${storeId}:`, error);
             throw error;
         }
     }
@@ -231,7 +242,6 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get(`/api/store/${storeId}/vectorizers`);
             return response.data || [];
         } catch (error) {
-            console.error(`Failed to fetch vectorizers for store ${storeId}:`, error);
             return [];
         }
     }
@@ -245,7 +255,6 @@ export const useDataStore = defineStore('data', () => {
                 uiStore.addNotification(response.data.message || 'Files uploaded successfully.', 'success');
             }
         } catch(error) {
-            console.error("File upload failed:", error);
             throw error;
         }
     }
@@ -255,7 +264,6 @@ export const useDataStore = defineStore('data', () => {
             await apiClient.delete(`/api/store/${storeId}/files/${encodeURIComponent(filename)}`);
             uiStore.addNotification(`File '${filename}' deleted.`, 'success');
         } catch(error) {
-            console.error("Failed to delete file:", error);
             throw error;
         }
     }
@@ -268,7 +276,6 @@ export const useDataStore = defineStore('data', () => {
             userPersonalities.value = Array.isArray(ownedRes.data) ? ownedRes.data : [];
             publicPersonalities.value = Array.isArray(publicRes.data) ? publicRes.data : [];
         } catch (error) {
-            console.error("Failed to load personalities:", error);
             userPersonalities.value = [];
             publicPersonalities.value = [];
         }
@@ -279,13 +286,11 @@ export const useDataStore = defineStore('data', () => {
             await fetchPersonalities();
             useUiStore().addNotification('Personality created successfully.', 'success');
         } catch (error) {
-            console.error("Failed to create personality:", error);
             throw error;
         }
     }
     async function updatePersonality(personalityData) {
         if (!personalityData.id) {
-            console.error("Update failed: Personality ID is missing.");
             return;
         }
         try {
@@ -293,7 +298,6 @@ export const useDataStore = defineStore('data', () => {
             await fetchPersonalities();
             useUiStore().addNotification('Personality updated successfully.', 'success');
         } catch (error) {
-            console.error("Failed to update personality:", error);
             throw error;
         }
     }
@@ -303,7 +307,6 @@ export const useDataStore = defineStore('data', () => {
             await fetchPersonalities();
             useUiStore().addNotification('Personality deleted.', 'success');
         } catch (error) {
-            console.error("Failed to delete personality:", error);
             throw error;
         }
     }
@@ -316,7 +319,6 @@ export const useDataStore = defineStore('data', () => {
             uiStore.addNotification('MCP services reloaded.', 'success');
         } catch (error) {
             uiStore.addNotification('Failed to reload mcp services.', 'fail');
-            console.error("Failed to trigger MCP reload:", error);
         }
     }
     async function fetchMcps() {
@@ -324,7 +326,6 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/mcps');
             userMcps.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
-            console.error("Failed to load MCP servers:", error);
             userMcps.value = [];
         }
     }
@@ -336,7 +337,6 @@ export const useDataStore = defineStore('data', () => {
             await fetchMcps();
             await triggerMcpReload();
         } catch (error) {
-            console.error("Failed to add MCP server:", error);
             throw error;
         }
     }
@@ -348,7 +348,6 @@ export const useDataStore = defineStore('data', () => {
             await fetchMcps();
             await triggerMcpReload();
         } catch (error) {
-            console.error("Failed to update MCP server:", error);
             throw error;
         }
     }
@@ -360,7 +359,6 @@ export const useDataStore = defineStore('data', () => {
             await fetchMcps();
             await triggerMcpReload();
         } catch (error) {
-            console.error("Failed to delete MCP server:", error);
             throw error;
         }
     }
@@ -369,7 +367,6 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/mcps/tools');
             mcpTools.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
-            console.error("Failed to load MCP tools:", error);
             mcpTools.value = [];
         }
     }
@@ -405,7 +402,6 @@ export const useDataStore = defineStore('data', () => {
                 systemApps.value = response.data.filter(app => app.type === 'system');
             }
         } catch (error) {
-            console.error("Failed to load apps:", error);
             userApps.value = [];
             systemApps.value = [];
         }
@@ -444,25 +440,18 @@ export const useDataStore = defineStore('data', () => {
         mcpTools.value = [];
         userApps.value = [];
         systemApps.value = [];
-        _languages.value = []; // Reset languages
+        _languages.value = [];
+        apiKeys.value = []; // Reset API keys
     }
 
     return {
-        // --- EXPORT NEW STATE AND ACTION ---
-        languages,
-        isLoadingLanguages,
-        fetchLanguages,
-
-        // --- All existing exports ---
+        languages, isLoadingLanguages, fetchLanguages,
         availableLollmsModels, ownedDataStores, sharedDataStores,
         userPersonalities, publicPersonalities, userMcps, mcpTools,
         userApps, systemApps,
         isLoadingLollmsModels,
         availableRagStores, availableMcpToolsForSelector, availableLollmsModelsGrouped,
-
-        // --- NEW Getters for Phase 2 ---
-        allPersonalities,
-        getPersonalityById,
+        allPersonalities, getPersonalityById,
         
         loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,
@@ -472,6 +461,13 @@ export const useDataStore = defineStore('data', () => {
         updateMcp, deleteMcp, fetchMcpTools, triggerMcpReload,
         refreshMcps, refreshRags,
         fetchApps, addApp, updateApp, deleteApp,
+        
+        // API Key management
+        apiKeys,
+        fetchApiKeys,
+        addApiKey,
+        deleteApiKey,
+
         $reset
     };
 });

@@ -542,3 +542,23 @@ class PostPublic(PostBase):
     
     class Config:
         from_attributes = True
+
+# --- NEW: OpenAI API Key Models ---
+class APIKeyBase(BaseModel):
+    alias: constr(min_length=1, max_length=100)
+
+class APIKeyCreate(APIKeyBase):
+    pass
+
+class APIKeyPublic(APIKeyBase):
+    id: int
+    created_at: datetime.datetime
+    last_used_at: Optional[datetime.datetime] = None
+    key_prefix: str
+
+    class Config:
+        from_attributes = True
+
+class NewAPIKeyResponse(APIKeyPublic):
+    # This model includes the full key and is only sent ONCE upon creation.
+    full_key: str

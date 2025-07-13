@@ -91,6 +91,20 @@ class Post(Base):
     comments = relationship("Comment", back_populates="post", cascade="all, delete-orphan")
     likes = relationship("PostLike", cascade="all, delete-orphan")
 
+# --- NEW: OpenAI API Key Table ---
+class OpenAIAPIKey(Base):
+    __tablename__ = "openai_api_keys"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    alias = Column(String(100), nullable=False)
+    key_prefix = Column(String(8), nullable=False, unique=True, index=True)
+    key_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    
+    user = relationship("User", back_populates="api_keys")
+    __table_args__ = (UniqueConstraint('user_id', 'alias', name='uq_user_api_key_alias'),)
+
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
@@ -120,6 +134,8 @@ class User(Base):
         secondaryjoin='User.id==follows.c.following_id',
         backref='followers'
     )
+
+    api_keys = relationship("OpenAIAPIKey", back_populates="user", cascade="all, delete-orphan")
 
     lollms_model_name = Column(String, nullable=True)
     safe_store_vectorizer = Column(String, nullable=True)
@@ -349,6 +365,18 @@ def _bootstrap_global_settings(connection):
             "value": True,
             "type": "boolean", "description": "Use TLS for the SMTP connection.", "category": "Email Settings"
         },
+        "default_lollms_model_name": {
+            "value": "",
+            "type": "string", "description": "Default model name assigned to newly created users.", "category": "Defaults"
+        },
+        "default_llm_ctx_size": {
+            "value": 32000,
+            "type": "integer", "description": "Default context size (in tokens) for new users.", "category": "Defaults"
+        },
+        "default_llm_temperature": {
+            "value": 0.7,
+            "type": "float", "description": "Default generation temperature for new users.", "category": "Defaults"
+        },
         "default_safe_store_vectorizer": {
             "value": config.get("safe_store_defaults", {}).get("global_default_vectorizer", "st:all-MiniLM-L6-v2"),
             "type": "string", "description": "Default vectorizer assigned to newly created users.", "category": "Defaults"
@@ -372,6 +400,10 @@ def _bootstrap_global_settings(connection):
         "force_context_size": {
             "value": 4096,
             "type": "integer", "description": "The context size (in tokens) to force on all users.", "category": "Global LLM Overrides"
+        },
+        "openai_api_service_enabled": {
+            "value": False,
+            "type": "boolean", "description": "Enable the OpenAI-compatible API endpoint for users.", "category": "Services"
         }
     }
 

@@ -29,6 +29,7 @@ import ResetPasswordModal from './components/modals/ResetPasswordModal.vue';
 import EmailAllUsersModal from './components/modals/EmailAllUsersModal.vue';
 import EmailUserModal from './components/modals/EmailUserModal.vue';
 import InsertImageModal from './components/modals/InsertImageModal.vue';
+import NewApiKeyModal from './components/modals/NewApiKeyModal.vue';
 
 import logoUrl from './assets/logo.png';
 
@@ -98,6 +99,7 @@ watch(
     <EmailAllUsersModal v-if="activeModal === 'emailAllUsers'" />
     <EmailUserModal v-if="activeModal === 'adminUserEmail'" />
     <InsertImageModal v-if="activeModal === 'insertImage'" />
+    <NewApiKeyModal v-if="activeModal === 'newApiKey'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />
