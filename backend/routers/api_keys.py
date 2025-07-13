@@ -1,7 +1,7 @@
 # backend/routers/api_keys.py
 import datetime
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response, Body
 from sqlalchemy.orm import Session
 
 from backend.database_setup import get_db, OpenAIAPIKey as DBAPIKey, User as DBUser
@@ -42,7 +42,6 @@ def create_new_api_key(
     if not settings.get("openai_api_service_enabled", False):
         raise HTTPException(status_code=403, detail="OpenAI API service is not enabled by the administrator.")
 
-    # Check if an alias already exists for this user
     existing_key = db.query(DBAPIKey).filter_by(user_id=current_user.id, alias=key_data.alias).first()
     if existing_key:
         raise HTTPException(status_code=400, detail="An API key with this alias already exists.")
@@ -67,27 +66,55 @@ def create_new_api_key(
         created_at=new_db_key.created_at,
         last_used_at=new_db_key.last_used_at,
         key_prefix=new_db_key.key_prefix,
-        full_key=full_key  # Return the full key just this once
+        full_key=full_key
     )
 
+@api_keys_router.delete("", status_code=200, response_model=dict)
+def delete_multiple_api_keys(
+    key_ids: List[int] = Body(..., embed=True),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Deletes one or more API keys by their IDs.
+    """
+    if not key_ids:
+        raise HTTPException(status_code=400, detail="No key IDs provided for deletion.")
+
+    if not settings.get("openai_api_service_enabled", False):
+        raise HTTPException(status_code=403, detail="OpenAI API service is not enabled by the administrator.")
+
+    try:
+        query = db.query(DBAPIKey).filter(
+            DBAPIKey.user_id == current_user.id,
+            DBAPIKey.id.in_(key_ids)
+        )
+        num_deleted = query.delete(synchronize_session=False)
+        db.commit()
+
+        if num_deleted != len(key_ids):
+            print(f"Warning: User {current_user.username} requested deletion of {len(key_ids)} keys, but only {num_deleted} were found and deleted.")
+
+        return {"message": f"{num_deleted} API key(s) have been deleted."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"An error occurred while deleting keys: {e}")
+
 @api_keys_router.delete("/{key_id}", status_code=204)
-def delete_api_key(
+def delete_single_api_key(
     key_id: int,
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """
-    Deletes an API key by its ID.
+    Deletes a single API key by its ID.
     """
-    key_to_delete = db.query(DBAPIKey).filter_by(id=key_id).first()
+    key_to_delete = db.query(DBAPIKey).filter_by(id=key_id, user_id=current_user.id).first()
 
     if not key_to_delete:
-        raise HTTPException(status_code=404, detail="API key not found.")
-
-    if key_to_delete.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You do not have permission to delete this API key.")
+        raise HTTPException(status_code=404, detail="API key not found or you do not have permission to delete it.")
 
     db.delete(key_to_delete)
     db.commit()
     
-    return None
+    return Response(status_code=204)

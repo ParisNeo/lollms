@@ -2,6 +2,7 @@
 import { ref, watch, onMounted, computed } from 'vue';
 import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
+import JsonRenderer from '../ui/JsonRenderer.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
@@ -11,15 +12,21 @@ const isLoading = ref(false);
 const hasChanges = ref(false);
 let pristineState = '{}';
 
+// State to track which JSON fields are in edit mode
+const jsonEditStates = ref({});
+
 const renderedSettingsByCategory = computed(() => {
     const allSettings = adminStore.globalSettings;
     const settingsToRender = allSettings.filter(setting => 
-        setting.category !== 'Email Settings' && setting.key !== 'password_recovery_mode'
+        setting.category !== 'Email Settings' && 
+        setting.category !== 'Server' &&
+        setting.key !== 'password_recovery_mode'
     );
     
     // Define the order of categories
     const categoryOrder = [
         'Registration',
+        'Authentication',
         'Services',
         'Defaults',
         'Global LLM Overrides'
@@ -76,6 +83,8 @@ function populateForm() {
                 } catch {
                     newFormState[setting.key] = setting.value;
                 }
+                 // Initialize edit state to false (view mode)
+                jsonEditStates.value[setting.key] = false;
             } else {
                 newFormState[setting.key] = setting.value;
             }
@@ -84,6 +93,20 @@ function populateForm() {
         pristineState = JSON.parse(JSON.stringify(newFormState));
         hasChanges.value = false;
     }
+}
+
+// Method to safely parse JSON from the form string for the renderer
+function getParsedJson(key) {
+    try {
+        return JSON.parse(form.value[key]);
+    } catch (e) {
+        return { "error": "Invalid JSON format in text editor", "details": e.message };
+    }
+}
+
+// Toggle edit mode for a specific JSON setting
+function toggleJsonEdit(key) {
+    jsonEditStates.value[key] = !jsonEditStates.value[key];
 }
 
 async function handleSave() {
@@ -97,10 +120,10 @@ async function handleSave() {
         if(form.value.hasOwnProperty(key)) {
             if (setting.type === 'json') {
                 try {
-                    // Parse the string from the textarea back into an object/array
+                    // Validate and add to payload
                     payload[key] = JSON.parse(form.value[key]);
                 } catch (e) {
-                    uiStore.addNotification(`Invalid JSON format for '${setting.description}'.`, 'error');
+                    uiStore.addNotification(`Invalid JSON format for '${setting.description}'. Please fix it before saving.`, 'error');
                     hasJsonError = true;
                 }
             } else {
@@ -111,12 +134,13 @@ async function handleSave() {
     
     if(hasJsonError) {
         isLoading.value = false;
-        return;
+        return; // Stop the save process if any JSON is invalid
     }
 
     try {
         await adminStore.updateGlobalSettings(payload);
-        // The watcher will repopulate the form, including re-stringifying JSON fields
+        // Turn off edit mode for all JSON fields after successful save
+        Object.keys(jsonEditStates.value).forEach(key => jsonEditStates.value[key] = false);
     } catch (error) {
         // Error is handled globally
     } finally {
@@ -141,43 +165,68 @@ async function handleSave() {
                     <h4 class="text-lg font-medium text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600 pb-2 mb-6">{{ category }}</h4>
                     <div class="space-y-8">
                         <div v-for="setting in settings" :key="setting.key">
-                            <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
                             
                             <!-- Special Case: registration_mode -->
-                            <select v-if="setting.key === 'registration_mode'" :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
-                                <option value="direct">Direct (instantly active)</option>
-                                <option value="admin_approval">Admin Approval</option>
-                            </select>
+                            <div v-if="setting.key === 'registration_mode'">
+                                <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
+                                <select :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
+                                    <option value="direct">Direct (instantly active)</option>
+                                    <option value="admin_approval">Admin Approval</option>
+                                </select>
+                            </div>
 
                             <!-- Special Case: force_model_mode -->
-                            <select v-else-if="setting.key === 'force_model_mode'" :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
-                                <option value="disabled">Disabled</option>
-                                <option value="force_once">Force Once (set user preference)</option>
-                                <option value="force_always">Force Always (override session)</option>
-                            </select>
+                            <div v-else-if="setting.key === 'force_model_mode'">
+                                <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
+                                <select :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
+                                    <option value="disabled">Disabled</option>
+                                    <option value="force_once">Force Once (set user preference)</option>
+                                    <option value="force_always">Force Always (override session)</option>
+                                </select>
+                            </div>
 
                             <!-- Generic Input for string, integer, and float -->
-                            <input v-else-if="['string', 'integer', 'float'].includes(setting.type)"
-                                :type="setting.type === 'string' ? 'text' : 'number'"
-                                :step="setting.type === 'float' ? '0.1' : '1'"
-                                :id="setting.key"
-                                v-model="form[setting.key]"
-                                class="input-field mt-1">
+                            <div v-else-if="['string', 'integer', 'float'].includes(setting.type)">
+                                <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
+                                <input
+                                    :type="setting.type === 'string' ? 'text' : 'number'"
+                                    :step="setting.type === 'float' ? '0.1' : '1'"
+                                    :id="setting.key"
+                                    v-model="form[setting.key]"
+                                    class="input-field mt-1">
+                            </div>
 
                             <!-- Boolean Toggle -->
-                            <div v-else-if="setting.type === 'boolean'" class="mt-2">
-                                <button @click="form[setting.key] = !form[setting.key]" type="button" :class="[form[setting.key] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
-                                    <span :class="[form[setting.key] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
-                                </button>
+                            <div v-else-if="setting.type === 'boolean'">
+                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
+                                <div class="mt-2">
+                                    <button @click="form[setting.key] = !form[setting.key]" type="button" :class="[form[setting.key] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                                        <span :class="[form[setting.key] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                                    </button>
+                                </div>
                             </div>
                             
-                            <!-- Textarea for JSON -->
-                            <textarea v-else-if="setting.type === 'json'"
-                                :id="setting.key"
-                                v-model="form[setting.key]"
-                                rows="5"
-                                class="input-field mt-1 font-mono text-xs !leading-relaxed"
-                                placeholder="Enter valid JSON here..."></textarea>
+                            <!-- JSON Renderer/Editor -->
+                            <div v-else-if="setting.type === 'json'">
+                                <div class="flex justify-between items-center mb-1">
+                                    <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
+                                    <button @click="toggleJsonEdit(setting.key)" type="button" class="btn btn-secondary btn-xs">
+                                        {{ jsonEditStates[setting.key] ? 'View Rendered' : 'Edit Raw' }}
+                                    </button>
+                                </div>
+                                
+                                <div v-if="jsonEditStates[setting.key]">
+                                    <textarea
+                                        :id="setting.key"
+                                        v-model="form[setting.key]"
+                                        rows="8"
+                                        class="input-field w-full font-mono text-xs !leading-relaxed"
+                                        placeholder="Enter valid JSON here..."></textarea>
+                                </div>
+                                <div v-else class="mt-2 p-4 rounded-md bg-gray-50 dark:bg-gray-900/50 border border-gray-200 dark:border-gray-700">
+                                    <JsonRenderer :json="getParsedJson(setting.key)" />
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>

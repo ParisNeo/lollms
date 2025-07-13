@@ -1,10 +1,10 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
-import { useAdminStore } from '../../stores/admin'; // To check global settings
+import { useAdminStore } from '../../stores/admin';
 import { storeToRefs } from 'pinia';
-import IconCopy from '../../assets/icons/IconCopy.vue';
+import IconTrash from '../../assets/icons/IconTrash.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
@@ -15,21 +15,44 @@ const { globalSettings } = storeToRefs(adminStore);
 
 const newKeyAlias = ref('');
 const isLoading = ref(false);
+const selectedKeys = ref(new Set());
 
 const isServiceEnabled = computed(() => {
     const setting = globalSettings.value.find(s => s.key === 'openai_api_service_enabled');
     return setting ? setting.value : false;
 });
 
+const hasKeys = computed(() => apiKeys.value.length > 0);
+
+// This computed property now drives the "Select All" / "Deselect All" toggle button
+const allKeysSelected = computed({
+    get: () => hasKeys.value && selectedKeys.value.size === apiKeys.value.length,
+    set: (value) => {
+        if (value) {
+            selectedKeys.value = new Set(apiKeys.value.map(k => k.id));
+        } else {
+            selectedKeys.value.clear();
+        }
+    }
+});
+
 onMounted(() => {
-    // Data is fetched by the main data store loader
-    // but we can ensure it's loaded if the user navigates here directly.
     if(adminStore.globalSettings.length === 0) {
         adminStore.fetchGlobalSettings();
     }
-    if (dataStore.apiKeys.length === 0) {
+    if (dataStore.apiKeys.length === 0 && isServiceEnabled.value) {
         dataStore.fetchApiKeys();
     }
+});
+
+watch(isServiceEnabled, (newValue) => {
+    if (newValue && dataStore.apiKeys.length === 0) {
+        dataStore.fetchApiKeys();
+    }
+});
+
+watch(apiKeys, () => {
+    selectedKeys.value.clear();
 });
 
 function formatTimestamp(timestamp) {
@@ -45,13 +68,9 @@ async function handleCreateKey() {
     isLoading.value = true;
     try {
         const newKeyData = await dataStore.addApiKey(newKeyAlias.value.trim());
-        console.log("Opening the new api key modal")
         uiStore.openModal('newApiKey', { keyData: newKeyData });
-        console.log("Opening the new api key modal. DONE")
-
         newKeyAlias.value = '';
     } catch (error) {
-        // Error is handled by the global interceptor
     } finally {
         isLoading.value = false;
     }
@@ -64,8 +83,31 @@ async function handleDeleteKey(key) {
         confirmText: 'Delete Key'
     });
     if (confirmed) {
-        await dataStore.deleteApiKey(key.id);
+        await dataStore.deleteSingleApiKey(key.id);
     }
+}
+
+async function handleDeleteSelected() {
+    const idsToDelete = Array.from(selectedKeys.value);
+    if (idsToDelete.length === 0) {
+        uiStore.addNotification('No keys selected for deletion.', 'warning');
+        return;
+    }
+    
+    const confirmed = await uiStore.showConfirmation({
+        title: `Delete ${idsToDelete.length} API Key(s)?`,
+        message: 'This will permanently revoke the selected keys. This action cannot be undone.',
+        confirmText: 'Delete Selected'
+    });
+
+    if (confirmed) {
+        await dataStore.deleteMultipleApiKeys(idsToDelete);
+    }
+}
+
+// Function to toggle the "Select All" state via the button
+function toggleSelectAll() {
+    allKeysSelected.value = !allKeysSelected.value;
 }
 </script>
 
@@ -110,28 +152,55 @@ async function handleDeleteKey(key) {
                 
                 <!-- Keys List -->
                 <div class="border-t border-gray-200 dark:border-gray-700">
-                    <div v-if="apiKeys.length === 0" class="p-6 text-center text-gray-500 dark:text-gray-400">
+                    <div v-if="!hasKeys" class="p-6 text-center text-gray-500 dark:text-gray-400">
                         You have not created any API keys yet.
                     </div>
-                    <ul v-else role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
-                        <li v-for="key in apiKeys" :key="key.id" class="px-4 py-4 sm:px-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                            <div class="flex-grow">
-                                <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ key.alias }}</p>
-                                <p class="text-sm text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                                    <span>{{ key.key_prefix }}...</span>
-                                </p>
+                    <div v-else>
+                        <!-- Contextual Actions Header - Shows only when items are selected -->
+                        <div v-if="selectedKeys.size > 0" class="px-4 sm:px-6 py-2 bg-blue-50 dark:bg-blue-900/20 flex items-center justify-between transition-all">
+                            <div class="flex items-center gap-4">
+                                <span class="text-sm font-semibold text-blue-800 dark:text-blue-200">{{ selectedKeys.size }} selected</span>
+                                <button @click="toggleSelectAll" class="text-sm font-medium text-blue-600 hover:underline">
+                                    {{ allKeysSelected ? 'Deselect All' : 'Select All' }}
+                                </button>
                             </div>
-                            <div class="flex-shrink-0 flex flex-col sm:flex-row sm:items-center gap-4 w-full sm:w-auto">
-                                <div class="text-xs text-gray-500 dark:text-gray-400 sm:text-right">
+                            <button @click="handleDeleteSelected" class="btn btn-danger btn-sm">
+                                Delete Selected
+                            </button>
+                        </div>
+
+                        <!-- Key List -->
+                        <ul role="list" class="divide-y divide-gray-200 dark:divide-gray-700">
+                            <li v-for="key in apiKeys" :key="key.id" 
+                                class="px-4 py-4 sm:px-6 flex items-center gap-4 group transition-colors duration-150"
+                                :class="{ 'bg-blue-50 dark:bg-blue-900/40': selectedKeys.has(key.id) }"
+                            >
+                                <input 
+                                    type="checkbox" 
+                                    :value="key.id" 
+                                    v-model="selectedKeys" 
+                                    class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                                >
+                                <div class="flex-grow ml-2">
+                                    <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ key.alias }}</p>
+                                    <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">{{ key.key_prefix }}<span>...</span>
+                                    </p>
+                                </div>
+                                <div class="text-xs text-gray-500 dark:text-gray-400 text-right">
                                     <p>Last used: {{ formatTimestamp(key.last_used_at) }}</p>
                                     <p>Created: {{ formatTimestamp(key.created_at) }}</p>
                                 </div>
-                                <button @click="handleDeleteKey(key)" class="btn btn-danger-outline btn-sm sm:w-auto w-full">
-                                    Delete
+                                <button 
+                                    @click="handleDeleteKey(key)" 
+                                    class="p-2 rounded-full text-gray-400 hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/50 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    :class="{'opacity-100': selectedKeys.size>0}"
+                                    title="Delete this key"
+                                >
+                                    <IconTrash class="h-5 w-5" />
                                 </button>
-                            </div>
-                        </li>
-                    </ul>
+                            </li>
+                        </ul>
+                    </div>
                 </div>
             </div>
         </div>

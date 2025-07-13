@@ -325,6 +325,26 @@ def _bootstrap_global_settings(connection):
     print("INFO: Checking and bootstrapping global settings in the database.")
     
     all_possible_settings = {
+        "host": {
+            "value": config.get("server", {}).get("host", "0.0.0.0"),
+            "type": "string", "description": "Server host address. Requires a restart to take effect.", "category": "Server"
+        },
+        "port": {
+            "value": config.get("server", {}).get("port", 9642),
+            "type": "integer", "description": "Server port. Requires a restart to take effect.", "category": "Server"
+        },
+        "https_enabled": {
+            "value": config.get("server", {}).get("https_enabled", False),
+            "type": "boolean", "description": "Enable HTTPS for the server. Requires a restart to take effect.", "category": "Server"
+        },
+        "ssl_certfile": {
+            "value": config.get("server", {}).get("ssl_certfile", ""),
+            "type": "string", "description": "Path to the SSL certificate file (e.g., cert.pem). Requires a restart.", "category": "Server"
+        },
+        "ssl_keyfile": {
+            "value": config.get("server", {}).get("ssl_keyfile", ""),
+            "type": "string", "description": "Path to the SSL private key file (e.g., key.pem). Requires a restart.", "category": "Server"
+        },
         "allow_new_registrations": {
             "value": config.get("app_settings", {}).get("allow_new_registrations", True),
             "type": "boolean", "description": "Allow new users to register an account.", "category": "Registration"

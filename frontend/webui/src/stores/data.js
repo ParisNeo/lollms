@@ -18,7 +18,7 @@ export const useDataStore = defineStore('data', () => {
     const isLoadingLollmsModels = ref(false);
     const _languages = ref([]);
     const isLoadingLanguages = ref(false);
-    const apiKeys = ref([]); // New state for API keys
+    const apiKeys = ref([]);
 
     const defaultLanguages = [
         { label: 'English', value: 'en' },
@@ -105,13 +105,12 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
-    // --- API Key Actions ---
     async function fetchApiKeys() {
         try {
             const response = await apiClient.get('/api/api-keys');
             apiKeys.value = response.data;
         } catch (error) {
-            if (error.response?.status !== 403) { // Don't show error if service is just disabled
+            if (error.response?.status !== 403) {
                 useUiStore().addNotification('Could not fetch API keys.', 'error');
             }
             apiKeys.value = [];
@@ -121,21 +120,31 @@ export const useDataStore = defineStore('data', () => {
     async function addApiKey(alias) {
         try {
             const response = await apiClient.post('/api/api-keys', { alias });
-            // The full key is in response.data.full_key
-            // We return it so the component can show it once.
-            await fetchApiKeys(); // Refresh the list
+            await fetchApiKeys();
             return response.data;
         } catch (error) {
-            // The global handler will show the notification
             throw error;
         }
     }
 
-    async function deleteApiKey(keyId) {
+
+    async function deleteSingleApiKey(keyId) {
+        const uiStore = useUiStore();
         try {
             await apiClient.delete(`/api/api-keys/${keyId}`);
             apiKeys.value = apiKeys.value.filter(key => key.id !== keyId);
-            useUiStore().addNotification('API Key deleted successfully.', 'success');
+            uiStore.addNotification('API Key deleted successfully.', 'success');
+        } catch (error) {
+            throw error;
+        }
+    }
+    
+    async function deleteMultipleApiKeys(keyIds) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.delete('/api/api-keys', { data: { key_ids: keyIds } });
+            apiKeys.value = apiKeys.value.filter(key => !keyIds.includes(key.id));
+            uiStore.addNotification(response.data.message || 'Selected keys deleted.', 'success');
         } catch (error) {
             throw error;
         }
@@ -149,7 +158,7 @@ export const useDataStore = defineStore('data', () => {
         fetchMcpTools();
         fetchApps();
         fetchLanguages();
-        fetchApiKeys(); // Fetch keys on initial load
+        fetchApiKeys();
     }
     
     async function fetchAvailableLollmsModels() {
@@ -441,7 +450,7 @@ export const useDataStore = defineStore('data', () => {
         userApps.value = [];
         systemApps.value = [];
         _languages.value = [];
-        apiKeys.value = []; // Reset API keys
+        apiKeys.value = [];
     }
 
     return {
@@ -462,11 +471,10 @@ export const useDataStore = defineStore('data', () => {
         refreshMcps, refreshRags,
         fetchApps, addApp, updateApp, deleteApp,
         
-        // API Key management
         apiKeys,
-        fetchApiKeys,
+        fetchApiKeys, 
         addApiKey,
-        deleteApiKey,
+        deleteMultipleApiKeys, deleteSingleApiKey,
 
         $reset
     };

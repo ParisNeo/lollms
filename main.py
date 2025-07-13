@@ -157,8 +157,35 @@ add_ui_routes(app)
 
 if __name__ == "__main__":
     import uvicorn
-    host = SERVER_CONFIG.get("host", "127.0.0.1")
-    port = int(SERVER_CONFIG.get("port", 9642))
+    from backend.settings import settings
+
+    # Initialize DB first to ensure settings are bootstrapped if needed
+    init_database(APP_DB_URL)
+    
+    # Force a refresh of settings from the database
+    settings.refresh()
+    
+    # Get server config from settings, with fallback to config.toml values from config.py
+    host = settings.get("host", SERVER_CONFIG.get("host", "0.0.0.0"))
+    port = int(settings.get("port", SERVER_CONFIG.get("port", 9642)))
+
+    # Get SSL config from settings
+    ssl_params = {}
+    if settings.get("https_enabled"):
+        certfile = settings.get("ssl_certfile")
+        keyfile = settings.get("ssl_keyfile")
+        
+        if certfile and keyfile and Path(certfile).is_file() and Path(keyfile).is_file():
+            ssl_params["ssl_certfile"] = certfile
+            ssl_params["ssl_keyfile"] = keyfile
+        else:
+            print("WARNING: HTTPS is enabled in settings, but the certificate or key file is missing, not found, or invalid.")
+            print(f"         Certfile path: '{certfile}' (Exists: {Path(certfile).is_file()})")
+            print(f"         Keyfile path: '{keyfile}' (Exists: {Path(keyfile).is_file()})")
+            print("         Server will start without HTTPS to avoid crashing.")
+
     print(f"--- LoLLMs Chat API Server (v{APP_VERSION}) ---")
-    print(f"Access UI at: http://{host}:{port}/")
-    uvicorn.run("main:app", host=host, port=port, reload=False)
+    protocol = "https" if ssl_params else "http"
+    print(f"Access UI at: {protocol}://{host}:{port}/")
+    
+    uvicorn.run("main:app", host=host, port=port, reload=False, **ssl_params)
