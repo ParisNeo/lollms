@@ -21,20 +21,18 @@ export const useUiStore = defineStore('ui', () => {
     const emailModalBody = ref('');
     const emailModalBackgroundColor = ref('#f4f4f8');
     const emailModalSendAsText = ref(false);
+    const isSidebarOpen = ref(true); // New state
 
     const activeModal = computed(() => modalStack.value.length > 0 ? modalStack.value[modalStack.value.length - 1] : null);
 
-    // --- NEW: Robust Clipboard Function ---
     async function copyToClipboard(textToCopy, successMessage = 'Copied to clipboard!') {
         try {
-            // Try the modern Clipboard API first
             if (navigator.clipboard && window.isSecureContext) {
                 await navigator.clipboard.writeText(textToCopy);
             } else {
-                // Fallback for insecure contexts or older browsers
                 const textArea = document.createElement("textarea");
                 textArea.value = textToCopy;
-                textArea.style.position = "fixed"; // Prevent scrolling to bottom of page in MS Edge.
+                textArea.style.position = "fixed";
                 textArea.style.left = "-9999px";
                 document.body.appendChild(textArea);
                 textArea.focus();
@@ -54,7 +52,6 @@ export const useUiStore = defineStore('ui', () => {
             addNotification('Could not copy text.', 'error');
         }
     }
-
 
     function initEmailModalState() {
         emailModalSubject.value = '';
@@ -111,6 +108,20 @@ export const useUiStore = defineStore('ui', () => {
     function initializeTheme() {
         setTheme(currentTheme.value);
     }
+
+    // --- New Sidebar Actions ---
+    function toggleSidebar() {
+        isSidebarOpen.value = !isSidebarOpen.value;
+        localStorage.setItem('lollms-sidebar-open', isSidebarOpen.value);
+    }
+
+    function initializeSidebarState() {
+        const storedState = localStorage.getItem('lollms-sidebar-open');
+        if (storedState !== null) {
+            isSidebarOpen.value = JSON.parse(storedState);
+        }
+    }
+    // --- End New Sidebar Actions ---
 
     function setLanguage(langCode) {
         currentLanguage.value = langCode;
@@ -181,11 +192,13 @@ export const useUiStore = defineStore('ui', () => {
         currentLanguage, availableLanguages,
         isImageViewerOpen, imageViewerSrc, confirmationOptions,
         emailModalSubject, emailModalBody, emailModalBackgroundColor, emailModalSendAsText,
+        isSidebarOpen, // Expose new state
         initEmailModalState,
         setMainView, openModal, closeModal, addNotification, removeNotification,
         setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages,
         openImageViewer, closeImageViewer, showConfirmation, confirmAction, cancelAction,
         isModalOpen, modalData,
-        copyToClipboard // Expose the new function
+        copyToClipboard,
+        toggleSidebar, initializeSidebarState, // Expose new actions
     };
 });

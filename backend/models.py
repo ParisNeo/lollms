@@ -1,10 +1,19 @@
 import datetime
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, TypeVar, Generic
 
 from pydantic import BaseModel, Field, constr, field_validator, validator, EmailStr, computed_field
 from backend.database_setup import FriendshipStatus
 from enum import Enum
 from backend.database_setup import FriendshipStatus, PostVisibility as DBPostVisibility
+
+T = TypeVar('T')
+
+class PaginatedResponse(BaseModel, Generic[T]):
+    items: List[T]
+    total: int
+    page: int
+    page_size: int
+    has_more: bool
 
 class LLMBindingBase(BaseModel):
     alias: constr(min_length=1, max_length=100)
@@ -562,3 +571,9 @@ class APIKeyPublic(APIKeyBase):
 class NewAPIKeyResponse(APIKeyPublic):
     # This model includes the full key and is only sent ONCE upon creation.
     full_key: str
+
+class PaginatedDiscussionInfo(PaginatedResponse[DiscussionInfo]):
+    pass
+
+class PaginatedMessageOutput(PaginatedResponse[MessageOutput]):
+    pass

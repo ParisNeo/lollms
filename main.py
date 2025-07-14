@@ -37,7 +37,7 @@ from backend.routers.api_keys import api_keys_router
 from backend.routers.openai_v1 import openai_v1_router
 from backend.routers.lollms_config import lollms_config_router
 from backend.routers.files import upload_router, assets_router
-from backend.routers.ui import add_ui_routes
+from backend.routers.ui import add_ui_routes, ui_router # Correct import
 
 app = FastAPI(
     title="Simplified LoLLMs Chat API",
@@ -152,8 +152,9 @@ app.include_router(openai_v1_router)
 app.include_router(lollms_config_router)
 app.include_router(upload_router)
 app.include_router(assets_router)
+app.include_router(ui_router) # Include the new API endpoint
 
-add_ui_routes(app)
+add_ui_routes(app) # Add the static file serving
 
 if __name__ == "__main__":
     import uvicorn

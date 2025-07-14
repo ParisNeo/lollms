@@ -1,77 +1,67 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
-import UserAvatar from '../ui/UserAvatar.vue';
-import ThemeToggle from '../ui/ThemeToggle.vue';
-import DiscussionList from './DiscussionList.vue';
 import UserInfo from './UserInfo.vue';
+import DiscussionList from './DiscussionList.vue';
+
 import logoUrl from '../../assets/logo.png';
+import IconPlus from '../../assets/icons/IconPlus.vue';
+import IconHome from '../../assets/icons/IconHome.vue';
+import IconSettings from '../../assets/icons/IconSettings.vue';
+import IconMenu from '../../assets/icons/IconMenu.vue';
+import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 
 const user = computed(() => authStore.user);
-const mainView = computed(() => uiStore.mainView);
-const currentDiscussionId = computed(() => discussionsStore.currentDiscussionId);
-const isUserMenuOpen = ref(false);
-
-const allDiscussions = computed(() => Object.values(discussionsStore.discussions).sort((a,b) => new Date(b.last_activity_at || 0) - new Date(a.last_activity_at || 0)));
-const starredDiscussions = computed(() => allDiscussions.value.filter(d => d.is_starred));
-const regularDiscussions = computed(() => allDiscussions.value.filter(d => !d.is_starred));
-
-const searchTerm = ref('');
-const filteredRegularDiscussions = computed(() => {
-    if (!searchTerm.value) return regularDiscussions.value;
-    const lowerCaseSearch = searchTerm.value.toLowerCase();
-    return regularDiscussions.value.filter(d => d.title.toLowerCase().includes(lowerCaseSearch));
-});
-
-
+const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 
 </script>
 
 <template>
-  <aside class="w-80 bg-gray-100 dark:bg-gray-800 flex flex-col h-full border-r dark:border-gray-700">
-    <div class="p-4 border-b dark:border-gray-700 flex-shrink-0">
-        <div class="flex items-center justify-between">
-            <div class="relative">
-                <button @click="isUserMenuOpen = !isUserMenuOpen" class="flex items-center space-x-3">
-                    <UserAvatar v-if="user" :icon="user.icon" :username="user.username" size-class="h-10 w-10" />
-                    <div>
-                        <div class="font-semibold text-gray-800 dark:text-gray-100">{{ user?.username }}</div>
-                        <div class="text-xs text-gray-500">Online</div>
-                    </div>
-                </button>
-                <div v-if="isUserMenuOpen" v-on-click-outside="() => isUserMenuOpen = false" class="absolute left-0 mt-2 w-56 bg-white dark:bg-gray-900 rounded-md shadow-lg z-20 border dark:border-gray-700">
-                    <div class="py-1">
-                        <div class="border-t border-gray-200 dark:border-gray-700 my-1"></div>
-                        <button @click="authStore.logout()" class="w-full text-left flex items-center px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-800">Logout</button>
-                    </div>
-                </div>
+  <aside class="flex-shrink-0 flex flex-col h-full bg-gray-100 dark:bg-gray-800 border-r dark:border-gray-700 transition-all duration-300 ease-in-out" :class="isSidebarOpen ? 'w-80' : 'w-20'">
+    
+    <!-- Redesigned Persistent Header -->
+    <header class="flex items-center p-3 border-b dark:border-gray-700 flex-shrink-0 h-16" :class="isSidebarOpen ? 'justify-between' : 'justify-center'">
+        <div v-if="isSidebarOpen" class="flex items-center space-x-3 min-w-0">
+            <img :src="logoUrl" alt="LoLLMs Logo" class="h-8 w-8 flex-shrink-0">
+            <div class="min-w-0">
+                <h1 class="text-lg font-bold text-gray-800 dark:text-gray-100 truncate">LoLLMs</h1>
+                <p class="text-xs text-gray-500 truncate">One tool to rule them all</p>
             </div>
-            <ThemeToggle />
         </div>
         
+        <button @click="uiStore.toggleSidebar" class="p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" :title="isSidebarOpen ? 'Collapse Sidebar' : 'Expand Sidebar'">
+            <IconArrowLeft class="w-6 h-6 transition-transform duration-300" :class="{ 'rotate-180': isSidebarOpen }" />
+        </button>
+    </header>
+    
+    <!-- Main Content Area -->
+    <div class="flex-1 min-h-0">
+      <!-- Expanded Content -->
+      <DiscussionList v-if="isSidebarOpen" class="h-full overflow-y-auto" />
+
+      <!-- Collapsed Content -->
+      <div v-else class="h-full flex flex-col items-center py-4 space-y-4">
+        <button @click="discussionsStore.createNewDiscussion()" class="p-3 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition-colors" title="New Discussion">
+          <IconPlus class="w-6 h-6" />
+        </button>
+        <button v-if="user && user.user_ui_level >= 2" @click="uiStore.setMainView('feed')" class="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Feed">
+          <IconHome class="w-6 h-6 text-gray-500 dark:text-gray-400" />
+        </button>
+        <router-link to="/settings" class="block p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Settings">
+          <IconSettings class="w-6 h-6 text-gray-500 dark:text-gray-400" />
+        </router-link>
+      </div>
     </div>
     
-    <!-- Discussion List (Main scrolling area) -->
-    <DiscussionList class="flex-1 overflow-y-auto" />
-
-    <!-- User Info and Menu at the bottom -->
-    <div class="p-3 border-t dark:border-gray-700">
-    <UserInfo />
+    <!-- User Info Footer -->
+    <div class="p-3 border-t dark:border-gray-700 flex-shrink-0">
+      <UserInfo />
     </div>
   </aside>
 </template>
-
-<style scoped>
-.main-nav-btn { @apply w-full py-2 px-3 rounded-md text-sm font-semibold transition-colors duration-200 text-gray-600 bg-gray-200 dark:text-gray-300 dark:bg-gray-700; }
-.main-nav-btn:hover { @apply bg-gray-300 dark:bg-gray-600; }
-.main-nav-btn.active { @apply bg-blue-500 text-white dark:bg-blue-600; }
-.discussion-item { @apply w-full text-left flex items-center p-3 text-sm transition-colors duration-150 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700; }
-.discussion-item.active { @apply bg-blue-500 text-white font-semibold dark:bg-blue-600; }
-.sidebar-section-header { @apply px-3 pt-4 pb-2 text-xs font-bold uppercase text-gray-500 dark:text-gray-400; }
-</style>

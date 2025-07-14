@@ -4,68 +4,78 @@ import apiClient from '../services/api';
 import { useUiStore } from './ui';
 
 export const useAuthStore = defineStore('auth', () => {
-    // STATE
     const user = ref(null);
     const token = ref(localStorage.getItem('lollms_token') || null);
     const isAuthenticating = ref(false);
+    const loadingMessage = ref('Initializing...');
+    const loadingProgress = ref(0);
+    const funFact = ref('');
 
-    // GETTERS
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
 
-    // ACTIONS
-
-    /**
-     * Attempts to authenticate the user using a stored token.
-     * If successful, fetches initial application data.
-     */
     async function attemptInitialAuth() {
         isAuthenticating.value = true;
         const uiStore = useUiStore();
 
+        loadingProgress.value = 0;
+        loadingMessage.value = 'Waking up the hamsters...';
+
+        try {
+            const funFactResponse = await apiClient.get('/api/fun-fact');
+            funFact.value = funFactResponse.data.fun_fact;
+        } catch (e) {
+            funFact.value = 'The LoLLMs project is open source and seeks to democratize AI.';
+        }
+        await new Promise(resolve => setTimeout(resolve, 500));
+        loadingProgress.value = 10;
+        loadingMessage.value = 'Checking credentials...';
+
         if (token.value) {
             try {
-                // Set the authorization header for this initial request
                 apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
+                loadingProgress.value = 20;
+                loadingMessage.value = 'Authenticating...';
                 const response = await apiClient.get('/api/auth/me');
                 user.value = response.data;
                 
-                // Dynamically import other stores to avoid circular dependencies
                 const { useDiscussionsStore } = await import('./discussions');
                 const { useDataStore } = await import('./data');
                 const discussionsStore = useDiscussionsStore();
                 const dataStore = useDataStore();
                 
-                // Fetch all initial data needed for the app to function
-                await Promise.all([
-                    discussionsStore.loadDiscussions(),
-                    dataStore.loadAllInitialData()
-                ]);
+                loadingProgress.value = 40;
+                loadingMessage.value = 'Loading user discussions...';
+                const p1 = discussionsStore.loadDiscussions();
 
-                // Handle first page redirect after all data is loaded
+                loadingProgress.value = 60;
+                loadingMessage.value = 'Loading personalities & tools...';
+                const p2 = dataStore.loadAllInitialData();
+                
+                await Promise.all([p1, p2]);
+
+                loadingProgress.value = 80;
+                loadingMessage.value = 'Preparing the interface...';
+
                 if (user.value) {
                     let targetView = user.value.first_page;
-
-                    // For users with limited UI, override 'feed' to a sensible default
                     if (user.value.user_ui_level < 2 && targetView === 'feed') {
                         targetView = 'new_discussion'; 
                     }
-                    
                     uiStore.setMainView(targetView === 'feed' ? 'feed' : 'chat');
 
                     if (targetView === 'last_discussion') {
                         if (discussionsStore.sortedDiscussions.length > 0) {
-                            // First discussion in the list is the most recent one
                             await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id);
                         } else {
-                            // No discussions exist, so start a new one
                             await discussionsStore.createNewDiscussion();
                         }
                     } else if (targetView === 'new_discussion') {
                         await discussionsStore.createNewDiscussion();
                     }
-                    // If targetView is 'feed', no specific discussion action is needed.
                 }
+                loadingProgress.value = 100;
+                loadingMessage.value = 'Done!';
 
             } catch (error) {
                 console.error("Token validation failed, clearing token.", error);
@@ -78,73 +88,50 @@ export const useAuthStore = defineStore('auth', () => {
         isAuthenticating.value = false;
     }
 
-    /**
-     * Logs the user in with a username and password, fetches a new token, and initializes the app.
-     * @param {string} username - The user's username.
-     * @param {string} password - The user's password.
-     */
     async function login(username, password) {
         const uiStore = useUiStore();
         try {
             const formData = new FormData();
             formData.append('username', username);
             formData.append('password', password);
-
             const response = await apiClient.post('/api/auth/token', formData);
-            
             token.value = response.data.access_token;
             localStorage.setItem('lollms_token', token.value);
-            
-            // After getting a new token, re-run the full authentication and data loading process.
             await attemptInitialAuth();
-
             if(isAuthenticated.value) {
                 uiStore.closeModal('login');
                 uiStore.addNotification('Login successful!', 'success');
             } else {
-                 // This case might happen if token is valid but /me fails for some reason
                  throw new Error("Authentication succeeded but failed to fetch user data.");
             }
-
         } catch (error) {
-            // Refined error handling to give user-specific feedback
             const detail = error.response?.data?.detail || "An unknown error occurred.";
             if (detail.includes("account is inactive")) {
                  uiStore.addNotification(detail, 'warning');
             } else {
-                 // Generic message for other failures like incorrect password
                  uiStore.addNotification('Login failed: Incorrect username or password.', 'error');
             }
-            throw new Error(detail); // Throw for component-level error state handling
+            throw new Error(detail);
         }
     }
 
-    /**
-     * Registers a new user account by calling the backend API.
-     * @param {object} registrationData - Object with { username, email, password }.
-     */
     async function register(registrationData) {
         const uiStore = useUiStore();
         try {
             const response = await apiClient.post('/api/auth/register', registrationData);
             const registrationMode = response.data.is_active ? 'direct' : 'admin_approval';
-            
             if (registrationMode === 'direct') {
                 uiStore.addNotification('Registration successful! You can now log in.', 'success');
             } else {
-                uiStore.addNotification('Registration successful! Your account is now pending administrator approval.', 'info', 6000); // Longer duration
+                uiStore.addNotification('Registration successful! Your account is now pending administrator approval.', 'info', 6000);
             }
             uiStore.closeModal('register');
-            uiStore.openModal('login'); // Guide user to the login screen
+            uiStore.openModal('login');
         } catch (error) {
-            // The global API interceptor will show the error message from the backend
-            throw error; // Propagate error for component-level handling (e.g., stop loading spinner)
+            throw error;
         }
     }
 
-    /**
-     * Clears all authentication-related state locally and from the apiClient header.
-     */
     function clearAuthData() {
         user.value = null;
         token.value = null;
@@ -152,37 +139,24 @@ export const useAuthStore = defineStore('auth', () => {
         delete apiClient.defaults.headers.common['Authorization'];
     }
 
-    /**
-     * Logs the user out by clearing all local data, calling the backend logout endpoint, and showing the login modal.
-     */
     async function logout() {
         const uiStore = useUiStore();
-        
         try {
-            // Call the backend logout endpoint to ensure server-side session is cleared.
             await apiClient.post('/api/auth/logout');
             uiStore.openModal('login');
         } catch(error) {
-            // Log a warning but proceed with client-side cleanup regardless
             console.warn("Could not reach logout endpoint, but proceeding with client-side logout.", error);
         } finally {
             const { useDiscussionsStore } = await import('./discussions');
             const { useDataStore } = await import('./data');
-
             clearAuthData();
-            // Reset all relevant stores to their initial state to prevent data leakage
             useDiscussionsStore().$reset();
             useDataStore().$reset();
-
             uiStore.addNotification('You have been logged out.', 'info');
             uiStore.openModal('login');
         }
     }
 
-    /**
-     * Updates the user's non-sensitive profile information.
-     * @param {object} profileData - Object containing fields like first_name, family_name, etc.
-     */
     async function updateUserProfile(profileData) {
         try {
             const response = await apiClient.put('/api/auth/me', profileData);
@@ -194,15 +168,9 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
     
-    /**
-     * Updates user preferences like LLM settings, RAG parameters, or active personality.
-     * @param {object} preferences - An object containing the preferences to update.
-     */
     async function updateUserPreferences(preferences) {
         try {
             const response = await apiClient.put('/api/auth/me', preferences);
-            // --- THIS IS THE KEY CORRECTION ---
-            // Merge the server's response back into the user state to ensure UI consistency.
             if (user.value) {
                 Object.assign(user.value, response.data);
             }
@@ -214,10 +182,6 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    /**
-     * Changes the user's password.
-     * @param {object} passwordData - Object with { current_password, new_password }.
-     */
     async function changePassword(passwordData) {
          try {
             await apiClient.post('/api/auth/change-password', passwordData);
@@ -229,20 +193,9 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     return {
-        // State
-        user,
-        token,
-        isAuthenticating,
-        // Getters
-        isAuthenticated,
-        isAdmin,
-        // Actions
-        attemptInitialAuth,
-        login,
-        register,
-        logout,
-        updateUserProfile,
-        updateUserPreferences,
-        changePassword,
+        user, token, isAuthenticating, isAuthenticated, isAdmin,
+        loadingMessage, loadingProgress, funFact,
+        attemptInitialAuth, login, register, logout,
+        updateUserProfile, updateUserPreferences, changePassword,
     };
 });

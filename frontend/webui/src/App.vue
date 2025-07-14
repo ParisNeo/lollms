@@ -1,10 +1,10 @@
 <script setup>
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
 import { usePyodideStore } from './stores/pyodide';
-import { useSocialStore } from './stores/social';
 
+// Import all modals
 import LoginModal from './components/modals/LoginModal.vue';
 import RegisterModal from './components/modals/RegisterModal.vue';
 import ForgotPasswordModal from './components/modals/ForgotPasswordModal.vue';
@@ -31,49 +31,43 @@ import EmailUserModal from './components/modals/EmailUserModal.vue';
 import InsertImageModal from './components/modals/InsertImageModal.vue';
 import NewApiKeyModal from './components/modals/NewApiKeyModal.vue';
 
-import logoUrl from './assets/logo.png';
-
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
-const socialStore = useSocialStore();
 
 const activeModal = computed(() => uiStore.activeModal);
 
 onMounted(async () => {
     await authStore.attemptInitialAuth();
     uiStore.initializeTheme();
+    uiStore.initializeSidebarState();
     if (authStore.isAuthenticated) {
         pyodideStore.initialize();
     }
 });
-
-watch(
-  () => authStore.isAuthenticated,
-  (isNowAuthenticated) => {
-    const canUseChat = authStore.user?.chat_active && authStore.user?.user_ui_level >= 2;
-    const isAdmin = authStore.user?.is_admin;
-
-    if (isNowAuthenticated && (canUseChat || isAdmin)) {
-      console.log("User authenticated with permissions, connecting to real-time service...");
-      socialStore.connectWebSocket();
-    } else {
-      console.log("User not authenticated or no permissions, disconnecting from real-time service...");
-      socialStore.disconnectWebSocket();
-    }
-  },
-  {
-    immediate: true,
-  }
-);
 </script>
 
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900">
-    <div v-if="authStore.isAuthenticating" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
-        <img :src="logoUrl" alt="Loading LoLLMs" class="h-20 w-20 md:h-24 md:w-24 mx-auto mb-6 animate-pulse" />
-        <p class="text-2xl md:text-3xl font-bold mb-3 text-gray-800 dark:text-gray-100">Loading Application...</p>
-        <p class="text-sm md:text-base text-gray-500">Please wait while we set things up.</p>
+    
+    <div v-if="authStore.isAuthenticating" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-[#2c3e50] text-white">
+        <div class="w-full max-w-lg mx-auto">
+            <h1 class="text-6xl md:text-7xl font-bold text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">LoLLMs</h1>
+            <p class="mt-2 text-xl md:text-2xl text-gray-300">One tool to rule them all</p>
+            <p class="mt-4 text-sm text-gray-400">by ParisNeo</p>
+            
+            <div v-if="authStore.funFact" class="mt-8 mx-auto max-w-md p-3 bg-white/10 border border-white/20 rounded-lg text-sm text-left">
+                <span class="font-bold text-yellow-300">🤓 Fun Fact:</span> {{ authStore.funFact }}
+            </div>
+
+            <div class="mt-12 w-full px-4">
+                <div class="h-2.5 w-full rounded-full bg-gray-600">
+                    <div class="h-2.5 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500" :style="{ width: `${authStore.loadingProgress}%` }"></div>
+                </div>
+                <p class="mt-3 text-sm text-gray-300">{{ authStore.loadingMessage }}</p>
+                <p class="mt-1 text-lg font-semibold">{{ authStore.loadingProgress }}%</p>
+            </div>
+        </div>
     </div>
 
     <router-view v-else />
