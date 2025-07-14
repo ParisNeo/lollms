@@ -141,6 +141,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         email=db_user.email,
         birth_date=db_user.birth_date,
         receive_notification_emails=db_user.receive_notification_emails,
+        is_searchable=db_user.is_searchable,
         lollms_model_name=user_sessions[username].get("lollms_model_name"),
         safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
         active_personality_id=user_sessions[username].get("active_personality_id"),
@@ -300,6 +301,56 @@ def get_user_lollms_client(username: str, binding_alias: Optional[str] = None) -
         except Exception as e:
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{alias}': {str(e)}")
+    finally:
+        db.close()
+
+def build_lollms_client_from_params(
+    username: str, 
+    binding_alias: str, 
+    model_name: str,
+    llm_params: Optional[Dict[str, Any]] = None
+) -> LollmsClient:
+    """
+    Builds a LollmsClient instance for a specific request based on provided parameters,
+    without caching it in the user's session. This is ideal for API calls
+    that specify their own model and binding.
+    """
+    session = user_sessions.get(username)
+    if not session:
+        raise HTTPException(status_code=500, detail="User session not found, cannot build LollmsClient.")
+
+    db = next(get_db())
+    try:
+        binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias, DBLLMBinding.is_active == True).first()
+        if not binding_to_use:
+            raise HTTPException(status_code=404, detail=f"Active binding with alias '{binding_alias}' not found.")
+
+        client_init_params = session.get("llm_params", {}).copy()
+        if llm_params:
+            client_init_params.update(llm_params)
+        
+        client_init_params.update({
+            "binding_name": binding_to_use.name,
+            "model_name": model_name,
+            "host_address": binding_to_use.host_address,
+            "models_path": binding_to_use.models_path,
+            "verify_ssl_certificate": binding_to_use.verify_ssl_certificate,
+            "service_key": binding_to_use.service_key,
+            "user_name": "user",
+            "ai_name": "assistant",
+        })
+
+        servers_infos = load_mcps(username)
+        if servers_infos:
+            client_init_params["mcp_binding_name"] = "remote_mcp"
+            client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
+
+        try:
+            lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
+            return lc
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Could not initialize ad-hoc LLM Client for binding '{binding_alias}': {str(e)}")
     finally:
         db.close()
 

@@ -177,8 +177,12 @@ const vOnClickOutside = {
                     >
                         <div v-if="!activeSubMenu" class="w-full py-1">
                             <router-link to="/profile/me" @click="closeMenu" class="menu-item">
-                            <UserAvatar :icon="user.icon" :username="user.username" size-class="h-5 w-5 mr-3" />
-                            <span>My Profile</span>
+                                <UserAvatar :icon="user.icon" :username="user.username" size-class="h-5 w-5 mr-3" />
+                                <span>My Profile</span>
+                            </router-link>
+                            <router-link to="/friends" @click="closeMenu" class="menu-item">
+                                <IconUserGroup class="mr-3 h-5 w-5 text-gray-500" />
+                                <span>Friends</span>
                             </router-link>
                             <router-link to="/settings" @click="closeMenu" class="menu-item">
                             <IconSettings class="mr-3 h-5 w-5 text-gray-500" />

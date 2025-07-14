@@ -18,12 +18,10 @@ const currentUser = computed(() => authStore.user);
 const messageContainer = ref(null);
 const newMessageContent = ref('');
 
-// Refs to help manage scroll position during lazy loading
 const scrollHeightBeforeLoad = ref(0);
 
 const partner = computed(() => props.conversation.partner);
 
-// Function to scroll to the bottom of the message container
 async function scrollToBottom() {
   await nextTick();
   if (messageContainer.value) {
@@ -31,18 +29,14 @@ async function scrollToBottom() {
   }
 }
 
-// Handler for the scroll event on the message container
 async function handleScroll(event) {
   const container = event.target;
-  // If the user has scrolled to the very top, load more messages
   if (container.scrollTop === 0 && !props.conversation.isLoading && !props.conversation.fullyLoaded) {
-    // Save the current scroll height before new messages are added
     scrollHeightBeforeLoad.value = container.scrollHeight;
     await socialStore.fetchMoreMessages(partner.value.id);
   }
 }
 
-// Function to handle sending a new message
 function sendMessage() {
   if (newMessageContent.value.trim() === '') return;
   socialStore.sendDirectMessage({
@@ -50,24 +44,19 @@ function sendMessage() {
     content: newMessageContent.value,
   });
   newMessageContent.value = '';
-  // After sending, we want to ensure the view scrolls to the new message
   scrollToBottom();
 }
 
-// Scroll to the bottom when the component is first mounted
 onMounted(() => {
   scrollToBottom();
 });
 
-// onUpdated is crucial for managing scroll position after new data arrives
 onUpdated(() => {
   if (messageContainer.value) {
-    // If we just lazy-loaded more messages (scrollHeightBeforeLoad is set)
     if (scrollHeightBeforeLoad.value > 0) {
-      // Restore the scroll position to where the user was
       const newScrollTop = messageContainer.value.scrollHeight - scrollHeightBeforeLoad.value;
       messageContainer.value.scrollTop = newScrollTop;
-      scrollHeightBeforeLoad.value = 0; // Reset for the next load
+      scrollHeightBeforeLoad.value = 0;
     }
   }
 });
@@ -80,7 +69,6 @@ function formatTimestamp(dateString) {
 
 <template>
   <div v-if="conversation && conversation.partner" class="flex flex-col h-full bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-lg">
-    <!-- Header -->
     <header class="flex items-center p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
       <UserAvatar :icon="partner.icon" :username="partner.username" size-class="h-9 w-9" />
       <div class="ml-3">
@@ -92,18 +80,18 @@ function formatTimestamp(dateString) {
       </button>
     </header>
 
-    <!-- Message Display Area -->
     <div ref="messageContainer" @scroll="handleScroll" class="flex-grow p-4 overflow-y-auto">
-      <!-- Loading indicator for older messages -->
-      <div v-if="conversation.isLoading" class="text-center py-2">
-        <p class="text-sm text-gray-500">Loading older messages...</p>
+      <div v-if="conversation.isLoading" class="text-center py-2 text-sm text-gray-500">Loading...</div>
+      
+      <!-- FIX: Add error message display -->
+      <div v-if="conversation.error" class="text-center py-2 text-red-500 text-sm">
+        {{ conversation.error }}
       </div>
-      <!-- Indicator for the start of the conversation -->
+
       <div v-if="conversation.fullyLoaded" class="text-center py-4">
         <p class="text-xs text-gray-400 dark:text-gray-500">This is the beginning of your conversation with {{ partner.username }}.</p>
       </div>
 
-      <!-- Messages -->
       <div v-for="message in conversation.messages" :key="message.id" class="flex my-2" :class="message.sender_id === currentUser.id ? 'justify-end' : 'justify-start'">
         <div class="max-w-xs lg:max-w-md px-3 py-2 rounded-lg" :class="{
             'bg-blue-500 text-white': message.sender_id === currentUser.id,
@@ -119,7 +107,6 @@ function formatTimestamp(dateString) {
       </div>
     </div>
 
-    <!-- Message Input -->
     <footer class="p-3 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
       <form @submit.prevent="sendMessage" class="flex items-center space-x-3">
         <input type="text" v-model="newMessageContent" placeholder="Type a message..." class="input-field flex-grow" autocomplete="off" />

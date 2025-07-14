@@ -8,7 +8,6 @@ const authStore = useAuthStore();
 const dataStore = useDataStore();
 
 const { user } = storeToRefs(authStore);
-// The 'languages' ref now comes from the dataStore and includes the fallback logic
 const { languages } = storeToRefs(dataStore);
 
 const form = ref({
@@ -58,7 +57,6 @@ function populateForm() {
 
 onMounted(() => {
     populateForm();
-    // Trigger fetch if not already loaded
     dataStore.fetchLanguages();
 });
 
@@ -71,7 +69,18 @@ watch(form, (newValue) => {
 async function handleSave() {
     isSaving.value = true;
     try {
-        await authStore.updateUserPreferences(form.value);
+        // --- FIX: Construct a payload with only the fields from this form ---
+        const payload = {
+            user_ui_level: form.value.user_ui_level,
+            first_page: form.value.first_page,
+            ai_response_language: form.value.ai_response_language,
+            auto_title: form.value.auto_title,
+            show_token_counter: form.value.show_token_counter,
+            fun_mode: form.value.fun_mode,
+            put_thoughts_in_context: form.value.put_thoughts_in_context,
+        };
+        await authStore.updateUserPreferences(payload);
+        // After a successful save, the pristine state will be updated by the watcher on `user`
     } finally {
         isSaving.value = false;
     }
@@ -110,6 +119,7 @@ async function handleSave() {
                     <div>
                         <label for="language" class="block text-sm font-medium text-gray-700 dark:text-gray-300">AI Response Language</label>
                         <select id="language" v-model="form.ai_response_language" class="input-field mt-1">
+                           <option value="auto">Auto-detect</option>
                            <option v-for="lang in languages" :key="lang.value" :value="lang.value">{{ lang.label }}</option>
                         </select>
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Instruct the AI to respond in a specific language.</p>

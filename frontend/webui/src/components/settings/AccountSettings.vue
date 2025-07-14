@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import apiClient from '../../services/api';
@@ -16,9 +16,13 @@ const profileForm = ref({
     first_name: '',
     family_name: '',
     email: '',
-    birth_date: ''
+    birth_date: '',
+    receive_notification_emails: true,
+    is_searchable: true,
 });
 const isProfileLoading = ref(false);
+const isProfileDirty = ref(false);
+let pristineProfileState = '{}';
 
 const passwordForm = ref({
     current_password: '',
@@ -32,21 +36,32 @@ const showNewPassword = ref(false);
 const isUploadingIcon = ref(false);
 const fileInput = ref(null);
 
-
-onMounted(() => {
+function populateProfileForm() {
     if (user.value) {
         profileForm.value.first_name = user.value.first_name || '';
         profileForm.value.family_name = user.value.family_name || '';
         profileForm.value.email = user.value.email || '';
         profileForm.value.birth_date = user.value.birth_date || '';
+        profileForm.value.receive_notification_emails = user.value.receive_notification_emails;
+        profileForm.value.is_searchable = user.value.is_searchable;
+        pristineProfileState = JSON.stringify(profileForm.value);
     }
-});
+}
+
+onMounted(populateProfileForm);
+
+watch(user, populateProfileForm, { deep: true });
+watch(profileForm, (newVal) => {
+    isProfileDirty.value = JSON.stringify(newVal) !== pristineProfileState;
+}, { deep: true });
 
 async function handleSaveProfile() {
     isProfileLoading.value = true;
     try {
         await authStore.updateUserProfile(profileForm.value);
+        // The watcher on `user` will reset the dirty state
     } catch (error) {
+        // Error is handled by the global interceptor
     } finally {
         isProfileLoading.value = false;
     }
@@ -69,6 +84,7 @@ async function handleChangePassword() {
         passwordForm.value.new_password = '';
         confirmNewPassword.value = '';
     } catch (error) {
+        // Error is handled by the global interceptor
     } finally {
         isPasswordLoading.value = false;
     }
@@ -160,8 +176,30 @@ const onIconFileChange = async (event) => {
                             <label for="birthDate" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Birth Date</label>
                             <input type="date" id="birthDate" v-model="profileForm.birth_date" class="input-field mt-1">
                         </div>
+                        
+                         <div class="space-y-4 pt-4 border-t dark:border-gray-600">
+                            <div class="relative flex items-start">
+                                <div class="flex h-6 items-center">
+                                    <input id="is_searchable" v-model="profileForm.is_searchable" type="checkbox" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-600">
+                                </div>
+                                <div class="ml-3 text-sm leading-6">
+                                    <label for="is_searchable" class="font-medium text-gray-900 dark:text-gray-100">Profile Searchability</label>
+                                    <p class="text-gray-500 dark:text-gray-400">Allow other users to find your profile in searches.</p>
+                                </div>
+                            </div>
+                             <div class="relative flex items-start">
+                                <div class="flex h-6 items-center">
+                                    <input id="receive_notification_emails" v-model="profileForm.receive_notification_emails" type="checkbox" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-600">
+                                </div>
+                                <div class="ml-3 text-sm leading-6">
+                                    <label for="receive_notification_emails" class="font-medium text-gray-900 dark:text-gray-100">Notification Emails</label>
+                                    <p class="text-gray-500 dark:text-gray-400">Receive emails for important events like password resets.</p>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="flex justify-end">
-                            <button type="submit" class="btn btn-primary" :disabled="isProfileLoading">
+                            <button type="submit" class="btn btn-primary" :disabled="isProfileLoading || !isProfileDirty">
                                 {{ isProfileLoading ? 'Saving...' : 'Save Profile' }}
                             </button>
                         </div>

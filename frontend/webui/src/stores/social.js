@@ -7,11 +7,18 @@ import { useAuthStore } from './auth';
 export const useSocialStore = defineStore('social', () => {
     // --- STATE ---
     const feedPosts = ref([]);
-    const profiles = ref({}); // { username: { user: {...}, relationship: {...} } }
+    const profiles = ref({});
     const userPosts = ref({});
+    const friends = ref([]);
     const pendingFriendRequests = ref([]);
+    const blockedUsers = ref([]);
+
     const isLoadingFeed = ref(false);
     const isLoadingProfile = ref(false);
+    const isLoadingFriends = ref(false);
+    const isLoadingRequests = ref(false);
+    const isLoadingBlocked = ref(false);
+
     const comments = ref({});
     const isLoadingComments = ref({});
     const conversations = ref([]);
@@ -20,27 +27,53 @@ export const useSocialStore = defineStore('social', () => {
     const isLoadingMessages = ref(false);
     const socket = ref(null);
     const isSocketConnected = ref(false);
-    const friends = ref([]);
 
     // --- GETTERS ---
     const getPostsByUsername = computed(() => (username) => userPosts.value[username] || []);
     const getActiveConversation = computed(() => (userId) => activeConversations.value[userId]);
     const getCommentsForPost = computed(() => (postId) => comments.value[postId] || null);
+    const friendRequestCount = computed(() => pendingFriendRequests.value.length);
 
     // --- ACTIONS ---
 
+    // -- Friendship, Requests & Blocks --
     async function fetchFriends() {
-        const uiStore = useUiStore();
+        isLoadingFriends.value = true;
         try {
             const response = await apiClient.get('/api/friends');
             friends.value = response.data;
         } catch (error) {
-            uiStore.addNotification('Could not fetch friends list.', 'error');
             console.error("Failed to fetch friends:", error);
+        } finally {
+            isLoadingFriends.value = false;
         }
     }
 
-    // -- User Profile & Friendship Actions --
+    async function fetchPendingRequests() {
+        isLoadingRequests.value = true;
+        try {
+            const response = await apiClient.get('/api/friends/requests/pending');
+            pendingFriendRequests.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch pending friend requests:", error);
+        } finally {
+            isLoadingRequests.value = false;
+        }
+    }
+    
+    async function fetchBlockedUsers() {
+        isLoadingBlocked.value = true;
+        try {
+            const response = await apiClient.get('/api/friends/blocked');
+            blockedUsers.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch blocked users:", error);
+            blockedUsers.value = [];
+        } finally {
+            isLoadingBlocked.value = false;
+        }
+    }
+    
     async function fetchUserProfile(username) {
         isLoadingProfile.value = true;
         try {
@@ -55,83 +88,107 @@ export const useSocialStore = defineStore('social', () => {
     }
 
     async function sendFriendRequest(targetUsername) {
-        const uiStore = useUiStore();
         try {
             await apiClient.post(`/api/friends/request`, { target_username: targetUsername });
-            if (profiles.value[targetUsername]) {
-                profiles.value[targetUsername].relationship.friendship_status = 'PENDING';
-            }
-            uiStore.addNotification('Friend request sent!', 'success');
+            useUiStore().addNotification('Friend request sent!', 'success');
         } catch (error) {
-            uiStore.addNotification(error.response?.data?.detail || 'Could not send request.', 'error');
+            throw error;
         }
     }
 
     async function acceptFriendRequest(friendshipId) {
-        const uiStore = useUiStore();
         try {
-            const response = await apiClient.put(`/api/friends/requests/${friendshipId}`, { action: "accept" });
-            const acceptedFriend = response.data;
+            await apiClient.put(`/api/friends/requests/${friendshipId}`, { action: "accept" });
+            useUiStore().addNotification(`Friend request accepted!`, 'success');
+            await Promise.all([fetchFriends(), fetchPendingRequests()]);
+        } catch (error) {
+            throw error;
+        }
+    }
+    
+    async function rejectFriendRequest(friendshipId) {
+        try {
+            await apiClient.put(`/api/friends/requests/${friendshipId}`, { action: "reject" });
+            useUiStore().addNotification(`Friend request rejected.`, 'info');
             pendingFriendRequests.value = pendingFriendRequests.value.filter(req => req.friendship_id !== friendshipId);
-            if (profiles.value[acceptedFriend.username]) {
-                profiles.value[acceptedFriend.username].relationship.friendship_status = 'ACCEPTED';
-            }
-            uiStore.addNotification(`You are now friends with ${acceptedFriend.username}!`, 'success');
         } catch (error) {
-            uiStore.addNotification(error.response?.data?.detail || 'Could not accept request.', 'error');
+            throw error;
         }
     }
-
-    async function removeFriend(otherUserId) {
-        const uiStore = useUiStore();
-        if (!confirm("Are you sure you want to remove this friend or cancel/decline the request?")) return;
+    
+    async function removeFriend(friendUserId) {
         try {
-            await apiClient.delete(`/api/friends/${otherUserId}`);
-            for (const key in profiles.value) {
-                if (profiles.value[key]?.user?.id === otherUserId) {
-                    profiles.value[key].relationship.friendship_status = null;
-                }
+            await apiClient.delete(`/api/friends/${friendUserId}`);
+            useUiStore().addNotification('Friend removed.', 'info');
+            await fetchFriends();
+            const profileKey = Object.keys(profiles.value).find(key => profiles.value[key]?.user?.id === friendUserId);
+            if(profileKey) {
+                await fetchUserProfile(profileKey);
             }
-            uiStore.addNotification('Friendship status updated.', 'info');
         } catch (error) {
-            uiStore.addNotification(error.response?.data?.detail || 'Could not perform action.', 'error');
+           throw error;
         }
     }
 
-    async function fetchPendingRequests() {
+    async function blockUser(userId) {
         try {
-            const response = await apiClient.get('/api/friends/requests/pending');
-            pendingFriendRequests.value = response.data;
+            await apiClient.put(`/api/friends/block/${userId}`);
+            useUiStore().addNotification('User blocked successfully.', 'success');
+            await Promise.all([fetchFriends(), fetchPendingRequests(), fetchBlockedUsers()]);
         } catch (error) {
-            console.error("Failed to fetch pending friend requests:", error);
+            throw error;
         }
     }
 
-    // -- WebSocket Actions --
+    async function unblockUser(userId) {
+        try {
+            await apiClient.put(`/api/friends/unblock/${userId}`);
+            useUiStore().addNotification('User unblocked.', 'success');
+            await fetchBlockedUsers();
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    // -- WebSocket Handling --
+    function handleIncomingFriendRequest(requestData) {
+        const existing = pendingFriendRequests.value.find(req => req.friendship_id === requestData.friendship_id);
+        if (!existing) {
+            pendingFriendRequests.value.unshift(requestData);
+            useUiStore().addNotification(`New friend request from ${requestData.requesting_username}`, 'info');
+        }
+    }
+    
     function connectWebSocket() {
         const authStore = useAuthStore();
         const uiStore = useUiStore();
-        if (!authStore.token || !authStore.user?.chat_active || (socket.value && isSocketConnected.value)) {
+        if (!authStore.token || (socket.value && isSocketConnected.value)) {
             return;
         }
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/dm/${authStore.token}`;
         socket.value = new WebSocket(wsUrl);
+
         socket.value.onopen = () => { isSocketConnected.value = true; };
+        
         socket.value.onmessage = (event) => {
             const message = JSON.parse(event.data);
+            
+            if (message.type === 'new_friend_request') {
+                handleIncomingFriendRequest(message.data);
+                return;
+            }
+
             const currentUser = authStore.user;
             if (!currentUser) return;
 
-            // Handle system-wide admin notifications for password resets etc.
             if (message.sender_username === 'System Alert') {
                 if (currentUser.is_admin) {
-                    uiStore.addNotification(message.content, 'warning', 10000); // 10 second duration
+                    uiStore.addNotification(message.content, 'warning', 10000);
                 }
-                return; // Stop processing, this is not a user-to-user DM
+                return;
             }
-
-            // Handle standard direct messages
+            
             const otherUserId = message.sender_id === currentUser.id ? message.receiver_id : message.sender_id;
             if (activeConversations.value[otherUserId]) {
                 activeConversations.value[otherUserId].messages.push(message);
@@ -141,9 +198,11 @@ export const useSocialStore = defineStore('social', () => {
                 }
             }
         };
+        
         socket.value.onclose = () => { isSocketConnected.value = false; socket.value = null; };
         socket.value.onerror = () => { uiStore.addNotification('Real-time connection error.', 'error'); isSocketConnected.value = false; };
     }
+
     function disconnectWebSocket() { if (socket.value) socket.value.close(); }
 
     // -- Post & Comment Actions --
@@ -158,6 +217,7 @@ export const useSocialStore = defineStore('social', () => {
             isLoadingFeed.value = false;
         }
     }
+    
     async function fetchUserPosts(username) {
         isLoadingProfile.value = true;
         try {
@@ -169,29 +229,30 @@ export const useSocialStore = defineStore('social', () => {
             isLoadingProfile.value = false;
         }
     }
+    
     async function createPost(postData) {
-        const uiStore = useUiStore();
         try {
             const response = await apiClient.post('/api/social/posts', postData);
             feedPosts.value.unshift(response.data);
-            uiStore.addNotification('Post created successfully!', 'success');
+            useUiStore().addNotification('Post created successfully!', 'success');
         } catch (error) {
             throw error;
         }
     }
+    
     async function deletePost(postId) {
-        const uiStore = useUiStore();
         try {
             await apiClient.delete(`/api/social/posts/${postId}`);
             feedPosts.value = feedPosts.value.filter(p => p.id !== postId);
             for (const username in userPosts.value) {
                 userPosts.value[username] = userPosts.value[username].filter(p => p.id !== postId);
             }
-            uiStore.addNotification('Post deleted.', 'success');
+            useUiStore().addNotification('Post deleted.', 'success');
         } catch (error) {
             console.error("Failed to delete post:", error);
         }
     }
+    
     async function fetchComments(postId) {
         if (isLoadingComments.value[postId]) return;
         isLoadingComments.value[postId] = true;
@@ -204,18 +265,18 @@ export const useSocialStore = defineStore('social', () => {
             isLoadingComments.value[postId] = false;
         }
     }
+    
     async function createComment({ postId, content }) {
         try {
             const response = await apiClient.post(`/api/social/posts/${postId}/comments`, { content });
             if (!comments.value[postId]) comments.value[postId] = [];
             comments.value[postId].push(response.data);
         } catch (error) {
-            useUiStore().addNotification(error.response?.data?.detail || 'Failed to post comment.', 'error');
             throw error;
         }
     }
+    
     async function deleteComment(commentId) {
-        const uiStore = useUiStore();
         try {
             await apiClient.delete(`/api/social/comments/${commentId}`);
             for (const postId in comments.value) {
@@ -225,9 +286,9 @@ export const useSocialStore = defineStore('social', () => {
                     break;
                 }
             }
-            uiStore.addNotification('Comment deleted.', 'success');
+            useUiStore().addNotification('Comment deleted.', 'success');
         } catch (error) {
-            uiStore.addNotification(error.response?.data?.detail || 'Failed to delete comment.', 'error');
+            throw error;
         }
     }
 
@@ -245,6 +306,7 @@ export const useSocialStore = defineStore('social', () => {
             console.error("Failed to follow user:", error);
         }
     }
+    
     async function unfollowUser(targetUserId) {
         try {
             await apiClient.delete(`/api/social/users/${targetUserId}/follow`);
@@ -271,22 +333,33 @@ export const useSocialStore = defineStore('social', () => {
             isLoadingConversations.value = false;
         }
     }
+    
     async function openConversation(otherUser) {
         const otherUserId = otherUser.id;
         if (!activeConversations.value[otherUserId]) {
-            activeConversations.value[otherUserId] = { partner: otherUser, messages: [], isLoading: false, fullyLoaded: false, page: 0 };
+            activeConversations.value[otherUserId] = { 
+                partner: otherUser, 
+                messages: [], 
+                isLoading: false, 
+                fullyLoaded: false, 
+                page: 0,
+                error: null
+            };
         }
         const convo = activeConversations.value[otherUserId];
         if (convo.messages.length > 0) return;
         await fetchMoreMessages(otherUserId);
     }
+    
     async function fetchMoreMessages(otherUserId) {
         const convo = activeConversations.value[otherUserId];
         if (!convo || convo.isLoading || convo.fullyLoaded) return;
+        
         convo.isLoading = true;
+        convo.error = null;
         isLoadingMessages.value = true;
         try {
-            const response = await apiClient.get(`/api/dm/conversation/${otherUserId}`, { params: { skip: convo.page * 50, limit: 50, } });
+            const response = await apiClient.get(`/api/dm/conversation/${otherUserId}`, { params: { skip: convo.page * 50, limit: 50 } });
             const newMessages = response.data;
             if (newMessages.length > 0) {
                 convo.messages.unshift(...newMessages);
@@ -297,11 +370,13 @@ export const useSocialStore = defineStore('social', () => {
             }
         } catch (error) {
             console.error(`Failed to fetch more messages for user ${otherUserId}:`, error);
+            convo.error = 'Failed to load older messages.';
         } finally {
             convo.isLoading = false;
             isLoadingMessages.value = false;
         }
     }
+    
     function closeConversation(otherUserId) { delete activeConversations.value[otherUserId]; }
 
     async function sendDirectMessage({ receiverUserId, content }) {
@@ -332,7 +407,6 @@ export const useSocialStore = defineStore('social', () => {
                 convo.messages.splice(index, 1, response.data);
             }
         } catch (error) {
-            console.error("Failed to send direct message:", error);
             const index = convo.messages.findIndex(m => m.id === tempMessage.id);
             if (index !== -1) {
                  convo.messages[index].error = true;
@@ -340,20 +414,16 @@ export const useSocialStore = defineStore('social', () => {
             useUiStore().addNotification('Failed to send message.', 'error');
         }
     }
+    
     async function toggleLike(postId) {
-        const post = this.feedPosts.find(p => p.id === postId) || (this.userPosts[this.profiles[authStore.user.username]?.user?.username] || []).find(p => p.id === postId);
+        const post = feedPosts.value.find(p => p.id === postId) || Object.values(userPosts.value).flat().find(p => p.id === postId);
         if (!post) return;
 
         const originalHasLiked = post.has_liked;
         const originalLikeCount = post.like_count;
 
-        if (post.has_liked) {
-            post.has_liked = false;
-            post.like_count--;
-        } else {
-            post.has_liked = true;
-            post.like_count++;
-        }
+        post.has_liked = !originalHasLiked;
+        post.like_count += originalHasLiked ? -1 : 1;
 
         try {
             if (originalHasLiked) {
@@ -368,17 +438,57 @@ export const useSocialStore = defineStore('social', () => {
             useUiStore().addNotification("Couldn't update like status.", "error");
         }
     }
+
     return {
-        feedPosts, profiles, userPosts, pendingFriendRequests, isLoadingFeed, isLoadingProfile,
-        conversations, activeConversations, isLoadingConversations, isLoadingMessages,
-        comments, isLoadingComments, isSocketConnected, friends,
-        getPostsByUsername, getActiveConversation, getCommentsForPost,
-        fetchUserProfile, sendFriendRequest, removeFriend, fetchPendingRequests, acceptFriendRequest,
-        fetchFeed, fetchUserPosts, createPost, deletePost,
-        followUser, unfollowUser,
-        fetchComments, createComment, deleteComment,
-        fetchConversations, openConversation, closeConversation, sendDirectMessage, fetchMoreMessages,
-        connectWebSocket, disconnectWebSocket, toggleLike,
+        feedPosts,
+        profiles,
+        userPosts,
+        friends,
+        pendingFriendRequests,
+        blockedUsers,
+        isLoadingFeed,
+        isLoadingProfile,
+        isLoadingFriends,
+        isLoadingRequests,
+        isLoadingBlocked,
+        comments,
+        isLoadingComments,
+        conversations,
+        activeConversations,
+        isLoadingConversations,
+        isLoadingMessages,
+        socket,
+        isSocketConnected,
+        getPostsByUsername,
+        getActiveConversation,
+        getCommentsForPost,
+        friendRequestCount,
         fetchFriends,
+        fetchPendingRequests,
+        fetchBlockedUsers,
+        fetchUserProfile,
+        sendFriendRequest,
+        acceptFriendRequest,
+        rejectFriendRequest,
+        removeFriend,
+        blockUser,
+        unblockUser,
+        connectWebSocket,
+        disconnectWebSocket,
+        fetchFeed,
+        createPost,
+        deletePost,
+        fetchUserPosts,
+        followUser,
+        unfollowUser,
+        fetchComments,
+        createComment,
+        deleteComment,
+        toggleLike,
+        fetchConversations,
+        openConversation,
+        closeConversation,
+        sendDirectMessage,
+        fetchMoreMessages,
     };
 });

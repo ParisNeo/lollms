@@ -9,13 +9,14 @@ from typing import List, Optional, Dict, Any, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel, Field
 
-from backend.database_setup import get_db, User as DBUser, OpenAIAPIKey as DBAPIKey, LLMBinding as DBLLMBinding
+from backend.database_setup import get_db, User as DBUser, OpenAIAPIKey as DBAPIKey, LLMBinding as DBLLMBinding, Personality as DBPersonality
 from backend.security import verify_api_key
-from backend.session import get_user_lollms_client, user_sessions
+from backend.session import get_user_lollms_client, user_sessions, build_lollms_client_from_params
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
 
@@ -31,6 +32,7 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
+    personality: Optional[str] = None # New field for personality
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = None
     stream: Optional[bool] = False
@@ -71,6 +73,55 @@ class ChatCompletionStreamResponse(BaseModel):
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
 
+# Models for Tokenizer Endpoints
+class TokenizeRequest(BaseModel):
+    model: str
+    text: str = Field(..., description="The text to be tokenized.")
+
+class TokenizeResponse(BaseModel):
+    tokens: List[int] = Field(..., description="The list of token IDs.")
+    count: int = Field(..., description="The total number of tokens.")
+
+class DetokenizeRequest(BaseModel):
+    model: str
+    tokens: List[int] = Field(..., description="The list of token IDs to be detokenized.")
+
+class DetokenizeResponse(BaseModel):
+    text: str = Field(..., description="The detokenized text.")
+
+class CountTokensRequest(BaseModel):
+    model: str
+    text: str = Field(..., description="The text for which to count tokens.")
+
+class CountTokensResponse(BaseModel):
+    count: int = Field(..., description="The total number of tokens.")
+
+# Models for Context Size Endpoint
+class ContextSizeRequest(BaseModel):
+    model: str = Field(..., description="The model name in 'binding_alias/model_name' format.")
+
+class ContextSizeResponse(BaseModel):
+    context_size: int = Field(..., description="The context window size of the model.")
+
+# --- NEW: Models for Personality Endpoints ---
+class PersonalityInfo(BaseModel):
+    id: str
+    object: str = "personality"
+    name: str
+    category: Optional[str] = None
+    author: Optional[str] = None
+    description: Optional[str] = None
+    is_public: bool
+    owner_username: Optional[str] = None
+    created_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+class PersonalityListResponse(BaseModel):
+    object: str = "list"
+    data: List[PersonalityInfo]
+
 
 # --- Dependencies ---
 
@@ -88,7 +139,8 @@ async def get_user_from_api_key(
     if '_' not in api_key:
         raise HTTPException(status_code=401, detail="Invalid API Key format.")
     
-    key_prefix = api_key.split('_')[0] + '_'
+    parts = api_key.split('_')
+    key_prefix = parts[0]+"_"+parts[1]
 
     db_key = db.query(DBAPIKey).filter(DBAPIKey.key_prefix == key_prefix).first()
 
@@ -102,8 +154,6 @@ async def get_user_from_api_key(
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive.")
 
-    # --- Ensure a session exists for the user ---
-    # This is crucial for get_user_lollms_client to work correctly
     if user.username not in user_sessions:
         session_llm_params = {
             "ctx_size": user.llm_ctx_size, "temperature": user.llm_temperature,
@@ -139,7 +189,7 @@ async def list_models(
             models = lc.listModels()
             if isinstance(models, list):
                 for item in models:
-                    model_id = item.get("name") if isinstance(item, dict) else item
+                    model_id = item.get("model_name") if isinstance(item, dict) else item
                     if model_id:
                         full_model_id = f"{binding.alias}/{model_id}"
                         all_models.append({
@@ -156,6 +206,32 @@ async def list_models(
     unique_models = {m["id"]: m for m in all_models}
     return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}
 
+
+@openai_v1_router.get("/personalities", response_model=PersonalityListResponse)
+async def list_personalities(
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
+):
+    """
+    Lists all personalities available to the authenticated user (owned and public).
+    """
+    personalities_db = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(
+        or_(
+            DBPersonality.is_public == True,
+            DBPersonality.owner_user_id == user.id
+        )
+    ).order_by(DBPersonality.category, DBPersonality.name).all()
+    
+    response_data = []
+    for p in personalities_db:
+        owner_username = p.owner.username if p.owner else "System"
+        p_info = PersonalityInfo.from_orm(p)
+        p_info.owner_username = owner_username
+        response_data.append(p_info)
+        
+    return PersonalityListResponse(data=response_data)
+
+
 @openai_v1_router.post("/chat/completions")
 async def chat_completions(
     request: ChatCompletionRequest,
@@ -166,40 +242,57 @@ async def chat_completions(
         raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
     
     binding_alias, model_name = request.model.split('/', 1)
+    is_instruct_mode = "instruct" in model_name.lower()
+
+    request_llm_params = {}
+    if request.temperature is not None:
+        request_llm_params['temperature'] = request.temperature
+    if request.max_tokens is not None:
+        request_llm_params['max_output_tokens'] = request.max_tokens
 
     try:
-        lc = get_user_lollms_client(user.username, binding_alias)
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name,
+            llm_params=request_llm_params
+        )
     except HTTPException as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get LLM client for binding '{binding_alias}': {e.detail}")
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to build LLM client for the request: {e}")
 
-    # Construct prompt from messages
-    prompt = ""
+    # --- Prompt Construction ---
     system_prompt = ""
-    for message in request.messages:
-        if message.role == "system":
-            system_prompt += f"{message.content}\n"
-        elif message.role == "user":
-            prompt += f"\n!@>user\n{message.content}"
-        elif message.role == "assistant":
-            prompt += f"\n!@>assistant\n{message.content}"
+    prompt_parts = []
     
-    # Use user's active personality if no system prompt is provided in the request
-    personality = LollmsPersonality(system_prompt=system_prompt) if system_prompt else None
-    if not personality:
-        if user.active_personality_id:
-            db_pers = db.query(LollmsPersonality).get(user.active_personality_id)
-            if db_pers:
-                personality = LollmsPersonality(system_prompt=db_pers.prompt_text, script=db_pers.script_code)
+    if request.personality:
+        personality = db.query(DBPersonality).filter(DBPersonality.id == request.personality).first()
+        if not personality:
+            raise HTTPException(status_code=404, detail=f"Personality with id '{request.personality}' not found.")
+        
+        is_owner = personality.owner_user_id == user.id
+        if not personality.is_public and not is_owner:
+            raise HTTPException(status_code=403, detail="You do not have permission to use this personality.")
+        
+        system_prompt = personality.prompt_text
+    else:
+        for message in request.messages:
+            if message.role == "system":
+                system_prompt += f"{message.content}\n"
+    
+    conversation_messages = [msg for msg in request.messages if msg.role != "system"]
 
-    # Use user's LLM params and override with request params if provided
-    llm_params = user_sessions.get(user.username, {}).get("llm_params", {}).copy()
-    if request.temperature is not None:
-        llm_params['temperature'] = request.temperature
-    if request.max_tokens is not None:
-        llm_params['max_output_tokens'] = request.max_tokens
+    if is_instruct_mode:
+        for msg in conversation_messages:
+            prompt_parts.append(msg.content)
+        prompt = "\n".join(prompt_parts)
+    else:
+        for msg in conversation_messages:
+            prompt_parts.append(f"!@>{msg.role}\n{msg.content}")
+        prompt = "\n".join(prompt_parts)
 
     if request.stream:
-        # --- Streaming Response ---
         async def stream_generator():
             main_loop = asyncio.get_event_loop()
             stream_queue = asyncio.Queue()
@@ -208,7 +301,6 @@ async def chat_completions(
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"
             created_ts = int(time.time())
 
-            # First chunk with role
             first_chunk_response = ChatCompletionStreamResponse(
                 id=completion_id, model=request.model, created=created_ts,
                 choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role="assistant"), finish_reason=None)]
@@ -228,7 +320,7 @@ async def chat_completions(
 
             def blocking_call():
                 try:
-                    lc.generate(prompt, personality=personality, streaming_callback=llm_callback, **llm_params)
+                    lc.generate_text(prompt, system_prompt=system_prompt.strip(), streaming_callback=llm_callback)
                 except Exception as e:
                     print(f"Error during OpenAI API generation: {e}")
                 finally:
@@ -242,7 +334,6 @@ async def chat_completions(
                     break
                 yield f"data: {item}\n\n"
             
-            # Final chunk
             final_chunk = ChatCompletionStreamResponse(
                 id=completion_id, model=request.model, created=created_ts,
                 choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(), finish_reason="stop")]
@@ -252,12 +343,12 @@ async def chat_completions(
 
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
     else:
-        # --- Non-streaming Response ---
         try:
-            full_response = lc.generate(prompt, personality=personality, **llm_params)
+            full_response = lc.generate_text(prompt, system_prompt=system_prompt.strip())
             
-            prompt_tokens = len(lc.tokenize(prompt))
-            completion_tokens = len(lc.tokenize(full_response))
+            full_prompt_for_counting = (system_prompt.strip() + "\n" + prompt).strip()
+            prompt_tokens = lc.count_tokens(full_prompt_for_counting)
+            completion_tokens = lc.count_tokens(full_response)
             total_tokens = prompt_tokens + completion_tokens
 
             return ChatCompletionResponse(
@@ -275,3 +366,107 @@ async def chat_completions(
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Error during generation: {str(e)}")
+
+
+@openai_v1_router.post("/tokenize", response_model=TokenizeResponse)
+async def tokenize_text(
+    request: TokenizeRequest,
+    user: DBUser = Depends(get_user_from_api_key)
+):
+    if not request.model or '/' not in request.model:
+        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
+    
+    binding_alias, model_name = request.model.split('/', 1)
+    
+    try:
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name
+        )
+        tokens = lc.tokenize(request.text)
+        return TokenizeResponse(tokens=tokens, count=len(tokens))
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to tokenize text: {e}")
+
+@openai_v1_router.post("/detokenize", response_model=DetokenizeResponse)
+async def detokenize_tokens(
+    request: DetokenizeRequest,
+    user: DBUser = Depends(get_user_from_api_key)
+):
+    if not request.model or '/' not in request.model:
+        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
+    
+    binding_alias, model_name = request.model.split('/', 1)
+    
+    try:
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name
+        )
+        text = lc.detokenize(request.tokens)
+        return DetokenizeResponse(text=text)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to detokenize tokens: {e}")
+
+@openai_v1_router.post("/count_tokens", response_model=CountTokensResponse)
+async def count_tokens(
+    request: CountTokensRequest,
+    user: DBUser = Depends(get_user_from_api_key)
+):
+    if not request.model or '/' not in request.model:
+        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
+    
+    binding_alias, model_name = request.model.split('/', 1)
+    
+    try:
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name
+        )
+        count = lc.count_tokens(request.text)
+        return CountTokensResponse(count=count)
+    except AttributeError:
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name
+        )
+        count = len(lc.tokenize(request.text))
+        return CountTokensResponse(count=count)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to count tokens: {e}")
+
+@openai_v1_router.post("/context_size", response_model=ContextSizeResponse)
+async def get_model_context_size(
+    request: ContextSizeRequest,
+    user: DBUser = Depends(get_user_from_api_key)
+):
+    """
+    Retrieves the context window size for a given model.
+    """
+    if not request.model or '/' not in request.model:
+        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
+    
+    binding_alias, model_name = request.model.split('/', 1)
+    
+    try:
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name
+        )
+        ctx_size = lc.get_ctx_size(model_name)
+        return ContextSizeResponse(context_size=ctx_size)
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve context size: {e}")

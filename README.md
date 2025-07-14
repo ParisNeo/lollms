@@ -1,4 +1,4 @@
-# Simplified LoLLMs Chat
+# LoLLMs Chat
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python Version](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
@@ -6,7 +6,7 @@
 <!-- Add build status badge if CI is set up -->
 <!-- [![Build Status](https://img.shields.io/your_ci_badge_url)](your_ci_link) -->
 
-A multi-user FastAPI backend and responsive HTML/Tailwind CSS frontend application designed to provide a chat interface powered by the [`lollms-client`](https://github.com/ParisNeo/lollms-client) library. It features integrated Retrieval-Augmented Generation (RAG) using [`safe_store`](https://github.com/ParisNeo/safe_store), multimodal chat, user personalities, a friend system, direct messaging, and enhanced sharing capabilities.
+A multi-user FastAPI backend and responsive HTML/Tailwind CSS frontend application designed to provide a chat interface powered by the [`lollms-client`](https://github.com/ParisNeo/lollms-client) library. It features integrated Retrieval-Augmented Generation (RAG) using [`safe_store`](https://github.com/ParisNeo/safe_store), MCPs, Personalities system, multimodal chat, user personalities, a friend system, direct messaging, and enhanced sharing capabilities.
 
 **Live Project:** [https://github.com/ParisNeo/lollms_chat](https://github.com/ParisNeo/lollms_chat)
 

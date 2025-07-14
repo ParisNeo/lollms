@@ -32,7 +32,6 @@ const isOwnProfile = computed(() => {
 async function fetchProfileData(username) {
     if (!username) return;
     const finalUsername = username === 'me' ? authStore.user?.username : username;
-    console.log(finalUsername)
     if (!finalUsername) {
         router.push('/'); 
         return;
@@ -54,7 +53,6 @@ function handleUnfollow() {
 
 function handleSendFriendRequest() {
     if (!profileUser.value) return;
-    // FIX: Pass the username, as required by the updated store action and backend API.
     socialStore.sendFriendRequest(profileUser.value.username);
 }
 
@@ -63,10 +61,11 @@ function handleRemoveFriend() {
     socialStore.removeFriend(profileUser.value.id);
 }
 
-function handleOpenMessage() {
+async function handleOpenMessage() {
     if (!profileUser.value) return;
+    // Navigate home first, then open the conversation
+    await router.push('/');
     socialStore.openConversation(profileUser.value);
-    router.push('/messages'); // Assuming you have a route for this
 }
 
 // --- LIFECYCLE HOOKS ---

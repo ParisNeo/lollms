@@ -6,7 +6,7 @@ import { useUiStore } from './ui';
 export const useAuthStore = defineStore('auth', () => {
     const user = ref(null);
     const token = ref(localStorage.getItem('lollms_token') || null);
-    const isAuthenticating = ref(false);
+    const isAuthenticating = ref(true); // Start as true
     const loadingMessage = ref('Initializing...');
     const loadingProgress = ref(0);
     const funFact = ref('');
@@ -14,10 +14,62 @@ export const useAuthStore = defineStore('auth', () => {
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
 
+    // This new function centralizes the data loading process
+    async function fetchUserAndInitialData() {
+        const uiStore = useUiStore();
+        try {
+            loadingProgress.value = 20;
+            loadingMessage.value = 'Authenticating...';
+            const response = await apiClient.get('/api/auth/me');
+            user.value = response.data;
+            
+            // Dynamically import stores to avoid circular dependencies
+            const { useDiscussionsStore } = await import('./discussions');
+            const { useDataStore } = await import('./data');
+            const discussionsStore = useDiscussionsStore();
+            const dataStore = useDataStore();
+            
+            loadingProgress.value = 40;
+            loadingMessage.value = 'Loading user data...';
+            // Use Promise.all to fetch data in parallel for speed
+            await Promise.all([
+                discussionsStore.loadDiscussions(),
+                dataStore.loadAllInitialData()
+            ]);
+
+            loadingProgress.value = 80;
+            loadingMessage.value = 'Preparing the interface...';
+
+            // Navigate to the correct initial view
+            if (user.value) {
+                let targetView = user.value.first_page;
+                if (user.value.user_ui_level < 2 && targetView === 'feed') {
+                    targetView = 'new_discussion'; 
+                }
+                uiStore.setMainView(targetView === 'feed' ? 'feed' : 'chat');
+
+                if (targetView === 'last_discussion') {
+                    if (discussionsStore.sortedDiscussions.length > 0) {
+                        await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id);
+                    } else {
+                        await discussionsStore.createNewDiscussion();
+                    }
+                } else if (targetView === 'new_discussion') {
+                    await discussionsStore.createNewDiscussion();
+                }
+            }
+            loadingProgress.value = 100;
+            loadingMessage.value = 'Done!';
+            return true;
+        } catch (error) {
+            console.error("Failed to fetch user and initial data:", error);
+            clearAuthData(); // Clear invalid auth state
+            return false;
+        }
+    }
+
     async function attemptInitialAuth() {
         isAuthenticating.value = true;
-        const uiStore = useUiStore();
-
         loadingProgress.value = 0;
         loadingMessage.value = 'Waking up the hamsters...';
 
@@ -32,58 +84,12 @@ export const useAuthStore = defineStore('auth', () => {
         loadingMessage.value = 'Checking credentials...';
 
         if (token.value) {
-            try {
-                apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
-                loadingProgress.value = 20;
-                loadingMessage.value = 'Authenticating...';
-                const response = await apiClient.get('/api/auth/me');
-                user.value = response.data;
-                
-                const { useDiscussionsStore } = await import('./discussions');
-                const { useDataStore } = await import('./data');
-                const discussionsStore = useDiscussionsStore();
-                const dataStore = useDataStore();
-                
-                loadingProgress.value = 40;
-                loadingMessage.value = 'Loading user discussions...';
-                const p1 = discussionsStore.loadDiscussions();
-
-                loadingProgress.value = 60;
-                loadingMessage.value = 'Loading personalities & tools...';
-                const p2 = dataStore.loadAllInitialData();
-                
-                await Promise.all([p1, p2]);
-
-                loadingProgress.value = 80;
-                loadingMessage.value = 'Preparing the interface...';
-
-                if (user.value) {
-                    let targetView = user.value.first_page;
-                    if (user.value.user_ui_level < 2 && targetView === 'feed') {
-                        targetView = 'new_discussion'; 
-                    }
-                    uiStore.setMainView(targetView === 'feed' ? 'feed' : 'chat');
-
-                    if (targetView === 'last_discussion') {
-                        if (discussionsStore.sortedDiscussions.length > 0) {
-                            await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id);
-                        } else {
-                            await discussionsStore.createNewDiscussion();
-                        }
-                    } else if (targetView === 'new_discussion') {
-                        await discussionsStore.createNewDiscussion();
-                    }
-                }
-                loadingProgress.value = 100;
-                loadingMessage.value = 'Done!';
-
-            } catch (error) {
-                console.error("Token validation failed, clearing token.", error);
-                clearAuthData();
-                uiStore.openModal('login');
+            const success = await fetchUserAndInitialData();
+            if (!success) {
+                useUiStore().openModal('login');
             }
         } else {
-            uiStore.openModal('login');
+            useUiStore().openModal('login');
         }
         isAuthenticating.value = false;
     }
@@ -95,23 +101,31 @@ export const useAuthStore = defineStore('auth', () => {
             formData.append('username', username);
             formData.append('password', password);
             const response = await apiClient.post('/api/auth/token', formData);
+            
+            // Set the token first
             token.value = response.data.access_token;
             localStorage.setItem('lollms_token', token.value);
-            await attemptInitialAuth();
-            if(isAuthenticated.value) {
+
+            // Now fetch data. The request interceptor will automatically use the new token.
+            const success = await fetchUserAndInitialData();
+
+            if (success) {
                 uiStore.closeModal('login');
                 uiStore.addNotification('Login successful!', 'success');
             } else {
-                 throw new Error("Authentication succeeded but failed to fetch user data.");
+                throw new Error("Authentication succeeded but failed to fetch user data.");
             }
         } catch (error) {
             const detail = error.response?.data?.detail || "An unknown error occurred.";
             if (detail.includes("account is inactive")) {
                  uiStore.addNotification(detail, 'warning');
-            } else {
+            } else if (error.message.includes('fetch user data')){
+                 uiStore.addNotification('Login succeeded, but failed to load user data.', 'error');
+            }
+            else {
                  uiStore.addNotification('Login failed: Incorrect username or password.', 'error');
             }
-            throw new Error(detail);
+            throw error; // Re-throw to inform the component
         }
     }
 
@@ -136,16 +150,15 @@ export const useAuthStore = defineStore('auth', () => {
         user.value = null;
         token.value = null;
         localStorage.removeItem('lollms_token');
-        delete apiClient.defaults.headers.common['Authorization'];
+        // No need to clear headers manually anymore
     }
 
     async function logout() {
         const uiStore = useUiStore();
         try {
             await apiClient.post('/api/auth/logout');
-            uiStore.openModal('login');
         } catch(error) {
-            console.warn("Could not reach logout endpoint, but proceeding with client-side logout.", error);
+            console.warn("Logout endpoint failed, but proceeding with client-side logout.", error);
         } finally {
             const { useDiscussionsStore } = await import('./discussions');
             const { useDataStore } = await import('./data');
@@ -163,7 +176,6 @@ export const useAuthStore = defineStore('auth', () => {
             user.value = { ...user.value, ...response.data };
             useUiStore().addNotification('Profile updated successfully.', 'success');
         } catch(error) {
-            console.error("Failed to update user profile:", error);
             throw error;
         }
     }
@@ -176,8 +188,6 @@ export const useAuthStore = defineStore('auth', () => {
             }
             useUiStore().addNotification('Settings saved successfully.', 'success');
         } catch(error) {
-            console.error("Failed to update user preferences:", error);
-            useUiStore().addNotification('Failed to save settings.', 'error');
             throw error;
         }
     }
@@ -187,7 +197,6 @@ export const useAuthStore = defineStore('auth', () => {
             await apiClient.post('/api/auth/change-password', passwordData);
             useUiStore().addNotification('Password changed successfully.', 'success');
         } catch(error) {
-            console.error("Failed to change password:", error);
             throw error;
         }
     }

@@ -27,13 +27,26 @@ def search_for_users(
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     """
-    Searches for users by username, excluding the current user.
+    Searches for users.
+    - If the query is a partial match, it returns only users who have enabled searchability.
+    - If the query is an exact username match, it returns that user regardless of their searchability setting.
+    - Excludes the current user from results.
     """
     search_term = f"%{q}%"
+    
+    # The main query finds searchable users via a partial match (ilike)
+    # OR it finds any user (searchable or not) via an exact match.
     users = db.query(DBUser).filter(
-        DBUser.username.ilike(search_term),
-        DBUser.id != current_user.id
+        DBUser.id != current_user.id,
+        or_(
+            DBUser.username == q, # Exact match for non-searchable users
+            and_(
+                DBUser.is_searchable == True,
+                DBUser.username.ilike(search_term)
+            )
+        )
     ).limit(10).all()
+    
     return users
 
 

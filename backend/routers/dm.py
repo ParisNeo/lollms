@@ -75,16 +75,11 @@ def get_user_conversations(
     sent_to_ids = select(distinct(DBDirectMessage.receiver_id)).where(DBDirectMessage.sender_id == current_user.id)
     received_from_ids = select(distinct(DBDirectMessage.sender_id)).where(DBDirectMessage.receiver_id == current_user.id)
     
-    # Create a union of the two queries
     partner_ids_query = union(sent_to_ids, received_from_ids)
-
-    # FIX: Use the .subquery() method as required by SQLAlchemy for IN clauses.
-    # This turns the union into a proper subquery that can be used in the filter.
     partners_subquery = partner_ids_query.subquery()
     
     partners_db = db.query(DBUser).filter(DBUser.id.in_(select(partners_subquery))).all()
 
-    # Explicitly convert each SQLAlchemy DBUser object into a Pydantic UserPublic model.
     response_list = [UserPublic.model_validate(user) for user in partners_db]
     
     return response_list
@@ -116,9 +111,21 @@ def get_message_history(
     )
     messages = query.all()
     
-    response_list = [DirectMessagePublic.model_validate(msg) for msg in messages]
+    # --- FIX: Manually construct the response to prevent model validation errors ---
+    response_list = []
+    for msg in messages:
+        response_list.append(DirectMessagePublic(
+            id=msg.id,
+            content=msg.content,
+            sender_id=msg.sender_id,
+            receiver_id=msg.receiver_id,
+            sent_at=msg.sent_at,
+            read_at=msg.read_at,
+            sender_username=msg.sender.username,
+            receiver_username=msg.receiver.username
+        ))
     
-    return response_list[::-1]
+    return response_list[::-1] # Reverse to show oldest first in the final list
 
 
 @dm_router.post("/send", response_model=DirectMessagePublic, status_code=status.HTTP_201_CREATED)

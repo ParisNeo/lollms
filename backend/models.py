@@ -133,6 +133,7 @@ class UserUpdate(BaseModel):
     ai_response_language: Optional[str] = "auto"
     fun_mode: Optional[bool] = False
     show_token_counter: Optional[bool] = None
+    is_searchable: Optional[bool] = None
 
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
@@ -221,6 +222,7 @@ class UserPublic(UserLLMParams):
     email: Optional[EmailStr] = None
     birth_date: Optional[datetime.date] = None
     receive_notification_emails: bool
+    is_searchable: bool
     password_reset_token: Optional[str] = None
     reset_token_expiry: Optional[datetime.datetime] = None
     lollms_model_name: Optional[str] = None
@@ -246,6 +248,7 @@ class UserAuthDetails(UserLLMParams):
     email: Optional[EmailStr] = None
     birth_date: Optional[datetime.date] = None
     receive_notification_emails: bool
+    is_searchable: bool
     lollms_model_name: Optional[str] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
