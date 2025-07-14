@@ -1,4 +1,4 @@
-# database_setup.py
+# backend/database_setup.py
 import uuid
 import json
 import enum
@@ -123,6 +123,7 @@ class User(Base):
     birth_date = Column(Date, nullable=True)
     icon = Column(Text, nullable=True)
     receive_notification_emails = Column(Boolean, default=True, nullable=False)
+    is_searchable = Column(Boolean, default=True, nullable=False, index=True)
 
     
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
@@ -533,7 +534,8 @@ def init_database(db_url: str):
                     "chat_active": "BOOLEAN DEFAULT 0 NOT NULL",
                     "first_page": "VARCHAR DEFAULT 'feed' NOT NULL",
                     "receive_notification_emails": "BOOLEAN DEFAULT 1 NOT NULL",
-                    "show_token_counter": "BOOLEAN DEFAULT 1 NOT NULL"
+                    "show_token_counter": "BOOLEAN DEFAULT 1 NOT NULL",
+                    "is_searchable": "BOOLEAN DEFAULT 1 NOT NULL"
                 }
                 
                 added_cols = []

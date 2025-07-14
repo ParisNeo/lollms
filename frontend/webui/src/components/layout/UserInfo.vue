@@ -113,11 +113,6 @@ function handleLogout() {
   closeMenu();
 }
 
-function openDataStores() {
-  uiStore.openModal('dataStores');
-  closeMenu();
-}
-
 const vOnClickOutside = {
   beforeMount: (el, binding) => {
     el.clickOutsideEvent = event => {
@@ -194,10 +189,10 @@ const vOnClickOutside = {
                                 <span>Admin Panel</span>
                             </router-link>
                             <div class="my-1 border-t dark:border-gray-600"></div>
-                            <button @click="openDataStores" class="menu-item">
-                            <IconDatabase class="mr-3 h-5 w-5 text-gray-500" />
-                            <span>Data Stores</span>
-                            </button>
+                            <router-link to="/datastores" @click="closeMenu" class="menu-item">
+                                <IconDatabase class="mr-3 h-5 w-5 text-gray-500" />
+                                <span>Data Stores</span>
+                            </router-link>
                             <button v-if="apps.length > 0" @click="activeSubMenu = 'apps'" class="menu-item justify-between">
                             <div class="flex items-center">
                                 <IconTicket class="mr-3 h-5 w-5 text-gray-500" />

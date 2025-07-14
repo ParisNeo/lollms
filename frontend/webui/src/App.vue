@@ -17,10 +17,7 @@ import ConfirmationModal from './components/ui/ConfirmationModal.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
 import SourceModal from './components/modals/SourceModal.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
-import DataStoresModal from './components/modals/DataStoresModal.vue';
-import DataStoreEditorModal from './components/modals/DataStoreEditorModal.vue';
 import ShareDataStoreModal from './components/modals/ShareDataStoreModal.vue';
-import FileManagementModal from './components/modals/FileManagementModal.vue';
 import ExportModal from './components/modals/ExportModal.vue';
 import ImportModal from './components/modals/ImportModal.vue';
 import InteractiveOutputModal from './components/modals/InteractiveOutputModal.vue';
@@ -81,11 +78,8 @@ onMounted(async () => {
     <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <SourceModal v-if="activeModal === 'sourceViewer'" />
-    <DataStoresModal v-if="activeModal === 'dataStores'" />
-    <DataStoreEditorModal v-if="activeModal === 'dataStoreEditor'" />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
     <ShareDiscussionModal v-if="activeModal === 'shareDiscussion'" />
-    <FileManagementModal v-if="activeModal === 'fileManagement'" />
     <ExportModal v-if="activeModal === 'export'" />
     <ImportModal v-if="activeModal === 'import'" />
     <InteractiveOutputModal v-if="activeModal === 'interactiveOutput'" />

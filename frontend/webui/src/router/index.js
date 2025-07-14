@@ -5,6 +5,7 @@ import SettingsView from '../views/SettingsView.vue';
 import MessagesView from '../views/MessagesView.vue';
 import ResetPasswordView from '../views/ResetPasswordView.vue';
 import AdminView from '../views/AdminView.vue';
+import DataStoresView from '../views/DataStoresView.vue';
 
 const routes = [
   {
@@ -33,6 +34,12 @@ const routes = [
     path: '/messages',
     name: 'Messages',
     component: MessagesView,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/datastores',
+    name: 'DataStores',
+    component: DataStoresView,
     meta: { requiresAuth: true }
   },
   {
