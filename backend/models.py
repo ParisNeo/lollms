@@ -368,6 +368,7 @@ class DataStorePublic(DataStoreBase):
     owner_username: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    permission_level: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -377,7 +378,7 @@ class DataStoreShareRequest(BaseModel):
 
     @validator('permission_level')
     def permission_level_must_be_valid(cls, value):
-        if value not in ["read_query"]:
+        if value not in ["read_query", "read_write", "revectorize"]:
             raise ValueError("Invalid permission level")
         return value
 

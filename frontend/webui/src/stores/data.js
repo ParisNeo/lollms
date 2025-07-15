@@ -229,10 +229,13 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-    async function shareDataStore({ storeId, username }) {
+    async function shareDataStore({ storeId, username, permissionLevel }) {
         const uiStore = useUiStore();
         try {
-            await apiClient.post(`/api/datastores/${storeId}/share`, { target_username: username, permission_level: "read_query" });
+            await apiClient.post(`/api/datastores/${storeId}/share`, { 
+                target_username: username, 
+                permission_level: permissionLevel 
+            });
             uiStore.addNotification(`Store shared with ${username}.`, 'success');
         } catch(error) {
             throw error;

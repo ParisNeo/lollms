@@ -215,7 +215,7 @@ class SharedDataStoreLink(Base):
     shared_at = Column(DateTime(timezone=True), server_default=func.now())
     datastore = relationship("DataStore", back_populates="shared_with_links")
     shared_with_user = relationship("User", foreign_keys=[shared_with_user_id], back_populates="received_shared_datastores_links")
-    __table_args__ = (UniqueConstraint('datastore_id', 'shared_with_user_id', name='uq_datastore_shared_user'), CheckConstraint(permission_level.in_(['read_query', 'read_write']), name='ck_permission_level_valid'))
+    __table_args__ = (UniqueConstraint('datastore_id', 'shared_with_user_id', name='uq_datastore_shared_user'), CheckConstraint(permission_level.in_(['read_query', 'read_write', 'revectorize']), name='ck_permission_level_valid'))
 
 class MCP(Base):
     __tablename__ = "mcps"

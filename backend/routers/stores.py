@@ -84,6 +84,33 @@ async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDe
         final_list.sort(key=lambda x: x["name"]); return final_list
     except Exception as e: raise HTTPException(status_code=500, detail=f"Error listing vectorizers for datastore {datastore_id}: {e}")
 
+@store_files_router.post("/revectorize")
+async def revectorize_datastore(
+    datastore_id: str,
+    background_tasks: BackgroundTasks,
+    vectorizer_name: str = Form(...),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> JSONResponse:
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
+    
+    try:
+        with ss:
+            all_vectorizers = {m['method_name'] for m in ss.list_vectorization_methods()} | set(ss.list_possible_vectorizer_names())
+            if not (vectorizer_name in all_vectorizers or vectorizer_name.startswith("st:") or vectorizer_name.startswith("tfidf:")):
+                raise HTTPException(status_code=400, detail=f"Vectorizer '{vectorizer_name}' not found or invalid format for datastore {datastore_id}.")
+            
+            background_tasks.add_task(ss.revectorize, vectorizer_name)
+
+        return JSONResponse(status_code=202, content={"message": f"DataStore is being revectorized with '{vectorizer_name}' in the background."})
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"An error occurred during revectorization: {e}")
 
 @store_files_router.post("/upload-files") 
 async def upload_rag_documents_to_datastore(
@@ -92,14 +119,10 @@ async def upload_rag_documents_to_datastore(
 ) -> JSONResponse:
     if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
     
-    ds_record = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
-    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    if not ds_record or not user_db_record or ds_record.owner_user_id != user_db_record.id:
-        raise HTTPException(status_code=403, detail="Only the owner can upload files to this DataStore.")
-
-    ss = get_safe_store_instance(current_user.username, datastore_id, db) 
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
     
-    datastore_docs_path = get_user_datastore_root_path(current_user.username) / "safestore_docs" / datastore_id
+    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+    datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / datastore_id
     datastore_docs_path.mkdir(parents=True, exist_ok=True)
 
     processed, errors_list = [], []
@@ -152,19 +175,16 @@ async def list_rag_documents_in_datastore(datastore_id: str, current_user: UserA
 async def delete_rag_document_from_datastore(datastore_id: str, filename: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:
     if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
     
-    ds_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
-    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    if not ds_record or not user_db_record or ds_record.owner_user_id != user_db_record.id:
-        raise HTTPException(status_code=403, detail="Only the owner can delete files from this DataStore.")
-
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+    
+    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
     s_filename = secure_filename(filename)
     if not s_filename or s_filename != filename: raise HTTPException(status_code=400, detail="Invalid filename.")
     
-    datastore_docs_path = get_user_datastore_root_path(current_user.username) / "safestore_docs" / datastore_id
+    datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / datastore_id
     file_to_delete_path = datastore_docs_path / s_filename
     if not file_to_delete_path.is_file(): raise HTTPException(status_code=404, detail=f"Document '{s_filename}' not found in datastore {datastore_id}.")
     
-    ss = get_safe_store_instance(current_user.username, datastore_id, db)
     try:
         with ss: ss.delete_document_by_path(str(file_to_delete_path))
         file_to_delete_path.unlink()
@@ -226,6 +246,7 @@ async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current
         response_list.append(DataStorePublic(
             id=ds_db.id, name=ds_db.name, description=ds_db.description,
             owner_username=current_user.username, 
+            permission_level='owner',
             created_at=ds_db.created_at, updated_at=ds_db.updated_at
         ))
     for link, ds_db in shared_links_and_datastores_db: 
@@ -233,6 +254,7 @@ async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current
              response_list.append(DataStorePublic(
                 id=ds_db.id, name=ds_db.name, description=ds_db.description,
                 owner_username=ds_db.owner.username, 
+                permission_level=link.permission_level,
                 created_at=ds_db.created_at, updated_at=ds_db.updated_at
             ))
     return response_list
@@ -245,20 +267,22 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreBase, current_
     
     ds_db_obj = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
     if not ds_db_obj: raise HTTPException(status_code=404, detail="DataStore not found.")
-    if ds_db_obj.owner_user_id != user_db_record.id:
-        raise HTTPException(status_code=403, detail="Only the owner can update a DataStore.")
+    
+    get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
 
     if ds_update.name != ds_db_obj.name:
-        existing_ds = db.query(DBDataStore).filter(DBDataStore.owner_user_id == user_db_record.id, DBDataStore.name == ds_update.name, DBDataStore.id != datastore_id).first()
-        if existing_ds: raise HTTPException(status_code=400, detail=f"DataStore with name '{ds_update.name}' already exists.")
+        existing_ds = db.query(DBDataStore).filter(DBDataStore.owner_user_id == ds_db_obj.owner_user_id, DBDataStore.name == ds_update.name, DBDataStore.id != datastore_id).first()
+        if existing_ds: raise HTTPException(status_code=400, detail=f"A DataStore with the name '{ds_update.name}' already exists for the owner.")
 
     ds_db_obj.name = ds_update.name
     ds_db_obj.description = ds_update.description
     try:
         db.commit(); db.refresh(ds_db_obj)
+        db.refresh(ds_db_obj, attribute_names=['owner'])
         return DataStorePublic(
              id=ds_db_obj.id, name=ds_db_obj.name, description=ds_db_obj.description,
-             owner_username=current_user.username, created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at
+             owner_username=ds_db_obj.owner.username, permission_level='owner' if ds_db_obj.owner.id == user_db_record.id else 'read_write',
+             created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at
         )
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error updating datastore: {e}")

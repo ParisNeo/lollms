@@ -18,7 +18,6 @@ const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 
-// CORRECTED: Use storeToRefs to correctly get reactive state
 const { ownedDataStores, sharedDataStores } = storeToRefs(dataStore);
 const isLoadingStores = ref(false);
 
@@ -175,8 +174,7 @@ async function handleDeleteFile(filename) {
 }
 
 function handleShare(store) {
-    // Placeholder for Phase 5
-    console.log("Sharing store:", store.name);
+    uiStore.openModal('shareDataStore', { store });
 }
 </script>
 

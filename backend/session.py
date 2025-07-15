@@ -355,7 +355,12 @@ def build_lollms_client_from_params(
         db.close()
 
 
-def get_safe_store_instance(requesting_user_username: str, datastore_id: str, db: Session) -> safe_store.SafeStore:
+def get_safe_store_instance(
+    requesting_user_username: str,
+    datastore_id: str,
+    db: Session,
+    permission_level: str = "read_query"
+) -> safe_store.SafeStore:
     if safe_store is None:
         raise HTTPException(status_code=501, detail="SafeStore library not installed. RAG is disabled.")
     
@@ -369,11 +374,29 @@ def get_safe_store_instance(requesting_user_username: str, datastore_id: str, db
         raise HTTPException(status_code=404, detail="Requesting user not found.")
 
     is_owner = (owner_username == requesting_user_username)
-    link = db.query(DBSharedDataStoreLink).filter_by(datastore_id=datastore_id, shared_with_user_id=requesting_user_record.id).first()
-    has_access = is_owner or (link and link.permission_level in ["read_query", "read_write"])
     
-    if not has_access:
-        raise HTTPException(status_code=403, detail="Access denied to this DataStore.")
+    if not is_owner:
+        link = db.query(DBSharedDataStoreLink).filter_by(
+            datastore_id=datastore_id,
+            shared_with_user_id=requesting_user_record.id
+        ).first()
+
+        if not link:
+            raise HTTPException(status_code=403, detail="Access denied to this DataStore.")
+        
+        user_permission = link.permission_level
+        
+        permission_hierarchy = {
+            "read_query": ["read_query", "read_write", "revectorize"],
+            "read_write": ["read_write", "revectorize"],
+            "revectorize": ["revectorize"]
+        }
+
+        if user_permission not in permission_hierarchy.get(permission_level, []):
+            raise HTTPException(
+                status_code=403,
+                detail=f"You do not have the required '{permission_level}' permission for this DataStore."
+            )
 
     session = user_sessions.get(requesting_user_username)
     if not session:
@@ -382,7 +405,7 @@ def get_safe_store_instance(requesting_user_username: str, datastore_id: str, db
     if datastore_id not in session.get("safe_store_instances", {}):
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
         try:
-            ss_instance = safe_store.SafeStore(db_path=ss_db_path, name =datastore_record.name, description=datastore_record.description, encryption_key=SAFE_STORE_DEFAULTS["encryption_key"])
+            ss_instance = safe_store.SafeStore(db_path=ss_db_path, name=datastore_record.name, description=datastore_record.description, encryption_key=SAFE_STORE_DEFAULTS["encryption_key"])
             session["safe_store_instances"][datastore_id] = ss_instance
         except Exception as e:
             traceback.print_exc()
