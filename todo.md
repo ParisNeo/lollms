@@ -17,6 +17,7 @@ new ui:
 - OK setup default page (new discussion/social networks)
 - OK revamp RAG datastores interface to put it in its own view
 
+- override the copy button
 - user management page needs upgrade and bugfix
 - email users enhance with ai not working
 - key generation for regular users
