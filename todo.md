@@ -41,6 +41,10 @@ new ui:
 - user management page needs upgrade and bugfix
 - email users enhance with ai not working
 
+## personalities
+- Add personality description to the list
+- Add a system personalities management page for administrator
+  
 ### bindings/models
 - add alias for models
 
@@ -57,16 +61,13 @@ new ui:
 ## cosmetics
 - add customization of the webui
 
-## personalities
-- Add personality description to the list
 
-## personalities
-- add protection for MCP output
 
 ## mcps
 - change refresh mcps to reload mcps
 - add a forgot my password button to the login modal that sends a notification to the administrator.
 - refresh mcps must be converted to reload mcps
+- add protection for MCP output
 
 ## background processes
 - add current processes listing
