@@ -282,14 +282,16 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
+
     async function fetchStoreVectorizers(storeId) {
         try {
             const response = await apiClient.get(`/api/store/${storeId}/vectorizers`);
-            return response.data || [];
+            return response.data || { in_store: [], all_possible: [] };
         } catch (error) {
-            return [];
+            return { in_store: [], all_possible: [] };
         }
     }
+    
     async function uploadFilesToStore({ storeId, formData }) {
         const uiStore = useUiStore();
         try {

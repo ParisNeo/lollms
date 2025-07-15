@@ -67,27 +67,36 @@ from backend.session import (
 # --- SafeStore File Management API (now per-datastore) ---
 store_files_router = APIRouter(prefix="/api/store/{datastore_id}", tags=["SafeStore RAG & File Management"])
 
-@store_files_router.get("/vectorizers", response_model=List[Dict[str,str]])
-async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[Dict[str,str]]:
-    if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
-    ss = get_safe_store_instance(current_user.username, datastore_id, db) 
+@store_files_router.get("/vectorizers", response_model=Dict[str, List[Dict[str, str]]])
+async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, List[Dict[str, str]]]:
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    ss = get_safe_store_instance(current_user.username, datastore_id, db)
+    
     try:
-        with ss: methods_in_db = ss.list_vectorization_methods(); possible_names = ss.list_possible_vectorizer_names()
-        formatted = []; existing_names = set()
-        for method_info in methods_in_db:
-            name = method_info.get("method_name")
-            if name: formatted.append({"name": name, "method_name": f"{name} (dim: {method_info.get('vector_dim', 'N/A')})"}); existing_names.add(name)
-        for possible_name in possible_names:
-            if possible_name not in existing_names:
-                display_text = possible_name
-                if possible_name.startswith("tfidf:"): display_text = f"{possible_name} (TF-IDF)"
-                elif possible_name.startswith("st:"): display_text = f"{possible_name} (Sentence Transformer)"
-                formatted.append({"name": possible_name, "method_name": display_text})
-        final_list = []; seen_names = set()
-        for fv in formatted:
-            if fv["name"] not in seen_names: final_list.append(fv); seen_names.add(fv["name"])
-        final_list.sort(key=lambda x: x["name"]); return final_list
-    except Exception as e: raise HTTPException(status_code=500, detail=f"Error listing vectorizers for datastore {datastore_id}: {e}")
+        with ss:
+            # Get vectorizers already in the store's DB
+            methods_in_db = ss.list_vectorization_methods()
+            in_store_formatted = [{"name": m.get("method_name"), "method_name": f"{m.get('method_name')} (dim: {m.get('vector_dim', 'N/A')})"} for m in methods_in_db if m.get("method_name")]
+            in_store_formatted.sort(key=lambda x: x["name"])
+
+            # Get all possible vectorizers that can be added
+            possible_names = ss.list_possible_vectorizer_names()
+            all_possible_formatted = []
+            for name in possible_names:
+                display_text = name
+                if name.startswith("tfidf:"): display_text = f"{name} (TF-IDF)"
+                elif name.startswith("st:"): display_text = f"{name} (Sentence Transformer)"
+                all_possible_formatted.append({"name": name, "method_name": display_text})
+            all_possible_formatted.sort(key=lambda x: x["name"])
+
+        return {
+            "in_store": in_store_formatted,
+            "all_possible": all_possible_formatted
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error listing vectorizers: {e}")
 
 @store_files_router.post("/revectorize", status_code=status.HTTP_202_ACCEPTED)
 async def revectorize_datastore(
