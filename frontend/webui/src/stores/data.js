@@ -241,6 +241,39 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
+
+    async function revokeShare(storeId, userId) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.delete(`/api/datastores/${storeId}/share/${userId}`);
+            uiStore.addNotification('Sharing revoked successfully.', 'success');
+            return true;
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    async function getSharedWithList(storeId) {
+        try {
+            const response = await apiClient.get(`/api/datastores/${storeId}/shared-with`);
+            return response.data || [];
+        } catch (error) {
+            return [];
+        }
+    }
+
+    async function revectorizeStore({ storeId, vectorizerName }) {
+        const uiStore = useUiStore();
+        try {
+            const formData = new FormData();
+            formData.append('vectorizer_name', vectorizerName);
+            const response = await apiClient.post(`/api/store/${storeId}/revectorize`, formData);
+            uiStore.addNotification(response.data.message, 'info', { duration: 5000 });
+        } catch (error) {
+            throw error;
+        }
+    }
+
     async function fetchStoreFiles(storeId) {
         try {
             const response = await apiClient.get(`/api/store/${storeId}/files`);
@@ -467,6 +500,7 @@ export const useDataStore = defineStore('data', () => {
         
         loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,
+        revokeShare, getSharedWithList, revectorizeStore,
         fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,
         deleteFileFromStore, fetchPersonalities, addPersonality,
         updatePersonality, deletePersonality, fetchMcps, addMcp,

@@ -150,23 +150,31 @@ export const useAuthStore = defineStore('auth', () => {
         user.value = null;
         token.value = null;
         localStorage.removeItem('lollms_token');
-        // No need to clear headers manually anymore
     }
 
     async function logout() {
         const uiStore = useUiStore();
-        try {
-            await apiClient.post('/api/auth/logout');
-        } catch(error) {
-            console.warn("Logout endpoint failed, but proceeding with client-side logout.", error);
-        } finally {
-            const { useDiscussionsStore } = await import('./discussions');
-            const { useDataStore } = await import('./data');
-            clearAuthData();
-            useDiscussionsStore().$reset();
-            useDataStore().$reset();
-            uiStore.addNotification('You have been logged out.', 'info');
-            uiStore.openModal('login');
+
+        if (!isAuthenticated.value) {
+            return;
+        }
+        
+        const localToken = token.value;
+
+        const { useDiscussionsStore } = await import('./discussions');
+        const { useDataStore } = await import('./data');
+        clearAuthData();
+        useDiscussionsStore().$reset();
+        useDataStore().$reset();
+        
+        uiStore.closeModal();
+        uiStore.addNotification('You have been logged out.', 'info');
+        uiStore.openModal('login');
+
+        if (localToken) {
+            apiClient.post('/api/auth/logout').catch(error => {
+                console.warn("Backend logout call failed, which can be normal after token removal.", error);
+            });
         }
     }
 

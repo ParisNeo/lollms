@@ -48,10 +48,11 @@ apiClient.interceptors.response.use(
 
       if (status === 401) {
         // If we get a 401 Unauthorized, it means the token is invalid or expired.
-        // The exception is the login endpoint itself, which is expected to return 401 on failure.
-        if (config.url !== '/api/auth/token') {
+        // We trigger a logout, but prevent loops by excluding auth-related endpoints.
+        const isAuthEndpoint = config.url.includes('/api/auth/token') || config.url.includes('/api/auth/logout');
+        
+        if (!isAuthEndpoint) {
             console.error("Authentication error (401), logging out.");
-            // We trigger a full logout, which will clear the bad token and show the login modal.
             authStore.logout();
         }
       } else if (status === 403) {

@@ -72,6 +72,12 @@ export const useUiStore = defineStore('ui', () => {
     }
 
     function closeModal(name = null) {
+        if (name === null) {
+            modalStack.value = [];
+            modalProps.value = {};
+            return;
+        }
+
         if (name && activeModal.value !== name) {
             return;
         }

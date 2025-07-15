@@ -372,6 +372,15 @@ class DataStorePublic(DataStoreBase):
     class Config:
         from_attributes = True
 
+class SharedWithUserPublic(BaseModel):
+    user_id: int
+    username: str
+    icon: Optional[str] = None
+    permission_level: str
+
+    class Config:
+        from_attributes = True
+
 class DataStoreShareRequest(BaseModel):
     target_username: constr(min_length=3, max_length=50)
     permission_level: str = "read_query"

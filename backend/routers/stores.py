@@ -14,7 +14,8 @@ from fastapi import (
     UploadFile,
     Form,
     APIRouter,
-    BackgroundTasks
+    BackgroundTasks,
+    status
 )
 from fastapi.responses import (
     JSONResponse,
@@ -32,7 +33,16 @@ from backend.database_setup import (
     SharedDataStoreLink as DBSharedDataStoreLink,
     get_db,
 )
-from backend.models import UserLLMParams, UserAuthDetails, DataStoreCreate, DataStoreEdit, DataStoreShareRequest, DataStorePublic, DataStoreBase
+from backend.models import (
+    UserAuthDetails,
+    DataStoreCreate,
+    DataStoreEdit,
+    DataStoreShareRequest,
+    DataStorePublic,
+    DataStoreBase,
+    SharedWithUserPublic,
+    SafeStoreDocumentInfo
+)
 from backend.session import get_datastore_db_path
 
 # safe_store is expected to be installed
@@ -45,17 +55,12 @@ except ImportError:
     safe_store = None
     SafeStoreLogLevel = None
 
-# --- Pydantic Models for API ---
-from backend.models import (
-UserAuthDetails,
-SafeStoreDocumentInfo,
-)
 from backend.session import (
     get_current_active_user,
-    get_db, get_safe_store_instance,
+    get_safe_store_instance,
     get_user_datastore_root_path,
     user_sessions
-    )
+)
 
 
 
@@ -84,7 +89,7 @@ async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDe
         final_list.sort(key=lambda x: x["name"]); return final_list
     except Exception as e: raise HTTPException(status_code=500, detail=f"Error listing vectorizers for datastore {datastore_id}: {e}")
 
-@store_files_router.post("/revectorize")
+@store_files_router.post("/revectorize", status_code=status.HTTP_202_ACCEPTED)
 async def revectorize_datastore(
     datastore_id: str,
     background_tasks: BackgroundTasks,
@@ -99,10 +104,12 @@ async def revectorize_datastore(
     
     try:
         with ss:
+            # Re-check vectorizer validity inside the `with` block
             all_vectorizers = {m['method_name'] for m in ss.list_vectorization_methods()} | set(ss.list_possible_vectorizer_names())
             if not (vectorizer_name in all_vectorizers or vectorizer_name.startswith("st:") or vectorizer_name.startswith("tfidf:")):
-                raise HTTPException(status_code=400, detail=f"Vectorizer '{vectorizer_name}' not found or invalid format for datastore {datastore_id}.")
+                 raise HTTPException(status_code=400, detail=f"Vectorizer '{vectorizer_name}' not found or invalid format.")
             
+            # Add the potentially long-running task to the background
             background_tasks.add_task(ss.revectorize, vectorizer_name)
 
         return JSONResponse(status_code=202, content={"message": f"DataStore is being revectorized with '{vectorizer_name}' in the background."})
@@ -120,7 +127,7 @@ async def upload_rag_documents_to_datastore(
     if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
     
     ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
-    
+
     datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
     datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / datastore_id
     datastore_docs_path.mkdir(parents=True, exist_ok=True)
@@ -196,27 +203,6 @@ async def delete_rag_document_from_datastore(datastore_id: str, filename: str, c
 
 
 datastore_router = APIRouter(prefix="/api/datastores", tags=["RAG DataStores"])
-@datastore_router.post("/edit", response_model=DataStorePublic, status_code=201)
-async def create_datastore(ds_edit: DataStoreEdit, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DBDataStore:
-    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
-    
-    existing_ds = db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_edit.name).first()
-    existing_ds.name = ds_edit.new_name
-    existing_ds.description = ds_edit.description
-    try:
-        db.commit(); db.refresh(existing_ds)
-        get_safe_store_instance(current_user.username, existing_ds.id, db)
-        
-        return DataStorePublic(
-            id=existing_ds.id, name=existing_ds.name, description=existing_ds.description,
-            owner_username=current_user.username, created_at=existing_ds.created_at, updated_at=existing_ds.updated_at
-        )
-    except IntegrityError: 
-        db.rollback(); raise HTTPException(status_code=400, detail="DataStore name conflict (race condition).")
-    except Exception as e:
-        db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error creating datastore: {e}")
-
 
 @datastore_router.get("", response_model=List[DataStorePublic])
 async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DataStorePublic]:
@@ -259,13 +245,40 @@ async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current
             ))
     return response_list
 
+@datastore_router.post("", response_model=DataStorePublic, status_code=status.HTTP_201_CREATED)
+async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DBDataStore:
+    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_create.name).first(): 
+        raise HTTPException(status_code=400, detail=f"DataStore '{ds_create.name}' already exists.")
+    new_ds_db_obj = DBDataStore(owner_user_id=user_db_record.id, name=ds_create.name, description=ds_create.description)
+    try:
+        db.add(new_ds_db_obj)
+        db.commit()
+        db.refresh(new_ds_db_obj)
+        get_safe_store_instance(current_user.username, new_ds_db_obj.id, db)
+        
+        data_store_public = DataStorePublic(
+            name=new_ds_db_obj.name,
+            description=new_ds_db_obj.description,
+            id=new_ds_db_obj.id,
+            owner_username=current_user.username,
+            created_at=new_ds_db_obj.created_at,
+            updated_at=new_ds_db_obj.updated_at,
+            permission_level='owner'
+        )
+        return data_store_public
+    except Exception as e: 
+        trace_exception(e)
+        db.rollback(); 
+        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+
 
 @datastore_router.put("/{datastore_id}", response_model=DataStorePublic)
 async def update_datastore(datastore_id: str, ds_update: DataStoreBase, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DBDataStore:
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
     
-    ds_db_obj = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
+    ds_db_obj = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
     if not ds_db_obj: raise HTTPException(status_code=404, detail="DataStore not found.")
     
     get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
@@ -278,45 +291,71 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreBase, current_
     ds_db_obj.description = ds_update.description
     try:
         db.commit(); db.refresh(ds_db_obj)
-        db.refresh(ds_db_obj, attribute_names=['owner'])
+        
+        permission_level = 'owner' if ds_db_obj.owner_user_id == user_db_record.id else 'read_write'
+        
         return DataStorePublic(
              id=ds_db_obj.id, name=ds_db_obj.name, description=ds_db_obj.description,
-             owner_username=ds_db_obj.owner.username, permission_level='owner' if ds_db_obj.owner.id == user_db_record.id else 'read_write',
+             owner_username=ds_db_obj.owner.username, permission_level=permission_level,
              created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at
         )
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error updating datastore: {e}")
 
 
-@datastore_router.delete("/{datastore_id}", status_code=200)
+@datastore_router.delete("/{datastore_id}", status_code=status.HTTP_200_OK)
 async def delete_datastore(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db), background_tasks: BackgroundTasks = BackgroundTasks()) -> Dict[str, str]:
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
     
-    ds_db_obj = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
+    ds_db_obj = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
     if not ds_db_obj: raise HTTPException(status_code=404, detail="DataStore not found.")
     if ds_db_obj.owner_user_id != user_db_record.id:
         raise HTTPException(status_code=403, detail="Only the owner can delete a DataStore.")
     
-    ds_file_path = get_datastore_db_path(current_user.username, datastore_id)
+    owner_username = ds_db_obj.owner.username
+    ds_file_path = get_datastore_db_path(owner_username, datastore_id)
     ds_lock_file_path = Path(f"{ds_file_path}.lock")
+    ds_docs_path = get_user_datastore_root_path(owner_username) / "safestore_docs" / datastore_id
 
     try:
         db.query(DBSharedDataStoreLink).filter_by(datastore_id=datastore_id).delete(synchronize_session=False)
         db.delete(ds_db_obj)
         db.commit()
         
-        if current_user.username in user_sessions and datastore_id in user_sessions[current_user.username]["safe_store_instances"]:
-            del user_sessions[current_user.username]["safe_store_instances"][datastore_id]
-
-        if ds_file_path.exists(): background_tasks.add_task(ds_file_path.unlink, missing_ok=True)
-        if ds_lock_file_path.exists(): background_tasks.add_task(ds_lock_file_path.unlink, missing_ok=True)
+        if owner_username in user_sessions and datastore_id in user_sessions[owner_username].get("safe_store_instances", {}):
+            del user_sessions[owner_username]["safe_store_instances"][datastore_id]
+        
+        background_tasks.add_task(shutil.rmtree, ds_docs_path, ignore_errors=True)
+        background_tasks.add_task(ds_file_path.unlink, missing_ok=True)
+        background_tasks.add_task(ds_lock_file_path.unlink, missing_ok=True)
             
-        return {"message": f"DataStore '{ds_db_obj.name}' deleted successfully."}
+        return {"message": f"DataStore '{ds_db_obj.name}' and its associated files are being deleted."}
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error deleting datastore: {e}")
 
-@datastore_router.post("/{datastore_id}/share", status_code=201)
+@datastore_router.get("/{datastore_id}/shared-with", response_model=List[SharedWithUserPublic])
+async def get_datastore_shared_with_list(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    owner_user_db = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not owner_user_db: raise HTTPException(status_code=404, detail="Owner user not found.")
+
+    ds_to_check = db.query(DBDataStore).filter(DBDataStore.id == datastore_id, DBDataStore.owner_user_id == owner_user_db.id).first()
+    if not ds_to_check: raise HTTPException(status_code=404, detail="DataStore not found or you are not the owner.")
+
+    shared_links = db.query(DBSharedDataStoreLink).options(joinedload(DBSharedDataStoreLink.shared_with_user)).filter(DBSharedDataStoreLink.datastore_id == datastore_id).all()
+    
+    response = [
+        SharedWithUserPublic(
+            user_id=link.shared_with_user.id,
+            username=link.shared_with_user.username,
+            icon=link.shared_with_user.icon,
+            permission_level=link.permission_level
+        ) for link in shared_links
+    ]
+    return response
+
+
+@datastore_router.post("/{datastore_id}/share", status_code=status.HTTP_201_CREATED)
 async def share_datastore(datastore_id: str, share_request: DataStoreShareRequest, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:
     owner_user_db = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not owner_user_db: raise HTTPException(status_code=404, detail="Owner user not found.")
@@ -351,22 +390,16 @@ async def share_datastore(datastore_id: str, share_request: DataStoreShareReques
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error sharing datastore: {e}")
 
-@datastore_router.delete("/{datastore_id}/share/{target_user_id_or_username}", status_code=200)
-async def unshare_datastore(datastore_id: str, target_user_id_or_username: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:
+@datastore_router.delete("/{datastore_id}/share/{target_user_id}", status_code=status.HTTP_200_OK)
+async def unshare_datastore(datastore_id: str, target_user_id: int, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:
     owner_user_db = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not owner_user_db: raise HTTPException(status_code=404, detail="Owner user not found.")
 
     ds_to_unshare = db.query(DBDataStore).filter(DBDataStore.id == datastore_id, DBDataStore.owner_user_id == owner_user_db.id).first()
     if not ds_to_unshare: raise HTTPException(status_code=404, detail="DataStore not found or you are not the owner.")
-
-    target_user_db = None
-    try:
-        target_user_id = int(target_user_id_or_username)
-        target_user_db = db.query(DBUser).filter(DBUser.id == target_user_id).first()
-    except ValueError: 
-        target_user_db = db.query(DBUser).filter(DBUser.username == target_user_id_or_username).first()
         
-    if not target_user_db: raise HTTPException(status_code=404, detail=f"Target user '{target_user_id_or_username}' not found.")
+    target_user_db = db.query(DBUser).filter(DBUser.id == target_user_id).first()
+    if not target_user_db: raise HTTPException(status_code=404, detail=f"Target user with ID '{target_user_id}' not found.")
 
     link_to_delete = db.query(DBSharedDataStoreLink).filter_by(datastore_id=datastore_id, shared_with_user_id=target_user_db.id).first()
     if not link_to_delete:
@@ -374,34 +407,6 @@ async def unshare_datastore(datastore_id: str, target_user_id_or_username: str, 
 
     try:
         db.delete(link_to_delete); db.commit()
-        return {"message": f"DataStore '{ds_to_unshare.name}' unshared from user '{target_user_db.username}'."}
+        return {"message": f"Sharing for DataStore '{ds_to_unshare.name}' has been revoked from user '{target_user_db.username}'."}
     except Exception as e:
-        db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error unsharing datastore: {e}")
-
-@datastore_router.post("", response_model=DataStorePublic, status_code=201)
-async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DBDataStore:
-    user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    if db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_create.name).first(): 
-        raise HTTPException(status_code=400, detail=f"DataStore '{ds_create.name}' already exists.")
-    new_ds_db_obj = DBDataStore(owner_user_id=user_db_record.id, name=ds_create.name, description=ds_create.description)
-    try:
-        db.add(new_ds_db_obj)
-        db.commit()
-        db.refresh(new_ds_db_obj)
-        get_safe_store_instance(current_user.username, new_ds_db_obj.id, db)
-        
-        # Construct DataStorePublic object with necessary fields
-        data_store_public = DataStorePublic(
-            name=new_ds_db_obj.name,
-            description=new_ds_db_obj.description,
-            id=new_ds_db_obj.id,
-            owner_username=current_user.username,
-            created_at=new_ds_db_obj.created_at,
-            updated_at=new_ds_db_obj.updated_at
-        )
-
-        return data_store_public
-    except Exception as e: 
-        trace_exception(e)
-        db.rollback(); 
-        raise HTTPException(status_code=500, detail=f"DB error: {e}")
+        db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error revoking share link: {e}")
