@@ -15,8 +15,10 @@ new ui:
 - OK refresh discussion after generation
 - OK add authenticate with email
 - OK setup default page (new discussion/social networks)
+- OK revamp RAG datastores interface to put it in its own view
 
-- revamp RAG datastores interface to put it in its own view
+- key generation for regular users
+- add azctivating realtime dms to the ui
 - add RAG vectorizer setting to the user RAG settings
 - add fast rag to the discussion
 - add customization of the webui
