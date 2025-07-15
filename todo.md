@@ -24,6 +24,7 @@ new ui:
 
 ## Discussion:
 - override the copy button
+- start/stop events must be collapsible, all that happens in between should be put inside in between
 - make sure the images stay after generation
 - when cancelling the generation, refresh the discussion
 - make the tools sections collapsible
