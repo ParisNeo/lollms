@@ -16,31 +16,56 @@ new ui:
 - OK add authenticate with email
 - OK setup default page (new discussion/social networks)
 - OK revamp RAG datastores interface to put it in its own view
+- OK After stopping, save current status and refresh discussion
+- OK auto title
+- OK the steps must by default be closed
+- OK the steps content must not exceed some length in the title mode
+- OK use the name of the personality in bubble instead of assistant also add its icon if applicable
 
+## Discussion:
 - override the copy button
+- make sure the images stay after generation
+- when cancelling the generation, refresh the discussion
+- Add the possibility to use multiple bindings at once with different configurations
+- fix the return key not sending the message
+- if the generation fails, don't destroy the message
+- Add a upload to discussion button that uploads documents to the discussion and shows them to the user if needed
+- fix branching
+- add tokens count to the chatinput
+- add context progressbar with scratchpad summary button
+
+## Admin
+### emailing system
 - user management page needs upgrade and bugfix
 - email users enhance with ai not working
+
+### bindings/models
+- add alias for models
+
+### keys management and permissions
 - key generation for regular users
-- add azctivating realtime dms to the ui
+
+## user settings
+- add activating realtime dms to the ui
+  
+## Rag settings 
 - add RAG vectorizer setting to the user RAG settings
 - add fast rag to the discussion
+
+## cosmetics
 - add customization of the webui
-- Add the possibility to use multiple bindings at once with different configurations
-- After stopping, save current status and refresh discussion
+
+## personalities
 - Add personality description to the list
-- fix the return key not sending the message
-- fix branching
-- if the generation fails, don't destroy the message
-- the steps must by default be closed
-- the steps content must not exceed some length in the title mode
-- add alias for models
-- auto title
-- Add a upload to discussion button that uploads documents to the discussion and shows them to the user if needed
+
+## personalities
 - add protection for MCP output
+
+## mcps
 - change refresh mcps to reload mcps
-- add tokens count to the chatinput
-- add current processes listing
-- use the name of the personality in bubble instead of assistant also add its icon if applicable
 - add a forgot my password button to the login modal that sends a notification to the administrator.
 - refresh mcps must be converted to reload mcps
-- add context progressbar with scratchpad summary button
+
+## background processes
+- add current processes listing
+- add a cleaning cron
