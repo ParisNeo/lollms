@@ -6,7 +6,6 @@ import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
 import { marked } from 'marked';
 
-// Component Imports
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import CodeBlock from './CodeBlock.vue';
 import StepDetail from './StepDetail.vue';
@@ -16,7 +15,6 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
 import UserAvatar from '../ui/UserAvatar.vue';
 
-// Action & UI Icon Imports
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
@@ -26,8 +24,6 @@ import IconThumbUp from '../../assets/icons/IconThumbUp.vue';
 import IconThumbDown from '../../assets/icons/IconThumbDown.vue';
 import IconToken from '../../assets/icons/IconToken.vue';
 import IconFormat from '../../assets/icons/IconFormat.vue';
-
-// Event Icon Imports
 import IconThinking from '../../assets/icons/IconThinking.vue';
 import IconTool from '../../assets/icons/IconTool.vue';
 import IconObservation from '../../assets/icons/IconObservation.vue';
@@ -35,9 +31,8 @@ import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconError from '../../assets/icons/IconError.vue';
 import IconScratchpad from '../../assets/icons/IconScratchpad.vue';
 import IconEventDefault from '../../assets/icons/IconEventDefault.vue';
-import IconStepStart from '../../assets/icons/IconStepStart.vue'; // NEW
-import IconStepEnd from '../../assets/icons/IconStepEnd.vue';     // NEW
-
+import IconStepStart from '../../assets/icons/IconStepStart.vue';
+import IconStepEnd from '../../assets/icons/IconStepEnd.vue';
 
 const props = defineProps({
   message: {
@@ -57,6 +52,7 @@ const editedContent = ref('');
 const codeMirrorView = ref(null);
 const messageContentRef = ref(null);
 const isFormattingMenuOpen = ref(false);
+const isSourcesVisible = ref(false);
 
 const areActionsDisabled = computed(() => discussionsStore.generationInProgress);
 const user = computed(() => authStore.user);
@@ -88,7 +84,15 @@ watch(() => props.message.content, async () => {
     renderMath();
 }, { flush: 'post' });
 
-onMounted(() => renderMath());
+onMounted(() => {
+    renderMath();
+    if (props.message.sources && props.message.sources.length > 3) {
+        isSourcesVisible.value = false;
+    } else {
+        isSourcesVisible.value = true;
+    }
+});
+
 
 const imagesToRender = computed(() => {
     if (props.message.localImageUrls?.length > 0) return props.message.localImageUrls;
@@ -142,6 +146,12 @@ const senderName = computed(() => {
 });
 
 const hasEvents = computed(() => props.message.events && props.message.events.length > 0);
+const hasSources = computed(() => props.message.sources && props.message.sources.length > 0);
+const sortedSources = computed(() => {
+    if (!hasSources.value) return [];
+    return [...props.message.sources].sort((a, b) => (b.similarity_percent || 0) - (a.similarity_percent || 0));
+});
+
 
 const lastEventSummary = computed(() => {
     if (!hasEvents.value) return '';
@@ -153,26 +163,16 @@ const lastEventSummary = computed(() => {
     return summary;
 });
 
-// UPDATED: Map event types to imported components
 const eventIconMap = {
-  'thought': IconThinking,
-  'tool_call': IconTool,
-  'observation': IconObservation,
-  'info': IconInfo,
-  'exception': IconError,
-  'error': IconError,
-  'scratchpad': IconScratchpad,
-  'step_start': IconStepStart, // NEW
-  'step_end': IconStepEnd,     // NEW
+  'thought': IconThinking, 'tool_call': IconTool, 'observation': IconObservation,
+  'info': IconInfo, 'exception': IconError, 'error': IconError,
+  'scratchpad': IconScratchpad, 'step_start': IconStepStart, 'step_end': IconStepEnd,
   'default': IconEventDefault
 };
 
 function getEventIcon(type) {
   const lowerType = type?.toLowerCase() || 'default';
-  // Use exact match first, then fallback to `includes`
-  if (eventIconMap[lowerType]) {
-    return eventIconMap[lowerType];
-  }
+  if (eventIconMap[lowerType]) return eventIconMap[lowerType];
   const key = Object.keys(eventIconMap).find(k => k !== 'default' && lowerType.includes(k));
   return eventIconMap[key || 'default'];
 }
@@ -186,11 +186,8 @@ const branchInfo = computed(() => {
     let activeBranchIndex = nextMessage ? props.message.branches.findIndex(id => id === nextMessage.id) : -1;
     if (activeBranchIndex === -1) activeBranchIndex = 0;
     return {
-        isBranchPoint: true,
-        current: activeBranchIndex + 1,
-        total: props.message.branches.length,
-        branchIds: props.message.branches,
-        currentIndex: activeBranchIndex,
+        isBranchPoint: true, current: activeBranchIndex + 1, total: props.message.branches.length,
+        branchIds: props.message.branches, currentIndex: activeBranchIndex,
     };
 });
 
@@ -225,29 +222,7 @@ async function handleSaveEdit() {
 
 function handleCancelEdit() { isEditing.value = false; }
 function handleEditorReady(payload) { codeMirrorView.value = payload.view; }
-function copyContent() {
-  navigator.clipboard.writeText(props.message.content)
-    .then(() => {
-      uiStore.addNotification('Content copied!', 'success');
-    })
-    .catch(err => {
-      console.error("Clipboard write failed:", err);
-      // Fallback mechanism:  Create a temporary textarea, copy to it, select, and copy.
-      const tempArea = document.createElement('textarea');
-      tempArea.value = props.message.content;
-      document.body.appendChild(tempArea);
-      tempArea.select();
-      try {
-        document.execCommand('copy'); // Deprecated, but widely supported fallback
-        uiStore.addNotification('Content copied (fallback)!', 'success');
-      } catch (err2) {
-        console.error("Fallback copy failed:", err2);
-        uiStore.addNotification('Failed to copy content.', 'error');
-      } finally {
-        document.body.removeChild(tempArea); // Clean up
-      }
-    });
-}
+function copyContent() { uiStore.copyToClipboard(props.message.content); }
 async function handleDelete() { const confirmed = await uiStore.showConfirmation({ title: 'Delete Message', message: 'This will delete the message and its entire branch.', confirmText: 'Delete' }); if (confirmed) discussionsStore.deleteMessage({ messageId: props.message.id}); }
 function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.message.id, change }); }
 
@@ -294,13 +269,10 @@ const formattingMenuItems = [
 
 <template>
   <div class="message-container group" :class="containerClass" :data-message-id="message.id">
-    
     <div class="message-bubble" :class="bubbleClass">
-        <!-- Message Header -->
         <div v-if="!isSystem" class="message-header">
             <UserAvatar v-if="isUser" :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
             <UserAvatar v-else-if="isAi" :icon="senderPersonality?.icon_base64" :username="senderName" size-class="h-8 w-8" />
-            
             <div class="sender-info">
                 <span class="font-semibold">{{ senderName }}</span>
                 <span v-if="isAi && (message.binding_name || message.model_name)" class="model-info">
@@ -308,18 +280,13 @@ const formattingMenuItems = [
                 </span>
             </div>
         </div>
-
-        <!-- Main Content -->
         <div class="message-content-wrapper">
              <div v-if="!isEditing">
-                <div v-if="imagesToRender.length > 0" 
-                    class="my-2 grid gap-2"
-                    :class="[imagesToRender.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
+                <div v-if="imagesToRender.length > 0" class="my-2 grid gap-2" :class="[imagesToRender.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
                     <div v-for="(imgSrc, index) in imagesToRender" :key="index" class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer" @click="uiStore.openImageViewer(imgSrc)">
                         <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain" />
                     </div>
                 </div>
-                
                 <div :key="message.isStreaming ? 'streaming' : 'settled'" ref="messageContentRef">
                     <div v-if="message.content || (isUser && !imagesToRender.length)" class="message-prose">
                         <div v-if="message.isStreaming" v-html="parsedStreamingContent"></div>
@@ -332,36 +299,26 @@ const formattingMenuItems = [
                                     </template>
                                 </template>
                                 <details v-else-if="part.type === 'think'" class="think-block my-4" open>
-                                    <summary class="think-summary">
-                                        <IconThinking class="h-5 w-5 flex-shrink-0" />
-                                        <span>Thinking...</span>
-                                    </summary>
+                                    <summary class="think-summary"><IconThinking class="h-5 w-5 flex-shrink-0" /><span>Thinking...</span></summary>
                                     <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
                                 </details>
                             </template>
                         </template>
                     </div>
                 </div>
-                
                 <div v-if="message.isStreaming && !message.content && (!imagesToRender || imagesToRender.length === 0)" class="typing-indicator">
                     <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                 </div>
             </div>
-
             <div v-else class="w-full">
                 <div class="flex items-center space-x-1 border-b dark:border-gray-600 mb-2 pb-2">
                     <div class="relative">
-                        <button @click="isFormattingMenuOpen = !isFormattingMenuOpen" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600" title="Formatting Options">
-                            <IconFormat class="w-5 h-5" />
-                        </button>
-                        <div v-if="isFormattingMenuOpen" v-on-click-outside="() => isFormattingMenuOpen = false"
-                            class="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-xl z-20 py-1">
+                        <button @click="isFormattingMenuOpen = !isFormattingMenuOpen" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600" title="Formatting Options"><IconFormat class="w-5 h-5" /></button>
+                        <div v-if="isFormattingMenuOpen" v-on-click-outside="() => isFormattingMenuOpen = false" class="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-xl z-20 py-1">
                             <template v-for="(item, index) in formattingMenuItems" :key="index">
                                 <div v-if="item.type === 'separator'" class="my-1 h-px bg-gray-200 dark:bg-gray-600"></div>
                                 <div v-else-if="item.type === 'header'" class="px-3 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ item.label }}</div>
-                                <button v-else @click="item.action(); isFormattingMenuOpen = false" class="w-full text-left flex items-center px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-blue-500 hover:text-white">
-                                    {{ item.label }}
-                                </button>
+                                <button v-else @click="item.action(); isFormattingMenuOpen = false" class="w-full text-left flex items-center px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-blue-500 hover:text-white">{{ item.label }}</button>
                             </template>
                         </div>
                     </div>
@@ -373,31 +330,28 @@ const formattingMenuItems = [
                 </div>
             </div>
         </div>
-
-        <!-- Collapsible Events Area -->
+        <div v-if="hasSources" class="mt-2 border-t border-black/10 dark:border-white/10 pt-2 user-bubble:border-white/20">
+            <button @click="isSourcesVisible = !isSourcesVisible" class="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none user-bubble:text-blue-200 w-full">
+                <IconChevronRight class="toggle-icon" :class="{'rotate-90': isSourcesVisible}" />
+                <span>Sources ({{sortedSources.length}})</span>
+            </button>
+            <div v-if="isSourcesVisible" class="mt-2 space-y-2 pl-4">
+                <div v-for="source in sortedSources" :key="source.document" @click="showSourceDetails(source)" class="source-item">
+                    <div class="similarity-chip" :class="getSimilarityColor(source.similarity_percent)" :title="typeof source.similarity_percent === 'number' ? `Similarity: ${(source.similarity_percent).toFixed(1)}%` : 'Similarity: N/A'"></div>
+                    <div class="truncate flex-grow" :title="source.document">{{ source.document }}</div>
+                    <div v-if="typeof source.similarity_percent === 'number'" class="font-mono text-xs text-gray-500 dark:text-gray-400 user-bubble:text-blue-200 flex-shrink-0">{{ (source.similarity_percent).toFixed(1) }}%</div>
+                </div>
+            </div>
+        </div>
         <details v-if="hasEvents" class="events-container" :open="!isEventsCollapsed" @toggle="event => isEventsCollapsed = !event.target.open">
-            <summary class="events-summary">
-                <IconChevronRight class="toggle-icon" />
-                <span>{{ isEventsCollapsed ? 'Show Events' : 'Hide Events' }}</span>
-                <span v-if="isEventsCollapsed" class="last-event-snippet">{{ lastEventSummary }}</span>
-            </summary>
+            <summary class="events-summary"><IconChevronRight class="toggle-icon" /><span>{{ isEventsCollapsed ? 'Show Events' : 'Hide Events' }}</span><span v-if="isEventsCollapsed" class="last-event-snippet">{{ lastEventSummary }}</span></summary>
             <div class="events-content">
                 <div v-for="(event, index) in message.events" :key="index" class="event-item">
-                    <div class="event-icon-container" :title="event.type">
-                      <component :is="getEventIcon(event.type)" />
-                    </div>
-                    <div class="event-details">
-                        <div class="event-title">{{ event.type }}</div>
-                        <div class="event-body">
-                           <div v-if="typeof event.content === 'string'" class="message-prose" v-html="parsedMarkdown(event.content)"></div>
-                           <StepDetail v-else :data="event.content" />
-                        </div>
-                    </div>
+                    <div class="event-icon-container" :title="event.type"><component :is="getEventIcon(event.type)" /></div>
+                    <div class="event-details"><div class="event-title">{{ event.type }}</div><div class="event-body"><div v-if="typeof event.content === 'string'" class="message-prose" v-html="parsedMarkdown(event.content)"></div><StepDetail v-else :data="event.content" /></div></div>
                 </div>
             </div>
         </details>
-
-        <!-- Footer with Actions -->
         <div v-if="!isSystem" class="message-footer">
             <div class="flex-grow flex items-center flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
                 <div v-if="branchInfo" class="detail-badge branch-badge-nav">
@@ -405,14 +359,7 @@ const formattingMenuItems = [
                     <span class="font-mono text-xs">{{ branchInfo.current }}/{{ branchInfo.total }}</span>
                     <button @click="navigateBranch(1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Next Branch"><IconChevronRight class="w-3.5 h-3.5" /></button>
                 </div>
-                <div v-if="isAi && message.token_count" class="detail-badge">
-                    <IconToken class="w-3.5 h-3.5" />
-                    <span>{{ message.token_count }}</span>
-                </div>
-                <button v-if="isAi && message.sources && message.sources.length" v-for="source in message.sources" :key="source.document" @click="showSourceDetails(source)" class="detail-badge source-badge" :title="`View source: ${source.document}`">
-                    <span class="similarity-chip" :class="getSimilarityColor(source.similarity_percent)"></span>
-                    <span class="truncate max-w-[150px]">{{ source.document }}</span>
-                </button>
+                <div v-if="isAi && message.token_count" class="detail-badge"><IconToken class="w-3.5 h-3.5" /><span>{{ message.token_count }}</span></div>
             </div>
             <div v-if="!isEditing" class="flex-shrink-0 flex items-center gap-1">
                 <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -451,7 +398,6 @@ const formattingMenuItems = [
 .typing-indicator .dot:nth-of-type(1) { animation-delay: -0.32s; }
 .typing-indicator .dot:nth-of-type(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
-
 .think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
 .user-bubble .think-block { @apply bg-blue-400/50 border-blue-300/50; }
 details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
@@ -462,16 +408,19 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .think-summary::-webkit-details-marker { display: none; }
 .think-content { @apply p-3; }
 
+.source-item { @apply flex items-center gap-3 p-2 rounded-md transition-colors cursor-pointer bg-gray-50 hover:bg-gray-200 dark:bg-gray-700/50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200; }
+.user-bubble .source-item { @apply bg-white/10 hover:bg-white/20 text-blue-100; }
+.source-item .similarity-chip { @apply w-2.5 h-2.5 rounded-full flex-shrink-0; }
+
 .events-container { @apply mt-2 border-t border-black/10 dark:border-white/10 pt-2; }
 .user-bubble .events-container { @apply border-white/20; }
 .events-summary { @apply flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer list-none select-none; }
 .user-bubble .events-summary { @apply text-blue-200; }
 .events-summary::-webkit-details-marker { display: none; }
-.events-summary .toggle-icon { @apply transition-transform duration-200 w-4 h-4; }
-details[open] > summary .toggle-icon { @apply rotate-90; }
+.toggle-icon { @apply transition-transform duration-200 w-4 h-4; }
+details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .last-event-snippet { @apply ml-auto text-gray-400 dark:text-gray-500 font-normal italic truncate pl-4; }
 .user-bubble .last-event-snippet { @apply text-blue-300; }
-
 .events-content { @apply mt-2 space-y-3; }
 .event-item { @apply flex items-start gap-3; }
 .event-icon-container { @apply flex-shrink-0 w-5 h-5 mt-0.5 text-gray-600 dark:text-gray-300; }
@@ -480,7 +429,6 @@ details[open] > summary .toggle-icon { @apply rotate-90; }
 .event-title { @apply text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400; }
 .event-body { @apply mt-1 text-sm; }
 .event-body .message-prose :where(p, ul, ol, pre) { margin-top: 0.25em; margin-bottom: 0.25em; }
-
 .cm-editor-container { border: 1px solid theme('colors.gray.300'); border-radius: theme('borderRadius.lg'); }
 .dark .cm-editor-container { border-color: theme('colors.gray.600'); }
 .message-footer { @apply flex items-center justify-between mt-2 pt-2 border-t border-black/10 dark:border-white/10; min-height: 28px; }
@@ -488,9 +436,6 @@ details[open] > summary .toggle-icon { @apply rotate-90; }
 .detail-badge { @apply flex items-center gap-1.5 px-2 py-1 rounded-full bg-gray-200/50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 font-mono; }
 .user-bubble .detail-badge { @apply bg-white/20 text-blue-100; }
 .branch-badge-nav { @apply flex items-center gap-1 p-0; }
-.user-bubble .branch-badge-nav { @apply bg-white/20 text-blue-100; }
-.source-badge { @apply cursor-pointer hover:bg-gray-300/70 dark:hover:bg-gray-600/70 transition-colors; }
-.source-badge .similarity-chip { @apply w-2 h-2 rounded-full flex-shrink-0; }
 .action-btn { @apply p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed; }
 .user-bubble .action-btn { @apply text-blue-200 hover:bg-white/20; }
 .message-rating { @apply flex items-center gap-1 bg-gray-200/50 dark:bg-gray-700/50 rounded-full; }

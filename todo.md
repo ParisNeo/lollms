@@ -21,9 +21,9 @@ new ui:
 - OK the steps must by default be closed
 - OK the steps content must not exceed some length in the title mode
 - OK use the name of the personality in bubble instead of assistant also add its icon if applicable
+- OK override the copy button
 
 ## Discussion:
-- override the copy button
 - start/stop events must be collapsible, all that happens in between should be put inside in between
 - make sure the images stay after generation
 - when cancelling the generation, refresh the discussion

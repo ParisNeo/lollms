@@ -6,7 +6,6 @@ import { useAuthStore } from './auth';
 
 let activeGenerationAbortController = null;
 
-// Helper to process message objects consistently
 function processSingleMessage(msg) {
     if (!msg) return null;
     const authStore = useAuthStore();
@@ -324,7 +323,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                                 }
                                 break;
                             }
-                            case 'error': // This handles explicit backend errors, not just exceptions
+                            case 'error':
                                 uiStore.addNotification(`LLM Error: ${data.content}`, 'error');
                                 if (reader.cancel) reader.cancel();
                                 break;
@@ -352,6 +351,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const uiStore = useUiStore();
         if (activeGenerationAbortController) {
             activeGenerationAbortController.abort();
+            activeGenerationAbortController = null;
         }
 
         if (currentDiscussionId.value) {
@@ -361,15 +361,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 console.warn("Backend stop signal failed, but proceeding with client-side cleanup.", e);
             }
         }
-
-        const streamingMessage = messages.value.find(m => m.isStreaming);
-        if (streamingMessage) {
-            streamingMessage.isStreaming = false;
-        }
-
+        
         generationInProgress.value = false;
-        activeGenerationAbortController = null;
-
+        
         await loadDiscussions(); 
         
         if (currentDiscussionId.value) {

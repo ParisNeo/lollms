@@ -52,8 +52,7 @@ const canExecute = computed(() => ['python', 'javascript', 'html'].includes(prop
 const themeClass = computed(() => uiStore.currentTheme === 'dark' ? 'theme-dark' : 'theme-light');
 
 function copyCode() {
-  navigator.clipboard.writeText(props.code)
-    .then(() => {
+  uiStore.copyToClipboard(props.code).then(() => {
       copyStatus.value = 'Copied!';
       setTimeout(() => { copyStatus.value = 'Copy'; }, 2000);
     });

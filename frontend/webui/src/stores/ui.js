@@ -115,7 +115,6 @@ export const useUiStore = defineStore('ui', () => {
         setTheme(currentTheme.value);
     }
 
-    // --- New Sidebar Actions ---
     function toggleSidebar() {
         isSidebarOpen.value = !isSidebarOpen.value;
         localStorage.setItem('lollms-sidebar-open', isSidebarOpen.value);
@@ -127,7 +126,6 @@ export const useUiStore = defineStore('ui', () => {
             isSidebarOpen.value = JSON.parse(storedState);
         }
     }
-    // --- End New Sidebar Actions ---
 
     function setLanguage(langCode) {
         currentLanguage.value = langCode;
@@ -198,13 +196,13 @@ export const useUiStore = defineStore('ui', () => {
         currentLanguage, availableLanguages,
         isImageViewerOpen, imageViewerSrc, confirmationOptions,
         emailModalSubject, emailModalBody, emailModalBackgroundColor, emailModalSendAsText,
-        isSidebarOpen, // Expose new state
+        isSidebarOpen,
         initEmailModalState,
         setMainView, openModal, closeModal, addNotification, removeNotification,
         setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages,
         openImageViewer, closeImageViewer, showConfirmation, confirmAction, cancelAction,
         isModalOpen, modalData,
         copyToClipboard,
-        toggleSidebar, initializeSidebarState, // Expose new actions
+        toggleSidebar, initializeSidebarState,
     };
 });
