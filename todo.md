@@ -26,6 +26,7 @@ new ui:
 - override the copy button
 - make sure the images stay after generation
 - when cancelling the generation, refresh the discussion
+- support for equations with /[ /] format
 - Add the possibility to use multiple bindings at once with different configurations
 - fix the return key not sending the message
 - if the generation fails, don't destroy the message
