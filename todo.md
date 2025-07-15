@@ -42,6 +42,11 @@ new ui:
 - email users enhance with ai not working
 
 ## personalities
+- Add personality sharing
+- Revamp personalities management tools
+- Add automatic generation of personalities
+- Add rag for personality
+- Add mcps for personality
 - Add personality description to the list
 - Add a system personalities management page for administrator
   
