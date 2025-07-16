@@ -27,7 +27,7 @@ bearer_scheme = HTTPBearer()
 
 class ChatMessage(BaseModel):
     role: str
-    content: str
+    content: str|List[Dict]
 
 class ChatCompletionRequest(BaseModel):
     model: str
@@ -232,6 +232,33 @@ async def list_personalities(
     return PersonalityListResponse(data=response_data)
 
 
+# --- Helper to Extract Images and Convert Messages ---
+def preprocess_messages(messages: List[ChatMessage], image_list: List[str]) -> List[Dict]:
+    processed = []
+
+    for msg in messages:
+        content = msg.content
+        if isinstance(content, str):
+            processed.append({"role": msg.role, "content": content})
+        elif isinstance(content, list):
+            text_parts = []
+            for item in content:
+                if item.get("type") == "image_url":
+                    base64_img = item["image_url"].get("base64")
+                    if base64_img:
+                        image_list.append(base64_img)
+                elif item.get("type") == "text":
+                    text_parts.append(item.get("text", ""))
+                else:
+                    text_parts.append(str(item))
+            processed.append({"role": msg.role, "content": "\n".join(text_parts)})
+        else:
+            processed.append({"role": msg.role, "content": str(content)})
+
+    return processed
+
+
+# --- Main Route ---
 @openai_v1_router.post("/chat/completions")
 async def chat_completions(
     request: ChatCompletionRequest,
@@ -240,79 +267,56 @@ async def chat_completions(
 ):
     if not request.model or '/' not in request.model:
         raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
-    
-    binding_alias, model_name = request.model.split('/', 1)
-    is_instruct_mode = "instruct" in model_name.lower()
 
-    request_llm_params = {}
-    if request.temperature is not None:
-        request_llm_params['temperature'] = request.temperature
-    if request.max_tokens is not None:
-        request_llm_params['max_output_tokens'] = request.max_tokens
+    binding_alias, model_name = request.model.split('/', 1)
 
     try:
         lc = build_lollms_client_from_params(
             username=user.username,
             binding_alias=binding_alias,
             model_name=model_name,
-            llm_params=request_llm_params
+            llm_params={
+                "temperature": request.temperature,
+                "max_output_tokens": request.max_tokens
+            }
         )
-    except HTTPException as e:
-        raise e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to build LLM client for the request: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
 
-    # --- Prompt Construction ---
-    system_prompt = ""
-    prompt_parts = []
-    
+    # Handle personality as a system message if provided
+    messages = list(request.messages)
     if request.personality:
         personality = db.query(DBPersonality).filter(DBPersonality.id == request.personality).first()
         if not personality:
-            raise HTTPException(status_code=404, detail=f"Personality with id '{request.personality}' not found.")
-        
-        is_owner = personality.owner_user_id == user.id
-        if not personality.is_public and not is_owner:
-            raise HTTPException(status_code=403, detail="You do not have permission to use this personality.")
-        
-        system_prompt = personality.prompt_text
-    else:
-        for message in request.messages:
-            if message.role == "system":
-                system_prompt += f"{message.content}\n"
-    
-    conversation_messages = [msg for msg in request.messages if msg.role != "system"]
+            raise HTTPException(status_code=404, detail="Personality not found.")
+        if not personality.is_public and personality.owner_user_id != user.id:
+            raise HTTPException(status_code=403, detail="You cannot use this personality.")
+        messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
-    if is_instruct_mode:
-        for msg in conversation_messages:
-            prompt_parts.append(msg.content)
-        prompt = "\n".join(prompt_parts)
-    else:
-        for msg in conversation_messages:
-            prompt_parts.append(f"!@>{msg.role}\n{msg.content}")
-        prompt = "\n".join(prompt_parts)
+    # Preprocess messages and extract images
+    images: List[str] = []
+    openai_messages = preprocess_messages(messages, images)
 
+    # Streaming or regular completion
     if request.stream:
         async def stream_generator():
             main_loop = asyncio.get_event_loop()
             stream_queue = asyncio.Queue()
             stop_event = threading.Event()
-            
+
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"
             created_ts = int(time.time())
 
-            first_chunk_response = ChatCompletionStreamResponse(
-                id=completion_id, model=request.model, created=created_ts,
-                choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role="assistant"), finish_reason=None)]
-            )
-            yield f"data: {first_chunk_response.model_dump_json()}\n\n"
+            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role='assistant'), finish_reason=None)]).model_dump_json()}\n\n"
 
             def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None):
-                if stop_event.is_set(): return False
-                
+                if stop_event.is_set():
+                    return False
                 if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
                     response_chunk = ChatCompletionStreamResponse(
-                        id=completion_id, model=request.model, created=created_ts,
+                        id=completion_id,
+                        model=request.model,
+                        created=created_ts,
                         choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(content=chunk))]
                     )
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, response_chunk.model_dump_json())
@@ -320,9 +324,15 @@ async def chat_completions(
 
             def blocking_call():
                 try:
-                    lc.generate_text(prompt, system_prompt=system_prompt.strip(), streaming_callback=llm_callback)
+                    lc.generate_from_messages(
+                        openai_messages,
+                        streaming_callback=llm_callback,
+                        images=images,
+                        temperature=request.temperature,
+                        n_predict=request.max_tokens
+                    )
                 except Exception as e:
-                    print(f"Error during OpenAI API generation: {e}")
+                    print(f"Streaming error: {e}")
                 finally:
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
@@ -333,40 +343,37 @@ async def chat_completions(
                 if item is None:
                     break
                 yield f"data: {item}\n\n"
-            
-            final_chunk = ChatCompletionStreamResponse(
-                id=completion_id, model=request.model, created=created_ts,
-                choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(), finish_reason="stop")]
-            )
-            yield f"data: {final_chunk.model_dump_json()}\n\n"
+
+            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(), finish_reason='stop')]).model_dump_json()}\n\n"
             yield "data: [DONE]\n\n"
 
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
+
     else:
         try:
-            full_response = lc.generate_text(prompt, system_prompt=system_prompt.strip())
-            
-            full_prompt_for_counting = (system_prompt.strip() + "\n" + prompt).strip()
-            prompt_tokens = lc.count_tokens(full_prompt_for_counting)
-            completion_tokens = lc.count_tokens(full_response)
-            total_tokens = prompt_tokens + completion_tokens
-
+            result = lc.generate_from_messages(
+                openai_messages,
+                images=images,
+                temperature=request.temperature,
+                n_predict=request.max_tokens
+            )
+            prompt_tokens = lc.count_tokens(str(openai_messages))
+            completion_tokens = lc.count_tokens(result)
             return ChatCompletionResponse(
                 model=request.model,
                 choices=[ChatCompletionResponseChoice(
                     index=0,
-                    message=ChatMessage(role="assistant", content=full_response),
+                    message=ChatMessage(role="assistant", content=result),
                     finish_reason="stop"
                 )],
                 usage=UsageInfo(
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
-                    total_tokens=total_tokens
+                    total_tokens=prompt_tokens + completion_tokens
                 )
             )
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Error during generation: {str(e)}")
-
+            raise HTTPException(status_code=500, detail=f"Generation error: {e}")
 
 @openai_v1_router.post("/tokenize", response_model=TokenizeResponse)
 async def tokenize_text(
