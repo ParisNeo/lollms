@@ -31,13 +31,17 @@ new ui:
 - support for equations with /[ /] format
 - Add the possibility to use multiple bindings at once with different configurations
 - fix the return key not sending the message
-- Add a upload to discussion button that uploads documents to the discussion and shows them to the user if needed
+- add a upload to discussion button that uploads documents to the discussion and shows them to the user if needed
 - fix branching
+- add add/view/remove files to the discussion with options (full file or RAG for each)
 
 ## Admin
 ### emailing system
 - user management page needs upgrade and bugfix
 - email users enhance with ai not working
+- password reset views and fixing the lost password email problem
+
+
 
 ## personalities
 - Add personality sharing
@@ -47,6 +51,7 @@ new ui:
 - Add mcps for personality
 - Add personality description to the list
 - Add a system personalities management page for administrator
+- Add personality maker AI
   
 ### bindings/models
 - add alias for models
