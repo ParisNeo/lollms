@@ -43,7 +43,7 @@ from backend.models import (
     UserAuthDetails, DiscussionInfo, DiscussionTitleUpdate,
     DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,
     MessageGradeUpdate, DiscussionBranchSwitchRequest, DiscussionSendRequest,
-    DiscussionExportRequest, ExportData, DiscussionImportRequest
+    DiscussionExportRequest, ExportData, DiscussionImportRequest, ContextStatusResponse
 )
 from backend.session import (
     get_current_active_user, get_user_lollms_client,
@@ -111,7 +111,6 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
 async def create_new_discussion(current_user: UserAuthDetails = Depends(get_current_active_user)) -> DiscussionInfo:
     username = current_user.username
     discussion_id = str(uuid.uuid4())
-    # This will use the default client, which is fine for creating an empty discussion.
     discussion_obj = get_user_discussion(username, discussion_id, create_if_missing=True)
     if not discussion_obj:
         raise HTTPException(status_code=500, detail="Failed to create new discussion.")
@@ -136,14 +135,14 @@ async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_cu
     username = current_user.username
     dm = get_user_discussion_manager(username)
     all_discs_infos = dm.list_discussions()
-    lc = get_user_lollms_client(username) # A default client is fine for just checking message counts
     deleted_count = 0
     discussions_to_delete = []
 
     for disc_info in all_discs_infos:
         discussion_id = disc_info['id']
         try:
-            discussion = dm.get_discussion(lc,discussion_id)
+            # get_user_discussion will use the correct client settings internally
+            discussion = get_user_discussion(username, discussion_id)
             if discussion and len(discussion.messages) <= 1:
                 discussions_to_delete.append(discussion_id)
         except Exception as e:
@@ -177,12 +176,7 @@ async def generate_discussion_auto_title(discussion_id: str, current_user: UserA
     Generates and sets a new title for a discussion automatically based on its content.
     """
     username = current_user.username
-    user_model_full = current_user.lollms_model_name
-    binding_alias = None
-    if user_model_full and '/' in user_model_full:
-        binding_alias, _ = user_model_full.split('/', 1)
-    lc = get_user_lollms_client(username, binding_alias)
-    discussion_obj = get_user_discussion(username, discussion_id, lollms_client=lc)
+    discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
@@ -192,7 +186,6 @@ async def generate_discussion_auto_title(discussion_id: str, current_user: UserA
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to generate title: {e}")
 
-    # Re-fetch info to return to the client
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
     is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
     metadata = discussion_obj.metadata or {}
@@ -211,7 +204,6 @@ async def generate_discussion_auto_title(discussion_id: str, current_user: UserA
 @discussion_router.get("/{discussion_id}", response_model=List[MessageOutput])
 async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[str] = Query(None), current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[MessageOutput]:
     username = current_user.username
-    db_user = db.query(DBUser).filter(DBUser.username == username).one()
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
@@ -219,42 +211,51 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
     branch_tip_to_load = branch_id or discussion_obj.active_branch_id
     messages_in_branch = discussion_obj.get_branch(branch_tip_to_load)
 
+    db_user = db.query(DBUser).filter(DBUser.username == username).one()
     user_grades = {g.message_id: g.grade for g in db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
 
     messages_output = []
     for msg in messages_in_branch:
-        full_image_refs = [f"/user_assets/{username}/{discussion_id}/{img['path']}" for img in (msg.images or []) if 'path' in img]
+        images_list = msg.images or []
+        if isinstance(images_list, str):
+            try: images_list = json.loads(images_list)
+            except json.JSONDecodeError: images_list = []
+        if not isinstance(images_list, list): images_list = []
+        full_image_refs = [ f"data:image/png;base64,{img}" for img in images_list]
         
-        # FIX: Defensively parse metadata which may be a string from some DB drivers/versions
         msg_metadata_raw = msg.metadata
         if isinstance(msg_metadata_raw, str):
-            try:
-                msg_metadata = json.loads(msg_metadata_raw) if msg_metadata_raw else {}
-            except json.JSONDecodeError:
-                msg_metadata = {}
+            try: msg_metadata = json.loads(msg_metadata_raw) if msg_metadata_raw else {}
+            except json.JSONDecodeError: msg_metadata = {}
         else:
             msg_metadata = msg_metadata_raw or {}
 
         messages_output.append(
             MessageOutput(
-                id=msg.id,
-                sender=msg.sender,
-                sender_type=msg.sender_type,
-                content=msg.content,
-                parent_message_id=msg.parent_id,
-                binding_name=msg.binding_name,
-                model_name=msg.model_name,
-                token_count=msg.tokens,
-                sources=msg_metadata.get('sources'),
-                events=msg_metadata.get('events'),
-                image_references=full_image_refs,
-                user_grade=user_grades.get(msg.id, 0),
-                created_at=msg.created_at,
-                branch_id=branch_tip_to_load,
-                branches=None
+                id=msg.id, sender=msg.sender, sender_type=msg.sender_type, content=msg.content,
+                parent_message_id=msg.parent_id, binding_name=msg.binding_name, model_name=msg.model_name,
+                token_count=msg.tokens, sources=msg_metadata.get('sources'), events=msg_metadata.get('events'),
+                image_references=full_image_refs, user_grade=user_grades.get(msg.id, 0),
+                created_at=msg.created_at, branch_id=branch_tip_to_load, branches=None
             )
         )
     return messages_output
+
+@discussion_router.get("/{discussion_id}/context_status", response_model=ContextStatusResponse)
+def get_discussion_context_status(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    try:
+        status = discussion.get_context_status()
+        return ContextStatusResponse(current_tokens=status['current_tokens'], max_tokens=status['max_tokens'])
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to get context status: {e}")
 
 @discussion_router.put("/{discussion_id}/active_branch", response_model=DiscussionInfo)
 async def update_discussion_active_branch(discussion_id: str, branch_request: DiscussionBranchSwitchRequest, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
@@ -420,21 +421,17 @@ async def chat_in_existing_discussion(
     db: Session = Depends(get_db)
 ) -> StreamingResponse:
     username = current_user.username
-    user_model_full = current_user.lollms_model_name
-    binding_alias = None
-    if user_model_full and '/' in user_model_full:
-        binding_alias, _ = user_model_full.split('/', 1)
-    
-    try:
-        lc = get_user_lollms_client(username, binding_alias)
-    except HTTPException as e:
-        async def error_stream():
-            yield json.dumps({"type": "error", "content": f"Failed to get LLM Client: {e.detail}"}) + "\n"
-        return StreamingResponse(error_stream(), media_type="application/x-ndjson")
-
-    discussion_obj = get_user_discussion(username, discussion_id, lollms_client=lc)
+    discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
+    
+    # The LollmsClient is now correctly attached to the discussion object
+    lc = discussion_obj.lollms_client
+    if not lc:
+        async def error_stream():
+            yield json.dumps({"type": "error", "content": "Failed to get a valid LLM Client from the discussion object."}) + "\n"
+        return StreamingResponse(error_stream(), media_type="application/x-ndjson")
+
 
     def query_rag_callback(query: str, ss, rag_top_k, rag_min_similarity_percent) -> List[Dict]:
         if not ss: return []
@@ -541,12 +538,18 @@ async def chat_in_existing_discussion(
 
                 def lollms_message_to_output(msg):
                     if not msg: return None
+                    
+                    full_image_refs = []
+                    if hasattr(msg, 'images') and msg.images:
+                        full_image_refs = [ f"data:image/png;base64,{img}" for img in msg.images or []]
+
                     return {
                         "id": msg.id, "sender": msg.sender, "content": msg.content,
                         "created_at": msg.created_at, "parent_message_id": msg.parent_id,
                         "discussion_id": msg.discussion_id, "metadata": msg.metadata,
                         "tokens": msg.tokens, "sender_type": msg.sender_type,
-                        "binding_name": msg.binding_name, "model_name": msg.model_name
+                        "binding_name": msg.binding_name, "model_name": msg.model_name,
+                        "image_references": full_image_refs
                     }
                 
                 final_messages_payload = {
@@ -614,7 +617,8 @@ async def grade_discussion_message(discussion_id: str, message_id: str, grade_up
     branch = discussion_obj.get_branch(discussion_obj.active_branch_id)
     target_message = next((msg for msg in branch if msg.id == message_id), None)
     if not target_message: raise HTTPException(status_code=404, detail="Message not found in active branch.")
-    full_image_refs = [f"/user_assets/{username}/{discussion_id}/{img['path']}" for img in (target_message.images or []) if 'path' in img]
+    full_image_refs = [ f"data:image/png;base64,{img}" for img in target_message.images or []]
+
     msg_metadata = target_message.metadata or {}
     return MessageOutput(
         id=target_message.id, sender=target_message.sender, sender_type=target_message.sender_type, content=target_message.content,
@@ -636,7 +640,8 @@ async def update_discussion_message(discussion_id: str, message_id: str, payload
     discussion_obj.commit()
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
     grade = db.query(UserMessageGrade.grade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).scalar() or 0
-    full_image_refs = [f"/user_assets/{username}/{discussion_id}/{img['path']}" for img in (target_message.images or []) if 'path' in img]
+    full_image_refs = [ f"data:image/png;base64,{img}" for img in target_message.images or []]
+
     msg_metadata = target_message.metadata or {}
     return MessageOutput(
         id=target_message.id, sender=target_message.sender, sender_type=target_message.sender_type, content=target_message.content,

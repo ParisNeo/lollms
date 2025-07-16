@@ -15,6 +15,7 @@ function processSingleMessage(msg) {
         sender_type: msg.sender_type || (msg.sender?.toLowerCase() === username ? 'user' : 'assistant'),
         events: msg.events || (msg.metadata?.events) || [],
         sources: msg.sources || (msg.metadata?.sources) || [],
+        image_references: msg.image_references || [],
     };
 }
 
@@ -25,6 +26,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const messages = ref([]);
     const generationInProgress = ref(false);
     const titleGenerationInProgressId = ref(null);
+    const activeDiscussionContextStatus = ref(null);
 
     const sortedDiscussions = computed(() => {
         return Object.values(discussions.value).sort((a, b) => {
@@ -49,6 +51,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             uiStore.closeModal();
         } catch (error) {
             console.error("Failed to send discussion:", error);
+        }
+    }
+
+    async function fetchContextStatus(discussionId) {
+        if (!discussionId) {
+            activeDiscussionContextStatus.value = null;
+            return;
+        }
+        try {
+            const response = await apiClient.get(`/api/discussions/${discussionId}/context_status`);
+            activeDiscussionContextStatus.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch context status:", error);
+            activeDiscussionContextStatus.value = null;
         }
     }
 
@@ -80,6 +96,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.get(`/api/discussions/${id}`);
             messages.value = processMessages(response.data);
+            await fetchContextStatus(id);
         } catch (error) {
             useUiStore().addNotification('Failed to load messages.', 'error');
             currentDiscussionId.value = null;
@@ -231,7 +248,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const tempUserMessage = {
             id: `temp-user-${Date.now()}`, sender: authStore.user.username,
             sender_type: 'user', content: payload.prompt,
-            image_references: payload.localImageUrls || [],
+            localImageUrls: payload.localImageUrls || [],
             created_at: new Date().toISOString(),
             parent_message_id: lastMessage ? lastMessage.id : null
         };
@@ -344,6 +361,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             generationInProgress.value = false;
             activeGenerationAbortController = null;
             loadDiscussions();
+            if (currentDiscussionId.value) {
+                fetchContextStatus(currentDiscussionId.value);
+            }
         }
     }
 
@@ -392,6 +412,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 messages.value.splice(index, 1);
             }
             useUiStore().addNotification('Message deleted.', 'success');
+            await fetchContextStatus(currentDiscussionId.value);
         } catch(e) {}
     }
 
@@ -480,6 +501,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         updateDiscussionRagStore, renameDiscussion, updateDiscussionMcps,
         sendMessage, stopGeneration, updateMessageContent, gradeMessage,
         deleteMessage, initiateBranch, switchBranch, exportDiscussions,
-        importDiscussions, sendDiscussion, $reset,
+        importDiscussions, sendDiscussion, $reset, activeDiscussionContextStatus, fetchContextStatus
     };
 });

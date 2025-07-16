@@ -32,9 +32,7 @@ export default {
 
     <!-- Message Area -->
     <!-- 
-      FIX: Added 'min-w-0' to allow this flex item to shrink and contain its oversized children,
-      which enables the horizontal scroll on the code blocks inside.
-      Added 'pb-40' to ensure the last message is not obscured by the floating chat input.
+      FIX: Added 'pb-40' to ensure the last message is not obscured by the floating chat input.
     -->
     <MessageArea v-if="activeDiscussion" class="flex-1 overflow-y-auto min-w-0 pb-40" />
     

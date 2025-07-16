@@ -85,6 +85,7 @@ const displayItems = computed(() => {
         const dateKey = new Date(message.created_at || Date.now()).toDateString();
         if (!acc[dateKey]) acc[dateKey] = [];
         acc[dateKey].push(message);
+        console.log(acc)
         return acc;
     }, {});
 

@@ -299,6 +299,10 @@ class DiscussionRagDatastoreUpdate(BaseModel):
 class DiscussionToolsUpdate(BaseModel):
     tools: List[str]
 
+class ContextStatusResponse(BaseModel):
+    current_tokens: int
+    max_tokens: Optional[int]
+
 class MessageOutput(BaseModel):
     id: str
     sender: str

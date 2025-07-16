@@ -378,7 +378,6 @@ const formattingMenuItems = [
     </div>
   </div>
 </template>
-
 <style scoped>
 .message-container { @apply w-full flex; }
 .message-bubble { @apply flex flex-col p-3 rounded-2xl max-w-[85%] md:max-w-[75%] shadow; }

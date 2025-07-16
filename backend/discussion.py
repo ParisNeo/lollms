@@ -98,16 +98,32 @@ def get_user_discussion_manager(username: str) -> LollmsDataManager:
     return manager
 
 def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False, lollms_client: Optional[LollmsClient] = None) -> Optional[LollmsDiscussion]:
+    # If no client is passed, create one using the user's current settings.
+    # This is the key change to ensure the correct context size and model are always used.
     lc = lollms_client if lollms_client is not None else get_user_lollms_client(username)
     dm = get_user_discussion_manager(username)
-    discussion = dm.get_discussion(lollms_client=lc, discussion_id=discussion_id, autosave=True)
+    
+    # Extract max_context_size from the definitive LollmsClient instance (lc).
+    
+    max_context_size = lc.get_ctx_size() or 4096
+    
+    discussion = dm.get_discussion(
+        lollms_client=lc,
+        discussion_id=discussion_id,
+        max_context_size=max_context_size,
+        autosave=True
+    )
     
     if discussion:
         discussion.lollms_client = lc
+        discussion.max_context_size = max_context_size  # Ensure it's correctly set on existing discussions
         return discussion
     elif create_if_missing:
         new_discussion = LollmsDiscussion.create_new(
-            lollms_client=lc, db_manager=dm, id=discussion_id,
+            lollms_client=lc,
+            db_manager=dm,
+            id=discussion_id,
+            max_context_size=max_context_size,
             autosave=True,
             discussion_metadata={"title": f"New Discussion {discussion_id[:8]}"},
         )
