@@ -22,20 +22,17 @@ new ui:
 - OK the steps content must not exceed some length in the title mode
 - OK use the name of the personality in bubble instead of assistant also add its icon if applicable
 - OK override the copy button
+- OK make sure the images stay after generation
+- OK when cancelling the generation, refresh the discussion
 
 ## Discussion:
 - start/stop events must be collapsible, all that happens in between should be put inside in between
-- make sure the images stay after generation
-- when cancelling the generation, refresh the discussion
 - make the tools sections collapsible
 - support for equations with /[ /] format
 - Add the possibility to use multiple bindings at once with different configurations
 - fix the return key not sending the message
-- if the generation fails, don't destroy the message
 - Add a upload to discussion button that uploads documents to the discussion and shows them to the user if needed
 - fix branching
-- add tokens count to the chatinput
-- add context progressbar with scratchpad summary button
 
 ## Admin
 ### emailing system

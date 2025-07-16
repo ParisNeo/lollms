@@ -11,8 +11,9 @@ const dataStore = useDataStore();
 
 const { availableLollmsModels, isLoadingLollmsModels } = storeToRefs(dataStore);
 
-const user = computed(() => uiStore.modalProps?.user);
-const onUserUpdated = computed(() => uiStore.modalProps?.onUserUpdated);
+const modalProps = computed(() => uiStore.modalData('adminUserEdit'));
+const user = computed(() => modalProps.value?.user);
+const onUserUpdated = computed(() => modalProps.value?.onUserUpdated);
 
 const form = ref({
     is_admin: false,
@@ -99,7 +100,7 @@ onMounted(() => {
 </script>
 
 <template>
-    <GenericModal :modal-name="'adminUserEdit'" :title="user ? `Edit User: ${user.username}` : 'Edit User'" @close="uiStore.closeModal('adminUserEdit')">
+    <GenericModal :modal-name="'adminUserEdit'" :title="user ? `Edit User: ${user.username}` : 'Edit User'">
         <template #body>
             <form v-if="user" @submit.prevent="handleSubmit" class="p-6 space-y-6">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -165,7 +166,7 @@ onMounted(() => {
         <template #footer>
             <div class="flex justify-end space-x-3">
                 <button type="button" class="btn btn-secondary" @click="uiStore.closeModal('adminUserEdit')">Cancel</button>
-                <button type="submit" class="btn btn-primary" :disabled="isLoading || !user" @click="handleSubmit">
+                <button type="button" class="btn btn-primary" :disabled="isLoading || !user" @click="handleSubmit">
                     {{ isLoading ? 'Saving...' : 'Save Changes' }}
                 </button>
             </div>

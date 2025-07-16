@@ -22,8 +22,9 @@ export const useAdminStore = defineStore('admin', () => {
     const mcps = ref([]);
     const apps = ref([]);
     const isLoadingServices = ref(false);
+
+    const isEnhancingEmail = ref(false);
     
-    // New state for "Force Settings" modal
     const adminAvailableLollmsModels = ref([]);
     const isLoadingLollmsModels = ref(false);
 
@@ -44,14 +45,14 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
     
-    async function sendEmailToUsers(subject, body, user_ids) {
+    async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) {
         try {
             const payload = {
                 subject,
                 body,
                 user_ids,
-                send_as_text: false, 
-                background_color: '#f0f4f8'
+                background_color: backgroundColor,
+                send_as_text: sendAsText
             };
             const response = await apiClient.post('/api/admin/email-users', payload);
             uiStore.addNotification(response.data.message || 'Email task started.', 'success');
@@ -61,19 +62,30 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
     
-    // New action for batch updating user settings
+    async function enhanceEmail(subject, body, backgroundColor, prompt) {
+        isEnhancingEmail.value = true;
+        try {
+            const response = await apiClient.post('/api/admin/enhance-email', { subject, body, background_color: backgroundColor, prompt });
+            uiStore.addNotification('Email content enhanced by AI.', 'success');
+            return response.data;
+        } catch (error) {
+            // Error handled by global interceptor
+            return null;
+        } finally {
+            isEnhancingEmail.value = false;
+        }
+    }
+
     async function batchUpdateUsers(payload) {
         try {
             const response = await apiClient.post('/api/admin/users/batch-update-settings', payload);
             uiStore.addNotification(response.data.message || 'Settings applied successfully.', 'success');
-            await fetchAllUsers(); // Refresh user list to reflect changes
+            await fetchAllUsers();
         } catch (error) {
-            // Error is handled by the global interceptor, re-throw to inform the component
             throw error;
         }
     }
     
-    // New action to fetch models specifically for the admin panel
     async function fetchAdminAvailableLollmsModels() {
         if (adminAvailableLollmsModels.value.length > 0) return;
         isLoadingLollmsModels.value = true;
@@ -217,7 +229,6 @@ export const useAdminStore = defineStore('admin', () => {
     }
 
     return {
-        // Existing
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers,
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings,
@@ -225,11 +236,8 @@ export const useAdminStore = defineStore('admin', () => {
         mcps, apps, isLoadingServices,
         fetchMcps, addMcp, updateMcp, deleteMcp,
         fetchApps, addApp, updateApp, deleteApp,
-
-        // New
-        adminAvailableLollmsModels,
-        isLoadingLollmsModels,
-        fetchAdminAvailableLollmsModels,
-        batchUpdateUsers
+        adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
+        batchUpdateUsers,
+        isEnhancingEmail, enhanceEmail
     };
 });
