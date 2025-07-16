@@ -266,6 +266,7 @@ class UserAuthDetails(UserLLMParams):
     ai_response_language: Optional[str] = "auto"
     fun_mode: Optional[bool] = False
     show_token_counter: Optional[bool] = True
+    openai_api_service_enabled: bool = False
 
 class GlobalConfigPublic(BaseModel):
     key: str
@@ -569,7 +570,6 @@ class PostPublic(PostBase):
     class Config:
         from_attributes = True
 
-# --- NEW: OpenAI API Key Models ---
 class APIKeyBase(BaseModel):
     alias: constr(min_length=1, max_length=100)
 
@@ -586,7 +586,6 @@ class APIKeyPublic(APIKeyBase):
         from_attributes = True
 
 class NewAPIKeyResponse(APIKeyPublic):
-    # This model includes the full key and is only sent ONCE upon creation.
     full_key: str
 
 class PaginatedDiscussionInfo(PaginatedResponse[DiscussionInfo]):

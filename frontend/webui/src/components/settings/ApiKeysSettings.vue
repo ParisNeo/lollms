@@ -2,29 +2,27 @@
 import { ref, onMounted, computed, watch } from 'vue';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
-import { useAdminStore } from '../../stores/admin';
+import { useAuthStore } from '../../stores/auth';
 import { storeToRefs } from 'pinia';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
-const adminStore = useAdminStore();
+const authStore = useAuthStore();
 
 const { apiKeys } = storeToRefs(dataStore);
-const { globalSettings } = storeToRefs(adminStore);
+const { user } = storeToRefs(authStore);
 
 const newKeyAlias = ref('');
 const isLoading = ref(false);
 const selectedKeys = ref(new Set());
 
 const isServiceEnabled = computed(() => {
-    const setting = globalSettings.value.find(s => s.key === 'openai_api_service_enabled');
-    return setting ? setting.value : false;
+    return user.value ? user.value.openai_api_service_enabled : false;
 });
 
 const hasKeys = computed(() => apiKeys.value.length > 0);
 
-// This computed property now drives the "Select All" / "Deselect All" toggle button
 const allKeysSelected = computed({
     get: () => hasKeys.value && selectedKeys.value.size === apiKeys.value.length,
     set: (value) => {
@@ -37,10 +35,7 @@ const allKeysSelected = computed({
 });
 
 onMounted(() => {
-    if(adminStore.globalSettings.length === 0) {
-        adminStore.fetchGlobalSettings();
-    }
-    if (dataStore.apiKeys.length === 0 && isServiceEnabled.value) {
+    if (isServiceEnabled.value && dataStore.apiKeys.length === 0) {
         dataStore.fetchApiKeys();
     }
 });
@@ -71,6 +66,7 @@ async function handleCreateKey() {
         uiStore.openModal('newApiKey', { keyData: newKeyData });
         newKeyAlias.value = '';
     } catch (error) {
+        // Error is handled by the global interceptor
     } finally {
         isLoading.value = false;
     }
@@ -105,7 +101,6 @@ async function handleDeleteSelected() {
     }
 }
 
-// Function to toggle the "Select All" state via the button
 function toggleSelectAll() {
     allKeysSelected.value = !allKeysSelected.value;
 }

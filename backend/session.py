@@ -101,6 +101,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     """
     Takes a DB user record, ensures they are active, and constructs the detailed
     UserAuthDetails model with data from both the DB and the active session.
+    This function now ALWAYS fetches the live value for global settings.
     """
     if not db_user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive.")
@@ -129,6 +130,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     lc = get_user_lollms_client(username) 
     ai_name_for_user = getattr(lc, "ai_name", "assistant")
     current_session_llm_params = user_sessions[username].get("llm_params", {})
+
+    # Always fetch the live setting from the global settings singleton
+    is_api_service_enabled = settings.get("openai_api_service_enabled", False)
 
     return UserAuthDetails(
         id=db_user.id,
@@ -165,7 +169,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         first_page=db_user.first_page,
         ai_response_language=db_user.ai_response_language,
         fun_mode=db_user.fun_mode,
-        show_token_counter=db_user.show_token_counter
+        show_token_counter=db_user.show_token_counter,
+        openai_api_service_enabled=is_api_service_enabled
     )
 
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
