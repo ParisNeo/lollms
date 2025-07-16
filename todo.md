@@ -23,7 +23,6 @@ new ui:
 - OK use the name of the personality in bubble instead of assistant also add its icon if applicable
 - OK override the copy button
 - OK make sure the images stay after generation
-- OK when cancelling the generation, refresh the discussion
 
 ## Discussion:
 - start/stop events must be collapsible, all that happens in between should be put inside in between
@@ -34,6 +33,8 @@ new ui:
 - add a upload to discussion button that uploads documents to the discussion and shows them to the user if needed
 - fix branching
 - add add/view/remove files to the discussion with options (full file or RAG for each)
+- when cancelling the generation, refresh the discussion
+- when the generation fails, refresh the discussion
 
 ## Admin
 ### emailing system
