@@ -82,6 +82,7 @@ async function handleSave() {
                         <option value="manual">Manual (Admin Managed)</option>
                         <option value="automatic">SMTP Server</option>
                         <option value="system_mail">System Mail Command</option>
+                        <option value="outlook">Outlook (Windows only)</option>
                     </select>
                 </div>
 
