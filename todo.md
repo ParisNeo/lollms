@@ -40,6 +40,7 @@ new ui:
 - cahge the interface to use a left bar and move the return to interface to the bottom of that bar
 
 ### emailing system
+- the modal looses information when another modal is shown (fix that)
 - user management page needs upgrade and bugfix
 - email users enhance with ai not working
 - password reset views and fixing the lost password email problem
