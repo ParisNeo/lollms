@@ -9,8 +9,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import re
 import html
-import tempfile
-
+import platform
 
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
@@ -20,14 +19,10 @@ from passlib.context import CryptContext
 from backend.config import SECRET_KEY, ALGORITHM
 from backend.settings import settings
 
-
-
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
-
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies a plain password against a hashed one."""
@@ -42,6 +37,11 @@ def generate_api_key() -> Tuple[str, str]:
     prefix = "lollms_" + secrets.token_urlsafe(6)  # e.g., lollms_aBcDeF12
     key = secrets.token_urlsafe(32)
     full_key = f"{prefix}_{key}"
+    
+    # Ensure the prefix does not contain underscores.  Regenerate if it does.
+    while "_" in prefix:
+        prefix = "lollms_" + secrets.token_urlsafe(6)
+
     return full_key, prefix
 
 def hash_api_key(api_key: str) -> str:
@@ -52,13 +52,12 @@ def verify_api_key(plain_key: str, hashed_key: str) -> bool:
     """Verifies a plain text API key against a stored hash."""
     return api_key_context.verify(plain_key, hashed_key)
 
-
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
     Creates a JWT access token with a dynamically configured expiration time.
     """
     to_encode = data.copy()
-    
+
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
@@ -68,9 +67,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         except (ValueError, TypeError):
             print(f"WARNING: Invalid 'access_token_expire_minutes' value ({expire_minutes}). Using fallback of 30 minutes.")
             minutes = 30
-            
+
         expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
-    
+
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -86,24 +85,24 @@ def _convert_html_to_text(html_string: str) -> str:
     """
     if not html_string:
         return ""
-    
+
     text = html.unescape(html_string)
 
     text = re.sub(r'</(p|div|h[1-6]|blockquote|tr|li)>', '\n\n', text, flags=re.IGNORECASE)
-    text = re.sub(r'<(br)\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'<br>\s*', '\n', text, flags=re.IGNORECASE)
     text = re.sub(r'<li[^>]*>', '* ', text, flags=re.IGNORECASE)
     text = re.sub(r'<[^>]+>', '', text)
     text = re.sub(r'[ \t]+', ' ', text)
     text = re.sub(r'\n{3,}', '\n\n', text)
-    
+
     return text.strip()
 
 def _get_full_html_email(body: str, background_color: Optional[str]) -> str:
     """Wraps the email body in a full HTML document with a background color."""
-    safe_bg_color = "#f4f4f4" # Default light gray background
+    safe_bg_color = "#f4f4f4"  # Default light gray background
     if background_color and re.match(r'^#(?:[0-9a-fA-F]{3}){1,2}$', background_color):
         safe_bg_color = background_color
-    
+
     return f"""
 <!DOCTYPE html>
 <html lang="en">
@@ -144,10 +143,11 @@ def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], t
     msg['Subject'] = subject
     msg['From'] = from_email
     msg['To'] = to_email
-    
+
     try:
         with smtplib.SMTP(smtp_host, smtp_port) as server:
-            if use_tls: server.starttls()
+            if use_tls:
+                server.starttls()
             server.login(smtp_user, smtp_password)
             server.sendmail(from_email, [to_email], msg.as_string())
         print(f"INFO: Email (SMTP) sent to {to_email}")
@@ -168,7 +168,7 @@ def _send_email_system_mail_html(to_email: str, subject: str, html_content: str,
         f"{text_content}\n\n"
         f"--{boundary}\n"
         f"Content-Type: text/html; charset=utf-8\n\n"
-        f"<html><body>{html_content}</body></html>\n\n"
+        f"{html_content}\n\n"
         f"--{boundary}--\n"
     )
     command = [
@@ -187,7 +187,7 @@ def _send_email_system_mail_text(to_email: str, subject: str, text_content: str)
     """Sends a simple plain text email using the system's `mail` command."""
     if not shutil.which("mail"):
         raise FileNotFoundError("The 'mail' command not found. Please install mailutils.")
-    
+
     command = ['mail', '-s', subject.replace('\n', ' ').replace('\r', ' '), to_email]
     try:
         process = subprocess.run(command, input=text_content, capture_output=True, text=True, check=True, encoding='utf-8')
@@ -196,29 +196,49 @@ def _send_email_system_mail_text(to_email: str, subject: str, text_content: str)
         print(f"ERROR: System 'mail' command failed. Stderr: {e.stderr}")
         raise
 
+def _send_email_outlook(to_email: str, subject: str, body: str):
+    """Sends an email using Outlook."""
+    try:
+        import win32com.client
+    except ImportError:
+        print("win32com.client not installed. Please install pywin32.")
+        return
+
+    try:
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        mail = outlook.CreateItem(0)
+        mail.To = to_email
+        mail.Subject = subject
+        # Check if the body contains HTML tags.  If so, treat it as HTML.
+        if "<" in body and ">" in body:
+            mail.HTMLBody = body  # Use HTMLBody for HTML content
+        else:
+            mail.Body = body  # Use Body for plain text
+        mail.Send()
+        print(f"INFO: Email sent using Outlook to {to_email}")
+    except Exception as e:
+        print(f"ERROR: Failed to send email using Outlook. Error: {e}")
+
+
 def send_generic_email(to_email: str, subject: str, body: str, background_color: Optional[str] = "#f4f4f4", send_as_text: bool = False):
     """
     Prepares and sends a generic email, handling both HTML and plain text modes correctly.
     """
     recovery_mode = settings.get("password_recovery_mode", "manual")
-    if recovery_mode not in ["automatic", "system_mail"]:
-        print(f"WARNING: Email sending is set to '{recovery_mode}'. Cannot send email to {to_email}.")
-        return
 
-    text_content = _convert_html_to_text(body)
-
-    if send_as_text:
-        if recovery_mode == "automatic":
-            _send_email_smtp(to_email, subject, None, text_content)
-        elif recovery_mode == "system_mail":
-            _send_email_system_mail_text(to_email, subject, text_content)
-    else: # Send as HTML
-        html_content_full = _get_full_html_email(body, background_color)
-        if recovery_mode == "automatic":
-            _send_email_smtp(to_email, subject, html_content_full, text_content)
-        elif recovery_mode == "system_mail":
-            # Pass the raw body fragment to the mailer, which wraps it in <html><body>
-            _send_email_system_mail_html(to_email, subject, body, text_content)
+    if recovery_mode == "smtp":
+        text_content = _convert_html_to_text(body)
+        _send_email_smtp(to_email, subject, body if not send_as_text else text_content, text_content)
+    elif recovery_mode == "system_mail":
+        text_content = _convert_html_to_text(body)
+        _send_email_system_mail_html(to_email, subject, body, text_content) if not send_as_text else _send_email_system_mail_text(to_email, subject, text_content)
+    elif recovery_mode == "outlook":
+        if platform.system() == "Windows":
+            _send_email_outlook(to_email, subject, body)
+        else:
+            print("Outlook integration is only supported on Windows.")
+    else:
+        print(f"WARNING: Email sending is set to '{recovery_mode}'.  No email sending configured.")
 
 def send_password_reset_email(to_email: str, reset_link: str, username: str):
     """Prepares and sends a password reset email using the configured method."""
@@ -231,7 +251,6 @@ def send_password_reset_email(to_email: str, reset_link: str, username: str):
     <p>If you did not request a password reset, please ignore this email.</p>
     """
     send_generic_email(to_email, subject, body_content, send_as_text=False)
-
 
 def decode_access_token(token: str) -> Optional[dict]:
     try:
