@@ -34,14 +34,15 @@ def get_password_hash(password: str) -> str:
 
 def generate_api_key() -> Tuple[str, str]:
     """Generates a secure API key and its non-secret prefix."""
-    prefix = "lollms_" + secrets.token_urlsafe(6)  # e.g., lollms_aBcDeF12
-    key = secrets.token_urlsafe(32)
-    full_key = f"{prefix}_{key}"
+    prefix = secrets.token_urlsafe(6)  # e.g., lollms_aBcDeF12
     
     # Ensure the prefix does not contain underscores.  Regenerate if it does.
     while "_" in prefix:
-        prefix = "lollms_" + secrets.token_urlsafe(6)
-
+        prefix = secrets.token_urlsafe(6)
+    key = secrets.token_urlsafe(32)
+    prefix = "lollms_" + prefix
+    full_key = f"{prefix}_{key}"
+        
     return full_key, prefix
 
 def hash_api_key(api_key: str) -> str:
