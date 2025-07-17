@@ -43,7 +43,12 @@ new ui:
 - password reset views and fixing the lost password email problem
 
 
+## services
+- add a reload mcps to the admin page
+- make it possible to load any image file for mcp icons and set reduce their size automatically
+- centralize icons management with a modal that allows preprocessing before building base64 png
 
+  
 ## personalities
 - Add personality sharing
 - Revamp personalities management tools
@@ -69,7 +74,7 @@ new ui:
 
 ## cosmetics
 - add customization of the webui
-
+- add themes
 
 
 ## mcps
