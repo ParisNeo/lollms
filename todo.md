@@ -37,6 +37,8 @@ new ui:
 - when the generation fails, refresh the discussion
 
 ## Admin
+- cahge the interface to use a left bar and move the return to interface to the bottom of that bar
+
 ### emailing system
 - user management page needs upgrade and bugfix
 - email users enhance with ai not working
