@@ -167,7 +167,7 @@ async def email_users(
     db: Session = Depends(get_db)
 ):
     email_mode = settings.get("password_recovery_mode")
-    if email_mode not in ["automatic", "system_mail"]:
+    if email_mode not in ["automatic", "system_mail", "outlook"]:
         raise HTTPException(status_code=412, detail=f"Email sending is not enabled or is set to manual. Current mode: '{email_mode}'.")
 
     if not payload.user_ids:
