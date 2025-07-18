@@ -96,6 +96,7 @@ function openForceSettingsModal() {
 }
 
 function openEmailModal(user) {
+    uiStore.initEmailModalState();
     uiStore.openModal('adminUserEmail', {
         user,
         onSend: async ({ subject, body, backgroundColor, sendAsText }) => {

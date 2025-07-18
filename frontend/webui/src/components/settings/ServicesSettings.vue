@@ -146,19 +146,61 @@ function triggerFileInput() {
 function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
+
     const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
     if (!allowedTypes.includes(file.type)) {
         uiStore.addNotification('Invalid file type. Please select an image.', 'error');
         return;
     }
-    if (file.size > 1 * 1024 * 1024) { // 1MB limit
-        uiStore.addNotification('File is too large. Maximum size is 1MB.', 'error');
+    
+    if (file.type === 'image/svg+xml') {
+        const reader = new FileReader();
+        reader.onload = (e) => { form.value.icon = e.target.result; };
+        reader.onerror = () => { uiStore.addNotification('Failed to read the SVG file.', 'error'); };
+        reader.readAsDataURL(file);
+        event.target.value = '';
         return;
     }
+
     const reader = new FileReader();
-    reader.onload = (e) => { form.value.icon = e.target.result; };
-    reader.onerror = () => { uiStore.addNotification('Failed to read the file.', 'error'); };
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            const MAX_WIDTH = 128;
+            const MAX_HEIGHT = 128;
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+                if (width > MAX_WIDTH) {
+                    height = Math.round(height * (MAX_WIDTH / width));
+                    width = MAX_WIDTH;
+                }
+            } else {
+                if (height > MAX_HEIGHT) {
+                    width = Math.round(width * (MAX_HEIGHT / height));
+                    height = MAX_HEIGHT;
+                }
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            form.value.icon = canvas.toDataURL('image/png');
+        };
+        img.onerror = () => {
+            uiStore.addNotification('Failed to load image for processing.', 'error');
+        };
+        img.src = e.target.result;
+    };
+    reader.onerror = () => {
+        uiStore.addNotification('Failed to read the file.', 'error');
+    };
     reader.readAsDataURL(file);
+    
     event.target.value = '';
 }
 </script>

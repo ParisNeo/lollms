@@ -24,6 +24,10 @@ new ui:
 - OK override the copy button
 - OK make sure the images stay after generation
 - OK add a reload mcps to the admin page
+- OK change the interface to use a left bar and move the return to interface to the bottom of that bar
+- OK the modal looses information when another modal is shown
+- OK user management page needs upgrade and bugfix
+- OK make it possible to load any image file for mcp icons and set reduce their size automatically
 
 ## Discussion:
 - start/stop events must be collapsible, all that happens in between should be put inside in between
@@ -37,18 +41,13 @@ new ui:
 - when cancelling the generation, refresh the discussion
 - when the generation fails, refresh the discussion
 
-## Admin
-- cahge the interface to use a left bar and move the return to interface to the bottom of that bar
 
 ### emailing system
-- the modal looses information when another modal is shown (fix that)
-- user management page needs upgrade and bugfix
 - email users enhance with ai not working
 - password reset views and fixing the lost password email problem
 
 
 ## services
-- make it possible to load any image file for mcp icons and set reduce their size automatically
 - centralize icons management with a modal that allows preprocessing before building base64 png
 
   

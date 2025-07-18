@@ -18,6 +18,7 @@ import json from 'highlight.js/lib/languages/json';
 import 'highlight.js/styles/github-dark.css';
 import CodeMirrorEditor from './CodeMirrorEditor.vue';
 import { useUiStore } from '../../stores/ui'; // Import UI store
+import InsertImageModal from '../modals/InsertImageModal.vue';
 
 const uiStore = useUiStore(); // Initialize UI store
 const lowlight = createLowlight({
@@ -142,8 +143,8 @@ const toolbarActions = ref([
   <div v-if="editor" class="border border-gray-300 dark:border-gray-600 rounded-md flex flex-col h-full max-h-[50vh]">
     <div class="toolbar-container flex-shrink-0">
         <div class="flex border-b border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50">
-            <button @click="activeTab = 'design'" :class="['tab-btn', { 'active': activeTab === 'design' }]">Design</button>
-            <button @click="activeTab = 'code'" :class="['tab-btn', { 'active': activeTab === 'code' }]">Code</button>
+            <button type="button" @click="activeTab = 'design'" :class="['tab-btn', { 'active': activeTab === 'design' }]">Design</button>
+            <button type="button" @click="activeTab = 'code'" :class="['tab-btn', { 'active': activeTab === 'code' }]">Code</button>
         </div>
         <div v-show="activeTab === 'design'" class="toolbar flex items-center p-2 border-b border-gray-300 dark:border-gray-600 space-x-1 bg-gray-50 dark:bg-gray-700/50 flex-wrap">
             <template v-for="(action, index) in toolbarActions" :key="index">

@@ -10,13 +10,10 @@ const uiStore = useUiStore();
 const adminStore = useAdminStore();
 
 const { allUsers, isEnhancingEmail } = storeToRefs(adminStore);
+const { emailModalSubject: subject, emailModalBody: body, emailModalBackgroundColor: backgroundColor, emailModalSendAsText: sendAsText } = storeToRefs(uiStore);
 
-const subject = ref('');
-const body = ref('');
-const backgroundColor = ref('#f4f4f8');
 const customPrompt = ref('');
 const showCustomPrompt = ref(false);
-const sendAsText = ref(false);
 
 const history = ref([]);
 const historyIndex = ref(-1);
@@ -117,6 +114,10 @@ async function handleSubmit() {
     try {
         await adminStore.sendEmailToUsers(subject.value, body.value, selectedUserIds.value, backgroundColor.value, sendAsText.value);
         uiStore.closeModal('emailAllUsers');
+        uiStore.initEmailModalState();
+        history.value = [];
+        historyIndex.value = -1;
+        recordHistory();
     } catch (error) {
     } finally {
         isLoading.value = false;

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import GenericModal from '../ui/GenericModal.vue';
 import { useUiStore } from '../../stores/ui';
@@ -10,29 +10,15 @@ const uiStore = useUiStore();
 const adminStore = useAdminStore();
 
 const { isEnhancingEmail } = storeToRefs(adminStore);
+const { emailModalSubject: subject, emailModalBody: body, emailModalBackgroundColor: backgroundColor, emailModalSendAsText: sendAsText } = storeToRefs(uiStore);
 
 const modalProps = computed(() => uiStore.modalData('adminUserEmail'));
 const user = computed(() => modalProps.value?.user);
 const onSend = computed(() => modalProps.value?.onSend);
 
-const subject = ref('');
-const body = ref('');
-const backgroundColor = ref('#f4f4f8');
-const sendAsText = ref(false);
 const customPrompt = ref('');
 const showCustomPrompt = ref(false);
 const isLoading = ref(false);
-
-watch(user, (newUser) => {
-    if (newUser) {
-        subject.value = '';
-        body.value = '';
-        backgroundColor.value = '#f4f4f8';
-        sendAsText.value = false;
-        customPrompt.value = '';
-        showCustomPrompt.value = false;
-    }
-}, { immediate: true });
 
 async function handleEnhance() {
     if (!subject.value && !body.value) {

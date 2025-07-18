@@ -35,8 +35,8 @@ const pyodideStore = usePyodideStore();
 const activeModal = computed(() => uiStore.activeModal);
 
 onMounted(async () => {
-    await authStore.attemptInitialAuth();
     uiStore.initializeTheme();
+    await authStore.attemptInitialAuth();
     uiStore.initializeSidebarState();
     if (authStore.isAuthenticated) {
         pyodideStore.initialize();
@@ -47,22 +47,22 @@ onMounted(async () => {
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900">
     
-    <div v-if="authStore.isAuthenticating" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-[#2c3e50] text-white">
+    <div v-if="authStore.isAuthenticating" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
         <div class="w-full max-w-lg mx-auto">
-            <h1 class="text-6xl md:text-7xl font-bold text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">LoLLMs</h1>
-            <p class="mt-2 text-xl md:text-2xl text-gray-300">One tool to rule them all</p>
-            <p class="mt-4 text-sm text-gray-400">by ParisNeo</p>
+            <h1 class="text-6xl md:text-7xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">LoLLMs</h1>
+            <p class="mt-2 text-xl md:text-2xl text-gray-600 dark:text-gray-300">One tool to rule them all</p>
+            <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">by ParisNeo</p>
             
-            <div v-if="authStore.funFact" class="mt-8 mx-auto max-w-md p-3 bg-white/10 border border-white/20 rounded-lg text-sm text-left">
-                <span class="font-bold text-yellow-300">🤓 Fun Fact:</span> {{ authStore.funFact }}
+            <div v-if="authStore.funFact" class="mt-8 mx-auto max-w-md p-3 bg-gray-200 dark:bg-white/10 border border-gray-300 dark:border-white/20 rounded-lg text-sm text-left text-gray-700 dark:text-gray-200">
+                <span class="font-bold text-yellow-600 dark:text-yellow-300">🤓 Fun Fact:</span> {{ authStore.funFact }}
             </div>
 
             <div class="mt-12 w-full px-4">
-                <div class="h-2.5 w-full rounded-full bg-gray-600">
+                <div class="h-2.5 w-full rounded-full bg-gray-200 dark:bg-gray-600">
                     <div class="h-2.5 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500" :style="{ width: `${authStore.loadingProgress}%` }"></div>
                 </div>
-                <p class="mt-3 text-sm text-gray-300">{{ authStore.loadingMessage }}</p>
-                <p class="mt-1 text-lg font-semibold">{{ authStore.loadingProgress }}%</p>
+                <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">{{ authStore.loadingMessage }}</p>
+                <p class="mt-1 text-lg font-semibold text-gray-700 dark:text-gray-200">{{ authStore.loadingProgress }}%</p>
             </div>
         </div>
     </div>
