@@ -3,22 +3,16 @@ from pathlib import Path
 from fastapi import FastAPI, Request, APIRouter
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-
+import json
 # This router will handle the API endpoint for fun facts.
 ui_router = APIRouter()
 
 # --- Fun Facts ---
-FUN_FACTS = [
-    "From text generation to coding assistance, LoLLMs aims to be a versatile AI tool.",
-    "The name LoLLMs stands for 'Lord of Large Language Models', a nod to its goal of managing multiple AI models.",
-    "Personalities in LoLLMs allow you to tailor the AI's responses to specific tasks or characters.",
-    "You can run LoLLMs entirely on your local machine, ensuring your data remains private.",
-    "The RAG (Retrieval-Augmented Generation) system lets your AI access and cite information from your own documents.",
-    "LoLLMs supports a wide variety of model backends, including llama.cpp, Ollama, and OpenAI.",
-    "The 'One tool to rule them all' slogan reflects the project's ambition to unify many AI functionalities in a single interface.",
-    "The project is open-source, meaning anyone can contribute to its development and see how it works.",
-]
-
+try:
+    ff = Path(__file__).parent.parent/"assets"/"fun_facts.json"
+    FUN_FACTS = json.loads(ff.read_text("utf-8"))
+except Exception as ex:
+    FUN_FACTS = ["No fun facts were loaded"]
 @ui_router.get("/api/fun-fact", include_in_schema=True)
 async def get_fun_fact():
     """

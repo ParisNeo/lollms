@@ -4,7 +4,7 @@ import { useUiStore } from '../../stores/ui';
 import GenericModal from '../ui/GenericModal.vue';
 
 const uiStore = useUiStore();
-const props = computed(() => uiStore.modalProps);
+const props = computed(() => uiStore.modalData('emailList'));
 
 const allEligibleUsers = ref([]);
 const selectedUserIds = ref([]);

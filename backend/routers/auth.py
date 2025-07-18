@@ -395,7 +395,11 @@ async def reset_password(request: PasswordResetRequest, db: Session = Depends(ge
     if not user:
         raise HTTPException(status_code=400, detail="Invalid or expired password reset token.")
     
-    if not user.reset_token_expiry or user.reset_token_expiry < datetime.datetime.now(timezone.utc):
+    expiry_time = user.reset_token_expiry
+    if expiry_time and expiry_time.tzinfo is None:
+        expiry_time = expiry_time.replace(tzinfo=timezone.utc)
+
+    if not expiry_time or expiry_time < datetime.datetime.now(timezone.utc):
         user.password_reset_token = None
         user.reset_token_expiry = None
         db.commit()

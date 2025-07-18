@@ -6,7 +6,7 @@ import GenericModal from '../ui/GenericModal.vue';
 
 const uiStore = useUiStore();
 
-const props = computed(() => uiStore.modalProps);
+const props = computed(() => uiStore.modalData('resetPassword'));
 const user = computed(() => props.value?.user);
 const onPasswordReset = computed(() => props.value?.onPasswordReset);
 

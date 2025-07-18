@@ -9,7 +9,8 @@ const uiStore = useUiStore();
 const adminStore = useAdminStore();
 
 const { adminAvailableLollmsModels, isLoadingLollmsModels, allUsers, isLoadingUsers } = storeToRefs(adminStore);
-const onSettingsApplied = computed(() => uiStore.modalProps?.onSettingsApplied);
+const props = computed(() => uiStore.modalData('forceSettings'));
+const onSettingsApplied = computed(() => props.value?.onSettingsApplied);
 
 const form = ref({
     lollms_model_name: '',

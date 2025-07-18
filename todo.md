@@ -23,6 +23,7 @@ new ui:
 - OK use the name of the personality in bubble instead of assistant also add its icon if applicable
 - OK override the copy button
 - OK make sure the images stay after generation
+- OK add a reload mcps to the admin page
 
 ## Discussion:
 - start/stop events must be collapsible, all that happens in between should be put inside in between
@@ -47,7 +48,6 @@ new ui:
 
 
 ## services
-- add a reload mcps to the admin page
 - make it possible to load any image file for mcp icons and set reduce their size automatically
 - centralize icons management with a modal that allows preprocessing before building base64 png
 

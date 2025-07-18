@@ -8,11 +8,16 @@ import apiClient from '../../services/api';
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
 
-const { allUsers, isLoadingUsers } = storeToRefs(adminStore);
+const { allUsers, isLoadingUsers, globalSettings } = storeToRefs(adminStore);
 
 const searchQuery = ref('');
 const sortKey = ref('username');
 const sortOrder = ref('asc');
+
+const emailMode = computed(() => {
+    const setting = globalSettings.value.find(s => s.key === 'password_recovery_mode');
+    return setting ? setting.value : 'manual';
+});
 
 const filteredAndSortedUsers = computed(() => {
     let users = [...allUsers.value];
@@ -99,6 +104,16 @@ function openEmailModal(user) {
     });
 }
 
+function handleEmailAllUsers() {
+    const eligibleUsers = allUsers.value.filter(u => u.is_active && u.receive_notification_emails && u.email);
+
+    if (emailMode.value === 'manual') {
+        uiStore.openModal('emailList', { users: eligibleUsers });
+    } else {
+        uiStore.openModal('emailAllUsers');
+    }
+}
+
 async function toggleUserStatus(user) {
     const action = user.is_active ? 'deactivate' : 'activate';
     const confirmation = await uiStore.showConfirmation({
@@ -144,9 +159,14 @@ async function deleteUser(user) {
                     <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">All Users</h3>
                     <p class="mt-1 max-w-2xl text-sm text-gray-500 dark:text-gray-400">A sortable and searchable list of all registered users.</p>
                 </div>
-                <button @click="openForceSettingsModal" class="btn btn-secondary">
-                    Force Settings
-                </button>
+                <div class="flex items-center gap-x-3">
+                    <button @click="handleEmailAllUsers" class="btn btn-primary">
+                        Email Users
+                    </button>
+                    <button @click="openForceSettingsModal" class="btn btn-secondary">
+                        Force Settings
+                    </button>
+                </div>
             </div>
             <input 
                 type="text" 
