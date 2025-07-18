@@ -240,6 +240,29 @@ def load_mcps(username):
         db_for_mcp.close()
     return servers_infos
 
+
+def invalidate_user_mcp_cache(username: str):
+    """Invalidates the lollms_client and tools cache for a given user."""
+    if username in user_sessions and 'tools_cache' in user_sessions[username]:
+        del user_sessions[username]['tools_cache']
+        print(f"INFO: Invalidated tools cache for user: {username}")
+
+def reload_lollms_client_mcp(username: str):
+    """Encapsulates the logic to reload MCP services for a given user."""
+    invalidate_user_mcp_cache(username)
+    lc = get_user_lollms_client(username)
+    if hasattr(lc, 'mcp') and lc.mcp:
+        lc.mcp = None
+    
+    servers_infos = load_mcps(username)
+    
+    if hasattr(lc, 'mcp_binding_manager'):
+        lc.mcp = lc.mcp_binding_manager.create_binding(
+            "remote_mcp",
+            servers_infos=servers_infos
+        )
+    print(f"INFO: Completed MCP reload for user: {username}")
+
 def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:

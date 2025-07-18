@@ -29,7 +29,7 @@ from backend.routers.personalities import personalities_router
 from backend.routers.friends import friends_router
 from backend.routers.dm import dm_router
 from backend.routers.stores import store_files_router, datastore_router
-from backend.routers.mcp import apps_router, mcp_router, discussion_tools_router
+from backend.routers.services import apps_router, mcp_router, discussion_tools_router
 from backend.routers.social import social_router
 from backend.routers.users import users_router
 from backend.routers.dm_ws import dm_ws_router

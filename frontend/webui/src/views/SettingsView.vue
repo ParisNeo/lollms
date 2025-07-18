@@ -19,7 +19,7 @@ const GeneralSettings = defineAsyncComponent(() => import('../components/setting
 const LLMSettings = defineAsyncComponent(() => import('../components/settings/LLMSettings.vue'));
 const PersonalitiesSettings = defineAsyncComponent(() => import('../components/settings/PersonalitiesSettings.vue'));
 const RAGSettings = defineAsyncComponent(() => import('../components/settings/RAGSettings.vue'));
-const MCPSettings = defineAsyncComponent(() => import('../components/settings/MCPSettings.vue'));
+const ServicesSettings = defineAsyncComponent(() => import('../components/settings/ServicesSettings.vue'));
 const ApiKeysSettings = defineAsyncComponent(() => import('../components/settings/ApiKeysSettings.vue'));
 
 const authStore = useAuthStore();
@@ -33,7 +33,7 @@ const tabs = [
     { id: 'llmConfig', label: 'LLM Config', icon: IconCog, component: LLMSettings },
     { id: 'personalities', label: 'Personalities', icon: IconSparkles, component: PersonalitiesSettings },
     { id: 'rag', label: 'RAG', minLevel: 1, icon: IconDatabase, component: RAGSettings },
-    { id: 'services', label: 'Services', minLevel: 3, icon: IconWrenchScrewdriver, component: MCPSettings },
+    { id: 'services', label: 'Services', minLevel: 3, icon: IconWrenchScrewdriver, component: ServicesSettings },
     { id: 'apiKeys', label: 'API Keys', minLevel: 2, icon: IconKey, component: ApiKeysSettings }
 ];
 
