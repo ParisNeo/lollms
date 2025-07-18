@@ -1,10 +1,12 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import { useDataStore } from '../../stores/data';
 import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
 import McpCard from '../ui/McpCard.vue';
 
+const dataStore = useDataStore();
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
 
@@ -30,6 +32,7 @@ const getInitialFormState = (type = 'mcps') => ({
 const form = ref(getInitialFormState());
 const editingItem = ref(null);
 const isLoading = ref(false);
+const isReloading = ref(false);
 const showKey = ref(false);
 const fileInput = ref(null);
 const formIconLoadFailed = ref(false);
@@ -129,6 +132,14 @@ async function handleDeleteItem(item, type) {
     if (confirmed) {
         if (editingItem.value && editingItem.value.id === item.id) cancelEditing();
         await (type === 'apps' ? adminStore.deleteApp(item.id) : adminStore.deleteMcp(item.id));
+    }
+}
+async function handleReloadMcps() {
+    isReloading.value = true;
+    try {
+        await dataStore.triggerMcpReload();
+    } finally {
+        isReloading.value = false;
     }
 }
 function triggerFileInput() { fileInput.value.click(); }
@@ -293,6 +304,7 @@ function handleFileSelect(event) {
             <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
                 <h3 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">System MCPs</h3>
                 <div class="flex items-center gap-x-3">
+                    <button @click="handleReloadMcps" :disabled="isReloading" class="btn btn-secondary text-sm">{{ isReloading ? 'Reloading...' : 'Reload MCPs' }}</button>
                     <button @click="showAddForm('mcps')" class="btn btn-primary text-sm">+ Add System Server</button>
                 </div>
             </div>
