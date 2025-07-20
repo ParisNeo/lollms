@@ -29,6 +29,7 @@ import InsertImageModal from './components/modals/InsertImageModal.vue';
 import NewApiKeyModal from './components/modals/NewApiKeyModal.vue';
 import AppInstallModal from './components/modals/AppInstallModal.vue';
 import AppDetailsModal from './components/modals/AppDetailsModal.vue';
+import AppConfigModal from './components/modals/AppConfigModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -92,6 +93,7 @@ onMounted(async () => {
     <NewApiKeyModal v-if="activeModal === 'newApiKey'" />
     <AppInstallModal v-if="activeModal === 'appInstall'" />
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
+    <AppConfigModal v-if="activeModal === 'appConfig'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

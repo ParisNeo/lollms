@@ -6,16 +6,21 @@ import traceback
 from pathlib import Path
 import os
 import signal
+import datetime
 from packaging import version as packaging_version
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import PlainTextResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from backend.db import get_db
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp
-from backend.models import AppZooRepositoryCreate, AppZooRepositoryPublic, ZooAppInfo, AppInstallRequest, AppPublic, AppActionResponse, TaskInfo
+from backend.models import (
+    AppZooRepositoryCreate, AppZooRepositoryPublic, ZooAppInfo, 
+    AppInstallRequest, AppPublic, AppActionResponse, TaskInfo,
+    AppUpdate, AppLog
+)
 from backend.session import get_current_admin_user
 from backend.config import APP_DATA_DIR, ZOO_DIR_NAME, APPS_DIR_NAME, CUSTOM_APPS_DIR_NAME
 from backend.task_manager import task_manager, Task
@@ -113,10 +118,34 @@ def _pull_repo_task(task: Task, repo_id: int, repo_name: str, repo_url: str):
         if task.cancellation_event.is_set(): return
 
         if repo_path.exists() and (repo_path / ".git").exists():
-            task.log("Existing repository found. Pulling changes...")
-            command = ["git", "-C", str(repo_path), "pull"]
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-            task.log(f"Successfully pulled updates for '{repo_name}'.\n{result.stdout}")
+            task.log("Existing repository found. Forcefully updating to match remote...")
+            
+            # 1. Fetch all updates from the remote
+            fetch_command = ["git", "-C", str(repo_path), "fetch", "--all"]
+            subprocess.run(fetch_command, capture_output=True, text=True, check=True)
+            task.log("Fetched remote updates.")
+
+            # 2. Find the default branch of the remote 'origin'
+            try:
+                symref_command = ["git", "-C", str(repo_path), "rev-parse", "--abbrev-ref", "origin/HEAD"]
+                result = subprocess.run(symref_command, capture_output=True, text=True, check=True)
+                default_branch = result.stdout.strip().replace("origin/", "")
+                task.log(f"Identified remote default branch as '{default_branch}'.")
+            except subprocess.CalledProcessError:
+                task.log("Could not auto-detect default branch. Falling back to 'main'.", level="WARNING")
+                default_branch = "main"
+
+            # 3. Force reset the local state to match the remote branch
+            reset_command = ["git", "-C", str(repo_path), "reset", "--hard", f"origin/{default_branch}"]
+            subprocess.run(reset_command, capture_output=True, text=True, check=True)
+            task.log(f"Reset local repository to 'origin/{default_branch}'.")
+
+            # 4. Remove any untracked files and directories
+            clean_command = ["git", "-C", str(repo_path), "clean", "-dfx"]
+            subprocess.run(clean_command, capture_output=True, text=True, check=True)
+            task.log("Removed untracked files and directories.")
+
+            task.log(f"Successfully forced update for '{repo_name}'.")
         else:
             task.log("New repository. Cloning...")
             if repo_path.exists():
@@ -305,10 +334,20 @@ def _install_app_task(task: Task, app_info: dict, port: int, autostart: bool):
         shutil.copytree(source_path, dest_path)
         task.set_progress(25)
         
+        run_command = None
+        main_py_path = dest_path / "main.py"
         server_py_path = dest_path / "server.py"
-        if not server_py_path.exists():
-            task.log("No server.py found. Creating a default static server.")
+
+        if main_py_path.exists():
+            task.log("Found main.py, configuring for python script execution.")
+            run_command = ["{python_executable}", "main.py"]
+        elif server_py_path.exists():
+            task.log("Found server.py, configuring for uvicorn execution.")
+            run_command = ["{python_executable}", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "{port}"]
+        else:
+            task.log("No main.py or server.py found. Creating a default static server (server.py).")
             with open(server_py_path, "w", encoding="utf-8") as f: f.write(DEFAULT_SERVER_CODE)
+            run_command = ["{python_executable}", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "{port}"]
 
         if task.cancellation_event.is_set(): raise InterruptedError("Installation cancelled by user.")
         task.log("Creating virtual environment...")
@@ -336,6 +375,7 @@ def _install_app_task(task: Task, app_info: dict, port: int, autostart: bool):
         app_entry.status = 'stopped'
         app_entry.port = port
         app_entry.autostart = autostart
+        app_entry.folder_name = folder_name
         app_entry.icon = app_info.get('icon')
         app_entry.author = app_info.get('author')
         app_entry.description = app_info.get('description')
@@ -347,6 +387,10 @@ def _install_app_task(task: Task, app_info: dict, port: int, autostart: bool):
         keys_to_remove = ['name', 'icon', 'author', 'description', 'version', 'category', 'tags', 'repository', 'folder_name', 'is_installed', 'has_readme']
         for key in keys_to_remove:
             other_metadata.pop(key, None)
+        
+        if run_command:
+            other_metadata['run_command'] = run_command
+
         app_entry.app_metadata = other_metadata
 
         db_session.commit()
@@ -418,7 +462,7 @@ def install_app(install_request: AppInstallRequest, background_tasks: Background
 
 @apps_management_router.get("/installed-apps", response_model=list[AppPublic])
 def get_installed_apps(db: Session = Depends(get_db)):
-    installed_apps = db.query(DBApp).filter(DBApp.is_installed == True).all()
+    installed_apps = db.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.is_installed == True).all()
     zoo_apps_metadata = _get_zoo_apps_metadata()
     
     response_apps = []
@@ -447,17 +491,36 @@ def start_app(app_id: str, db: Session = Depends(get_db)):
     
     if app.status == 'running':
         return {"success": False, "message": "App is already running."}
-    app_folder_name = app.name.replace(" ", "_")
+    
+    app_folder_name = app.folder_name
+    if not app_folder_name:
+        raise HTTPException(status_code=500, detail="App installation is corrupted: missing folder name.")
+        
     app_path = APPS_ROOT_PATH / app_folder_name
+
     if not app_path.exists():
         app.status = 'error'
         db.commit()
         raise HTTPException(status_code=404, detail=f"App directory not found at {app_path}")
+
     venv_path = app_path / "venv"
     python_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+    log_file_path = app_path / "app.log"
     
+    command = None
+    if app.app_metadata and 'run_command' in app.app_metadata:
+        run_command_template = app.app_metadata['run_command']
+        command = [str(arg).replace("{python_executable}", str(python_executable)).replace("{port}", str(app.port)) for arg in run_command_template]
+    else: 
+        command = [str(python_executable), "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", str(app.port)]
+
     try:
-        process = subprocess.Popen([str(python_executable), "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", str(app.port)], cwd=str(app_path))
+        log_file = open(log_file_path, "a", encoding="utf-8")
+        log_file.write(f"\n--- Starting app at {datetime.datetime.now().isoformat()} ---\n")
+        log_file.flush()
+        
+        process = subprocess.Popen(command, cwd=str(app_path), stdout=log_file, stderr=subprocess.STDOUT)
+        
         app.pid = process.pid
         app.status = 'running'
         app.url = f"http://localhost:{app.port}"
@@ -467,6 +530,7 @@ def start_app(app_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         app.status = 'error'
         db.commit()
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to start app: {e}")
 
 @apps_management_router.post("/installed-apps/{app_id}/stop", response_model=AppActionResponse)
@@ -499,6 +563,60 @@ def stop_app(app_id: str, db: Session = Depends(get_db)):
         db.commit()
         raise HTTPException(status_code=500, detail=f"Failed to stop app: {e}")
 
+@apps_management_router.put("/installed-apps/{app_id}", response_model=AppPublic)
+def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depends(get_db)):
+    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Installed app not found.")
+
+    if app.status == 'running':
+        raise HTTPException(status_code=409, detail="Cannot update settings while the app is running. Please stop it first.")
+
+    update_data = app_update.model_dump(exclude_unset=True)
+    
+    if 'port' in update_data and update_data['port'] != app.port:
+        if db.query(DBApp).filter(DBApp.port == update_data['port'], DBApp.id != app_id).first():
+            raise HTTPException(status_code=409, detail=f"Port {update_data['port']} is already in use by another app.")
+
+    unmodifiable_fields = ['name', 'url', 'active', 'type', 'is_installed', 'status', 'pid', 'folder_name']
+    for field in unmodifiable_fields:
+        if field in update_data:
+            del update_data[field]
+    
+    for key, value in update_data.items():
+        setattr(app, key, value)
+    
+    try:
+        db.commit()
+        db.refresh(app)
+        app_with_owner = db.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.id == app_id).first()
+        return AppPublic.from_orm(app_with_owner)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error while updating app: {e}")
+
+@apps_management_router.get("/installed-apps/{app_id}/logs", response_model=AppLog)
+def get_app_logs(app_id: str, db: Session = Depends(get_db)):
+    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="Installed app not found.")
+
+    app_folder_name = app.folder_name
+    if not app_folder_name:
+        return AppLog(log_content="App installation is corrupted: missing folder name.")
+        
+    app_path = APPS_ROOT_PATH / app_folder_name
+    log_file_path = app_path / "app.log"
+
+    if not log_file_path.is_file():
+        return AppLog(log_content="Log file not found. The app may not have been started yet.")
+
+    try:
+        log_content = log_file_path.read_text(encoding="utf-8")
+        return AppLog(log_content=log_content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read log file: {e}")
+
 @apps_management_router.delete("/installed-apps/{app_id}", response_model=AppActionResponse)
 def uninstall_app(app_id: str, db: Session = Depends(get_db)):
     app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
@@ -509,10 +627,12 @@ def uninstall_app(app_id: str, db: Session = Depends(get_db)):
             os.kill(app.pid, signal.SIGTERM)
         except Exception as e:
             print(f"Warning: Could not stop process {app.pid} during uninstall: {e}")
-    app_folder_name = app.name.replace(" ", "_")
-    app_path = APPS_ROOT_PATH / app_folder_name
-    if app_path.exists():
-        shutil.rmtree(app_path, ignore_errors=True)
+
+    app_folder_name = app.folder_name
+    if app_folder_name:
+        app_path = APPS_ROOT_PATH / app_folder_name
+        if app_path.exists():
+            shutil.rmtree(app_path, ignore_errors=True)
     
     db.delete(app)
     db.commit()

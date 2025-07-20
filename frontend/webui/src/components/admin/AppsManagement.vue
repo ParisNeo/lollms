@@ -12,6 +12,8 @@ import IconArrowsUpDown from '../../assets/icons/IconArrowsUpDown.vue';
 import IconArrowUp from '../../assets/icons/IconArrowUp.vue';
 import IconArrowDown from '../../assets/icons/IconArrowDown.vue';
 import IconArrowUpCircle from '../../assets/icons/IconArrowUpCircle.vue';
+import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconCode from '../../assets/icons/IconCode.vue';
 import AppCard from '../ui/AppCard.vue';
 import AppCardSkeleton from '../ui/AppCardSkeleton.vue';
 
@@ -26,7 +28,8 @@ const newRepo = ref({ name: '', url: '' });
 const isLoadingAction = ref(null); 
 const searchQuery = ref('');
 const selectedCategory = ref('All');
-const installationStatusFilter = ref('All'); // New filter state
+const installationStatusFilter = ref('All');
+const isPullingAll = ref(false);
 
 // Sorting and Starring state
 const sortKey = ref('last_update_date');
@@ -193,6 +196,15 @@ async function handlePullRepository(repo) {
     }
 }
 
+async function handlePullAll() {
+    isPullingAll.value = true;
+    try {
+        await adminStore.pullAllZooRepositories();
+    } finally {
+        isPullingAll.value = false;
+    }
+}
+
 async function handleDeleteRepository(repo) {
     const confirmed = await uiStore.showConfirmation({
         title: `Delete Repository '${repo.name}'?`,
@@ -263,6 +275,23 @@ async function handleUninstallApp(app) {
 
 function showAppDetails(app) {
     uiStore.openModal('appDetails', { app });
+}
+
+function handleEditApp(app) {
+    uiStore.openModal('appConfig', { app });
+}
+
+async function handleShowLogs(app) {
+    try {
+        const logContent = await adminStore.fetchAppLog(app.id);
+        uiStore.openModal('sourceViewer', {
+            title: `Logs: ${app.name}`,
+            content: logContent || 'No log content found.',
+            language: 'log'
+        });
+    } catch (error) {
+        // Handled by interceptor
+    }
 }
 
 async function showAppHelp(app) {
@@ -338,11 +367,17 @@ async function handleCancelInstall(taskId) {
 
         <!-- Repositories Section -->
         <section v-if="activeTab === 'repositories'">
-            <div class="flex justify-between items-center mb-4">
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <h3 class="text-xl font-semibold">App Zoo Repositories</h3>
-                <button @click="isAddFormVisible = !isAddFormVisible" class="btn btn-primary">
-                    {{ isAddFormVisible ? 'Cancel' : 'Add Repository' }}
-                </button>
+                <div class="flex items-center gap-2">
+                    <button @click="handlePullAll" class="btn btn-secondary" :disabled="isPullingAll">
+                        <IconRefresh class="w-4 h-4" :class="{'animate-spin': isPullingAll}" />
+                        <span class="ml-2">Pull All</span>
+                    </button>
+                    <button @click="isAddFormVisible = !isAddFormVisible" class="btn btn-primary">
+                        {{ isAddFormVisible ? 'Cancel' : 'Add Repository' }}
+                    </button>
+                </div>
             </div>
 
             <transition name="form-fade">
@@ -381,6 +416,7 @@ async function handleCancelInstall(taskId) {
                     <div class="flex items-center gap-x-2 flex-shrink-0">
                         <button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm" :disabled="isLoadingAction === repo.id" title="Refresh (git pull)">
                             <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingAction === repo.id}" />
+                            <span class="ml-1">Pull</span>
                         </button>
                         <button @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm" :disabled="isLoadingAction === repo.id" title="Delete">
                             <IconTrash class="w-4 h-4" />
@@ -392,6 +428,13 @@ async function handleCancelInstall(taskId) {
 
         <!-- Available Apps Section -->
         <section v-if="activeTab === 'available_apps'">
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <h3 class="text-xl font-semibold">Available Apps</h3>
+                <button @click="adminStore.fetchZooApps()" class="btn btn-secondary" :disabled="isLoadingZooApps">
+                    <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingZooApps}" />
+                    <span class="ml-2">Rescan All Sources</span>
+                </button>
+            </div>
              <div class="space-y-4">
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
                     <div class="relative lg:col-span-1">
@@ -464,7 +507,7 @@ async function handleCancelInstall(taskId) {
                             <p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate" :title="`Port: ${app.port}`">Port: {{ app.port }}</p>
                         </div>
                     </div>
-                    <div class="flex items-center gap-x-2 flex-shrink-0">
+                    <div class="flex items-center gap-x-2 flex-shrink-0 flex-wrap justify-end">
                          <button v-if="app.update_available" @click="handleUpdateApp(app)" class="btn btn-warning btn-sm p-2" :disabled="isLoadingAction === `update-${app.id}`" title="Update App">
                             <IconArrowUpCircle class="w-5 h-5" :class="{'animate-spin': isLoadingAction === `update-${app.id}`}" />
                         </button>
@@ -479,6 +522,12 @@ async function handleCancelInstall(taskId) {
                         <a v-if="app.status === 'running' && app.url" :href="app.url" target="_blank" class="btn btn-secondary btn-sm p-2" title="Open App">
                             <IconGlobeAlt class="w-5 h-5" />
                         </a>
+                        <button @click="handleEditApp(app)" class="btn btn-secondary btn-sm p-2" title="Edit App Settings">
+                            <IconPencil class="w-5 h-5" />
+                        </button>
+                        <button @click="handleShowLogs(app)" class="btn btn-secondary btn-sm p-2" title="View App Logs">
+                            <IconCode class="w-5 h-5" />
+                        </button>
                         <button v-if="app.status !== 'running'" @click="handleAppAction(app.id, 'start')" class="btn btn-success btn-sm p-2" :disabled="isLoadingAction === `start-${app.id}`" title="Start App">
                             <IconPlayCircle class="w-5 h-5" />
                         </button>

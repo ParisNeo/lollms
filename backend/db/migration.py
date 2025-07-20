@@ -296,7 +296,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "autostart": "BOOLEAN DEFAULT 0 NOT NULL",
             "port": "INTEGER",
             "pid": "INTEGER",
-            "app_metadata": "JSON"
+            "app_metadata": "JSON",
+            "folder_name": "VARCHAR"
         }
         
         app_columns_db_after_rebuild = [col['name'] for col in inspector.get_columns('apps')]

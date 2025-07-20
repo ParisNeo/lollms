@@ -331,6 +331,22 @@ export const useAdminStore = defineStore('admin', () => {
             throw error;
         }
     }
+    async function pullAllZooRepositories() {
+        if (zooRepositories.value.length === 0) {
+            uiStore.addNotification('No repositories to pull.', 'info');
+            return;
+        }
+        uiStore.addNotification('Starting to pull all repositories...', 'info');
+        // Sequentially start the pull tasks. The tasks themselves run in the background.
+        for (const repo of zooRepositories.value) {
+            try {
+                await pullZooRepository(repo.id);
+            } catch (error) {
+                // The error is already handled and notified by the global interceptor.
+                console.error(`Failed to start pull task for repository: ${repo.name}`, error);
+            }
+        }
+    }
 
     // Available Zoo Apps
     async function fetchZooApps() {
@@ -385,11 +401,13 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
-    async function fetchNextAvailablePort() {
+    async function fetchNextAvailablePort(port = null) {
         try {
-            const response = await apiClient.get('/api/apps-management/apps/get-next-available-port');
+            const params = port ? { port } : {};
+            const response = await apiClient.get('/api/apps-management/apps/get-next-available-port', { params });
             return response.data.port;
         } catch (error) {
+            if (port) throw error; // Re-throw for specific port checks
             uiStore.addNotification('Could not determine an available port.', 'warning');
             return 9601; // Fallback
         }
@@ -412,6 +430,26 @@ export const useAdminStore = defineStore('admin', () => {
         await fetchZooApps();
     }
 
+    async function updateInstalledApp(appId, payload) {
+        try {
+            const response = await apiClient.put(`/api/apps-management/installed-apps/${appId}`, payload);
+            uiStore.addNotification(`App '${response.data.name}' updated successfully.`, 'success');
+            await fetchInstalledApps();
+            return response.data;
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    async function fetchAppLog(appId) {
+        try {
+            const response = await apiClient.get(`/api/apps-management/installed-apps/${appId}/logs`);
+            return response.data.log_content;
+        } catch (error) {
+            throw error;
+        }
+    }
+
 
     return {
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers,
@@ -424,9 +462,10 @@ export const useAdminStore = defineStore('admin', () => {
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
         batchUpdateUsers,
         isEnhancingEmail, enhanceEmail,
-        zooRepositories, isLoadingZooRepositories, fetchZooRepositories, addZooRepository, deleteZooRepository, pullZooRepository,
+        zooRepositories, isLoadingZooRepositories, fetchZooRepositories, addZooRepository, deleteZooRepository, pullZooRepository, pullAllZooRepositories,
         zooApps, isLoadingZooApps, fetchZooApps, installZooApp, fetchAppReadme,
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
-        tasks, isLoadingTasks, activeTaskIds, fetchTasks, clearCompletedTasks, cancelTask
+        tasks, isLoadingTasks, activeTaskIds, fetchTasks, clearCompletedTasks, cancelTask,
+        updateInstalledApp, fetchAppLog
     };
 });

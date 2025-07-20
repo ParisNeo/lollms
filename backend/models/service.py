@@ -188,3 +188,6 @@ class ToolInfo(BaseModel):
     name: str
     description: Optional[str] = None
     is_active: bool = False
+
+class AppLog(BaseModel):
+    log_content: str
