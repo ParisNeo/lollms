@@ -7,9 +7,15 @@ const uiStore = useUiStore();
 const props = computed(() => uiStore.modalData('passwordResetLink'));
 const linkCopied = ref(false);
 
+const title = computed(() => props.value?.title || 'Generated Link');
+const message = computed(() => props.value?.message || 'Please copy this link and send it securely.');
+const entityName = computed(() => props.value?.username || '');
+const link = computed(() => props.value?.link || '');
+const copyButtonText = computed(() => props.value?.copyButtonText || 'Copy Link');
+
 const copyLink = () => {
-  if (props.value?.link) {
-    navigator.clipboard.writeText(props.value.link).then(() => {
+  if (link.value) {
+    navigator.clipboard.writeText(link.value).then(() => {
       linkCopied.value = true;
       setTimeout(() => {
         linkCopied.value = false;
@@ -22,20 +28,19 @@ const copyLink = () => {
 <template>
   <GenericModal
     modalName="passwordResetLink"
-    title="Generated Password Reset Link"
+    :title="title"
     maxWidthClass="max-w-lg"
   >
     <template #body>
       <div v-if="props" class="space-y-4">
         <p class="text-sm text-gray-600 dark:text-gray-300">
-          A single-use password reset link has been generated for the user
-          <strong class="font-medium text-gray-900 dark:text-gray-100">{{ props.username }}</strong>.
-          Please copy this link and send it to them securely. This link will expire in one hour.
+          {{ message }}
+          <strong v-if="entityName" class="font-medium text-gray-900 dark:text-gray-100">{{ entityName }}</strong>.
         </p>
         <div class="relative mt-2">
           <input
             type="text"
-            :value="props.link"
+            :value="link"
             readonly
             class="input-field w-full pr-24"
           />
@@ -48,7 +53,7 @@ const copyLink = () => {
                 : 'bg-blue-600 text-white hover:bg-blue-700'
             ]"
           >
-            {{ linkCopied ? 'Copied!' : 'Copy Link' }}
+            {{ linkCopied ? 'Copied!' : copyButtonText }}
           </button>
         </div>
       </div>

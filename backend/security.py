@@ -45,6 +45,10 @@ def generate_api_key() -> Tuple[str, str]:
         
     return full_key, prefix
 
+def generate_sso_secret() -> str:
+    """Generates a secure, URL-safe random string for SSO client secrets."""
+    return secrets.token_urlsafe(32)
+
 def hash_api_key(api_key: str) -> str:
     """Hashes a plain text API key for storage."""
     return api_key_context.hash(api_key)
@@ -55,7 +59,7 @@ def verify_api_key(plain_key: str, hashed_key: str) -> bool:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """
-    Creates a JWT access token with a dynamically configured expiration time.
+    Creates a JWT access token for the main application using the global SECRET_KEY.
     """
     to_encode = data.copy()
 
@@ -73,6 +77,19 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+def create_sso_token(data: dict, secret_key: str, audience: str) -> str:
+    """
+    Creates a JWT access token specifically for an SSO application.
+    """
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=15) # SSO tokens have a short lifespan
+    to_encode.update({
+        "exp": expire,
+        "aud": audience
+    })
+    encoded_jwt = jwt.encode(to_encode, secret_key, algorithm=ALGORITHM)
     return encoded_jwt
 
 def create_reset_token() -> str:
@@ -253,9 +270,18 @@ def send_password_reset_email(to_email: str, reset_link: str, username: str):
     """
     send_generic_email(to_email, subject, body_content, send_as_text=False)
 
-def decode_access_token(token: str) -> Optional[dict]:
+def decode_main_access_token(token: str) -> Optional[dict]:
+    """Decodes a main application JWT using the global SECRET_KEY."""
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        return payload
+    except JWTError:
+        return None
+
+def decode_sso_token(token: str, secret_key: str, audience: str) -> Optional[dict]:
+    """Decodes an SSO JWT using the application-specific secret key and audience."""
+    try:
+        payload = jwt.decode(token, secret_key, algorithms=[ALGORITHM], audience=audience)
         return payload
     except JWTError:
         return None

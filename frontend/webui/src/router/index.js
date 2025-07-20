@@ -7,6 +7,7 @@ import ResetPasswordView from '../views/ResetPasswordView.vue';
 import AdminView from '../views/AdminView.vue';
 import DataStoresView from '../views/DataStoresView.vue';
 import FriendsView from '../views/FriendsView.vue';
+import SsoLoginView from '../views/SsoLoginView.vue';
 
 const routes = [
   {
@@ -54,6 +55,12 @@ const routes = [
     name: 'ResetPassword',
     component: ResetPasswordView,
     meta: { requiresGuest: true }
+  },
+  {
+    path: '/app/:appName',
+    name: 'SsoLogin',
+    component: SsoLoginView,
+    meta: { isSsoRoute: true }
   },
 ];
 

@@ -28,6 +28,10 @@ new ui:
 - OK the modal looses information when another modal is shown
 - OK user management page needs upgrade and bugfix
 - OK make it possible to load any image file for mcp icons and set reduce their size automatically
+- OK key generation for regular users
+
+## SSO
+- add applications/mcps log in with permissions via introspect
 
 ## Discussion:
 - start/stop events must be collapsible, all that happens in between should be put inside in between
@@ -64,8 +68,6 @@ new ui:
 ### bindings/models
 - add alias for models
 
-### keys management and permissions
-- key generation for regular users
 
 ## user settings
 - add activating realtime dms to the ui
@@ -88,3 +90,6 @@ new ui:
 ## background processes
 - add current processes listing
 - add a cleaning cron
+
+## integrate lollms apps
+- add the apps zoo to lollms_chat

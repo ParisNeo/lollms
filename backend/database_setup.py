@@ -229,7 +229,10 @@ class MCP(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     authentication_type = Column(String, default="None", nullable=False)
-    authentication_key = Column(String, nullable=True)    
+    authentication_key = Column(String, nullable=True)
+    sso_secret = Column(String, nullable=True)
+    sso_redirect_uri = Column(String, nullable=True)
+    sso_user_infos_to_share = Column(JSON, nullable=True)
     owner = relationship("User", back_populates="personal_mcps")
     
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_mcp_name'),)
@@ -246,7 +249,10 @@ class App(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     authentication_type = Column(String, default="None", nullable=False)
-    authentication_key = Column(String, nullable=True)    
+    authentication_key = Column(String, nullable=True)
+    sso_secret = Column(String, nullable=True)
+    sso_redirect_uri = Column(String, nullable=True)
+    sso_user_infos_to_share = Column(JSON, nullable=True)
     owner = relationship("User", back_populates="personal_apps")
     
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_app_name'),)
@@ -262,6 +268,9 @@ class SystemApp(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     authentication_type = Column(String, default="None", nullable=False)
     authentication_key = Column(String, nullable=True)
+    sso_secret = Column(String, nullable=True)
+    sso_redirect_uri = Column(String, nullable=True)
+    sso_user_infos_to_share = Column(JSON, nullable=True)
 
 class DatabaseVersion(Base):
     __tablename__ = "database_version"
@@ -571,7 +580,8 @@ def init_database(db_url: str):
                     "active": "BOOLEAN DEFAULT 1 NOT NULL",
                     "type": "VARCHAR",
                     "icon": "TEXT",
-                    "authentication_type": "VARCHAR", "authentication_key": "VARCHAR"
+                    "authentication_type": "VARCHAR", "authentication_key": "VARCHAR",
+                    "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON"
                 }
                 for col_name, col_sql_def in new_mcp_cols_defs.items():
                     if col_name not in mcp_columns_db:
@@ -584,12 +594,23 @@ def init_database(db_url: str):
                     "icon": "TEXT",
                     "active": "BOOLEAN DEFAULT 1 NOT NULL",
                     "type": "VARCHAR",
-                    "authentication_type": "VARCHAR", "authentication_key": "VARCHAR"
+                    "authentication_type": "VARCHAR", "authentication_key": "VARCHAR",
+                    "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON"
                 }
                 for col_name, col_sql_def in new_app_cols_defs.items():
                     if col_name not in app_columns_db:
                         connection.execute(text(f"ALTER TABLE apps ADD COLUMN {col_name} {col_sql_def}"))
                         print(f"INFO: Added missing column '{col_name}' to 'apps' table.")
+
+            if inspector.has_table("system_apps"):
+                system_app_columns_db = [col['name'] for col in inspector.get_columns('system_apps')]
+                new_system_app_cols_defs = {
+                    "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON"
+                }
+                for col_name, col_sql_def in new_system_app_cols_defs.items():
+                    if col_name not in system_app_columns_db:
+                        connection.execute(text(f"ALTER TABLE system_apps ADD COLUMN {col_name} {col_sql_def}"))
+                        print(f"INFO: Added missing column '{col_name}' to 'system_apps' table.")
 
             transaction.commit()
             print("INFO: Database schema migration/check completed successfully.")

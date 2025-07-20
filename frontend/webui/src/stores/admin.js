@@ -198,6 +198,15 @@ export const useAdminStore = defineStore('admin', () => {
         mcps.value = mcps.value.filter(m => m.id !== id);
         uiStore.addNotification('MCP deleted successfully.', 'success');
     }
+    async function generateMcpSsoSecret(id) {
+        try {
+            const response = await apiClient.post(`/api/mcps/${id}/generate-sso-secret`);
+            await fetchMcps();
+            return response.data.sso_secret;
+        } catch (error) {
+            throw error;
+        }
+    }
 
     // Apps
     async function fetchApps() {
@@ -227,6 +236,15 @@ export const useAdminStore = defineStore('admin', () => {
         apps.value = apps.value.filter(a => a.id !== id);
         uiStore.addNotification('App deleted successfully.', 'success');
     }
+    async function generateAppSsoSecret(id) {
+        try {
+            const response = await apiClient.post(`/api/apps/${id}/generate-sso-secret`);
+            await fetchApps();
+            return response.data.sso_secret;
+        } catch (error) {
+            throw error;
+        }
+    }
 
     return {
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers,
@@ -234,8 +252,8 @@ export const useAdminStore = defineStore('admin', () => {
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings,
         isImporting, importOpenWebUIData,
         mcps, apps, isLoadingServices,
-        fetchMcps, addMcp, updateMcp, deleteMcp,
-        fetchApps, addApp, updateApp, deleteApp,
+        fetchMcps, addMcp, updateMcp, deleteMcp, generateMcpSsoSecret,
+        fetchApps, addApp, updateApp, deleteApp, generateAppSsoSecret,
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
         batchUpdateUsers,
         isEnhancingEmail, enhanceEmail

@@ -434,6 +434,8 @@ class MCPBase(BaseModel):
     type: Optional[str] = "user"
     authentication_type: Optional[str] = "none"
     authentication_key: Optional[str] = ""
+    sso_redirect_uri: Optional[str] = None
+    sso_user_infos_to_share: List[str] = Field(default_factory=list)
 
 class MCPCreate(MCPBase):
     pass
@@ -446,13 +448,15 @@ class MCPUpdate(BaseModel):
     type: Optional[str] = "user"
     authentication_type: Optional[str] = "none"
     authentication_key: Optional[str] = ""
-
+    sso_redirect_uri: Optional[str] = None
+    sso_user_infos_to_share: Optional[List[str]] = None
 
 class MCPPublic(MCPBase):
     id: str
     owner_username: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    sso_secret_exists: bool = False
     class Config:
         from_attributes = True
 
@@ -464,6 +468,8 @@ class AppBase(BaseModel):
     type: Optional[str] = "user"
     authentication_type: Optional[str] = "none"
     authentication_key: Optional[str] = ""
+    sso_redirect_uri: Optional[str] = None
+    sso_user_infos_to_share: List[str] = Field(default_factory=list)
 
 class AppCreate(AppBase):
     pass
@@ -476,14 +482,20 @@ class AppUpdate(BaseModel):
     type: Optional[str] = "user"
     authentication_type: Optional[str] = "none"
     authentication_key: Optional[str] = ""
+    sso_redirect_uri: Optional[str] = None
+    sso_user_infos_to_share: Optional[List[str]] = None
 
 class AppPublic(AppBase):
     id: str
     owner_username: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    sso_secret_exists: bool = False
     class Config:
         from_attributes = True
+
+class SSOSecretResponse(BaseModel):
+    sso_secret: str
 
 class ToolInfo(BaseModel):
     name: str

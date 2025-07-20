@@ -379,7 +379,7 @@ export const useDataStore = defineStore('data', () => {
     async function addMcp(mcpData) {
         const uiStore = useUiStore();
         try {
-            await apiClient.post('/api/mcps/personal', mcpData);
+            await apiClient.post('/api/mcps', mcpData);
             uiStore.addNotification('MCP server added successfully.', 'success');
             await fetchMcps();
             await triggerMcpReload();
@@ -405,6 +405,15 @@ export const useDataStore = defineStore('data', () => {
             uiStore.addNotification('MCP server removed.', 'success');
             await fetchMcps();
             await triggerMcpReload();
+        } catch (error) {
+            throw error;
+        }
+    }
+    async function generateMcpSsoSecret(id) {
+        try {
+            const response = await apiClient.post(`/api/mcps/${id}/generate-sso-secret`);
+            await fetchMcps();
+            return response.data.sso_secret;
         } catch (error) {
             throw error;
         }
@@ -456,7 +465,7 @@ export const useDataStore = defineStore('data', () => {
     async function addApp(appData) {
         const uiStore = useUiStore();
         try {
-            await apiClient.post('/api/apps/personal', appData);
+            await apiClient.post('/api/apps', appData);
             uiStore.addNotification('App added successfully.', 'success');
             await fetchApps();
         } catch (error) { throw error; }
@@ -476,6 +485,15 @@ export const useDataStore = defineStore('data', () => {
             uiStore.addNotification('App removed.', 'success');
             await fetchApps();
         } catch (error) { throw error; }
+    }
+    async function generateAppSsoSecret(id) {
+        try {
+            const response = await apiClient.post(`/api/apps/${id}/generate-sso-secret`);
+            await fetchApps();
+            return response.data.sso_secret;
+        } catch (error) {
+            throw error;
+        }
     }
     function $reset() {
         availableLollmsModels.value = [];
@@ -506,9 +524,10 @@ export const useDataStore = defineStore('data', () => {
         fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,
         deleteFileFromStore, fetchPersonalities, addPersonality,
         updatePersonality, deletePersonality, fetchMcps, addMcp,
-        updateMcp, deleteMcp, fetchMcpTools, triggerMcpReload,
+        updateMcp, deleteMcp, generateMcpSsoSecret,
+        fetchMcpTools, triggerMcpReload,
         refreshMcps, refreshRags,
-        fetchApps, addApp, updateApp, deleteApp,
+        fetchApps, addApp, updateApp, deleteApp, generateAppSsoSecret,
         
         apiKeys,
         fetchApiKeys, 

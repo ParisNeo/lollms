@@ -40,7 +40,7 @@ from backend.session import (
     user_sessions,
 )
 from backend.config import SAFE_STORE_DEFAULTS
-from backend.security import get_password_hash, verify_password, create_access_token, decode_access_token, create_reset_token, send_password_reset_email
+from backend.security import get_password_hash, verify_password, create_access_token, decode_main_access_token, create_reset_token, send_password_reset_email
 from backend.settings import settings
 from backend.ws_manager import manager
 
@@ -145,7 +145,7 @@ async def introspect_token(
     token: str = Form(...),
     db: Session = Depends(get_db)
 ):
-    payload = decode_access_token(token)
+    payload = decode_main_access_token(token)
     if payload is None:
         return {"active": False}
         

@@ -26,7 +26,7 @@ from backend.database_setup import (
 )
 from lollms_client import LollmsClient
 from backend.models import UserAuthDetails, TokenData
-from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM
+from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM, decode_main_access_token
 from backend.config import (
     APP_DATA_DIR,
     SAFE_STORE_DEFAULTS,
@@ -65,14 +65,14 @@ async def get_current_db_user_from_token(
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-        token_data = TokenData(username=username)
-    except JWTError:
+    payload = decode_main_access_token(token)
+    if payload is None:
         raise credentials_exception
+    
+    username: str = payload.get("sub")
+    if username is None:
+        raise credentials_exception
+    token_data = TokenData(username=username)
     
     user = get_user_by_username(db, username=token_data.username)
     if user is None:

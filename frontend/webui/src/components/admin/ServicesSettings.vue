@@ -19,6 +19,13 @@ const servicesForm = ref({
     openai_api_service_enabled: false
 });
 
+const ssoInfoOptions = [
+    { id: 'email', label: 'Email Address' },
+    { id: 'first_name', label: 'First Name' },
+    { id: 'family_name', label: 'Family Name' },
+    { id: 'birth_date', label: 'Birth Date' },
+];
+
 const getInitialFormState = (type = 'mcps') => ({
     name: '',
     url: '',
@@ -26,7 +33,9 @@ const getInitialFormState = (type = 'mcps') => ({
     active: true,
     type: 'system',
     authentication_type: 'none',
-    authentication_key: ''
+    authentication_key: '',
+    sso_redirect_uri: '',
+    sso_user_infos_to_share: [],
 });
 
 const form = ref(getInitialFormState());
@@ -76,6 +85,7 @@ const sortedSystemMcps = computed(() => mcps.value.filter(m => m.type === 'syste
 const sortedUserMcps = computed(() => mcps.value.filter(m => m.type === 'user').sort((a, b) => a.name.localeCompare(b.name)));
 const sortedSystemApps = computed(() => apps.value.filter(a => a.type === 'system').sort((a, b) => a.name.localeCompare(b.name)));
 const sortedUserApps = computed(() => apps.value.filter(a => a.type === 'user').sort((a, b) => a.name.localeCompare(b.name)));
+const isSsoAuth = computed(() => form.value.authentication_type === 'lollms_sso');
 
 function showAddForm(type) {
     if (isEditMode.value) cancelEditing();
@@ -94,6 +104,8 @@ function startEditing(item, type) {
     form.value.type = item.type;
     form.value.authentication_type = item.authentication_type || 'none';
     form.value.authentication_key = '';
+    form.value.sso_redirect_uri = item.sso_redirect_uri || '';
+    form.value.sso_user_infos_to_share = item.sso_user_infos_to_share || [];
     isFormVisible.value = true;
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -132,6 +144,25 @@ async function handleDeleteItem(item, type) {
     if (confirmed) {
         if (editingItem.value && editingItem.value.id === item.id) cancelEditing();
         await (type === 'apps' ? adminStore.deleteApp(item.id) : adminStore.deleteMcp(item.id));
+    }
+}
+async function handleGenerateSecret(item, type) {
+    const confirmed = await uiStore.showConfirmation({
+        title: `Generate New Secret?`,
+        message: `This will generate a new SSO secret for '${item.name}'. Any existing application using the old secret will no longer be able to authenticate. This action is irreversible.`,
+        confirmText: 'Generate Secret'
+    });
+    if (confirmed) {
+        const isApp = type === 'apps';
+        const secret = await (isApp ? adminStore.generateAppSsoSecret(item.id) : adminStore.generateMcpSsoSecret(item.id));
+        if (secret) {
+            uiStore.openModal('passwordResetLink', {
+                title: 'New SSO Secret Generated',
+                message: `This is the new SSO secret for '${item.name}'. Copy it now, as you will not be able to see it again.`,
+                link: secret,
+                copyButtonText: 'Copy Secret'
+            });
+        }
     }
 }
 async function handleReloadMcps() {
@@ -314,6 +345,7 @@ function handleFileSelect(event) {
                             <legend class="text-sm font-medium text-gray-700 dark:text-gray-300">Authentication</legend>
                             <select id="formAuthType" v-model="form.authentication_type" class="input-field">
                                 <option value="none">None</option>
+                                <option value="lollms_sso">LoLLMs SSO</option>
                                 <option value="lollms_chat_auth">LoLLMs Chat Auth</option>
                                 <option value="bearer">Bearer Token</option>
                             </select>
@@ -330,6 +362,31 @@ function handleFileSelect(event) {
                             </div>
                         </fieldset>
                         
+                        <div v-if="isSsoAuth" class="p-4 space-y-4 border rounded-md dark:border-gray-600">
+                            <h4 class="font-medium text-gray-800 dark:text-gray-200">SSO Configuration</h4>
+                            <div>
+                                <label for="ssoRedirectUri" class="block text-sm font-medium">Redirect URI</label>
+                                <input type="url" id="ssoRedirectUri" v-model="form.sso_redirect_uri" class="input-field mt-1" placeholder="https://yourapp.com/lollms_auth" required>
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The URL where users are sent after successful authentication.</p>
+                            </div>
+                             <div>
+                                <label class="block text-sm font-medium">User Info to Share</label>
+                                <div class="mt-2 space-y-2">
+                                    <div v-for="option in ssoInfoOptions" :key="option.id" class="flex items-center">
+                                        <input :id="`sso-info-${option.id}`" type="checkbox" :value="option.id" v-model="form.sso_user_infos_to_share" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                                        <label :for="`sso-info-${option.id}`" class="ml-2 text-sm text-gray-700 dark:text-gray-300">{{ option.label }}</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div v-if="isEditMode">
+                                <label class="block text-sm font-medium">SSO Secret</label>
+                                 <div class="mt-1 flex items-center gap-x-3">
+                                    <p class="text-sm text-gray-500 dark:text-gray-400 flex-grow">{{ editingItem.sso_secret_exists ? 'A secret is configured.' : 'No secret has been generated.' }}</p>
+                                    <button type="button" @click="handleGenerateSecret(editingItem, activeTab)" class="btn btn-secondary text-sm">{{ editingItem.sso_secret_exists ? 'Regenerate Secret' : 'Generate Secret' }}</button>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="flex justify-end items-center gap-x-3 pt-2">
                             <button @click="cancelEditing" type="button" class="btn btn-secondary">Cancel</button>
                             <button type="submit" class="btn btn-primary" :disabled="isLoading">

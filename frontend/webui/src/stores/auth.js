@@ -69,6 +69,21 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function attemptInitialAuth() {
+        // Skip auth attempt if we are on an SSO route
+        if (window.location.pathname.startsWith('/app/')) {
+            if(token.value){
+                // try to load user data silently if a token exists
+                try{
+                    const response = await apiClient.get('/api/auth/me');
+                    user.value = response.data;
+                } catch(e){
+                    clearAuthData();
+                }
+            }
+            isAuthenticating.value = false;
+            return;
+        }
+
         isAuthenticating.value = true;
         loadingProgress.value = 0;
         loadingMessage.value = 'Waking up the hamsters...';
@@ -129,6 +144,27 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
+    async function ssoLoginWithPassword(appName, username, password) {
+        // First, login to establish a session.
+        await login(username, password);
+        
+        // Then, authorize the app using the new session.
+        return await ssoAuthorizeApplication(appName);
+    }
+
+    async function ssoAuthorizeApplication(appName) {
+        const formData = new FormData();
+        formData.append('app_name', appName);
+        const response = await apiClient.post('/api/sso/authorize', formData);
+        
+        const appDetailsResponse = await apiClient.get(`/api/sso/app_details/${appName}`);
+
+        return {
+            access_token: response.data.access_token,
+            redirect_uri: appDetailsResponse.data.sso_redirect_uri,
+        };
+    }
+    
     async function register(registrationData) {
         const uiStore = useUiStore();
         try {
@@ -169,7 +205,11 @@ export const useAuthStore = defineStore('auth', () => {
         
         uiStore.closeModal();
         uiStore.addNotification('You have been logged out.', 'info');
-        uiStore.openModal('login');
+        // On SSO route, don't reopen login modal automatically
+        if (!window.location.pathname.startsWith('/app/')) {
+            uiStore.openModal('login');
+        }
+
 
         if (localToken) {
             apiClient.post('/api/auth/logout').catch(error => {
@@ -214,5 +254,6 @@ export const useAuthStore = defineStore('auth', () => {
         loadingMessage, loadingProgress, funFact,
         attemptInitialAuth, login, register, logout,
         updateUserProfile, updateUserPreferences, changePassword,
+        ssoLoginWithPassword, ssoAuthorizeApplication
     };
 });
