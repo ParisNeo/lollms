@@ -7,12 +7,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from jose import JWTError, jwt
 
-from backend.database_setup import (
-    User as DBUser,
-    App as DBApp,
-    MCP as DBMCP,
-    get_db,
-)
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.service import App as DBApp, MCP as DBMCP
 from backend.models import (
     UserAuthDetails,
     UserPublic

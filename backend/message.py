@@ -47,44 +47,9 @@ from werkzeug.utils import secure_filename
 from pydantic import BaseModel, Field, constr, field_validator, validator # Ensure these are imported
 import datetime # Ensure datetime is imported
 
-from backend.database_setup import Personality as DBPersonality # Add this import at the top of main.py
 from backend.config import *
 # --- Pydantic Models for API ---
-from backend.models import (
-UserLLMParams,
-UserAuthDetails,
-UserCreateAdmin,
-UserPasswordResetAdmin,UserPasswordChange,
-UserPublic,
-DiscussionInfo,
-DiscussionTitleUpdate,
-DiscussionRagDatastoreUpdate,MessageOutput,
-MessageContentUpdate,
-MessageGradeUpdate,
-SafeStoreDocumentInfo,
-DiscussionExportRequest,
-ExportData,
-DiscussionImportRequest,
-DiscussionSendRequest,
-DataStoreBase,
-DataStoreCreate,
-DataStorePublic,
-DataStoreShareRequest,
-PersonalityBase,
-PersonalityCreate,
-PersonalityUpdate,
-PersonalityPublic,
-UserUpdate,
-FriendshipBase,
-FriendRequestCreate,
-FriendshipAction,
-FriendPublic,
-FriendshipRequestPublic,
-PersonalitySendRequest,
 
-DirectMessagePublic,
-DirectMessageCreate
-)
 # safe_store is expected to be installed
 try:
     import safe_store

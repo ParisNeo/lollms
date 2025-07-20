@@ -17,12 +17,10 @@ from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from jose import JWTError, jwt
 
-from backend.database_setup import (
-    User as DBUser,
-    Personality as DBPersonality,
-    get_db,
-    LLMBinding as DBLLMBinding,
-)
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.personality import Personality as DBPersonality
+from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.models import (
     Token,
     UserCreatePublic,

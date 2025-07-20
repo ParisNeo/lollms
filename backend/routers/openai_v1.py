@@ -14,7 +14,11 @@ from sqlalchemy import or_
 from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel, Field
 
-from backend.database_setup import get_db, User as DBUser, OpenAIAPIKey as DBAPIKey, LLMBinding as DBLLMBinding, Personality as DBPersonality
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
+from backend.db.models.config import LLMBinding as DBLLMBinding
+from backend.db.models.personality import Personality as DBPersonality
 from backend.security import verify_api_key
 from backend.session import get_user_lollms_client, user_sessions, build_lollms_client_from_params
 from backend.settings import settings

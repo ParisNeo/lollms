@@ -1,29 +1,20 @@
-# backend/session.py
-
-# --- Standard Library Imports ---
 import json
 import traceback
 import datetime
 from pathlib import Path
 from typing import Dict, Optional, Any, cast
 
-# --- Third-Party Imports ---
 from fastapi import HTTPException, Depends, status
 from sqlalchemy.orm import Session, joinedload
 from werkzeug.utils import secure_filename
 from jose import jwt, JWTError
 
-# --- Local Application Imports ---
-from backend.database_setup import (
-    User as DBUser,
-    DataStore as DBDataStore,
-    MCP as DBMCP,
-    SharedDataStoreLink as DBSharedDataStoreLink,
-    Personality as DBPersonality,
-    MCP as DBMCP,
-    LLMBinding as DBLLMBinding,
-    get_db,
-)
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
+from backend.db.models.service import MCP as DBMCP
+from backend.db.models.personality import Personality as DBPersonality
+from backend.db.models.config import LLMBinding as DBLLMBinding
 from lollms_client import LollmsClient
 from backend.models import UserAuthDetails, TokenData
 from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM, decode_main_access_token
@@ -36,30 +27,21 @@ from backend.config import (
 )
 from backend.settings import settings
 from backend.security import create_access_token
-# --- safe_store is optional ---
+
 try:
     import safe_store
 except ImportError:
     safe_store = None
 
-# --- Global User Session Management ---
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
-
-# --- User & Authentication Helpers ---
-
 def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
-    """Fetches a user from the database by their username."""
     return db.query(DBUser).filter(DBUser.username == username).first()
 
 async def get_current_db_user_from_token(
     token: str = Depends(oauth2_scheme), 
     db: Session = Depends(get_db)
 ) -> DBUser:
-    """
-    Decodes the JWT token to get the username, fetches the user from the database,
-    and updates their last activity timestamp.
-    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -98,11 +80,6 @@ async def get_current_db_user_from_token(
     return user
 
 def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_token)) -> UserAuthDetails:
-    """
-    Takes a DB user record, ensures they are active, and constructs the detailed
-    UserAuthDetails model with data from both the DB and the active session.
-    This function now ALWAYS fetches the live value for global settings.
-    """
     if not db_user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive.")
 
@@ -131,7 +108,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     ai_name_for_user = getattr(lc, "ai_name", "assistant")
     current_session_llm_params = user_sessions[username].get("llm_params", {})
 
-    # Always fetch the live setting from the global settings singleton
     is_api_service_enabled = settings.get("openai_api_service_enabled", False)
 
     return UserAuthDetails(
@@ -174,13 +150,10 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     )
 
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
-    """Checks if the current active user has administrator privileges."""
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator privileges required.")
     return current_user
 
-
-# --- Service Instance Helpers ---
 def load_mcps(username):
     session = user_sessions[username]
     servers_infos = {}
@@ -242,13 +215,11 @@ def load_mcps(username):
 
 
 def invalidate_user_mcp_cache(username: str):
-    """Invalidates the lollms_client and tools cache for a given user."""
     if username in user_sessions and 'tools_cache' in user_sessions[username]:
         del user_sessions[username]['tools_cache']
         print(f"INFO: Invalidated tools cache for user: {username}")
 
 def reload_lollms_client_mcp(username: str):
-    """Encapsulates the logic to reload MCP services for a given user."""
     invalidate_user_mcp_cache(username)
     lc = get_user_lollms_client(username)
     if hasattr(lc, 'mcp') and lc.mcp:
@@ -275,31 +246,24 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
     try:
         binding_to_use = None
         
-        # Determine the target binding alias with corrected priority
         target_binding_alias = binding_alias_override
         if not target_binding_alias:
             user_model_full = session.get("lollms_model_name")
             if user_model_full and '/' in user_model_full:
                 target_binding_alias = user_model_full.split('/', 1)[0]
 
-        # Attempt to find the targeted binding
         if target_binding_alias:
             binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
 
-        # If the targeted binding wasn't found or wasn't specified, fall back to the first active binding
         if not binding_to_use:
             binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
             if not binding_to_use:
                 raise HTTPException(status_code=404, detail="No active LLM bindings are configured.")
 
-        # Now we have a definitive binding to use. Check cache.
         final_alias = binding_to_use.alias
         if final_alias in session["lollms_clients"]:
             return cast(LollmsClient, session["lollms_clients"][final_alias])
         
-        # --- If not cached, build a new client ---
-        
-        # Determine the model name for this specific binding
         user_model_full = session.get("lollms_model_name")
         selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
 
@@ -310,7 +274,6 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
 
         client_init_params = session.get("llm_params", {}).copy()
         
-        # Handle global "force" overrides from admin settings
         force_mode = settings.get("force_model_mode", "disabled")
         if force_mode == "force_always":
             forced_model_full = settings.get("force_model_name")
@@ -321,7 +284,6 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
             if ctx_size_override is not None:
                 client_init_params["ctx_size"] = ctx_size_override
 
-        # Assemble all parameters for client instantiation
         client_init_params.update({
             "binding_name": binding_to_use.name,
             "model_name": model_name_for_binding,
@@ -354,11 +316,6 @@ def build_lollms_client_from_params(
     model_name: str,
     llm_params: Optional[Dict[str, Any]] = None
 ) -> LollmsClient:
-    """
-    Builds a LollmsClient instance for a specific request based on provided parameters,
-    without caching it in the user's session. This is ideal for API calls
-    that specify their own model and binding.
-    """
     session = user_sessions.get(username)
     if not session:
         raise HTTPException(status_code=500, detail="User session not found, cannot build LollmsClient.")
@@ -458,7 +415,6 @@ def get_safe_store_instance(
     return cast(safe_store.SafeStore, session["safe_store_instances"][datastore_id])
 
 
-# --- User-specific Path Helpers ---
 def get_user_data_root(username: str) -> Path:
     safe_username = secure_filename(username)
     path = APP_DATA_DIR / safe_username

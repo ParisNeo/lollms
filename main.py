@@ -12,10 +12,11 @@ from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG, DEFAULT_PERSONALITIES
 )
-from backend.database_setup import (
-    init_database, get_db, hash_password,
-    User as DBUser, Personality as DBPersonality, AppZooRepository as DBAppZooRepository
-)
+from backend.db import init_database, get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.personality import Personality as DBPersonality
+from backend.db.models.service import AppZooRepository as DBAppZooRepository
+from backend.security import get_password_hash as hash_password
 from backend.discussion import LegacyDiscussion
 from backend.session import (
     get_user_data_root, get_user_discussion_path, user_sessions
@@ -125,7 +126,6 @@ async def on_startup() -> None:
                 db_for_defaults.add(new_pers)
                 print(f"INFO: Added default public personality: '{new_pers.name}'")
         
-        # Add default App Zoo Repository if none exist
         repo_count = db_for_defaults.query(func.count(DBAppZooRepository.id)).scalar()
         if repo_count == 0:
             default_repo = DBAppZooRepository(
@@ -142,26 +142,22 @@ async def on_startup() -> None:
         if db_for_defaults: db_for_defaults.close()
 
 # --- CORS Configuration ---
-# This is now more secure, only allowing the frontend to connect.
 host = SERVER_CONFIG.get("host", "0.0.0.0")
 port = SERVER_CONFIG.get("port", 9642)
 https_enabled = SERVER_CONFIG.get("https_enabled", False)
 
 allowed_origins = [
-    "http://localhost:5173",    # Vite dev server default
-    "http://127.0.0.1:5173",   # Vite dev server alternate
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
 ]
 
-# Add the server's own origin(s) for production builds
 if host == "0.0.0.0":
-    # If listening on all interfaces, allow common local access points
     allowed_origins.append(f"http://localhost:{port}")
     allowed_origins.append(f"http://127.0.0.1:{port}")
     if https_enabled:
         allowed_origins.append(f"https://localhost:{port}")
         allowed_origins.append(f"https://127.0.0.1:{port}")
 else:
-    # If listening on a specific interface
     allowed_origins.append(f"http://{host}:{port}")
     if https_enabled:
         allowed_origins.append(f"https://{host}:{port}")
@@ -199,23 +195,19 @@ app.include_router(sso_router)
 app.include_router(apps_management_router)
 app.include_router(tasks_router)
 
-add_ui_routes(app) # Add the static file serving
+add_ui_routes(app)
 
 if __name__ == "__main__":
     import uvicorn
     from backend.settings import settings
 
-    # Initialize DB first to ensure settings are bootstrapped if needed
     init_database(APP_DB_URL)
     
-    # Force a refresh of settings from the database
     settings.refresh()
     
-    # Get server config from settings, with fallback to config.toml values from config.py
     host_setting = settings.get("host", host)
     port_setting = int(settings.get("port", port))
 
-    # Get SSL config from settings
     ssl_params = {}
     if settings.get("https_enabled"):
         certfile = settings.get("ssl_certfile")

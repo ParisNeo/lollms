@@ -27,12 +27,9 @@ from werkzeug.utils import secure_filename
 
 
 # Local Application Imports
-from backend.database_setup import (
-    User as DBUser,
-    DataStore as DBDataStore,
-    SharedDataStoreLink as DBSharedDataStoreLink,
-    get_db,
-)
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
 from backend.models import (
     UserAuthDetails,
     DataStoreCreate,

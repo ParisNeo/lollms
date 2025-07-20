@@ -1,6 +1,6 @@
 import datetime
 from pydantic import BaseModel, constr
-from backend.database_setup import FriendshipStatus
+from backend.db.base import FriendshipStatus
 
 class FriendshipBase(BaseModel):
     pass

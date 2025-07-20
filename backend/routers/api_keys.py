@@ -4,7 +4,9 @@ from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Response, Body
 from sqlalchemy.orm import Session
 
-from backend.database_setup import get_db, OpenAIAPIKey as DBAPIKey, User as DBUser
+from backend.db import get_db
+from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
+from backend.db.models.user import User as DBUser
 from backend.models import UserAuthDetails, APIKeyCreate, APIKeyPublic, NewAPIKeyResponse
 from backend.security import generate_api_key, hash_api_key
 from backend.session import get_current_active_user

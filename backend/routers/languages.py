@@ -1,92 +1,9 @@
-# Standard Library Imports
-import os
-import shutil
-import uuid
 import json
 from pathlib import Path
-from typing import List, Dict, Optional, Any, cast, Union, Tuple, AsyncGenerator
-import datetime
-import asyncio
-import threading
-import traceback
-import io
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import JSONResponse
+from backend.config import LOCALS_DIR
 
-# Third-Party Imports
-import toml
-import yaml
-from fastapi import (
-    FastAPI,
-    HTTPException,
-    Depends,
-    Request,
-    File,
-    UploadFile,
-    Form,
-    APIRouter,
-    Response,
-    Query,
-    BackgroundTasks
-)
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.responses import (
-    HTMLResponse,
-    StreamingResponse,
-    JSONResponse,
-    FileResponse,
-)
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, constr, field_validator, validator
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy import (
-    or_, and_ # Add this line
-)
-from dataclasses import dataclass, field as dataclass_field
-from werkzeug.utils import secure_filename
-from pydantic import BaseModel, Field, constr, field_validator, validator # Ensure these are imported
-import datetime # Ensure datetime is imported
-
-from backend.database_setup import Personality as DBPersonality # Add this import at the top of main.py
-
-# Local Application Imports
-from backend.database_setup import (
-    User as DBUser,
-    UserStarredDiscussion,
-    UserMessageGrade,
-    FriendshipStatus,Friendship, 
-    DataStore as DBDataStore,
-    SharedDataStoreLink as DBSharedDataStoreLink,
-    init_database,
-    get_db,
-    hash_password,
-    DATABASE_URL_CONFIG_KEY,
-)
-from lollms_client import (
-    LollmsClient,
-    MSG_TYPE,
-    LollmsDiscussion as LollmsClientDiscussion,
-    ELF_COMPLETION_FORMAT, # For client params
-)
-
-# safe_store is expected to be installed
-try:
-    import safe_store
-    from safe_store import (
-        LogLevel as SafeStoreLogLevel,
-    )
-except ImportError:
-    print(
-        "WARNING: safe_store library not found. RAG features will be disabled. Install with: pip install safe_store[all]"
-    )
-    safe_store = None
-    SafeStoreLogLevel = None
-
-# --- Pydantic Models for API ---
-from backend.config import (
-    LOCALS_DIR
-)
-
-security = HTTPBasic()
 
 
 

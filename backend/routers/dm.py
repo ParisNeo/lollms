@@ -7,7 +7,11 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, union, distinct, select
 from typing import List
 
-from backend.database_setup import get_db, User as DBUser, DirectMessage as DBDirectMessage, FriendshipStatus, get_friendship_record
+from backend.db import get_db
+from backend.db.base import FriendshipStatus
+from backend.db.utils import get_friendship_record
+from backend.db.models.user import User as DBUser
+from backend.db.models.dm import DirectMessage as DBDirectMessage
 from backend.models import UserAuthDetails, UserPublic, DirectMessageCreate, DirectMessagePublic, DiscussionSendRequest
 from backend.session import get_current_active_user, get_user_data_root, get_user_by_username
 from backend.ws_manager import manager
@@ -111,7 +115,6 @@ def get_message_history(
     )
     messages = query.all()
     
-    # --- FIX: Manually construct the response to prevent model validation errors ---
     response_list = []
     for msg in messages:
         response_list.append(DirectMessagePublic(
@@ -125,7 +128,7 @@ def get_message_history(
             receiver_username=msg.receiver.username
         ))
     
-    return response_list[::-1] # Reverse to show oldest first in the final list
+    return response_list[::-1]
 
 
 @dm_router.post("/send", response_model=DirectMessagePublic, status_code=status.HTTP_201_CREATED)

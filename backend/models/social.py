@@ -2,7 +2,7 @@ import datetime
 from typing import List, Optional, Dict, Any
 from enum import Enum
 from pydantic import BaseModel, Field
-from backend.database_setup import PostVisibility as DBPostVisibility
+from backend.db.models.social import PostVisibility as DBPostVisibility
 from .user import AuthorPublic
 
 class PostVisibility(str, Enum):

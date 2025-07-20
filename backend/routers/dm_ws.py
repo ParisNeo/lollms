@@ -2,7 +2,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status, HTTPExcep
 from sqlalchemy.orm import Session
 
 from backend.session import get_current_db_user_from_token
-from backend.database_setup import get_db
+from backend.db import get_db
 from backend.ws_manager import manager
 
 dm_ws_router = APIRouter(

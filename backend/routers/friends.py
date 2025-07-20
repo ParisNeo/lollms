@@ -1,16 +1,13 @@
-# backend/routers/friends.py
 import traceback
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, and_
 
-from backend.database_setup import (
-    User as DBUser,
-    FriendshipStatus, Friendship,
-    get_db,
-    get_friendship_record,
-)
+from backend.db import get_db
+from backend.db.base import FriendshipStatus
+from backend.db.utils import get_friendship_record
+from backend.db.models.user import User as DBUser, Friendship
 from backend.models import (
     UserAuthDetails,
     FriendRequestCreate,
@@ -19,7 +16,7 @@ from backend.models import (
     FriendshipAction
 )
 from backend.session import get_current_db_user_from_token
-from backend.ws_manager import manager # Import the WebSocket manager
+from backend.ws_manager import manager
 from typing import List, Dict
 
 friends_router = APIRouter(prefix="/api/friends", tags=["Friends Management"])
@@ -97,7 +94,6 @@ async def send_friend_request(
             status=db_friendship_to_return.status
         )
 
-        # Send WebSocket notification to the target user
         notification_payload = {
             "type": "new_friend_request",
             "data": response_data.model_dump(mode="json")
@@ -304,7 +300,6 @@ async def unblock_user(
     if not is_blocker:
         raise HTTPException(status_code=400, detail="You have not blocked this user.")
 
-    # Unblocking removes the friendship record entirely.
     db.delete(friendship)
     try:
         db.commit()

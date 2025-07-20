@@ -35,10 +35,9 @@ from lollms_client import (
 )
 from ascii_colors import ASCIIColors, trace_exception
 # Local Application Imports
-from backend.database_setup import (
-    User as DBUser, UserStarredDiscussion, UserMessageGrade, get_db,
-    Personality as DBPersonality
-)
+from backend.db import get_db
+from backend.db.models.user import User as DBUser, UserStarredDiscussion, UserMessageGrade
+from backend.db.models.personality import Personality as DBPersonality
 from backend.models import (
     UserAuthDetails, DiscussionInfo, DiscussionTitleUpdate,
     DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,

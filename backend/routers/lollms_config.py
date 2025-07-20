@@ -2,7 +2,9 @@ from fastapi import APIRouter, Depends, HTTPException, Form
 from sqlalchemy.orm import Session
 from typing import List
 
-from backend.database_setup import get_db, User as DBUser, LLMBinding as DBLLMBinding
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.session import get_current_active_user, get_user_lollms_client, user_sessions
 from backend.models import UserLLMParams, ModelInfo, UserAuthDetails
 

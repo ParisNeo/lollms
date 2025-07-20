@@ -6,7 +6,8 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 
-from backend.database_setup import get_db, MCP as DBMCP, App as DBApp
+from backend.db import get_db
+from backend.db.models.service import MCP as DBMCP, App as DBApp
 from backend.security import generate_sso_secret
 from backend.session import get_current_active_user, get_user_lollms_client, user_sessions, load_mcps
 from backend.models import (
@@ -327,7 +328,7 @@ async def update_discussion_tools(
     db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
-    from backend.database_setup import UserStarredDiscussion
+    from backend.db.models.user import UserStarredDiscussion
     user_model_full = current_user.lollms_model_name
     binding_alias = None
     if user_model_full and '/' in user_model_full:

@@ -11,13 +11,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from lollms_client.lollms_llm_binding import get_available_bindings
 
-from backend.database_setup import (
-    User as DBUser,
-    GlobalConfig as DBGlobalConfig,
-    LLMBinding as DBLLMBinding,
-    get_db,
-    hash_password,
-)
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.config import GlobalConfig as DBGlobalConfig, LLMBinding as DBLLMBinding
+from backend.security import get_password_hash as hash_password
+
+
 from backend.models import (
     UserAuthDetails,
     UserCreateAdmin,

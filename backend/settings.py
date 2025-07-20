@@ -1,6 +1,8 @@
-# backend/settings.py
 import json
 from typing import Any, Dict, Optional
+
+from backend.db import get_db
+from backend.db.models.config import GlobalConfig
 
 class _Settings:
     _instance = None
@@ -16,7 +18,6 @@ class _Settings:
         if self._is_loaded:
             return
 
-        from backend.database_setup import GlobalConfig, get_db
         from sqlalchemy.orm import Session
         from sqlalchemy.exc import OperationalError
 

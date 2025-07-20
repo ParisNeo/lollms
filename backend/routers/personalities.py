@@ -13,11 +13,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_, and_
 
 # Local Application Imports
-from backend.database_setup import (
-    User as DBUser,
-    Personality as DBPersonality,
-    get_db,
-)
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.personality import Personality as DBPersonality
 from backend.models import (
     UserAuthDetails, PersonalityPublic, PersonalityCreate,
     PersonalityUpdate, PersonalitySendRequest

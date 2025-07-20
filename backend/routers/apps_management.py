@@ -13,11 +13,15 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 
-from backend.database_setup import get_db, AppZooRepository as DBAppZooRepository, App as DBApp
+from backend.db import get_db
+from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp
 from backend.models import AppZooRepositoryCreate, AppZooRepositoryPublic, ZooAppInfo, AppInstallRequest, AppPublic, AppActionResponse, TaskInfo
 from backend.session import get_current_admin_user
 from backend.config import APP_DATA_DIR, ZOO_DIR_NAME, APPS_DIR_NAME, CUSTOM_APPS_DIR_NAME
 from backend.task_manager import task_manager, Task
+
+from backend.settings import settings
+from typing import Optional, Dict
 
 apps_management_router = APIRouter(
     prefix="/api/apps-management",
@@ -32,6 +36,31 @@ APPS_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 CUSTOM_APPS_ROOT_PATH = APP_DATA_DIR / CUSTOM_APPS_DIR_NAME
 CUSTOM_APPS_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 
+
+@apps_management_router.get("/apps/get-next-available-port", response_model=Dict[str, int])
+def get_next_available_port(port: Optional[int] = Query(None), db: Session = Depends(get_db)):
+    """
+    Finds the next available port. If a port is provided, it checks its availability.
+    If available, it returns the same port. If not, it raises a 409 conflict.
+    If no port is provided, it finds and returns the next available one.
+    """
+    base_port = 9601
+    
+    used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
+    main_app_port = settings.get("port", 9642)
+    used_ports.add(main_app_port)
+
+    if port is not None:
+        if port in used_ports:
+            raise HTTPException(status_code=409, detail=f"Port {port} is already in use.")
+        return {"port": port}
+    else:
+        current_port = base_port
+        while current_port in used_ports:
+            current_port += 1
+            if current_port > 65535:
+                raise HTTPException(status_code=500, detail="No available ports.")
+        return {"port": current_port}
 
 # --- App Zoo Repository Management ---
 

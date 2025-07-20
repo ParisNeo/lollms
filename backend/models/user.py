@@ -1,7 +1,7 @@
 import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, constr, EmailStr
-from backend.database_setup import FriendshipStatus
+from backend.db.models.friends import FriendshipStatus
 
 class UserLLMParams(BaseModel):
     llm_ctx_size: Optional[int] = Field(None, ge=0)
