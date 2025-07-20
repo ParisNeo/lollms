@@ -28,8 +28,52 @@ export const useAdminStore = defineStore('admin', () => {
     const adminAvailableLollmsModels = ref([]);
     const isLoadingLollmsModels = ref(false);
 
+    const zooRepositories = ref([]);
+    const isLoadingZooRepositories = ref(false);
+
+    const zooApps = ref([]);
+    const isLoadingZooApps = ref(false);
+
+    const installedApps = ref([]);
+    const isLoadingInstalledApps = ref(false);
+
+    const tasks = ref([]);
+    const isLoadingTasks = ref(false);
+    const activeTaskIds = ref({}); // Maps app names to task IDs
 
     // --- Actions ---
+    
+    // Tasks
+    async function fetchTasks() {
+        isLoadingTasks.value = true;
+        try {
+            const response = await apiClient.get('/api/tasks');
+            tasks.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Could not fetch task list.', 'error');
+        } finally {
+            isLoadingTasks.value = false;
+        }
+    }
+    async function clearCompletedTasks() {
+        try {
+            await apiClient.post('/api/tasks/clear-completed');
+            uiStore.addNotification('Cleared completed tasks.', 'success');
+            await fetchTasks();
+        } catch (error) {
+            // Handled globally
+        }
+    }
+    async function cancelTask(taskId) {
+        try {
+            const response = await apiClient.post(`/api/tasks/${taskId}/cancel`);
+            uiStore.addNotification(`Task cancellation initiated for '${response.data.name}'.`, 'info');
+            await fetchTasks();
+        } catch (error) {
+            // Handled globally
+        }
+    }
+
 
     // Users
     async function fetchAllUsers() {
@@ -246,6 +290,129 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    // App Zoo Repositories
+    async function fetchZooRepositories() {
+        isLoadingZooRepositories.value = true;
+        try {
+            const response = await apiClient.get('/api/apps-management/zoo/repositories');
+            zooRepositories.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Could not load App Zoo repositories.', 'error');
+        } finally {
+            isLoadingZooRepositories.value = false;
+        }
+    }
+    async function addZooRepository(name, url) {
+        try {
+            const response = await apiClient.post('/api/apps-management/zoo/repositories', { name, url });
+            zooRepositories.value.push(response.data);
+            uiStore.addNotification(`Repository '${name}' added.`, 'success');
+        } catch (error) {
+            throw error; // Let the component handle UI feedback on error
+        }
+    }
+    async function deleteZooRepository(repoId) {
+        try {
+            await apiClient.delete(`/api/apps-management/zoo/repositories/${repoId}`);
+            zooRepositories.value = zooRepositories.value.filter(r => r.id !== repoId);
+            uiStore.addNotification('Repository deleted.', 'success');
+        } catch (error) {
+            throw error;
+        }
+    }
+    async function pullZooRepository(repoId) {
+        try {
+            const response = await apiClient.post(`/api/apps-management/zoo/repositories/${repoId}/pull`);
+            const task = response.data;
+            activeTaskIds.value[task.name] = task.id;
+            uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
+            return task;
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    // Available Zoo Apps
+    async function fetchZooApps() {
+        isLoadingZooApps.value = true;
+        try {
+            const response = await apiClient.get('/api/apps-management/zoo/available-apps');
+            zooApps.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Could not load available apps from the zoo.', 'error');
+        } finally {
+            isLoadingZooApps.value = false;
+        }
+    }
+
+    async function fetchAppReadme(repository, folder_name) {
+        try {
+            const response = await apiClient.get('/api/apps-management/zoo/app-readme', {
+                params: { repository, folder_name }
+            });
+            return response.data;
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    async function installZooApp(payload) {
+        try {
+            const response = await apiClient.post('/api/apps-management/zoo/install-app', payload);
+            const task = response.data;
+            activeTaskIds.value[task.name] = task.id;
+            uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
+
+            // No longer need polling here as the component will do it based on activeTaskIds
+            await fetchZooApps();
+            await fetchTasks();
+            return task;
+        } catch (error) {
+            throw error;
+        }
+    }
+    
+    // Installed Apps Management
+    async function fetchInstalledApps() {
+        isLoadingInstalledApps.value = true;
+        try {
+            const response = await apiClient.get('/api/apps-management/installed-apps');
+            installedApps.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Could not load installed apps.', 'error');
+        } finally {
+            isLoadingInstalledApps.value = false;
+        }
+    }
+
+    async function fetchNextAvailablePort() {
+        try {
+            const response = await apiClient.get('/api/apps-management/apps/get-next-available-port');
+            return response.data.port;
+        } catch (error) {
+            uiStore.addNotification('Could not determine an available port.', 'warning');
+            return 9601; // Fallback
+        }
+    }
+
+    async function startApp(appId) {
+        const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/start`);
+        uiStore.addNotification(response.data.message, response.data.success ? 'success' : 'warning');
+        await fetchInstalledApps();
+    }
+    async function stopApp(appId) {
+        const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/stop`);
+        uiStore.addNotification(response.data.message, response.data.success ? 'success' : 'warning');
+        await fetchInstalledApps();
+    }
+    async function uninstallApp(appId) {
+        const response = await apiClient.delete(`/api/apps-management/installed-apps/${appId}`);
+        uiStore.addNotification(response.data.message, 'success');
+        await fetchInstalledApps();
+        await fetchZooApps();
+    }
+
+
     return {
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers,
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
@@ -256,6 +423,10 @@ export const useAdminStore = defineStore('admin', () => {
         fetchApps, addApp, updateApp, deleteApp, generateAppSsoSecret,
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
         batchUpdateUsers,
-        isEnhancingEmail, enhanceEmail
+        isEnhancingEmail, enhanceEmail,
+        zooRepositories, isLoadingZooRepositories, fetchZooRepositories, addZooRepository, deleteZooRepository, pullZooRepository,
+        zooApps, isLoadingZooApps, fetchZooApps, installZooApp, fetchAppReadme,
+        installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
+        tasks, isLoadingTasks, activeTaskIds, fetchTasks, clearCompletedTasks, cancelTask
     };
 });

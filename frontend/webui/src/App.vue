@@ -27,6 +27,8 @@ import EmailAllUsersModal from './components/modals/EmailAllUsersModal.vue';
 import EmailUserModal from './components/modals/EmailUserModal.vue';
 import InsertImageModal from './components/modals/InsertImageModal.vue';
 import NewApiKeyModal from './components/modals/NewApiKeyModal.vue';
+import AppInstallModal from './components/modals/AppInstallModal.vue';
+import AppDetailsModal from './components/modals/AppDetailsModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -88,6 +90,8 @@ onMounted(async () => {
     <EmailUserModal v-if="activeModal === 'adminUserEmail'" />
     <InsertImageModal v-if="activeModal === 'insertImage'" />
     <NewApiKeyModal v-if="activeModal === 'newApiKey'" />
+    <AppInstallModal v-if="activeModal === 'appInstall'" />
+    <AppDetailsModal v-if="activeModal === 'appDetails'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

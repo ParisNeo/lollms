@@ -53,6 +53,10 @@ SERVER_CONFIG = config.get("server", {})
 TEMP_UPLOADS_DIR_NAME = "temp_uploads"
 DISCUSSION_ASSETS_DIR_NAME = "discussion_assets"
 DATASTORES_DIR_NAME = "safestores"
+APPS_DIR_NAME = "apps"
+CUSTOM_APPS_DIR_NAME = "custom_apps"
+ZOO_DIR_NAME = "zoo"
+
 
 # --- Security Constants (Not moved to DB) ---
 # These are fundamental to the application's security posture and should

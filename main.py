@@ -6,6 +6,7 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
@@ -13,7 +14,7 @@ from backend.config import (
 )
 from backend.database_setup import (
     init_database, get_db, hash_password,
-    User as DBUser, Personality as DBPersonality
+    User as DBUser, Personality as DBPersonality, AppZooRepository as DBAppZooRepository
 )
 from backend.discussion import LegacyDiscussion
 from backend.session import (
@@ -39,6 +40,10 @@ from backend.routers.lollms_config import lollms_config_router
 from backend.routers.files import upload_router, assets_router
 from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
+from backend.routers.apps_management import apps_management_router
+from backend.routers.tasks import tasks_router
+from backend.task_manager import task_manager # Import the singleton instance
+
 
 app = FastAPI(
     title="Simplified LoLLMs Chat API",
@@ -119,15 +124,51 @@ async def on_startup() -> None:
                 new_pers = DBPersonality(name=default_pers_data["name"], author=default_pers_data.get("author", "System"), description=default_pers_data.get("description"), prompt_text=default_pers_data["prompt_text"], is_public=True, owner_user_id=None, **{k:v for k,v in default_pers_data.items() if k not in ["name", "author", "description", "prompt_text"]})
                 db_for_defaults.add(new_pers)
                 print(f"INFO: Added default public personality: '{new_pers.name}'")
+        
+        # Add default App Zoo Repository if none exist
+        repo_count = db_for_defaults.query(func.count(DBAppZooRepository.id)).scalar()
+        if repo_count == 0:
+            default_repo = DBAppZooRepository(
+                name="Official LoLLMs Apps Zoo",
+                url="https://github.com/ParisNeo/lollms_apps_zoo.git"
+            )
+            db_for_defaults.add(default_repo)
+            print("INFO: Added default LoLLMs App Zoo repository.")
+
         db_for_defaults.commit()
     except Exception as e:
         if db_for_defaults: db_for_defaults.rollback()
     finally:
         if db_for_defaults: db_for_defaults.close()
 
+# --- CORS Configuration ---
+# This is now more secure, only allowing the frontend to connect.
+host = SERVER_CONFIG.get("host", "0.0.0.0")
+port = SERVER_CONFIG.get("port", 9642)
+https_enabled = SERVER_CONFIG.get("https_enabled", False)
+
+allowed_origins = [
+    "http://localhost:5173",    # Vite dev server default
+    "http://127.0.0.1:5173",   # Vite dev server alternate
+]
+
+# Add the server's own origin(s) for production builds
+if host == "0.0.0.0":
+    # If listening on all interfaces, allow common local access points
+    allowed_origins.append(f"http://localhost:{port}")
+    allowed_origins.append(f"http://127.0.0.1:{port}")
+    if https_enabled:
+        allowed_origins.append(f"https://localhost:{port}")
+        allowed_origins.append(f"https://127.0.0.1:{port}")
+else:
+    # If listening on a specific interface
+    allowed_origins.append(f"http://{host}:{port}")
+    if https_enabled:
+        allowed_origins.append(f"https://{host}:{port}")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -154,7 +195,9 @@ app.include_router(lollms_config_router)
 app.include_router(upload_router)
 app.include_router(assets_router)
 app.include_router(ui_router)
-app.include_router(sso_router) # Added SSO Router
+app.include_router(sso_router)
+app.include_router(apps_management_router)
+app.include_router(tasks_router)
 
 add_ui_routes(app) # Add the static file serving
 
@@ -169,8 +212,8 @@ if __name__ == "__main__":
     settings.refresh()
     
     # Get server config from settings, with fallback to config.toml values from config.py
-    host = settings.get("host", SERVER_CONFIG.get("host", "0.0.0.0"))
-    port = int(settings.get("port", SERVER_CONFIG.get("port", 9642)))
+    host_setting = settings.get("host", host)
+    port_setting = int(settings.get("port", port))
 
     # Get SSL config from settings
     ssl_params = {}
@@ -189,6 +232,6 @@ if __name__ == "__main__":
 
     print(f"--- LoLLMs Chat API Server (v{APP_VERSION}) ---")
     protocol = "https" if ssl_params else "http"
-    print(f"Access UI at: {protocol}://{host}:{port}/")
+    print(f"Access UI at: {protocol}://{host_setting}:{port_setting}/")
     
-    uvicorn.run("main:app", host=host, port=port, reload=False, **ssl_params)
+    uvicorn.run("main:app", host=host_setting, port=port_setting, reload=False, **ssl_params)

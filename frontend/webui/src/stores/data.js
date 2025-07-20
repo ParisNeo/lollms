@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useAuthStore } from './auth';
 import { useUiStore } from './ui';
+import { useAdminStore } from './admin';
 
 export const useDataStore = defineStore('data', () => {
     const availableLollmsModels = ref([]);
@@ -480,10 +481,15 @@ export const useDataStore = defineStore('data', () => {
     }
     async function deleteApp(appId) {
         const uiStore = useUiStore();
+        const adminStore = useAdminStore();
         try {
             await apiClient.delete(`/api/apps/${appId}`);
             uiStore.addNotification('App removed.', 'success');
             await fetchApps();
+            // Also refresh installed apps list in case the deleted app was an installed one.
+            if (authStore.isAdmin) {
+                adminStore.fetchInstalledApps();
+            }
         } catch (error) { throw error; }
     }
     async function generateAppSsoSecret(id) {

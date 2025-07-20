@@ -237,14 +237,22 @@ class MCP(Base):
     
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_mcp_name'),)
 
+class AppZooRepository(Base):
+    __tablename__ = "app_zoo_repositories"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    url = Column(String, unique=True, nullable=False)
+    last_pulled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 class App(Base):
     __tablename__ = "apps"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     name = Column(String, nullable=False, index=True)
-    url = Column(String, nullable=False)
+    url = Column(String, nullable=True) # Now nullable
     icon = Column(Text, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
-    type = Column(String, default="system", nullable=False)
+    type = Column(String, default="system", nullable=False) # 'system', 'user'
     owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_app_owner", ondelete="CASCADE"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -253,9 +261,23 @@ class App(Base):
     sso_secret = Column(String, nullable=True)
     sso_redirect_uri = Column(String, nullable=True)
     sso_user_infos_to_share = Column(JSON, nullable=True)
-    owner = relationship("User", back_populates="personal_apps")
     
+    # Fields for installed apps
+    description = Column(Text, nullable=True)
+    author = Column(String, nullable=True, index=True)
+    version = Column(String, nullable=True)
+    category = Column(String, nullable=True, index=True)
+    tags = Column(JSON, nullable=True)
+    is_installed = Column(Boolean, default=False, nullable=False, index=True)
+    status = Column(String, default='stopped', nullable=False, index=True) # e.g., stopped, running, installing, error
+    autostart = Column(Boolean, default=False, nullable=False)
+    port = Column(Integer, nullable=True, unique=True)
+    pid = Column(Integer, nullable=True) # Process ID
+    app_metadata = Column(JSON, nullable=True) # For other fields from description.yaml
+
+    owner = relationship("User", back_populates="personal_apps")
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_app_name'),)
+
 
 class SystemApp(Base):
     __tablename__ = "system_apps"
@@ -590,17 +612,69 @@ def init_database(db_url: str):
 
             if inspector.has_table("apps"):
                 app_columns_db = [col['name'] for col in inspector.get_columns('apps')]
+                url_col_info = next((col for col in inspector.get_columns('apps') if col['name'] == 'url'), None)
+
+                # Robust check for SQLite where 'nullable' is 0 for NOT NULL
+                if url_col_info and url_col_info.get('nullable') == 0:
+                    print("WARNING: 'url' column in 'apps' table is NOT NULL. This can cause issues with installed apps. Attempting to migrate schema...")
+                    try:
+                        # SQLite doesn't support ALTER COLUMN to remove NOT NULL easily.
+                        # The standard way is to rename, create new, copy, and drop.
+                        connection.execute(text("PRAGMA foreign_keys=off;"))
+                        connection.execute(text("BEGIN TRANSACTION;"))
+                        connection.execute(text("ALTER TABLE apps RENAME TO _apps_old;"))
+                        # Recreate table using the declarative base's definition
+                        App.__table__.create(connection)
+                        
+                        # Get columns from old and new tables to copy only common ones
+                        old_cols = [c['name'] for c in inspector.get_columns('_apps_old')]
+                        new_cols = [c['name'] for c in inspector.get_columns('apps')]
+                        common_cols = [c for c in old_cols if c in new_cols]
+                        cols_str = ", ".join(common_cols)
+
+                        connection.execute(text(f"INSERT INTO apps ({cols_str}) SELECT {cols_str} FROM _apps_old;"))
+                        connection.execute(text("DROP TABLE _apps_old;"))
+                        connection.execute(text("COMMIT;"))
+                        connection.execute(text("PRAGMA foreign_keys=on;"))
+                        print("INFO: Successfully migrated 'apps' table to make 'url' column nullable.")
+                    except Exception as e:
+                        print(f"CRITICAL: Failed to migrate 'apps' table schema. Error: {e}")
+                        connection.execute(text("ROLLBACK;"))
+                        connection.execute(text("PRAGMA foreign_keys=on;"))
+
                 new_app_cols_defs = {
                     "icon": "TEXT",
                     "active": "BOOLEAN DEFAULT 1 NOT NULL",
                     "type": "VARCHAR",
                     "authentication_type": "VARCHAR", "authentication_key": "VARCHAR",
-                    "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON"
+                    "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON",
+                    "description": "TEXT",
+                    "author": "VARCHAR",
+                    "version": "VARCHAR",
+                    "category": "VARCHAR",
+                    "tags": "JSON",
+                    "is_installed": "BOOLEAN DEFAULT 0 NOT NULL",
+                    "status": "VARCHAR DEFAULT 'stopped' NOT NULL",
+                    "autostart": "BOOLEAN DEFAULT 0 NOT NULL",
+                    "port": "INTEGER",
+                    "pid": "INTEGER",
+                    "app_metadata": "JSON"
                 }
+                
+                app_columns_db_after_rebuild = [col['name'] for col in inspector.get_columns('apps')]
                 for col_name, col_sql_def in new_app_cols_defs.items():
-                    if col_name not in app_columns_db:
+                    if col_name not in app_columns_db_after_rebuild:
                         connection.execute(text(f"ALTER TABLE apps ADD COLUMN {col_name} {col_sql_def}"))
                         print(f"INFO: Added missing column '{col_name}' to 'apps' table.")
+                
+                app_constraints = inspector.get_unique_constraints('apps')
+                if 'port' in new_app_cols_defs and not any(c['name'] == 'uq_app_port' for c in app_constraints):
+                    try:
+                        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_app_port ON apps (port) WHERE port IS NOT NULL"))
+                        print("INFO: Created unique index 'uq_app_port' on 'apps.port'.")
+                    except (OperationalError, IntegrityError) as e:
+                        print(f"Warning: Could not create unique index on app port. Error: {e}")
+
 
             if inspector.has_table("system_apps"):
                 system_app_columns_db = [col['name'] for col in inspector.get_columns('system_apps')]

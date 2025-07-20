@@ -155,7 +155,11 @@ def _format_app_public(app: DBApp) -> AppPublic:
         created_at=app.created_at, updated_at=app.updated_at,
         sso_redirect_uri=app.sso_redirect_uri,
         sso_user_infos_to_share=app.sso_user_infos_to_share or [],
-        sso_secret_exists=bool(app.sso_secret)
+        sso_secret_exists=bool(app.sso_secret),
+        is_installed=app.is_installed,
+        port=app.port,
+        status=app.status,
+        autostart=app.autostart
     )
 
 @apps_router.get("", response_model=List[AppPublic])
@@ -195,6 +199,14 @@ def update_app(app_id: str, app_update: AppUpdate, db: Session = Depends(get_db)
         raise HTTPException(status_code=403, detail="Not authorized to edit this app.")
 
     update_data = app_update.model_dump(exclude_unset=True)
+    
+    if app_db.is_installed:
+        if 'active' in update_data:
+            raise HTTPException(status_code=400, detail="Cannot change 'active' status of an installed app directly. Use the start/stop controls in Apps Management.")
+        if app_update.port and app_update.port != app_db.port:
+            if db.query(DBApp).filter(DBApp.port == app_update.port, DBApp.id != app_id).first():
+                raise HTTPException(status_code=409, detail=f"Port {app_update.port} is already in use by another app.")
+
     for key, value in update_data.items():
         setattr(app_db, key, value)
     
@@ -235,6 +247,10 @@ def delete_app(app_id: str, db: Session = Depends(get_db), current_user: UserAut
     is_owner = app_db.owner_user_id == current_user.id
     if not is_owner and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="Not authorized to delete this app.")
+        
+    if app_db.is_installed:
+        raise HTTPException(status_code=400, detail="Installed apps cannot be deleted from this menu. Please use the Apps Management panel to uninstall.")
+
 
     db.delete(app_db)
     db.commit()

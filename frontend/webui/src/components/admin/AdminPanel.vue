@@ -17,13 +17,17 @@ const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
 const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
 const ServicesSettings = defineAsyncComponent(() => import('./ServicesSettings.vue'));
 const HttpsSettings = defineAsyncComponent(() => import('./HttpsSettings.vue'));
+const AppsManagement = defineAsyncComponent(() => import('./AppsManagement.vue'));
+const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
 
 const tabs = [
     { id: 'dashboard', component: Dashboard },
     { id: 'users', component: UserTable },
+    { id: 'tasks', component: TaskManager },
     { id: 'https', component: HttpsSettings },
     { id: 'bindings', component: BindingsSettings },
     { id: 'services', component: ServicesSettings },
+    { id: 'apps', component: AppsManagement },
     { id: 'global_settings', component: GlobalSettings },
     { id: 'email', component: EmailSettings },
     { id: 'import', component: ImportTools }

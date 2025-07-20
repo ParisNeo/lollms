@@ -35,6 +35,7 @@ const getInitialFormState = (type = 'mcps', ownerType = 'user') => ({
     authentication_key: '',
     sso_redirect_uri: '',
     sso_user_infos_to_share: [],
+    port: null,
 });
 
 const form = ref(getInitialFormState());
@@ -57,6 +58,8 @@ watch(() => form.value.icon, () => {
 
 const isEditMode = computed(() => editingItem.value !== null);
 const isSsoAuth = computed(() => form.value.authentication_type === 'lollms_sso');
+const isEditingInstalledApp = computed(() => isEditMode.value && editingItem.value.is_installed);
+
 
 const sortedUserMcps = computed(() => userMcps.value.filter(m => m.type === 'user').sort((a, b) => a.name.localeCompare(b.name)));
 const sortedSystemMcps = computed(() => userMcps.value.filter(m => m.type === 'system').sort((a, b) => a.name.localeCompare(b.name)));
@@ -77,7 +80,7 @@ function startEditing(item, type) {
     activeTab.value = type;
     editingItem.value = { ...item, _type: type };
     form.value.name = item.name;
-    form.value.url = item.url;
+    form.value.url = item.url || '';
     form.value.icon = item.icon || '';
     form.value.active = typeof item.active === 'boolean' ? item.active : true;
     form.value.type = item.type || 'user';
@@ -85,6 +88,7 @@ function startEditing(item, type) {
     form.value.authentication_key = ''; // Never populate existing key
     form.value.sso_redirect_uri = item.sso_redirect_uri || '';
     form.value.sso_user_infos_to_share = item.sso_user_infos_to_share || [];
+    form.value.port = item.port || null;
     isFormVisible.value = true;
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -110,13 +114,14 @@ async function handleReloadServers() {
 }
 
 async function handleFormSubmit() {
-    if (!form.value.name || !form.value.url) {
+    if (!form.value.name || (!form.value.url && !isEditingInstalledApp.value)) {
         uiStore.addNotification('Name and URL are required.', 'warning');
         return;
     }
     isLoading.value = true;
     try {
         const payload = { ...form.value };
+        if (payload.port) payload.port = Number(payload.port);
         const isApp = activeTab.value === 'apps';
         if (isEditMode.value) {
             await (isApp ? dataStore.updateApp(editingItem.value.id, payload) : dataStore.updateMcp(editingItem.value.id, payload));
@@ -283,9 +288,13 @@ function handleFileSelect(event) {
                                 <label for="formName" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Name</label>
                                 <input type="text" id="formName" v-model="form.name" class="input-field mt-1" :placeholder="activeTab === 'mcps' ? 'My Local Server' : 'My Web App'" required>
                             </div>
-                            <div>
+                            <div v-if="!isEditingInstalledApp">
                                 <label for="formUrl" class="block text-sm font-medium text-gray-700 dark:text-gray-300">URL</label>
                                 <input type="url" id="formUrl" v-model="form.url" class="input-field mt-1" :placeholder="activeTab === 'mcps' ? 'http://127.0.0.1:9602' : 'https://example.com'" required>
+                            </div>
+                             <div v-else>
+                                <label for="formPort" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Port</label>
+                                <input type="number" id="formPort" v-model="form.port" class="input-field mt-1" placeholder="e.g., 9601" required>
                             </div>
                         </div>
 
@@ -307,12 +316,13 @@ function handleFileSelect(event) {
                             <input type="file" ref="fileInput" @change="handleFileSelect" class="hidden" accept="image/png, image/jpeg, image/gif, image/webp, image/svg+xml">
                         </div>
 
-                        <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                        <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md"
+                             :title="isEditingInstalledApp ? 'Status is controlled from the Apps Management panel' : ''">
                             <span class="flex-grow flex flex-col">
-                                <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Active</span>
+                                <span class="text-sm font-medium" :class="isEditingInstalledApp ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'">Active</span>
                                 <span class="text-sm text-gray-500 dark:text-gray-400">Inactive items cannot be used.</span>
                             </span>
-                            <button @click="form.active = !form.active" type="button" :class="[form.active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                            <button @click="form.active = !form.active" type="button" :disabled="isEditingInstalledApp" :class="[form.active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800', {'opacity-50 cursor-not-allowed': isEditingInstalledApp}]">
                                 <span :class="[form.active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>

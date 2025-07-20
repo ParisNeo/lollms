@@ -12,6 +12,8 @@ import IconMessage from '../assets/icons/IconMessage.vue';
 import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
 import IconArrowLeft from '../assets/icons/IconArrowLeft.vue';
 import IconMenu from '../assets/icons/IconMenu.vue';
+import IconSquares2x2 from '../assets/icons/IconSquares2x2.vue';
+import IconTicket from '../assets/icons/IconTicket.vue';
 
 const AdminPanel = defineAsyncComponent(() => import('../components/admin/AdminPanel.vue'));
 const adminStore = useAdminStore();
@@ -22,9 +24,11 @@ const isSidebarOpen = ref(false);
 const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: IconHome },
     { id: 'users', label: 'User Management', icon: IconUserGroup },
+    { id: 'tasks', label: 'Tasks', icon: IconTicket },
     { id: 'https', label: 'Server/HTTPS', icon: IconCpuChip },
     { id: 'bindings', label: 'LLM Bindings', icon: IconLink },
     { id: 'services', label: 'Services', icon: IconWrenchScrewdriver },
+    { id: 'apps', label: 'Apps Management', icon: IconSquares2x2 },
     { id: 'global_settings', label: 'Global Settings', icon: IconCog },
     { id: 'email', label: 'Email Settings', icon: IconMessage },
     { id: 'import', label: 'Import', icon: IconArrowDownTray }
@@ -48,7 +52,7 @@ onMounted(() => {
         <div class="p-4 border-b dark:border-gray-700 flex-shrink-0">
           <div class="flex items-center space-x-3">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-500 dark:text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21v-1.5a6.375 6.375 0 00-3.262-5.171M9 10a3 3 0 11-6 0 3 3 0 016 0zm3 2a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M15 21v-1.5a6.375 6.375 0 00-3-5.171M9 10a3 3 0 11-6 0 3 3 0 016 0zm3 2a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             <h1 class="text-xl font-bold text-gray-900 dark:text-gray-100">Admin Panel</h1>
           </div>
