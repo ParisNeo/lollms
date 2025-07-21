@@ -93,6 +93,8 @@ new ui:
 - add purge to tasks
 - add a new cleaning of unused uploaded files task
 - add adding rag stores files to tasks management with access to file upload status.
+- reload mcps
+- starting apps
 
 ## apps
 - add the possibility to use the domain name not just localhost
