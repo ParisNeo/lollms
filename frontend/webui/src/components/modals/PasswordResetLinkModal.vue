@@ -13,14 +13,15 @@ const entityName = computed(() => props.value?.username || '');
 const link = computed(() => props.value?.link || '');
 const copyButtonText = computed(() => props.value?.copyButtonText || 'Copy Link');
 
-const copyLink = () => {
+const copyLink = async () => {
   if (link.value) {
-    navigator.clipboard.writeText(link.value).then(() => {
+    const success = await uiStore.copyToClipboard(link.value);
+    if (success) {
       linkCopied.value = true;
       setTimeout(() => {
         linkCopied.value = false;
       }, 2000);
-    });
+    }
   }
 };
 </script>

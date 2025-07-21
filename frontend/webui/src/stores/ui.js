@@ -47,9 +47,11 @@ export const useUiStore = defineStore('ui', () => {
             if (successMessage) {
                 addNotification(successMessage, 'success');
             }
+            return true;
         } catch (error) {
             console.error('Copy to clipboard failed:', error);
             addNotification('Could not copy text.', 'error');
+            return false;
         }
     }
 
