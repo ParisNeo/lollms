@@ -89,6 +89,10 @@ new ui:
 
 ## background processes
 - centralize background processes
+- add email sending to tasks
+- add purge to tasks
+- add a new cleaning of unused uploaded files task
+
 ## apps
 - add the possibility to use the domain name not just localhost
 - set the domain name globally so that it can be used eaésily
