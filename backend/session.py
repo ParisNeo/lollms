@@ -406,7 +406,13 @@ def get_safe_store_instance(
     if datastore_id not in session.get("safe_store_instances", {}):
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
         try:
-            ss_instance = safe_store.SafeStore(db_path=ss_db_path, name=datastore_record.name, description=datastore_record.description, encryption_key=SAFE_STORE_DEFAULTS["encryption_key"])
+            ss_instance = safe_store.SafeStore(
+                                                db_path=ss_db_path, 
+                                                name=datastore_record.name, 
+                                                description=datastore_record.description, 
+                                                encryption_key=SAFE_STORE_DEFAULTS["encryption_key"],
+                                                cache_folder=SAFE_STORE_DEFAULTS.get("cache_folder","data/cache/safestore")
+                                            )
             session["safe_store_instances"][datastore_id] = ss_instance
         except Exception as e:
             traceback.print_exc()
