@@ -100,6 +100,8 @@ new ui:
 - add the possibility to use the domain name not just localhost
 - set the domain name globally so that it can be used eaésily
 - only show active apps in the apps list
+
+- ### todoooo: fix embed function to use a specific model
 - add current processes listing
 - add a cleaning cron
 
