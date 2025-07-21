@@ -88,6 +88,11 @@ new ui:
 - add protection for MCP output
 
 ## background processes
+- centralize background processes
+## apps
+- add the possibility to use the domain name not just localhost
+- set the domain name globally so that it can be used eaésily
+- only show active apps in the apps list
 - add current processes listing
 - add a cleaning cron
 
