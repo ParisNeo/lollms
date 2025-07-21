@@ -56,6 +56,7 @@ ai_name = "assistant" # Default name for the AI in prompts
 # top_p = 0.95 # Optional: Default top_p
 
 [safe_store_defaults] # Global defaults
+cache_folder = "data/cache/safestore"
 chunk_size = 2096 # characters (as safestore make no assumptions about the LLM)
 chunk_overlap = 150 # characters (as safestore make no assumptions about the LLM)
 # Default vectorizer if not set per user. Users can override this.
