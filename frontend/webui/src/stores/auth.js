@@ -84,6 +84,12 @@ export const useAuthStore = defineStore('auth', () => {
             return;
         }
 
+        // Skip auth for reset password view, which is a guest route
+        if (window.location.pathname.startsWith('/reset-password')) {
+            isAuthenticating.value = false;
+            return;
+        }
+
         isAuthenticating.value = true;
         loadingProgress.value = 0;
         loadingMessage.value = 'Waking up the hamsters...';

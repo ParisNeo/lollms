@@ -72,6 +72,7 @@ onMounted(async () => {
 
     <router-view v-else />
 
+    <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     <LoginModal v-if="activeModal === 'login'" />
     <RegisterModal v-if="activeModal === 'register'" />
     <ForgotPasswordModal v-if="activeModal === 'forgotPassword'" />
@@ -86,7 +87,6 @@ onMounted(async () => {
     <ExportModal v-if="activeModal === 'export'" />
     <ImportModal v-if="activeModal === 'import'" />
     <InteractiveOutputModal v-if="activeModal === 'interactiveOutput'" />
-    <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     <EmailAllUsersModal v-if="activeModal === 'emailAllUsers'" />
     <EmailUserModal v-if="activeModal === 'adminUserEmail'" />
     <InsertImageModal v-if="activeModal === 'insertImage'" />
