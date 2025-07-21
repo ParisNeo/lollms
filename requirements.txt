@@ -1,5 +1,6 @@
 # requirements.txt
-
+pip>=21.2.3
+sse_starlette
 # --- Core FastAPI and Server ---
 fastapi
 uvicorn[standard]  # Includes python-multipart and other useful server extras
@@ -40,7 +41,6 @@ Pillow
 # - cryptography (for encryption)
 # - filelock (core concurrency mechanism for safe_store)
 safe_store[all]>=2.2.1
-lollmsvectordb
 wcwidth
 # If you prefer to install safe_store features individually:
 # safe_store
