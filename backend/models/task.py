@@ -11,6 +11,7 @@ class TaskLogMessage(BaseModel):
 class TaskInfo(BaseModel):
     id: str
     name: str
+    description: Optional[str] = None
     status: TaskStatus
     progress: int
     logs: List[TaskLogMessage]
@@ -19,3 +20,5 @@ class TaskInfo(BaseModel):
     created_at: datetime.datetime
     started_at: Optional[datetime.datetime] = None
     completed_at: Optional[datetime.datetime] = None
+    file_name: Optional[str] = None
+    total_files: Optional[int] = None

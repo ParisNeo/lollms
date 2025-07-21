@@ -224,6 +224,10 @@ function handleShare(store) { uiStore.openModal('shareDataStore', { store }); }
                     <p class="text-sm text-gray-500">{{ permissionsMap[selectedStore.permission_level] }}</p>
                 </div>
                 <div class="flex items-center gap-2">
+                    <button v-if="selectedStore.permission_level === 'owner'" @click="handleShare(selectedStore)" class="btn btn-secondary">
+                        <IconShare class="w-4 h-4 mr-1.5" />
+                        Share
+                    </button>
                     <button v-if="selectedStore.permission_level === 'owner'" @click="showEditForm" class="btn-icon" title="Edit Store"><IconPencil class="w-5 w-5"/></button>
                     <button v-if="selectedStore.permission_level === 'owner'" @click="handleDeleteStore(selectedStore)" class="btn-icon-danger" title="Delete Store"><IconTrash class="w-5 w-5"/></button>
                 </div>

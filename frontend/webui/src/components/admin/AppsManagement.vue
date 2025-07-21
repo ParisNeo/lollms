@@ -17,6 +17,7 @@ import IconCode from '../../assets/icons/IconCode.vue';
 import AppCard from '../ui/AppCard.vue';
 import AppCardSkeleton from '../ui/AppCardSkeleton.vue';
 
+
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
 
@@ -52,13 +53,13 @@ onMounted(() => {
 
 watch(activeTab, (newTab) => {
     if (newTab === 'available_apps') {
-        // Refresh both lists to ensure status is up-to-date
         adminStore.fetchZooApps();
         adminStore.fetchInstalledApps();
         adminStore.fetchTasks();
     }
     if (newTab === 'installed_apps') {
         adminStore.fetchInstalledApps();
+        adminStore.fetchTasks();
     }
 });
 
@@ -71,7 +72,6 @@ const appsWithTaskStatus = computed(() => {
     tasks.value.forEach(task => {
         if (task.name.startsWith('Installing app: ')) {
             const appName = task.name.replace('Installing app: ', '');
-            // Only consider the most recent task for an app
             if (!taskMap.has(appName) || new Date(task.created_at) > new Date(taskMap.get(appName).created_at)) {
                 taskMap.set(appName, task);
             }
@@ -82,7 +82,7 @@ const appsWithTaskStatus = computed(() => {
         const task = taskMap.get(app.name);
         return {
             ...app,
-            task: (task && task.status === 'running') ? task : null,
+            task: (task && (task.status === 'running' || task.status === 'pending')) ? task : null,
         };
     });
 });
@@ -110,7 +110,6 @@ const filteredAndSortedApps = computed(() => {
         return matchesStatus && matchesCategory && matchesSearch;
     });
 
-    // Perform sorting with multi-level priority
     apps.sort((a, b) => {
         const isAStarred = starredApps.value.includes(a.name);
         const isBStarred = starredApps.value.includes(b.name);
@@ -119,8 +118,7 @@ const filteredAndSortedApps = computed(() => {
 
         if (a.is_installed && !b.is_installed) return -1;
         if (!a.is_installed && b.is_installed) return 1;
-
-        // Priority 3: User-selected sort key
+        
         let valA = a[sortKey.value] || '';
         let valB = b[sortKey.value] || '';
         
@@ -154,6 +152,29 @@ const groupedApps = computed(() => {
 const sortedInstalledApps = computed(() => {
     if (!installedApps.value) return [];
     return [...installedApps.value].sort((a, b) => a.name.localeCompare(b.name));
+});
+
+const installedAppsWithTaskStatus = computed(() => {
+    const taskMap = new Map();
+    tasks.value.forEach(task => {
+        let appName = '';
+        if (task.name.startsWith('Start app: ')) {
+            appName = task.name.replace('Start app: ', '');
+        } else if (task.name.startsWith('Installing app: ')) {
+            appName = task.name.replace('Installing app: ', '');
+        }
+        
+        if (appName && (task.status === 'running' || task.status === 'pending')) {
+            if (!taskMap.has(appName) || new Date(task.created_at) > new Date(taskMap.get(appName).created_at)) {
+                taskMap.set(appName, task);
+            }
+        }
+    });
+
+    return sortedInstalledApps.value.map(app => ({
+        ...app,
+        task: taskMap.get(app.name) || null,
+    }));
 });
 
 function handleStarToggle(appName) {
@@ -290,7 +311,6 @@ async function handleShowLogs(app) {
             language: 'log'
         });
     } catch (error) {
-        // Handled by interceptor
     }
 }
 
@@ -303,11 +323,10 @@ async function showAppHelp(app) {
             language: 'markdown'
         });
     } catch (error) {
-        // Handled by interceptor
     }
 }
 
-async function handleCancelInstall(taskId) {
+async function handleCancelTask(taskId) {
     await adminStore.cancelTask(taskId);
 }
 
@@ -480,12 +499,12 @@ async function handleCancelInstall(taskId) {
                         <div v-for="(authorApps, author) in groupedApps" :key="author">
                             <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3 border-b pb-2 dark:border-gray-700">{{ author }}</h3>
                              <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-                                <AppCard v-for="app in authorApps" :key="`${app.repository}/${app.folder_name}`" :app="app" :task="app.task" :is-starred="starredApps.includes(app.name)" @star="handleStarToggle(app.name)" @install="handleInstallApp(app)" @details="showAppDetails(app)" @help="showAppHelp(app)" @cancel-install="handleCancelInstall" />
+                                <AppCard v-for="app in authorApps" :key="`${app.repository}/${app.folder_name}`" :app="app" :task="app.task" :is-starred="starredApps.includes(app.name)" @star="handleStarToggle(app.name)" @install="handleInstallApp(app)" @details="showAppDetails(app)" @help="showAppHelp(app)" @cancel-install="handleCancelTask" />
                             </div>
                         </div>
                     </div>
                      <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-                        <AppCard v-for="app in filteredAndSortedApps" :key="`${app.repository}/${app.folder_name}`" :app="app" :task="app.task" :is-starred="starredApps.includes(app.name)" @star="handleStarToggle(app.name)" @install="handleInstallApp(app)" @update="handleUpdateApp(app)" @details="showAppDetails(app)" @help="showAppHelp(app)" @cancel-install="handleCancelInstall" />
+                        <AppCard v-for="app in filteredAndSortedApps" :key="`${app.repository}/${app.folder_name}`" :app="app" :task="app.task" :is-starred="starredApps.includes(app.name)" @star="handleStarToggle(app.name)" @install="handleInstallApp(app)" @update="handleUpdateApp(app)" @details="showAppDetails(app)" @help="showAppHelp(app)" @cancel-install="handleCancelTask" />
                     </div>
                 </div>
              </div>
@@ -494,12 +513,12 @@ async function handleCancelInstall(taskId) {
         <!-- Installed Apps Section -->
         <section v-if="activeTab === 'installed_apps'">
              <div v-if="isLoadingInstalledApps" class="text-center p-10">Loading installed apps...</div>
-             <div v-else-if="sortedInstalledApps.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+             <div v-else-if="installedAppsWithTaskStatus.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                 <h4 class="font-semibold">No Apps Installed</h4>
                 <p class="text-sm text-gray-500">Go to the "Available Apps" tab to install an application.</p>
             </div>
             <div v-else class="space-y-4">
-                 <div v-for="app in sortedInstalledApps" :key="app.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                 <div v-for="app in installedAppsWithTaskStatus" :key="app.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div class="flex items-center gap-4 flex-grow truncate">
                         <img v-if="app.icon" :src="app.icon" class="h-10 w-10 rounded-md flex-shrink-0 object-cover" alt="App Icon">
                         <div class="flex-grow truncate">
@@ -508,39 +527,45 @@ async function handleCancelInstall(taskId) {
                         </div>
                     </div>
                     <div class="flex items-center gap-x-2 flex-shrink-0 flex-wrap justify-end">
-                         <button v-if="app.update_available" @click="handleUpdateApp(app)" class="btn btn-warning btn-sm p-2" :disabled="isLoadingAction === `update-${app.id}`" title="Update App">
-                            <IconArrowUpCircle class="w-5 h-5" :class="{'animate-spin': isLoadingAction === `update-${app.id}`}" />
-                        </button>
-                        <span class="px-2 py-1 text-xs font-semibold rounded-full" :class="{
-                            'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300': app.status === 'running',
-                            'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300': app.status === 'stopped',
-                            'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300': app.status === 'error',
-                            'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300': app.status === 'installing',
-                        }">
-                           {{ app.status }}
-                        </span>
-                        <a v-if="app.status === 'running' && app.url" :href="app.url" target="_blank" class="btn btn-secondary btn-sm p-2" title="Open App">
-                            <IconGlobeAlt class="w-5 h-5" />
-                        </a>
-                        <button @click="handleEditApp(app)" class="btn btn-secondary btn-sm p-2" title="Edit App Settings">
-                            <IconPencil class="w-5 h-5" />
-                        </button>
-                        <button @click="handleShowLogs(app)" class="btn btn-secondary btn-sm p-2" title="View App Logs">
-                            <IconCode class="w-5 h-5" />
-                        </button>
-                        <button v-if="app.status !== 'running'" @click="handleAppAction(app.id, 'start')" class="btn btn-success btn-sm p-2" :disabled="isLoadingAction === `start-${app.id}`" title="Start App">
-                            <IconPlayCircle class="w-5 h-5" />
-                        </button>
-                         <button v-if="app.status === 'running'" @click="handleAppAction(app.id, 'stop')" class="btn btn-warning btn-sm p-2" :disabled="isLoadingAction === `stop-${app.id}`" title="Stop App">
-                            <IconStopCircle class="w-5 h-5" />
-                        </button>
-                        <button @click="handleUninstallApp(app)" class="btn btn-danger btn-sm p-2" :disabled="isLoadingAction === `uninstall-${app.id}`" title="Uninstall App">
-                            <IconTrash class="w-5 h-5" />
-                        </button>
+                        <div v-if="app.task" class="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+                            <span class="capitalize">{{ app.task.name.split(':')[0] }}... ({{ app.task.progress }}%)</span>
+                            <button @click="handleCancelTask(app.task.id)" class="btn btn-warning btn-sm !p-1" title="Cancel Task">
+                                <IconStopCircle class="w-4 h-4" />
+                            </button>
+                        </div>
+                        <template v-else>
+                            <button v-if="app.update_available" @click="handleUpdateApp(app)" class="btn btn-warning btn-sm p-2" title="Update App">
+                                <IconArrowUpCircle class="w-5 h-5" />
+                            </button>
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full" :class="{
+                                'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300': app.status === 'running',
+                                'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300': app.status === 'stopped',
+                                'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300': app.status === 'error',
+                            }">
+                               {{ app.status }}
+                            </span>
+                            <a v-if="app.status === 'running' && app.url" :href="app.url" target="_blank" class="btn btn-secondary btn-sm p-2" title="Open App">
+                                <IconGlobeAlt class="w-5 h-5" />
+                            </a>
+                            <button @click="handleEditApp(app)" class="btn btn-secondary btn-sm p-2" title="Edit App Settings">
+                                <IconPencil class="w-5 h-5" />
+                            </button>
+                            <button @click="handleShowLogs(app)" class="btn btn-secondary btn-sm p-2" title="View App Logs">
+                                <IconCode class="w-5 h-5" />
+                            </button>
+                            <button v-if="app.status !== 'running'" @click="handleAppAction(app.id, 'start')" class="btn btn-success btn-sm p-2" title="Start App">
+                                <IconPlayCircle class="w-5 h-5" />
+                            </button>
+                             <button v-if="app.status === 'running'" @click="handleAppAction(app.id, 'stop')" class="btn btn-warning btn-sm p-2" :disabled="isLoadingAction === `stop-${app.id}`" title="Stop App">
+                                <IconStopCircle class="w-5 h-5" />
+                            </button>
+                            <button @click="handleUninstallApp(app)" class="btn btn-danger btn-sm p-2" title="Uninstall App">
+                                <IconTrash class="w-5 h-5" />
+                            </button>
+                        </template>
                     </div>
                  </div>
             </div>
         </section>
-
     </div>
 </template>

@@ -42,6 +42,66 @@ CUSTOM_APPS_ROOT_PATH = APP_DATA_DIR / CUSTOM_APPS_DIR_NAME
 CUSTOM_APPS_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 
 
+# --- Task Functions ---
+def _start_app_task(task: Task, app_id: str):
+    db_session = next(get_db())
+    try:
+        app = db_session.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+        if not app:
+            raise ValueError("Installed app not found.")
+        
+        app_folder_name = app.folder_name
+        if not app_folder_name:
+            raise ValueError("App installation is corrupted: missing folder name.")
+            
+        app_path = APPS_ROOT_PATH / app_folder_name
+
+        if not app_path.exists():
+            app.status = 'error'
+            db_session.commit()
+            raise FileNotFoundError(f"App directory not found at {app_path}")
+
+        venv_path = app_path / "venv"
+        python_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+        log_file_path = app_path / "app.log"
+        
+        command = None
+        if app.app_metadata and 'run_command' in app.app_metadata:
+            run_command_template = app.app_metadata['run_command']
+            command = [str(arg).replace("{python_executable}", str(python_executable)).replace("{port}", str(app.port)) for arg in run_command_template]
+        else: 
+            command = [str(python_executable), "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", str(app.port)]
+
+        task.log(f"Executing start command: {' '.join(command)}")
+        task.set_progress(50)
+
+        log_file = open(log_file_path, "a", encoding="utf-8")
+        log_file.write(f"\n--- Starting app at {datetime.datetime.now().isoformat()} ---\n")
+        log_file.flush()
+        
+        process = subprocess.Popen(command, cwd=str(app_path), stdout=log_file, stderr=subprocess.STDOUT)
+        
+        app.pid = process.pid
+        app.status = 'running'
+        app.url = f"http://localhost:{app.port}"
+        app.active = True
+        db_session.commit()
+        
+        task.log(f"App '{app.name}' process started with PID {process.pid} on port {app.port}.")
+        task.set_progress(100)
+        task.result = {"success": True, "message": f"App '{app.name}' started successfully."}
+
+    except Exception as e:
+        task.log(f"Failed to start app: {e}", level="CRITICAL")
+        app_to_fail = db_session.query(DBApp).filter(DBApp.id == app_id).first()
+        if app_to_fail:
+            app_to_fail.status = 'error'
+            db_session.commit()
+        raise e
+    finally:
+        db_session.close()
+
+
 @apps_management_router.get("/apps/get-next-available-port", response_model=Dict[str, int])
 def get_next_available_port(port: Optional[int] = Query(None), db: Session = Depends(get_db)):
     """
@@ -483,55 +543,23 @@ def get_installed_apps(db: Session = Depends(get_db)):
         response_apps.append(app_public)
     return response_apps
 
-@apps_management_router.post("/installed-apps/{app_id}/start", response_model=AppActionResponse)
-def start_app(app_id: str, db: Session = Depends(get_db)):
+@apps_management_router.post("/installed-apps/{app_id}/start", response_model=TaskInfo, status_code=202)
+def start_app(app_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
     if not app:
         raise HTTPException(status_code=404, detail="Installed app not found.")
     
     if app.status == 'running':
-        return {"success": False, "message": "App is already running."}
+        raise HTTPException(status_code=400, detail="App is already running.")
     
-    app_folder_name = app.folder_name
-    if not app_folder_name:
-        raise HTTPException(status_code=500, detail="App installation is corrupted: missing folder name.")
-        
-    app_path = APPS_ROOT_PATH / app_folder_name
-
-    if not app_path.exists():
-        app.status = 'error'
-        db.commit()
-        raise HTTPException(status_code=404, detail=f"App directory not found at {app_path}")
-
-    venv_path = app_path / "venv"
-    python_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "python"
-    log_file_path = app_path / "app.log"
-    
-    command = None
-    if app.app_metadata and 'run_command' in app.app_metadata:
-        run_command_template = app.app_metadata['run_command']
-        command = [str(arg).replace("{python_executable}", str(python_executable)).replace("{port}", str(app.port)) for arg in run_command_template]
-    else: 
-        command = [str(python_executable), "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", str(app.port)]
-
-    try:
-        log_file = open(log_file_path, "a", encoding="utf-8")
-        log_file.write(f"\n--- Starting app at {datetime.datetime.now().isoformat()} ---\n")
-        log_file.flush()
-        
-        process = subprocess.Popen(command, cwd=str(app_path), stdout=log_file, stderr=subprocess.STDOUT)
-        
-        app.pid = process.pid
-        app.status = 'running'
-        app.url = f"http://localhost:{app.port}"
-        app.active = True
-        db.commit()
-        return {"success": True, "message": f"App '{app.name}' started successfully on port {app.port}."}
-    except Exception as e:
-        app.status = 'error'
-        db.commit()
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to start app: {e}")
+    task = task_manager.submit_task(
+        name=f"Start app: {app.name}",
+        target=_start_app_task,
+        args=(app_id,),
+        description=f"Starting the application '{app.name}' on port {app.port}."
+    )
+    background_tasks.add_task(task.run)
+    return TaskInfo(**task.__dict__)
 
 @apps_management_router.post("/installed-apps/{app_id}/stop", response_model=AppActionResponse)
 def stop_app(app_id: str, db: Session = Depends(get_db)):

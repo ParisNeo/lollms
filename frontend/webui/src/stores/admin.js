@@ -74,6 +74,19 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    // Purge Task
+    async function purgeUnusedUploads() {
+        try {
+            const response = await apiClient.post('/api/admin/purge-unused-uploads');
+            const task = response.data;
+            uiStore.addNotification(`Task '${task.name}' started.`, 'info');
+            await fetchTasks();
+            return task;
+        } catch (error) {
+            throw error;
+        }
+    }
+
 
     // Users
     async function fetchAllUsers() {
@@ -99,7 +112,9 @@ export const useAdminStore = defineStore('admin', () => {
                 send_as_text: sendAsText
             };
             const response = await apiClient.post('/api/admin/email-users', payload);
-            uiStore.addNotification(response.data.message || 'Email task started.', 'success');
+            const task = response.data;
+            uiStore.addNotification(`Email task '${task.name}' started.`, 'success');
+            await fetchTasks();
             return true;
         } catch (error) {
             return false;
@@ -415,8 +430,9 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function startApp(appId) {
         const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/start`);
-        uiStore.addNotification(response.data.message, response.data.success ? 'success' : 'warning');
-        await fetchInstalledApps();
+        const task = response.data;
+        uiStore.addNotification(`Task '${task.name}' started.`, 'info');
+        await fetchTasks();
     }
     async function stopApp(appId) {
         const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/stop`);
@@ -465,7 +481,7 @@ export const useAdminStore = defineStore('admin', () => {
         zooRepositories, isLoadingZooRepositories, fetchZooRepositories, addZooRepository, deleteZooRepository, pullZooRepository, pullAllZooRepositories,
         zooApps, isLoadingZooApps, fetchZooApps, installZooApp, fetchAppReadme,
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
-        tasks, isLoadingTasks, activeTaskIds, fetchTasks, clearCompletedTasks, cancelTask,
+        tasks, isLoadingTasks, activeTaskIds, fetchTasks, clearCompletedTasks, cancelTask, purgeUnusedUploads,
         updateInstalledApp, fetchAppLog
     };
 });

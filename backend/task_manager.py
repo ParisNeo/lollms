@@ -12,9 +12,10 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 class Task:
-    def __init__(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None):
+    def __init__(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None):
         self.id: str = str(uuid.uuid4())
         self.name: str = name
+        self.description: Optional[str] = description or name
         self.target: Callable = target
         self.args: tuple = args
         self.kwargs: dict = kwargs or {}
@@ -27,6 +28,8 @@ class Task:
         self.started_at: Optional[datetime.datetime] = None
         self.completed_at: Optional[datetime.datetime] = None
         self.cancellation_event = threading.Event()
+        self.file_name: Optional[str] = None
+        self.total_files: Optional[int] = None
 
     def log(self, message: str, level: str = "INFO"):
         self.logs.append({
@@ -37,6 +40,13 @@ class Task:
 
     def set_progress(self, value: int):
         self.progress = max(0, min(100, value))
+
+    def set_description(self, description: str):
+        self.description = description
+    
+    def set_file_info(self, file_name: str, total_files: int):
+        self.file_name = file_name
+        self.total_files = total_files
 
     def cancel(self):
         if self.status in [TaskStatus.RUNNING, TaskStatus.PENDING]:
@@ -77,8 +87,8 @@ class TaskManager:
             cls._instance.tasks: Dict[str, Task] = {}
         return cls._instance
 
-    def submit_task(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None) -> Task:
-        task = Task(name=name, target=target, args=args, kwargs=kwargs)
+    def submit_task(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None) -> Task:
+        task = Task(name=name, target=target, args=args, kwargs=kwargs, description=description)
         self.tasks[task.id] = task
         return task
 

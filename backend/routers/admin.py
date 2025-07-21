@@ -35,6 +35,7 @@ from backend.models import (
     LLMBindingCreate,
     LLMBindingUpdate,
     LLMBindingPublic,
+    TaskInfo,
 )
 from backend.session import (
     get_user_data_root,
@@ -45,11 +46,91 @@ from backend.session import (
 )
 from backend.security import create_reset_token, send_generic_email
 from backend.settings import settings
-from backend.config import INITIAL_ADMIN_USER_CONFIG
+from backend.config import INITIAL_ADMIN_USER_CONFIG, APP_DATA_DIR, TEMP_UPLOADS_DIR_NAME
 from backend.migration_utils import run_openwebui_migration
+from backend.task_manager import task_manager, Task
 
 
 admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependencies=[Depends(get_current_admin_user)])
+
+# --- Task Functions ---
+def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, background_color: Optional[str], send_as_text: bool):
+    db_session_local = next(get_db())
+    try:
+        users_to_email = db_session_local.query(DBUser).filter(DBUser.id.in_(user_ids)).all()
+        total_users = len(users_to_email)
+        sent_count = 0
+        task.set_progress(5)
+        for i, user in enumerate(users_to_email):
+            if task.cancellation_event.is_set():
+                task.log(f"Cancellation requested. Stopping email process.", level="WARNING")
+                break
+            if user.email and user.receive_notification_emails:
+                try:
+                    send_generic_email(
+                        user.email,
+                        subject,
+                        body,
+                        background_color,
+                        send_as_text
+                    )
+                    sent_count += 1
+                    task.log(f"Email sent to {user.username} ({user.email}).")
+                except Exception as e:
+                    task.log(f"Failed to send email to {user.username}: {e}", level="ERROR")
+            
+            progress = 5 + int(90 * (i + 1) / total_users)
+            task.set_progress(progress)
+        
+        task.set_progress(100)
+        task.result = {"message": f"Email sending task completed. Emails sent to {sent_count} of {total_users} targeted users."}
+    except Exception as e:
+        traceback.print_exc()
+        raise e
+    finally:
+        db_session_local.close()
+
+def _purge_unused_temp_files_task(task: Task):
+    task.log("Starting purge of unused temporary files older than 24 hours.")
+    deleted_count = 0
+    total_scanned = 0
+    retention_period = timedelta(hours=24)
+    now = datetime.now(timezone.utc)
+    
+    all_user_dirs = [d for d in APP_DATA_DIR.iterdir() if d.is_dir()]
+    task.set_progress(5)
+
+    if not all_user_dirs:
+        task.log("No user data directories found to scan.")
+        task.set_progress(100)
+        task.result = {"message": "Purge complete. No user directories found."}
+        return
+
+    for i, user_dir in enumerate(all_user_dirs):
+        if task.cancellation_event.is_set():
+            task.log("Purge task cancelled.", level="WARNING")
+            break
+            
+        temp_uploads_path = user_dir / TEMP_UPLOADS_DIR_NAME
+        if temp_uploads_path.exists():
+            task.log(f"Scanning directory: {temp_uploads_path}")
+            for file_path in temp_uploads_path.iterdir():
+                if file_path.is_file():
+                    total_scanned += 1
+                    try:
+                        file_mtime = datetime.fromtimestamp(file_path.stat().st_mtime, timezone.utc)
+                        if (now - file_mtime) > retention_period:
+                            file_path.unlink()
+                            deleted_count += 1
+                            task.log(f"Deleted old temporary file: {file_path.name}")
+                    except Exception as e:
+                        task.log(f"Error processing file {file_path.name}: {e}", level="ERROR")
+        
+        progress = 5 + int(90 * (i + 1) / len(all_user_dirs))
+        task.set_progress(progress)
+
+    task.set_progress(100)
+    task.result = {"message": f"Purge complete. Scanned {total_scanned} files and deleted {deleted_count}."}
 
 # --- Bindings Management Endpoints ---
 
@@ -159,7 +240,7 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
         pending_password_resets=pending_password_resets
     )
 
-@admin_router.post("/email-users", status_code=202)
+@admin_router.post("/email-users", response_model=TaskInfo, status_code=202)
 async def email_users(
     payload: EmailUsersRequest,
     background_tasks: BackgroundTasks,
@@ -172,25 +253,28 @@ async def email_users(
     if not payload.user_ids:
         raise HTTPException(status_code=400, detail="No users selected to email.")
 
-    users_to_email = db.query(DBUser).filter(DBUser.id.in_(payload.user_ids)).all()
+    task = task_manager.submit_task(
+        name=f"Emailing {len(payload.user_ids)} users",
+        target=_email_users_task,
+        args=(payload.user_ids, payload.subject, payload.body, payload.background_color, payload.send_as_text),
+        description=f"Sending email with subject: '{payload.subject}'"
+    )
+    background_tasks.add_task(task.run)
+    return TaskInfo(**task.__dict__)
 
-    if not users_to_email:
-        raise HTTPException(status_code=404, detail="No valid users found for the provided IDs.")
+@admin_router.post("/purge-unused-uploads", response_model=TaskInfo, status_code=202)
+async def purge_temp_files(background_tasks: BackgroundTasks):
+    """
+    Triggers a background task to delete temporary uploaded files older than 24 hours.
+    """
+    task = task_manager.submit_task(
+        name="Purge unused temporary files",
+        target=_purge_unused_temp_files_task,
+        description="Scans all user temporary upload folders and deletes files older than 24 hours."
+    )
+    background_tasks.add_task(task.run)
+    return TaskInfo(**task.__dict__)
 
-    sent_count = 0
-    for user in users_to_email:
-        if user.email and user.receive_notification_emails:
-            background_tasks.add_task(
-                send_generic_email, 
-                user.email, 
-                payload.subject, 
-                payload.body, 
-                payload.background_color,
-                payload.send_as_text
-            )
-            sent_count += 1
-    
-    return {"message": f"Email sending initiated for {sent_count} users."}
 
 @admin_router.post("/enhance-email", response_model=EnhancedEmailResponse)
 async def enhance_email_with_ai(

@@ -38,7 +38,8 @@ from backend.models import (
     DataStorePublic,
     DataStoreBase,
     SharedWithUserPublic,
-    SafeStoreDocumentInfo
+    SafeStoreDocumentInfo,
+    TaskInfo
 )
 from backend.session import get_datastore_db_path
 
@@ -58,7 +59,46 @@ from backend.session import (
     get_user_datastore_root_path,
     user_sessions
 )
+from backend.task_manager import task_manager, Task
 
+
+# --- Task Functions ---
+def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_paths: List[str], vectorizer_name: str):
+    db = next(get_db())
+    ss = None
+    try:
+        ss = get_safe_store_instance(username, datastore_id, db, permission_level="read_write")
+        processed_count = 0
+        error_count = 0
+        total_files = len(file_paths)
+        
+        with ss:
+            for i, file_path_str in enumerate(file_paths):
+                if task.cancellation_event.is_set():
+                    task.log("Upload task cancelled.", level="WARNING")
+                    break
+                
+                file_path = Path(file_path_str)
+                task.set_file_info(file_name=file_path.name, total_files=total_files)
+                task.log(f"Processing file {i+1}/{total_files}: {file_path.name}")
+                
+                try:
+                    ss.add_document(str(file_path), vectorizer_name=vectorizer_name)
+                    processed_count += 1
+                except Exception as e:
+                    error_count += 1
+                    task.log(f"Error processing {file_path.name}: {e}", level="ERROR")
+                
+                progress = int(100 * (i + 1) / total_files)
+                task.set_progress(progress)
+        
+        task.result = {"message": f"Processing complete. Added {processed_count} files. Encountered {error_count} errors."}
+
+    except Exception as e:
+        traceback.print_exc()
+        raise e
+    finally:
+        db.close()
 
 
 # --- SafeStore File Management API (now per-datastore) ---
@@ -125,40 +165,47 @@ async def revectorize_datastore(
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"An error occurred during revectorization: {e}")
 
-@store_files_router.post("/upload-files") 
+@store_files_router.post("/upload-files", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED) 
 async def upload_rag_documents_to_datastore(
-    datastore_id: str, files: List[UploadFile] = File(...), vectorizer_name: str = Form(...),
-    current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)
-) -> JSONResponse:
+    datastore_id: str,
+    background_tasks: BackgroundTasks,
+    files: List[UploadFile] = File(...),
+    vectorizer_name: str = Form(...),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> TaskInfo:
     if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
     
     ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
-
     datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
     datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / datastore_id
     datastore_docs_path.mkdir(parents=True, exist_ok=True)
-
-    processed, errors_list = [], []
+    
     try:
         with ss: all_vectorizers = {m['method_name'] for m in ss.list_vectorization_methods()} | set(ss.list_possible_vectorizer_names())
         if not (vectorizer_name in all_vectorizers or vectorizer_name.startswith("st:") or vectorizer_name.startswith("tfidf:")):
              raise HTTPException(status_code=400, detail=f"Vectorizer '{vectorizer_name}' not found or invalid format for datastore {datastore_id}.")
     except Exception as e: raise HTTPException(status_code=500, detail=f"Error checking vectorizer for datastore {datastore_id}: {e}")
 
+    saved_file_paths = []
     for file_upload in files:
         s_filename = secure_filename(file_upload.filename or f"upload_{uuid.uuid4().hex[:8]}")
         target_file_path = datastore_docs_path / s_filename
         try:
             with open(target_file_path, "wb") as buffer: shutil.copyfileobj(file_upload.file, buffer)
-            with ss: ss.add_document(str(target_file_path), vectorizer_name=vectorizer_name)
-            processed.append(s_filename)
+            saved_file_paths.append(str(target_file_path))
         except Exception as e:
-            errors_list.append({"filename": s_filename, "error": str(e)}); target_file_path.unlink(missing_ok=True); traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Failed to save file {s_filename}: {e}")
         finally: await file_upload.close()
-    status_code, msg = (207, "Some files processed with errors.") if errors_list and processed else \
-                       (400, "Failed to process uploaded files.") if errors_list else \
-                       (200, "All files uploaded and processed successfully.")
-    return JSONResponse(status_code=status_code, content={"message": msg, "processed_files": processed, "errors": errors_list})
+
+    task = task_manager.submit_task(
+        name=f"Add files to DataStore: {datastore_record.name}",
+        target=_upload_rag_files_task,
+        args=(current_user.username, datastore_id, saved_file_paths, vectorizer_name),
+        description=f"Vectorizing and adding {len(files)} files to the '{datastore_record.name}' DataStore."
+    )
+    background_tasks.add_task(task.run)
+    return TaskInfo(**task.__dict__)
 
 @store_files_router.get("/files", response_model=List[SafeStoreDocumentInfo])
 async def list_rag_documents_in_datastore(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[SafeStoreDocumentInfo]:

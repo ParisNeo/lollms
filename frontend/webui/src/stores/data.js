@@ -295,13 +295,12 @@ export const useDataStore = defineStore('data', () => {
     
     async function uploadFilesToStore({ storeId, formData }) {
         const uiStore = useUiStore();
+        const adminStore = useAdminStore();
         try {
             const response = await apiClient.post(`/api/store/${storeId}/upload-files`, formData);
-            if (response.status === 207) { 
-                uiStore.addNotification(response.data.message || 'Upload completed with some errors.', 'warning');
-            } else {
-                uiStore.addNotification(response.data.message || 'Files uploaded successfully.', 'success');
-            }
+            const task = response.data;
+            uiStore.addNotification(`Task '${task.name}' started. Check the Admin panel for progress.`, 'info', { duration: 7000 });
+            adminStore.fetchTasks();
         } catch(error) {
             throw error;
         }
@@ -360,13 +359,15 @@ export const useDataStore = defineStore('data', () => {
     }
     async function triggerMcpReload() {
         const uiStore = useUiStore();
-        uiStore.addNotification('Reloading MCP services...', 'info');
+        const adminStore = useAdminStore();
         try {
-            await apiClient.post('/api/mcps/reload');
+            const response = await apiClient.post('/api/mcps/reload');
+            const task = response.data;
+            uiStore.addNotification(`Task '${task.name}' started.`, 'info');
+            adminStore.fetchTasks();
             await fetchMcpTools();
-            uiStore.addNotification('MCP services reloaded.', 'success');
         } catch (error) {
-            uiStore.addNotification('Failed to reload mcp services.', 'fail');
+            // Handled by interceptor
         }
     }
     async function fetchMcps() {
