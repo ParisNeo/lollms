@@ -22,3 +22,4 @@ class TaskInfo(BaseModel):
     completed_at: Optional[datetime.datetime] = None
     file_name: Optional[str] = None
     total_files: Optional[int] = None
+    owner_username: Optional[str] = None

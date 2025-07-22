@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
-import { useAdminStore } from '../stores/admin';
+import { useTasksStore } from '../stores/tasks'; // NEW IMPORT
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import UserAvatar from '../components/ui/UserAvatar.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
@@ -24,11 +24,11 @@ import IconChevronDown from '../assets/icons/IconChevronDown.vue'; // NEW: For r
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
-const adminStore = useAdminStore();
+const tasksStore = useTasksStore(); // NEW
 const router = useRouter();
 
 const { ownedDataStores, sharedDataStores } = storeToRefs(dataStore);
-const { tasks } = storeToRefs(adminStore);
+const { tasks } = storeToRefs(tasksStore); // NEW
 
 const selectedStoreId = ref(null);
 const newStoreName = ref('');
@@ -63,41 +63,28 @@ const currentSelectedStore = computed(() => {
     return allDataStores.value.find(s => s.id === selectedStoreId.value);
 });
 
-const currentStoreUploadTask = computed(() => {
-    if (!currentSelectedStore.value) return null;
-    return tasks.value.find(task =>
-        task.name.startsWith('Add files to DataStore:') &&
-        task.name.includes(currentSelectedStore.value.name) &&
-        (task.status === 'running' || task.status === 'pending')
-    );
-});
-
-const currentStoreRevectorizeTask = computed(() => {
-    if (!currentSelectedStore.value) return null;
-    return tasks.value.find(task =>
-        task.name.startsWith('Revectorize DataStore:') &&
-        task.name.includes(currentSelectedStore.value.name) &&
-        (task.status === 'running' || task.status === 'pending')
-    );
-});
-
 const isAnyTaskRunningForSelectedStore = computed(() => {
-    return !!currentUploadTask.value || !!currentRevectorizeTask.value;
+    if (!currentSelectedStore.value) return false;
+    const storeName = currentSelectedStore.value.name;
+    return tasks.value.some(task =>
+        (task.name.startsWith('Add files to DataStore:') && task.name.includes(storeName) && (task.status === 'running' || task.status === 'pending')) ||
+        (task.name.startsWith('Revectorize DataStore:') && task.name.includes(storeName) && (task.status === 'running' || task.status === 'pending'))
+    );
 });
 
 let taskPollingInterval;
 
 onMounted(() => {
     dataStore.fetchDataStores();
-    adminStore.fetchTasks();
-    taskPollingInterval = setInterval(adminStore.fetchTasks, 3000);
+    tasksStore.fetchTasks();
+    taskPollingInterval = setInterval(tasksStore.fetchTasks, 3000);
 });
 
 onUnmounted(() => {
     clearInterval(taskPollingInterval);
 });
 
-// WATCHER FOR TASK STATUS UPDATES (REFACTORED)
+// WATCHER FOR TASK STATUS UPDATES
 watch(tasks, (newTasks) => {
     if (!currentSelectedStore.value) {
         currentUploadTask.value = null;
@@ -107,61 +94,40 @@ watch(tasks, (newTasks) => {
 
     const storeName = currentSelectedStore.value.name;
 
-    // Find the latest relevant upload task
-    const latestUploadTask = newTasks.filter(task =>
-        task.name.startsWith('Add files to DataStore:') &&
-        task.name.includes(storeName) &&
-        (task.status === 'running' || task.status === 'pending')
-    ).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+    const findLatestTask = (namePrefix) => newTasks
+        .filter(task =>
+            task.name.startsWith(namePrefix) &&
+            task.name.includes(storeName) &&
+            (task.status === 'running' || task.status === 'pending')
+        )
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
 
-    // Find the latest relevant revectorize task
-    const latestRevectorizeTask = newTasks.filter(task =>
-        task.name.startsWith('Revectorize DataStore:') &&
-        task.name.includes(storeName) &&
-        (task.status === 'running' || task.status === 'pending')
-    ).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+    const latestUploadTask = findLatestTask('Add files to DataStore:');
+    const latestRevectorizeTask = findLatestTask('Revectorize DataStore:');
 
-    // If a task changed state from running to completed/failed/cancelled, trigger refresh
-    if (currentUploadTask.value && !latestUploadTask && (currentUploadTask.value.status === 'running' || currentUploadTask.value.status === 'pending')) {
-        // Task completed/failed/cancelled
-        fetchFilesInStore(currentSelectedStore.value.id);
-        fetchStoreVectorizers(currentSelectedStore.value.id);
-    }
-    if (currentRevectorizeTask.value && !latestRevectorizeTask && (currentRevectorizeTask.value.status === 'running' || currentRevectorizeTask.value.status === 'pending')) {
-        // Task completed/failed/cancelled
+    // Function to check if a task has just completed
+    const taskJustFinished = (currentTask, latestTask) => {
+        return currentTask && !latestTask && (currentTask.status === 'running' || currentTask.status === 'pending');
+    };
+
+    if (taskJustFinished(currentUploadTask.value, latestUploadTask) || taskJustFinished(currentRevectorizeTask.value, latestRevectorizeTask)) {
         fetchFilesInStore(currentSelectedStore.value.id);
         fetchStoreVectorizers(currentSelectedStore.value.id);
     }
     
-    // Update local task refs
     currentUploadTask.value = latestUploadTask;
     currentRevectorizeTask.value = latestRevectorizeTask;
 
 }, { deep: true });
 
-
 watch(selectedStoreId, async (newId) => {
     if (newId) {
         await fetchFilesInStore(newId);
         await fetchStoreVectorizers(newId);
-        // Also update local task refs immediately when store changes
-        const storeName = currentSelectedStore.value.name;
-        currentUploadTask.value = tasks.value.find(task =>
-            task.name.startsWith('Add files to DataStore:') &&
-            task.name.includes(storeName) &&
-            (task.status === 'running' || task.status === 'pending')
-        ) || null;
-        currentRevectorizeTask.value = tasks.value.find(task =>
-            task.name.startsWith('Revectorize DataStore:') &&
-            task.name.includes(storeName) &&
-            (task.status === 'running' || task.status === 'pending')
-        ) || null;
     } else {
         filesInSelectedStore.value = [];
         availableVectorizers.value = { in_store: [], all_possible: [] };
         currentVectorizer.value = '';
-        currentUploadTask.value = null;
-        currentRevectorizeTask.value = null;
     }
 }, { immediate: true });
 
@@ -407,7 +373,6 @@ function canReadWrite(store) {
 function canRevectorize(store) {
     return store.permission_level === 'owner' || store.permission_level === 'revectorize';
 }
-
 </script>
 
 <template>
@@ -590,7 +555,7 @@ function canRevectorize(store) {
                             </div>
                         </div>
                         <button @click="handleUploadFiles" class="btn btn-primary ml-auto" :disabled="currentUploadTask || selectedFilesToUpload.length === 0 || !currentVectorizer || isAnyTaskRunningForSelectedStore">
-                            <IconArrowUpTray class="w-5 h-5 mr-2" /> <!-- UPDATED to SVG -->
+                            <IconArrowUpTray class="w-5 h-5 mr-2" />
                             {{ currentUploadTask ? 'Adding...' : 'Add Selected Files' }}
                         </button>
                     </div>
@@ -600,7 +565,7 @@ function canRevectorize(store) {
                 <div v-if="canRevectorize(currentSelectedStore)" class="flex justify-between items-center">
                     <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Re-Index / Revectorize</h3>
                     <button @click="showRevectorizePanel = !showRevectorizePanel" class="btn btn-secondary btn-sm">
-                        <IconCog class="w-4 h-4 mr-2" /> <!-- NEW Icon -->
+                        <IconCog class="w-4 h-4 mr-2" />
                         <span>Re-index Settings</span>
                         <IconChevronDown class="w-4 h-4 ml-2 transition-transform" :class="{'rotate-180': showRevectorizePanel}" />
                     </button>

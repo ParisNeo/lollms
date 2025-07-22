@@ -186,7 +186,8 @@ async def revectorize_datastore(
                 name=f"Revectorize DataStore: {datastore_record.name}",
                 target=_revectorize_datastore_task,
                 args=(current_user.username, datastore_id, vectorizer_name),
-                description=f"Revectorizing all documents in '{datastore_record.name}' with '{vectorizer_name}'."
+                description=f"Revectorizing all documents in '{datastore_record.name}' with '{vectorizer_name}'.",
+                owner_username=current_user.username
             )
             background_tasks.add_task(task.run)
             return TaskInfo(**task.__dict__)
@@ -234,7 +235,8 @@ async def upload_rag_documents_to_datastore(
         name=f"Add files to DataStore: {datastore_record.name}",
         target=_upload_rag_files_task,
         args=(current_user.username, datastore_id, saved_file_paths, vectorizer_name),
-        description=f"Vectorizing and adding {len(files)} files to the '{datastore_record.name}' DataStore."
+        description=f"Vectorizing and adding {len(files)} files to the '{datastore_record.name}' DataStore.",
+        owner_username=current_user.username
     )
     background_tasks.add_task(task.run)
     return TaskInfo(**task.__dict__)

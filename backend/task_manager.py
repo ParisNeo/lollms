@@ -12,7 +12,7 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 class Task:
-    def __init__(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None):
+    def __init__(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None, owner_username: Optional[str] = None):
         self.id: str = str(uuid.uuid4())
         self.name: str = name
         self.description: Optional[str] = description or name
@@ -30,6 +30,7 @@ class Task:
         self.cancellation_event = threading.Event()
         self.file_name: Optional[str] = None
         self.total_files: Optional[int] = None
+        self.owner_username: Optional[str] = owner_username
 
     def log(self, message: str, level: str = "INFO"):
         self.logs.append({
@@ -58,8 +59,9 @@ class Task:
         self.started_at = datetime.datetime.now(datetime.timezone.utc)
         self.log(f"Task '{self.name}' started.")
         try:
-            # Pass the task instance itself to the target function
-            self.result = self.target(self, *self.args, **self.kwargs)
+            # CORRECTED: Execute the target function, which modifies the task object directly.
+            # Do NOT assign its return value to self.result.
+            self.target(self, *self.args, **self.kwargs)
             
             if self.cancellation_event.is_set():
                 self.status = TaskStatus.CANCELLED
@@ -87,8 +89,8 @@ class TaskManager:
             cls._instance.tasks: Dict[str, Task] = {}
         return cls._instance
 
-    def submit_task(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None) -> Task:
-        task = Task(name=name, target=target, args=args, kwargs=kwargs, description=description)
+    def submit_task(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None, owner_username: Optional[str] = None) -> Task:
+        task = Task(name=name, target=target, args=args, kwargs=kwargs, description=description, owner_username=owner_username)
         self.tasks[task.id] = task
         return task
 
@@ -97,12 +99,23 @@ class TaskManager:
 
     def get_all_tasks(self) -> List[Task]:
         return sorted(list(self.tasks.values()), key=lambda t: t.created_at, reverse=True)
+    
+    def get_tasks_for_user(self, username: str) -> List[Task]:
+        user_tasks = [task for task in self.tasks.values() if task.owner_username == username]
+        return sorted(user_tasks, key=lambda t: t.created_at, reverse=True)
 
-    def clear_completed_tasks(self):
-        tasks_to_keep = {
-            task_id: task for task_id, task in self.tasks.items()
-            if task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
-        }
+    def clear_completed_tasks(self, username: Optional[str] = None):
+        if username:
+            # Clear only for a specific user
+            tasks_to_keep = {
+                task_id: task for task_id, task in self.tasks.items()
+                if task.owner_username != username or task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
+            }
+        else: # Admin case: clear all
+            tasks_to_keep = {
+                task_id: task for task_id, task in self.tasks.items()
+                if task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
+            }
         self.tasks = tasks_to_keep
 
 task_manager = TaskManager()

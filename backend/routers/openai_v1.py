@@ -77,6 +77,24 @@ class ChatCompletionStreamResponse(BaseModel):
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
 
+# --- NEW: Models for Embeddings ---
+class EmbeddingRequest(BaseModel):
+    input: Union[str, List[str]]
+    model: str
+    encoding_format: Optional[str] = "float"
+    user: Optional[str] = None # Not used by us, but part of OpenAI spec
+
+class EmbeddingObject(BaseModel):
+    object: str = "embedding"
+    embedding: List[float]
+    index: int
+
+class EmbeddingResponse(BaseModel):
+    object: str = "list"
+    data: List[EmbeddingObject]
+    model: str
+    usage: UsageInfo
+
 # Models for Tokenizer Endpoints
 class TokenizeRequest(BaseModel):
     model: str
@@ -378,6 +396,61 @@ async def chat_completions(
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Generation error: {e}")
+
+@openai_v1_router.post("/embeddings", response_model=EmbeddingResponse)
+async def create_embeddings(
+    request: EmbeddingRequest,
+    user: DBUser = Depends(get_user_from_api_key)
+):
+    if not request.model or '/' not in request.model:
+        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
+
+    binding_alias, model_name = request.model.split('/', 1)
+
+    try:
+        # We need a client to access token counting and embedding functions
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
+
+    if request.encoding_format != "float":
+        raise HTTPException(status_code=400, detail="Only 'float' encoding_format is supported.")
+
+    input_texts = [request.input] if isinstance(request.input, str) else request.input
+    if not input_texts or not all(isinstance(t, str) for t in input_texts):
+        raise HTTPException(status_code=400, detail="Invalid 'input' format. Must be a non-empty string or a list of non-empty strings.")
+
+    embeddings_data = []
+    total_tokens = 0
+    try:
+        for i, text in enumerate(input_texts):
+            # The LollmsLLMBinding.embed method is expected to return a list of floats.
+            embedding_vector = lc.embed(text) 
+            if not isinstance(embedding_vector, list) or not all(isinstance(f, (float, int)) for f in embedding_vector):
+                # Log the unexpected return type for debugging
+                print(f"Warning: Binding '{binding_alias}' embed function returned an unexpected type for input '{text[:50]}...': {type(embedding_vector)}")
+                raise HTTPException(status_code=500, detail=f"The embedding model for binding '{binding_alias}' returned an invalid data format.")
+
+            embeddings_data.append(EmbeddingObject(embedding=embedding_vector, index=i))
+            total_tokens += lc.count_tokens(text)
+            
+    except Exception as e:
+        # Re-raise HTTP exceptions, wrap others
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Failed to generate embeddings: {str(e)}")
+
+    usage = UsageInfo(prompt_tokens=total_tokens, completion_tokens=0, total_tokens=total_tokens)
+    
+    return EmbeddingResponse(
+        data=embeddings_data,
+        model=request.model,
+        usage=usage
+    )
 
 @openai_v1_router.post("/tokenize", response_model=TokenizeResponse)
 async def tokenize_text(

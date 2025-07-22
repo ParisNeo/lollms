@@ -2,9 +2,11 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
+import { useTasksStore } from './tasks'; // Import the new tasks store
 
 export const useAdminStore = defineStore('admin', () => {
     const uiStore = useUiStore();
+    const tasksStore = useTasksStore(); // Get instance of tasks store
 
     // --- State ---
     const allUsers = ref([]);
@@ -37,56 +39,20 @@ export const useAdminStore = defineStore('admin', () => {
     const installedApps = ref([]);
     const isLoadingInstalledApps = ref(false);
 
-    const tasks = ref([]);
-    const isLoadingTasks = ref(false);
-    const activeTaskIds = ref({}); // Maps app names to task IDs
-
     // --- Actions ---
-    
-    // Tasks
-    async function fetchTasks() {
-        isLoadingTasks.value = true;
-        try {
-            const response = await apiClient.get('/api/tasks');
-            tasks.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Could not fetch task list.', 'error');
-        } finally {
-            isLoadingTasks.value = false;
-        }
-    }
-    async function clearCompletedTasks() {
-        try {
-            await apiClient.post('/api/tasks/clear-completed');
-            uiStore.addNotification('Cleared completed tasks.', 'success');
-            await fetchTasks();
-        } catch (error) {
-            // Handled globally
-        }
-    }
-    async function cancelTask(taskId) {
-        try {
-            const response = await apiClient.post(`/api/tasks/${taskId}/cancel`);
-            uiStore.addNotification(`Task cancellation initiated for '${response.data.name}'.`, 'info');
-            await fetchTasks();
-        } catch (error) {
-            // Handled globally
-        }
-    }
 
-    // Purge Task
+    // Purge Task - an admin-only action
     async function purgeUnusedUploads() {
         try {
             const response = await apiClient.post('/api/admin/purge-unused-uploads');
             const task = response.data;
             uiStore.addNotification(`Task '${task.name}' started.`, 'info');
-            await fetchTasks();
+            await tasksStore.fetchTasks(); // Use the tasks store to refresh
             return task;
         } catch (error) {
             throw error;
         }
     }
-
 
     // Users
     async function fetchAllUsers() {
@@ -114,7 +80,7 @@ export const useAdminStore = defineStore('admin', () => {
             const response = await apiClient.post('/api/admin/email-users', payload);
             const task = response.data;
             uiStore.addNotification(`Email task '${task.name}' started.`, 'success');
-            await fetchTasks();
+            await tasksStore.fetchTasks(); // Use the tasks store to refresh
             return true;
         } catch (error) {
             return false;
@@ -339,8 +305,8 @@ export const useAdminStore = defineStore('admin', () => {
         try {
             const response = await apiClient.post(`/api/apps-management/zoo/repositories/${repoId}/pull`);
             const task = response.data;
-            activeTaskIds.value[task.name] = task.id;
             uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
+            await tasksStore.fetchTasks();
             return task;
         } catch (error) {
             throw error;
@@ -352,12 +318,10 @@ export const useAdminStore = defineStore('admin', () => {
             return;
         }
         uiStore.addNotification('Starting to pull all repositories...', 'info');
-        // Sequentially start the pull tasks. The tasks themselves run in the background.
         for (const repo of zooRepositories.value) {
             try {
                 await pullZooRepository(repo.id);
             } catch (error) {
-                // The error is already handled and notified by the global interceptor.
                 console.error(`Failed to start pull task for repository: ${repo.name}`, error);
             }
         }
@@ -391,12 +355,9 @@ export const useAdminStore = defineStore('admin', () => {
         try {
             const response = await apiClient.post('/api/apps-management/zoo/install-app', payload);
             const task = response.data;
-            activeTaskIds.value[task.name] = task.id;
             uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
-
-            // No longer need polling here as the component will do it based on activeTaskIds
             await fetchZooApps();
-            await fetchTasks();
+            await tasksStore.fetchTasks();
             return task;
         } catch (error) {
             throw error;
@@ -432,7 +393,7 @@ export const useAdminStore = defineStore('admin', () => {
         const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/start`);
         const task = response.data;
         uiStore.addNotification(`Task '${task.name}' started.`, 'info');
-        await fetchTasks();
+        await tasksStore.fetchTasks();
     }
     async function stopApp(appId) {
         const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/stop`);
@@ -466,7 +427,6 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
-
     return {
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers,
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
@@ -481,7 +441,7 @@ export const useAdminStore = defineStore('admin', () => {
         zooRepositories, isLoadingZooRepositories, fetchZooRepositories, addZooRepository, deleteZooRepository, pullZooRepository, pullAllZooRepositories,
         zooApps, isLoadingZooApps, fetchZooApps, installZooApp, fetchAppReadme,
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
-        tasks, isLoadingTasks, activeTaskIds, fetchTasks, clearCompletedTasks, cancelTask, purgeUnusedUploads,
+        purgeUnusedUploads,
         updateInstalledApp, fetchAppLog
     };
 });

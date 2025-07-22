@@ -23,6 +23,12 @@ export const useUiStore = defineStore('ui', () => {
     const emailModalSendAsText = ref(false);
     const isSidebarOpen = ref(true); // New state
 
+    // NEW: State for the Generate Personality Modal
+    const generatePersonalityModalProps = ref({
+        prompt: '',
+        customEnhancePrompt: ''
+    });
+
     const activeModal = computed(() => modalStack.value.length > 0 ? modalStack.value[modalStack.value.length - 1] : null);
 
     async function copyToClipboard(textToCopy, successMessage = 'Copied to clipboard!') {
@@ -117,18 +123,6 @@ export const useUiStore = defineStore('ui', () => {
         setTheme(currentTheme.value);
     }
 
-    function toggleSidebar() {
-        isSidebarOpen.value = !isSidebarOpen.value;
-        localStorage.setItem('lollms-sidebar-open', isSidebarOpen.value);
-    }
-
-    function initializeSidebarState() {
-        const storedState = localStorage.getItem('lollms-sidebar-open');
-        if (storedState !== null) {
-            isSidebarOpen.value = JSON.parse(storedState);
-        }
-    }
-
     function setLanguage(langCode) {
         currentLanguage.value = langCode;
         localStorage.setItem('lollms-language', langCode);
@@ -193,6 +187,31 @@ export const useUiStore = defineStore('ui', () => {
         return activeModal.value === name;
     }
 
+    // NEW: Getter and Setter for Generate Personality Modal
+    function openGeneratePersonalityModal() {
+        openModal('generatePersonality');
+    }
+
+    // Getters/Setters for email modal state
+    function setEmailModalState(subject, body, backgroundColor='#f4f4f8', sendAsText=false) {
+        emailModalSubject.value = subject;
+        emailModalBody.value = body;
+        emailModalBackgroundColor.value = backgroundColor;
+        emailModalSendAsText.value = sendAsText;
+    }
+
+    function toggleSidebar() {
+        isSidebarOpen.value = !isSidebarOpen.value;
+        localStorage.setItem('lollms-sidebar-open', isSidebarOpen.value);
+    }
+
+    function initializeSidebarState() {
+        const storedState = localStorage.getItem('lollms-sidebar-open');
+        if (storedState !== null) {
+            isSidebarOpen.value = JSON.parse(storedState);
+        }
+    }
+
     return {
         mainView, activeModal, modalProps, notifications, currentTheme,
         currentLanguage, availableLanguages,
@@ -206,5 +225,6 @@ export const useUiStore = defineStore('ui', () => {
         isModalOpen, modalData,
         copyToClipboard,
         toggleSidebar, initializeSidebarState,
+        openGeneratePersonalityModal // NEW
     };
 });

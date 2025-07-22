@@ -244,6 +244,7 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
 async def email_users(
     payload: EmailUsersRequest,
     background_tasks: BackgroundTasks,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     email_mode = settings.get("password_recovery_mode")
@@ -257,20 +258,22 @@ async def email_users(
         name=f"Emailing {len(payload.user_ids)} users",
         target=_email_users_task,
         args=(payload.user_ids, payload.subject, payload.body, payload.background_color, payload.send_as_text),
-        description=f"Sending email with subject: '{payload.subject}'"
+        description=f"Sending email with subject: '{payload.subject}'",
+        user_id=current_admin.id
     )
     background_tasks.add_task(task.run)
     return TaskInfo(**task.__dict__)
 
 @admin_router.post("/purge-unused-uploads", response_model=TaskInfo, status_code=202)
-async def purge_temp_files(background_tasks: BackgroundTasks):
+async def purge_temp_files(background_tasks: BackgroundTasks, current_admin: UserAuthDetails = Depends(get_current_admin_user)):
     """
     Triggers a background task to delete temporary uploaded files older than 24 hours.
     """
     task = task_manager.submit_task(
         name="Purge unused temporary files",
         target=_purge_unused_temp_files_task,
-        description="Scans all user temporary upload folders and deletes files older than 24 hours."
+        description="Scans all user temporary upload folders and deletes files older than 24 hours.",
+        user_id=current_admin.id
     )
     background_tasks.add_task(task.run)
     return TaskInfo(**task.__dict__)

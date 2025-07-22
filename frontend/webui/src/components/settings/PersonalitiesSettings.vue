@@ -156,16 +156,33 @@ async function handleDeselectAll() {
 function openEditor(personality = null) {
     let personalityData;
     if (personality) {
+        // This is an existing personality, either user's or public
         personalityData = { ...personality };
+        // If it's a public one, we're cloning it, so nullify the ID
         if (personality.is_public) {
             personalityData.id = null;
-            personalityData.is_public = false;
+            personalityData.is_public = false; // Cloned personalities are private by default
         }
     } else {
-        personalityData = { name: '', category: '', description: '', prompt_text: '', is_public: false, icon_base64: null };
+        // This is a brand new, blank personality
+        personalityData = { 
+            id: null, // Ensure ID is null for creation
+            name: '', 
+            category: '', 
+            description: '', 
+            prompt_text: '', 
+            is_public: false, 
+            icon_base64: null 
+        };
     }
     uiStore.openModal('personalityEditor', { personality: personalityData });
 }
+
+// NEW: Function to open the Generate Personality modal
+function openGeneratePersonalityModal() {
+    uiStore.openModal('generatePersonality');
+}
+
 
 async function handleDeletePersonality(personality) {
     const confirmed = await uiStore.showConfirmation({
@@ -197,7 +214,13 @@ async function handleShare(personality) {
 
 <template>
     <section>
-        <h4 class="text-lg font-semibold mb-2 border-b dark:border-gray-600 pb-2">Personalities</h4>
+        <div class="flex justify-between items-center mb-4">
+            <h4 class="text-lg font-semibold">Personalities</h4>
+            <div class="flex gap-2">
+                <button @click="openGeneratePersonalityModal()" class="btn btn-primary">Generate from Prompt</button>
+                <button @click="openEditor()" class="btn btn-secondary">+ Create New</button>
+            </div>
+        </div>
         
         <div class="my-6 grid grid-cols-1 md:grid-cols-2 gap-4">
              <div class="relative">
@@ -220,10 +243,7 @@ async function handleShare(personality) {
 
         <div class="space-y-10">
             <div>
-                <div class="flex justify-between items-center mb-4">
-                    <h5 class="text-md font-semibold">Your Personalities</h5>
-                    <button @click="openEditor()" class="btn btn-secondary !text-xs !py-1">+ Create New</button>
-                </div>
+                <h5 class="text-md font-semibold mb-4">Your Personalities</h5>
                 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     <div
                         @click="handleDeselectAll"

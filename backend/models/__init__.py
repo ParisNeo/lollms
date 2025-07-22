@@ -6,6 +6,7 @@ from .user import *
 from .api_key import *
 from .discussion import *
 from .personality import *
+from .personality_generation import * # NEW
 from .service import *
 from .datastore import *
 from .social import *

@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../stores/admin';
+import { useTasksStore } from '../../stores/tasks'; // NEW
 import { useUiStore } from '../../stores/ui';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
@@ -14,15 +15,18 @@ import IconArrowDown from '../../assets/icons/IconArrowDown.vue';
 import IconArrowUpCircle from '../../assets/icons/IconArrowUpCircle.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
-import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue'; // IMPORTED
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import AppCard from '../ui/AppCard.vue';
 import AppCardSkeleton from '../ui/AppCardSkeleton.vue';
 
 
 const adminStore = useAdminStore();
+const tasksStore = useTasksStore(); // NEW
 const uiStore = useUiStore();
 
-const { zooRepositories, isLoadingZooRepositories, zooApps, isLoadingZooApps, installedApps, isLoadingInstalledApps, tasks, activeTaskIds } = storeToRefs(adminStore);
+// UPDATED: Destructuring from both admin and tasks stores
+const { zooRepositories, isLoadingZooRepositories, zooApps, isLoadingZooApps, installedApps, isLoadingInstalledApps } = storeToRefs(adminStore);
+const { tasks } = storeToRefs(tasksStore); // UPDATED
 
 const activeTab = ref('repositories');
 const isAddFormVisible = ref(false);
@@ -49,18 +53,18 @@ onMounted(() => {
     adminStore.fetchZooRepositories();
     adminStore.fetchZooApps();
     adminStore.fetchInstalledApps();
-    adminStore.fetchTasks();
+    tasksStore.fetchTasks(); // UPDATED
 });
 
 watch(activeTab, (newTab) => {
     if (newTab === 'available_apps') {
         adminStore.fetchZooApps();
         adminStore.fetchInstalledApps();
-        adminStore.fetchTasks();
+        tasksStore.fetchTasks(); // UPDATED
     }
     if (newTab === 'installed_apps') {
         adminStore.fetchInstalledApps();
-        adminStore.fetchTasks();
+        tasksStore.fetchTasks(); // UPDATED
     }
 });
 
@@ -328,7 +332,7 @@ async function showAppHelp(app) {
 }
 
 async function handleCancelTask(taskId) {
-    await adminStore.cancelTask(taskId);
+    await tasksStore.cancelTask(taskId); // UPDATED
 }
 
 </script>
@@ -529,7 +533,7 @@ async function handleCancelTask(taskId) {
                     </div>
                     <div class="flex items-center gap-x-2 flex-shrink-0 flex-wrap justify-end">
                         <div v-if="app.task" class="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
-                            <IconAnimateSpin class="w-4 h-4" /> <!-- ADDED -->
+                            <IconAnimateSpin class="w-4 h-4" />
                             <span class="capitalize">{{ app.task.name.split(':')[0] }}... ({{ app.task.progress }}%)</span>
                             <button @click="handleCancelTask(app.task.id)" class="btn btn-warning btn-sm !p-1" title="Cancel Task">
                                 <IconStopCircle class="w-4 h-4" />

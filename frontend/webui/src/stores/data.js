@@ -3,7 +3,7 @@ import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useAuthStore } from './auth';
 import { useUiStore } from './ui';
-import { useAdminStore } from './admin';
+import { useTasksStore } from './tasks'; // Import tasks store
 
 export const useDataStore = defineStore('data', () => {
     const availableLollmsModels = ref([]);
@@ -274,11 +274,14 @@ export const useDataStore = defineStore('data', () => {
 
     async function revectorizeStore({ storeId, vectorizerName }) {
         const uiStore = useUiStore();
+        const tasksStore = useTasksStore();
         try {
             const formData = new FormData();
             formData.append('vectorizer_name', vectorizerName);
             const response = await apiClient.post(`/api/store/${storeId}/revectorize`, formData);
-            uiStore.addNotification(response.data.message, 'info', { duration: 5000 });
+            const task = response.data;
+            uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
+            tasksStore.fetchTasks();
         } catch (error) {
             throw error;
         }
@@ -304,12 +307,12 @@ export const useDataStore = defineStore('data', () => {
     
     async function uploadFilesToStore({ storeId, formData }) {
         const uiStore = useUiStore();
-        const adminStore = useAdminStore();
+        const tasksStore = useTasksStore();
         try {
             const response = await apiClient.post(`/api/store/${storeId}/upload-files`, formData);
             const task = response.data;
-            uiStore.addNotification(`Task '${task.name}' started. Check the Admin panel for progress.`, 'info', { duration: 7000 });
-            adminStore.fetchTasks();
+            uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
+            tasksStore.fetchTasks();
         } catch(error) {
             throw error;
         }
@@ -337,9 +340,14 @@ export const useDataStore = defineStore('data', () => {
         }
     }
     async function addPersonality(personalityData) {
+        if (personalityData.id) {
+            userPersonalities.value.unshift(personalityData);
+            return;
+        }
+        
         try {
-            await apiClient.post('/api/personalities', personalityData);
-            await fetchPersonalities();
+            const response = await apiClient.post('/api/personalities', personalityData);
+            userPersonalities.value.unshift(response.data);
             useUiStore().addNotification('Personality created successfully.', 'success');
         } catch (error) {
             throw error;
@@ -366,14 +374,38 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
+    async function generatePersonalityFromPrompt(prompt) {
+        const tasksStore = useTasksStore();
+        try {
+            const response = await apiClient.post('/api/personalities/generate_from_prompt', { prompt });
+            tasksStore.fetchTasks();
+            return response.data; // This returns task_id and message
+        } catch (error) {
+            throw error;
+        }
+    }
+    async function enhancePersonalityPrompt(prompt_text, custom_instruction) {
+        const tasksStore = useTasksStore(); // CORRECT
+        const payload = { prompt_text };
+        if (custom_instruction) {
+            payload.custom_instruction = custom_instruction;
+        }
+        try {
+            const response = await apiClient.post('/api/personalities/enhance_prompt', payload);
+            tasksStore.fetchTasks(); // CORRECT
+            return response.data; // This returns task_id and message
+        } catch (error) {
+            throw error;
+        }
+    }
     async function triggerMcpReload() {
         const uiStore = useUiStore();
-        const adminStore = useAdminStore();
+        const tasksStore = useTasksStore();
         try {
             const response = await apiClient.post('/api/mcps/reload');
             const task = response.data;
             uiStore.addNotification(`Task '${task.name}' started.`, 'info');
-            adminStore.fetchTasks();
+            tasksStore.fetchTasks();
             await fetchMcpTools();
         } catch (error) {
             // Handled by interceptor
@@ -456,7 +488,7 @@ export const useDataStore = defineStore('data', () => {
         try {
             await fetchDataStores();
             uiStore.addNotification('RAG stores refreshed.', 'success');
-        } catch(e) {
+        }  catch(e) {
             uiStore.addNotification('Failed to refresh RAG stores.', 'error');
         }
     }
@@ -491,13 +523,14 @@ export const useDataStore = defineStore('data', () => {
     }
     async function deleteApp(appId) {
         const uiStore = useUiStore();
+        const { useAdminStore } = await import('./admin');
         const adminStore = useAdminStore();
         try {
             await apiClient.delete(`/api/apps/${appId}`);
             uiStore.addNotification('App removed.', 'success');
             await fetchApps();
             // Also refresh installed apps list in case the deleted app was an installed one.
-            if (authStore.isAdmin) {
+            if (useAuthStore().isAdmin) {
                 adminStore.fetchInstalledApps();
             }
         } catch (error) { throw error; }
@@ -539,7 +572,8 @@ export const useDataStore = defineStore('data', () => {
         revokeShare, getSharedWithList, revectorizeStore,
         fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,
         deleteFileFromStore, fetchPersonalities, addPersonality,
-        updatePersonality, deletePersonality, fetchMcps, addMcp,
+        updatePersonality, deletePersonality, generatePersonalityFromPrompt, enhancePersonalityPrompt,
+        fetchMcps, addMcp,
         updateMcp, deleteMcp, generateMcpSsoSecret,
         fetchMcpTools, triggerMcpReload,
         refreshMcps, refreshRags,

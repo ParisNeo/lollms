@@ -4,6 +4,7 @@ import { computed, onMounted } from 'vue';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
 import { usePyodideStore } from './stores/pyodide';
+import { useTasksStore } from './stores/tasks'; // NEW
 
 // Import all modals
 import LoginModal from './components/modals/LoginModal.vue';
@@ -33,10 +34,13 @@ import AppInstallModal from './components/modals/AppInstallModal.vue';
 import AppDetailsModal from './components/modals/AppDetailsModal.vue';
 import AppConfigModal from './components/modals/AppConfigModal.vue';
 import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue';
+import GeneratePersonalityModal from './components/modals/GeneratePersonalityModal.vue';
+import TasksManagerModal from './components/modals/TasksManagerModal.vue'; // NEW
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
+const tasksStore = useTasksStore(); // NEW
 
 const activeModal = computed(() => uiStore.activeModal);
 
@@ -61,10 +65,11 @@ onMounted(async () => {
     uiStore.initializeTheme();
     await authStore.attemptInitialAuth();
     uiStore.initializeSidebarState();
-    // Pyodide initialization should only happen if authentication is successful
+    // Pyodide and Tasks initialization should only happen if authentication is successful
     // and we're not stuck in a setup flow.
     if (authStore.isAuthenticated) {
         pyodideStore.initialize();
+        tasksStore.startPolling(); // NEW
     }
 });
 </script>
@@ -123,6 +128,8 @@ onMounted(async () => {
     <WhatsNextModal v-if="activeModal === 'whatsNext'" />
     <!-- Ensure CreateFirstAdminModal is rendered if it's the active modal, regardless of loading state -->
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> 
+    <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
+    <TasksManagerModal v-if="activeModal === 'tasksManager'" /> <!-- NEW -->
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />
