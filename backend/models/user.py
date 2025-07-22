@@ -1,3 +1,4 @@
+# backend/models/user.py
 import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, constr, EmailStr
@@ -42,6 +43,7 @@ class UserCreateAdmin(UserLLMParams):
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: Optional[bool] = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
+    put_thoughts_in_context: Optional[bool] = False # NEW: Explicitly set default for Admin creation
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100)
@@ -58,7 +60,7 @@ class UserUpdate(BaseModel):
     llm_top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
     llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
     llm_repeat_last_n: Optional[int] = Field(None, ge=0)
-    put_thoughts_in_context: Optional[bool] = None
+    put_thoughts_in_context: Optional[bool] = False # NEW: Ensure default value for updates
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
     rag_n_hops: Optional[int] = Field(None, ge=1)
@@ -80,6 +82,8 @@ class AdminUserUpdate(BaseModel):
     lollms_model_name: Optional[str] = None
     llm_ctx_size: Optional[int] = Field(None, ge=0)
     safe_store_vectorizer: Optional[str] = None
+    # No direct user_ui_level here as it's typically set by admin role or default
+
     class Config:
         from_attributes = True
 

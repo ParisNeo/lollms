@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/auth.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -104,15 +105,29 @@ export const useAuthStore = defineStore('auth', () => {
         loadingProgress.value = 10;
         loadingMessage.value = 'Checking credentials...';
 
-        if (token.value) {
-            const success = await fetchUserAndInitialData();
-            if (!success) {
-                useUiStore().openModal('login');
+        const uiStore = useUiStore(); // Get uiStore instance
+
+        try {
+            const adminStatusResponse = await apiClient.get('/api/auth/admin_status');
+            if (!adminStatusResponse.data.admin_exists) {
+                loadingMessage.value = 'First run setup...';
+                uiStore.openModal('firstAdminSetup'); // Open new modal
+            } else if (token.value) {
+                const success = await fetchUserAndInitialData();
+                if (!success) {
+                    uiStore.openModal('login');
+                }
+            } else {
+                uiStore.openModal('login');
             }
-        } else {
-            useUiStore().openModal('login');
+        } catch (error) {
+            console.error("Failed to check admin status or during initial auth:", error);
+            uiStore.addNotification('Failed to connect to server. Please try again later.', 'error');
+            clearAuthData();
+            uiStore.openModal('login'); // Fallback to login
+        } finally {
+            isAuthenticating.value = false;
         }
-        isAuthenticating.value = false;
     }
 
     async function login(username, password) {
@@ -174,15 +189,27 @@ export const useAuthStore = defineStore('auth', () => {
     async function register(registrationData) {
         const uiStore = useUiStore();
         try {
-            const response = await apiClient.post('/api/auth/register', registrationData);
+            let response;
+            const adminStatusResponse = await apiClient.get('/api/auth/admin_status');
+            const isAdminExists = adminStatusResponse.data.admin_exists;
+
+            if (!isAdminExists) {
+                // If no admin exists, call the special endpoint for first admin
+                response = await apiClient.post('/api/auth/create_first_admin', registrationData);
+            } else {
+                // Otherwise, use the standard registration endpoint
+                response = await apiClient.post('/api/auth/register', registrationData);
+            }
+            
             const registrationMode = response.data.is_active ? 'direct' : 'admin_approval';
             if (registrationMode === 'direct') {
                 uiStore.addNotification('Registration successful! You can now log in.', 'success');
             } else {
                 uiStore.addNotification('Registration successful! Your account is now pending administrator approval.', 'info', 6000);
             }
-            uiStore.closeModal('register');
-            uiStore.openModal('login');
+            // After successful registration, the authStore will automatically proceed
+            // with fetching user data and initial app state, which will close the modal.
+
         } catch (error) {
             throw error;
         }

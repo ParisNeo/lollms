@@ -29,7 +29,8 @@ from backend.models import (
     UserUpdate,
     UserPasswordChange,
     ForgotPasswordRequest,
-    PasswordResetRequest
+    PasswordResetRequest,
+    UserCreateAdmin # Import the admin user model for initial setup
 )
 from backend.session import (
     get_current_active_user, 
@@ -205,7 +206,7 @@ async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(g
 
     if db.query(DBUser).filter(DBUser.username == user_data.username).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username is already registered.")
-    if db.query(DBUser).filter(DBUser.email == user_data.email).first():
+    if user_data.email and db.query(DBUser).filter(DBUser.email == user_data.email).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An account with this email address already exists.")
 
     registration_mode = settings.get("registration_mode", "admin_approval")
@@ -413,3 +414,54 @@ async def reset_password(request: PasswordResetRequest, db: Session = Depends(ge
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail="An error occurred while resetting the password.")
+
+@auth_router.get("/admin_status", response_model=Dict[str, bool])
+async def get_admin_status(db: Session = Depends(get_db)):
+    """
+    Checks if any admin user exists in the database.
+    """
+    admin_exists = db.query(DBUser).filter(DBUser.is_admin == True).first() is not None
+    return {"admin_exists": admin_exists}
+
+@auth_router.post("/create_first_admin", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
+async def create_first_admin(user_data: UserCreateAdmin, db: Session = Depends(get_db)):
+    """
+    Creates the very first admin user account.
+    This endpoint is only accessible if no admin users exist in the database.
+    """
+    admin_exists = db.query(DBUser).filter(DBUser.is_admin == True).first() is not None
+    if admin_exists:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin user already exists. Cannot create another first admin.")
+
+    if db.query(DBUser).filter(DBUser.username == user_data.username).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username is already registered.")
+    if user_data.email and db.query(DBUser).filter(DBUser.email == user_data.email).first():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An account with this email address already exists.")
+
+    # Ensure the first user is an admin
+    new_user = DBUser(
+        username=user_data.username,
+        email=user_data.email,
+        hashed_password=get_password_hash(user_data.password),
+        is_admin=True,  # Force to be admin
+        is_active=True, # Force to be active
+        lollms_model_name=settings.get("default_lollms_model_name"),
+        safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
+        llm_ctx_size=settings.get("default_llm_ctx_size"),
+        llm_temperature=settings.get("default_llm_temperature"),
+        user_ui_level=4
+    )
+
+    try:
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        print(f"INFO: First admin user '{new_user.username}' created successfully.")
+        return new_user
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A user with that username or email already exists.")
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Could not create first admin account due to a server error.")

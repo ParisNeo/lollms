@@ -1,3 +1,4 @@
+<!-- frontend/webui/src/App.vue -->
 <script setup>
 import { computed, onMounted } from 'vue';
 import { useAuthStore } from './stores/auth';
@@ -30,6 +31,7 @@ import NewApiKeyModal from './components/modals/NewApiKeyModal.vue';
 import AppInstallModal from './components/modals/AppInstallModal.vue';
 import AppDetailsModal from './components/modals/AppDetailsModal.vue';
 import AppConfigModal from './components/modals/AppConfigModal.vue';
+import FirstAdminSetupModal from './components/modals/FirstAdminSetupModal.vue'; // NEW IMPORT
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -94,6 +96,7 @@ onMounted(async () => {
     <AppInstallModal v-if="activeModal === 'appInstall'" />
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
     <AppConfigModal v-if="activeModal === 'appConfig'" />
+    <FirstAdminSetupModal v-if="activeModal === 'firstAdminSetup'" /> <!-- NEW RENDER -->
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

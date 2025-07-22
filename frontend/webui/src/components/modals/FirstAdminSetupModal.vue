@@ -1,4 +1,4 @@
-<!-- frontend/webui/src/components/modals/RegisterModal.vue -->
+<!-- frontend/webui/src/components/modals/FirstAdminSetupModal.vue -->
 <script setup>
 import { ref, computed } from 'vue';
 import { useAuthStore } from '../../stores/auth';
@@ -19,16 +19,11 @@ const errorMessage = ref('');
 const passwordsMatch = computed(() => password.value === confirmPassword.value);
 const isPasswordLongEnough = computed(() => password.value.length >= 8);
 
-const openLoginModal = () => {
-    uiStore.closeModal('register');
-    uiStore.openModal('login');
-};
-
-const handleRegister = async () => {
+const handleSubmit = async () => {
     errorMessage.value = '';
 
-    if (!username.value || !email.value || !password.value || !confirmPassword.value) {
-        errorMessage.value = 'All fields are required.';
+    if (!username.value || !password.value || !confirmPassword.value) {
+        errorMessage.value = 'Username and password fields are required.';
         return;
     }
     if (!isPasswordLongEnough.value) {
@@ -42,16 +37,19 @@ const handleRegister = async () => {
 
     isLoading.value = true;
     try {
-        await authStore.register({
+        // Call the specific API endpoint for creating the first admin
+        await authStore.register({ 
             username: username.value,
-            email: email.value,
+            email: email.value || null, // Email is optional for first admin
             password: password.value,
         });
-        // Notification is handled by authStore.register
-        uiStore.closeModal('register');
-        uiStore.openModal('login');
+        
+        // uiStore.addNotification is already handled by authStore.register
+        uiStore.closeModal('firstAdminSetup');
+        uiStore.openModal('login'); // Redirect to login after setup
+
     } catch (error) {
-        errorMessage.value = error.response?.data?.detail || 'An unexpected error occurred during registration.';
+        errorMessage.value = error.response?.data?.detail || 'An unexpected error occurred during admin setup.';
     } finally {
         isLoading.value = false;
     }
@@ -60,8 +58,10 @@ const handleRegister = async () => {
 
 <template>
   <GenericModal
-    modalName="register"
-    title="Create an Account"
+    modalName="firstAdminSetup"
+    title="First Run Setup: Create Admin Account"
+    :showCloseButton="false"
+    :allowOverlayClose="false"
     maxWidthClass="max-w-md"
   >
     <template #body>
@@ -69,41 +69,44 @@ const handleRegister = async () => {
         <img :src="appLogo" alt="Application Logo" class="h-16 w-auto" />
       </div>
 
-      <form @submit.prevent="handleRegister" class="space-y-4">
+      <p class="text-sm text-center text-gray-600 dark:text-gray-400 mb-4">
+        Welcome to LoLLMs! It looks like this is your first time running the application. Please create the initial administrator account.
+      </p>
+
+      <form @submit.prevent="handleSubmit" class="space-y-4">
         <div>
-          <label for="reg-username" class="block text-sm font-medium">Username</label>
+          <label for="admin-username" class="block text-sm font-medium">Admin Username</label>
           <input
             v-model="username"
             type="text"
-            id="reg-username"
+            id="admin-username"
             required
             :disabled="isLoading"
             class="input-field mt-1 w-full"
-            placeholder="Choose a username"
-            autocomplete="username"
+            placeholder="Choose an admin username"
+            autocomplete="new-username"
           />
         </div>
-
+        
         <div>
-          <label for="reg-email" class="block text-sm font-medium">Email Address</label>
+          <label for="admin-email" class="block text-sm font-medium">Admin Email (Optional)</label>
           <input
             v-model="email"
             type="email"
-            id="reg-email"
-            required
+            id="admin-email"
             :disabled="isLoading"
             class="input-field mt-1 w-full"
-            placeholder="your@email.com"
+            placeholder="admin@example.com"
             autocomplete="email"
           />
         </div>
 
         <div>
-          <label for="reg-password" class="block text-sm font-medium">Password</label>
+          <label for="admin-password" class="block text-sm font-medium">Admin Password</label>
             <input
               v-model="password"
               type="password"
-              id="reg-password"
+              id="admin-password"
               required
               :disabled="isLoading"
               class="input-field mt-1 w-full"
@@ -116,11 +119,11 @@ const handleRegister = async () => {
         </div>
 
         <div>
-          <label for="reg-confirm-password" class="block text-sm font-medium">Confirm Password</label>
+          <label for="admin-confirm-password" class="block text-sm font-medium">Confirm Admin Password</label>
             <input
               v-model="confirmPassword"
               type="password"
-              id="reg-confirm-password"
+              id="admin-confirm-password"
               required
               :disabled="isLoading"
               class="input-field mt-1 w-full"
@@ -145,21 +148,10 @@ const handleRegister = async () => {
                     </svg>
                     <span>Creating Account...</span>
                 </span>
-                <span v-else>Register</span>
+                <span v-else>Create Admin Account</span>
             </button>
         </div>
       </form>
-    </template>
-    
-    <template #footer>
-        <div class="text-center text-sm">
-            <p>
-                Already have an account?
-                <button @click="openLoginModal" class="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300">
-                    Log in here
-                </button>
-            </p>
-        </div>
     </template>
   </GenericModal>
 </template>

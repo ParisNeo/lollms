@@ -1,3 +1,4 @@
+# backend/db/migration.py
 import json
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, IntegrityError
@@ -202,7 +203,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "rag_top_k": "INTEGER", "max_rag_len": "INTEGER", "rag_n_hops": "INTEGER",
             "rag_min_sim_percent": "FLOAT", "rag_use_graph": "BOOLEAN DEFAULT 0",
             "rag_graph_response_type": "VARCHAR DEFAULT 'chunks_summary'",
-            "put_thoughts_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
+            "put_thoughts_in_context": "BOOLEAN DEFAULT 0 NOT NULL", # Add here if it's missing
             "auto_title": "BOOLEAN DEFAULT 0 NOT NULL",
             "user_ui_level":"INTEGER", "ai_response_language":"VARCHAR DEFAULT 'auto'",
             "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL",
@@ -223,6 +224,15 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'is_active' in added_cols:
             connection.execute(text("UPDATE users SET is_active = 1 WHERE is_active IS NULL"))
             print("INFO: Set 'is_active' to True for all existing users to ensure access after upgrade.")
+
+        # NEW: Ensure put_thoughts_in_context is explicitly False, in case it was NULL from older versions
+        if 'put_thoughts_in_context' not in user_columns_db: # Force update if column just added or to fix old nulls
+            try:
+                connection.execute(text("UPDATE users SET put_thoughts_in_context = 0 WHERE put_thoughts_in_context IS NULL"))
+                print("INFO: Set 'put_thoughts_in_context' to False for all users where it was NULL.")
+            except Exception as e:
+                print(f"WARNING: Could not update 'put_thoughts_in_context' to default False: {e}")
+
 
         user_constraints = inspector.get_unique_constraints('users')
         if 'email' in new_user_cols_defs and not any(c['name'] == 'uq_user_email' for c in user_constraints):
