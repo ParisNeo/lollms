@@ -84,8 +84,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             await apiClient.put(`/api/discussions/${discussionId}/data_zone`, { content });
             discussions.value[discussionId].data_zone = content;
-            useUiStore().addNotification('Data Zone saved successfully.', 'success');
+            // No notification here to avoid being too noisy
         } catch (error) {
+            useUiStore().addNotification('Failed to save discussion scratchpad.', 'error');
             throw error;
         }
     }
@@ -106,6 +107,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     async function selectDiscussion(id) {
         if (!id || generationInProgress.value) return;
         const uiStore = useUiStore();
+        const authStore = useAuthStore();
         if (currentDiscussionId.value === id) {
             uiStore.setMainView('chat');
             return; 
@@ -122,7 +124,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             messages.value = processMessages(response.data);
             await Promise.all([
                 fetchContextStatus(id),
-                fetchDataZone(id) // Fetch data zone on selection
+                fetchDataZone(id),
+                authStore.fetchScratchpad() // Ensure user scratchpad is loaded
             ]);
         } catch (error) {
             useUiStore().addNotification('Failed to load messages.', 'error');

@@ -35,6 +35,11 @@ let userSaveDebounceTimer = null;
 
 const showChatView = computed(() => activeDiscussion.value !== null);
 
+const combinedScratchpadContent = computed(() => {
+    // This is used to reactively pass the full context to the chat input for token counting
+    return `### User Scratchpad\n${userDataZone.value || ''}\n\n### Discussion Scratchpad\n${discussionDataZone.value || ''}`.trim();
+});
+
 // Watch for discussion changes to update the discussion scratchpad
 watch(() => activeDiscussion.value?.data_zone, (newVal) => {
     if (newVal !== discussionDataZone.value) {
@@ -143,7 +148,7 @@ async function handleKnowledgeFileUpload(event) {
               </div>
             </div>
             
-            <ChatInput @toggle-data-zone="toggleDataZone" />
+            <ChatInput @toggle-data-zone="toggleDataZone" :scratchpad-content="combinedScratchpadContent" />
         </div>
 
         <!-- Data Zone Side Panel -->
