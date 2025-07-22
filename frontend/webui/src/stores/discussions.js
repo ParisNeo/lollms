@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
+import { useDataStore } from './data'; // Import at the top level
 
 let activeGenerationAbortController = null;
 
@@ -37,6 +38,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     });
     const activeDiscussion = computed(() => currentDiscussionId.value ? discussions.value[currentDiscussionId.value] : null);
     const activeMessages = computed(() => messages.value);
+
+    const activePersonality = computed(() => {
+        const authStore = useAuthStore();
+        const dataStore = useDataStore(); // Get instance inside the computed property
+        const personalityId = authStore.user?.active_personality_id;
+        if (!personalityId) return null;
+        return dataStore.getPersonalityById(personalityId);
+    });
 
     function processMessages(rawMessages) {
         if (!Array.isArray(rawMessages)) return [];
@@ -532,6 +541,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         sendMessage, stopGeneration, updateMessageContent, gradeMessage,
         deleteMessage, initiateBranch, switchBranch, exportDiscussions,
         importDiscussions, sendDiscussion, $reset, activeDiscussionContextStatus, fetchContextStatus,
-        fetchDataZone, updateDataZone,
+        fetchDataZone, updateDataZone, activePersonality
     };
 });
