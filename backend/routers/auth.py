@@ -30,7 +30,8 @@ from backend.models import (
     UserPasswordChange,
     ForgotPasswordRequest,
     PasswordResetRequest,
-    UserCreateAdmin
+    UserCreateAdmin,
+    ScratchpadUpdate
 )
 from backend.session import (
     get_current_active_user, 
@@ -198,6 +199,25 @@ async def update_my_icon(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Could not process and save the image: {e}")
 
+@auth_router.get("/me/scratchpad", response_model=Dict[str, str])
+async def get_my_scratchpad(
+    db_user: DBUser = Depends(get_current_db_user_from_token)
+):
+    return {"content": db_user.scratchpad or ""}
+
+@auth_router.put("/me/scratchpad", status_code=200)
+async def update_my_scratchpad(
+    payload: ScratchpadUpdate,
+    db_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db)
+):
+    db_user.scratchpad = payload.content
+    try:
+        db.commit()
+        return {"message": "Scratchpad updated successfully."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @auth_router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(get_db)):
@@ -222,7 +242,7 @@ async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(g
         safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
         llm_ctx_size=settings.get("default_llm_ctx_size"),
         llm_temperature=settings.get("default_llm_temperature"),
-        first_login_done=True # NEW: Set to True for non-admin registrations (no "What's Next" for them)
+        first_login_done=True
     )
 
     try:
@@ -451,7 +471,7 @@ async def create_first_admin(user_data: UserCreateAdmin, db: Session = Depends(g
         llm_ctx_size=settings.get("default_llm_ctx_size"),
         llm_temperature=settings.get("default_llm_temperature"),
         user_ui_level=4,
-        first_login_done=False # NEW: Set to False, so "What's Next" modal shows on first actual login
+        first_login_done=False
     )
 
     try:

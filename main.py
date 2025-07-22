@@ -38,7 +38,7 @@ from backend.routers.dm_ws import dm_ws_router
 from backend.routers.api_keys import api_keys_router
 from backend.routers.openai_v1 import openai_v1_router
 from backend.routers.lollms_config import lollms_config_router
-from backend.routers.files import upload_router, assets_router
+from backend.routers.files import upload_router, assets_router, files_router
 from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
 from backend.routers.apps_management import apps_management_router
@@ -191,6 +191,7 @@ app.include_router(openai_v1_router)
 app.include_router(lollms_config_router)
 app.include_router(upload_router)
 app.include_router(assets_router)
+app.include_router(files_router)
 app.include_router(ui_router)
 app.include_router(sso_router)
 app.include_router(apps_management_router)

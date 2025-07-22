@@ -190,6 +190,18 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text(f"ALTER TABLE llm_bindings ADD COLUMN {col_name} {col_sql_def}"))
                 print(f"INFO: Added missing column '{col_name}' to 'llm_bindings' table.")
 
+    if inspector.has_table("personalities"):
+        personality_columns_db = [col['name'] for col in inspector.get_columns('personalities')]
+        new_personality_cols_defs = {
+            "active_mcps": "JSON",
+            "data_source_type": "VARCHAR DEFAULT 'none' NOT NULL",
+            "data_source": "TEXT"
+        }
+        for col_name, col_sql_def in new_personality_cols_defs.items():
+            if col_name not in personality_columns_db:
+                connection.execute(text(f"ALTER TABLE personalities ADD COLUMN {col_name} {col_sql_def}"))
+                print(f"INFO: Added missing column '{col_name}' to 'personalities' table.")
+
     if inspector.has_table("users"):
         user_columns_db = [col['name'] for col in inspector.get_columns('users')]
         
@@ -212,7 +224,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "receive_notification_emails": "BOOLEAN DEFAULT 1 NOT NULL",
             "show_token_counter": "BOOLEAN DEFAULT 1 NOT NULL",
             "is_searchable": "BOOLEAN DEFAULT 1 NOT NULL",
-            "first_login_done": "BOOLEAN DEFAULT 0 NOT NULL" # NEW: Add this column
+            "first_login_done": "BOOLEAN DEFAULT 0 NOT NULL",
+            "scratchpad": "TEXT"
         }
         
         added_cols = []
@@ -233,7 +246,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             except Exception as e:
                 print(f"WARNING: Could not update 'put_thoughts_in_context' to default False: {e}")
 
-        # NEW: Set first_login_done to True for existing users (who have already logged in)
         if 'first_login_done' in added_cols:
             try:
                 connection.execute(text("UPDATE users SET first_login_done = 1 WHERE first_login_done IS NULL"))

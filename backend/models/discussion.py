@@ -12,12 +12,16 @@ class DiscussionInfo(BaseModel):
     created_at: Optional[datetime.datetime] = None
     last_activity_at: Optional[datetime.datetime] = None
     active_branch_id: Optional[str] = None
+    data_zone: Optional[str] = None
 
 class DiscussionBranchSwitchRequest(BaseModel):
     active_branch_id: str
 
 class DiscussionTitleUpdate(BaseModel):
     title: constr(min_length=1, max_length=255)
+
+class DiscussionDataZoneUpdate(BaseModel):
+    content: str
 
 class DiscussionRagDatastoreUpdate(BaseModel):
     rag_datastore_ids: Optional[List[str]] = None

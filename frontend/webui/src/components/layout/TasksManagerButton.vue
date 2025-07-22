@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { useTasksStore } from '../../stores/tasks';
 import { useUiStore } from '../../stores/ui';
-import IconTicket from '../../assets/icons/IconTicket.vue';
+import IconTicket from '../../assets/icons/IconTasks.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const tasksStore = useTasksStore();

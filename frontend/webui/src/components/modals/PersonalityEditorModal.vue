@@ -2,56 +2,55 @@
 import { ref, watch, computed, onUnmounted } from 'vue';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
-import { useTasksStore } from '../../stores/tasks'; // NEW IMPORT
+import { useTasksStore } from '../../stores/tasks';
+import { useAuthStore } from '../../stores/auth';
+import { storeToRefs } from 'pinia';
 import GenericModal from '../ui/GenericModal.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
+import apiClient from '../../services/api';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
-const tasksStore = useTasksStore(); // NEW INSTANCE
+const tasksStore = useTasksStore();
+const authStore = useAuthStore();
 
 const modalData = computed(() => uiStore.modalData('personalityEditor'));
+const { availableMcpToolsForSelector } = storeToRefs(dataStore);
+const { isAdmin } = storeToRefs(authStore);
+const { availableRagStores } = storeToRefs(dataStore);
 
 const form = ref({});
 const isLoading = ref(false);
 const iconPreview = ref(null);
+const fileInputRef = ref(null);
+const isExtractingText = ref(false);
 
 const modalTitle = computed(() => form.value.id ? 'Edit Personality' : 'Create Personality');
 
-const isEnhancingPrompt = ref(false);
-const promptEnhanceTaskId = ref(null);
-const showCustomEnhancePrompt = ref(false);
-const customEnhancePrompt = ref('');
-let enhancePollInterval = null;
-
-const currentEnhanceTask = computed(() => { // NEW COMPUTED FOR PROGRESS
-    if (!promptEnhanceTaskId.value) return null;
-    return tasksStore.tasks.find(t => t.id === promptEnhanceTaskId.value);
-});
-
-
-function stopEnhancePolling() {
-    if (enhancePollInterval) {
-        clearInterval(enhancePollInterval);
-        enhancePollInterval = null;
-    }
-}
-
-watch(modalData, (newData, oldData) => {
+watch(modalData, (newData) => {
     if (newData?.personality) {
-        form.value = { ...newData.personality };
-        iconPreview.value = newData.personality.icon_base64 || null;
-    }
-    if (!newData && oldData) {
-        stopEnhancePolling();
-        isEnhancingPrompt.value = false;
+        const p = newData.personality;
+        form.value = { 
+            ...p, 
+            active_mcps: p.active_mcps || [],
+            owner_type: p.owner_username === 'System' ? 'system' : 'user',
+            data_source_type: p.data_source_type || 'none',
+            data_source: p.data_source || '',
+        };
+        
+        if (p.id && (p.is_public || p.owner_username === 'System')) {
+            const clonedPersonality = { ...form.value };
+            clonedPersonality.id = null;
+            clonedPersonality.is_public = false;
+            clonedPersonality.owner_type = 'user';
+            form.value = clonedPersonality;
+        }
+        iconPreview.value = p.icon_base64 || null;
     }
 }, { immediate: true });
 
-onUnmounted(() => {
-    stopEnhancePolling();
-});
 
 function compressImage(file, maxSize = 96) {
     return new Promise((resolve, reject) => {
@@ -123,7 +122,11 @@ async function handleSave() {
   const action = form.value.id ? dataStore.updatePersonality : dataStore.addPersonality;
   
   try {
-    await action(form.value);
+    const payload = { ...form.value };
+    if (payload.data_source_type === 'none') {
+        payload.data_source = null;
+    }
+    await action(payload);
     uiStore.closeModal('personalityEditor');
   } catch (error) {
     // Error is handled by interceptor, don't close modal on failure
@@ -132,76 +135,37 @@ async function handleSave() {
   }
 }
 
-async function handleEnhancePrompt() {
-    if (!form.value.prompt_text.trim()) {
-        uiStore.addNotification('System prompt cannot be empty for enhancement.', 'warning');
-        return;
+async function handleKnowledgeFileUpload(event) {
+    const files = event.target.files;
+    if (!files.length) return;
+
+    isExtractingText.value = true;
+    const formData = new FormData();
+    for (const file of files) {
+        formData.append('files', file);
     }
-    
-    isEnhancingPrompt.value = true;
-    promptEnhanceTaskId.value = null;
-    
+
     try {
-        const response = await dataStore.enhancePersonalityPrompt(form.value.prompt_text, customEnhancePrompt.value || null);
-        promptEnhanceTaskId.value = response.task_id;
-        uiStore.addNotification('Prompt enhancement started in the background.', 'info');
-        
-        await tasksStore.fetchTasks(); // CORRECTED: Use tasksStore
-        
-        // Start polling
-        enhancePollInterval = setInterval(async () => {
-            await tasksStore.fetchTasks(); // CORRECTED: Use tasksStore
-            const task = tasksStore.tasks.find(t => t.id === promptEnhanceTaskId.value);
-            if (task && (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')) {
-                stopEnhancePolling();
-                isEnhancingPrompt.value = false;
-                
-                if (task.status === 'completed') {
-                    let resultData = null;
-                    if (task.result && typeof task.result === 'string') {
-                        try { resultData = JSON.parse(task.result); } catch (e) { console.error("Failed to parse enhancement result", e); }
-                    } else {
-                        resultData = task.result;
-                    }
-
-                    if (resultData?.enhanced_prompt_text) {
-                        form.value.prompt_text = resultData.enhanced_prompt_text; // DIRECT UPDATE
-                        uiStore.addNotification('System prompt enhanced successfully!', 'success');
-                    } else {
-                        uiStore.addNotification('Enhancement finished, but no new text was returned.', 'warning');
-                    }
-                } else {
-                    uiStore.addNotification(`Prompt enhancement failed: ${task.error || 'Unknown error.'}`, 'error');
-                }
-            }
-        }, 3000);
-
+        const response = await apiClient.post('/api/files/extract-text', formData);
+        const extractedText = response.data.text;
+        form.value.data_source = form.value.data_source 
+            ? `${form.value.data_source}\n\n${extractedText}` 
+            : extractedText;
+        uiStore.addNotification(`Extracted text from ${files.length} file(s).`, 'success');
     } catch (error) {
-        uiStore.addNotification(`Failed to start prompt enhancement: ${error.response?.data?.detail || error.message}`, 'error');
-        isEnhancingPrompt.value = false;
+        // Error is handled by the global API interceptor
+    } finally {
+        isExtractingText.value = false;
+        if (fileInputRef.value) fileInputRef.value.value = ''; // Reset file input
     }
 }
+
 </script>
 
 <template>
   <GenericModal modalName="personalityEditor" :title="modalTitle" maxWidthClass="max-w-4xl">
     <template #body>
-      <!-- NEW: Progress Indicator for Enhancement -->
-      <div v-if="isEnhancingPrompt" class="text-center p-6 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-          <IconAnimateSpin class="w-8 h-8 mx-auto text-blue-500 animate-spin" />
-          <p class="mt-4 font-semibold">Enhancing Prompt...</p>
-          <div v-if="currentEnhanceTask">
-              <p class="text-sm text-gray-500 mt-2">{{ currentEnhanceTask.description }}</p>
-              <div class="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-600 mt-4">
-                  <div class="bg-blue-600 h-2.5 rounded-full" :style="{ width: currentEnhanceTask.progress + '%' }"></div>
-              </div>
-              <p class="text-xs text-gray-500 mt-1">{{ currentEnhanceTask.progress }}%</p>
-          </div>
-          <p v-else class="text-sm text-gray-500 mt-2">Initializing enhancement task...</p>
-      </div>
-      
-      <!-- Existing Form (now using v-show) -->
-      <form v-show="!isEnhancingPrompt" @submit.prevent="handleSave" class="space-y-4">
+      <form @submit.prevent="handleSave" class="space-y-4">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium">Name*</label>
@@ -223,10 +187,62 @@ async function handleEnhancePrompt() {
                 </div>
             </div>
         </div>
+        <div v-if="isAdmin && !form.id" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm font-medium">Type</label>
+                <select v-model="form.owner_type" class="input-field mt-1">
+                    <option value="user">Personal (for my account only)</option>
+                    <option value="system">System (for all users)</option>
+                </select>
+            </div>
+        </div>
+        <div v-if="availableMcpToolsForSelector.length > 0">
+            <label class="block text-sm font-medium">Active MCPs (Tools)</label>
+            <MultiSelectMenu 
+                v-model="form.active_mcps" 
+                :items="availableMcpToolsForSelector" 
+                placeholder="Select default tools..." 
+                class="mt-1"
+            />
+        </div>
         <div>
           <label class="block text-sm font-medium">Description</label>
           <textarea v-model="form.description" rows="2" class="input-field mt-1" placeholder="Briefly describe this personality's purpose and style..."></textarea>
         </div>
+        
+        <!-- KNOWLEDGE SECTION -->
+        <div class="space-y-2 pt-4 border-t dark:border-gray-600">
+            <h3 class="text-base font-medium">Knowledge</h3>
+            <div>
+                <label class="block text-sm font-medium">Knowledge Type</label>
+                <select v-model="form.data_source_type" class="input-field mt-1">
+                    <option value="none">None</option>
+                    <option value="raw_text">Static (Raw Text & Files)</option>
+                    <option value="datastore">Dynamic (Data Store)</option>
+                </select>
+            </div>
+            
+            <div v-if="form.data_source_type === 'raw_text'">
+                <label class="block text-sm font-medium">Static Knowledge Content</label>
+                <textarea v-model="form.data_source" rows="6" class="input-field mt-1 font-mono text-sm" placeholder="Paste text or upload files..."></textarea>
+                <div class="mt-2 flex items-center gap-4">
+                    <input type="file" ref="fileInputRef" @change="handleKnowledgeFileUpload" multiple class="hidden" accept=".txt,.pdf,.docx">
+                    <button type="button" @click="fileInputRef.click()" :disabled="isExtractingText" class="btn btn-secondary text-sm">
+                        <IconAnimateSpin v-if="isExtractingText" class="w-4 h-4 mr-2" />
+                        {{ isExtractingText ? 'Processing...' : 'Add from Files (.txt, .pdf, .docx)' }}
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="form.data_source_type === 'datastore'">
+                <label class="block text-sm font-medium">Select Data Store</label>
+                <select v-model="form.data_source" class="input-field mt-1">
+                    <option :value="null">Select a Data Store...</option>
+                    <option v-for="store in availableRagStores" :key="store.id" :value="store.id">{{ store.name }}</option>
+                </select>
+            </div>
+        </div>
+        
         <div>
           <label class="block text-sm font-medium">Disclaimer</label>
           <textarea v-model="form.disclaimer" rows="2" class="input-field mt-1" placeholder="Any warnings or disclaimers for the user..."></textarea>
@@ -234,26 +250,14 @@ async function handleEnhancePrompt() {
         <div>
             <div class="flex items-center justify-between mb-1">
                 <label class="block text-sm font-medium">System Prompt*</label>
-                <button @click="handleEnhancePrompt" type="button" class="btn btn-secondary btn-xs flex items-center gap-1" :disabled="isEnhancingPrompt || isLoading">
-                    <IconAnimateSpin v-if="isEnhancingPrompt" class="w-4 h-4 animate-spin" />
-                    <IconSparkles v-else class="w-4 h-4" />
-                    <span>Enhance</span>
-                </button>
             </div>
           <textarea v-model="form.prompt_text" rows="8" required class="input-field mt-1 font-mono text-sm" placeholder="Enter the core instructions, role, and context for the AI..."></textarea>
-        </div>
-        <div class="mb-4">
-            <label class="flex items-center">
-                <input type="checkbox" v-model="showCustomEnhancePrompt" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                <span class="ml-2 text-sm font-medium text-gray-700 dark:text-gray-300">Add custom enhancement instructions</span>
-            </label>
-            <textarea v-if="showCustomEnhancePrompt" v-model="customEnhancePrompt" rows="2" class="input-field mt-2" placeholder="e.g., Make it more concise and formal."></textarea>
         </div>
         <div>
           <label class="block text-sm font-medium">Script Code (Optional)</label>
           <textarea v-model="form.script_code" rows="6" class="input-field mt-1 font-mono text-sm" placeholder="Enter Python script for advanced logic..."></textarea>
         </div>
-         <div>
+         <div v-if="isAdmin">
             <label class="flex items-center">
                 <input type="checkbox" v-model="form.is_public" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
                 <span class="ml-2 text-sm">Make this personality public for all users</span>
@@ -262,8 +266,8 @@ async function handleEnhancePrompt() {
       </form>
     </template>
     <template #footer>
-      <button @click="uiStore.closeModal('personalityEditor')" class="btn btn-secondary" :disabled="isEnhancingPrompt">Cancel</button>
-      <button @click="handleSave" class="btn btn-primary" :disabled="isLoading || isEnhancingPrompt">
+      <button @click="uiStore.closeModal('personalityEditor')" class="btn btn-secondary">Cancel</button>
+      <button @click="handleSave" class="btn btn-primary" :disabled="isLoading">
         {{ isLoading ? 'Saving...' : 'Save Personality' }}
       </button>
     </template>

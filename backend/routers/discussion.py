@@ -42,7 +42,8 @@ from backend.models import (
     UserAuthDetails, DiscussionInfo, DiscussionTitleUpdate,
     DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,
     MessageGradeUpdate, DiscussionBranchSwitchRequest, DiscussionSendRequest,
-    DiscussionExportRequest, ExportData, DiscussionImportRequest, ContextStatusResponse
+    DiscussionExportRequest, ExportData, DiscussionImportRequest, ContextStatusResponse,
+    DiscussionDataZoneUpdate
 )
 from backend.session import (
     get_current_active_user, get_user_lollms_client,
@@ -125,6 +126,35 @@ async def create_new_discussion(current_user: UserAuthDetails = Depends(get_curr
         created_at=discussion_obj.created_at,
         last_activity_at=discussion_obj.updated_at
     )
+
+@discussion_router.get("/{discussion_id}/data_zone", response_model=Dict[str, str])
+def get_discussion_data_zone(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    return {"content": discussion.data_zone or ""}
+
+@discussion_router.put("/{discussion_id}/data_zone", status_code=200)
+def update_discussion_data_zone(
+    discussion_id: str,
+    payload: DiscussionDataZoneUpdate,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    try:
+        discussion.data_zone = payload.content
+        discussion.commit()
+        return {"message": "Data Zone updated successfully."}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to update Data Zone: {e}")
+
 
 @discussion_router.post("/prune", status_code=200)
 async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db), background_tasks: BackgroundTasks = BackgroundTasks()):
@@ -453,7 +483,7 @@ async def chat_in_existing_discussion(
 
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
     rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
-    use_mcps = (discussion_obj.metadata or {}).get('active_tools', [])
+    
     use_rag = {}
     for ds_id in rag_datastore_ids:
         ss = get_safe_store_instance(username, ds_id, db)
@@ -461,15 +491,78 @@ async def chat_in_existing_discussion(
             use_rag[ss.name] = {"name": ss.name, "description": ss.description, "callable": partial(query_rag_callback, ss=ss)}
 
     db_pers = db.query(DBPersonality).filter(DBPersonality.id == db_user.active_personality_id).first() if db_user.active_personality_id else None
+    
+    # --- REFINED: Placeholder replacement and data zone combination ---
+    user_scratchpad = db_user.scratchpad or ""
+    discussion_scratchpad_original = discussion_obj.data_zone or "" # Use the original, un-replaced version
+    now = datetime.datetime.now()
+    replacements = {
+        "{{date}}": now.strftime("%Y-%m-%d"),
+        "{{time}}": now.strftime("%H:%M:%S"),
+        "{{datetime}}": now.strftime("%Y-%m-%d %H:%M:%S"),
+    }
+    # Apply replacements to a copy
+    processed_user_scratchpad = user_scratchpad
+    for placeholder, value in replacements.items():
+        processed_user_scratchpad = processed_user_scratchpad.replace(placeholder, value)
+
+    # Combine scratchpads with clear separation for the context
+    combined_data_zone_parts = []
+    if processed_user_scratchpad:
+        combined_data_zone_parts.append(f"### User Scratchpad\n{processed_user_scratchpad}")
+    if discussion_scratchpad_original:
+        combined_data_zone_parts.append(f"### Discussion Scratchpad\n{discussion_scratchpad_original}")
+    
+    temp_data_zone_for_generation = "\n\n".join(combined_data_zone_parts).strip()
+
+
+    # Combine MCPs from discussion metadata and personality
+    use_mcps_from_discussion = (discussion_obj.metadata or {}).get('active_tools', [])
+    use_mcps_from_personality = db_pers.active_mcps if db_pers and db_pers.active_mcps else []
+    combined_mcps = list(set(use_mcps_from_discussion + use_mcps_from_personality))
+
+    # --- Build LollmsPersonality with data_source ---
+    data_source_runtime = None
+    if db_pers:
+        if db_pers.data_source_type == "raw_text":
+            data_source_runtime = db_pers.data_source
+        elif db_pers.data_source_type == "datastore" and db_pers.data_source:
+            # Create a callable for the dynamic data source
+            def query_personality_datastore(query: str) -> str:
+                ds_id = db_pers.data_source
+                ds = get_safe_store_instance(username, ds_id, db)
+                if not ds: return f"Error: Personality datastore '{ds_id}' not found or inaccessible."
+                try:
+                    results = ds.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=db_user.rag_top_k)
+                    return "\n".join([chunk.get("chunk_text", "") for chunk in results])
+                except Exception as e:
+                    return f"Error querying personality datastore: {e}"
+            data_source_runtime = query_personality_datastore
+
     active_personality = LollmsPersonality(
-        name=db_pers.name, author=db_pers.author, category=db_pers.category,
-        description=db_pers.description, system_prompt=db_pers.prompt_text,
-        script=db_pers.script_code
-    ) if db_pers else LollmsPersonality(
-        name="Generic Assistant", author="System", category="Default",
-        description="A generic, helpful assistant.",
-        system_prompt="You are a helpful AI assistant, ready to answer questions and follow instructions."
+        name=db_pers.name if db_pers else "Generic Assistant",
+        author=db_pers.author if db_pers else "System",
+        category=db_pers.category if db_pers else "Default",
+        description=db_pers.description if db_pers else "A generic, helpful assistant.",
+        system_prompt=db_pers.prompt_text if db_pers else "You are a helpful AI assistant.",
+        script=db_pers.script_code if db_pers else None,
+        active_mcps=db_pers.active_mcps or [] if db_pers else [],
+        data_source=data_source_runtime
     )
+    
+    # Correctly combine data_zone content for the client library
+    # The library expects data_source on the personality object to be the primary driver
+    # for additional context. We will append our combined scratchpad to it.
+    if data_source_runtime:
+        if isinstance(data_source_runtime, str):
+            active_personality.data_source = f"{data_source_runtime}\n\n{temp_data_zone_for_generation}".strip()
+        # If it's a callable, we can't easily combine it. The scratchpad will be the main data source.
+        # A more advanced lollms-client version might handle multiple sources better.
+        # For now, we prioritize the scratchpad if a callable is also present.
+        else:
+             active_personality.data_source = temp_data_zone_for_generation
+    else:
+        active_personality.data_source = temp_data_zone_for_generation
     
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
@@ -521,10 +614,10 @@ async def chat_in_existing_discussion(
                             images_for_message.append(b64_data)
 
                 if is_resend:
-                    result = discussion_obj.regenerate_branch(personality=active_personality, use_mcps=use_mcps, use_data_store=use_rag, streaming_callback=llm_callback)
+                    result = discussion_obj.regenerate_branch(personality=active_personality, use_mcps=combined_mcps, use_data_store=use_rag, streaming_callback=llm_callback)
                 else:
                     result = discussion_obj.chat(
-                        user_message=prompt, personality=active_personality, use_mcps=use_mcps,
+                        user_message=prompt, personality=active_personality, use_mcps=combined_mcps,
                         use_data_store=use_rag, images=images_for_message,
                         streaming_callback=llm_callback, max_reasoning_steps=db_user.rag_n_hops,
                         rag_top_k=db_user.rag_top_k, rag_min_similarity_percent=db_user.rag_min_sim_percent,

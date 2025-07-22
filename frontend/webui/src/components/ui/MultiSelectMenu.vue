@@ -89,6 +89,7 @@ const vOnClickOutside = {
     >
       <!-- Fallback / Default Button -->
       <button 
+        type="button"
         @click="toggleMenu" 
         class="w-full btn !justify-start !text-left !font-normal"
         :class="[buttonClass, selected.length > 0 ? activeClass : inactiveClass]"

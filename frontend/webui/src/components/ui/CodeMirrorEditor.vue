@@ -1,5 +1,5 @@
 <script setup>
-import { ref, shallowRef, watch } from 'vue'; // Import 'watch'
+import { ref, shallowRef, watch } from 'vue';
 import { Codemirror } from 'vue-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { languages } from '@codemirror/language-data';
@@ -19,9 +19,6 @@ const emit = defineEmits(['update:modelValue']);
 const view = shallowRef();
 const code = ref(props.modelValue);
 
-// --- FIX: Watch for external changes to v-model ---
-// This ensures that if the parent component resets the modelValue,
-// the editor's content is updated to match.
 watch(() => props.modelValue, (newValue) => {
   if (newValue !== code.value) {
     code.value = newValue;
@@ -137,9 +134,9 @@ const toolbarActions = [
 </script>
 
 <template>
-  <div class="codemirror-container border border-gray-300 dark:border-gray-600 rounded-md">
+  <div class="codemirror-container border border-gray-300 dark:border-gray-600 rounded-md h-full flex flex-col">
     <!-- Toolbar -->
-    <div class="toolbar flex items-center p-2 bg-gray-100 dark:bg-gray-700 border-b border-gray-300 dark:border-gray-600 space-x-1">
+    <div class="toolbar flex items-center p-2 bg-gray-100 dark:bg-gray-700 border-b border-gray-300 dark:border-gray-600 space-x-1 flex-shrink-0">
       <!-- Basic Formatting -->
       <button v-for="item in toolbarActions" :key="item.title" @click="item.action" :title="item.title" class="toolbar-btn">
         <!-- SVG Icons -->
@@ -171,17 +168,23 @@ const toolbarActions = [
       :extensions="extensions"
       @ready="handleReady"
       @change="handleCodeChange"
+      class="flex-grow min-h-0"
     />
   </div>
 </template>
 
 <style>
+.codemirror-container {
+    overflow: hidden; /* Prevent CodeMirror from breaking the layout */
+}
 .cm-editor {
   background-color: transparent;
   outline: none;
+  height: 100%; /* Make the editor fill the container */
 }
 .cm-scroller {
   padding: 8px;
+  overflow-y: auto; /* Enable vertical scrolling */
 }
 .cm-gutters {
   background-color: transparent !important;

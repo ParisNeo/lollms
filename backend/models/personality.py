@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field, constr
 
 class PersonalityBase(BaseModel):
@@ -11,9 +11,14 @@ class PersonalityBase(BaseModel):
     disclaimer: Optional[str] = Field(None, max_length=1000)
     script_code: Optional[str] = None
     icon_base64: Optional[str] = None
+    active_mcps: Optional[List[str]] = Field(default_factory=list)
+    data_source_type: Optional[str] = "none"
+    data_source: Optional[str] = None
+
 
 class PersonalityCreate(PersonalityBase):
     is_public: Optional[bool] = False
+    owner_type: Optional[str] = 'user' # For admins to specify 'system' or 'user'
 
 class PersonalityUpdate(PersonalityBase):
     name: Optional[constr(min_length=1, max_length=100)] = None

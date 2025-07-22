@@ -281,11 +281,40 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
+    async function fetchScratchpad() {
+        if (!isAuthenticated.value) return;
+        try {
+            const response = await apiClient.get('/api/auth/me/scratchpad');
+            if (user.value) {
+                user.value.scratchpad = response.data.content;
+            }
+        } catch (error) {
+            console.error("Failed to fetch scratchpad:", error);
+            useUiStore().addNotification('Could not load user scratchpad.', 'error');
+        }
+    }
+
+    async function updateScratchpad(content) {
+        if (!isAuthenticated.value) return;
+        try {
+            await apiClient.put('/api/auth/me/scratchpad', { content });
+            if (user.value) {
+                user.value.scratchpad = content;
+            }
+            // No notification on success for scratchpad to avoid being noisy.
+        } catch (error) {
+            useUiStore().addNotification('Failed to save scratchpad.', 'error');
+            throw error;
+        }
+    }
+
+
     return {
         user, token, isAuthenticating, isAuthenticated, isAdmin,
         loadingMessage, loadingProgress, funFact,
         attemptInitialAuth, login, register, logout,
         updateUserProfile, updateUserPreferences, changePassword,
-        ssoLoginWithPassword, ssoAuthorizeApplication
+        ssoLoginWithPassword, ssoAuthorizeApplication,
+        fetchScratchpad, updateScratchpad
     };
 });

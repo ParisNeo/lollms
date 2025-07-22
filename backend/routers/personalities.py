@@ -55,7 +55,8 @@ def _generate_personality_task(task: Task, username: str, prompt: str):
                 "description": {"type": "string", "description": "A brief overview of the personality's purpose and style, for display in the UI."},
                 "prompt_text": {"type": "string", "description": "The core system prompt that defines the AI's role, rules, and initial instructions for character."},
                 "disclaimer": {"type": "string", "description": "Any necessary warnings or disclaimers users should be aware of."},
-                "script_code": {"type": "string", "description": "Optional Python code for advanced behaviors. Can be empty."}
+                "script_code": {"type": "string", "description": "Optional Python code for advanced behaviors. Can be empty."},
+                "active_mcps": {"type": "array", "items": {"type": "string"}, "description": "A list of default MCP tools to activate with this personality."}
             },
             "required": ["name", "prompt_text"],
             "description": "JSON object defining a LoLLMs personality."
@@ -193,7 +194,7 @@ async def generate_personality_from_prompt(
         target=_generate_personality_task,
         args=(current_user.username, payload.prompt),
         description=f"Generating personality from prompt: '{payload.prompt[:50]}...'",
-        owner_username=current_user.username  # CORRECTED
+        owner_username=current_user.username
     )
     background_tasks.add_task(task.run)
     return {"task_id": task.id, "message": "Personality generation started in the background. Check tasks for progress."}
@@ -219,15 +220,15 @@ async def enhance_personality_prompt(
         target=_enhance_prompt_task,
         args=(current_user.username, prompt_text, custom_instruction),
         description="Enhancing personality system prompt.",
-        owner_username=current_user.username  # CORRECTED
+        owner_username=current_user.username
     )
     background_tasks.add_task(task.run)
     return {"task_id": task.id, "message": "Prompt enhancement started in the background. Check tasks for progress."}
 
 
 def get_personality_public_from_db(db_personality: DBPersonality, owner_username: Optional[str] = None) -> PersonalityPublic:
-    if owner_username is None and db_personality.owner:
-        owner_username = db_personality.owner.username
+    if owner_username is None:
+        owner_username = db_personality.owner.username if db_personality.owner else "System"
     
     return PersonalityPublic(
         id=db_personality.id,
@@ -242,6 +243,7 @@ def get_personality_public_from_db(db_personality: DBPersonality, owner_username
         created_at=db_personality.created_at,
         updated_at=db_personality.updated_at,
         is_public=db_personality.is_public,
+        active_mcps=db_personality.active_mcps or [],
         owner_username=owner_username
     )
 
@@ -249,27 +251,39 @@ def get_personality_public_from_db(db_personality: DBPersonality, owner_username
 async def create_personality(personality_data: PersonalityCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> PersonalityPublic:
     db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
     
-    existing_personality = db.query(DBPersonality).filter(
-        DBPersonality.owner_user_id == db_user.id,
-        DBPersonality.name == personality_data.name
-    ).first()
-    if existing_personality:
-        raise HTTPException(status_code=400, detail=f"You already have a personality named '{personality_data.name}'.")
-
-    if personality_data.is_public and not current_user.is_admin:
+    owner_id = db_user.id
+    is_public = False
+    
+    if current_user.is_admin:
+        if personality_data.owner_type == 'system':
+            owner_id = None
+        is_public = personality_data.is_public
+    elif personality_data.is_public:
         raise HTTPException(status_code=403, detail="Only administrators can create public personalities.")
     
+    name_check_owner_id = owner_id if owner_id is not None else -1 # Use a placeholder for system check if needed
+    
+    q = db.query(DBPersonality).filter(DBPersonality.name == personality_data.name)
+    if owner_id:
+        q = q.filter(DBPersonality.owner_user_id == owner_id)
+    else:
+        q = q.filter(DBPersonality.owner_user_id.is_(None))
+
+    if q.first():
+        scope = "system-wide" if owner_id is None else "your account"
+        raise HTTPException(status_code=400, detail=f"A personality named '{personality_data.name}' already exists for {scope}.")
+
     db_personality = DBPersonality(
-        **personality_data.model_dump(exclude={"is_public"}),
-        owner_user_id=db_user.id,
-        is_public=personality_data.is_public if current_user.is_admin else False
+        **personality_data.model_dump(exclude={"is_public", "owner_type"}),
+        owner_user_id=owner_id,
+        is_public=is_public
     )
 
     try:
         db.add(db_personality)
         db.commit()
         db.refresh(db_personality)
-        return get_personality_public_from_db(db_personality, current_user.username)
+        return get_personality_public_from_db(db_personality, current_user.username if owner_id else "System")
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=400, detail="Personality name conflict (race condition).")
@@ -277,6 +291,7 @@ async def create_personality(personality_data: PersonalityCreate, current_user: 
         db.rollback()
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
 
 @personalities_router.get("/my", response_model=List[PersonalityPublic])
 async def get_my_personalities(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[PersonalityPublic]:
@@ -287,7 +302,7 @@ async def get_my_personalities(current_user: UserAuthDetails = Depends(get_curre
 
 @personalities_router.get("/public", response_model=List[PersonalityPublic])
 async def get_public_personalities(db: Session = Depends(get_db)) -> List[PersonalityPublic]:
-    public_personalities_db = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(DBPersonality.is_public == True).order_by(DBPersonality.category, DBPersonality.name).all()
+    public_personalities_db = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(or_(DBPersonality.is_public == True, DBPersonality.owner_user_id.is_(None))).order_by(DBPersonality.category, DBPersonality.name).all()
     return [get_personality_public_from_db(p) for p in public_personalities_db]
 
 @personalities_router.get("/{personality_id}", response_model=PersonalityPublic)
@@ -296,10 +311,11 @@ async def get_personality(personality_id: str, current_user: UserAuthDetails = D
     if not db_personality:
         raise HTTPException(status_code=404, detail="Personality not found.")
 
-    db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
-    is_owner = (db_personality.owner_user_id == db_user.id)
+    is_owner = (db_personality.owner_user_id == current_user.id)
+    is_system = db_personality.owner_user_id is None
+    is_public = db_personality.is_public
 
-    if not db_personality.is_public and not is_owner:
+    if not is_public and not is_system and not is_owner:
         raise HTTPException(status_code=403, detail="You do not have permission to view this personality.")
     
     return get_personality_public_from_db(db_personality)
@@ -310,30 +326,32 @@ async def update_personality(personality_id: str, personality_data: PersonalityU
     if not db_personality:
         raise HTTPException(status_code=404, detail="Personality not found.")
 
-    db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
-    is_owner = (db_personality.owner_user_id == db_user.id)
+    is_owner = (db_personality.owner_user_id == current_user.id)
 
     if not is_owner and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="You do not have permission to update this personality.")
     
     if personality_data.is_public is not None:
         if not current_user.is_admin:
-            if is_owner and personality_data.is_public != db_personality.is_public:
-                 raise HTTPException(status_code=403, detail="Only administrators can change the public status of a personality.")
-        elif current_user.is_admin:
-            db_personality.is_public = personality_data.is_public
+            raise HTTPException(status_code=403, detail="Only administrators can change the public status of a personality.")
+        db_personality.is_public = personality_data.is_public
     
     update_data = personality_data.model_dump(exclude_unset=True, exclude={"is_public"})
 
     if "name" in update_data and update_data["name"] != db_personality.name:
         owner_id_for_check = db_personality.owner_user_id
         q = db.query(DBPersonality).filter(
-            DBPersonality.owner_user_id == owner_id_for_check,
             DBPersonality.name == update_data["name"],
             DBPersonality.id != personality_id
         )
+        if owner_id_for_check:
+            q = q.filter(DBPersonality.owner_user_id == owner_id_for_check)
+        else:
+            q = q.filter(DBPersonality.owner_user_id.is_(None))
+        
         if q.first():
-            raise HTTPException(status_code=400, detail=f"A personality named '{update_data['name']}' already exists.")
+            scope = "system-wide" if owner_id_for_check is None else "your account"
+            raise HTTPException(status_code=400, detail=f"A personality named '{update_data['name']}' already exists for {scope}.")
 
     for field, value in update_data.items():
         if hasattr(db_personality, field):
@@ -357,10 +375,9 @@ async def delete_personality(personality_id: str, current_user: UserAuthDetails 
     if not db_personality:
         raise HTTPException(status_code=404, detail="Personality not found.")
 
-    db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
-    is_owner = (db_personality.owner_user_id == db_user.id)
+    is_owner = (db_personality.owner_user_id == current_user.id)
 
-    if not is_owner and not (current_user.is_admin and (db_personality.is_public or db_personality.owner_user_id is None)):
+    if not is_owner and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="You do not have permission to delete this personality.")
 
     users_with_this_active = db.query(DBUser).filter(DBUser.active_personality_id == personality_id).all()
@@ -416,6 +433,7 @@ async def send_personality_to_user(personality_id: str, send_request: Personalit
         script_code=original_personality.script_code,
         icon_base64=original_personality.icon_base64,
         owner_user_id=target_user.id,
+        active_mcps=original_personality.active_mcps,
         is_public=False
     )
     db.add(copied_personality)

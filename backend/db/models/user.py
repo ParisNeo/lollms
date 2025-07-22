@@ -29,7 +29,8 @@ class User(Base):
     icon = Column(Text, nullable=True)
     receive_notification_emails = Column(Boolean, default=True, nullable=False)
     is_searchable = Column(Boolean, default=True, nullable=False, index=True)
-    first_login_done = Column(Boolean, default=False, nullable=False) # NEW: Added first_login_done
+    first_login_done = Column(Boolean, default=False, nullable=False)
+    scratchpad = Column(Text, nullable=True)
     
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     

@@ -2,7 +2,7 @@ import uuid
 from sqlalchemy import (
     Column, Integer, String, Boolean,
     ForeignKey, UniqueConstraint,
-    DateTime, Text
+    DateTime, Text, JSON
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -24,5 +24,8 @@ class Personality(Base):
     icon_base64 = Column(Text, nullable=True)
     is_public = Column(Boolean, default=False, index=True) 
     owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_personality_owner", ondelete="SET NULL"), nullable=True, index=True)
+    active_mcps = Column(JSON, nullable=True)
+    data_source_type = Column(String, default="none", nullable=False)
+    data_source = Column(Text, nullable=True)
     owner = relationship("User", foreign_keys=[owner_user_id], back_populates="owned_personalities")
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_personality_name'),)

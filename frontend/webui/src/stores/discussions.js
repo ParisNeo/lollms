@@ -68,13 +68,37 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
+    async function fetchDataZone(discussionId) {
+        if (!discussions.value[discussionId]) return;
+        try {
+            const response = await apiClient.get(`/api/discussions/${discussionId}/data_zone`);
+            discussions.value[discussionId].data_zone = response.data.content;
+        } catch (error) {
+            useUiStore().addNotification('Could not load discussion data zone.', 'error');
+            if (discussions.value[discussionId]) discussions.value[discussionId].data_zone = '';
+        }
+    }
+
+    async function updateDataZone({ discussionId, content }) {
+        if (!discussions.value[discussionId]) return;
+        try {
+            await apiClient.put(`/api/discussions/${discussionId}/data_zone`, { content });
+            discussions.value[discussionId].data_zone = content;
+            useUiStore().addNotification('Data Zone saved successfully.', 'success');
+        } catch (error) {
+            throw error;
+        }
+    }
+
     async function loadDiscussions() {
         try {
             const response = await apiClient.get('/api/discussions');
             const discussionData = response.data;
             if (!Array.isArray(discussionData)) return;
             const loadedDiscussions = {};
-            discussionData.forEach(d => { loadedDiscussions[d.id] = d; });
+            discussionData.forEach(d => { 
+                loadedDiscussions[d.id] = { ...d, data_zone: '' }; // Initialize with data_zone
+            });
             discussions.value = loadedDiscussions;
         } catch (error) { console.error("Failed to load discussions:", error); }
     }
@@ -96,7 +120,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.get(`/api/discussions/${id}`);
             messages.value = processMessages(response.data);
-            await fetchContextStatus(id);
+            await Promise.all([
+                fetchContextStatus(id),
+                fetchDataZone(id) // Fetch data zone on selection
+            ]);
         } catch (error) {
             useUiStore().addNotification('Failed to load messages.', 'error');
             currentDiscussionId.value = null;
@@ -107,7 +134,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.post('/api/discussions');
             const newDiscussion = response.data;
-            discussions.value[newDiscussion.id] = newDiscussion;
+            discussions.value[newDiscussion.id] = { ...newDiscussion, data_zone: '' };
             await selectDiscussion(newDiscussion.id);
             return newDiscussion;
         } catch (error) {
@@ -501,6 +528,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         updateDiscussionRagStore, renameDiscussion, updateDiscussionMcps,
         sendMessage, stopGeneration, updateMessageContent, gradeMessage,
         deleteMessage, initiateBranch, switchBranch, exportDiscussions,
-        importDiscussions, sendDiscussion, $reset, activeDiscussionContextStatus, fetchContextStatus
+        importDiscussions, sendDiscussion, $reset, activeDiscussionContextStatus, fetchContextStatus,
+        fetchDataZone, updateDataZone,
     };
 });

@@ -13,6 +13,9 @@ class UserLLMParams(BaseModel):
     llm_repeat_last_n: Optional[int] = Field(None, ge=0)
     put_thoughts_in_context: Optional[bool] = False
 
+class ScratchpadUpdate(BaseModel):
+    content: str
+
 class UserBase(BaseModel):
     username: str
     email: Optional[EmailStr] = None
@@ -44,7 +47,7 @@ class UserCreateAdmin(UserLLMParams):
     rag_use_graph: Optional[bool] = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
     put_thoughts_in_context: Optional[bool] = False
-    first_login_done: Optional[bool] = False # NEW: Add for admin creation
+    first_login_done: Optional[bool] = False
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100)
@@ -158,6 +161,7 @@ class UserPublic(UserLLMParams):
     rag_use_graph: bool
     rag_graph_response_type: Optional[str] = None
     first_login_done: bool 
+    scratchpad: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -192,11 +196,12 @@ class UserAuthDetails(UserLLMParams):
     show_token_counter: Optional[bool] = True
     openai_api_service_enabled: bool = False
     first_login_done: bool 
+    scratchpad: Optional[str] = None
 
-class RelationshipStatus(BaseModel): # NEW: Add this Pydantic model
+class RelationshipStatus(BaseModel):
     is_following: bool
     friendship_status: Optional[FriendshipStatus] = None
 
-class UserProfileResponse(BaseModel): # NEW: Add this Pydantic model
+class UserProfileResponse(BaseModel):
     user: UserPublic
     relationship: RelationshipStatus
