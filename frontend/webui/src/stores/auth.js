@@ -105,13 +105,15 @@ export const useAuthStore = defineStore('auth', () => {
         loadingProgress.value = 10;
         loadingMessage.value = 'Checking credentials...';
 
-        const uiStore = useUiStore(); // Get uiStore instance
+        const uiStore = useUiStore();
 
         try {
             const adminStatusResponse = await apiClient.get('/api/auth/admin_status');
             if (!adminStatusResponse.data.admin_exists) {
                 loadingMessage.value = 'First run setup...';
-                uiStore.openModal('firstAdminSetup'); // Open new modal
+                isAuthenticating.value = false; // Set to false so App.vue renders modals directly
+                uiStore.openModal('firstAdminSetup'); 
+                return; // Stop further execution
             } else if (token.value) {
                 const success = await fetchUserAndInitialData();
                 if (!success) {
@@ -126,7 +128,9 @@ export const useAuthStore = defineStore('auth', () => {
             clearAuthData();
             uiStore.openModal('login'); // Fallback to login
         } finally {
-            isAuthenticating.value = false;
+            if (isAuthenticating.value) { 
+                isAuthenticating.value = false;
+            }
         }
     }
 
@@ -138,25 +142,27 @@ export const useAuthStore = defineStore('auth', () => {
             formData.append('password', password);
             const response = await apiClient.post('/api/auth/token', formData);
             
-            // Set the token first
             token.value = response.data.access_token;
             localStorage.setItem('lollms_token', token.value);
 
-            // Now fetch data. The request interceptor will automatically use the new token.
+            // Hide the loading screen and modals before fetching all data
+            uiStore.closeModal(); // Close any active modal (login, firstAdminSetup, etc.)
+            isAuthenticating.value = true; // Show loading screen for data fetch
+
             const success = await fetchUserAndInitialData();
 
+            isAuthenticating.value = false; // Hide loading screen after data fetch
+
             if (success) {
-                uiStore.closeModal('login');
                 uiStore.addNotification('Login successful!', 'success');
-                // Check for first admin login and show "What's Next" modal
-                if (user.value.is_admin && !user.value.first_login_done) {
-                    // first_login_done is set to true in backend/session/get_current_active_user
+                if (user.value.is_admin && !user.value.first_login_done) { 
                     uiStore.openModal('whatsNext'); 
                 }
             } else {
                 throw new Error("Authentication succeeded but failed to fetch user data.");
             }
         } catch (error) {
+            isAuthenticating.value = false; // Hide loading screen on error
             const detail = error.response?.data?.detail || "An unknown error occurred.";
             if (detail.includes("account is inactive")) {
                  uiStore.addNotification(detail, 'warning');
@@ -171,10 +177,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function ssoLoginWithPassword(appName, username, password) {
-        // First, login to establish a session.
         await login(username, password);
-        
-        // Then, authorize the app using the new session.
         return await ssoAuthorizeApplication(appName);
     }
 
@@ -182,9 +185,7 @@ export const useAuthStore = defineStore('auth', () => {
         const formData = new FormData();
         formData.append('app_name', appName);
         const response = await apiClient.post('/api/sso/authorize', formData);
-        
         const appDetailsResponse = await apiClient.get(`/api/sso/app_details/${appName}`);
-
         return {
             access_token: response.data.access_token,
             redirect_uri: appDetailsResponse.data.sso_redirect_uri,
@@ -194,28 +195,27 @@ export const useAuthStore = defineStore('auth', () => {
     async function register(registrationData) {
         const uiStore = useUiStore();
         try {
-            let response;
             const adminStatusResponse = await apiClient.get('/api/auth/admin_status');
             const isAdminExists = adminStatusResponse.data.admin_exists;
 
             if (!isAdminExists) {
-                // If no admin exists, call the special endpoint for first admin
-                response = await apiClient.post('/api/auth/create_first_admin', registrationData);
+                await apiClient.post('/api/auth/create_first_admin', registrationData);
+                // After successful creation, log the new admin in.
+                // The login function will handle closing the modal and showing "What's Next".
+                await login(registrationData.username, registrationData.password);
             } else {
-                // Otherwise, use the standard registration endpoint
-                response = await apiClient.post('/api/auth/register', registrationData);
+                const response = await apiClient.post('/api/auth/register', registrationData);
+                const registrationMode = response.data.is_active ? 'direct' : 'admin_approval';
+                if (registrationMode === 'direct') {
+                    uiStore.addNotification('Registration successful! You can now log in.', 'success');
+                } else {
+                    uiStore.addNotification('Registration successful! Your account is now pending administrator approval.', 'info', 6000);
+                }
+                uiStore.closeModal('register');
+                uiStore.openModal('login');
             }
-            
-            const registrationMode = response.data.is_active ? 'direct' : 'admin_approval';
-            if (registrationMode === 'direct') {
-                uiStore.addNotification('Registration successful! You can now log in.', 'success');
-            } else {
-                uiStore.addNotification('Registration successful! Your account is now pending administrator approval.', 'info', 6000);
-            }
-            // After successful registration, the authStore will automatically proceed
-            // with fetching user data and initial app state, which will close the modal.
-
         } catch (error) {
+            // Re-throw to be handled by the component.
             throw error;
         }
     }
@@ -228,11 +228,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     async function logout() {
         const uiStore = useUiStore();
-
-        if (!isAuthenticated.value) {
-            return;
-        }
-        
+        if (!isAuthenticated.value) { return; }
         const localToken = token.value;
 
         const { useDiscussionsStore } = await import('./discussions');
@@ -243,11 +239,9 @@ export const useAuthStore = defineStore('auth', () => {
         
         uiStore.closeModal();
         uiStore.addNotification('You have been logged out.', 'info');
-        // On SSO route, don't reopen login modal automatically
         if (!window.location.pathname.startsWith('/app/')) {
             uiStore.openModal('login');
         }
-
 
         if (localToken) {
             apiClient.post('/api/auth/logout').catch(error => {

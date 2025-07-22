@@ -56,9 +56,13 @@ async def get_current_db_user_from_token(
         raise credentials_exception
     token_data = TokenData(username=username)
     
-    user = get_user_by_username(db, username=token_data.username)
+    user = db.query(DBUser).filter(DBUser.username == token_data.username).first()
     if user is None:
         raise credentials_exception
+    
+    # --- MODIFIED LOGIC START ---
+    # Capture the state we need for the response *before* any potential DB changes.
+    is_first_admin_login_for_this_request = user.is_admin and not user.first_login_done
     
     now = datetime.datetime.now(datetime.timezone.utc)
     last_activity_aware = None
@@ -69,13 +73,26 @@ async def get_current_db_user_from_token(
         else:
             last_activity_aware = user.last_activity_at
 
-    if last_activity_aware is None or (now - last_activity_aware) > datetime.timedelta(seconds=60):
+    # Check if an update is needed
+    update_needed = last_activity_aware is None or (now - last_activity_aware) > datetime.timedelta(seconds=60)
+    
+    if update_needed:
         user.last_activity_at = now
+        if is_first_admin_login_for_this_request:
+            user.first_login_done = True # Update the flag
         try:
             db.commit()
         except Exception as e:
             db.rollback()
-            print(f"Warning: Could not update last_activity_at for user {user.username}: {e}")
+            print(f"Warning: Could not update user state for {user.username}: {e}")
+
+    # After the commit, `user.first_login_done` is now True in the database and session.
+    # We temporarily set it back to False on the object being returned ONLY for this request
+    # so the frontend gets the correct "before" state.
+    # This is a safe, non-persistent change for the current request context.
+    if is_first_admin_login_for_this_request:
+        user.first_login_done = False
+    # --- MODIFIED LOGIC END ---
 
     return user
 
@@ -98,6 +115,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         user_sessions[username] = {
             "lollms_clients": {},
             "safe_store_instances": {},
+            "discussions": {},
             "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
             "lollms_model_name": db_user.lollms_model_name,
             "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
@@ -122,6 +140,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         birth_date=db_user.birth_date,
         receive_notification_emails=db_user.receive_notification_emails,
         is_searchable=db_user.is_searchable,
+        first_login_done=db_user.first_login_done,
         lollms_model_name=user_sessions[username].get("lollms_model_name"),
         safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
         active_personality_id=user_sessions[username].get("active_personality_id"),

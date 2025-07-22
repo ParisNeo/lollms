@@ -7,7 +7,8 @@ const props = defineProps({
   modalName: { type: String, required: true },
   title: { type: String, default: 'Modal' },
   allowOverlayClose: { type: Boolean, default: true },
-  maxWidthClass: { type: String, default: 'max-w-xl' }
+  maxWidthClass: { type: String, default: 'max-w-xl' },
+  showCloseButton: { type: Boolean, default: true } // NEW: Define the prop
 });
 
 const uiStore = useUiStore();
@@ -19,7 +20,8 @@ function handleClose() {
 }
 
 function handleKeydown(e) {
-  if (e.key === 'Escape' && isVisible.value) {
+  // NEW: Also check if the close button is enabled before allowing Escape key to close
+  if (e.key === 'Escape' && isVisible.value && props.allowOverlayClose && props.showCloseButton) {
     handleClose();
   }
 }
@@ -58,7 +60,8 @@ onUnmounted(() => {
         <div class="modal-panel bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full flex flex-col max-h-[90vh]" :class="[maxWidthClass]">
           <header class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
             <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ title }}</h2>
-            <button @click="handleClose" class="p-1 rounded-full text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600">
+            <!-- NEW: Conditionally render the close button based on the prop -->
+            <button v-if="showCloseButton" @click="handleClose" class="p-1 rounded-full text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600">
               <IconClose class="w-6 h-6" />
             </button>
           </header>

@@ -100,6 +100,7 @@ export const useDataStore = defineStore('data', () => {
                 _languages.value = [];
             }
         } catch (error) {
+            console.error("Failed to fetch languages, using fallback.", error);
             _languages.value = [];
         } finally {
             isLoadingLanguages.value = false;
@@ -111,9 +112,11 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/api-keys');
             apiKeys.value = response.data;
         } catch (error) {
+            // This is expected if the service is disabled, so we don't show a notification unless it's another error.
             if (error.response?.status !== 403) {
                 useUiStore().addNotification('Could not fetch API keys.', 'error');
             }
+            console.warn("API keys could not be fetched (this is normal if the service is disabled).");
             apiKeys.value = [];
         }
     }
@@ -152,14 +155,20 @@ export const useDataStore = defineStore('data', () => {
     }
 
     async function loadAllInitialData() {
-        fetchAvailableLollmsModels();
-        fetchDataStores();
-        fetchPersonalities();
-        fetchMcps();
-        fetchMcpTools();
-        fetchApps();
-        fetchLanguages();
-        fetchApiKeys();
+        // Run all fetch operations, but catch individual errors so one failure doesn't stop the others.
+        const promises = [
+            fetchAvailableLollmsModels().catch(e => console.error("Error fetching models:", e)),
+            fetchDataStores().catch(e => console.error("Error fetching data stores:", e)),
+            fetchPersonalities().catch(e => console.error("Error fetching personalities:", e)),
+            fetchMcps().catch(e => console.error("Error fetching MCPs:", e)),
+            fetchMcpTools().catch(e => console.error("Error fetching MCP tools:", e)),
+            fetchApps().catch(e => console.error("Error fetching apps:", e)),
+            fetchLanguages().catch(e => console.error("Error fetching languages:", e)),
+            fetchApiKeys().catch(e => console.error("Error fetching API keys:", e))
+        ];
+        
+        // Wait for all of them to settle, regardless of success or failure.
+        await Promise.allSettled(promises);
     }
     
     async function fetchAvailableLollmsModels() {

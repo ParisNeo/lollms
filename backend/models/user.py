@@ -43,7 +43,8 @@ class UserCreateAdmin(UserLLMParams):
     rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
     rag_use_graph: Optional[bool] = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
-    put_thoughts_in_context: Optional[bool] = False # NEW: Explicitly set default for Admin creation
+    put_thoughts_in_context: Optional[bool] = False
+    first_login_done: Optional[bool] = False # NEW: Add for admin creation
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100)
@@ -60,7 +61,7 @@ class UserUpdate(BaseModel):
     llm_top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
     llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
     llm_repeat_last_n: Optional[int] = Field(None, ge=0)
-    put_thoughts_in_context: Optional[bool] = False # NEW: Ensure default value for updates
+    put_thoughts_in_context: Optional[bool] = False
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
     rag_n_hops: Optional[int] = Field(None, ge=1)
@@ -156,6 +157,7 @@ class UserPublic(UserLLMParams):
     rag_min_sim_percent: Optional[float] = None
     rag_use_graph: bool
     rag_graph_response_type: Optional[str] = None
+    first_login_done: bool 
     class Config:
         from_attributes = True
 
@@ -189,11 +191,12 @@ class UserAuthDetails(UserLLMParams):
     fun_mode: Optional[bool] = False
     show_token_counter: Optional[bool] = True
     openai_api_service_enabled: bool = False
+    first_login_done: bool 
 
-class RelationshipStatus(BaseModel):
+class RelationshipStatus(BaseModel): # NEW: Add this Pydantic model
     is_following: bool
     friendship_status: Optional[FriendshipStatus] = None
 
-class UserProfileResponse(BaseModel):
+class UserProfileResponse(BaseModel): # NEW: Add this Pydantic model
     user: UserPublic
     relationship: RelationshipStatus

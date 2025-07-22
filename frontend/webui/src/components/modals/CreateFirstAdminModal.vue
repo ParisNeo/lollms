@@ -1,6 +1,5 @@
-<!-- frontend/webui/src/components/modals/FirstAdminSetupModal.vue -->
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import GenericModal from '../ui/GenericModal.vue';
@@ -19,11 +18,22 @@ const errorMessage = ref('');
 const passwordsMatch = computed(() => password.value === confirmPassword.value);
 const isPasswordLongEnough = computed(() => password.value.length >= 8);
 
-const handleSubmit = async () => {
+const usernameInput = ref(null); // Ref for the username input to focus
+
+// When the modal becomes active, focus the username input
+watch(() => uiStore.activeModal, (newModal) => {
+    if (newModal === 'firstAdminSetup') {
+        nextTick(() => {
+            usernameInput.value?.focus();
+        });
+    }
+});
+
+const handleRegister = async () => {
     errorMessage.value = '';
 
-    if (!username.value || !password.value || !confirmPassword.value) {
-        errorMessage.value = 'Username and password fields are required.';
+    if (!username.value || !email.value || !password.value || !confirmPassword.value) {
+        errorMessage.value = 'All fields are required.';
         return;
     }
     if (!isPasswordLongEnough.value) {
@@ -37,19 +47,16 @@ const handleSubmit = async () => {
 
     isLoading.value = true;
     try {
-        // Call the specific API endpoint for creating the first admin
-        await authStore.register({ 
+        await authStore.register({
             username: username.value,
-            email: email.value || null, // Email is optional for first admin
+            email: email.value,
             password: password.value,
         });
-        
-        // uiStore.addNotification is already handled by authStore.register
-        uiStore.closeModal('firstAdminSetup');
-        uiStore.openModal('login'); // Redirect to login after setup
-
+        // On successful registration, the authStore will automatically handle
+        // fetching user data and initial app state, which will eventually
+        // close this modal.
     } catch (error) {
-        errorMessage.value = error.response?.data?.detail || 'An unexpected error occurred during admin setup.';
+        errorMessage.value = error.response?.data?.detail || 'An unexpected error occurred during registration.';
     } finally {
         isLoading.value = false;
     }
@@ -58,8 +65,8 @@ const handleSubmit = async () => {
 
 <template>
   <GenericModal
-    modalName="createFirstAdminModal"
-    title="First Run Setup: Create Admin Account"
+    modalName="firstAdminSetup"
+    title="Welcome! First Admin Setup"
     :showCloseButton="false"
     :allowOverlayClose="false"
     maxWidthClass="max-w-md"
@@ -69,40 +76,42 @@ const handleSubmit = async () => {
         <img :src="appLogo" alt="Application Logo" class="h-16 w-auto" />
       </div>
 
-      <p class="text-sm text-center text-gray-600 dark:text-gray-400 mb-4">
-        Welcome to LoLLMs! It looks like this is your first time running the application. Please create the initial administrator account.
-      </p>
+      <div class="text-sm bg-blue-50 dark:bg-blue-900/20 text-blue-800 dark:text-blue-200 p-3 rounded-md mb-4">
+        This is your first time running the application. Please create an administrator account.
+      </div>
 
-      <form @submit.prevent="handleSubmit" class="space-y-4">
+      <form @submit.prevent="handleRegister" class="space-y-4">
         <div>
-          <label for="admin-username" class="block text-sm font-medium">Admin Username</label>
+          <label for="admin-username" class="block text-sm font-medium">Username</label>
           <input
+            ref="usernameInput"
             v-model="username"
             type="text"
             id="admin-username"
             required
             :disabled="isLoading"
             class="input-field mt-1 w-full"
-            placeholder="Choose an admin username"
-            autocomplete="new-username"
+            placeholder="Choose a username"
+            autocomplete="username"
           />
         </div>
-        
+
         <div>
-          <label for="admin-email" class="block text-sm font-medium">Admin Email (Optional)</label>
+          <label for="admin-email" class="block text-sm font-medium">Email Address</label>
           <input
             v-model="email"
             type="email"
             id="admin-email"
+            required
             :disabled="isLoading"
             class="input-field mt-1 w-full"
-            placeholder="admin@example.com"
+            placeholder="your@email.com"
             autocomplete="email"
           />
         </div>
 
         <div>
-          <label for="admin-password" class="block text-sm font-medium">Admin Password</label>
+          <label for="admin-password" class="block text-sm font-medium">Password</label>
             <input
               v-model="password"
               type="password"
@@ -119,7 +128,7 @@ const handleSubmit = async () => {
         </div>
 
         <div>
-          <label for="admin-confirm-password" class="block text-sm font-medium">Confirm Admin Password</label>
+          <label for="admin-confirm-password" class="block text-sm font-medium">Confirm Password</label>
             <input
               v-model="confirmPassword"
               type="password"
@@ -146,12 +155,16 @@ const handleSubmit = async () => {
                         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    <span>Creating Account...</span>
+                    <span>Creating Admin...</span>
                 </span>
                 <span v-else>Create Admin Account</span>
             </button>
         </div>
       </form>
+    </template>
+    
+    <template #footer>
+        <!-- No buttons in the footer as it's a mandatory setup -->
     </template>
   </GenericModal>
 </template>

@@ -28,11 +28,11 @@ import EmailAllUsersModal from './components/modals/EmailAllUsersModal.vue';
 import EmailUserModal from './components/modals/EmailUserModal.vue';
 import InsertImageModal from './components/modals/InsertImageModal.vue';
 import NewApiKeyModal from './components/modals/NewApiKeyModal.vue'; 
-import WhatsNextModal from './components/modals/WhatsNextModal.vue'; // NEW IMPORT
+import WhatsNextModal from './components/modals/WhatsNextModal.vue';
 import AppInstallModal from './components/modals/AppInstallModal.vue';
 import AppDetailsModal from './components/modals/AppDetailsModal.vue';
 import AppConfigModal from './components/modals/AppConfigModal.vue';
-import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue'; // RENAMED IMPORT
+import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -40,10 +40,29 @@ const pyodideStore = usePyodideStore();
 
 const activeModal = computed(() => uiStore.activeModal);
 
+// NEW computed property: determines if the main content (router-view) or the loading screen should be shown
+// This ensures the first admin modal can appear on top during initial load.
+const showMainContentOrLoading = computed(() => {
+    // If the first admin setup modal is active, we render nothing else but the modal itself
+    // The modal is handled directly in the template.
+    if (activeModal.value === 'firstAdminSetup') {
+        return 'modal_only'; 
+    }
+    // If we're still authenticating and the first admin modal is not active, show loading screen
+    if (authStore.isAuthenticating) {
+        return 'loading';
+    }
+    // Otherwise, show the main content (router-view)
+    return 'main_content';
+});
+
+
 onMounted(async () => {
     uiStore.initializeTheme();
     await authStore.attemptInitialAuth();
     uiStore.initializeSidebarState();
+    // Pyodide initialization should only happen if authentication is successful
+    // and we're not stuck in a setup flow.
     if (authStore.isAuthenticated) {
         pyodideStore.initialize();
     }
@@ -53,7 +72,8 @@ onMounted(async () => {
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900">
     
-    <div v-if="authStore.isAuthenticating" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
+    <!-- Conditional rendering based on showMainContentOrLoading -->
+    <div v-if="showMainContentOrLoading === 'loading'" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
         <div class="w-full max-w-lg mx-auto">
             <h1 class="text-6xl md:text-7xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">LoLLMs</h1>
             <p class="mt-2 text-xl md:text-2xl text-gray-600 dark:text-gray-300">One tool to rule them all</p>
@@ -73,8 +93,11 @@ onMounted(async () => {
         </div>
     </div>
 
-    <router-view v-else />
+    <!-- Render router-view only if not loading and not in admin setup -->
+    <router-view v-else-if="showMainContentOrLoading === 'main_content'" />
 
+    <!-- Modals are rendered always, but only visible when activeModal matches -->
+    <!-- This ensures the firstAdminSetup modal can appear even if isAuthenticating is still true -->
     <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     <LoginModal v-if="activeModal === 'login'" />
     <RegisterModal v-if="activeModal === 'register'" />
@@ -97,8 +120,9 @@ onMounted(async () => {
     <AppInstallModal v-if="activeModal === 'appInstall'" />
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
     <AppConfigModal v-if="activeModal === 'appConfig'" />
-    <WhatsNextModal v-if="activeModal === 'whatsNext'" /> <!-- NEW RENDER -->
-    <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> <!-- RENAMED RENDER -->
+    <WhatsNextModal v-if="activeModal === 'whatsNext'" />
+    <!-- Ensure CreateFirstAdminModal is rendered if it's the active modal, regardless of loading state -->
+    <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> 
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />
