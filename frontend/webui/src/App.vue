@@ -27,11 +27,12 @@ import ResetPasswordModal from './components/modals/ResetPasswordModal.vue';
 import EmailAllUsersModal from './components/modals/EmailAllUsersModal.vue';
 import EmailUserModal from './components/modals/EmailUserModal.vue';
 import InsertImageModal from './components/modals/InsertImageModal.vue';
-import NewApiKeyModal from './components/modals/NewApiKeyModal.vue';
+import NewApiKeyModal from './components/modals/NewApiKeyModal.vue'; 
+import WhatsNextModal from './components/modals/WhatsNextModal.vue'; // NEW IMPORT
 import AppInstallModal from './components/modals/AppInstallModal.vue';
 import AppDetailsModal from './components/modals/AppDetailsModal.vue';
 import AppConfigModal from './components/modals/AppConfigModal.vue';
-import FirstAdminSetupModal from './components/modals/FirstAdminSetupModal.vue'; // NEW IMPORT
+import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue'; // RENAMED IMPORT
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -96,7 +97,8 @@ onMounted(async () => {
     <AppInstallModal v-if="activeModal === 'appInstall'" />
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
     <AppConfigModal v-if="activeModal === 'appConfig'" />
-    <FirstAdminSetupModal v-if="activeModal === 'firstAdminSetup'" /> <!-- NEW RENDER -->
+    <WhatsNextModal v-if="activeModal === 'whatsNext'" /> <!-- NEW RENDER -->
+    <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> <!-- RENAMED RENDER -->
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

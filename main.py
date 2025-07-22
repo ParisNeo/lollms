@@ -43,6 +43,7 @@ from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
 from backend.routers.apps_management import apps_management_router
 from backend.routers.tasks import tasks_router
+from backend.routers.help import help_router
 from backend.task_manager import task_manager # Import the singleton instance
 
 
@@ -194,6 +195,8 @@ app.include_router(ui_router)
 app.include_router(sso_router)
 app.include_router(apps_management_router)
 app.include_router(tasks_router)
+app.include_router(help_router)
+
 
 add_ui_routes(app)
 

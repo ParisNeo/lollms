@@ -11,6 +11,7 @@ import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconHome from '../../assets/icons/IconHome.vue';
 import IconSettings from '../../assets/icons/IconSettings.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
+import IconBookOpen from '../../assets/icons/IconBookOpen.vue'; // NEW IMPORT
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 
 const discussionsStore = useDiscussionsStore();
@@ -53,6 +54,9 @@ const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
         <button v-if="user && user.user_ui_level >= 2" @click="uiStore.setMainView('feed')" class="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Feed">
           <IconHome class="w-6 h-6 text-gray-500 dark:text-gray-400" />
         </button>
+        <router-link to="/help" class="block p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Help">
+          <IconBookOpen class="w-6 h-6 text-gray-500 dark:text-gray-400" />
+        </router-link>
         <router-link to="/settings" class="block p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Settings">
           <IconSettings class="w-6 h-6 text-gray-500 dark:text-gray-400" />
         </router-link>

@@ -148,6 +148,11 @@ export const useAuthStore = defineStore('auth', () => {
             if (success) {
                 uiStore.closeModal('login');
                 uiStore.addNotification('Login successful!', 'success');
+                // Check for first admin login and show "What's Next" modal
+                if (user.value.is_admin && !user.value.first_login_done) {
+                    // first_login_done is set to true in backend/session/get_current_active_user
+                    uiStore.openModal('whatsNext'); 
+                }
             } else {
                 throw new Error("Authentication succeeded but failed to fetch user data.");
             }
