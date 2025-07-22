@@ -14,6 +14,7 @@ import IconArrowDown from '../../assets/icons/IconArrowDown.vue';
 import IconArrowUpCircle from '../../assets/icons/IconArrowUpCircle.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue'; // IMPORTED
 import AppCard from '../ui/AppCard.vue';
 import AppCardSkeleton from '../ui/AppCardSkeleton.vue';
 
@@ -528,6 +529,7 @@ async function handleCancelTask(taskId) {
                     </div>
                     <div class="flex items-center gap-x-2 flex-shrink-0 flex-wrap justify-end">
                         <div v-if="app.task" class="flex items-center gap-2 text-sm text-blue-600 dark:text-blue-400">
+                            <IconAnimateSpin class="w-4 h-4" /> <!-- ADDED -->
                             <span class="capitalize">{{ app.task.name.split(':')[0] }}... ({{ app.task.progress }}%)</span>
                             <button @click="handleCancelTask(app.task.id)" class="btn btn-warning btn-sm !p-1" title="Cancel Task">
                                 <IconStopCircle class="w-4 h-4" />

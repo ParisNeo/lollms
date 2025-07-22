@@ -1,4 +1,3 @@
-# Standard Library Imports
 import shutil
 import uuid
 from pathlib import Path
@@ -22,6 +21,7 @@ from fastapi.responses import (
 )
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
+
 
 from werkzeug.utils import secure_filename
 
@@ -100,6 +100,32 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
     finally:
         db.close()
 
+def _revectorize_datastore_task(task: Task, username: str, datastore_id: str, vectorizer_name: str):
+    db = next(get_db())
+    ss = None
+    try:
+        ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
+        
+        # This is a simplified progress reporting for revectorization
+        # In a real-world scenario, safe_store's revectorize would ideally offer callbacks
+        # for more granular progress updates (e.g., per document).
+        # For now, we'll simulate progress or assume it's a single blocking step.
+        task.log(f"Starting revectorization of datastore '{datastore_id}' with vectorizer '{vectorizer_name}'.")
+        task.set_progress(10)
+        
+        with ss:
+            ss.revectorize(vectorizer_name)
+        
+        task.set_progress(100)
+        task.result = {"message": f"Datastore '{datastore_id}' successfully revectorized with '{vectorizer_name}'."}
+        task.log("Revectorization completed successfully.")
+
+    except Exception as e:
+        task.log(f"Error during revectorization: {e}", level="CRITICAL")
+        traceback.print_exc()
+        raise e
+    finally:
+        db.close()
 
 # --- SafeStore File Management API (now per-datastore) ---
 store_files_router = APIRouter(prefix="/api/store/{datastore_id}", tags=["SafeStore RAG & File Management"])
@@ -135,30 +161,36 @@ async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDe
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing vectorizers: {e}")
 
-@store_files_router.post("/revectorize", status_code=status.HTTP_202_ACCEPTED)
+@store_files_router.post("/revectorize", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def revectorize_datastore(
     datastore_id: str,
     background_tasks: BackgroundTasks,
     vectorizer_name: str = Form(...),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
-) -> JSONResponse:
+) -> TaskInfo:
     if not safe_store:
         raise HTTPException(status_code=501, detail="SafeStore not available.")
 
     ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
+    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+    if not datastore_record: raise HTTPException(status_code=404, detail="Datastore metadata not found in main DB.")
     
     try:
-        with ss:
-            # Re-check vectorizer validity inside the `with` block
+        with ss: 
             all_vectorizers = {m['method_name'] for m in ss.list_vectorization_methods()} | set(ss.list_possible_vectorizer_names())
             if not (vectorizer_name in all_vectorizers or vectorizer_name.startswith("st:") or vectorizer_name.startswith("tfidf:")):
                  raise HTTPException(status_code=400, detail=f"Vectorizer '{vectorizer_name}' not found or invalid format.")
             
-            # Add the potentially long-running task to the background
-            background_tasks.add_task(ss.revectorize, vectorizer_name)
+            task = task_manager.submit_task(
+                name=f"Revectorize DataStore: {datastore_record.name}",
+                target=_revectorize_datastore_task,
+                args=(current_user.username, datastore_id, vectorizer_name),
+                description=f"Revectorizing all documents in '{datastore_record.name}' with '{vectorizer_name}'."
+            )
+            background_tasks.add_task(task.run)
+            return TaskInfo(**task.__dict__)
 
-        return JSONResponse(status_code=202, content={"message": f"DataStore is being revectorized with '{vectorizer_name}' in the background."})
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
