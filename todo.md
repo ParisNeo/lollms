@@ -66,6 +66,8 @@ new ui:
 - Add personality description to the list
 - Add a system personalities management page for administrator
 - Add personality maker AI
+- FIx personality adding for users who are not admin ** IMPORTANT **
+- Edit system prompt button
   
 ### bindings/models
 - add alias for models
@@ -109,4 +111,5 @@ new ui:
 - add the apps zoo to lollms_chat
 
 ## Scratchpad
-- add summerize document to scratchpad
+- add summerize document to scratchpad ** IMPORTANT **
+- fix the scratchpad loop ** IMPORTANT **
