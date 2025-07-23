@@ -29,6 +29,8 @@ new ui:
 - OK user management page needs upgrade and bugfix
 - OK make it possible to load any image file for mcp icons and set reduce their size automatically
 - OK key generation for regular users
+- OK centralize background processes
+- OK add email sending to tasks
 
 ## SSO
 - add applications/mcps log in with permissions via introspect
@@ -88,8 +90,6 @@ new ui:
 - add protection for MCP output
 
 ## background processes
-- centralize background processes
-- add email sending to tasks
 - add purge to tasks
 - add a new cleaning of unused uploaded files task
 - add adding rag stores files to tasks management with access to file upload status.
@@ -107,3 +107,6 @@ new ui:
 
 ## integrate lollms apps
 - add the apps zoo to lollms_chat
+
+## Scratchpad
+- add summerize document to scratchpad
