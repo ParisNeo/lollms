@@ -7,6 +7,7 @@ from backend.config import LOLLMS_CLIENT_DEFAULTS, config
 from backend.db.base import CURRENT_DB_VERSION
 from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
 from backend.db.models.service import App
+from ascii_colors import ASCIIColors
 
 def _bootstrap_global_settings(connection):
     """
@@ -151,36 +152,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         _bootstrap_global_settings(connection)
 
     if inspector.has_table("llm_bindings"):
-        binding_count_res = connection.execute(text("SELECT COUNT(id) FROM llm_bindings")).scalar_one_or_none()
-        if binding_count_res == 0:
-            print("INFO: 'llm_bindings' table is empty. Attempting to seed from config.toml.")
-            if LOLLMS_CLIENT_DEFAULTS.get("binding_name"):
-                alias = LOLLMS_CLIENT_DEFAULTS["binding_name"].lower().replace(" ", "_")
-                
-                existing_alias = connection.execute(
-                    text("SELECT id FROM llm_bindings WHERE alias = :alias"),
-                    {"alias": alias}
-                ).first()
-
-                if not existing_alias:
-                    connection.execute(
-                        LLMBinding.__table__.insert(),
-                        [{
-                            "alias": alias,
-                            "name": LOLLMS_CLIENT_DEFAULTS.get("binding_name"),
-                            "host_address": LOLLMS_CLIENT_DEFAULTS.get("host_address"),
-                            "models_path": LOLLMS_CLIENT_DEFAULTS.get("models_path"),
-                            "service_key": LOLLMS_CLIENT_DEFAULTS.get("service_key"),
-                            "default_model_name": LOLLMS_CLIENT_DEFAULTS.get("default_model_name"),
-                            "verify_ssl_certificate": LOLLMS_CLIENT_DEFAULTS.get("verify_ssl_certificate",True),
-                            "is_active": True
-                        }]
-                    )
-                    print(f"INFO: Successfully created initial binding '{alias}' from config.toml.")
-                else:
-                    print(f"INFO: Binding with alias '{alias}' already exists. Skipping seed from config.")
-            else:
-                print("WARNING: No 'binding_name' found in [lollms_client_defaults] in config.toml. Cannot seed initial binding.")
         llm_bindings_columns_db = [col['name'] for col in inspector.get_columns('llm_bindings')]                        
         new_llm_bindings_cols_defs = {
             "verify_ssl_certificate": "BOOLEAN DEFAULT 1 NOT NULL"

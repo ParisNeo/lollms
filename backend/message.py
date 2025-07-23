@@ -50,20 +50,6 @@ import datetime # Ensure datetime is imported
 from backend.config import *
 # --- Pydantic Models for API ---
 
-# safe_store is expected to be installed
-try:
-    import safe_store
-    from safe_store import (
-        LogLevel as SafeStoreLogLevel,
-    )
-except ImportError:
-    print(
-        "WARNING: safe_store library not found. RAG features will be disabled. Install with: pip install safe_store[all]"
-    )
-    safe_store = None
-    SafeStoreLogLevel = None
-
-
 @dataclass
 class AppLollmsMessage:
     """Represents a single message with enriched metadata for persistence."""
