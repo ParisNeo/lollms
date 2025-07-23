@@ -51,38 +51,6 @@ if /I "!gen_secret!"=="Y" (
     call :update_config secret_key "!new_secret!"
 )
 
-
-set /p username=Enter admin username [superadmin]: 
-if "!username!"=="" set username=superadmin
-call :update_config username "!username!"
-
-set /p gen_pass=Generate secure password? (y/N): 
-if /I "!gen_pass!"=="Y" (
-    for /f %%A in ('powershell -Command "[Convert]::ToBase64String((1..20 | %% { Get-Random -Minimum 0 -Maximum 256 }))"') do set new_password=%%A
-    echo Generated password: !new_password!
-    call :update_config password "!new_password!"
-) else (
-    set /p password=Enter password:
-    call :update_config password "!password!"
-)
-
-:: Client defaults
-set /p bind=Enter binding_name [ollama]: 
-if "!bind!"=="" set bind=ollama
-call :update_config binding_name "!bind!"
-
-set /p model=Enter default_model_name [phi4:latest]: 
-if "!model!"=="" set model=phi4:latest
-call :update_config default_model_name "!model!"
-
-set /p addr=Enter host_address [http://localhost:11434]: 
-if "!addr!"=="" set addr=http://localhost:11434
-call :update_config host_address "!addr!"
-
-set /p apikey=Enter service_key_env_var [OPENAI_API_KEY]: 
-if "!apikey!"=="" set apikey=OPENAI_API_KEY
-call :update_config service_key_env_var "!apikey!"
-
 :: Safe store defaults
 set /p chunk=Enter chunk_size [4096]: 
 if "!chunk!"=="" set chunk=4096
