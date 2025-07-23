@@ -23,6 +23,8 @@ from backend.security import verify_api_key
 from backend.session import get_user_lollms_client, user_sessions, build_lollms_client_from_params
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
+from ascii_colors import ASCIIColors
+
 
 openai_v1_router = APIRouter(prefix="/v1")
 bearer_scheme = HTTPBearer()
@@ -418,8 +420,9 @@ async def create_embeddings(
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
 
     if request.encoding_format != "float":
-        raise HTTPException(status_code=400, detail="Only 'float' encoding_format is supported.")
-
+        #raise HTTPException(status_code=400, detail="Only 'float' encoding_format is supported.")
+        ASCIIColors.warning(f"The request encoding format {request.encoding_format} is not supported. Only 'float' encoding_format is supported.")
+        request.encoding_format = 'float'
     input_texts = [request.input] if isinstance(request.input, str) else request.input
     if not input_texts or not all(isinstance(t, str) for t in input_texts):
         raise HTTPException(status_code=400, detail="Invalid 'input' format. Must be a non-empty string or a list of non-empty strings.")
