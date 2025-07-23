@@ -281,6 +281,38 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
+
+
+    async function fetchDataZone() {
+        if (!isAuthenticated.value) return;
+        try {
+            const response = await apiClient.get('/api/auth/me/data-zone');
+            if (user.value) {
+                user.value.data_zone = response.data.content;
+            }
+        } catch (error) {
+            console.error("Failed to fetch data_zone:", error);
+            useUiStore().addNotification('Could not load user data zone.', 'error');
+        }
+    }
+
+    async function updateDataZone(content) {
+        if (!isAuthenticated.value) return;
+        try {
+            const response = await apiClient.put('/api/auth/me/data-zone', { content });
+            // FIX: Use Object.assign to merge updates into the existing reactive user object,
+            // which is safer than replacing the whole object.
+            if (user.value) {
+                Object.assign(user.value, response.data);
+            } else {
+                user.value = response.data;
+            }
+        } catch (error) {
+            useUiStore().addNotification('Failed to save data zone.', 'error');
+            throw error;
+        }
+    }
+
     async function fetchScratchpad() {
         if (!isAuthenticated.value) return;
         try {
@@ -315,6 +347,8 @@ export const useAuthStore = defineStore('auth', () => {
         attemptInitialAuth, login, register, logout,
         updateUserProfile, updateUserPreferences, changePassword,
         ssoLoginWithPassword, ssoAuthorizeApplication,
-        fetchScratchpad, updateScratchpad
+        fetchScratchpad, updateScratchpad,
+        fetchDataZone,
+        updateDataZone
     };
 });

@@ -6,12 +6,26 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.responses import PlainTextResponse
 from backend.models import UserAuthDetails
 from backend.session import get_current_active_user
+from typing import List, Dict
 
 help_router = APIRouter(prefix="/api/help", tags=["Help & Documentation"])
 
 HELP_DOCS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "markdown" / "help"
 HELP_INDEX_FILE = HELP_DOCS_DIR / "help_index.md"
 ADMIN_HELP_FILE = HELP_DOCS_DIR / "admin_specific_help.md" # New constant for admin file
+
+@help_router.get("/keywords", response_model=List[Dict[str, str]])
+async def get_data_zone_keywords():
+    """
+    Returns a list of available dynamic keywords for use in data zones.
+    """
+    return [
+        {"keyword": "{{date}}", "description": "The current server date (e.g., 2025-07-23)."},
+        {"keyword": "{{time}}", "description": "The current server time (e.g., 23:06:51)."},
+        {"keyword": "{{ip_address}}", "description": "Your public IP address as seen by the server."},
+        {"keyword": "{{user_name}}", "description": "Your registered username."},
+        {"keyword": "{{user_email}}", "description": "Your registered email address."},
+    ]
 
 def _get_markdown_content(file_path: Path) -> str:
     """Helper to safely read a markdown file."""

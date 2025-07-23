@@ -176,6 +176,16 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if inspector.has_table("users"):
         user_columns_db = [col['name'] for col in inspector.get_columns('users')]
         
+        # --- Migration from scratchpad to data_zone ---
+        if 'scratchpad' in user_columns_db and 'data_zone' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users RENAME COLUMN scratchpad TO data_zone"))
+                print("INFO: Migrated column 'users.scratchpad' to 'users.data_zone'.")
+                # Refresh columns after rename
+                user_columns_db = [col['name'] for col in inspector.get_columns('users')]
+            except Exception as e:
+                print(f"ERROR: Could not rename 'scratchpad' to 'data_zone': {e}")
+        
         new_user_cols_defs = {
             "is_active": "BOOLEAN DEFAULT 1 NOT NULL", "created_at": "DATETIME", 
             "last_activity_at": "DATETIME", "activation_token": "VARCHAR",
@@ -196,7 +206,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "show_token_counter": "BOOLEAN DEFAULT 1 NOT NULL",
             "is_searchable": "BOOLEAN DEFAULT 1 NOT NULL",
             "first_login_done": "BOOLEAN DEFAULT 0 NOT NULL",
-            "scratchpad": "TEXT"
+            "data_zone": "TEXT"
         }
         
         added_cols = []

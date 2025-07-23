@@ -60,39 +60,18 @@ async def get_current_db_user_from_token(
     if user is None:
         raise credentials_exception
     
-    # --- MODIFIED LOGIC START ---
-    # Capture the state we need for the response *before* any potential DB changes.
-    is_first_admin_login_for_this_request = user.is_admin and not user.first_login_done
-    
+    # --- CORRECTED LOGIC START ---
+    # Update last activity timestamp. The commit will be handled by the endpoint's session.
     now = datetime.datetime.now(datetime.timezone.utc)
-    last_activity_aware = None
-    
-    if user.last_activity_at:
-        if user.last_activity_at.tzinfo is None:
-            last_activity_aware = user.last_activity_at.replace(tzinfo=datetime.timezone.utc)
-        else:
-            last_activity_aware = user.last_activity_at
+    last_activity_aware = user.last_activity_at.replace(tzinfo=datetime.timezone.utc) if user.last_activity_at and user.last_activity_at.tzinfo is None else user.last_activity_at
 
-    # Check if an update is needed
-    update_needed = last_activity_aware is None or (now - last_activity_aware) > datetime.timedelta(seconds=60)
-    
-    if update_needed:
+    if not last_activity_aware or (now - last_activity_aware) > datetime.timedelta(seconds=60):
         user.last_activity_at = now
-        if is_first_admin_login_for_this_request:
-            user.first_login_done = True # Update the flag
-        try:
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            print(f"Warning: Could not update user state for {user.username}: {e}")
-
-    # After the commit, `user.first_login_done` is now True in the database and session.
-    # We temporarily set it back to False on the object being returned ONLY for this request
-    # so the frontend gets the correct "before" state.
-    # This is a safe, non-persistent change for the current request context.
-    if is_first_admin_login_for_this_request:
-        user.first_login_done = False
-    # --- MODIFIED LOGIC END ---
+        # DO NOT COMMIT HERE. The main endpoint will handle the commit.
+    
+    # The complex logic for 'first_login_done' has been moved to the login endpoint,
+    # which is a safer place for write operations.
+    # --- CORRECTED LOGIC END ---
 
     return user
 
@@ -141,6 +120,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         receive_notification_emails=db_user.receive_notification_emails,
         is_searchable=db_user.is_searchable,
         first_login_done=db_user.first_login_done,
+        data_zone=db_user.data_zone,
         lollms_model_name=user_sessions[username].get("lollms_model_name"),
         safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
         active_personality_id=user_sessions[username].get("active_personality_id"),

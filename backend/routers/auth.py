@@ -31,7 +31,7 @@ from backend.models import (
     ForgotPasswordRequest,
     PasswordResetRequest,
     UserCreateAdmin,
-    ScratchpadUpdate
+    DataZoneUpdate
 )
 from backend.session import (
     get_current_active_user, 
@@ -199,22 +199,23 @@ async def update_my_icon(
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Could not process and save the image: {e}")
 
-@auth_router.get("/me/scratchpad", response_model=Dict[str, str])
-async def get_my_scratchpad(
+@auth_router.get("/me/data-zone", response_model=Dict[str, str])
+async def get_my_data_zone(
     db_user: DBUser = Depends(get_current_db_user_from_token)
 ):
-    return {"content": db_user.scratchpad or ""}
+    return {"content": db_user.data_zone or ""}
 
-@auth_router.put("/me/scratchpad", status_code=200)
-async def update_my_scratchpad(
-    payload: ScratchpadUpdate,
+@auth_router.put("/me/data-zone", response_model=UserAuthDetails)
+async def update_my_data_zone(
+    payload: DataZoneUpdate,
     db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
-    db_user.scratchpad = payload.content
+    db_user.data_zone = payload.content
     try:
         db.commit()
-        return {"message": "Scratchpad updated successfully."}
+        db.refresh(db_user)
+        return get_current_active_user(db_user)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")

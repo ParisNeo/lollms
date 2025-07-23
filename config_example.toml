@@ -16,7 +16,7 @@ ssl_keyfile = ""
 data_dir = "data"  # For user-specific discussion files and SafeStore DBs
 database_url = "sqlite:///./data/app_main.db" # Central SQLite DB for users and app settings
 secret_key = "a_very_secret_key_for_flask_sessions_or_jwt" # For session/token use
-access_token_expires_mintes = 44640 # How many minutes the access token stays alive after last use (44640 = 1 month)
+access_token_expires_minutes = 44640 # How many minutes the access token stays alive after last use (44640 = 1 month)
 
 # Initial admin user to be created in the database if it doesn't exist.
 # The password here should be the PLAIN TEXT password you want for the first admin.

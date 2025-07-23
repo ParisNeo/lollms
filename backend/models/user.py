@@ -13,7 +13,7 @@ class UserLLMParams(BaseModel):
     llm_repeat_last_n: Optional[int] = Field(None, ge=0)
     put_thoughts_in_context: Optional[bool] = False
 
-class ScratchpadUpdate(BaseModel):
+class DataZoneUpdate(BaseModel):
     content: str
 
 class UserBase(BaseModel):
@@ -161,7 +161,7 @@ class UserPublic(UserLLMParams):
     rag_use_graph: bool
     rag_graph_response_type: Optional[str] = None
     first_login_done: bool 
-    scratchpad: Optional[str] = None
+    data_zone: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -196,7 +196,7 @@ class UserAuthDetails(UserLLMParams):
     show_token_counter: Optional[bool] = True
     openai_api_service_enabled: bool = False
     first_login_done: bool 
-    scratchpad: Optional[str] = None
+    data_zone: Optional[str] = None
 
 class RelationshipStatus(BaseModel):
     is_following: bool

@@ -39,13 +39,13 @@
           "type": "string",
           "description": "Secret key for Flask sessions or JWT tokens."
         },
-        "access_token_expires_mintes": {
+        "access_token_expires_minutes": {
           "type": "integer",
           "minimum": 1,
           "description": "Access token expiration time in minutes."
         }
       },
-      "required": ["data_dir", "database_url", "secret_key", "access_token_expires_mintes"],
+      "required": ["data_dir", "database_url", "secret_key", "access_token_expires_minutes"],
       "additionalProperties": false
     },
     "initial_admin_user": {

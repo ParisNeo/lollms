@@ -83,7 +83,6 @@ function formatTimestamp(dateString) {
     <div ref="messageContainer" @scroll="handleScroll" class="flex-grow p-4 overflow-y-auto">
       <div v-if="conversation.isLoading" class="text-center py-2 text-sm text-gray-500">Loading...</div>
       
-      <!-- FIX: Add error message display -->
       <div v-if="conversation.error" class="text-center py-2 text-red-500 text-sm">
         {{ conversation.error }}
       </div>

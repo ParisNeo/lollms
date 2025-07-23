@@ -493,23 +493,24 @@ async def chat_in_existing_discussion(
     db_pers = db.query(DBPersonality).filter(DBPersonality.id == db_user.active_personality_id).first() if db_user.active_personality_id else None
     
     # --- REFINED: Placeholder replacement and data zone combination ---
-    user_scratchpad = db_user.scratchpad or ""
+    user_data_zone = db_user.data_zone or ""
     discussion_scratchpad_original = discussion_obj.data_zone or "" # Use the original, un-replaced version
     now = datetime.datetime.now()
     replacements = {
         "{{date}}": now.strftime("%Y-%m-%d"),
         "{{time}}": now.strftime("%H:%M:%S"),
         "{{datetime}}": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "{{ip_address}}": "localhost", # for now
     }
     # Apply replacements to a copy
-    processed_user_scratchpad = user_scratchpad
+    processed_user_data_zone = user_data_zone
     for placeholder, value in replacements.items():
-        processed_user_scratchpad = processed_user_scratchpad.replace(placeholder, value)
+        processed_user_data_zone = processed_user_data_zone.replace(placeholder, value)
 
     # Combine scratchpads with clear separation for the context
     combined_data_zone_parts = []
-    if processed_user_scratchpad:
-        combined_data_zone_parts.append(f"### User Scratchpad\n{processed_user_scratchpad}")
+    if processed_user_data_zone:
+        combined_data_zone_parts.append(f"### User Scratchpad\n{processed_user_data_zone}")
     if discussion_scratchpad_original:
         combined_data_zone_parts.append(f"### Discussion Scratchpad\n{discussion_scratchpad_original}")
     
