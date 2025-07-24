@@ -6,6 +6,7 @@
 [server]
 host = "0.0.0.0"
 port = "9642"
+workers = 4
 debug = false
 migrate = false # micration from old version using yaml
 https_enabled = false
