@@ -62,34 +62,17 @@ def _generate_personality_task(task: Task, username: str, prompt: str):
             "description": "JSON object defining a LoLLMs personality."
         }
 
-        generation_prompt = f"""You are an expert personality designer for AI chatbots.
-Your task is to create a new personality based on the user's prompt.
-You MUST output ONLY a single valid JSON object strictly conforming to the following JSON schema.
-Do NOT include any other text, comments, or explanations outside the JSON object.
-
-JSON Schema:
-{json.dumps(personality_schema, indent=2)}
-
-User's prompt: "{prompt}"
-
-Please generate the personality now."""
+        system_prompt = f"""You are an expert personality designer for AI chatbots.
+Your task is to create a new personality based on the user's prompt."""
 
         task.log("Sending prompt to LLM for JSON generation...")
         task.set_progress(30)
         
-        raw_response = lc.generate_text(generation_prompt, stream=False, n_predict=settings.get("default_llm_ctx_size"))
-        
-        task.log("LLM response received. Parsing JSON...")
-        task.set_progress(70)
-
-        json_start = raw_response.find('{')
-        json_end = raw_response.rfind('}') + 1
-        
-        if json_start == -1 or json_end == 0:
-            raise ValueError("LLM did not return a valid JSON object.")
-            
-        json_string = raw_response[json_start:json_end]
-        generated_data_dict = json.loads(json_string)
+        generated_data_dict = lc.generate_structured_content(prompt,
+                                                             system_prompt=system_prompt,
+                                                             schema=personality_schema,
+                                                             n_predict=settings.get("default_llm_ctx_size")
+                                                            )
 
         task.log("Creating new personality in the database...")
         task.set_progress(90)
@@ -131,6 +114,7 @@ Please generate the personality now."""
         task.error = f"LLM output could not be decoded as JSON: {jde}. Ensure the LLM outputs a valid JSON object."
         raise json.JSONDecodeError(f"LLM output could not be decoded as JSON: {jde}", json_string or raw_response, 0) from jde
     except Exception as e:
+        traceback(e)
         db_session.rollback()
         task.log(f"An unexpected error occurred during personality generation: {e}", level="CRITICAL")
         task.error = str(e)
