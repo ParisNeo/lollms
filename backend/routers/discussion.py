@@ -135,7 +135,7 @@ def get_discussion_data_zone(
     discussion = get_user_discussion(current_user.username, discussion_id)
     if not discussion:
         raise HTTPException(status_code=404, detail="Discussion not found")
-    return {"content": discussion.data_zone or ""}
+    return {"content": discussion.discussion_data_zone or ""}
 
 @discussion_router.put("/{discussion_id}/data_zone", status_code=200)
 def update_discussion_data_zone(
@@ -148,7 +148,7 @@ def update_discussion_data_zone(
         raise HTTPException(status_code=404, detail="Discussion not found")
     
     try:
-        discussion.data_zone = payload.content
+        discussion.discussion_data_zone = payload.content
         discussion.commit()
         return {"message": "Data Zone updated successfully."}
     except Exception as e:
@@ -494,7 +494,6 @@ async def chat_in_existing_discussion(
     
     # --- REFINED: Placeholder replacement and data zone combination ---
     user_data_zone = db_user.data_zone or ""
-    discussion_scratchpad_original = discussion_obj.data_zone or "" # Use the original, un-replaced version
     now = datetime.datetime.now()
     replacements = {
         "{{date}}": now.strftime("%Y-%m-%d"),
@@ -506,16 +505,8 @@ async def chat_in_existing_discussion(
     processed_user_data_zone = user_data_zone
     for placeholder, value in replacements.items():
         processed_user_data_zone = processed_user_data_zone.replace(placeholder, value)
-
-    # Combine scratchpads with clear separation for the context
-    combined_data_zone_parts = []
-    if processed_user_data_zone:
-        combined_data_zone_parts.append(f"### User Scratchpad\n{processed_user_data_zone}")
-    if discussion_scratchpad_original:
-        combined_data_zone_parts.append(f"### Discussion Scratchpad\n{discussion_scratchpad_original}")
-    
-    temp_data_zone_for_generation = "\n\n".join(combined_data_zone_parts).strip()
-
+        
+    discussion_obj.user_data_zone = processed_user_data_zone
 
     # Combine MCPs from discussion metadata and personality
     use_mcps_from_discussion = (discussion_obj.metadata or {}).get('active_tools', [])
@@ -551,20 +542,7 @@ async def chat_in_existing_discussion(
         data_source=data_source_runtime
     )
     
-    # Correctly combine data_zone content for the client library
-    # The library expects data_source on the personality object to be the primary driver
-    # for additional context. We will append our combined scratchpad to it.
-    if data_source_runtime:
-        if isinstance(data_source_runtime, str):
-            active_personality.data_source = f"{data_source_runtime}\n\n{temp_data_zone_for_generation}".strip()
-        # If it's a callable, we can't easily combine it. The scratchpad will be the main data source.
-        # A more advanced lollms-client version might handle multiple sources better.
-        # For now, we prioritize the scratchpad if a callable is also present.
-        else:
-             active_personality.data_source = temp_data_zone_for_generation
-    else:
-        active_personality.data_source = temp_data_zone_for_generation
-    
+
     main_loop = asyncio.get_event_loop()
     stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
     stop_event = threading.Event()
