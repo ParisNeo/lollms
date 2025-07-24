@@ -36,6 +36,7 @@ import AppConfigModal from './components/modals/AppConfigModal.vue';
 import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue';
 import GeneratePersonalityModal from './components/modals/GeneratePersonalityModal.vue';
 import TasksManagerModal from './components/modals/TasksManagerModal.vue'; // NEW
+import EnhancePersonalityPromptModal from './components/modals/EnhancePersonalityPromptModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -129,6 +130,7 @@ onMounted(async () => {
     <!-- Ensure CreateFirstAdminModal is rendered if it's the active modal, regardless of loading state -->
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> 
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
+    <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
     <TasksManagerModal v-if="activeModal === 'tasksManager'" /> <!-- NEW -->
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />

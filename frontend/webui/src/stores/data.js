@@ -384,18 +384,23 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
-    async function enhancePersonalityPrompt(prompt_text, custom_instruction) {
-        const tasksStore = useTasksStore(); // CORRECT
-        const payload = { prompt_text };
-        if (custom_instruction) {
-            payload.custom_instruction = custom_instruction;
-        }
+    async function enhancePersonalityPrompt(prompt_text, modification_prompt) {
+        const uiStore = useUiStore();
+        const tasksStore = useTasksStore();
+        isEnhancingPrompt.value = true;
         try {
-            const response = await apiClient.post('/api/personalities/enhance_prompt', payload);
-            tasksStore.fetchTasks(); // CORRECT
-            return response.data; // This returns task_id and message
+            const response = await apiClient.post('/api/personalities/enhance_prompt', {
+                prompt_text,
+                modification_prompt
+            });
+            // The endpoint now returns a task object
+            tasksStore.addTask(response.data); // Add task to the store
+            return response.data; // Return the initial task info
         } catch (error) {
-            throw error;
+            // Error handled by global interceptor
+            return null;
+        } finally {
+            isEnhancingPrompt.value = false;
         }
     }
     async function triggerMcpReload() {

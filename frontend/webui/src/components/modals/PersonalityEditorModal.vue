@@ -1,275 +1,259 @@
 <script setup>
-import { ref, watch, computed, onUnmounted } from 'vue';
-import { useDataStore } from '../../stores/data';
-import { useUiStore } from '../../stores/ui';
-import { useTasksStore } from '../../stores/tasks';
-import { useAuthStore } from '../../stores/auth';
+import { ref, computed, watch, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import GenericModal from '../ui/GenericModal.vue';
-import IconSparkles from '../../assets/icons/IconSparkles.vue';
-import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
-import apiClient from '../../services/api';
+import { useUiStore } from '../../stores/ui';
+import { useDataStore } from '../../stores/data';
+import { useAuthStore } from '../../stores/auth';
 
-const dataStore = useDataStore();
 const uiStore = useUiStore();
-const tasksStore = useTasksStore();
+const dataStore = useDataStore();
 const authStore = useAuthStore();
 
-const modalData = computed(() => uiStore.modalData('personalityEditor'));
-const { availableMcpToolsForSelector } = storeToRefs(dataStore);
-const { isAdmin } = storeToRefs(authStore);
-const { availableRagStores } = storeToRefs(dataStore);
+const { isEnhancingPrompt } = storeToRefs(dataStore);
+const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
 
-const form = ref({});
+const modalProps = computed(() => uiStore.modalData('personalityEditor'));
+const personality = computed(() => modalProps.value?.personality);
+
+const getInitialFormState = () => ({
+    id: null, name: '', category: '', author: '', description: '',
+    prompt_text: '', disclaimer: '', script_code: '', icon_base_64: null,
+    is_public: false, data_source_type: 'none', data_source: null, active_mcps: []
+});
+
+const form = ref(getInitialFormState());
+const fileInput = ref(null);
+const staticTextInputRef = ref(null);
 const isLoading = ref(false);
-const iconPreview = ref(null);
-const fileInputRef = ref(null);
-const isExtractingText = ref(false);
+const formIconLoadFailed = ref(false);
+const modificationPrompt = ref('');
 
-const modalTitle = computed(() => form.value.id ? 'Edit Personality' : 'Create Personality');
+watch(() => form.value.icon_base_64, () => {
+    formIconLoadFailed.value = false;
+});
 
-watch(modalData, (newData) => {
-    if (newData?.personality) {
-        const p = newData.personality;
-        form.value = { 
-            ...p, 
-            active_mcps: p.active_mcps || [],
-            owner_type: p.owner_username === 'System' ? 'system' : 'user',
-            data_source_type: p.data_source_type || 'none',
-            data_source: p.data_source || '',
-        };
-        
-        if (p.id && (p.is_public || p.owner_username === 'System')) {
-            const clonedPersonality = { ...form.value };
-            clonedPersonality.id = null;
-            clonedPersonality.is_public = false;
-            clonedPersonality.owner_type = 'user';
-            form.value = clonedPersonality;
-        }
-        iconPreview.value = p.icon_base64 || null;
+watch(() => personality.value, (newVal) => {
+    if (newVal) {
+        form.value = { ...getInitialFormState(), ...newVal };
+    } else {
+        form.value = getInitialFormState();
     }
-}, { immediate: true });
+    modificationPrompt.value = '';
+}, { immediate: true, deep: true });
 
+onMounted(() => {
+    if(dataStore.availableRagStores.length === 0) dataStore.fetchDataStores();
+    if(dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools();
+});
 
-function compressImage(file, maxSize = 96) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                let { width, height } = img;
+async function handleSubmit() {
+    isLoading.value = true;
+    try {
+        if (form.value.id) {
+            await dataStore.updatePersonality(form.value);
+        } else {
+            await dataStore.addPersonality(form.value);
+        }
+        uiStore.closeModal('personalityEditor');
+    } finally {
+        isLoading.value = false;
+    }
+}
 
-                if (width > height) {
-                    if (width > maxSize) {
-                        height = Math.round(height * (maxSize / width));
-                        width = maxSize;
-                    }
-                } else {
-                    if (height > maxSize) {
-                        width = Math.round(width * (maxSize / height));
-                        height = maxSize;
-                    }
-                }
-
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-
-                const dataUrl = canvas.toDataURL('image/webp', 0.8);
-                if (dataUrl.length > 10) {
-                    resolve(dataUrl);
-                } else {
-                    resolve(canvas.toDataURL('image/jpeg', 0.85));
-                }
-            };
-            img.onerror = reject;
-            img.src = e.target.result;
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
+function handleEnhancePrompt() {
+    if (!form.value.prompt_text) {
+        uiStore.addNotification('Please provide a base prompt to enhance.', 'warning');
+        return;
+    }
+    uiStore.openModal('enhancePersonalityPrompt', {
+        prompt_text: form.value.prompt_text,
+        modification_prompt: modificationPrompt.value,
+        onApply: (enhancedPrompt) => {
+            form.value.prompt_text = enhancedPrompt;
+            modificationPrompt.value = ''; // Clear after use
+        }
     });
 }
 
-async function handleIconUpload(event) {
+function triggerFileInput() {
+    fileInput.value.click();
+}
+
+function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
 
-    if (file.size > 5 * 1024 * 1024) {
-        uiStore.addNotification('Image file is too large (max 5MB).', 'error');
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    if (!allowedTypes.includes(file.type)) {
+        uiStore.addNotification('Invalid file type. Please select an image.', 'error');
         return;
     }
+    
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            const MAX_WIDTH = 128; const MAX_HEIGHT = 128;
+            let width = img.width, height = img.height;
 
-    try {
-        const compressedDataUrl = await compressImage(file);
-        form.value.icon_base64 = compressedDataUrl;
-        iconPreview.value = compressedDataUrl;
-    } catch(error) {
-        console.error("Image compression failed:", error);
-        uiStore.addNotification('Failed to process image.', 'error');
-    }
+            if (width > height) {
+                if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
+            } else {
+                if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width; canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            form.value.icon_base_64 = canvas.toDataURL('image/png');
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
 }
 
-async function handleSave() {
-  if (!form.value.name || !form.value.prompt_text) {
-    uiStore.addNotification('Name and System Prompt are required.', 'error');
-    return;
-  }
-  
-  isLoading.value = true;
-  const action = form.value.id ? dataStore.updatePersonality : dataStore.addPersonality;
-  
-  try {
-    const payload = { ...form.value };
-    if (payload.data_source_type === 'none') {
-        payload.data_source = null;
-    }
-    await action(payload);
-    uiStore.closeModal('personalityEditor');
-  } catch (error) {
-    // Error is handled by interceptor, don't close modal on failure
-  } finally {
-    isLoading.value = false;
-  }
+function triggerStaticTextImport() {
+    staticTextInputRef.value?.click();
 }
 
-async function handleKnowledgeFileUpload(event) {
-    const files = event.target.files;
-    if (!files.length) return;
+function handleStaticTextFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
 
-    isExtractingText.value = true;
-    const formData = new FormData();
-    for (const file of files) {
-        formData.append('files', file);
-    }
-
-    try {
-        const response = await apiClient.post('/api/files/extract-text', formData);
-        const extractedText = response.data.text;
-        form.value.data_source = form.value.data_source 
-            ? `${form.value.data_source}\n\n${extractedText}` 
-            : extractedText;
-        uiStore.addNotification(`Extracted text from ${files.length} file(s).`, 'success');
-    } catch (error) {
-        // Error is handled by the global API interceptor
-    } finally {
-        isExtractingText.value = false;
-        if (fileInputRef.value) fileInputRef.value.value = ''; // Reset file input
-    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        form.value.data_source = e.target.result;
+        uiStore.addNotification(`Imported text from ${file.name}`, 'success');
+    };
+    reader.onerror = (e) => {
+        uiStore.addNotification(`Error reading file: ${e.target.error.name}`, 'error');
+    };
+    reader.readAsText(file);
+    event.target.value = '';
 }
-
 </script>
 
 <template>
-  <GenericModal modalName="personalityEditor" :title="modalTitle" maxWidthClass="max-w-4xl">
+  <GenericModal modal-name="personalityEditor" :title="form.id ? 'Edit Personality' : 'Create Personality'" maxWidthClass="max-w-4xl">
     <template #body>
-      <form @submit.prevent="handleSave" class="space-y-4">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <form v-if="personality" @submit.prevent="handleSubmit" class="space-y-6">
+        <!-- Icon and Basic Info -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div class="md:col-span-1 flex flex-col items-center">
+            <div class="w-24 h-24 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden mb-2">
+              <img v-if="form.icon_base_64 && !formIconLoadFailed" :src="form.icon_base_64" @error="formIconLoadFailed = true" alt="Icon Preview" class="h-full w-full object-cover">
+              <svg v-else class="w-16 h-16 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
+            </div>
+            <button @click="triggerFileInput" type="button" class="btn btn-secondary text-sm">Upload Icon</button>
+            <input type="file" ref="fileInput" @change="handleFileSelect" class="hidden" accept="image/png, image/jpeg, image/gif, image/webp, image/svg+xml">
+          </div>
+
+          <div class="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
-              <label class="block text-sm font-medium">Name*</label>
-              <input type="text" v-model="form.name" required class="input-field mt-1" placeholder="e.g., Creative Writer">
+              <label for="name" class="block text-sm font-medium">Name</label>
+              <input type="text" id="name" v-model="form.name" class="input-field mt-1" required>
             </div>
             <div>
-              <label class="block text-sm font-medium">Category</label>
-              <input type="text" v-model="form.category" class="input-field mt-1" placeholder="e.g., Writing, Coding, Fun">
+              <label for="category" class="block text-sm font-medium">Category</label>
+              <input type="text" id="category" v-model="form.category" class="input-field mt-1">
             </div>
-            <div>
-                <label class="block text-sm font-medium">Author</label>
-                <input type="text" v-model="form.author" class="input-field mt-1" placeholder="Your name or alias">
+            <div class="sm:col-span-2">
+              <label for="author" class="block text-sm font-medium">Author</label>
+              <input type="text" id="author" v-model="form.author" class="input-field mt-1" :placeholder="authStore.user.username">
             </div>
-            <div>
-                <label class="block text-sm font-medium">Icon (Image, max 5MB)</label>
-                <div class="flex items-center space-x-4">
-                    <input type="file" @change="handleIconUpload" accept="image/png, image/jpeg, image/webp" class="input-field mt-1 file:mr-4 file:py-1 file:px-2 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/50 dark:file:text-blue-300 dark:hover:file:bg-blue-900">
-                    <img v-if="iconPreview" :src="iconPreview" alt="Icon Preview" class="h-12 w-12 object-cover rounded-md border dark:border-gray-600 bg-gray-100 dark:bg-gray-700 flex-shrink-0"/>
-                </div>
-            </div>
-        </div>
-        <div v-if="isAdmin && !form.id" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-                <label class="block text-sm font-medium">Type</label>
-                <select v-model="form.owner_type" class="input-field mt-1">
-                    <option value="user">Personal (for my account only)</option>
-                    <option value="system">System (for all users)</option>
-                </select>
-            </div>
-        </div>
-        <div v-if="availableMcpToolsForSelector.length > 0">
-            <label class="block text-sm font-medium">Active MCPs (Tools)</label>
-            <MultiSelectMenu 
-                v-model="form.active_mcps" 
-                :items="availableMcpToolsForSelector" 
-                placeholder="Select default tools..." 
-                class="mt-1"
-            />
-        </div>
-        <div>
-          <label class="block text-sm font-medium">Description</label>
-          <textarea v-model="form.description" rows="2" class="input-field mt-1" placeholder="Briefly describe this personality's purpose and style..."></textarea>
+          </div>
         </div>
         
-        <!-- KNOWLEDGE SECTION -->
-        <div class="space-y-2 pt-4 border-t dark:border-gray-600">
-            <h3 class="text-base font-medium">Knowledge</h3>
-            <div>
-                <label class="block text-sm font-medium">Knowledge Type</label>
-                <select v-model="form.data_source_type" class="input-field mt-1">
-                    <option value="none">None</option>
-                    <option value="raw_text">Static (Raw Text & Files)</option>
-                    <option value="datastore">Dynamic (Data Store)</option>
-                </select>
-            </div>
-            
-            <div v-if="form.data_source_type === 'raw_text'">
-                <label class="block text-sm font-medium">Static Knowledge Content</label>
-                <textarea v-model="form.data_source" rows="6" class="input-field mt-1 font-mono text-sm" placeholder="Paste text or upload files..."></textarea>
-                <div class="mt-2 flex items-center gap-4">
-                    <input type="file" ref="fileInputRef" @change="handleKnowledgeFileUpload" multiple class="hidden" accept=".txt,.pdf,.docx">
-                    <button type="button" @click="fileInputRef.click()" :disabled="isExtractingText" class="btn btn-secondary text-sm">
-                        <IconAnimateSpin v-if="isExtractingText" class="w-4 h-4 mr-2" />
-                        {{ isExtractingText ? 'Processing...' : 'Add from Files (.txt, .pdf, .docx)' }}
+        <!-- Description and Disclaimer -->
+        <div>
+            <label for="description" class="block text-sm font-medium">Description</label>
+            <textarea id="description" v-model="form.description" rows="3" class="input-field mt-1"></textarea>
+        </div>
+        <div>
+            <label for="disclaimer" class="block text-sm font-medium">Disclaimer</label>
+            <textarea id="disclaimer" v-model="form.disclaimer" rows="2" class="input-field mt-1"></textarea>
+        </div>
+
+        <!-- System Prompt with AI Enhancement -->
+        <div>
+            <label for="prompt" class="block text-sm font-medium">System Prompt</label>
+            <div class="my-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg space-y-2">
+                <label for="modification_prompt" class="text-sm font-medium text-gray-700 dark:text-gray-300">Enhancement Instructions (optional)</label>
+                <div class="flex items-center gap-2">
+                    <textarea id="modification_prompt" v-model="modificationPrompt" rows="2" class="input-field flex-grow" placeholder="e.g., Make it sound more like a pirate..."></textarea>
+                    <button @click="handleEnhancePrompt" type="button" class="btn btn-secondary self-stretch" :disabled="isEnhancingPrompt">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" :class="{'animate-spin': isEnhancingPrompt}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.898 20.572L16.5 21.75l-.398-1.178a3.375 3.375 0 00-2.3-2.3L12.75 18l1.178-.398a3.375 3.375 0 002.3-2.3L16.5 14.25l.398 1.178a3.375 3.375 0 002.3 2.3l1.178.398-1.178.398a3.375 3.375 0 00-2.3 2.3z" /></svg>
+                        <span class="ml-2">{{ isEnhancingPrompt ? 'Enhancing...' : 'Enhance with AI' }}</span>
                     </button>
                 </div>
             </div>
+            <CodeMirrorEditor v-model="form.prompt_text" class="h-48" />
+        </div>
 
-            <div v-if="form.data_source_type === 'datastore'">
-                <label class="block text-sm font-medium">Select Data Store</label>
-                <select v-model="form.data_source" class="input-field mt-1">
-                    <option :value="null">Select a Data Store...</option>
-                    <option v-for="store in availableRagStores" :key="store.id" :value="store.id">{{ store.name }}</option>
-                </select>
-            </div>
+        <!-- Script Code (Admin only) -->
+        <div v-if="authStore.user.is_admin">
+            <label for="script_code" class="block text-sm font-medium">Script Code (Python)</label>
+            <CodeMirrorEditor v-model="form.script_code" class="h-48 mt-1" language="python" />
         </div>
         
-        <div>
-          <label class="block text-sm font-medium">Disclaimer</label>
-          <textarea v-model="form.disclaimer" rows="2" class="input-field mt-1" placeholder="Any warnings or disclaimers for the user..."></textarea>
-        </div>
-        <div>
-            <div class="flex items-center justify-between mb-1">
-                <label class="block text-sm font-medium">System Prompt*</label>
+        <!-- Advanced Settings (RAG, MCPs) -->
+        <div class="space-y-6 pt-6 border-t dark:border-gray-700">
+            <h3 class="text-lg font-medium text-gray-900 dark:text-gray-100">Advanced Settings</h3>
+            <!-- RAG Settings -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="data_source_type" class="block text-sm font-medium">Data Source Type</label>
+                    <select id="data_source_type" v-model="form.data_source_type" class="input-field mt-1">
+                        <option value="none">None</option>
+                        <option value="datastore">Data Store</option>
+                        <option value="static_text">Static Text</option>
+                    </select>
+                </div>
+                <div v-if="form.data_source_type === 'datastore'">
+                    <label for="data_source" class="block text-sm font-medium">Select Data Store</label>
+                    <select id="data_source" v-model="form.data_source" class="input-field mt-1">
+                        <option :value="null">Select a store</option>
+                        <option v-for="store in availableRagStores" :key="store.id" :value="store.id">
+                            {{ store.name }}
+                        </option>
+                    </select>
+                </div>
             </div>
-          <textarea v-model="form.prompt_text" rows="8" required class="input-field mt-1 font-mono text-sm" placeholder="Enter the core instructions, role, and context for the AI..."></textarea>
+            <div v-if="form.data_source_type === 'static_text'">
+                <div class="flex items-center justify-between mb-1">
+                    <label for="data_source_static" class="block text-sm font-medium">Static Text Content</label>
+                    <button @click="triggerStaticTextImport" type="button" class="btn btn-secondary btn-sm">Import from File</button>
+                    <input type="file" ref="staticTextInputRef" @change="handleStaticTextFileSelect" class="hidden" accept=".txt,.md,.json,.csv,.py,.js,text/*">
+                </div>
+                <CodeMirrorEditor v-model="form.data_source" id="data_source_static" class="h-32" />
+            </div>
+
+            <!-- MCP Tools Settings -->
+            <div>
+                <label class="block text-sm font-medium">Active MCPs</label>
+                 <MultiSelectMenu 
+                    v-model="form.active_mcps" 
+                    :items="availableMcpToolsForSelector"
+                    placeholder="Select tools"
+                    class="mt-1"
+                />
+            </div>
         </div>
-        <div>
-          <label class="block text-sm font-medium">Script Code (Optional)</label>
-          <textarea v-model="form.script_code" rows="6" class="input-field mt-1 font-mono text-sm" placeholder="Enter Python script for advanced logic..."></textarea>
-        </div>
-         <div v-if="isAdmin">
-            <label class="flex items-center">
-                <input type="checkbox" v-model="form.is_public" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                <span class="ml-2 text-sm">Make this personality public for all users</span>
-            </label>
+
+        <!-- Public Toggle (Admin only) -->
+        <div v-if="authStore.user.is_admin" class="flex items-center pt-6 border-t dark:border-gray-700">
+            <input id="is_public" type="checkbox" v-model="form.is_public" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            <label for="is_public" class="ml-2 block text-sm text-gray-900 dark:text-gray-200">Make Public (Available to all users)</label>
         </div>
       </form>
     </template>
     <template #footer>
-      <button @click="uiStore.closeModal('personalityEditor')" class="btn btn-secondary">Cancel</button>
-      <button @click="handleSave" class="btn btn-primary" :disabled="isLoading">
-        {{ isLoading ? 'Saving...' : 'Save Personality' }}
-      </button>
+      <button @click="uiStore.closeModal('personalityEditor')" type="button" class="btn btn-secondary">Cancel</button>
+      <button @click="handleSubmit" type="button" class="btn btn-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Save' }}</button>
     </template>
   </GenericModal>
 </template>
