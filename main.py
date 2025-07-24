@@ -2,6 +2,9 @@ import shutil
 import datetime
 from pathlib import Path
 from typing import Optional
+import os
+from multiprocessing import cpu_count
+
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -211,7 +214,9 @@ if __name__ == "__main__":
     
     host_setting = settings.get("host", host)
     port_setting = int(settings.get("port", port))
-
+    # Decide how many workers to run
+    # Priority: env var LOLLMS_WORKERS > settings["workers"] > cpu_count()
+    workers = int(os.getenv("LOLLMS_WORKERS", settings.get("workers", cpu_count())))
     ssl_params = {}
     if settings.get("https_enabled"):
         certfile = settings.get("ssl_certfile")
@@ -228,6 +233,29 @@ if __name__ == "__main__":
 
     print(f"--- LoLLMs Chat API Server (v{APP_VERSION}) ---")
     protocol = "https" if ssl_params else "http"
-    print(f"Access UI at: {protocol}://{host_setting}:{port_setting}/")
     
-    uvicorn.run("main:app", host=host_setting, port=port_setting, reload=False, **ssl_params)
+    import socket
+    import psutil  # Requires `pip install psutil`
+
+    print(f"--- LoLLMs Chat API Server (v{APP_VERSION}) ---")
+    protocol = "https" if ssl_params else "http"
+
+    if host_setting == "0.0.0.0":
+        # Always include localhost
+        print(f"Access UI at: {protocol}://localhost:{port_setting}/")
+
+        # Get all network interfaces and IPs
+        for iface, addrs in psutil.net_if_addrs().items():
+            for addr in addrs:
+                if addr.family == socket.AF_INET:
+                    print(f"Access UI at: {protocol}://{addr.address}:{port_setting}/")
+        # Optionally print hostnames
+        hostname = socket.gethostname()
+        fqdn = socket.getfqdn()
+        print(f"Access UI via hostname: {protocol}://{hostname}:{port_setting}/")
+        if fqdn != hostname:
+            print(f"Access UI via FQDN: {protocol}://{fqdn}:{port_setting}/")
+    else:
+        print(f"Access UI at: {protocol}://{host_setting}:{port_setting}/")
+            
+    uvicorn.run("main:app", host=host_setting, port=port_setting, reload=False, workers=workers, **ssl_params)
