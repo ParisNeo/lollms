@@ -60,3 +60,5 @@ pypdf
 python-docx
 python-pptx
 openpyxl
+
+psutil
