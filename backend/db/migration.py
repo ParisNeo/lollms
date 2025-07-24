@@ -7,7 +7,7 @@ from backend.config import LOLLMS_CLIENT_DEFAULTS, config
 from backend.db.base import CURRENT_DB_VERSION
 from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
 from backend.db.models.service import App
-from ascii_colors import ASCIIColors
+from ascii_colors import ASCIIColors, trace_exception
 
 def _bootstrap_global_settings(connection):
     """
@@ -212,9 +212,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         added_cols = []
         for col_name, col_sql_def in new_user_cols_defs.items():
             if col_name not in user_columns_db:
-                connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))
-                print(f"INFO: Added missing column '{col_name}' to 'users' table.")
-                added_cols.append(col_name)
+                try:
+                    connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))
+                    print(f"INFO: Added missing column '{col_name}' to 'users' table.")
+                    added_cols.append(col_name)
+                except Exception as ex:
+                    trace_exception(ex)
 
         if 'is_active' in added_cols:
             connection.execute(text("UPDATE users SET is_active = 1 WHERE is_active IS NULL"))
