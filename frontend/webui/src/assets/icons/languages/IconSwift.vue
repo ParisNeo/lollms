@@ -1,0 +1,3 @@
+<template>
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 8.7a1.5 1.5 0 0 0-1.2-1.2l-3.3-1a2 2 0 0 0-1.8.8l-1.9 3.2 2.1 1.2 3.1-2.1a1.5 1.5 0 0 1 2.1 2.1l-6.6 4.3-3.1-4.3a2 2 0 0 0-3.3.3l-3.6 6.1a1 1 0 0 0 .9 1.5l14.3-.1a1 1 0 0 0 .9-1.5l-3.6-6.1a2 2 0 0 0-3.3-.3l-3.1 4.3 6.6-4.3a1.5 1.5 0 0 1 2.1-2.1Z"/></svg>
+</template>

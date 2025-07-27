@@ -2,25 +2,30 @@
 import { computed } from 'vue';
 import { useTasksStore } from '../../stores/tasks';
 import { useUiStore } from '../../stores/ui';
-import IconTicket from '../../assets/icons/IconTasks.vue';
+import IconTicket from '../../assets/icons/IconTicket.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const tasksStore = useTasksStore();
 const uiStore = useUiStore();
 
-const activeCount = computed(() => tasksStore.activeTasksCount);
+const activeTasksCount = computed(() => tasksStore.activeTasksCount);
 
-function openTasksModal() {
+function openTasksManager() {
     uiStore.openModal('tasksManager');
 }
 </script>
 
 <template>
-    <button @click="openTasksModal" class="relative btn btn-secondary !p-2" title="View background tasks">
-        <IconTicket v-if="activeCount === 0" class="w-5 h-5" />
-        <IconAnimateSpin v-else class="w-5 h-5 text-blue-500" />
-        <span v-if="activeCount > 0" class="absolute -top-1 -right-1 flex items-center justify-center h-4 w-4 rounded-full bg-blue-500 text-white text-[10px] font-bold">
-            {{ activeCount }}
+    <button @click="openTasksManager"
+        class="relative p-2 rounded-full text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-100 dark:focus:ring-offset-gray-800 focus:ring-blue-500">
+        <span class="sr-only">View Tasks</span>
+        
+        <IconAnimateSpin v-if="activeTasksCount > 0" class="w-6 h-6 text-blue-500" />
+        <IconTicket v-else class="w-6 h-6" />
+        
+        <span v-if="activeTasksCount > 0"
+            class="absolute -top-1 -right-1 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">
+            {{ activeTasksCount }}
         </span>
     </button>
 </template>

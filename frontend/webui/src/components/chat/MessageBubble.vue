@@ -9,7 +9,7 @@ import { marked } from 'marked';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import CodeBlock from './CodeBlock.vue';
 import StepDetail from './StepDetail.vue';
-import { Codemirror } from 'vue-codemirror';
+import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import { markdown } from '@codemirror/lang-markdown';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
@@ -64,6 +64,40 @@ const senderPersonality = computed(() => {
     return null;
 });
 
+const mathPlaceholders = new Map();
+let mathCounter = 0;
+
+function protectMath(text) {
+    if (!text) return text;
+    mathCounter = 0;
+    mathPlaceholders.clear();
+
+    return text.replace(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g, (match) => {
+        const placeholder = `<!--MATH_PLACEHOLDER_${mathCounter}-->`;
+        mathPlaceholders.set(placeholder, match);
+        mathCounter++;
+        return placeholder;
+    });
+}
+
+function unprotectHtml(html) {
+    if (!html || mathPlaceholders.size === 0) return html;
+    let result = html;
+    for (const [placeholder, original] of mathPlaceholders.entries()) {
+        const regex = new RegExp(placeholder.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
+        result = result.replace(regex, original);
+    }
+    return result;
+}
+
+const parsedMarkdown = (content) => {
+    if (typeof content !== 'string') return '';
+    const protectedContent = protectMath(content);
+    // FIX: Add mangle: false and smartypants: false to prevent underscore issues
+    const rawHtml = marked.parse(protectedContent, { gfm: true, breaks: true, mangle: false, smartypants: false });
+    return unprotectHtml(rawHtml);
+};
+
 function renderMath() {
   if (messageContentRef.value && window.renderMathInElement) {
     window.renderMathInElement(messageContentRef.value, {
@@ -84,6 +118,14 @@ watch(() => props.message.content, async () => {
     renderMath();
 }, { flush: 'post' });
 
+watch(isEditing, async (newVal, oldVal) => {
+    if (oldVal === true && newVal === false) {
+        await nextTick();
+        renderMath();
+    }
+});
+
+
 onMounted(() => {
     renderMath();
     if (props.message.sources && props.message.sources.length > 3) {
@@ -100,11 +142,6 @@ const imagesToRender = computed(() => {
     return [];
 });
 
-const parsedMarkdown = (content) => {
-    if (typeof content !== 'string') return '';
-    return marked.parse(content, { gfm: true, breaks: true });
-}
-
 const messageParts = computed(() => {
     if (!props.message.content || props.message.isStreaming) return [];
     const parts = [];
@@ -120,7 +157,23 @@ const messageParts = computed(() => {
     return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
 });
 
-const getContentTokens = (text) => text ? Array.from(marked.lexer(text)) : [];
+const getContentTokens = (text) => {
+    if (!text) return [];
+    const protectedText = protectMath(text);
+    const tokens = Array.from(marked.lexer(protectedText, { mangle: false, smartypants: false }));
+
+    return tokens.map(token => {
+        const unprotectedToken = { ...token };
+        if (unprotectedToken.raw) {
+            unprotectedToken.raw = unprotectHtml(unprotectedToken.raw);
+        }
+        if (unprotectedToken.text) { 
+            unprotectedToken.text = unprotectHtml(unprotectedToken.text);
+        }
+        return unprotectedToken;
+    });
+};
+
 const parsedStreamingContent = computed(() => parsedMarkdown(props.message.content));
 
 const isUser = computed(() => props.message.sender_type === 'user');
@@ -198,14 +251,20 @@ function navigateBranch(direction) {
     discussionsStore.switchBranch(branchIds[newIndex]);
 }
 
-const editorExtensions = computed(() => [
-    markdown(), EditorView.lineWrapping,
-    keymap.of([
-        { key: "Mod-Enter", run: () => { handleSaveEdit(); return true; }},
-        { key: "Escape", run: () => { handleCancelEdit(); return true; }}
-    ]),
-    ...(uiStore.currentTheme === 'dark' ? [oneDark] : [])
-]);
+const editorExtensions = computed(() => {
+    const extensions = [
+        EditorView.lineWrapping,
+        keymap.of([
+            { key: "Mod-Enter", run: () => { handleSaveEdit(); return true; }},
+            { key: "Escape", run: () => { handleCancelEdit(); return true; }}
+        ])
+    ];
+    if (uiStore.currentTheme === 'dark' || isUser.value) {
+        extensions.push(oneDark);
+    }
+    return extensions;
+});
+
 
 function toggleEdit() {
     isEditing.value = !isEditing.value;
@@ -311,19 +370,15 @@ const formattingMenuItems = [
                 </div>
             </div>
             <div v-else class="w-full">
-                <div class="flex items-center space-x-1 border-b dark:border-gray-600 mb-2 pb-2">
-                    <div class="relative">
-                        <button @click="isFormattingMenuOpen = !isFormattingMenuOpen" class="p-2 rounded hover:bg-gray-200 dark:hover:bg-gray-600" title="Formatting Options"><IconFormat class="w-5 h-5" /></button>
-                        <div v-if="isFormattingMenuOpen" v-on-click-outside="() => isFormattingMenuOpen = false" class="absolute bottom-full left-0 mb-2 w-56 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow-xl z-20 py-1">
-                            <template v-for="(item, index) in formattingMenuItems" :key="index">
-                                <div v-if="item.type === 'separator'" class="my-1 h-px bg-gray-200 dark:bg-gray-600"></div>
-                                <div v-else-if="item.type === 'header'" class="px-3 py-1 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{{ item.label }}</div>
-                                <button v-else @click="item.action(); isFormattingMenuOpen = false" class="w-full text-left flex items-center px-3 py-1.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-blue-500 hover:text-white">{{ item.label }}</button>
-                            </template>
-                        </div>
-                    </div>
-                </div>
-                <codemirror v-model="editedContent" placeholder="Enter your message..." :style="{ maxHeight: '500px' }" :autofocus="true" :indent-with-tab="true" :tab-size="2" :extensions="editorExtensions" @ready="handleEditorReady" class="cm-editor-container"/>
+                <CodeMirrorEditor
+                    v-model="editedContent"
+                    placeholder="Enter your message..."
+                    :autofocus="true"
+                    :extensions="editorExtensions"
+                    @ready="handleEditorReady"
+                    :editor-class="isUser ? 'user-bubble-editor' : ''"
+                    :toolbar-class="isUser ? 'user-bubble-toolbar' : ''"
+                />
                 <div class="flex justify-end space-x-2 mt-2">
                     <button @click="handleCancelEdit" class="btn btn-secondary !py-1 !px-3">Cancel</button>
                     <button @click="handleSaveEdit" class="btn btn-primary !py-1 !px-3">Save</button>
@@ -428,8 +483,6 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .event-title { @apply text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400; }
 .event-body { @apply mt-1 text-sm; }
 .event-body .message-prose :where(p, ul, ol, pre) { margin-top: 0.25em; margin-bottom: 0.25em; }
-.cm-editor-container { border: 1px solid theme('colors.gray.300'); border-radius: theme('borderRadius.lg'); }
-.dark .cm-editor-container { border-color: theme('colors.gray.600'); }
 .message-footer { @apply flex items-center justify-between mt-2 pt-2 border-t border-black/10 dark:border-white/10; min-height: 28px; }
 .user-bubble .message-footer { @apply border-white/20; }
 .detail-badge { @apply flex items-center gap-1.5 px-2 py-1 rounded-full bg-gray-200/50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 font-mono; }
@@ -444,4 +497,27 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .rating-btn.upvote.active { @apply text-green-500; }
 .rating-btn.downvote.active { @apply text-red-500; }
 .rating-score { @apply px-1 text-xs font-bold w-6 text-center; }
+
+:deep(.user-bubble-toolbar) {
+    @apply bg-blue-700/80 border-b-blue-500/50;
+}
+:deep(.user-bubble-toolbar .toolbar-btn) {
+    @apply text-blue-100 hover:bg-white/20;
+}
+:deep(.user-bubble-editor .cm-editor) {
+    @apply bg-blue-600;
+}
+:deep(.user-bubble-editor .cm-content) {
+    @apply text-white caret-white;
+}
+:deep(.user-bubble-editor .cm-gutters) {
+    @apply bg-blue-600 border-r-blue-500 text-blue-200;
+}
+:deep(.user-bubble-editor .cm-cursor) {
+    @apply border-l-white;
+}
+:deep(.user-bubble-editor .cm-selectionBackground),
+:deep(.user-bubble-editor .cm-content ::selection) {
+    @apply bg-blue-400/50;
+}
 </style>

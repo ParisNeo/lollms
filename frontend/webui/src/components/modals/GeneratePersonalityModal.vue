@@ -79,8 +79,7 @@ async function handleGenerate() {
 
     try {
         const response = await dataStore.generatePersonalityFromPrompt(prompt.value);
-        taskId.value = response.task_id;
-        // No need for a separate notification here, the watcher will handle it.
+        taskId.value = response.id; // Corrected from task_id to id
     } catch (error) {
         isLoading.value = false;
         // error is handled by interceptor
@@ -112,7 +111,7 @@ async function handleGenerate() {
                 </div>
 
                 <div v-if="showProgressIndicator" class="text-center p-6 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <IconAnimateSpin class="w-8 h-8 mx-auto text-blue-500 animate-spin" />
+                    <IconAnimateSpin class="w-8 h-8 mx-auto text-blue-500" />
                     <p class="mt-4 font-semibold">Generation in Progress...</p>
                     <p v-if="currentTask" class="text-sm text-gray-500 mt-2">{{ currentTask.description }}</p>
                     <div v-if="currentTask" class="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-600 mt-4">

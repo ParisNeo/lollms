@@ -481,35 +481,67 @@ function removeImage(index) {
                     <button @click="discussionsStore.stopGeneration" class="btn btn-danger !py-1 !px-3">Stop Generation</button>
                 </div>
                 
-                <div v-else class="flex items-end space-x-2">
-                    <button @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary !p-2.5 self-end disabled:opacity-50" title="Upload Images"><IconPhoto class="w-6 h-6"/></button>
-                    <button @click="$emit('toggle-data-zone')" v-if="user.user_ui_level >= 2" class="btn btn-secondary !p-2.5 self-end" title="Toggle Data Zone"><IconDataZone class="w-6 h-6" /></button>
-                    <div v-if="user.user_ui_level >= 3" class="self-end">
-                        <MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary">
-                            <template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2.5" title="Select MCP Tools"><IconMcp class="w-6 h-6"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template>
-                            <template #footer>
-                                <div class="p-2">
-                                    <button @click="refreshMcps" :disabled="isRefreshingMcps" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingMcps}"/><span>{{ isRefreshingMcps ? 'Refreshing...' : 'Refresh Tools' }}</span></button>
+                <div v-else>
+                    <!-- Simple Mode Layout -->
+                    <div v-if="!isAdvancedMode" class="flex items-end space-x-2">
+                        <button @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary !p-2.5 self-end disabled:opacity-50" title="Upload Images"><IconPhoto class="w-6 h-6"/></button>
+                        <button @click="$emit('toggle-data-zone')" v-if="user.user_ui_level >= 2" class="btn btn-secondary !p-2.5 self-end" title="Toggle Data Zone"><IconDataZone class="w-6 h-6" /></button>
+                        <div v-if="user.user_ui_level >= 3" class="self-end">
+                            <MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary">
+                                <template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2.5" title="Select MCP Tools"><IconMcp class="w-6 h-6"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template>
+                                <template #footer>
+                                    <div class="p-2">
+                                        <button @click="refreshMcps" :disabled="isRefreshingMcps" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingMcps}"/><span>{{ isRefreshingMcps ? 'Refreshing...' : 'Refresh Tools' }}</span></button>
+                                    </div>
+                                </template>
+                            </MultiSelectMenu>
+                        </div>
+                        <div v-if="user.user_ui_level >= 1" class="self-end">
+                            <MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary">
+                                <template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2.5" title="Select RAG Store"><IconDatabase class="w-6 h-6" /><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span></button></template>
+                                <template #footer>
+                                    <div class="p-2">
+                                        <button @click="refreshRags" :disabled="isRefreshingRags" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingRags}"/><span>{{ isRefreshingRags ? 'Refreshing...' : 'Refresh Stores' }}</span></button>
+                                    </div>
+                                </template>
+                            </MultiSelectMenu>
+                        </div>
+                        <div class="flex-1 self-end">
+                            <textarea v-model="messageText" @keydown.enter.exact.prevent="handleSendMessage" @keydown.enter.shift.prevent="switchToAdvancedMode($event)" placeholder="Type your message... (Shift+Enter for advanced editor)" rows="1" class="simple-chat-input"></textarea>
+                        </div>
+                        <button @click="handleSendMessage" :disabled="isSendDisabled" class="btn btn-primary self-end !p-2.5" title="Send Message (Enter or Ctrl+Enter)"><IconSend class="w-6 h-6"/></button>
+                    </div>
+
+                    <!-- Advanced Mode Layout -->
+                    <div v-else class="space-y-2">
+                        <CodeMirrorEditor v-model="messageText" placeholder="Type your message... (Ctrl+Enter to send)" :style="{ maxHeight: '200px' }" :autofocus="true" :extensions="advancedEditorExtensions" @ready="handleEditorReady" class="w-full"/>
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center space-x-2">
+                                <button @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary !p-2.5 disabled:opacity-50" title="Upload Images"><IconPhoto class="w-6 h-6"/></button>
+                                <button @click="$emit('toggle-data-zone')" v-if="user.user_ui_level >= 2" class="btn btn-secondary !p-2.5" title="Toggle Data Zone"><IconDataZone class="w-6 h-6" /></button>
+                                <div v-if="user.user_ui_level >= 3">
+                                    <MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary">
+                                        <template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2.5" title="Select MCP Tools"><IconMcp class="w-6 h-6"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template>
+                                        <template #footer>
+                                            <div class="p-2"><button @click="refreshMcps" :disabled="isRefreshingMcps" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingMcps}"/><span>{{ isRefreshingMcps ? 'Refreshing...' : 'Refresh Tools' }}</span></button></div>
+                                        </template>
+                                    </MultiSelectMenu>
                                 </div>
-                            </template>
-                        </MultiSelectMenu>
-                    </div>
-                    <div v-if="user.user_ui_level >= 1" class="self-end">
-                        <MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary">
-                            <template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2.5" title="Select RAG Store"><IconDatabase class="w-6 h-6" /><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span></button></template>
-                            <template #footer>
-                                <div class="p-2">
-                                    <button @click="refreshRags" :disabled="isRefreshingRags" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingRags}"/><span>{{ isRefreshingRags ? 'Refreshing...' : 'Refresh Stores' }}</span></button>
+                                <div v-if="user.user_ui_level >= 1">
+                                    <MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary">
+                                        <template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2.5" title="Select RAG Store"><IconDatabase class="w-6 h-6" /><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span></button></template>
+                                        <template #footer>
+                                            <div class="p-2"><button @click="refreshRags" :disabled="isRefreshingRags" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingRags}"/><span>{{ isRefreshingRags ? 'Refreshing...' : 'Refresh Stores' }}</span></button></div>
+                                        </template>
+                                    </MultiSelectMenu>
                                 </div>
-                            </template>
-                        </MultiSelectMenu>
+                            </div>
+                            <div class="flex items-center space-x-2">
+                                <button @click="isAdvancedMode = false" class="btn btn-secondary !p-2.5" title="Switch to Simple Input"><IconChevronDown class="w-6 h-6" /></button>
+                                <button @click="handleSendMessage" :disabled="isSendDisabled" class="btn btn-primary !p-2.5" title="Send Message (Enter or Ctrl+Enter)"><IconSend class="w-6 h-6"/></button>
+                            </div>
+                        </div>
                     </div>
-                    <div class="flex-1 self-end">
-                        <textarea v-if="!isAdvancedMode" v-model="messageText" @keydown.enter.exact.prevent="handleSendMessage" @keydown.enter.shift.prevent="switchToAdvancedMode($event)" placeholder="Type your message... (Shift+Enter for advanced editor)" rows="1" class="simple-chat-input"></textarea>
-                        <CodeMirrorEditor v-else v-model="messageText" placeholder="Type your message... (Ctrl+Enter to send)" :style="{ maxHeight: '200px' }" :autofocus="true" :extensions="advancedEditorExtensions" @ready="handleEditorReady" class="w-full"/>
-                    </div>
-                     <button v-if="isAdvancedMode" @click="isAdvancedMode = false" class="btn btn-secondary !p-2.5 self-end" title="Switch to Simple Input"><IconChevronDown class="w-6 h-6" /></button>
-                    <button @click="handleSendMessage" :disabled="isSendDisabled" class="btn btn-primary self-end !p-2.5" title="Send Message (Enter or Ctrl+Enter)"><IconSend class="w-6 h-6"/></button>
                 </div>
             </div>
         </div>

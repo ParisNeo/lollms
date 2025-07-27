@@ -78,25 +78,19 @@ const formatDateSeparator = (dateStr) => {
     });
 };
 
-const displayItems = computed(() => {
-    if (!activeMessages.value) return [];
-    const items = [];
-    const groups = activeMessages.value.reduce((acc, message) => {
-        const dateKey = new Date(message.created_at || Date.now()).toDateString();
-        if (!acc[dateKey]) acc[dateKey] = [];
-        acc[dateKey].push(message);
-        console.log(acc)
-        return acc;
-    }, {});
+// NEW: Helper function to check if a date separator should be shown
+function shouldShowDateSeparator(currentIndex) {
+    if (currentIndex === 0) return true; // Always show for the first message
+    const currentMessage = activeMessages.value[currentIndex];
+    const prevMessage = activeMessages.value[currentIndex - 1];
+    if (!currentMessage?.created_at || !prevMessage?.created_at) return false;
+    
+    const currentDate = new Date(currentMessage.created_at).toDateString();
+    const prevDate = new Date(prevMessage.created_at).toDateString();
+    
+    return currentDate !== prevDate;
+}
 
-    for (const date in groups) {
-        items.push({ type: 'separator', id: `sep-${date}`, date: date });
-        groups[date].forEach(message => {
-            items.push({ type: 'message', id: message.id, data: message });
-        });
-    }
-    return items;
-});
 </script>
 
 <template>
@@ -105,16 +99,16 @@ const displayItems = computed(() => {
         <svg class="animate-spin h-6 w-6 text-gray-400 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
     </div>
     <TransitionGroup name="list" tag="div" class="relative flex flex-col gap-4 pb-40">
-      <div v-for="item in displayItems" :key="item.id">
-        <div v-if="item.type === 'separator'" class="date-separator">
+      <template v-for="(message, index) in activeMessages" :key="message.id">
+        <div v-if="shouldShowDateSeparator(index)" class="date-separator">
             <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
             <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
-              {{ formatDateSeparator(item.date) }}
+              {{ formatDateSeparator(message.created_at) }}
             </div>
             <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
         </div>
-        <MessageBubble v-else-if="item.type === 'message'" :message="item.data" />
-      </div>
+        <MessageBubble :message="message" />
+      </template>
     </TransitionGroup>
   </div>
 </template>

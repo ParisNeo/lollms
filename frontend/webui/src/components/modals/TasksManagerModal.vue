@@ -11,6 +11,9 @@ import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 const tasksStore = useTasksStore();
 const uiStore = useUiStore();
 
+const props = computed(() => uiStore.modalData('tasksManager'));
+const initialTaskId = computed(() => props.value?.initialTaskId);
+
 const { tasks, isLoadingTasks } = storeToRefs(tasksStore);
 
 const selectedTask = ref(null);
@@ -21,13 +24,30 @@ const sortedTasks = computed(() => {
     return [...tasks.value].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 });
 
-// Auto-select the first task if none is selected
+// Select initial task when modal opens
+watch(() => uiStore.isModalOpen('tasksManager'), (isOpen) => {
+    if (isOpen) {
+        if (initialTaskId.value && sortedTasks.value.length > 0) {
+            selectedTask.value = sortedTasks.value.find(t => t.id === initialTaskId.value) || sortedTasks.value[0];
+        } else if (sortedTasks.value.length > 0) {
+            selectedTask.value = sortedTasks.value[0];
+        } else {
+            selectedTask.value = null;
+        }
+    }
+});
+
+// Keep selected task updated or handle its removal
 watch(sortedTasks, (newTasks) => {
-    if (!selectedTask.value && newTasks.length > 0) {
+    if (selectedTask.value) {
+        const updatedTask = newTasks.find(t => t.id === selectedTask.value.id);
+        if (updatedTask) {
+            selectedTask.value = updatedTask;
+        } else {
+            selectedTask.value = newTasks.length > 0 ? newTasks[0] : null;
+        }
+    } else if (newTasks.length > 0) {
         selectedTask.value = newTasks[0];
-    } else if (selectedTask.value && !newTasks.find(t => t.id === selectedTask.value.id)) {
-        // If the selected task disappears (e.g., cleared), select the new first task or null
-        selectedTask.value = newTasks.length > 0 ? newTasks[0] : null;
     }
 });
 
@@ -149,7 +169,7 @@ function getLogLevelClass(level) {
                                     <strong>Error:</strong> <pre class="whitespace-pre-wrap font-mono text-xs">{{ selectedTask.error }}</pre>
                                 </div>
                                  <div v-if="selectedTask.result" class="text-green-700 dark:text-green-300 p-2 bg-green-50 dark:bg-green-900/20 rounded">
-                                    <strong>Result:</strong> <pre class="whitespace-pre-wrap font-mono text-xs">{{ selectedTask.result }}</pre>
+                                    <strong>Result:</strong> <pre class="whitespace-pre-wrap font-mono text-xs">{{ JSON.stringify(selectedTask.result, null, 2) }}</pre>
                                 </div>
                             </div>
                             <div class="flex-grow p-4 border-t dark:border-gray-700 overflow-hidden flex flex-col">

@@ -8,6 +8,7 @@ import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
 import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 import UserAvatar from '../ui/UserAvatar.vue';
 import TasksManagerButton from '../layout/TasksManagerButton.vue';
+import ThemeToggle from '../ui/ThemeToggle.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -44,6 +45,7 @@ function newDiscussion() {
 
     <!-- Right Side: Action Buttons -->
     <div class="flex items-center space-x-2">
+      <ThemeToggle />
       <TasksManagerButton />
 
       <button @click="newDiscussion" class="btn btn-secondary" title="New Discussion">

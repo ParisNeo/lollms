@@ -47,7 +47,7 @@ export const useAdminStore = defineStore('admin', () => {
             const response = await apiClient.post('/api/admin/purge-unused-uploads');
             const task = response.data;
             uiStore.addNotification(`Task '${task.name}' started.`, 'info');
-            await tasksStore.fetchTasks(); // Use the tasks store to refresh
+            tasksStore.addTask(task); // Use the tasks store to refresh
             return task;
         } catch (error) {
             throw error;
@@ -80,7 +80,7 @@ export const useAdminStore = defineStore('admin', () => {
             const response = await apiClient.post('/api/admin/email-users', payload);
             const task = response.data;
             uiStore.addNotification(`Email task '${task.name}' started.`, 'success');
-            await tasksStore.fetchTasks(); // Use the tasks store to refresh
+            tasksStore.addTask(task);
             return true;
         } catch (error) {
             return false;
@@ -306,7 +306,7 @@ export const useAdminStore = defineStore('admin', () => {
             const response = await apiClient.post(`/api/apps-management/zoo/repositories/${repoId}/pull`);
             const task = response.data;
             uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
-            await tasksStore.fetchTasks();
+            tasksStore.addTask(task);
             return task;
         } catch (error) {
             throw error;
@@ -357,7 +357,7 @@ export const useAdminStore = defineStore('admin', () => {
             const task = response.data;
             uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
             await fetchZooApps();
-            await tasksStore.fetchTasks();
+            tasksStore.addTask(task);
             return task;
         } catch (error) {
             throw error;
@@ -393,12 +393,13 @@ export const useAdminStore = defineStore('admin', () => {
         const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/start`);
         const task = response.data;
         uiStore.addNotification(`Task '${task.name}' started.`, 'info');
-        await tasksStore.fetchTasks();
+        tasksStore.addTask(task);
     }
     async function stopApp(appId) {
         const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/stop`);
-        uiStore.addNotification(response.data.message, response.data.success ? 'success' : 'warning');
-        await fetchInstalledApps();
+        const task = response.data;
+        uiStore.addNotification(`Task '${task.name}' started.`, 'info');
+        tasksStore.addTask(task);
     }
     async function uninstallApp(appId) {
         const response = await apiClient.delete(`/api/apps-management/installed-apps/${appId}`);
@@ -411,7 +412,10 @@ export const useAdminStore = defineStore('admin', () => {
         try {
             const response = await apiClient.put(`/api/apps-management/installed-apps/${appId}`, payload);
             uiStore.addNotification(`App '${response.data.name}' updated successfully.`, 'success');
-            await fetchInstalledApps();
+            const index = installedApps.value.findIndex(app => app.id === appId);
+            if (index !== -1) {
+                installedApps.value[index] = response.data;
+            }
             return response.data;
         } catch (error) {
             throw error;

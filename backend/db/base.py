@@ -26,3 +26,11 @@ class FriendshipStatus(enum.Enum):
     ACCEPTED = "accepted"
     BLOCKED_BY_USER1 = "blocked_by_user1"
     BLOCKED_BY_USER2 = "blocked_by_user2"
+
+# NEW: TaskStatus enum is moved here to break circular dependency
+class TaskStatus(str, enum.Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"

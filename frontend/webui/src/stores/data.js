@@ -374,33 +374,32 @@ export const useDataStore = defineStore('data', () => {
             throw error;
         }
     }
+
     async function generatePersonalityFromPrompt(prompt) {
         const tasksStore = useTasksStore();
         try {
             const response = await apiClient.post('/api/personalities/generate_from_prompt', { prompt });
-            tasksStore.fetchTasks();
-            return response.data; // This returns task_id and message
+            tasksStore.addTask(response.data); // Add the returned task
+            return response.data; // This returns the full task object now
         } catch (error) {
             throw error;
         }
     }
+
     async function enhancePersonalityPrompt(prompt_text, modification_prompt) {
-        const uiStore = useUiStore();
         const tasksStore = useTasksStore();
-        isEnhancingPrompt.value = true;
         try {
             const response = await apiClient.post('/api/personalities/enhance_prompt', {
                 prompt_text,
                 modification_prompt
             });
-            // The endpoint now returns a task object
-            tasksStore.addTask(response.data); // Add task to the store
-            return response.data; // Return the initial task info
+            // The endpoint now returns a full task object.
+            // Add it directly to the tasks store to avoid race conditions.
+            tasksStore.addTask(response.data);
+            return { task_id: response.data.id, message: 'Task started.' }; // Return the ID for the modal
         } catch (error) {
             // Error handled by global interceptor
-            return null;
-        } finally {
-            isEnhancingPrompt.value = false;
+            throw error;
         }
     }
     async function triggerMcpReload() {

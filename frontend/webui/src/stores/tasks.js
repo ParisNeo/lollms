@@ -16,25 +16,59 @@ export const useTasksStore = defineStore('tasks', () => {
         return tasks.value.filter(t => t.status === 'running' || t.status === 'pending').length;
     });
 
+    const getTaskById = computed(() => {
+        return (taskId) => tasks.value.find(t => t.id === taskId);
+    });
+
     // --- ACTIONS ---
     async function fetchTasks() {
-        isLoadingTasks.value = true;
+        // Prevent setting loading state on every poll to avoid UI flicker
+        const wasLoading = isLoadingTasks.value;
+        if (!wasLoading) {
+            isLoadingTasks.value = true;
+        }
         try {
             const response = await apiClient.get('/api/tasks');
             tasks.value = response.data;
         } catch (error) {
             console.error("Failed to fetch tasks:", error);
-            // Optionally notify user on fetch failure, but can be noisy with polling
+            // Don't show a notification on silent polling failures
         } finally {
-            isLoadingTasks.value = false;
+            if (!wasLoading) {
+                isLoadingTasks.value = false;
+            }
+        }
+    }
+
+    async function fetchTask(taskId) {
+        try {
+            const response = await apiClient.get(`/api/tasks/${taskId}`);
+            const updatedTask = response.data;
+            const index = tasks.value.findIndex(t => t.id === taskId);
+            if (index !== -1) {
+                tasks.value[index] = updatedTask;
+            } else {
+                tasks.value.push(updatedTask);
+            }
+        } catch (error) {
+            console.error(`Failed to fetch task ${taskId}:`, error);
+        }
+    }
+
+    function addTask(task) {
+        const index = tasks.value.findIndex(t => t.id === task.id);
+        if (index === -1) {
+            tasks.value.unshift(task); // Add to the top of the list
+        } else {
+            tasks.value[index] = task; // Update existing task
         }
     }
 
     async function cancelTask(taskId) {
         try {
-            await apiClient.post(`/api/tasks/${taskId}/cancel`);
-            uiStore.addNotification('Task cancellation requested.', 'info');
-            await fetchTasks();
+            const response = await apiClient.post(`/api/tasks/${taskId}/cancel`);
+            addTask(response.data); // Immediately update the task state with the final state from the API
+            uiStore.addNotification('Task cancellation processed.', 'info');
         } catch (error) {
             // Error is handled by global interceptor
         }
@@ -53,7 +87,7 @@ export const useTasksStore = defineStore('tasks', () => {
     function startPolling() {
         if (pollInterval) return; // Prevent multiple intervals
         fetchTasks(); // Initial fetch
-        pollInterval = setInterval(fetchTasks, 5000); // Poll every 5 seconds
+        pollInterval = setInterval(fetchTasks, 3000); // Poll every 3 seconds
     }
 
     function stopPolling() {
@@ -73,7 +107,10 @@ export const useTasksStore = defineStore('tasks', () => {
         tasks,
         isLoadingTasks,
         activeTasksCount,
+        getTaskById,
         fetchTasks,
+        fetchTask,
+        addTask,
         cancelTask,
         clearCompletedTasks,
         startPolling,

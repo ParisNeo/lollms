@@ -1,6 +1,9 @@
 <script setup>
-import { ref, defineAsyncComponent, onMounted } from 'vue';
+import { ref, defineAsyncComponent, onMounted, computed } from 'vue';
 import { useAdminStore } from '../stores/admin';
+import { useUiStore } from '../stores/ui';
+import { useTasksStore } from '../stores/tasks';
+import { storeToRefs } from 'pinia';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 
 import IconHome from '../assets/icons/IconHome.vue';
@@ -13,9 +16,14 @@ import IconMessage from '../assets/icons/IconMessage.vue';
 import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
 import IconSquares2x2 from '../assets/icons/IconSquares2x2.vue';
 import IconTicket from '../assets/icons/IconTicket.vue';
+import IconTasks from '../assets/icons/IconTasks.vue';
 
 const AdminPanel = defineAsyncComponent(() => import('../components/admin/AdminPanel.vue'));
 const adminStore = useAdminStore();
+const uiStore = useUiStore();
+const tasksStore = useTasksStore();
+
+const { activeTasksCount } = storeToRefs(tasksStore);
 
 const activeTab = ref('dashboard');
 
@@ -40,6 +48,16 @@ onMounted(() => {
 
 <template>
   <PageViewLayout title="Admin Panel" :title-icon="IconWrenchScrewdriver">
+    <template #header-actions>
+      <button @click="uiStore.openModal('tasksManager')" class="btn btn-secondary relative">
+        <IconTasks class="w-5 h-5" />
+        <span class="ml-2">Task Manager</span>
+        <span v-if="activeTasksCount > 0" class="absolute -top-1 -right-1 flex h-4 w-4">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-4 w-4 bg-blue-500 text-white text-xs items-center justify-center">{{ activeTasksCount }}</span>
+        </span>
+      </button>
+    </template>
     <template #sidebar>
       <button 
         v-for="tab in tabs" 

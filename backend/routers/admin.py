@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from lollms_client.lollms_llm_binding import get_available_bindings
@@ -83,7 +83,7 @@ def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, 
             task.set_progress(progress)
         
         task.set_progress(100)
-        task.result = {"message": f"Email sending task completed. Emails sent to {sent_count} of {total_users} targeted users."}
+        return {"message": f"Email sending task completed. Emails sent to {sent_count} of {total_users} targeted users."}
     except Exception as e:
         traceback.print_exc()
         raise e
@@ -103,8 +103,7 @@ def _purge_unused_temp_files_task(task: Task):
     if not all_user_dirs:
         task.log("No user data directories found to scan.")
         task.set_progress(100)
-        task.result = {"message": "Purge complete. No user directories found."}
-        return
+        return {"message": "Purge complete. No user directories found."}
 
     for i, user_dir in enumerate(all_user_dirs):
         if task.cancellation_event.is_set():
@@ -130,7 +129,7 @@ def _purge_unused_temp_files_task(task: Task):
         task.set_progress(progress)
 
     task.set_progress(100)
-    task.result = {"message": f"Purge complete. Scanned {total_scanned} files and deleted {deleted_count}."}
+    return {"message": f"Purge complete. Scanned {total_scanned} files and deleted {deleted_count}."}
 
 # --- Bindings Management Endpoints ---
 
@@ -243,9 +242,7 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
 @admin_router.post("/email-users", response_model=TaskInfo, status_code=202)
 async def email_users(
     payload: EmailUsersRequest,
-    background_tasks: BackgroundTasks,
-    current_admin: UserAuthDetails = Depends(get_current_admin_user),
-    db: Session = Depends(get_db)
+    current_admin: UserAuthDetails = Depends(get_current_admin_user)
 ):
     email_mode = settings.get("password_recovery_mode")
     if email_mode not in ["automatic", "system_mail", "outlook"]:
@@ -254,29 +251,27 @@ async def email_users(
     if not payload.user_ids:
         raise HTTPException(status_code=400, detail="No users selected to email.")
 
-    task = task_manager.submit_task(
+    db_task = task_manager.submit_task(
         name=f"Emailing {len(payload.user_ids)} users",
         target=_email_users_task,
         args=(payload.user_ids, payload.subject, payload.body, payload.background_color, payload.send_as_text),
         description=f"Sending email with subject: '{payload.subject}'",
-        user_id=current_admin.id
+        owner_username=current_admin.username
     )
-    background_tasks.add_task(task.run)
-    return TaskInfo(**task.__dict__)
+    return TaskInfo.from_orm(db_task)
 
 @admin_router.post("/purge-unused-uploads", response_model=TaskInfo, status_code=202)
-async def purge_temp_files(background_tasks: BackgroundTasks, current_admin: UserAuthDetails = Depends(get_current_admin_user)):
+async def purge_temp_files(current_admin: UserAuthDetails = Depends(get_current_admin_user)):
     """
     Triggers a background task to delete temporary uploaded files older than 24 hours.
     """
-    task = task_manager.submit_task(
+    db_task = task_manager.submit_task(
         name="Purge unused temporary files",
         target=_purge_unused_temp_files_task,
         description="Scans all user temporary upload folders and deletes files older than 24 hours.",
-        user_id=current_admin.id
+        owner_username=current_admin.username
     )
-    background_tasks.add_task(task.run)
-    return TaskInfo(**task.__dict__)
+    return TaskInfo.from_orm(db_task)
 
 
 @admin_router.post("/enhance-email", response_model=EnhancedEmailResponse)
@@ -412,7 +407,6 @@ async def force_settings_once(payload: ForceSettingsPayload, db: Session = Depen
 
 @admin_router.post("/import-openwebui", response_model=Dict[str, str])
 async def import_openwebui_data(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_admin: UserAuthDetails = Depends(get_current_admin_user)
 ):
@@ -434,9 +428,15 @@ async def import_openwebui_data(
     finally:
         file.file.close()
 
-    background_tasks.add_task(run_openwebui_migration, str(temp_import_dir))
+    task_manager.submit_task(
+        name="Import OpenWebUI Data",
+        target=run_openwebui_migration,
+        args=(str(temp_import_dir),),
+        description=f"Migrating data from {file.filename}",
+        owner_username=current_admin.username
+    )
 
-    return {"message": "Migration process started in the background. Check server logs for progress."}
+    return {"message": "Migration process started in the background. Check the Task Manager for progress."}
 
 @admin_router.get("/settings", response_model=List[GlobalConfigPublic])
 async def admin_get_global_settings(db: Session = Depends(get_db)):
@@ -675,8 +675,7 @@ async def admin_generate_password_reset_link(user_id: int, request: Request, db:
 async def admin_remove_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_admin: UserAuthDetails = Depends(get_current_admin_user),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    current_admin: UserAuthDetails = Depends(get_current_admin_user)
 ):
     user_to_delete = db.query(DBUser).filter(DBUser.id == user_id).first()
     if not user_to_delete:
@@ -698,9 +697,15 @@ async def admin_remove_user(
         db.commit()
         
         if user_data_dir_to_delete.exists():
-            background_tasks.add_task(shutil.rmtree, user_data_dir_to_delete, ignore_errors=True)
+            task_manager.submit_task(
+                name=f"Delete user data for {user_to_delete.username}",
+                target=shutil.rmtree,
+                args=(user_data_dir_to_delete,),
+                kwargs={'ignore_errors': True},
+                description=f"Cleaning up data directory: {user_data_dir_to_delete}"
+            )
             
-        return {"message": f"User '{user_to_delete.username}' and their data have been deleted."}
+        return {"message": f"User '{user_to_delete.username}' deleted. Data cleanup initiated."}
     except Exception as e:
         db.rollback()
         traceback.print_exc()

@@ -1,7 +1,7 @@
 import datetime
 from typing import List, Optional, Any
 from pydantic import BaseModel
-from backend.task_manager import TaskStatus
+from backend.db.base import TaskStatus  # CORRECTED IMPORT
 
 class TaskLogMessage(BaseModel):
     timestamp: str
@@ -23,3 +23,6 @@ class TaskInfo(BaseModel):
     file_name: Optional[str] = None
     total_files: Optional[int] = None
     owner_username: Optional[str] = None
+
+    class Config:
+        from_attributes = True

@@ -1,121 +1,212 @@
 import uuid
 import datetime
 import threading
-from enum import Enum
+import traceback
 from typing import List, Dict, Any, Callable, Optional
+from sqlalchemy.orm import Session, joinedload
 
-class TaskStatus(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
+from backend.db.models.db_task import DBTask
+from backend.db.base import TaskStatus
 
 class Task:
-    def __init__(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None, owner_username: Optional[str] = None):
-        self.id: str = str(uuid.uuid4())
-        self.name: str = name
-        self.description: Optional[str] = description or name
-        self.target: Callable = target
-        self.args: tuple = args
-        self.kwargs: dict = kwargs or {}
-        self.status: TaskStatus = TaskStatus.PENDING
-        self.progress: int = 0
-        self.logs: List[Dict[str, Any]] = []
-        self.result: Any = None
-        self.error: Optional[str] = None
-        self.created_at: datetime.datetime = datetime.datetime.now(datetime.timezone.utc)
-        self.started_at: Optional[datetime.datetime] = None
-        self.completed_at: Optional[datetime.datetime] = None
+    """
+    Represents a runnable task that updates its state in the database.
+    This object is managed by the TaskManager and executed in a separate thread.
+    """
+    def __init__(self, id: str, name: str, description: Optional[str], target: Callable, args: tuple, kwargs: dict, owner_username: Optional[str], db_session_factory: Callable[[], Session]):
+        self.id = id
+        self.name = name
+        self.description = description
+        self.target = target
+        self.args = args
+        self.kwargs = kwargs or {}
+        self.owner_username = owner_username
+        self.db_session_factory = db_session_factory
         self.cancellation_event = threading.Event()
-        self.file_name: Optional[str] = None
-        self.total_files: Optional[int] = None
-        self.owner_username: Optional[str] = owner_username
+        self.process = None # To hold a potential subprocess object for cancellation
+
+    def _update_db(self, **kwargs):
+        """Safely updates the task's record in the database."""
+        with self.db_session_factory() as db:
+            db.query(DBTask).filter(DBTask.id == self.id).update(kwargs)
+            db.commit()
 
     def log(self, message: str, level: str = "INFO"):
-        self.logs.append({
+        """Adds a log entry to the task's record."""
+        log_entry = {
             "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "message": message,
             "level": level
-        })
+        }
+        with self.db_session_factory() as db:
+            task = db.query(DBTask).filter(DBTask.id == self.id).first()
+            if task:
+                current_logs = task.logs or []
+                current_logs.append(log_entry)
+                task.logs = current_logs
+                db.commit()
 
     def set_progress(self, value: int):
-        self.progress = max(0, min(100, value))
+        """Sets the task's progress percentage."""
+        self._update_db(progress=max(0, min(100, value)))
 
     def set_description(self, description: str):
-        self.description = description
+        """Updates the task's description."""
+        self._update_db(description=description)
     
     def set_file_info(self, file_name: str, total_files: int):
-        self.file_name = file_name
-        self.total_files = total_files
+        """Sets file-related information for the task."""
+        self._update_db(file_name=file_name, total_files=total_files)
 
     def cancel(self):
-        if self.status in [TaskStatus.RUNNING, TaskStatus.PENDING]:
-            self.cancellation_event.set()
-            self.log("Cancellation signal received.", level="WARNING")
+        """Signals the task to cancel."""
+        self.cancellation_event.set()
+        if self.process and self.process.poll() is None:
+            self.log("Terminating associated subprocess...", "WARNING")
+            self.process.terminate()
+        self.log("Cancellation signal received.", level="WARNING")
 
     def run(self):
-        self.status = TaskStatus.RUNNING
-        self.started_at = datetime.datetime.now(datetime.timezone.utc)
+        """The main execution method for the task thread."""
+        self._update_db(status=TaskStatus.RUNNING, started_at=datetime.datetime.now(datetime.timezone.utc))
         self.log(f"Task '{self.name}' started.")
         try:
-            # CORRECTED: Execute the target function, which modifies the task object directly.
-            # Do NOT assign its return value to self.result.
-            self.target(self, *self.args, **self.kwargs)
+            # --- FIX: Capture the return value from the target function ---
+            result = self.target(self, *self.args, **self.kwargs)
             
             if self.cancellation_event.is_set():
-                self.status = TaskStatus.CANCELLED
+                self._update_db(status=TaskStatus.CANCELLED)
                 self.log(f"Task '{self.name}' was cancelled.", level="WARNING")
             else:
-                self.status = TaskStatus.COMPLETED
-                self.progress = 100
+                # --- FIX: Persist the captured result to the database ---
+                self._update_db(status=TaskStatus.COMPLETED, progress=100, result=result)
                 self.log(f"Task '{self.name}' completed successfully.")
 
         except Exception as e:
-            self.status = TaskStatus.FAILED
-            self.error = str(e)
-            self.log(f"Task '{self.name}' failed: {e}", level="CRITICAL")
-            import traceback
-            traceback.print_exc()
+            tb_str = traceback.format_exc()
+            self._update_db(status=TaskStatus.FAILED, error=str(e))
+            self.log(f"Task '{self.name}' failed: {e}\n{tb_str}", level="CRITICAL")
         finally:
-            self.completed_at = datetime.datetime.now(datetime.timezone.utc)
+            self._update_db(completed_at=datetime.datetime.now(datetime.timezone.utc))
 
 class TaskManager:
-    _instance = None
+    """
+    Manages the lifecycle of background tasks in a persistent, thread-safe manner.
+    """
+    def __init__(self, db_session_factory: Optional[Callable[[], Session]] = None):
+        self.db_session_factory = db_session_factory
+        self.active_tasks: Dict[str, Task] = {}
+        self.lock = threading.Lock()
 
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(TaskManager, cls).__new__(cls)
-            cls._instance.tasks: Dict[str, Task] = {}
-        return cls._instance
+    def init_app(self, db_session_factory: Callable[[], Session]):
+        """Initializes the TaskManager with a database session factory."""
+        self.db_session_factory = db_session_factory
 
-    def submit_task(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None, owner_username: Optional[str] = None) -> Task:
-        task = Task(name=name, target=target, args=args, kwargs=kwargs, description=description, owner_username=owner_username)
-        self.tasks[task.id] = task
-        return task
+    def _run_and_cleanup(self, task: Task):
+        """Wrapper to run a task and ensure it's removed from the active list upon completion."""
+        try:
+            task.run()
+        finally:
+            with self.lock:
+                if task.id in self.active_tasks:
+                    del self.active_tasks[task.id]
 
-    def get_task(self, task_id: str) -> Optional[Task]:
-        return self.tasks.get(task_id)
+    def submit_task(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None, owner_username: Optional[str] = None) -> DBTask:
+        """
+        Creates a task record in the DB, and starts its execution in a new thread.
+        """
+        if not self.db_session_factory:
+            raise RuntimeError("TaskManager not initialized. Call init_app first.")
+            
+        from backend.db.models.user import User as DBUser
 
-    def get_all_tasks(self) -> List[Task]:
-        return sorted(list(self.tasks.values()), key=lambda t: t.created_at, reverse=True)
+        with self.db_session_factory() as db:
+            owner_id = None
+            if owner_username:
+                user = db.query(DBUser).filter_by(username=owner_username).first()
+                if user:
+                    owner_id = user.id
+
+            new_db_task = DBTask(
+                name=name,
+                description=description or name,
+                owner_user_id=owner_id
+            )
+            db.add(new_db_task)
+            db.commit()
+            # Eagerly load owner relationship and detach from session for thread safety
+            db.refresh(new_db_task, ['owner'])
+            db.expunge(new_db_task)
+
+        task_instance = Task(id=new_db_task.id, name=name, description=description, target=target, args=args, kwargs=kwargs, owner_username=owner_username, db_session_factory=self.db_session_factory)
+        
+        with self.lock:
+            self.active_tasks[task_instance.id] = task_instance
+
+        thread = threading.Thread(target=self._run_and_cleanup, args=(task_instance,), daemon=True)
+        thread.start()
+        
+        return new_db_task
+
+    def cancel_task(self, task_id: str) -> bool:
+        """
+        Cancels a task. If the task is actively running, it signals the thread.
+        If the task is a "zombie" (in DB but not running), it updates the DB directly.
+        """
+        # First, check for an active, running task
+        with self.lock:
+            task_instance = self.active_tasks.get(task_id)
+        
+        if task_instance and not task_instance.cancellation_event.is_set():
+            task_instance.cancel()
+            return True
+
+        # If not active, it might be a zombie task from a previous run
+        with self.db_session_factory() as db:
+            db_task = db.query(DBTask).filter(DBTask.id == task_id).first()
+            if db_task and db_task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
+                db_task.status = TaskStatus.CANCELLED
+                db_task.completed_at = datetime.datetime.now(datetime.timezone.utc)
+                
+                log_entry = {
+                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                    "message": "Task was cancelled manually while in a pending or orphaned state.",
+                    "level": "WARNING"
+                }
+                current_logs = db_task.logs or []
+                current_logs.append(log_entry)
+                db_task.logs = current_logs
+                
+                db.commit()
+                return True
+
+        return False
+
+    def get_task(self, task_id: str) -> Optional[DBTask]:
+        """Retrieves a task from the database by its ID."""
+        with self.db_session_factory() as db:
+            return db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == task_id).first()
+
+    def get_all_tasks(self) -> List[DBTask]:
+        """Retrieves all tasks from the database for an admin."""
+        with self.db_session_factory() as db:
+            return db.query(DBTask).options(joinedload(DBTask.owner)).order_by(DBTask.created_at.desc()).all()
     
-    def get_tasks_for_user(self, username: str) -> List[Task]:
-        user_tasks = [task for task in self.tasks.values() if task.owner_username == username]
-        return sorted(user_tasks, key=lambda t: t.created_at, reverse=True)
+    def get_tasks_for_user(self, username: str) -> List[DBTask]:
+        """Retrieves all tasks for a specific user."""
+        with self.db_session_factory() as db:
+            from backend.db.models.user import User as DBUser
+            return db.query(DBTask).options(joinedload(DBTask.owner)).join(DBUser, DBTask.owner_user_id == DBUser.id).filter(DBUser.username == username).order_by(DBTask.created_at.desc()).all()
 
     def clear_completed_tasks(self, username: Optional[str] = None):
-        if username:
-            # Clear only for a specific user
-            tasks_to_keep = {
-                task_id: task for task_id, task in self.tasks.items()
-                if task.owner_username != username or task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
-            }
-        else: # Admin case: clear all
-            tasks_to_keep = {
-                task_id: task for task_id, task in self.tasks.items()
-                if task.status not in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
-            }
-        self.tasks = tasks_to_keep
+        """Deletes finished (completed, failed, cancelled) tasks from the database."""
+        with self.db_session_factory() as db:
+            query = db.query(DBTask).filter(DBTask.status.in_([TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]))
+            if username:
+                from backend.db.models.user import User as DBUser
+                query = query.join(DBUser, DBTask.owner_user_id == DBUser.id).filter(DBUser.username == username)
+            
+            query.delete(synchronize_session=False)
+            db.commit()
 
 task_manager = TaskManager()

@@ -1,31 +1,44 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
-import { useAdminStore } from '../../stores/admin';
+import { useTasksStore } from '../../stores/tasks';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
-const adminStore = useAdminStore();
-const { tasks, isLoadingTasks } = storeToRefs(adminStore);
+const tasksStore = useTasksStore();
+const { tasks, isLoadingTasks } = storeToRefs(tasksStore);
 
 const selectedTask = ref(null);
-let pollInterval;
 
 onMounted(() => {
-    adminStore.fetchTasks();
-    pollInterval = setInterval(adminStore.fetchTasks, 5000); // Poll every 5 seconds
-});
-
-onUnmounted(() => {
-    clearInterval(pollInterval);
+    tasksStore.fetchTasks(); // Fetch tasks when component is mounted
 });
 
 const sortedTasks = computed(() => {
+    // Make sure tasks.value is always an array before sorting
+    if (!Array.isArray(tasks.value)) {
+        return [];
+    }
     return [...tasks.value].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 });
+
+watch(sortedTasks, (newTasks) => {
+    // If the selected task is no longer in the list, deselect it
+    if (selectedTask.value && !newTasks.some(t => t.id === selectedTask.value.id)) {
+        selectedTask.value = null;
+    }
+    // If a task was selected, update its details
+    else if (selectedTask.value) {
+        const updatedTask = newTasks.find(t => t.id === selectedTask.value.id);
+        if (updatedTask) {
+            selectedTask.value = updatedTask;
+        }
+    }
+});
+
 
 function formatDateTime(isoString) {
     if (!isoString) return 'N/A';
@@ -40,6 +53,8 @@ function getStatusInfo(status) {
             return { color: 'green', text: 'Completed' };
         case 'failed':
             return { color: 'red', text: 'Failed' };
+        case 'cancelled':
+            return { color: 'yellow', text: 'Cancelled' };
         case 'pending':
         default:
             return { color: 'gray', text: 'Pending' };
@@ -55,10 +70,10 @@ function getStatusInfo(status) {
                 <p class="text-sm text-gray-500">Monitor and manage background processes like installations.</p>
             </div>
             <div>
-                <button @click="adminStore.fetchTasks" class="btn btn-secondary mr-2" :disabled="isLoadingTasks">
+                <button @click="tasksStore.fetchTasks" class="btn btn-secondary mr-2" :disabled="isLoadingTasks">
                     <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingTasks}" />
                 </button>
-                 <button @click="adminStore.clearCompletedTasks" class="btn btn-danger">
+                 <button @click="tasksStore.clearCompletedTasks" class="btn btn-danger">
                     <IconTrash class="w-4 h-4 mr-2" /> Clear Completed
                 </button>
             </div>
@@ -85,6 +100,7 @@ function getStatusInfo(status) {
                                             'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300': task.status === 'running',
                                             'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300': task.status === 'completed',
                                             'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300': task.status === 'failed',
+                                            'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300': task.status === 'cancelled',
                                             'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300': task.status === 'pending'
                                           }">
                                         {{ getStatusInfo(task.status).text }}

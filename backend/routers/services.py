@@ -1,7 +1,7 @@
 # backend/routers/mcp.py
 import traceback
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
@@ -30,7 +30,7 @@ def _reload_mcps_task(task: Task, username: str):
         reload_lollms_client_mcp(username)
         task.log("MCP client reloaded successfully.")
         task.set_progress(100)
-        task.result = {"message": "MCP client and tools cache re-initialized."}
+        return {"message": "MCP client and tools cache re-initialized."}
     except Exception as e:
         task.log(f"Error during MCP reload: {e}", level="ERROR")
         raise e
@@ -274,18 +274,16 @@ def delete_app(app_id: str, db: Session = Depends(get_db), current_user: UserAut
 
 @mcp_router.post("/reload", response_model=TaskInfo, status_code=202)
 def reload_user_lollms_client(
-    background_tasks: BackgroundTasks,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     """Triggers a background task to reload MCPs for the current user."""
-    task = task_manager.submit_task(
+    db_task = task_manager.submit_task(
         name=f"Reload MCPs for {current_user.username}",
         target=_reload_mcps_task,
         args=(current_user.username,),
         description="Refreshes the connection to all MCP servers and re-discovers available tools."
     )
-    background_tasks.add_task(task.run)
-    return TaskInfo(**task.__dict__)
+    return TaskInfo.from_orm(db_task)
 
 @mcp_router.get("/tools", response_model=List[ToolInfo])
 def list_all_available_tools(current_user: UserAuthDetails = Depends(get_current_active_user)):

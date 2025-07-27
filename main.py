@@ -15,7 +15,7 @@ from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG, DEFAULT_PERSONALITIES
 )
-from backend.db import init_database, get_db
+from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.service import AppZooRepository as DBAppZooRepository
@@ -51,14 +51,15 @@ from backend.task_manager import task_manager # Import the singleton instance
 
 
 app = FastAPI(
-    title="Simplified LoLLMs Chat API",
-    description="API for a multi-user LoLLMs and SafeStore chat application with social features.",
+    title="LoLLMs Platform",
+    description="API for a multi-user LoLLMs and SafeStore chat application with social features and AI hub.",
     version=APP_VERSION,
 )
 
 @app.on_event("startup")
 async def on_startup() -> None:
     init_database(APP_DB_URL)
+    task_manager.init_app(db_session_module.SessionLocal)
     print("Database initialized.")
     print("\n--- Running Automated Discussion Migration ---")
     db_session = None
@@ -207,6 +208,8 @@ add_ui_routes(app)
 if __name__ == "__main__":
     import uvicorn
     from backend.settings import settings
+    import socket
+    import psutil  # Requires `pip install psutil`
 
     init_database(APP_DB_URL)
     
@@ -231,15 +234,9 @@ if __name__ == "__main__":
             print(f"         Keyfile path: '{keyfile}' (Exists: {Path(keyfile).is_file()})")
             print("         Server will start without HTTPS to avoid crashing.")
 
-    print(f"--- LoLLMs Chat API Server (v{APP_VERSION}) ---")
+    print(f"--- LoLLMs Plateform (v{APP_VERSION}) ---")
     protocol = "https" if ssl_params else "http"
     
-    import socket
-    import psutil  # Requires `pip install psutil`
-
-    print(f"--- LoLLMs Chat API Server (v{APP_VERSION}) ---")
-    protocol = "https" if ssl_params else "http"
-
     if host_setting == "0.0.0.0":
         # Always include localhost
         print(f"Access UI at: {protocol}://localhost:{port_setting}/")

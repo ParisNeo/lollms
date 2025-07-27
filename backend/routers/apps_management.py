@@ -7,10 +7,13 @@ from pathlib import Path
 import os
 import signal
 import datetime
+import time
 from packaging import version as packaging_version
+import psutil # NEW IMPORT
+from typing import Dict, Any # NEW IMPORT
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -26,10 +29,10 @@ from backend.config import APP_DATA_DIR, ZOO_DIR_NAME, APPS_DIR_NAME, CUSTOM_APP
 from backend.task_manager import task_manager, Task
 
 from backend.settings import settings
-from typing import Optional, Dict
+from typing import Optional
 
 apps_management_router = APIRouter(
-    prefix="/api/apps-management",
+    prefix="/api-management/apps",
     tags=["Apps Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
@@ -41,10 +44,16 @@ APPS_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 CUSTOM_APPS_ROOT_PATH = APP_DATA_DIR / CUSTOM_APPS_DIR_NAME
 CUSTOM_APPS_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 
+# NEW: Global dict to hold log file handles for running apps
+open_log_files: Dict[str, Any] = {}
+
 
 # --- Task Functions ---
 def _start_app_task(task: Task, app_id: str):
     db_session = next(get_db())
+    app = None
+    process = None
+    log_file_handle = None
     try:
         app = db_session.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
         if not app:
@@ -61,9 +70,18 @@ def _start_app_task(task: Task, app_id: str):
             db_session.commit()
             raise FileNotFoundError(f"App directory not found at {app_path}")
 
+        # MODIFIED: Log file setup
+        log_file_path = app_path / "app.log"
+        if log_file_path.exists():
+            try:
+                log_file_path.unlink()
+            except OSError as e:
+                task.log(f"Could not clear old log file: {e}", "WARNING")
+        
+        log_file_handle = open(log_file_path, "w", encoding="utf-8", buffering=1) # Line-buffered
+
         venv_path = app_path / "venv"
         python_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "python"
-        log_file_path = app_path / "app.log"
         
         command = None
         if app.app_metadata and 'run_command' in app.app_metadata:
@@ -73,29 +91,116 @@ def _start_app_task(task: Task, app_id: str):
             command = [str(python_executable), "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", str(app.port)]
 
         task.log(f"Executing start command: {' '.join(command)}")
-        task.set_progress(50)
+        task.log(f"Redirecting output to: {log_file_path}")
+        task.set_progress(20)
 
-        log_file = open(log_file_path, "a", encoding="utf-8")
-        log_file.write(f"\n--- Starting app at {datetime.datetime.now().isoformat()} ---\n")
-        log_file.flush()
+        # MODIFIED: Redirect stdout/stderr to the log file
+        process = subprocess.Popen(command, cwd=str(app_path), stdout=log_file_handle, stderr=subprocess.STDOUT)
         
-        process = subprocess.Popen(command, cwd=str(app_path), stdout=log_file, stderr=subprocess.STDOUT)
+        # Store the handle in the global dictionary
+        open_log_files[app.id] = log_file_handle
+
+        task.process = process # Attach process to task for cancellation
+
+        # Health check: Monitor for 5 seconds to see if it starts successfully
+        task.log("Monitoring application start-up for 5 seconds...")
+        time.sleep(5) 
         
+        return_code = process.poll()
+        if return_code is not None:
+            task.log(f"Process exited prematurely with code {return_code}. Start-up failed.", "ERROR")
+            app.status = 'error'
+            app.pid = None
+            db_session.commit()
+            raise Exception("Application failed to start. Check task logs and app.log for details.")
+
         app.pid = process.pid
         app.status = 'running'
         app.url = f"http://localhost:{app.port}"
         app.active = True
         db_session.commit()
         
-        task.log(f"App '{app.name}' process started with PID {process.pid} on port {app.port}.")
+        task.log(f"App '{app.name}' appears to have started successfully with PID {process.pid} on port {app.port}.")
+        task.log("Note: This task is complete, but the app process runs independently.")
         task.set_progress(100)
-        task.result = {"success": True, "message": f"App '{app.name}' started successfully."}
+        return {"success": True, "message": f"App '{app.name}' started successfully."}
 
     except Exception as e:
         task.log(f"Failed to start app: {e}", level="CRITICAL")
-        app_to_fail = db_session.query(DBApp).filter(DBApp.id == app_id).first()
-        if app_to_fail:
-            app_to_fail.status = 'error'
+        # MODIFIED: Clean up log handle on failure
+        if log_file_handle:
+            log_file_handle.close()
+        if app_id in open_log_files:
+            del open_log_files[app_id]
+        if app:
+            app.status = 'error'
+            db_session.commit()
+        if process and process.poll() is None:
+            process.terminate()
+        raise e
+    finally:
+        db_session.close()
+
+# NEW: Task function for stopping an app
+def _stop_app_task(task: Task, app_id: str):
+    db_session = next(get_db())
+    app = None
+    try:
+        task.log("Fetching app details from database...")
+        app = db_session.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+        if not app:
+            raise ValueError("Installed app not found.")
+
+        if not app.pid:
+            task.log("App has no PID. Assuming it is already stopped.", "WARNING")
+            app.status = 'stopped'
+            db_session.commit()
+            task.set_progress(100)
+            return {"success": True, "message": "App was already stopped."}
+
+        pid = app.pid
+        task.log(f"Attempting to stop process with PID: {pid}")
+        task.set_progress(20)
+
+        try:
+            process = psutil.Process(pid)
+            task.log("Sending SIGTERM signal...")
+            process.terminate()
+            
+            try:
+                process.wait(timeout=5)
+                task.log("Process terminated gracefully.")
+            except psutil.TimeoutExpired:
+                task.log("Process did not terminate gracefully. Sending SIGKILL...", "WARNING")
+                process.kill()
+                process.wait(timeout=2)
+                task.log("Process killed.")
+
+            task.set_progress(80)
+
+        except psutil.NoSuchProcess:
+            task.log(f"Process with PID {pid} not found. It may have already been stopped.", "WARNING")
+        
+        except Exception as e:
+            task.log(f"An error occurred while stopping the process: {e}", "ERROR")
+        
+        task.log("Updating app status in database...")
+        app.pid = None
+        app.status = 'stopped'
+        db_session.commit()
+        
+        if app.id in open_log_files:
+            task.log("Closing app log file handle.")
+            open_log_files[app.id].close()
+            del open_log_files[app.id]
+
+        task.set_progress(100)
+        return {"success": True, "message": f"App '{app.name}' stopped successfully."}
+
+    except Exception as e:
+        task.log(f"Failed to execute stop task: {e}", level="CRITICAL")
+        if app:
+            app.status = 'error' # Mark as error if stop task fails
             db_session.commit()
         raise e
     finally:
@@ -127,26 +232,19 @@ def get_next_available_port(port: Optional[int] = Query(None), db: Session = Dep
                 raise HTTPException(status_code=500, detail="No available ports.")
         return {"port": current_port}
 
-# --- App Zoo Repository Management ---
 
 @apps_management_router.get("/zoo/repositories", response_model=list[AppZooRepositoryPublic])
 def get_zoo_repositories(db: Session = Depends(get_db)):
-    """
-    Lists all configured App Zoo repositories.
-    """
     return db.query(DBAppZooRepository).all()
 
 @apps_management_router.post("/zoo/repositories", response_model=AppZooRepositoryPublic, status_code=201)
-def add_zoo_repository(repo_data: AppZooRepositoryCreate, db: Session = Depends(get_db)):
-    """
-    Adds a new App Zoo repository to the database.
-    """
-    if db.query(DBAppZooRepository).filter(DBAppZooRepository.url == repo_data.url).first():
-        raise HTTPException(status_code=409, detail="A repository with this URL already exists.")
-    if db.query(DBAppZooRepository).filter(DBAppZooRepository.name == repo_data.name).first():
+def add_zoo_repository(repo: AppZooRepositoryCreate, db: Session = Depends(get_db)):
+    if db.query(DBAppZooRepository).filter(DBAppZooRepository.name == repo.name).first():
         raise HTTPException(status_code=409, detail="A repository with this name already exists.")
-
-    new_repo = DBAppZooRepository(name=repo_data.name, url=repo_data.url)
+    if db.query(DBAppZooRepository).filter(DBAppZooRepository.url == repo.url).first():
+        raise HTTPException(status_code=409, detail="A repository with this URL already exists.")
+    
+    new_repo = DBAppZooRepository(**repo.model_dump())
     db.add(new_repo)
     db.commit()
     db.refresh(new_repo)
@@ -154,369 +252,272 @@ def add_zoo_repository(repo_data: AppZooRepositoryCreate, db: Session = Depends(
 
 @apps_management_router.delete("/zoo/repositories/{repo_id}", status_code=204)
 def delete_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
-    """
-    Deletes an App Zoo repository and its cached files.
-    """
-    repo_to_delete = db.query(DBAppZooRepository).filter(DBAppZooRepository.id == repo_id).first()
-    if not repo_to_delete:
-        raise HTTPException(status_code=404, detail="Repository not found.")
-    
-    repo_path = ZOO_ROOT_PATH / repo_to_delete.name
-    if repo_path.exists():
-        shutil.rmtree(repo_path, ignore_errors=True)
-        
-    db.delete(repo_to_delete)
-    db.commit()
-    return None
-
-def _pull_repo_task(task: Task, repo_id: int, repo_name: str, repo_url: str):
-    repo_path = ZOO_ROOT_PATH / repo_name
-    task.log(f"Starting pull for repository '{repo_name}' from {repo_url} into {repo_path}")
-    task.set_progress(10)
-    
-    try:
-        if task.cancellation_event.is_set(): return
-
-        if repo_path.exists() and (repo_path / ".git").exists():
-            task.log("Existing repository found. Forcefully updating to match remote...")
-            
-            # 1. Fetch all updates from the remote
-            fetch_command = ["git", "-C", str(repo_path), "fetch", "--all"]
-            subprocess.run(fetch_command, capture_output=True, text=True, check=True)
-            task.log("Fetched remote updates.")
-
-            # 2. Find the default branch of the remote 'origin'
-            try:
-                symref_command = ["git", "-C", str(repo_path), "rev-parse", "--abbrev-ref", "origin/HEAD"]
-                result = subprocess.run(symref_command, capture_output=True, text=True, check=True)
-                default_branch = result.stdout.strip().replace("origin/", "")
-                task.log(f"Identified remote default branch as '{default_branch}'.")
-            except subprocess.CalledProcessError:
-                task.log("Could not auto-detect default branch. Falling back to 'main'.", level="WARNING")
-                default_branch = "main"
-
-            # 3. Force reset the local state to match the remote branch
-            reset_command = ["git", "-C", str(repo_path), "reset", "--hard", f"origin/{default_branch}"]
-            subprocess.run(reset_command, capture_output=True, text=True, check=True)
-            task.log(f"Reset local repository to 'origin/{default_branch}'.")
-
-            # 4. Remove any untracked files and directories
-            clean_command = ["git", "-C", str(repo_path), "clean", "-dfx"]
-            subprocess.run(clean_command, capture_output=True, text=True, check=True)
-            task.log("Removed untracked files and directories.")
-
-            task.log(f"Successfully forced update for '{repo_name}'.")
-        else:
-            task.log("New repository. Cloning...")
-            if repo_path.exists():
-                shutil.rmtree(repo_path)
-            command = ["git", "clone", repo_url, str(repo_path)]
-            result = subprocess.run(command, capture_output=True, text=True, check=True)
-            task.log(f"Successfully cloned '{repo_name}'.\n{result.stdout}")
-        
-        if task.cancellation_event.is_set(): return
-        task.set_progress(90)
-        session = next(get_db())
-        try:
-            repo_in_db = session.query(DBAppZooRepository).filter(DBAppZooRepository.id == repo_id).first()
-            if repo_in_db:
-                from datetime import datetime, timezone
-                repo_in_db.last_pulled_at = datetime.now(timezone.utc)
-                session.commit()
-                task.log("Updated last pulled timestamp in database.")
-        finally:
-            session.close()
-
-    except subprocess.CalledProcessError as e:
-        task.log(f"Git command failed. Stderr: {e.stderr}", level="ERROR")
-        raise e
-    except Exception as e:
-        task.log(f"An unexpected error occurred: {e}", level="CRITICAL")
-        raise e
-
-@apps_management_router.post("/zoo/repositories/{repo_id}/pull", response_model=TaskInfo)
-def pull_zoo_repository(repo_id: int, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     repo = db.query(DBAppZooRepository).filter(DBAppZooRepository.id == repo_id).first()
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found.")
-
-    task = task_manager.submit_task(
-        name=f"Pulling repository: {repo.name}",
-        target=_pull_repo_task,
-        args=(repo.id, repo.name, repo.url)
-    )
-    background_tasks.add_task(task.run)
-    return TaskInfo(**task.__dict__)
-
-
-# --- Available Apps Discovery ---
-
-def _get_zoo_apps_metadata():
-    """Helper to scan and parse metadata from all zoo repos."""
-    all_zoo_metadata = {}
-    for repo_dir in ZOO_ROOT_PATH.iterdir():
-        if not repo_dir.is_dir(): continue
-        for app_dir in repo_dir.iterdir():
-            if not app_dir.is_dir() or app_dir.name.startswith('.'): continue
-            yaml_path = app_dir / "description.yaml"
-            if not yaml_path.is_file(): continue
-            try:
-                with open(yaml_path, 'r', encoding='utf-8') as f:
-                    metadata = yaml.safe_load(f)
-                if metadata and 'name' in metadata:
-                    all_zoo_metadata[metadata['name']] = metadata
-            except Exception as e:
-                print(f"ERROR: Could not process metadata for app in '{app_dir.name}': {e}")
-    return all_zoo_metadata
-
-def _scan_app_directory(app_dir: Path, repository_name: str, installed_app_names: set):
-    """Scans a single directory for a valid app and returns its info."""
-    if not app_dir.is_dir() or app_dir.name.startswith('.'):
-        return None
     
-    yaml_path = app_dir / "description.yaml"
-    if not yaml_path.is_file():
-        return None
-
-    try:
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            metadata = yaml.safe_load(f)
-        
-        if not metadata or 'name' not in metadata:
-            return None
-
-        icon_base64 = None
-        icon_path = app_dir / "icon.png"
-        if icon_path.is_file():
-            with open(icon_path, "rb") as image_file:
-                icon_base64 = f"data:image/png;base64,{base64.b64encode(image_file.read()).decode('utf-8')}"
-
-        has_readme = (app_dir / "README.md").is_file()
-        metadata.pop('repository', None)
-
-        return ZooAppInfo(
-            **metadata,
-            repository=repository_name,
-            folder_name=app_dir.name,
-            icon=icon_base64,
-            is_installed=(metadata['name'] in installed_app_names),
-            has_readme=has_readme
-        )
-    except Exception as e:
-        print(f"ERROR: Could not process app in '{app_dir.name}': {e}")
-        return None
-
-
-@apps_management_router.get("/zoo/available-apps", response_model=list[ZooAppInfo])
-def get_available_zoo_apps(db: Session = Depends(get_db)):
-    """
-    Scans all pulled App Zoo repositories and custom app folders, returning a list of available apps.
-    """
-    installed_app_names = {app.name for app in db.query(DBApp).filter(DBApp.is_installed == True).all()}
-    available_apps = []
-
-    # Scan Zoo Repositories
-    for repo_dir in ZOO_ROOT_PATH.iterdir():
-        if not repo_dir.is_dir(): continue
-        for app_dir in repo_dir.iterdir():
-            app_info = _scan_app_directory(app_dir, repo_dir.name, installed_app_names)
-            if app_info:
-                available_apps.append(app_info)
-
-    # Scan Custom Apps Folder
-    for app_dir in CUSTOM_APPS_ROOT_PATH.iterdir():
-        app_info = _scan_app_directory(app_dir, "Custom", installed_app_names)
-        if app_info:
-            available_apps.append(app_info)
-
-    return sorted(available_apps, key=lambda x: x.name.lower())
-
-@apps_management_router.get("/zoo/app-readme", response_class=PlainTextResponse)
-def get_app_readme(repository: str = Query(...), folder_name: str = Query(...)):
-    if repository == "Custom":
-        base_path = CUSTOM_APPS_ROOT_PATH
-    else:
-        base_path = ZOO_ROOT_PATH / repository
-
-    readme_path = base_path / folder_name / "README.md"
-    if not readme_path.is_file():
-        raise HTTPException(status_code=404, detail="README.md not found for this app.")
+    repo_path = ZOO_ROOT_PATH / repo.name
+    if repo_path.exists():
+        shutil.rmtree(repo_path, ignore_errors=True)
     
-    try:
-        return readme_path.read_text(encoding="utf-8")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to read README file: {e}")
+    db.delete(repo)
+    db.commit()
+    return None
 
-
-# --- App Installation ---
-
-DEFAULT_SERVER_CODE = """
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from pathlib import Path
-
-app = FastAPI()
-app_dir = Path(__file__).parent
-static_folder = app_dir / 'dist'
-if not static_folder.exists():
-    static_folder = app_dir
-app.mount("/", StaticFiles(directory=static_folder, html=True), name="static")
-"""
-
-def _install_app_task(task: Task, app_info: dict, port: int, autostart: bool):
-    repo_name = app_info.get("repository")
-    folder_name = app_info.get("folder_name")
-    app_name = app_info.get("name")
-
-    if repo_name == "Custom":
-        source_path = CUSTOM_APPS_ROOT_PATH / folder_name
-    else:
-        source_path = ZOO_ROOT_PATH / repo_name / folder_name
-        
-    dest_path = APPS_ROOT_PATH / folder_name
-    
+def _pull_repo_task(task: Task, repo_id: int):
     db_session = next(get_db())
+    repo = None
     try:
-        task.log(f"Starting installation for '{app_name}'...")
-        app_entry = db_session.query(DBApp).filter_by(name=app_name).first()
-        if not app_entry:
-            app_entry = DBApp(name=app_name, url="#installing", status='installing', is_installed=False)
-            db_session.add(app_entry)
-        else:
-            app_entry.status = 'installing'
-        db_session.commit()
+        repo = db_session.query(DBAppZooRepository).filter(DBAppZooRepository.id == repo_id).first()
+        if not repo:
+            raise ValueError("Repository not found.")
+
+        repo_path = ZOO_ROOT_PATH / repo.name
+        task.log(f"Repository path: {repo_path}")
         task.set_progress(10)
-
-        if task.cancellation_event.is_set(): raise InterruptedError("Installation cancelled by user.")
-        task.log("Copying app files...")
-        if dest_path.exists():
-            shutil.rmtree(dest_path)
-        shutil.copytree(source_path, dest_path)
-        task.set_progress(25)
         
-        run_command = None
-        main_py_path = dest_path / "main.py"
-        server_py_path = dest_path / "server.py"
-
-        if main_py_path.exists():
-            task.log("Found main.py, configuring for python script execution.")
-            run_command = ["{python_executable}", "main.py"]
-        elif server_py_path.exists():
-            task.log("Found server.py, configuring for uvicorn execution.")
-            run_command = ["{python_executable}", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "{port}"]
+        command = []
+        if repo_path.exists():
+            task.log("Repository exists, pulling latest changes...")
+            command = ["git", "pull"]
+            cwd = str(repo_path)
         else:
-            task.log("No main.py or server.py found. Creating a default static server (server.py).")
-            with open(server_py_path, "w", encoding="utf-8") as f: f.write(DEFAULT_SERVER_CODE)
-            run_command = ["{python_executable}", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "{port}"]
-
-        if task.cancellation_event.is_set(): raise InterruptedError("Installation cancelled by user.")
-        task.log("Creating virtual environment...")
-        venv_path = dest_path / "venv"
-        python_executable = sys.executable
-        subprocess.run([python_executable, "-m", "venv", str(venv_path)], check=True, capture_output=True, text=True)
-        task.set_progress(50)
+            task.log("Repository does not exist, cloning...")
+            repo_path.parent.mkdir(parents=True, exist_ok=True)
+            command = ["git", "clone", repo.url, repo.name]
+            cwd = str(ZOO_ROOT_PATH)
         
-        pip_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
-        base_deps = ["fastapi", "uvicorn", "pydantic", "lollms_client"]
-        task.log(f"Installing base dependencies: {', '.join(base_deps)}")
-        subprocess.run([str(pip_executable), "install"] + base_deps, check=True, capture_output=True, text=True)
-        task.set_progress(75)
+        task.log(f"Executing command: {' '.join(command)}")
+        process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
+        
+        task.process = process
+        
+        # Stream output to task logs
+        for line in iter(process.stdout.readline, ''):
+            if task.cancellation_event.is_set():
+                task.log("Cancellation requested, terminating git process.", "WARNING")
+                process.terminate()
+                break
+            task.log(line.strip(), "GIT_STDOUT")
 
-        if task.cancellation_event.is_set(): raise InterruptedError("Installation cancelled by user.")
-        requirements_path = dest_path / "requirements.txt"
-        if requirements_path.is_file():
-            task.log("Installing app-specific dependencies from requirements.txt...")
-            subprocess.run([str(pip_executable), "install", "-r", str(requirements_path)], check=True, capture_output=True, text=True)
+        process.wait()
+
+        if process.returncode != 0:
+            stderr_output = process.stderr.read()
+            task.log(f"Git command failed with exit code {process.returncode}.", "ERROR")
+            task.log(f"Stderr: {stderr_output.strip()}", "ERROR")
+            raise Exception(f"Git operation failed. See logs for details.")
+        
+        task.log("Git operation completed successfully.")
         task.set_progress(90)
-
-        task.log("Finalizing installation in database...")
-        app_entry.url = f"http://localhost:{port}"
-        app_entry.is_installed = True
-        app_entry.status = 'stopped'
-        app_entry.port = port
-        app_entry.autostart = autostart
-        app_entry.folder_name = folder_name
-        app_entry.icon = app_info.get('icon')
-        app_entry.author = app_info.get('author')
-        app_entry.description = app_info.get('description')
-        app_entry.version = str(app_info.get('version')) if app_info.get('version') is not None else None
-        app_entry.category = app_info.get('category')
-        app_entry.tags = app_info.get('tags')
         
-        other_metadata = app_info.copy()
-        keys_to_remove = ['name', 'icon', 'author', 'description', 'version', 'category', 'tags', 'repository', 'folder_name', 'is_installed', 'has_readme']
-        for key in keys_to_remove:
-            other_metadata.pop(key, None)
-        
-        if run_command:
-            other_metadata['run_command'] = run_command
-
-        app_entry.app_metadata = other_metadata
-
+        repo.last_pulled_at = datetime.datetime.now(datetime.timezone.utc)
         db_session.commit()
+        task.log("Updated repository pull time.")
+        task.set_progress(100)
+        return {"message": "Repository pulled successfully."}
 
-    except InterruptedError as e:
-        task.log(f"Rollback: {e}", level="WARNING")
-        db_session.rollback()
-        if dest_path.exists():
-            shutil.rmtree(dest_path, ignore_errors=True)
-        app_to_clean = db_session.query(DBApp).filter_by(name=app_name).first()
-        if app_to_clean and not app_to_clean.is_installed:
-            db_session.delete(app_to_clean)
-        db_session.commit()
     except Exception as e:
-        db_session.rollback()
-        if dest_path.exists():
-            shutil.rmtree(dest_path, ignore_errors=True)
-        app_to_update = db_session.query(DBApp).filter_by(name=app_name).first()
-        if app_to_update:
-            if not app_to_update.is_installed:
-                db_session.delete(app_to_update)
-            else:
-                app_to_update.status = 'error'
+        if repo:
+            repo.last_pulled_at = None
             db_session.commit()
         raise e
     finally:
         db_session.close()
 
+@apps_management_router.post("/zoo/repositories/{repo_id}/pull", response_model=TaskInfo, status_code=202)
+def pull_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
+    repo = db.query(DBAppZooRepository).filter(DBAppZooRepository.id == repo_id).first()
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found.")
 
-@apps_management_router.post("/zoo/install-app", response_model=TaskInfo)
-def install_app(install_request: AppInstallRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
-    if install_request.repository == "Custom":
-        base_path = CUSTOM_APPS_ROOT_PATH
-    else:
-        base_path = ZOO_ROOT_PATH / install_request.repository
-        
-    yaml_path = base_path / install_request.folder_name / "description.yaml"
-    if not yaml_path.is_file():
-        raise HTTPException(status_code=404, detail="App not found in the specified repository.")
-    
-    with open(yaml_path, 'r', encoding='utf-8') as f: metadata = yaml.safe_load(f)
-    app_name = metadata.get('name')
-    if not app_name:
-        raise HTTPException(status_code=400, detail="App metadata is invalid (missing name).")
-
-    existing_app_by_name = db.query(DBApp).filter(DBApp.name == app_name, DBApp.is_installed == True).first()
-    existing_app_by_port = db.query(DBApp).filter(DBApp.port == install_request.port, DBApp.is_installed == True).first()
-
-    if existing_app_by_port and (not existing_app_by_name or existing_app_by_name.id != existing_app_by_port.id):
-         raise HTTPException(status_code=409, detail=f"Port {install_request.port} is already in use by another installed app.")
-
-    icon_base64 = None
-    icon_path = yaml_path.parent / "icon.png"
-    if icon_path.is_file():
-        with open(icon_path, "rb") as image_file: icon_base64 = f"data:image/png;base64,{base64.b64encode(image_file.read()).decode('utf-8')}"
-    metadata['icon'] = icon_base64
-    metadata['repository'] = install_request.repository
-    metadata['folder_name'] = install_request.folder_name
-
-    task = task_manager.submit_task(
-        name=f"Installing app: {app_name}",
-        target=_install_app_task,
-        args=(metadata, install_request.port, install_request.autostart)
+    db_task = task_manager.submit_task(
+        name=f"Pulling repository: {repo.name}",
+        target=_pull_repo_task,
+        args=(repo_id,),
+        description=f"Updating local copy of '{repo.name}' from '{repo.url}'."
     )
-    background_tasks.add_task(task.run)
-    return TaskInfo(**task.__dict__)
+    return TaskInfo.from_orm(db_task)
+
+
+def _get_zoo_apps_metadata():
+    apps_metadata = {}
+    if not ZOO_ROOT_PATH.exists():
+        return {}
+    
+    for repo_dir in ZOO_ROOT_PATH.iterdir():
+        if repo_dir.is_dir():
+            for app_dir in repo_dir.iterdir():
+                if app_dir.is_dir() and (app_dir / "app_info.yaml").exists():
+                    try:
+                        with open(app_dir / "app_info.yaml", "r", encoding='utf-8') as f:
+                            info = yaml.safe_load(f)
+                            # Key by app name for easy lookup
+                            apps_metadata[info['name']] = info
+                    except Exception as e:
+                        print(f"Warning: Could not parse app_info.yaml for {app_dir.name}. Error: {e}")
+    return apps_metadata
+
+@apps_management_router.get("/zoo/available-apps", response_model=list[ZooAppInfo])
+def get_available_zoo_apps(db: Session = Depends(get_db)):
+    if not ZOO_ROOT_PATH.exists():
+        return []
+
+    installed_apps = {app.name for app in db.query(DBApp.name).filter(DBApp.is_installed == True).all()}
+    
+    apps_list = []
+    for repo_dir in ZOO_ROOT_PATH.iterdir():
+        if repo_dir.is_dir():
+            for app_dir in repo_dir.iterdir():
+                if app_dir.is_dir() and (app_dir / "app_info.yaml").exists():
+                    try:
+                        with open(app_dir / "app_info.yaml", "r", encoding='utf-8') as f:
+                            info = yaml.safe_load(f)
+                        
+                        icon_path = app_dir / "assets" / "logo.png"
+                        icon_base64 = None
+                        if icon_path.exists():
+                            icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}"
+
+                        readme_path = app_dir / "README.md"
+
+                        app_info = ZooAppInfo(
+                            name=info.get('name', app_dir.name),
+                            repository=repo_dir.name,
+                            folder_name=app_dir.name,
+                            icon=icon_base64,
+                            is_installed=(info.get('name', app_dir.name) in installed_apps),
+                            has_readme=readme_path.exists(),
+                            author=info.get('author'),
+                            category=info.get('category'),
+                            creation_date=info.get('creation_date'),
+                            description=info.get('description'),
+                            disclaimer=info.get('disclaimer'),
+                            last_update_date=info.get('last_update_date'),
+                            model=info.get('model'),
+                            version=info.get('version'),
+                            features=info.get('features'),
+                            tags=info.get('tags'),
+                            license=info.get('license'),
+                            documentation=info.get('documentation')
+                        )
+                        apps_list.append(app_info)
+                    except Exception as e:
+                        print(f"Warning: Could not process app at {app_dir}. Error: {e}")
+    
+    return apps_list
+
+@apps_management_router.get("/zoo/app-readme", response_class=PlainTextResponse)
+def get_app_readme(repository: str, folder_name: str):
+    readme_path = ZOO_ROOT_PATH / repository / folder_name / "README.md"
+    if not readme_path.exists():
+        raise HTTPException(status_code=404, detail="README.md not found for this app.")
+    
+    return readme_path.read_text(encoding="utf-8")
+
+def _install_app_task(task: Task, repository: str, folder_name: str, port: int, autostart: bool):
+    db_session = next(get_db())
+    app_info = {}
+    try:
+        source_app_path = ZOO_ROOT_PATH / repository / folder_name
+        if not source_app_path.exists():
+            raise FileNotFoundError(f"Source app directory not found at {source_app_path}")
+        
+        with open(source_app_path / "app_info.yaml", "r", encoding='utf-8') as f:
+            app_info = yaml.safe_load(f)
+        
+        app_name = app_info.get("name", folder_name)
+
+        if db_session.query(DBApp).filter(DBApp.name == app_name, DBApp.is_installed == True).first():
+            task.log(f"App '{app_name}' is already installed. Reinstalling...", "WARNING")
+            existing_app = db_session.query(DBApp).filter(DBApp.name == app_name).first()
+            if existing_app:
+                if existing_app.pid:
+                    try:
+                        os.kill(existing_app.pid, signal.SIGTERM)
+                    except Exception: pass
+                db_session.delete(existing_app)
+                db_session.commit()
+        
+        dest_app_path = APPS_ROOT_PATH / folder_name
+        if dest_app_path.exists():
+            task.log(f"Removing existing destination directory: {dest_app_path}")
+            shutil.rmtree(dest_app_path, ignore_errors=True)
+
+        task.log(f"Copying app files from {source_app_path} to {dest_app_path}")
+        task.set_progress(10)
+        shutil.copytree(source_app_path, dest_app_path)
+        task.set_progress(30)
+        
+        task.log("Creating virtual environment...")
+        venv_path = dest_app_path / "venv"
+        subprocess.run([sys.executable, "-m", "venv", str(venv_path)], check=True, capture_output=True, text=True)
+        task.set_progress(50)
+
+        task.log("Installing dependencies from requirements.txt...")
+        pip_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
+        requirements_path = dest_app_path / "requirements.txt"
+        
+        if requirements_path.exists():
+            install_process = subprocess.run([str(pip_executable), "install", "-r", str(requirements_path)], check=True, capture_output=True, text=True)
+            task.log(install_process.stdout)
+        else:
+            task.log("No requirements.txt found, skipping dependency installation.", "WARNING")
+        
+        task.set_progress(80)
+
+        icon_path = dest_app_path / "assets" / "logo.png"
+        icon_base64 = None
+        if icon_path.exists():
+            icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}"
+
+        new_app = DBApp(
+            name=app_name,
+            folder_name=folder_name,
+            icon=icon_base64,
+            is_installed=True,
+            status='stopped',
+            port=port,
+            autostart=autostart,
+            version=app_info.get('version'),
+            author=app_info.get('author'),
+            description=app_info.get('description'),
+            category=app_info.get('category'),
+            tags=app_info.get('tags'),
+            app_metadata=app_info, # Store the whole app_info for future reference
+        )
+        db_session.add(new_app)
+        db_session.commit()
+        
+        task.set_progress(100)
+        task.log(f"App '{app_name}' installed successfully.")
+        
+        if autostart:
+            task.log("Autostart is enabled. Initiating app start...")
+            _start_app_task(task, new_app.id)
+
+        return {"success": True, "message": "App installed successfully."}
+
+    except Exception as e:
+        traceback.print_exc()
+        if isinstance(e, subprocess.CalledProcessError):
+            task.log("Subprocess failed.", "CRITICAL")
+            task.log(f"STDOUT: {e.stdout}", "ERROR")
+            task.log(f"STDERR: {e.stderr}", "ERROR")
+        raise e
+    finally:
+        db_session.close()
+
+@apps_management_router.post("/zoo/install-app", response_model=TaskInfo, status_code=202)
+def install_zoo_app(request: AppInstallRequest):
+    db_task = task_manager.submit_task(
+        name=f"Installing app: {request.folder_name}",
+        target=_install_app_task,
+        args=(request.repository, request.folder_name, request.port, request.autostart),
+        description=f"Installing from repository '{request.repository}'."
+    )
+    return TaskInfo.from_orm(db_task)
+
 
 # --- Installed App Management ---
 
@@ -544,7 +545,7 @@ def get_installed_apps(db: Session = Depends(get_db)):
     return response_apps
 
 @apps_management_router.post("/installed-apps/{app_id}/start", response_model=TaskInfo, status_code=202)
-def start_app(app_id: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def start_app(app_id: str, db: Session = Depends(get_db)):
     app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
     if not app:
         raise HTTPException(status_code=404, detail="Installed app not found.")
@@ -552,44 +553,32 @@ def start_app(app_id: str, background_tasks: BackgroundTasks, db: Session = Depe
     if app.status == 'running':
         raise HTTPException(status_code=400, detail="App is already running.")
     
-    task = task_manager.submit_task(
+    db_task = task_manager.submit_task(
         name=f"Start app: {app.name}",
         target=_start_app_task,
         args=(app_id,),
         description=f"Starting the application '{app.name}' on port {app.port}."
     )
-    background_tasks.add_task(task.run)
-    return TaskInfo(**task.__dict__)
+    return TaskInfo.from_orm(db_task)
 
-@apps_management_router.post("/installed-apps/{app_id}/stop", response_model=AppActionResponse)
+# MODIFIED: stop_app is now a task-based endpoint
+@apps_management_router.post("/installed-apps/{app_id}/stop", response_model=TaskInfo, status_code=202)
 def stop_app(app_id: str, db: Session = Depends(get_db)):
     app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
     if not app:
         raise HTTPException(status_code=404, detail="Installed app not found.")
     
-    if app.status != 'running' or not app.pid:
-        app.status = 'stopped'
-        app.pid = None
-        app.active = False
-        db.commit()
-        return {"success": True, "message": "App was not running."}
-    try:
-        os.kill(app.pid, signal.SIGTERM)
-        app.pid = None
-        app.status = 'stopped'
-        app.active = False
-        db.commit()
-        return {"success": True, "message": f"App '{app.name}' stopped successfully."}
-    except ProcessLookupError:
-        app.pid = None
-        app.status = 'stopped'
-        app.active = False
-        db.commit()
-        return {"success": True, "message": "Process not found, app was likely already stopped."}
-    except Exception as e:
-        app.status = 'error'
-        db.commit()
-        raise HTTPException(status_code=500, detail=f"Failed to stop app: {e}")
+    if app.status == 'stopped' and not app.pid:
+        raise HTTPException(status_code=400, detail="App is already stopped.")
+
+    db_task = task_manager.submit_task(
+        name=f"Stop app: {app.name}",
+        target=_stop_app_task,
+        args=(app_id,),
+        description=f"Stopping the application '{app.name}'."
+    )
+    return TaskInfo.from_orm(db_task)
+
 
 @apps_management_router.put("/installed-apps/{app_id}", response_model=AppPublic)
 def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depends(get_db)):
@@ -618,7 +607,7 @@ def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depen
         db.commit()
         db.refresh(app)
         app_with_owner = db.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.id == app_id).first()
-        return AppPublic.from_orm(app_with_owner)
+        return app_with_owner
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error while updating app: {e}")

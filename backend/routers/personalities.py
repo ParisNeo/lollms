@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 
 # Third-Party Imports
 from fastapi import (
-    APIRouter, Depends, HTTPException, BackgroundTasks
+    APIRouter, Depends, HTTPException
 )
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +20,7 @@ from backend.db.models.personality import Personality as DBPersonality
 from backend.models import (
     UserAuthDetails, PersonalityPublic, PersonalityCreate,
     PersonalityUpdate, PersonalitySendRequest,
-    GeneratePersonalityFromPromptRequest
+    GeneratePersonalityFromPromptRequest, TaskInfo
 )
 from backend.session import (
     get_current_active_user,
@@ -37,15 +37,13 @@ personalities_router = APIRouter(prefix="/api/personalities", tags=["Personaliti
 def _generate_personality_task(task: Task, username: str, prompt: str):
     task.log("Starting personality generation...")
     task.set_progress(10)
-    db_session = next(get_db())
-    raw_response = "" # Initialize raw_response
-    try:
+    
+    with task.db_session_factory() as db_session:
         lc = get_user_lollms_client(username)
         current_user = db_session.query(DBUser).filter(DBUser.username == username).first()
         if not current_user:
             raise Exception("User not found for personality generation task.")
 
-        # Define the schema for personality generation
         personality_schema = {
             "type": "object",
             "properties": {
@@ -77,7 +75,6 @@ Your task is to create a new personality based on the user's prompt."""
         task.log("Creating new personality in the database...")
         task.set_progress(90)
 
-        # Check if a personality with the same name already exists for this user
         existing_personality = db_session.query(DBPersonality).filter(
             DBPersonality.owner_user_id == current_user.id,
             DBPersonality.name == generated_data_dict.get("name")
@@ -86,8 +83,6 @@ Your task is to create a new personality based on the user's prompt."""
             task.log(f"Personality '{generated_data_dict.get('name')}' already exists. Appending UUID to make it unique.", "WARNING")
             generated_data_dict["name"] = f"{generated_data_dict.get('name')} {task.id.split('-')[0]}"
 
-
-        # Create the new personality record
         new_personality = DBPersonality(
             owner_user_id=current_user.id,
             is_public=False,
@@ -97,117 +92,82 @@ Your task is to create a new personality based on the user's prompt."""
         db_session.commit()
         db_session.refresh(new_personality, ["owner"])
 
-        # Use model_dump_json() to ensure the result is a JSON string.
-        task.result = get_personality_public_from_db(new_personality, username).model_dump_json()
-
         task.log("Personality created and saved successfully.")
         task.set_progress(100)
-
-    except ValueError as ve:
-        db_session.rollback()
-        task.log(f"JSON Parsing Error: {ve}. Response was:\n{raw_response}", level="ERROR")
-        task.error = f"Failed to parse LLM response as JSON: {ve}. Check LLM output for formatting issues."
-        raise ValueError(f"LLM output was not valid JSON: {ve}") from ve
-    except json.JSONDecodeError as jde:
-        db_session.rollback()
-        task.log(f"JSON Decode Error: {jde}. Response was:\n{raw_response}", level="ERROR")
-        task.error = f"LLM output could not be decoded as JSON: {jde}. Ensure the LLM outputs a valid JSON object."
-        raise json.JSONDecodeError(f"LLM output could not be decoded as JSON: {jde}", json_string or raw_response, 0) from jde
-    except Exception as e:
-        traceback(e)
-        db_session.rollback()
-        task.log(f"An unexpected error occurred during personality generation: {e}", level="CRITICAL")
-        task.error = str(e)
-        raise e
-    finally:
-        db_session.close()
+        
+        return get_personality_public_from_db(new_personality, username).model_dump()
 
 # --- Task for Prompt Enhancement ---
 def _enhance_prompt_task(task: Task, username: str, prompt_text: str, custom_instruction: Optional[str]):
     task.log("Starting prompt enhancement...")
     task.set_progress(10)
-    try:
-        lc = get_user_lollms_client(username)
 
-        enhance_instruction = custom_instruction.strip() if custom_instruction else ""
+    lc = get_user_lollms_client(username)
 
-        if enhance_instruction:
-            generation_prompt = f"""{enhance_instruction}
+    enhance_instruction = custom_instruction.strip() if custom_instruction else "Enhance the prompt:"
+    enhance_instruction +=f"\nOriginal system prompt:\n{prompt_text}\n"
+    # Define the schema for personality generation
+    output_schema = {
+        "type": "object",
+        "properties": {
+            "enhanced_system_prompt": {"type": "string", "description": "The core system prompt that defines the AI's role, rules, and initial instructions for character enhanced from the original one using the instructions provided by the user."},
+        },
+        "required": ["name", "enhanced_system_prompt"],
+        "description": "JSON object defining a LoLLMs personality system prompt."
+    }
 
-Here is the text to enhance:
----
-{prompt_text}
----
-"""
-        else:
-            generation_prompt = f"""You are an expert copywriter. Your task is to enhance the following text. Make it more engaging, descriptive, and clear. You must return ONLY the enhanced text, nothing else.
+    system_prompt = f"""You are an expert personality designer for AI chatbots.
+Your task is to enhance the current system prompt of the personality.
+You return the JSON without any comments or placeholders."""
 
-Text to enhance:
----
-{prompt_text}
----
-"""
-        
-        task.log("Sending text to LLM for enhancement...")
-        task.set_progress(50)
-        
-        enhanced_text = lc.generate_text(generation_prompt, stream=False, n_predict=settings.get("default_llm_ctx_size"))
-        
-        # Ensure the result is a JSON string.
-        task.result = json.dumps({"enhanced_prompt_text": enhanced_text})
-        task.log("Prompt enhanced successfully.")
-        task.set_progress(100)
-
-    except Exception as e:
-        task.log(f"Failed to enhance prompt: {e}", level="CRITICAL")
-        task.error = str(e)
-        raise e
+    task.log("Sending prompt to LLM for JSON generation...")
+    task.set_progress(30)
+    
+    generated_data_dict = lc.generate_structured_content(enhance_instruction,
+                                                            system_prompt=system_prompt,
+                                                            schema=output_schema,
+                                                            n_predict=settings.get("default_llm_ctx_size")
+                                                        )
+    
+    task.log("Prompt enhanced successfully.")
+    task.set_progress(100)
+    return generated_data_dict
 
 # --- Personality Generation from Prompt Endpoint ---
-@personalities_router.post("/generate_from_prompt", response_model=Dict[str, str], status_code=202)
+@personalities_router.post("/generate_from_prompt", response_model=TaskInfo, status_code=202)
 async def generate_personality_from_prompt(
     payload: GeneratePersonalityFromPromptRequest,
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    """
-    Triggers a background task to generate a personality from a natural language prompt using an LLM.
-    """
-    task = task_manager.submit_task(
+    db_task = task_manager.submit_task(
         name="Generate Personality from Prompt",
         target=_generate_personality_task,
         args=(current_user.username, payload.prompt),
         description=f"Generating personality from prompt: '{payload.prompt[:50]}...'",
         owner_username=current_user.username
     )
-    background_tasks.add_task(task.run)
-    return {"task_id": task.id, "message": "Personality generation started in the background. Check tasks for progress."}
+    return TaskInfo.from_orm(db_task)
 
 # --- Prompt Enhancement Endpoint ---
-@personalities_router.post("/enhance_prompt", response_model=Dict[str, str], status_code=202)
+@personalities_router.post("/enhance_prompt", response_model=TaskInfo, status_code=202)
 async def enhance_personality_prompt(
-    payload: Dict[str, str], # Use dict for flexible input, Pydantic model can be added later
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    payload: Dict[str, str],
+    current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    """
-    Triggers a background task to enhance a personality's system prompt using an LLM.
-    """
     prompt_text = payload.get("prompt_text")
-    custom_instruction = payload.get("custom_instruction")
+    custom_instruction = payload.get("modification_prompt")
 
     if not prompt_text:
         raise HTTPException(status_code=400, detail="Prompt text is required for enhancement.")
 
-    task = task_manager.submit_task(
+    db_task = task_manager.submit_task(
         name="Enhance Personality Prompt",
         target=_enhance_prompt_task,
         args=(current_user.username, prompt_text, custom_instruction),
         description="Enhancing personality system prompt.",
         owner_username=current_user.username
     )
-    background_tasks.add_task(task.run)
-    return {"task_id": task.id, "message": "Prompt enhancement started in the background. Check tasks for progress."}
+    return TaskInfo.from_orm(db_task)
 
 
 def get_personality_public_from_db(db_personality: DBPersonality, owner_username: Optional[str] = None) -> PersonalityPublic:
@@ -244,8 +204,6 @@ async def create_personality(personality_data: PersonalityCreate, current_user: 
         is_public = personality_data.is_public
     elif personality_data.is_public:
         raise HTTPException(status_code=403, detail="Only administrators can create public personalities.")
-    
-    name_check_owner_id = owner_id if owner_id is not None else -1 # Use a placeholder for system check if needed
     
     q = db.query(DBPersonality).filter(DBPersonality.name == personality_data.name)
     if owner_id:

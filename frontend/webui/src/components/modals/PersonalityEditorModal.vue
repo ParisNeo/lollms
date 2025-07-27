@@ -12,7 +12,6 @@ const uiStore = useUiStore();
 const dataStore = useDataStore();
 const authStore = useAuthStore();
 
-const { isEnhancingPrompt } = storeToRefs(dataStore);
 const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
 
 const modalProps = computed(() => uiStore.modalData('personalityEditor'));
@@ -29,7 +28,6 @@ const fileInput = ref(null);
 const staticTextInputRef = ref(null);
 const isLoading = ref(false);
 const formIconLoadFailed = ref(false);
-const modificationPrompt = ref('');
 
 watch(() => form.value.icon_base_64, () => {
     formIconLoadFailed.value = false;
@@ -41,7 +39,6 @@ watch(() => personality.value, (newVal) => {
     } else {
         form.value = getInitialFormState();
     }
-    modificationPrompt.value = '';
 }, { immediate: true, deep: true });
 
 onMounted(() => {
@@ -70,10 +67,8 @@ function handleEnhancePrompt() {
     }
     uiStore.openModal('enhancePersonalityPrompt', {
         prompt_text: form.value.prompt_text,
-        modification_prompt: modificationPrompt.value,
         onApply: (enhancedPrompt) => {
             form.value.prompt_text = enhancedPrompt;
-            modificationPrompt.value = ''; // Clear after use
         }
     });
 }
@@ -180,16 +175,12 @@ function handleStaticTextFileSelect(event) {
 
         <!-- System Prompt with AI Enhancement -->
         <div>
-            <label for="prompt" class="block text-sm font-medium">System Prompt</label>
-            <div class="my-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg space-y-2">
-                <label for="modification_prompt" class="text-sm font-medium text-gray-700 dark:text-gray-300">Enhancement Instructions (optional)</label>
-                <div class="flex items-center gap-2">
-                    <textarea id="modification_prompt" v-model="modificationPrompt" rows="2" class="input-field flex-grow" placeholder="e.g., Make it sound more like a pirate..."></textarea>
-                    <button @click="handleEnhancePrompt" type="button" class="btn btn-secondary self-stretch" :disabled="isEnhancingPrompt">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" :class="{'animate-spin': isEnhancingPrompt}" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.898 20.572L16.5 21.75l-.398-1.178a3.375 3.375 0 00-2.3-2.3L12.75 18l1.178-.398a3.375 3.375 0 002.3-2.3L16.5 14.25l.398 1.178a3.375 3.375 0 002.3 2.3l1.178.398-1.178.398a3.375 3.375 0 00-2.3 2.3z" /></svg>
-                        <span class="ml-2">{{ isEnhancingPrompt ? 'Enhancing...' : 'Enhance with AI' }}</span>
-                    </button>
-                </div>
+            <div class="flex items-center justify-between mb-1">
+                <label for="prompt" class="block text-sm font-medium">System Prompt</label>
+                <button @click="handleEnhancePrompt" type="button" class="btn btn-secondary btn-sm flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.898 20.572L16.5 21.75l-.398-1.178a3.375 3.375 0 00-2.3-2.3L12.75 18l1.178-.398a3.375 3.375 0 002.3-2.3L16.5 14.25l.398 1.178a3.375 3.375 0 002.3 2.3l1.178.398-1.178.398a3.375 3.375 0 00-2.3 2.3z" /></svg>
+                    <span>Enhance with AI</span>
+                </button>
             </div>
             <CodeMirrorEditor v-model="form.prompt_text" class="h-48" />
         </div>
