@@ -16,6 +16,7 @@ import base64
 from functools import partial
 from ascii_colors import trace_exception
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import PlainTextResponse
 # Third-Party Imports
 from fastapi import (
     HTTPException, Depends, Form,
@@ -733,3 +734,31 @@ async def delete_discussion_message(discussion_id: str, message_id: str, current
     db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).delete(synchronize_session=False)
     db.commit()
     return {"message": "Message and its branch deleted successfully."}
+@discussion_router.get("/{discussion_id}/export_context", response_class=PlainTextResponse)
+async def export_discussion_context(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Exports the full discussion context as a single string, exactly as it would be presented to the LLM.
+    """
+    user_model_full = current_user.lollms_model_name
+    binding_alias = None
+    if user_model_full and '/' in user_model_full:
+        binding_alias, _ = user_model_full.split('/', 1)
+    
+    lc = get_user_lollms_client(current_user.username, binding_alias)
+    discussion_obj = get_user_discussion(current_user.username, discussion_id, lollms_client=lc)
+    if not discussion_obj:
+        raise HTTPException(status_code=404, detail="Discussion not found.")
+
+    try:
+        context_string = discussion_obj.export("markdown")
+        if type(context_string)==str:
+            return PlainTextResponse(content=context_string)
+        else:
+            return PlainTextResponse(content="error")
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to export discussion context: {e}")

@@ -62,3 +62,4 @@ python-pptx
 openpyxl
 
 psutil
+pynvml

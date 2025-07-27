@@ -131,6 +131,25 @@ const contextWarningMessage = computed(() => {
     return "";
 });
 
+async function showContext() {
+    if (!activeDiscussion.value) return;
+    uiStore.openModal('contextViewer', { content: 'Loading context...' });
+    try {
+        const response = await apiClient.get(`/api/discussions/${activeDiscussion.value.id}/export_context`, {
+            responseType: 'text'
+        });
+        if(uiStore.isModalOpen('contextViewer')) {
+            uiStore.modalProps['contextViewer'].content = response.data;
+        }
+    } catch (error) {
+        console.error("Failed to fetch discussion context:", error);
+        if(uiStore.isModalOpen('contextViewer')) {
+            uiStore.modalProps['contextViewer'].content = 'Error: Could not load context.';
+        }
+        uiStore.addNotification('Failed to load discussion context.', 'error');
+    }
+}
+
 
 // --- FLOATING/MOVABLE BEHAVIOR ---
 const headerTitle = computed(() => activeDiscussion.value?.title || "New Chat");
@@ -456,7 +475,7 @@ function removeImage(index) {
         <div class="p-3" @mousedown.stop>
             <div v-if="showContextBar" class="px-1 pb-2">
                 <div class="flex justify-between items-center mb-1 text-xs text-gray-600 dark:text-gray-400 font-mono">
-                    <div class="flex items-center gap-1.5"><IconToken class="w-4 h-4" /><span>Context: {{ discussionTokens.toLocaleString() }} + {{ dataZoneTokenCount.toLocaleString() }} + {{ inputTokenCount.toLocaleString() }}</span></div>
+                    <div class="flex items-center gap-1.5"><IconToken class="w-4 h-4" /><span><a @click.prevent="showContext" href="#" class="cursor-pointer hover:underline" title="View full context">Context</a>: {{ discussionTokens.toLocaleString() }} + {{ dataZoneTokenCount.toLocaleString() }} + {{ inputTokenCount.toLocaleString() }}</span></div>
                     <span>{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
                 </div>
                 <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden">

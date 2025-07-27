@@ -37,6 +37,7 @@ import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue
 import GeneratePersonalityModal from './components/modals/GeneratePersonalityModal.vue';
 import TasksManagerModal from './components/modals/TasksManagerModal.vue'; // NEW
 import EnhancePersonalityPromptModal from './components/modals/EnhancePersonalityPromptModal.vue';
+import ContextViewModal from './components/modals/ContextViewModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -114,6 +115,7 @@ onMounted(async () => {
     <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <SourceModal v-if="activeModal === 'sourceViewer'" />
+    <ContextViewModal v-if="activeModal === 'contextViewer'" />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
     <ShareDiscussionModal v-if="activeModal === 'shareDiscussion'" />
     <ExportModal v-if="activeModal === 'export'" />

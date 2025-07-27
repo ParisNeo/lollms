@@ -32,7 +32,7 @@ from backend.settings import settings
 from typing import Optional
 
 apps_management_router = APIRouter(
-    prefix="/api-management/apps",
+    prefix="/api/apps-management",
     tags=["Apps Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
@@ -48,7 +48,60 @@ CUSTOM_APPS_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 open_log_files: Dict[str, Any] = {}
 
 
-# --- Task Functions ---
+# --- Startup and Task Functions ---
+def _cleanup_and_autostart_apps():
+    """
+    Called on server startup to clean app statuses and autostart designated apps.
+    """
+    db_session = None
+    print("INFO: Performing startup app cleanup and autostart...")
+    try:
+        db_session = next(get_db())
+        
+        # 1. Clean up statuses for all installed apps
+        installed_apps = db_session.query(DBApp).filter(DBApp.is_installed == True).all()
+        updated_count = 0
+        for app in installed_apps:
+            if app.status != 'stopped' or app.pid is not None:
+                app.status = 'stopped'
+                app.pid = None
+                updated_count += 1
+        
+        if updated_count > 0:
+            db_session.commit()
+            print(f"INFO: Reset status for {updated_count} apps to 'stopped'.")
+        else:
+            print("INFO: All app statuses were already clean.")
+
+        # 2. Find and start apps with autostart enabled
+        apps_to_autostart = db_session.query(DBApp).filter(
+            DBApp.is_installed == True,
+            DBApp.autostart == True
+        ).all()
+
+        if apps_to_autostart:
+            print(f"INFO: Found {len(apps_to_autostart)} apps to autostart.")
+            for app in apps_to_autostart:
+                print(f"INFO: Submitting autostart task for '{app.name}' (ID: {app.id})")
+                task_manager.submit_task(
+                    name=f"Autostart app: {app.name}",
+                    target=_start_app_task,
+                    args=(app.id,),
+                    description=f"Automatically starting '{app.name}' on server boot.",
+                    owner_username=None  # System task
+                )
+        else:
+            print("INFO: No apps configured for autostart.")
+
+    except Exception as e:
+        print(f"CRITICAL: Failed during app startup management. Error: {e}")
+        traceback.print_exc()
+        if db_session:
+            db_session.rollback()
+    finally:
+        if db_session:
+            db_session.close()
+
 def _start_app_task(task: Task, app_id: str):
     db_session = next(get_db())
     app = None

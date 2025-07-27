@@ -65,15 +65,19 @@ watch(starredApps, (newStarred) => {
 }, { deep: true });
 
 const appsWithTaskStatus = computed(() => {
+    if (!Array.isArray(zooApps.value)) return [];
+
     const taskMap = new Map();
-    tasks.value.forEach(task => {
-        if (task.name.startsWith('Installing app: ')) {
-            const appName = task.name.replace('Installing app: ', '');
-            if (!taskMap.has(appName) || new Date(task.created_at) > new Date(taskMap.get(appName).created_at)) {
-                taskMap.set(appName, task);
+    if (Array.isArray(tasks.value)) {
+        tasks.value.forEach(task => {
+            if (task && task.name && task.name.startsWith('Installing app: ')) {
+                const appName = task.name.replace('Installing app: ', '');
+                if (!taskMap.has(appName) || new Date(task.created_at) > new Date(taskMap.get(appName).created_at)) {
+                    taskMap.set(appName, task);
+                }
             }
-        }
-    });
+        });
+    }
 
     return zooApps.value.map(app => {
         const task = taskMap.get(app.name);
@@ -85,11 +89,12 @@ const appsWithTaskStatus = computed(() => {
 });
 
 const sortedRepositories = computed(() => {
-    if (!zooRepositories.value) return [];
-    return [...zooRepositories.value].sort((a, b) => a.name.localeCompare(b.name));
+    if (!Array.isArray(zooRepositories.value)) return [];
+    return [...zooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 });
 
 const categories = computed(() => {
+    if (!Array.isArray(zooApps.value)) return ['All'];
     const allCats = new Set(zooApps.value.map(app => app.category || 'Uncategorized'));
     return ['All', ...Array.from(allCats).sort()];
 });
@@ -145,24 +150,27 @@ const groupedApps = computed(() => {
 });
 
 const sortedInstalledApps = computed(() => {
-    if (!installedApps.value) return [];
-    return [...installedApps.value].sort((a, b) => a.name.localeCompare(b.name));
+    if (!Array.isArray(installedApps.value)) return [];
+    return [...installedApps.value].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 });
 
 const installedAppsWithTaskStatus = computed(() => {
     const taskMap = new Map();
-    tasks.value.forEach(task => {
-        let appName = '';
-        if (task.name.startsWith('Start app: ')) appName = task.name.replace('Start app: ', '');
-        else if (task.name.startsWith('Stop app: ')) appName = task.name.replace('Stop app: ', '');
-        else if (task.name.startsWith('Installing app: ')) appName = task.name.replace('Installing app: ', '');
-        
-        if (appName && (task.status === 'running' || task.status === 'pending')) {
-            if (!taskMap.has(appName) || new Date(task.created_at) > new Date(taskMap.get(appName).created_at)) {
-                taskMap.set(appName, task);
+    if (Array.isArray(tasks.value)) {
+        tasks.value.forEach(task => {
+            if (!task || !task.name) return;
+            let appName = '';
+            if (task.name.startsWith('Start app: ')) appName = task.name.replace('Start app: ', '');
+            else if (task.name.startsWith('Stop app: ')) appName = task.name.replace('Stop app: ', '');
+            else if (task.name.startsWith('Installing app: ')) appName = task.name.replace('Installing app: ', '');
+            
+            if (appName && (task.status === 'running' || task.status === 'pending')) {
+                if (!taskMap.has(appName) || new Date(task.created_at) > new Date(taskMap.get(appName).created_at)) {
+                    taskMap.set(appName, task);
+                }
             }
-        }
-    });
+        });
+    }
 
     return sortedInstalledApps.value.map(app => ({
         ...app,
@@ -320,7 +328,7 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                 </div>
             </transition>
             <div v-if="isLoadingZooRepositories" class="text-center p-4">Loading repositories...</div>
-            <div v-else-if="sortedRepositories.length === 0" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p>No App Zoo repositories have been added yet.</p></div>
+            <div v-else-if="!sortedRepositories || sortedRepositories.length === 0" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p>No App Zoo repositories have been added yet.</p></div>
             <div v-else class="space-y-4">
                 <div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div class="flex-grow truncate">
@@ -354,7 +362,7 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                     <button @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'" class="btn btn-secondary p-2"><IconArrowUp v-if="sortOrder === 'asc'" class="w-5 h-5" /><IconArrowDown v-else class="w-5 h-5" /></button>
                 </div>
                 <div v-if="isLoadingZooApps" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6"><AppCardSkeleton v-for="i in 8" :key="i" /></div>
-                <div v-else-if="zooApps.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Apps Found</h4><p class="text-sm text-gray-500">Please add and pull a repository to see available apps.</p></div>
+                <div v-else-if="!zooApps || zooApps.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Apps Found</h4><p class="text-sm text-gray-500">Please add and pull a repository to see available apps.</p></div>
                 <div v-else-if="filteredAndSortedApps.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Matching Apps</h4><p class="text-sm text-gray-500">Try adjusting your search or filter.</p></div>
                 <div v-else>
                     <div v-if="groupedApps" class="space-y-8">
@@ -367,7 +375,7 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
         
         <section v-if="activeTab === 'installed_apps'">
             <div v-if="isLoadingInstalledApps" class="text-center p-10">Loading installed apps...</div>
-            <div v-else-if="installedAppsWithTaskStatus.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Apps Installed</h4><p class="text-sm text-gray-500">Go to the "Available Apps" tab to install an application.</p></div>
+            <div v-else-if="!installedAppsWithTaskStatus || installedAppsWithTaskStatus.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Apps Installed</h4><p class="text-sm text-gray-500">Go to the "Available Apps" tab to install an application.</p></div>
             <div v-else class="space-y-4">
                 <div v-for="app in installedAppsWithTaskStatus" :key="app.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div class="flex items-center gap-4 flex-grow truncate">

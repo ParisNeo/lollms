@@ -39,7 +39,23 @@ export const useAdminStore = defineStore('admin', () => {
     const installedApps = ref([]);
     const isLoadingInstalledApps = ref(false);
 
+    const systemStatus = ref(null);
+    const isLoadingSystemStatus = ref(false);
+
     // --- Actions ---
+    async function fetchSystemStatus() {
+        isLoadingSystemStatus.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/system-status');
+            systemStatus.value = response.data;
+        } catch (error) {
+            systemStatus.value = null; // Clear on error
+            uiStore.addNotification('Could not load system status.', 'error');
+        } finally {
+            isLoadingSystemStatus.value = false;
+        }
+    }
+
 
     // Purge Task - an admin-only action
     async function purgeUnusedUploads() {
@@ -446,6 +462,7 @@ export const useAdminStore = defineStore('admin', () => {
         zooApps, isLoadingZooApps, fetchZooApps, installZooApp, fetchAppReadme,
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
         purgeUnusedUploads,
-        updateInstalledApp, fetchAppLog
+        updateInstalledApp, fetchAppLog,
+        systemStatus, isLoadingSystemStatus, fetchSystemStatus
     };
 });

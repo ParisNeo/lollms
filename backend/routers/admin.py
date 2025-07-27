@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Optional
 
+import psutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -36,6 +37,9 @@ from backend.models import (
     LLMBindingUpdate,
     LLMBindingPublic,
     TaskInfo,
+    SystemUsageStats,
+    GPUInfo,
+    DiskInfo,
 )
 from backend.session import (
     get_user_data_root,
@@ -46,7 +50,7 @@ from backend.session import (
 )
 from backend.security import create_reset_token, send_generic_email
 from backend.settings import settings
-from backend.config import INITIAL_ADMIN_USER_CONFIG, APP_DATA_DIR, TEMP_UPLOADS_DIR_NAME
+from backend.config import INITIAL_ADMIN_USER_CONFIG, APP_DATA_DIR, TEMP_UPLOADS_DIR_NAME, PROJECT_ROOT
 from backend.migration_utils import run_openwebui_migration
 from backend.task_manager import task_manager, Task
 
@@ -130,6 +134,89 @@ def _purge_unused_temp_files_task(task: Task):
 
     task.set_progress(100)
     return {"message": f"Purge complete. Scanned {total_scanned} files and deleted {deleted_count}."}
+
+# --- System Status Endpoint ---
+@admin_router.get("/system-status", response_model=SystemUsageStats)
+async def get_system_status():
+    # CPU RAM
+    ram = psutil.virtual_memory()
+    cpu_ram_total_gb = ram.total / (1024**3)
+    cpu_ram_used_gb = ram.used / (1024**3)
+    cpu_ram_available_gb = ram.available / (1024**3)
+    cpu_ram_usage_percent = ram.percent
+
+    # Disk Usage
+    disks_info = []
+    app_disk_mount = None
+    data_disk_mount = None
+
+    try:
+        partitions = psutil.disk_partitions(all=False)
+        
+        def find_mount_point(path, partitions_list):
+            path_abs = Path(path).resolve()
+            best_match = ''
+            for p in partitions_list:
+                if str(path_abs).startswith(p.mountpoint) and len(p.mountpoint) > len(best_match):
+                    best_match = p.mountpoint
+            return best_match if best_match else None
+
+        app_disk_mount = find_mount_point(PROJECT_ROOT, partitions)
+        data_disk_mount = find_mount_point(APP_DATA_DIR, partitions)
+        
+        for part in partitions:
+            if 'loop' in part.device or not part.fstype or not Path(part.mountpoint).exists():
+                continue
+            try:
+                usage = psutil.disk_usage(part.mountpoint)
+                disks_info.append(DiskInfo(
+                    mount_point=part.mountpoint,
+                    total_gb=usage.total / (1024**3),
+                    used_gb=usage.used / (1024**3),
+                    available_gb=usage.free / (1024**3),
+                    usage_percent=usage.percent,
+                    is_app_disk=(part.mountpoint == app_disk_mount),
+                    is_data_disk=(part.mountpoint == data_disk_mount)
+                ))
+            except OSError as e:
+                print(f"Could not get usage for partition {part.mountpoint}: {e}")
+    except Exception as e:
+        print(f"Error collecting disk information: {e}")
+
+    # GPU VRAM
+    gpus_info = []
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        device_count = pynvml.nvmlDeviceGetCount()
+        for i in range(device_count):
+            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
+            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            gpu_name = pynvml.nvmlDeviceGetName(handle)
+            if isinstance(gpu_name, bytes):
+                gpu_name = gpu_name.decode('utf-8')
+            
+            gpus_info.append(GPUInfo(
+                id=i,
+                name=gpu_name,
+                vram_total_gb=info.total / (1024**3),
+                vram_used_gb=info.used / (1024**3),
+                vram_usage_percent=(info.used / info.total) * 100 if info.total > 0 else 0
+            ))
+        pynvml.nvmlShutdown()
+    except ImportError:
+        pass
+    except Exception as e:
+        print(f"Could not get GPU info: {e}")
+
+    return SystemUsageStats(
+        cpu_ram_total_gb=cpu_ram_total_gb,
+        cpu_ram_used_gb=cpu_ram_used_gb,
+        cpu_ram_available_gb=cpu_ram_available_gb,
+        cpu_ram_usage_percent=cpu_ram_usage_percent,
+        disks=disks_info,
+        gpus=gpus_info,
+    )
 
 # --- Bindings Management Endpoints ---
 

@@ -44,7 +44,7 @@ from backend.routers.lollms_config import lollms_config_router
 from backend.routers.files import upload_router, assets_router, files_router
 from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
-from backend.routers.apps_management import apps_management_router
+from backend.routers.apps_management import apps_management_router, _cleanup_and_autostart_apps
 from backend.routers.tasks import tasks_router
 from backend.routers.help import help_router
 from backend.task_manager import task_manager # Import the singleton instance
@@ -61,6 +61,13 @@ async def on_startup() -> None:
     init_database(APP_DB_URL)
     task_manager.init_app(db_session_module.SessionLocal)
     print("Database initialized.")
+
+    # Clean up and autostart apps
+    try:
+        _cleanup_and_autostart_apps()
+    except Exception as e:
+        print(f"ERROR during app cleanup and autostart: {e}")
+
     print("\n--- Running Automated Discussion Migration ---")
     db_session = None
     if APP_SETTINGS.get("migrate"):
