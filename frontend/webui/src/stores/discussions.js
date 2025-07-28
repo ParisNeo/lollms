@@ -3,7 +3,7 @@ import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
-import { useDataStore } from './data'; // Import at the top level
+import { useDataStore } from './data';
 
 let activeGenerationAbortController = null;
 
@@ -19,7 +19,6 @@ function processSingleMessage(msg) {
         image_references: msg.image_references || [],
     };
 }
-
 
 export const useDiscussionsStore = defineStore('discussions', () => {
     const discussions = ref({});
@@ -41,7 +40,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     const activePersonality = computed(() => {
         const authStore = useAuthStore();
-        const dataStore = useDataStore(); // Get instance inside the computed property
+        const dataStore = useDataStore();
         const personalityId = authStore.user?.active_personality_id;
         if (!personalityId) return null;
         return dataStore.getPersonalityById(personalityId);
@@ -77,26 +76,70 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    async function fetchDataZone(discussionId) {
+
+    async function fetchDataZones(discussionId) {
         if (!discussions.value[discussionId]) return;
         try {
-            const response = await apiClient.get(`/api/discussions/${discussionId}/data_zone`);
-            discussions.value[discussionId].data_zone = response.data.content;
+            const response = await apiClient.get(`/api/discussions/${discussionId}/data_zones`);
+            discussions.value[discussionId] = {
+                ...discussions.value[discussionId],
+                ...response.data
+            };
         } catch (error) {
-            useUiStore().addNotification('Could not load discussion data zone.', 'error');
-            if (discussions.value[discussionId]) discussions.value[discussionId].data_zone = '';
+            useUiStore().addNotification('Could not load discussion data zones.', 'error');
+            if (discussions.value[discussionId]) {
+                 discussions.value[discussionId].discussion_data_zone = '';
+                 discussions.value[discussionId].personality_data_zone = '';
+                 discussions.value[discussionId].memory = '';
+            }
         }
     }
-
     async function updateDataZone({ discussionId, content }) {
         if (!discussions.value[discussionId]) return;
         try {
             await apiClient.put(`/api/discussions/${discussionId}/data_zone`, { content });
-            discussions.value[discussionId].data_zone = content;
-            // No notification here to avoid being too noisy
+            discussions.value[discussionId].discussion_data_zone = content;
         } catch (error) {
-            useUiStore().addNotification('Failed to save discussion scratchpad.', 'error');
+            useUiStore().addNotification('Failed to save discussion data zone.', 'error');
             throw error;
+        }
+    }
+    
+    async function summarizeDiscussionDataZone(discussionId) {
+        const uiStore = useUiStore();
+        if (activeAiTasks.value[discussionId]) {
+            uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId]}) is already running for this discussion.`, 'warning');
+            return;
+        }
+        if (!discussions.value[discussionId]) return;
+
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/summarize_data_zone`);
+            const task = response.data;
+            activeAiTasks.value[discussionId] = 'summarize';
+            useTasksStore().addTask(task);
+            uiStore.addNotification('Summarization task started.', 'info');
+        } catch (error) {
+            // Handled by interceptor
+        }
+    }
+
+    async function memorizeLTM(discussionId) {
+        const uiStore = useUiStore();
+        if (activeAiTasks.value[discussionId]) {
+            uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId]}) is already running for this discussion.`, 'warning');
+            return;
+        }
+        if (!discussions.value[discussionId]) return;
+        
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/memorize`);
+            const task = response.data;
+            activeAiTasks.value[discussionId] = 'memorize';
+            useTasksStore().addTask(task);
+            uiStore.addNotification('Memorization task started.', 'info');
+        } catch (error) {
+            // Handled by interceptor
         }
     }
 
@@ -107,7 +150,12 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             if (!Array.isArray(discussionData)) return;
             const loadedDiscussions = {};
             discussionData.forEach(d => { 
-                loadedDiscussions[d.id] = { ...d, data_zone: '' }; // Initialize with data_zone
+                loadedDiscussions[d.id] = { 
+                    ...d, 
+                    discussion_data_zone: '',
+                    personality_data_zone: '',
+                    memory: ''
+                };
             });
             discussions.value = loadedDiscussions;
         } catch (error) { console.error("Failed to load discussions:", error); }
@@ -133,8 +181,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             messages.value = processMessages(response.data);
             await Promise.all([
                 fetchContextStatus(id),
-                fetchDataZone(id),
-                authStore.fetchScratchpad() // Ensure user scratchpad is loaded
+                fetchDataZones(id),
+                authStore.fetchDataZone()
             ]);
         } catch (error) {
             useUiStore().addNotification('Failed to load messages.', 'error');
@@ -146,7 +194,12 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.post('/api/discussions');
             const newDiscussion = response.data;
-            discussions.value[newDiscussion.id] = { ...newDiscussion, data_zone: '' };
+            discussions.value[newDiscussion.id] = { 
+                ...newDiscussion, 
+                discussion_data_zone: '',
+                personality_data_zone: '',
+                memory: ''
+            };
             await selectDiscussion(newDiscussion.id);
             return newDiscussion;
         } catch (error) {
@@ -526,12 +579,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             await loadDiscussions();
         } catch (error) { console.error("Import failed:", error); }
     }
+
     function $reset() {
         discussions.value = {};
         currentDiscussionId.value = null;
         messages.value = [];
         generationInProgress.value = false;
     }
+
     return {
         discussions, currentDiscussionId, messages, generationInProgress,
         titleGenerationInProgressId, activeDiscussion, activeMessages,
@@ -541,6 +596,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         sendMessage, stopGeneration, updateMessageContent, gradeMessage,
         deleteMessage, initiateBranch, switchBranch, exportDiscussions,
         importDiscussions, sendDiscussion, $reset, activeDiscussionContextStatus, fetchContextStatus,
-        fetchDataZone, updateDataZone, activePersonality
+        fetchDataZones, updateDataZone, activePersonality,
+        summarizeDiscussionDataZone, memorizeLTM
     };
 });

@@ -95,7 +95,7 @@ Your task is to create a new personality based on the user's prompt."""
         task.log("Personality created and saved successfully.")
         task.set_progress(100)
         
-        return get_personality_public_from_db(new_personality, username).model_dump()
+        return get_personality_public_from_db(new_personality, username).model_dump(mode='json')
 
 # --- Task for Prompt Enhancement ---
 def _enhance_prompt_task(task: Task, username: str, prompt_text: str, custom_instruction: Optional[str]):

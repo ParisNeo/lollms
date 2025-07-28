@@ -21,14 +21,12 @@ export const useUiStore = defineStore('ui', () => {
     const emailModalBody = ref('');
     const emailModalBackgroundColor = ref('#f4f4f8');
     const emailModalSendAsText = ref(false);
-    const isSidebarOpen = ref(true); // New state
-
-    // NEW: State for the Generate Personality Modal
+    const isSidebarOpen = ref(true);
+    const keywords = ref([]); // NEW
     const generatePersonalityModalProps = ref({
         prompt: '',
         customEnhancePrompt: ''
     });
-
     const activeModal = computed(() => modalStack.value.length > 0 ? modalStack.value[modalStack.value.length - 1] : null);
 
     async function copyToClipboard(textToCopy, successMessage = 'Copied to clipboard!') {
@@ -179,6 +177,18 @@ export const useUiStore = defineStore('ui', () => {
         }
     }
     
+    // NEW ACTION
+    async function fetchKeywords() {
+        if (keywords.value.length > 0) return;
+        try {
+            const apiClient = (await import('../services/api')).default;
+            const response = await apiClient.get('/api/help/keywords');
+            keywords.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch keywords:", error);
+        }
+    }
+
     function modalData(name) {
         return modalProps.value[name] || null;
     }
@@ -186,13 +196,9 @@ export const useUiStore = defineStore('ui', () => {
     function isModalOpen(name) {
         return activeModal.value === name;
     }
-
-    // NEW: Getter and Setter for Generate Personality Modal
     function openGeneratePersonalityModal() {
         openModal('generatePersonality');
     }
-
-    // Getters/Setters for email modal state
     function setEmailModalState(subject, body, backgroundColor='#f4f4f8', sendAsText=false) {
         emailModalSubject.value = subject;
         emailModalBody.value = body;
@@ -217,14 +223,14 @@ export const useUiStore = defineStore('ui', () => {
         currentLanguage, availableLanguages,
         isImageViewerOpen, imageViewerSrc, confirmationOptions,
         emailModalSubject, emailModalBody, emailModalBackgroundColor, emailModalSendAsText,
-        isSidebarOpen,
+        isSidebarOpen, keywords, generatePersonalityModalProps,
         initEmailModalState,
         setMainView, openModal, closeModal, addNotification, removeNotification,
-        setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages,
+        setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages, fetchKeywords,
         openImageViewer, closeImageViewer, showConfirmation, confirmAction, cancelAction,
         isModalOpen, modalData,
         copyToClipboard,
         toggleSidebar, initializeSidebarState,
-        openGeneratePersonalityModal // NEW
+        openGeneratePersonalityModal
     };
 });

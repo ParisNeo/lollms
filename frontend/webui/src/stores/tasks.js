@@ -1,10 +1,12 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
+import useEventBus from '../services/eventBus';
 
 export const useTasksStore = defineStore('tasks', () => {
     const uiStore = useUiStore();
+    const { emit } = useEventBus();
 
     // --- STATE ---
     const tasks = ref([]);
@@ -28,8 +30,19 @@ export const useTasksStore = defineStore('tasks', () => {
             isLoadingTasks.value = true;
         }
         try {
+            const oldTasks = new Map(tasks.value.map(t => [t.id, t]));
             const response = await apiClient.get('/api/tasks');
-            tasks.value = response.data;
+            const newTasks = response.data;
+            tasks.value = newTasks;
+
+            // Check for newly completed tasks and emit an event
+            newTasks.forEach(newTask => {
+                const oldTask = oldTasks.get(newTask.id);
+                if (oldTask && oldTask.status !== 'completed' && newTask.status === 'completed') {
+                    emit('task:completed', newTask);
+                }
+            });
+
         } catch (error) {
             console.error("Failed to fetch tasks:", error);
             // Don't show a notification on silent polling failures
@@ -43,13 +56,7 @@ export const useTasksStore = defineStore('tasks', () => {
     async function fetchTask(taskId) {
         try {
             const response = await apiClient.get(`/api/tasks/${taskId}`);
-            const updatedTask = response.data;
-            const index = tasks.value.findIndex(t => t.id === taskId);
-            if (index !== -1) {
-                tasks.value[index] = updatedTask;
-            } else {
-                tasks.value.push(updatedTask);
-            }
+            addTask(response.data);
         } catch (error) {
             console.error(`Failed to fetch task ${taskId}:`, error);
         }

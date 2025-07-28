@@ -20,7 +20,8 @@ const personality = computed(() => modalProps.value?.personality);
 const getInitialFormState = () => ({
     id: null, name: '', category: '', author: '', description: '',
     prompt_text: '', disclaimer: '', script_code: '', icon_base_64: null,
-    is_public: false, data_source_type: 'none', data_source: null, active_mcps: []
+    is_public: false, data_source_type: 'none', data_source: null, active_mcps: [],
+    owner_type: 'user'
 });
 
 const form = ref(getInitialFormState());
@@ -163,6 +164,15 @@ function handleStaticTextFileSelect(event) {
           </div>
         </div>
         
+        <!-- Owner Type (Admin only for new personalities) -->
+        <div v-if="authStore.user.is_admin && !form.id">
+            <label for="owner_type" class="block text-sm font-medium">Owner Type</label>
+            <select id="owner_type" v-model="form.owner_type" class="input-field mt-1">
+                <option value="user">Personal (for me only)</option>
+                <option value="system">System (available to all users if public)</option>
+            </select>
+        </div>
+
         <!-- Description and Disclaimer -->
         <div>
             <label for="description" class="block text-sm font-medium">Description</label>

@@ -59,8 +59,8 @@ const filteredList = computed(() => {
     return list;
 });
 
-const filteredUserPersonalities = computed(() => filteredList.value.filter(p => !p.is_public));
-const filteredPublicPersonalities = computed(() => filteredList.value.filter(p => p.is_public));
+const filteredUserPersonalities = computed(() => filteredList.value.filter(p => !p.is_public && p.owner_username !== 'System'));
+const filteredPublicPersonalities = computed(() => filteredList.value.filter(p => p.is_public || p.owner_username === 'System'));
 
 onMounted(() => {
     dataStore.fetchPersonalities();
@@ -156,27 +156,23 @@ async function handleDeselectAll() {
 function openEditor(personality = null) {
     let personalityData;
     if (personality) {
-        // This is an existing personality, either user's or public
         personalityData = { ...personality };
-        // If it's a public one, we're cloning it, so nullify the ID
-        if (personality.is_public) {
+        // If it's a public/system one AND the user is NOT an admin, we are cloning it.
+        if ((personality.is_public || personality.owner_username === 'System') && !authStore.user.is_admin) {
             personalityData.id = null;
             personalityData.is_public = false; // Cloned personalities are private by default
+            personalityData.owner_type = 'user';
         }
     } else {
         // This is a brand new, blank personality
         personalityData = { 
-            id: null, // Ensure ID is null for creation
-            name: '', 
-            category: '', 
-            description: '', 
-            prompt_text: '', 
-            is_public: false, 
-            icon_base64: null 
+            id: null, name: '', category: '', description: '', 
+            prompt_text: '', is_public: false, icon_base_64: null 
         };
     }
     uiStore.openModal('personalityEditor', { personality: personalityData });
 }
+
 
 // NEW: Function to open the Generate Personality modal
 function openGeneratePersonalityModal() {
@@ -281,19 +277,21 @@ async function handleShare(personality) {
             </div>
 
             <div>
-                <h5 class="text-md font-semibold mb-4">Public Personalities</h5>
+                <h5 class="text-md font-semibold mb-4">Public & System Personalities</h5>
                 <div v-if="filteredPublicPersonalities.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                      <PersonalityCard
                         v-for="p in filteredPublicPersonalities"
                         :key="p.id"
                         :personality="p"
-                        :is-user-personality="false"
+                        :is-user-personality="user && user.is_admin"
                         :is-active="p.id === activePersonalityId"
                         :is-saving="p.id === savingPersonalityId"
                         :is-starred="starredPersonalityIds.has(p.id)"
                         @select="handleSelectPersonality($event)"
                         @toggle-star="handleToggleStar($event)"
                         @clone="openEditor($event)"
+                        @edit="openEditor($event)"
+                        @delete="handleDeletePersonality($event)"
                         @share="handleShare($event)"
                     />
                 </div>

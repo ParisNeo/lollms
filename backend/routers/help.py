@@ -22,9 +22,8 @@ async def get_data_zone_keywords():
     return [
         {"keyword": "{{date}}", "description": "The current server date (e.g., 2025-07-23)."},
         {"keyword": "{{time}}", "description": "The current server time (e.g., 23:06:51)."},
-        {"keyword": "{{ip_address}}", "description": "Your public IP address as seen by the server."},
+        {"keyword": "{{datetime}}", "description": "The current server date and time."},
         {"keyword": "{{user_name}}", "description": "Your registered username."},
-        {"keyword": "{{user_email}}", "description": "Your registered email address."},
     ]
 
 def _get_markdown_content(file_path: Path) -> str:

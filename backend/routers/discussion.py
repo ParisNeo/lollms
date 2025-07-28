@@ -44,7 +44,7 @@ from backend.models import (
     DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,
     MessageGradeUpdate, DiscussionBranchSwitchRequest, DiscussionSendRequest,
     DiscussionExportRequest, ExportData, DiscussionImportRequest, ContextStatusResponse,
-    DiscussionDataZoneUpdate
+    DiscussionDataZoneUpdate, DataZones, TaskInfo
 )
 from backend.session import (
     get_current_active_user, get_user_lollms_client,
@@ -53,6 +53,7 @@ from backend.session import (
 )
 from backend.discussion import get_user_discussion_manager, get_user_discussion
 from backend.config import APP_VERSION, SERVER_CONFIG
+from backend.task_manager import task_manager, Task
 
 # safe_store is needed for RAG callbacks
 try:
@@ -64,6 +65,39 @@ except ImportError:
 message_grade_lock = threading.Lock()
 
 discussion_router = APIRouter(prefix="/api/discussions", tags=["Discussions"])
+
+# --- Task Functions ---
+def _summarize_data_zone_task(task: Task, username: str, discussion_id: str):
+    task.log("Starting data zone summary task...")
+    discussion = get_user_discussion(username, discussion_id)
+    if not discussion:
+        raise ValueError("Discussion not found.")
+    if not discussion.discussion_data_zone or not discussion.discussion_data_zone.strip():
+        task.log("Data zone is empty, nothing to summarize.", "WARNING")
+        return {"discussion_id": discussion_id, "new_content": ""}
+    
+    task.set_progress(20)
+    lc = get_user_lollms_client(username)
+    summary = lc.sequential_summarize(discussion.discussion_data_zone)
+    discussion.discussion_data_zone = summary
+    discussion.commit()
+    task.set_progress(100)
+    task.log("Summary complete and saved.")
+    return {"discussion_id": discussion_id, "new_content": summary, "zone": "discussion"}
+
+def _memorize_ltm_task(task: Task, username: str, discussion_id: str):
+    task.log("Starting long-term memory memorization task...")
+    discussion = get_user_discussion(username, discussion_id)
+    if not discussion:
+        raise ValueError("Discussion not found.")
+    
+    task.set_progress(20)
+    discussion.memorize()
+    discussion.commit()
+    task.set_progress(100)
+    task.log("Memorization complete and saved.")
+    return {"discussion_id": discussion_id, "new_content": discussion.memory, "zone": "memory"}
+
 
 class TokenizeRequest(BaseModel):
     text: str
@@ -128,6 +162,26 @@ async def create_new_discussion(current_user: UserAuthDetails = Depends(get_curr
         last_activity_at=discussion_obj.updated_at
     )
 
+@discussion_router.get("/{discussion_id}/data_zones", response_model=DataZones)
+def get_all_data_zones(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    
+    return DataZones(
+        user_data_zone=db_user.data_zone if db_user else "",
+        discussion_data_zone=discussion.discussion_data_zone,
+        personality_data_zone=discussion.personality_data_zone,
+        memory=discussion.memory
+    )
+
+
 @discussion_router.get("/{discussion_id}/data_zone", response_model=Dict[str, str])
 def get_discussion_data_zone(
     discussion_id: str,
@@ -155,6 +209,43 @@ def update_discussion_data_zone(
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to update Data Zone: {e}")
+
+@discussion_router.post("/{discussion_id}/summarize_data_zone", response_model=TaskInfo, status_code=202)
+def summarize_discussion_data_zone(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    db_task = task_manager.submit_task(
+        name=f"Summarize Data Zone for: {discussion.metadata.get('title', 'Untitled')}",
+        target=_summarize_data_zone_task,
+        args=(current_user.username, discussion_id),
+        description=f"AI is summarizing the discussion data zone content.",
+        owner_username=current_user.username
+    )
+    return TaskInfo.from_orm(db_task)
+
+
+@discussion_router.post("/{discussion_id}/memorize", response_model=TaskInfo, status_code=202)
+def memorize_ltm(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+
+    db_task = task_manager.submit_task(
+        name=f"Memorize LTM for: {discussion.metadata.get('title', 'Untitled')}",
+        target=_memorize_ltm_task,
+        args=(current_user.username, discussion_id),
+        description="AI is analyzing the conversation to extract key facts for long-term memory.",
+        owner_username=current_user.username
+    )
+    return TaskInfo.from_orm(db_task)
 
 
 @discussion_router.post("/prune", status_code=200)
@@ -282,11 +373,10 @@ def get_discussion_context_status(
     
     try:
         status = discussion.get_context_status()
-        return ContextStatusResponse(current_tokens=status['current_tokens'], max_tokens=status['max_tokens'])
+        return status
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to get context status: {e}")
-
 @discussion_router.put("/{discussion_id}/active_branch", response_model=DiscussionInfo)
 async def update_discussion_active_branch(discussion_id: str, branch_request: DiscussionBranchSwitchRequest, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
     username = current_user.username
@@ -500,7 +590,7 @@ async def chat_in_existing_discussion(
         "{{date}}": now.strftime("%Y-%m-%d"),
         "{{time}}": now.strftime("%H:%M:%S"),
         "{{datetime}}": now.strftime("%Y-%m-%d %H:%M:%S"),
-        "{{ip_address}}": "localhost", # for now
+        "{{user_name}}": current_user.username,
     }
     # Apply replacements to a copy
     processed_user_data_zone = user_data_zone

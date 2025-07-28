@@ -1,3 +1,4 @@
+# backend/models/discussion.py
 import datetime
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, constr, field_validator
@@ -14,6 +15,12 @@ class DiscussionInfo(BaseModel):
     active_branch_id: Optional[str] = None
     data_zone: Optional[str] = None
 
+class DataZones(BaseModel):
+    user_data_zone: Optional[str] = None
+    discussion_data_zone: Optional[str] = None
+    personality_data_zone: Optional[str] = None
+    memory: Optional[str] = None
+
 class DiscussionBranchSwitchRequest(BaseModel):
     active_branch_id: str
 
@@ -29,9 +36,17 @@ class DiscussionRagDatastoreUpdate(BaseModel):
 class DiscussionToolsUpdate(BaseModel):
     tools: List[str]
 
+class ContextZoneDetail(BaseModel):
+    content: str
+    tokens: int
+    breakdown: Optional[Dict[str, str]] = None
+    message_count: Optional[int] = None
+
 class ContextStatusResponse(BaseModel):
     current_tokens: int
     max_tokens: Optional[int]
+    zones: Dict[str, ContextZoneDetail]
+
 
 class MessageOutput(BaseModel):
     id: str

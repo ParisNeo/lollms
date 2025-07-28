@@ -56,11 +56,8 @@ const isRefreshingRags = ref(false);
 
 // --- Token Count State ---
 const inputTokenCount = ref(0);
-const dataZoneTokenCount = ref(0);
 const isTokenizingInput = ref(false);
-const isTokenizingDataZone = ref(false);
 let tokenizeInputDebounceTimer = null;
-let tokenizeDataZoneDebounceTimer = null;
 
 // --- STATE FOR FLOATING/MOVABLE BEHAVIOR ---
 const isShrunk = ref(false);
@@ -88,24 +85,25 @@ const showContextBar = computed(() => {
     return user.value.show_token_counter && user.value.user_ui_level >= 2;
 });
 
-const discussionTokens = computed(() => contextStatus.value?.current_tokens || 0);
+const systemTokens = computed(() => contextStatus.value?.zones?.system_context?.tokens || 0);
+const historyTokens = computed(() => contextStatus.value?.zones?.message_history?.tokens || 0);
 const maxTokens = computed(() => contextStatus.value?.max_tokens || 1);
 
-const totalCurrentTokens = computed(() => discussionTokens.value + inputTokenCount.value + dataZoneTokenCount.value);
+const totalCurrentTokens = computed(() => systemTokens.value + historyTokens.value + inputTokenCount.value);
 
-const discussionTokensPercentage = computed(() => {
+const systemTokensPercentage = computed(() => {
     if (maxTokens.value <= 0) return 0;
-    return (discussionTokens.value / maxTokens.value) * 100;
+    return (systemTokens.value / maxTokens.value) * 100;
+});
+
+const historyTokensPercentage = computed(() => {
+    if (maxTokens.value <= 0) return 0;
+    return (historyTokens.value / maxTokens.value) * 100;
 });
 
 const inputTokensPercentage = computed(() => {
     if (maxTokens.value <= 0) return 0;
     return (inputTokenCount.value / maxTokens.value) * 100;
-});
-
-const dataZoneTokensPercentage = computed(() => {
-    if (maxTokens.value <= 0) return 0;
-    return (dataZoneTokenCount.value / maxTokens.value) * 100;
 });
 
 const totalPercentage = computed(() => {
@@ -133,21 +131,7 @@ const contextWarningMessage = computed(() => {
 
 async function showContext() {
     if (!activeDiscussion.value) return;
-    uiStore.openModal('contextViewer', { content: 'Loading context...' });
-    try {
-        const response = await apiClient.get(`/api/discussions/${activeDiscussion.value.id}/export_context`, {
-            responseType: 'text'
-        });
-        if(uiStore.isModalOpen('contextViewer')) {
-            uiStore.modalProps['contextViewer'].content = response.data;
-        }
-    } catch (error) {
-        console.error("Failed to fetch discussion context:", error);
-        if(uiStore.isModalOpen('contextViewer')) {
-            uiStore.modalProps['contextViewer'].content = 'Error: Could not load context.';
-        }
-        uiStore.addNotification('Failed to load discussion context.', 'error');
-    }
+    uiStore.openModal('contextViewer');
 }
 
 
@@ -266,25 +250,9 @@ watch(messageText, (newValue) => {
     }
 });
 
-watch(() => props.dataZoneContent, (newValue) => {
-    clearTimeout(tokenizeDataZoneDebounceTimer);
-    if (typeof newValue !== 'string' || !newValue.trim()) {
-        dataZoneTokenCount.value = 0;
-    } else if (showContextBar.value) {
-        tokenizeDataZoneDebounceTimer = setTimeout(() => {
-            fetchTokenCount(newValue, dataZoneTokenCount, isTokenizingDataZone);
-        }, 500);
-    }
-}, { immediate: true });
-
 watch(activeDiscussion, () => {
     clearTimeout(tokenizeInputDebounceTimer);
-    clearTimeout(tokenizeDataZoneDebounceTimer);
     inputTokenCount.value = 0;
-    dataZoneTokenCount.value = 0;
-    if (props.dataZoneContent) {
-        fetchTokenCount(props.dataZoneContent, dataZoneTokenCount, isTokenizingDataZone);
-    }
 });
 
 onMounted(() => {
@@ -305,7 +273,6 @@ onUnmounted(() => {
     window.removeEventListener('mousemove', onMouseMove);
     window.removeEventListener('mouseup', onMouseUp);
     clearTimeout(tokenizeInputDebounceTimer);
-    clearTimeout(tokenizeDataZoneDebounceTimer);
 });
 
 // --- Chat Input Logic ---
@@ -475,13 +442,13 @@ function removeImage(index) {
         <div class="p-3" @mousedown.stop>
             <div v-if="showContextBar" class="px-1 pb-2">
                 <div class="flex justify-between items-center mb-1 text-xs text-gray-600 dark:text-gray-400 font-mono">
-                    <div class="flex items-center gap-1.5"><IconToken class="w-4 h-4" /><span><a @click.prevent="showContext" href="#" class="cursor-pointer hover:underline" title="View full context">Context</a>: {{ discussionTokens.toLocaleString() }} + {{ dataZoneTokenCount.toLocaleString() }} + {{ inputTokenCount.toLocaleString() }}</span></div>
+                    <div class="flex items-center gap-1.5"><IconToken class="w-4 h-4" /><span><a @click.prevent="showContext" href="#" class="cursor-pointer hover:underline" title="View full context breakdown">Context</a>: {{ systemTokens.toLocaleString() }} + {{ historyTokens.toLocaleString() }} + {{ inputTokenCount.toLocaleString() }}</span></div>
                     <span>{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
                 </div>
                 <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden">
-                    <div class="absolute top-0 left-0 h-full transition-all duration-300 opacity-50" :class="progressColorClass" :style="{ width: `${Math.min(discussionTokensPercentage, 100)}%` }"></div>
-                    <div class="absolute top-0 h-full transition-all duration-300 opacity-75" :class="progressColorClass" :style="{ left: `${Math.min(discussionTokensPercentage, 100)}%`, width: `${Math.min(dataZoneTokensPercentage, 100)}%` }"></div>
-                    <div class="absolute top-0 h-full transition-all duration-300" :class="progressColorClass" :style="{ left: `${Math.min(discussionTokensPercentage + dataZoneTokensPercentage, 100)}%`, width: `${Math.min(inputTokensPercentage, 100)}%` }"></div>
+                    <div class="absolute top-0 left-0 h-full transition-all duration-300 opacity-50" :class="progressColorClass" :style="{ width: `${Math.min(systemTokensPercentage, 100)}%` }" title="System & Data"></div>
+                    <div class="absolute top-0 h-full transition-all duration-300 opacity-75" :class="progressColorClass" :style="{ left: `${Math.min(systemTokensPercentage, 100)}%`, width: `${Math.min(historyTokensPercentage, 100)}%` }" title="Message History"></div>
+                    <div class="absolute top-0 h-full transition-all duration-300" :class="progressColorClass" :style="{ left: `${Math.min(systemTokensPercentage + historyTokensPercentage, 100)}%`, width: `${Math.min(inputTokensPercentage, 100)}%` }" title="Current Input"></div>
                 </div>
                 <p v-if="showContextWarning" class="mt-1.5 text-xs text-center" :class="totalPercentage > 100 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'">{{ contextWarningMessage }}</p>
             </div>
