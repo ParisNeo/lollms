@@ -71,14 +71,12 @@ class Task:
         self._update_db(status=TaskStatus.RUNNING, started_at=datetime.datetime.now(datetime.timezone.utc))
         self.log(f"Task '{self.name}' started.")
         try:
-            # --- FIX: Capture the return value from the target function ---
             result = self.target(self, *self.args, **self.kwargs)
             
             if self.cancellation_event.is_set():
                 self._update_db(status=TaskStatus.CANCELLED)
                 self.log(f"Task '{self.name}' was cancelled.", level="WARNING")
             else:
-                # --- FIX: Persist the captured result to the database ---
                 self._update_db(status=TaskStatus.COMPLETED, progress=100, result=result)
                 self.log(f"Task '{self.name}' completed successfully.")
 

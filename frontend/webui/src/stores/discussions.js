@@ -55,6 +55,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     });
 
     function handleTaskCompletion(task) {
+        // Handle prune task completion
+        if (task && task.name.startsWith('Prune empty discussions')) {
+            loadDiscussions(); // Force a refresh of the discussion list
+            const deletedCount = task.result?.deleted_count || 0;
+            uiStore.addNotification(`Pruning complete. ${deletedCount} discussion(s) removed.`, 'success');
+            return; // Stop further processing for this task type
+        }
+        
+        // Existing logic for other tasks
         if (!task.result || !task.result.discussion_id) return;
 
         const { discussion_id, new_content, zone } = task.result;
@@ -267,14 +276,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             confirmText: 'Prune'
         });
         if (!confirmed) return;
-        uiStore.addNotification('Pruning discussions...', 'info');
+        
         try {
             const response = await apiClient.post('/api/discussions/prune');
-            await loadDiscussions();
-            uiStore.addNotification(response.data.message || 'Pruning complete.', 'success');
+            const task = response.data;
+            tasksStore.addTask(task);
+            uiStore.addNotification(`Pruning task '${task.name}' has started.`, 'info');
         } catch (error) {
-            console.error("Failed to prune discussions:", error);
-            uiStore.addNotification('An error occurred while pruning.', 'error');
+            console.error("Failed to start pruning task:", error);
         }
     }
 

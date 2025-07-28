@@ -20,7 +20,7 @@ from fastapi.responses import PlainTextResponse
 # Third-Party Imports
 from fastapi import (
     HTTPException, Depends, Form,
-    APIRouter, Query, BackgroundTasks)
+    APIRouter, Query, BackgroundTasks, status)
 from pydantic import BaseModel
 from backend.models import DiscussionRagDatastoreUpdate # Make sure it's the updated one
 from fastapi.responses import (
@@ -98,6 +98,69 @@ def _memorize_ltm_task(task: Task, username: str, discussion_id: str):
     task.log("Memorization complete and saved.")
     return {"discussion_id": discussion_id, "new_content": discussion.memory, "zone": "memory"}
 
+
+def _prune_empty_discussions_task(task: Task, username: str):
+    task.log("Starting prune of empty and single-message discussions.")
+    dm = get_user_discussion_manager(username)
+    all_discs_infos = dm.list_discussions()
+    total_discussions = len(all_discs_infos)
+    discussions_to_delete = []
+
+    task.log(f"Scanning {total_discussions} discussions for user '{username}'.")
+    for i, disc_info in enumerate(all_discs_infos):
+        discussion_id = disc_info['id']
+        try:
+            discussion = get_user_discussion(username, discussion_id)
+            if discussion and len(discussion.messages) <= 1:
+                discussions_to_delete.append(discussion_id)
+        except Exception as e:
+            task.log(f"Could not process discussion {discussion_id} for pruning: {e}", level="WARNING")
+        
+        progress = int(50 * (i + 1) / total_discussions) if total_discussions > 0 else 50
+        task.set_progress(progress)
+
+    if not discussions_to_delete:
+        task.log("No empty discussions found to prune.")
+        task.set_progress(100)
+        return {"message": "Pruning complete. No empty discussions found.", "deleted_count": 0}
+
+    task.log(f"Found {len(discussions_to_delete)} discussions to delete.")
+    task.set_progress(50)
+    deleted_count = 0
+    
+    with task.db_session_factory() as db:
+        try:
+            db_user = db.query(DBUser).filter(DBUser.username == username).one()
+            
+            for i, discussion_id in enumerate(discussions_to_delete):
+                if task.cancellation_event.is_set():
+                    task.log("Pruning task cancelled.", level="WARNING")
+                    break
+
+                try:
+                    dm.delete_discussion(discussion_id)
+                    assets_path = get_user_discussion_assets_path(username) / discussion_id
+                    if assets_path.exists() and assets_path.is_dir():
+                        shutil.rmtree(assets_path, ignore_errors=True)
+                    
+                    db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).delete(synchronize_session=False)
+                    db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).delete(synchronize_session=False)
+
+                    deleted_count += 1
+                    task.log(f"Deleted discussion: {discussion_id}")
+                except Exception as e:
+                    task.log(f"Failed to delete discussion {discussion_id} during prune: {e}", level="ERROR")
+                
+                progress = 50 + int(50 * (i + 1) / len(discussions_to_delete))
+                task.set_progress(progress)
+
+            db.commit()
+            task.log(f"Successfully pruned {deleted_count} discussions.")
+            return {"message": f"Successfully pruned {deleted_count} empty or single-message discussions.", "deleted_count": deleted_count}
+        except Exception as e:
+            db.rollback()
+            task.log(f"A database error occurred during the final commit: {e}", level="CRITICAL")
+            raise e
 
 class TokenizeRequest(BaseModel):
     text: str
@@ -248,47 +311,20 @@ def memorize_ltm(
     return TaskInfo.from_orm(db_task)
 
 
-@discussion_router.post("/prune", status_code=200)
-async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db), background_tasks: BackgroundTasks = BackgroundTasks()):
+@discussion_router.post("/prune", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_current_active_user)):
     """
-    Deletes all discussions for the current user that are empty or contain only one message.
+    Triggers a background task to delete all discussions for the current user 
+    that are empty or contain only one message.
     """
-    username = current_user.username
-    dm = get_user_discussion_manager(username)
-    all_discs_infos = dm.list_discussions()
-    deleted_count = 0
-    discussions_to_delete = []
-
-    for disc_info in all_discs_infos:
-        discussion_id = disc_info['id']
-        try:
-            # get_user_discussion will use the correct client settings internally
-            discussion = get_user_discussion(username, discussion_id)
-            if discussion and len(discussion.messages) <= 1:
-                discussions_to_delete.append(discussion_id)
-        except Exception as e:
-            print(f"Could not process discussion {discussion_id} for pruning: {e}")
-
-    db_user = db.query(DBUser).filter(DBUser.username == username).one()
-    for discussion_id in discussions_to_delete:
-        try:
-            dm.delete_discussion(discussion_id)
-            assets_path = get_user_discussion_assets_path(username) / discussion_id
-            if assets_path.exists() and assets_path.is_dir():
-                background_tasks.add_task(shutil.rmtree, assets_path, ignore_errors=True)
-            
-            db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).delete(synchronize_session=False)
-            db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).delete(synchronize_session=False)
-
-            deleted_count += 1
-        except Exception as e:
-            print(f"Failed to delete discussion {discussion_id} during prune: {e}")
-            db.rollback()
-    
-    if deleted_count > 0:
-        db.commit()
-
-    return {"message": f"Successfully pruned {deleted_count} empty or single-message discussions.", "deleted_count": deleted_count}
+    db_task = task_manager.submit_task(
+        name=f"Prune empty discussions for {current_user.username}",
+        target=_prune_empty_discussions_task,
+        args=(current_user.username,),
+        description="Scans and deletes discussions with 0 or 1 message.",
+        owner_username=current_user.username
+    )
+    return TaskInfo.from_orm(db_task)
 
 
 @discussion_router.post("/{discussion_id}/auto-title", response_model=DiscussionInfo)

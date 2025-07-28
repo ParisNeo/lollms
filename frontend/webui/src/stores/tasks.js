@@ -38,7 +38,7 @@ export const useTasksStore = defineStore('tasks', () => {
             // Check for newly completed tasks and emit an event
             newTasks.forEach(newTask => {
                 const oldTask = oldTasks.get(newTask.id);
-                if (oldTask && oldTask.status !== 'completed' && newTask.status === 'completed') {
+                if (oldTask && (oldTask.status === 'running' || oldTask.status === 'pending') && (newTask.status === 'completed')) {
                     emit('task:completed', newTask);
                 }
             });
