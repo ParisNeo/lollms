@@ -46,6 +46,8 @@ new ui:
 - add add/view/remove files to the discussion with options (full file or RAG for each)
 - when cancelling the generation, refresh the discussion
 - when the generation fails, refresh the discussion
+- the remove is not updating the discussion after removing
+- share discussion with friends with permission to participate to the discussion or not (read/write or READ)
 
 
 ### emailing system
@@ -113,3 +115,7 @@ new ui:
 ## Scratchpad
 - add summerize document to scratchpad ** IMPORTANT **
 - fix the scratchpad loop ** IMPORTANT **
+
+## tasks management
+- task status is not automatically updated and reflected on all the ui
+- when a task is done, it needs to update the corresponding ui
