@@ -162,6 +162,7 @@ class UserPublic(UserLLMParams):
     rag_graph_response_type: Optional[str] = None
     first_login_done: bool 
     data_zone: Optional[str] = None
+    memory: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -197,6 +198,7 @@ class UserAuthDetails(UserLLMParams):
     openai_api_service_enabled: bool = False
     first_login_done: bool 
     data_zone: Optional[str] = None
+    memory: Optional[str] = None
 
 class RelationshipStatus(BaseModel):
     is_following: bool
