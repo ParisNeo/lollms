@@ -31,6 +31,7 @@ class User(Base):
     is_searchable = Column(Boolean, default=True, nullable=False, index=True)
     first_login_done = Column(Boolean, default=False, nullable=False)
     data_zone = Column(Text, nullable=True)
+    memory = Column(Text, nullable=True)
     
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
