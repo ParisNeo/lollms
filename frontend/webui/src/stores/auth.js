@@ -313,6 +313,23 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
+    async function updateMemoryZone(content) {
+        if (!isAuthenticated.value) return;
+        try {
+            const response = await apiClient.put('/api/auth/me/memory', { content });
+            // FIX: Use Object.assign to merge updates into the existing reactive user object,
+            // which is safer than replacing the whole object.
+            if (user.value) {
+                Object.assign(user.value, response.data);
+            } else {
+                user.value = response.data;
+            }
+        } catch (error) {
+            useUiStore().addNotification('Failed to save data zone.', 'error');
+            throw error;
+        }
+    }
+
     async function fetchScratchpad() {
         if (!isAuthenticated.value) return;
         try {
@@ -349,6 +366,7 @@ export const useAuthStore = defineStore('auth', () => {
         ssoLoginWithPassword, ssoAuthorizeApplication,
         fetchScratchpad, updateScratchpad,
         fetchDataZone,
-        updateDataZone
+        updateDataZone,
+        updateMemoryZone
     };
 });
