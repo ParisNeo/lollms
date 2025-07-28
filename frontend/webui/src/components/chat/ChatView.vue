@@ -41,6 +41,7 @@ const memory = ref('');
 
 let discussionSaveDebounceTimer = null;
 let userSaveDebounceTimer = null;
+let memorySaveDebounceTimer = null;
 
 // --- Computed Properties ---
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
@@ -78,10 +79,13 @@ watch(() => authStore.user?.data_zone, (newZone) => {
 
 // Watch local discussionDataZone and update store
 watch(discussionDataZone, (newVal) => {
+    console.log("discussion data zone updated. Debouncing")
     clearTimeout(discussionSaveDebounceTimer);
     discussionSaveDebounceTimer = setTimeout(() => {
+        console.log("updating discussion data zone")
         if (activeDiscussion.value && newVal !== activeDiscussion.value.discussion_data_zone) {
             discussionsStore.updateDataZone({ discussionId: activeDiscussion.value.id, content: newVal });
+            console.log("updating discussion finished")
         }
     }, 750);
 });
@@ -91,6 +95,15 @@ watch(userDataZone, (newVal) => {
     clearTimeout(userSaveDebounceTimer);
     userSaveDebounceTimer = setTimeout(() => {
         if (authStore.user && newVal !== authStore.user.data_zone) {
+            authStore.updateDataZone(newVal);
+        }
+    }, 750);
+});
+
+watch(memory, (newVal) => {
+    clearTimeout(memorySaveDebounceTimer);
+    memorySaveDebounceTimer = setTimeout(() => {
+        if (authStore.user && newVal !== authStore.user.memory) {
             authStore.updateDataZone(newVal);
         }
     }, 750);
