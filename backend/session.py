@@ -121,6 +121,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         is_searchable=db_user.is_searchable,
         first_login_done=db_user.first_login_done,
         data_zone=db_user.data_zone,
+        memory=db_user.memory,
         lollms_model_name=user_sessions[username].get("lollms_model_name"),
         safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
         active_personality_id=user_sessions[username].get("active_personality_id"),
