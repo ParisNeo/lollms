@@ -81,7 +81,7 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
     )
 
 # --- Task Functions ---
-def _summarize_data_zone_task(task: Task, username: str, discussion_id: str):
+def _summarize_data_zone_task(task: Task, username: str, discussion_id: str, contextual_prompt: Optional[str]):
     task.log("Starting data zone summary task...")
     discussion = get_user_discussion(username, discussion_id)
     if not discussion:
@@ -100,6 +100,7 @@ def _summarize_data_zone_task(task: Task, username: str, discussion_id: str):
     lc = get_user_lollms_client(username)
     summary = lc.summarize(
         discussion.discussion_data_zone,
+        contextual_prompt=contextual_prompt,
         streaming_callback=summary_callback
     )
     
@@ -314,6 +315,7 @@ def update_discussion_data_zone(
 @discussion_router.post("/{discussion_id}/summarize_data_zone", response_model=TaskInfo, status_code=202)
 def summarize_discussion_data_zone(
     discussion_id: str,
+    prompt: Optional[str] = Form(None),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     discussion = get_user_discussion(current_user.username, discussion_id)
@@ -323,7 +325,7 @@ def summarize_discussion_data_zone(
     db_task = task_manager.submit_task(
         name=f"Summarize Data Zone for: {discussion.metadata.get('title', 'Untitled')}",
         target=_summarize_data_zone_task,
-        args=(current_user.username, discussion_id),
+        args=(current_user.username, discussion_id, prompt),
         description=f"AI is summarizing the discussion data zone content.",
         owner_username=current_user.username
     )

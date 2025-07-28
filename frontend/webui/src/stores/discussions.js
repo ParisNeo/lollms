@@ -174,14 +174,18 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
     
-    async function summarizeDiscussionDataZone(discussionId) {
+    async function summarizeDiscussionDataZone(discussionId, prompt = null) {
         if (activeAiTasks.value[discussionId]) {
             uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId]}) is already running for this discussion.`, 'warning');
             return;
         }
         if (!discussions.value[discussionId]) return;
         try {
-            const response = await apiClient.post(`/api/discussions/${discussionId}/summarize_data_zone`);
+            const formData = new FormData();
+            if (prompt) {
+                formData.append('prompt', prompt);
+            }
+            const response = await apiClient.post(`/api/discussions/${discussionId}/summarize_data_zone`, formData);
             const task = response.data;
             activeAiTasks.value[discussionId] = 'summarize';
             tasksStore.addTask(task);

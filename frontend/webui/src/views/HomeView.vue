@@ -1,6 +1,5 @@
 <script setup>
 import { computed } from 'vue';
-import Sidebar from '../components/layout/Sidebar.vue';
 import ChatView from '../components/chat/ChatView.vue';
 import FeedComponent from '../components/social/FeedComponent.vue';
 import DmWindow from '../components/dm/DmWindow.vue';
@@ -24,21 +23,14 @@ const showChatView = computed(() => {
 </script>
 
 <template>
-  <div class="flex h-full w-full relative">
-    <Sidebar />
-    <main class="flex-1 flex flex-col overflow-hidden bg-white dark:bg-gray-900">
-      <div class="flex-grow flex flex-col min-h-0">
-        
-        <!-- CORRECTED: Use v-if/v-else for clarity and to prevent prop issues -->
-        
-        <!-- Render ChatView only when it's explicitly the correct state -->
-        <ChatView v-if="showChatView" class="flex-grow" />
-        
-        <!-- Render FeedComponent for all other cases (feed view, or chat view with no active discussion) -->
-        <FeedComponent v-else class="flex-grow" />
-        
-      </div>
-    </main>
+  <div class="h-full w-full relative">
+    <div class="flex-grow flex flex-col min-h-0 h-full">
+      <!-- Render ChatView only when it's explicitly the correct state -->
+      <ChatView v-if="showChatView" class="flex-grow" />
+      
+      <!-- Render FeedComponent for all other cases (feed view, or chat view with no active discussion) -->
+      <FeedComponent v-else class="flex-grow" />
+    </div>
 
     <!-- Floating DM Windows Container -->
     <div class="fixed bottom-0 right-0 flex items-end space-x-4 pr-4 z-30 pointer-events-none">

@@ -1,11 +1,16 @@
 <!-- frontend/webui/src/App.vue -->
 <script setup>
 import { computed, onMounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
 import { usePyodideStore } from './stores/pyodide';
 import { useTasksStore } from './stores/tasks';
-import { useDiscussionsStore } from './stores/discussions'; // NEW
+import { useDiscussionsStore } from './stores/discussions'; 
+
+// Import Layouts
+import Sidebar from './components/layout/Sidebar.vue';
+import GlobalHeader from './components/layout/GlobalHeader.vue';
 
 // Import all modals
 import LoginModal from './components/modals/LoginModal.vue';
@@ -44,37 +49,33 @@ const authStore = useAuthStore();
 const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
 const tasksStore = useTasksStore();
-const discussionsStore = useDiscussionsStore(); // NEW
+const discussionsStore = useDiscussionsStore();
+const route = useRoute();
 
 const activeModal = computed(() => uiStore.activeModal);
 
-// NEW computed property: determines if the main content (router-view) or the loading screen should be shown
-// This ensures the first admin modal can appear on top during initial load.
 const showMainContentOrLoading = computed(() => {
-    // If the first admin setup modal is active, we render nothing else but the modal itself
-    // The modal is handled directly in the template.
     if (activeModal.value === 'firstAdminSetup') {
         return 'modal_only'; 
     }
-    // If we're still authenticating and the first admin modal is not active, show loading screen
     if (authStore.isAuthenticating) {
         return 'loading';
     }
-    // Otherwise, show the main content (router-view)
     return 'main_content';
 });
+
+const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages'];
+const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
 
 
 onMounted(async () => {
     uiStore.initializeTheme();
     await authStore.attemptInitialAuth();
     uiStore.initializeSidebarState();
-    // Pyodide and Tasks initialization should only happen if authentication is successful
-    // and we're not stuck in a setup flow.
     if (authStore.isAuthenticated) {
         pyodideStore.initialize();
         tasksStore.startPolling();
-        discussionsStore.initialize(); // NEW
+        discussionsStore.initialize();
     }
 });
 </script>
@@ -82,17 +83,15 @@ onMounted(async () => {
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900">
     
-    <!-- Conditional rendering based on showMainContentOrLoading -->
+    <!-- Loading Screen -->
     <div v-if="showMainContentOrLoading === 'loading'" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
         <div class="w-full max-w-lg mx-auto">
             <h1 class="text-6xl md:text-7xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">LoLLMs</h1>
             <p class="mt-2 text-xl md:text-2xl text-gray-600 dark:text-gray-300">One tool to rule them all</p>
             <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">by ParisNeo</p>
-            
             <div v-if="authStore.funFact" class="mt-8 mx-auto max-w-md p-3 bg-gray-200 dark:bg-white/10 border border-gray-300 dark:border-white/20 rounded-lg text-sm text-left text-gray-700 dark:text-gray-200">
                 <span class="font-bold text-yellow-600 dark:text-yellow-300">🤓 Fun Fact:</span> {{ authStore.funFact }}
             </div>
-
             <div class="mt-12 w-full px-4">
                 <div class="h-2.5 w-full rounded-full bg-gray-200 dark:bg-gray-600">
                     <div class="h-2.5 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500" :style="{ width: `${authStore.loadingProgress}%` }"></div>
@@ -103,11 +102,18 @@ onMounted(async () => {
         </div>
     </div>
 
-    <!-- Render router-view only if not loading and not in admin setup -->
-    <router-view v-else-if="showMainContentOrLoading === 'main_content'" />
+    <!-- Main App Layout -->
+    <div v-else-if="showMainContentOrLoading === 'main_content'" class="flex h-full w-full relative">
+      <Sidebar v-if="isHomePageLayout" />
+      <div class="flex-1 flex flex-col overflow-hidden">
+        <GlobalHeader v-if="isHomePageLayout" />
+        <main class="flex-1" :class="isHomePageLayout ? 'overflow-y-auto' : ''">
+            <router-view />
+        </main>
+      </div>
+    </div>
 
-    <!-- Modals are rendered always, but only visible when activeModal matches -->
-    <!-- This ensures the firstAdminSetup modal can appear even if isAuthenticating is still true -->
+    <!-- Modals -->
     <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     <LoginModal v-if="activeModal === 'login'" />
     <RegisterModal v-if="activeModal === 'register'" />
@@ -132,7 +138,6 @@ onMounted(async () => {
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
     <AppConfigModal v-if="activeModal === 'appConfig'" />
     <WhatsNextModal v-if="activeModal === 'whatsNext'" />
-    <!-- Ensure CreateFirstAdminModal is rendered if it's the active modal, regardless of loading state -->
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> 
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
     <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />

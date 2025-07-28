@@ -6,7 +6,6 @@ import { useUiStore } from '../../stores/ui';
 import apiClient from '../../services/api';
 
 // Component Imports
-import ChatHeader from './ChatHeader.vue';
 import MessageArea from './MessageArea.vue';
 import ChatInput from './ChatInput.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
@@ -32,7 +31,9 @@ const knowledgeFileInput = ref(null);
 const isExtractingText = ref(false);
 const activeDataZoneTab = ref('discussion');
 const userCodeMirrorEditor = ref(null);
+const summaryPrompt = ref(''); // NEW: For guided summary
 
+// --- Data Zone State ---
 let discussionSaveDebounceTimer = null;
 let userSaveDebounceTimer = null;
 let memorySaveDebounceTimer = null;
@@ -140,7 +141,7 @@ async function handleKnowledgeFileUpload(event) {
 
 function handleSummarize() {
     if (!activeDiscussion.value) return;
-    discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id);
+    discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, summaryPrompt.value);
 }
 
 function handleMemorize() {
@@ -161,7 +162,6 @@ function insertPlaceholder(keyword) {
 <template>
   <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
     <input type="file" ref="knowledgeFileInput" @change="handleKnowledgeFileUpload" multiple class="hidden" accept=".txt,.md,.pdf,.docx,.pptx,.xlsx,.xls, .py, .js, .html, .css, .json, .xml, .c, .cpp, .java">
-    <ChatHeader v-if="activeDiscussion" />
     <div class="flex-1 flex min-h-0">
         <div class="flex-1 flex flex-col min-w-0 relative">
             <MessageArea v-if="showChatView" class="flex-1 overflow-y-auto min-w-0" />
@@ -186,15 +186,21 @@ function insertPlaceholder(keyword) {
                 </div>
                 <!-- Discussion Data Zone -->
                 <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0">
-                    <div class="p-4 border-b dark:border-gray-600 flex-shrink-0 flex justify-between items-center">
-                        <div>
-                            <h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data Zone</h3>
-                            <p class="text-xs text-gray-500 mt-1">Context for this discussion only.</p>
+                    <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data Zone</h3>
+                                <p class="text-xs text-gray-500 mt-1">Context for this discussion only.</p>
+                            </div>
+                             <button @click="triggerKnowledgeFileUpload" class="btn btn-secondary btn-sm" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-4 h-4" /><IconPlus v-else class="w-4 h-4" /></button>
                         </div>
-                        <div class="flex items-center gap-2">
-                            <button @click="handleSummarize" class="btn btn-secondary btn-sm" title="Summarize content" :disabled="isSummarizing || !discussionDataZone.trim()"><IconSparkles class="w-4 h-4" :class="{'animate-pulse': isSummarizing}"/></button>
-                            <button @click="triggerKnowledgeFileUpload" class="btn btn-secondary btn-sm" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-4 h-4" /><IconPlus v-else class="w-4 h-4" /></button>
+                        <div class="mt-4">
+                             <textarea v-model="summaryPrompt" rows="2" class="input-field text-sm" placeholder="Optional: Enter a specific prompt for the summary..."></textarea>
+                             <div class="flex justify-end mt-2">
+                                <button @click="handleSummarize" class="btn btn-secondary btn-sm" title="Summarize content" :disabled="isSummarizing || !discussionDataZone.trim()"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isSummarizing}"/>Summarize</button>
+                             </div>
                         </div>
+
                     </div>
                     <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-model="discussionDataZone" class="h-full" /></div>
                 </div>
