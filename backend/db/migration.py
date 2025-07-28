@@ -206,7 +206,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "show_token_counter": "BOOLEAN DEFAULT 1 NOT NULL",
             "is_searchable": "BOOLEAN DEFAULT 1 NOT NULL",
             "first_login_done": "BOOLEAN DEFAULT 0 NOT NULL",
-            "data_zone": "TEXT"
+            "data_zone": "TEXT", "memory": "TEXT"
         }
         
         added_cols = []
