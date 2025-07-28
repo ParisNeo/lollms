@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
 import { useDataStore } from './data';
+import { useTasksStore } from './tasks';
+import useEventBus from '../services/eventBus';
 
 let activeGenerationAbortController = null;
 
@@ -20,13 +22,19 @@ function processSingleMessage(msg) {
     };
 }
 
+
 export const useDiscussionsStore = defineStore('discussions', () => {
+    const uiStore = useUiStore();
+    const tasksStore = useTasksStore();
+    const { on } = useEventBus();
+
     const discussions = ref({});
     const currentDiscussionId = ref(null);
     const messages = ref([]);
     const generationInProgress = ref(false);
     const titleGenerationInProgressId = ref(null);
     const activeDiscussionContextStatus = ref(null);
+    const activeAiTasks = ref({}); // Tracks running AI tasks per discussion: { [discussionId]: 'summarize' | 'memorize' }
 
     const sortedDiscussions = computed(() => {
         return Object.values(discussions.value).sort((a, b) => {
@@ -44,6 +52,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const personalityId = authStore.user?.active_personality_id;
         if (!personalityId) return null;
         return dataStore.getPersonalityById(personalityId);
+    });
+
+    function handleTaskCompletion(task) {
+        if (!task.result || !task.result.discussion_id) return;
+
+        const { discussion_id, new_content, zone } = task.result;
+        const discussion = discussions.value[discussion_id];
+
+        if (discussion) {
+            if (zone === 'discussion') {
+                discussion.discussion_data_zone = new_content;
+                uiStore.addNotification('Data zone summarized successfully.', 'success');
+            } else if (zone === 'memory') {
+                discussion.memory = new_content;
+                uiStore.addNotification('Memorization complete.', 'success');
+            }
+        }
+        
+        if (activeAiTasks.value[discussion_id]) {
+            delete activeAiTasks.value[discussion_id];
+        }
+    }
+
+    onMounted(() => {
+        on('task:completed', handleTaskCompletion);
     });
 
     function processMessages(rawMessages) {
@@ -76,7 +109,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-
     async function fetchDataZones(discussionId) {
         if (!discussions.value[discussionId]) return;
         try {
@@ -94,6 +126,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
         }
     }
+
     async function updateDataZone({ discussionId, content }) {
         if (!discussions.value[discussionId]) return;
         try {
@@ -106,18 +139,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
     
     async function summarizeDiscussionDataZone(discussionId) {
-        const uiStore = useUiStore();
         if (activeAiTasks.value[discussionId]) {
             uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId]}) is already running for this discussion.`, 'warning');
             return;
         }
         if (!discussions.value[discussionId]) return;
-
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/summarize_data_zone`);
             const task = response.data;
             activeAiTasks.value[discussionId] = 'summarize';
-            useTasksStore().addTask(task);
+            tasksStore.addTask(task);
             uiStore.addNotification('Summarization task started.', 'info');
         } catch (error) {
             // Handled by interceptor
@@ -125,18 +156,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     async function memorizeLTM(discussionId) {
-        const uiStore = useUiStore();
         if (activeAiTasks.value[discussionId]) {
             uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId]}) is already running for this discussion.`, 'warning');
             return;
         }
         if (!discussions.value[discussionId]) return;
-        
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/memorize`);
             const task = response.data;
             activeAiTasks.value[discussionId] = 'memorize';
-            useTasksStore().addTask(task);
+            tasksStore.addTask(task);
             uiStore.addNotification('Memorization task started.', 'info');
         } catch (error) {
             // Handled by interceptor
@@ -195,7 +224,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const response = await apiClient.post('/api/discussions');
             const newDiscussion = response.data;
             discussions.value[newDiscussion.id] = { 
-                ...newDiscussion, 
+                ...newDiscussion,
                 discussion_data_zone: '',
                 personality_data_zone: '',
                 memory: ''
@@ -345,7 +374,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             parent_message_id: lastMessage ? lastMessage.id : null
         };
         const tempAiMessage = {
-            id: `temp-ai-${Date.now()}`, sender: 'assistant', sender_type: 'assistant',
+            id: `temp-ai-${Date.now()}`, sender: activePersonality.value?.name || 'assistant', sender_type: 'assistant',
             content: '', isStreaming: true, created_at: new Date().toISOString(),
             events: []
         };
@@ -465,20 +494,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             activeGenerationAbortController.abort();
             activeGenerationAbortController = null;
         }
-
+        generationInProgress.value = false;
+        
         if (currentDiscussionId.value) {
             try { 
                 await apiClient.post(`/api/discussions/${currentDiscussionId.value}/stop_generation`); 
             } catch(e) { 
                 console.warn("Backend stop signal failed, but proceeding with client-side cleanup.", e);
             }
-        }
-        
-        generationInProgress.value = false;
-        
-        await loadDiscussions(); 
-        
-        if (currentDiscussionId.value) {
             await selectDiscussion(currentDiscussionId.value);
         }
 
@@ -499,11 +522,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (!currentDiscussionId.value) return;
         try {
             await apiClient.delete(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`);
-            const index = messages.value.findIndex(m => m.id === messageId);
-            if (index !== -1) {
-                messages.value.splice(index, 1);
-            }
-            useUiStore().addNotification('Message deleted.', 'success');
+            await selectDiscussion(currentDiscussionId.value);
+            useUiStore().addNotification('Message and branch deleted.', 'success');
             await fetchContextStatus(currentDiscussionId.value);
         } catch(e) {}
     }
@@ -579,12 +599,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             await loadDiscussions();
         } catch (error) { console.error("Import failed:", error); }
     }
-
+    
     function $reset() {
         discussions.value = {};
         currentDiscussionId.value = null;
         messages.value = [];
         generationInProgress.value = false;
+        titleGenerationInProgressId.value = null;
+        activeDiscussionContextStatus.value = null;
+        activeAiTasks.value = {};
     }
 
     return {
@@ -597,6 +620,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         deleteMessage, initiateBranch, switchBranch, exportDiscussions,
         importDiscussions, sendDiscussion, $reset, activeDiscussionContextStatus, fetchContextStatus,
         fetchDataZones, updateDataZone, activePersonality,
-        summarizeDiscussionDataZone, memorizeLTM
+        summarizeDiscussionDataZone, memorizeLTM, activeAiTasks
     };
 });
