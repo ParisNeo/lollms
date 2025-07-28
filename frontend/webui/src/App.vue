@@ -4,7 +4,8 @@ import { computed, onMounted } from 'vue';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
 import { usePyodideStore } from './stores/pyodide';
-import { useTasksStore } from './stores/tasks'; // NEW
+import { useTasksStore } from './stores/tasks';
+import { useDiscussionsStore } from './stores/discussions'; // NEW
 
 // Import all modals
 import LoginModal from './components/modals/LoginModal.vue';
@@ -35,14 +36,15 @@ import AppDetailsModal from './components/modals/AppDetailsModal.vue';
 import AppConfigModal from './components/modals/AppConfigModal.vue';
 import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue';
 import GeneratePersonalityModal from './components/modals/GeneratePersonalityModal.vue';
-import TasksManagerModal from './components/modals/TasksManagerModal.vue'; // NEW
+import TasksManagerModal from './components/modals/TasksManagerModal.vue';
 import EnhancePersonalityPromptModal from './components/modals/EnhancePersonalityPromptModal.vue';
 import ContextViewModal from './components/modals/ContextViewModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
-const tasksStore = useTasksStore(); // NEW
+const tasksStore = useTasksStore();
+const discussionsStore = useDiscussionsStore(); // NEW
 
 const activeModal = computed(() => uiStore.activeModal);
 
@@ -71,7 +73,8 @@ onMounted(async () => {
     // and we're not stuck in a setup flow.
     if (authStore.isAuthenticated) {
         pyodideStore.initialize();
-        tasksStore.startPolling(); // NEW
+        tasksStore.startPolling();
+        discussionsStore.initialize(); // NEW
     }
 });
 </script>
@@ -133,7 +136,7 @@ onMounted(async () => {
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> 
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
     <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
-    <TasksManagerModal v-if="activeModal === 'tasksManager'" /> <!-- NEW -->
+    <TasksManagerModal v-if="activeModal === 'tasksManager'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

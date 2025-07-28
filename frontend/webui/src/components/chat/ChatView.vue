@@ -33,12 +33,6 @@ const isExtractingText = ref(false);
 const activeDataZoneTab = ref('discussion');
 const userCodeMirrorEditor = ref(null);
 
-// --- Data Zone State ---
-const discussionDataZone = ref('');
-const userDataZone = ref('');
-const personalityDataZone = ref('');
-const memory = ref('');
-
 let discussionSaveDebounceTimer = null;
 let userSaveDebounceTimer = null;
 let memorySaveDebounceTimer = null;
@@ -50,6 +44,54 @@ const showChatView = computed(() => activeDiscussion.value !== null);
 const isSummarizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id] === 'summarize');
 const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id] === 'memorize');
 
+// --- Reactive Data Zone Management with Computed Properties ---
+const discussionDataZone = computed({
+    get: () => activeDiscussion.value?.discussion_data_zone || '',
+    set: (newVal) => {
+        clearTimeout(discussionSaveDebounceTimer);
+        discussionSaveDebounceTimer = setTimeout(() => {
+            if (activeDiscussion.value) {
+                discussionsStore.updateDataZone({ discussionId: activeDiscussion.value.id, content: newVal });
+            }
+        }, 750);
+        // Optimistic update for immediate UI feedback in the store
+        if (activeDiscussion.value) {
+            discussionsStore.discussions[activeDiscussion.value.id].discussion_data_zone = newVal;
+        }
+    }
+});
+
+const userDataZone = computed({
+    get: () => authStore.user?.data_zone || '',
+    set: (newVal) => {
+        clearTimeout(userSaveDebounceTimer);
+        userSaveDebounceTimer = setTimeout(() => {
+            authStore.updateDataZone(newVal);
+        }, 750);
+        // Optimistic update
+        if (authStore.user) {
+            authStore.user.data_zone = newVal;
+        }
+    }
+});
+
+const personalityDataZone = computed(() => activeDiscussion.value?.personality_data_zone || '');
+
+const memory = computed({
+    get: () => activeDiscussion.value?.memory || '',
+    set: (newVal) => {
+        clearTimeout(memorySaveDebounceTimer);
+        memorySaveDebounceTimer = setTimeout(() => {
+            authStore.updateMemoryZone(newVal);
+        }, 750);
+         // Optimistic update
+        if (authStore.user) {
+            authStore.user.memory = newVal;
+        }
+    }
+});
+
+
 const combinedDataZoneContent = computed(() => {
     return [
         userDataZone.value ? `### User Data\n${userDataZone.value}` : '',
@@ -59,55 +101,10 @@ const combinedDataZoneContent = computed(() => {
     ].filter(Boolean).join('\n\n');
 });
 
-// --- Watchers for State Synchronization ---
-watch(() => activeDiscussion.value?.id, (newId) => {
-    if (newId && activeDiscussion.value) {
-        discussionDataZone.value = activeDiscussion.value?.discussion_data_zone || '';
-        personalityDataZone.value = activeDiscussion.value?.personality_data_zone || '';
-        memory.value = activeDiscussion.value?.memory || '';
-    } else {
-        discussionDataZone.value = '';
-        personalityDataZone.value = '';
-        memory.value = '';
-    }
-    userDataZone.value = authStore.user?.data_zone || '';
-}, { immediate: true, deep: true });
+watch(combinedDataZoneContent, (newCombinedText) => {
+    discussionsStore.updateDataZonesTokenCount(newCombinedText);
+}, { immediate: true });
 
-watch(() => authStore.user?.data_zone, (newZone) => {
-    userDataZone.value = newZone || '';
-});
-
-// Watch local discussionDataZone and update store
-watch(discussionDataZone, (newVal) => {
-    console.log("discussion data zone updated. Debouncing")
-    clearTimeout(discussionSaveDebounceTimer);
-    discussionSaveDebounceTimer = setTimeout(() => {
-        console.log("updating discussion data zone")
-        if (activeDiscussion.value && newVal !== activeDiscussion.value.discussion_data_zone) {
-            discussionsStore.updateDataZone({ discussionId: activeDiscussion.value.id, content: newVal });
-            console.log("updating discussion finished")
-        }
-    }, 750);
-});
-
-// Watch local userDataZone and update store
-watch(userDataZone, (newVal) => {
-    clearTimeout(userSaveDebounceTimer);
-    userSaveDebounceTimer = setTimeout(() => {
-        if (authStore.user && newVal !== authStore.user.data_zone) {
-            authStore.updateDataZone(newVal);
-        }
-    }, 750);
-});
-
-watch(memory, (newVal) => {
-    clearTimeout(memorySaveDebounceTimer);
-    memorySaveDebounceTimer = setTimeout(() => {
-        if (authStore.user && newVal !== authStore.user.memory) {
-            authStore.updateDataZone(newVal);
-        }
-    }, 750);
-});
 
 // --- Methods ---
 async function toggleDataZone() {
@@ -130,7 +127,10 @@ async function handleKnowledgeFileUpload(event) {
     try {
         const response = await apiClient.post('/api/files/extract-text', formData);
         const extractedText = response.data.text;
+        
+        // This will trigger the computed property's setter
         discussionDataZone.value = discussionDataZone.value ? `${discussionDataZone.value}\n\n${extractedText}` : extractedText;
+        
         uiStore.addNotification(`Extracted text from ${files.length} file(s) and added to discussion data zone.`, 'success');
     } finally {
         isExtractingText.value = false;

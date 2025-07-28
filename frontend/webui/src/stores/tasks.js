@@ -18,6 +18,13 @@ export const useTasksStore = defineStore('tasks', () => {
         return tasks.value.filter(t => t.status === 'running' || t.status === 'pending').length;
     });
 
+    const mostRecentActiveTask = computed(() => {
+        const activeTasks = tasks.value
+            .filter(t => t.status === 'running' || t.status === 'pending')
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        return activeTasks.length > 0 ? activeTasks[0] : null;
+    });
+
     const getTaskById = computed(() => {
         return (taskId) => tasks.value.find(t => t.id === taskId);
     });
@@ -114,6 +121,7 @@ export const useTasksStore = defineStore('tasks', () => {
         tasks,
         isLoadingTasks,
         activeTasksCount,
+        mostRecentActiveTask,
         getTaskById,
         fetchTasks,
         fetchTask,

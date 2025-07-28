@@ -90,13 +90,26 @@ def _summarize_data_zone_task(task: Task, username: str, discussion_id: str):
         task.log("Data zone is empty, nothing to summarize.", "WARNING")
         return {"discussion_id": discussion_id, "new_content": ""}
     
-    task.set_progress(20)
+    def summary_callback(message: str, msg_type: Any, params: Optional[Dict] = None):
+        """Callback to update the task in real-time."""
+        task.log(message)
+        task.set_description(message)
+        if params and 'progress' in params:
+            task.set_progress(int(params['progress']))
+
     lc = get_user_lollms_client(username)
-    summary = lc.sequential_summarize(discussion.discussion_data_zone)
+    summary = lc.summarize(
+        discussion.discussion_data_zone,
+        streaming_callback=summary_callback
+    )
+    
     discussion.discussion_data_zone = summary
     discussion.commit()
+    
     task.set_progress(100)
+    task.set_description("Summary complete and saved.")
     task.log("Summary complete and saved.")
+    
     return {"discussion_id": discussion_id, "new_content": summary, "zone": "discussion"}
 
 def _memorize_ltm_task(task: Task, username: str, discussion_id: str, db:Session):
@@ -636,6 +649,7 @@ async def chat_in_existing_discussion(
             return [{"error": f"Error during RAG query on datastore {ss.name}: {e}"}]
 
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
+    discussion_obj.memory = db_user.memory
     rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
     
     use_rag = {}

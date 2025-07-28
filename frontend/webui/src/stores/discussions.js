@@ -35,6 +35,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const titleGenerationInProgressId = ref(null);
     const activeDiscussionContextStatus = ref(null);
     const activeAiTasks = ref({}); // Tracks running AI tasks per discussion: { [discussionId]: 'summarize' | 'memorize' }
+    const dataZonesTokenCount = ref(0);
+    let tokenizeDataZonesDebounceTimer = null;
+
 
     const sortedDiscussions = computed(() => {
         return Object.values(discussions.value).sort((a, b) => {
@@ -75,6 +78,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 uiStore.addNotification('Data zone summarized successfully.', 'success');
             } else if (zone === 'memory') {
                 discussion.memory = new_content;
+                const authStore = useAuthStore();
+                if (authStore.user) {
+                    authStore.user.memory = new_content;
+                }
                 uiStore.addNotification('Memorization complete.', 'success');
             }
         }
@@ -84,13 +91,33 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    onMounted(() => {
-        on('task:completed', handleTaskCompletion);
-    });
+    function initialize() {
+        onMounted(() => {
+            on('task:completed', handleTaskCompletion);
+        });
+    }
 
     function processMessages(rawMessages) {
         if (!Array.isArray(rawMessages)) return [];
         return rawMessages.map(msg => processSingleMessage(msg));
+    }
+
+    async function updateDataZonesTokenCount(combinedText) {
+        clearTimeout(tokenizeDataZonesDebounceTimer);
+        if (!combinedText || !combinedText.trim()) {
+            dataZonesTokenCount.value = 0;
+            return;
+        }
+
+        tokenizeDataZonesDebounceTimer = setTimeout(async () => {
+            try {
+                const response = await apiClient.post('/api/discussions/tokenize', { text: combinedText });
+                dataZonesTokenCount.value = response.data.tokens;
+            } catch (error) {
+                console.error("Data zone tokenization failed:", error);
+                dataZonesTokenCount.value = 0; // Reset on error
+            }
+        }, 750);
     }
 
     async function sendDiscussion({ discussionId, targetUsername }) {
@@ -186,16 +213,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const response = await apiClient.get('/api/discussions');
             const discussionData = response.data;
             if (!Array.isArray(discussionData)) return;
-            const loadedDiscussions = {};
-            discussionData.forEach(d => { 
-                loadedDiscussions[d.id] = { 
-                    ...d, 
-                    discussion_data_zone: '',
-                    personality_data_zone: '',
-                    memory: ''
+            const newDiscussions = {};
+            discussionData.forEach(d => {
+                const existingData = discussions.value[d.id] || {};
+                newDiscussions[d.id] = {
+                    ...d,
+                    discussion_data_zone: existingData.discussion_data_zone || '',
+                    personality_data_zone: existingData.personality_data_zone || '',
+                    memory: existingData.memory || ''
                 };
             });
-            discussions.value = loadedDiscussions;
+            discussions.value = newDiscussions;
         } catch (error) { console.error("Failed to load discussions:", error); }
     }
 
@@ -529,13 +557,40 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     async function deleteMessage({ messageId }) {
         if (!currentDiscussionId.value) return;
+        const discussionId = currentDiscussionId.value;
+        const uiStore = useUiStore();
+
+        // Find the index for optimistic update
+        const messageIndex = messages.value.findIndex(m => m.id === messageId);
+        if (messageIndex === -1) {
+            console.warn("Attempted to delete a message not in the current view. Re-fetching for safety.");
+            await selectDiscussion(discussionId);
+            return;
+        }
+
+        // 1. Optimistic UI Update
+        const oldMessages = [...messages.value];
+        // Remove the target message and all subsequent messages in the current branch view.
+        messages.value.splice(messageIndex);
+        
         try {
-            await apiClient.delete(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`);
-            await selectDiscussion(currentDiscussionId.value);
-            useUiStore().addNotification('Message and branch deleted.', 'success');
-            await fetchContextStatus(currentDiscussionId.value);
-        } catch(e) {}
+            // 2. API Call
+            await apiClient.delete(`/api/discussions/${discussionId}/messages/${messageId}`);
+            
+            // 3. Re-sync with backend state to handle any branch changes
+            // This also implicitly handles refreshing context status and data zones.
+            await selectDiscussion(discussionId); 
+
+            uiStore.addNotification('Message and branch deleted.', 'success');
+
+        } catch (error) {
+            console.error("Error deleting message:", error);
+            uiStore.addNotification('Failed to delete message. Reverting change.', 'error');
+            // 4. Rollback UI on failure
+            messages.value = oldMessages;
+        }
     }
+
 
     async function gradeMessage({ messageId, change }) {
         if (!currentDiscussionId.value) return;
@@ -629,6 +684,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         deleteMessage, initiateBranch, switchBranch, exportDiscussions,
         importDiscussions, sendDiscussion, $reset, activeDiscussionContextStatus, fetchContextStatus,
         fetchDataZones, updateDataZone, activePersonality,
-        summarizeDiscussionDataZone, memorizeLTM, activeAiTasks
+        summarizeDiscussionDataZone, memorizeLTM, activeAiTasks,
+        dataZonesTokenCount, updateDataZonesTokenCount,
+        initialize
     };
 });

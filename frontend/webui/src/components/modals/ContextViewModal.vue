@@ -1,101 +1,117 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
+import { storeToRefs } from 'pinia';
 import GenericModal from '../ui/GenericModal.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
+import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
+const { activeDiscussionContextStatus: contextStatus } = storeToRefs(discussionsStore);
 
-const contextStatus = computed(() => discussionsStore.activeDiscussionContextStatus);
+const formatZoneName = (name) => {
+    return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+};
 
-const systemContext = computed(() => contextStatus.value?.zones?.system_context);
-const messageHistory = computed(() => contextStatus.value?.zones?.message_history);
+const formatNumber = (num) => {
+    return num ? num.toLocaleString() : '0';
+};
 
-const systemBreakdown = computed(() => {
-    if (!systemContext.value?.breakdown) return [];
-    // Order matters for display
-    const order = ['system_prompt', 'pruning_summary', 'memory', 'user_data_zone', 'personality_data_zone', 'discussion_data_zone'];
-    return Object.entries(systemContext.value.breakdown)
-        .filter(([key, value]) => value && value.trim() !== '')
-        .sort((a, b) => {
-            const indexA = order.indexOf(a[0]);
-            const indexB = order.indexOf(b[0]);
-            if (indexA === -1) return 1;
-            if (indexB === -1) return -1;
-            return indexA - indexB;
-        });
+const totalTokens = computed(() => contextStatus.value?.current_tokens || 0);
+const maxTokens = computed(() => contextStatus.value?.max_tokens || 1);
+const totalPercentage = computed(() => {
+    if (maxTokens.value <= 0) return 0;
+    return (totalTokens.value / maxTokens.value) * 100;
+});
+const progressColorClass = computed(() => {
+    const percentage = totalPercentage.value;
+    if (percentage >= 90) return 'bg-red-500';
+    if (percentage >= 75) return 'bg-yellow-500';
+    return 'bg-blue-500';
 });
 
-function formatTitle(key) {
-    return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-}
+const sortedZones = computed(() => {
+    if (!contextStatus.value?.zones) return [];
+    return Object.entries(contextStatus.value.zones).sort(([keyA], [keyB]) => {
+        if (keyA === 'system_context') return -1;
+        if (keyB === 'system_context') return 1;
+        return 0;
+    });
+});
+
 </script>
 
 <template>
-  <GenericModal modalName="contextViewer" title="Context Breakdown" maxWidthClass="max-w-4xl">
-    <template #body>
-      <div v-if="!contextStatus" class="text-center text-gray-500">
-        Loading context information...
-      </div>
-      <div v-else class="space-y-4 text-sm">
-        <div class="flex justify-between items-baseline p-3 bg-gray-100 dark:bg-gray-700/50 rounded-lg">
-            <h3 class="font-semibold text-lg text-gray-800 dark:text-gray-100">Total Context</h3>
-            <p class="font-mono font-semibold text-lg">
-                <span class="text-blue-600 dark:text-blue-400">{{ contextStatus.current_tokens.toLocaleString() }}</span>
-                <span class="text-gray-400 dark:text-gray-500"> / </span>
-                <span class="text-gray-500 dark:text-gray-400">{{ (contextStatus.max_tokens || '∞').toLocaleString() }}</span>
-            </p>
-        </div>
-
-        <!-- System Context Section -->
-        <details v-if="systemContext" class="context-section" open>
-            <summary class="context-summary">
-                <span>System Context</span>
-                <span class="font-mono text-xs px-2 py-0.5 bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300 rounded-full">{{ systemContext.tokens.toLocaleString() }} tokens</span>
-            </summary>
-            <div class="context-content">
-                 <details v-for="([key, value]) in systemBreakdown" :key="key" class="context-section !border-l-2 !pl-4" open>
-                    <summary class="context-summary !py-1 !text-xs">
-                        <span>{{ formatTitle(key) }}</span>
-                    </summary>
-                    <div class="context-content">
-                        <CodeMirrorEditor :model-value="value" :options="{ readOnly: true }" class="text-xs" />
+    <GenericModal modal-name="contextViewer" title="Context Breakdown" maxWidthClass="max-w-4xl">
+        <template #body>
+            <div v-if="contextStatus" class="space-y-6">
+                <!-- Overall Progress Bar -->
+                <div>
+                    <div class="flex justify-between items-center mb-1 text-sm font-mono text-gray-700 dark:text-gray-300">
+                        <span>Total Tokens</span>
+                        <span>{{ formatNumber(totalTokens) }} / {{ formatNumber(maxTokens) }}</span>
                     </div>
-                </details>
+                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 relative overflow-hidden">
+                        <div class="h-full rounded-full transition-all duration-300" 
+                             :class="progressColorClass" 
+                             :style="{ width: `${Math.min(totalPercentage, 100)}%` }">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Zones -->
+                <div class="space-y-4">
+                    <details v-for="([zoneKey, zoneData]) in sortedZones" :key="zoneKey" class="bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg" open>
+                        <summary class="flex items-center justify-between p-3 cursor-pointer select-none">
+                            <div class="flex items-center gap-3">
+                                <IconChevronRight class="w-5 h-5 text-gray-500 transition-transform details-arrow" />
+                                <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ formatZoneName(zoneKey) }}</h3>
+                                <span v-if="zoneData.message_count" class="text-xs text-gray-500">({{ zoneData.message_count }} messages)</span>
+                            </div>
+                            <span class="font-mono text-sm text-gray-600 dark:text-gray-400">{{ formatNumber(zoneData.tokens) }} tokens</span>
+                        </summary>
+                        <div class="p-4 border-t dark:border-gray-700">
+                            <!-- Breakdown for System Context -->
+                            <div v-if="zoneData.breakdown" class="space-y-3">
+                                <details v-for="([breakdownKey, breakdownData]) in Object.entries(zoneData.breakdown)" :key="breakdownKey" class="bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-md">
+                                    <summary class="flex items-center justify-between p-2 cursor-pointer select-none">
+                                        <div class="flex items-center gap-2">
+                                            <IconChevronRight class="w-4 h-4 text-gray-400 transition-transform details-arrow" />
+                                            <h4 class="text-sm font-medium">{{ formatZoneName(breakdownKey) }}</h4>
+                                        </div>
+                                        <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ formatNumber(breakdownData.tokens) }} tokens</span>
+                                    </summary>
+                                    <div class="p-2 border-t dark:border-gray-600">
+                                        <CodeMirrorEditor :model-value="breakdownData.content" :options="{ readOnly: true }" class="text-xs max-h-60" />
+                                    </div>
+                                </details>
+                            </div>
+                            <!-- Full Content for other zones -->
+                            <CodeMirrorEditor v-else :model-value="zoneData.content" :options="{ readOnly: true }" class="text-xs max-h-96" />
+                        </div>
+                    </details>
+                </div>
             </div>
-        </details>
-        
-        <!-- Message History Section -->
-        <details v-if="messageHistory" class="context-section" open>
-            <summary class="context-summary">
-                <span>Message History ({{ messageHistory.message_count }} messages)</span>
-                <span class="font-mono text-xs px-2 py-0.5 bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300 rounded-full">{{ messageHistory.tokens.toLocaleString() }} tokens</span>
-            </summary>
-            <div class="context-content">
-                <CodeMirrorEditor :model-value="messageHistory.content" :options="{ readOnly: true }" class="text-xs" />
+            <div v-else class="text-center py-10">
+                <p class="text-gray-500">Context information is not available.</p>
             </div>
-        </details>
-      </div>
-    </template>
-    <template #footer>
-        <button @click="uiStore.closeModal('contextViewer')" class="btn btn-primary">Close</button>
-    </template>
-  </GenericModal>
+        </template>
+        <template #footer>
+            <button @click="uiStore.closeModal('contextViewer')" class="btn btn-primary">Close</button>
+        </template>
+    </GenericModal>
 </template>
 
 <style scoped>
-.context-section {
-    @apply border border-gray-200 dark:border-gray-700 rounded-lg;
+details > summary {
+  list-style: none;
 }
-.context-summary {
-    @apply flex justify-between items-center p-3 cursor-pointer list-none font-semibold text-gray-700 dark:text-gray-200 bg-gray-50 dark:bg-gray-700/30 rounded-t-lg;
+details > summary::-webkit-details-marker {
+  display: none;
 }
-details[open] > .context-summary {
-    @apply border-b border-gray-200 dark:border-gray-700;
-}
-.context-content {
-    @apply p-3;
+details[open] > summary .details-arrow {
+  transform: rotate(90deg);
 }
 </style>

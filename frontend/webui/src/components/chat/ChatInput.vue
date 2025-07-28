@@ -74,6 +74,7 @@ const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const availableRagStores = computed(() => dataStore.availableRagStores);
 const availableMcpTools = computed(() => dataStore.availableMcpToolsForSelector);
 const contextStatus = computed(() => discussionsStore.activeDiscussionContextStatus);
+const dataZonesTokenCount = computed(() => discussionsStore.dataZonesTokenCount);
 
 const isSendDisabled = computed(() => {
   return generationInProgress.value || (messageText.value.trim() === '' && uploadedImages.value.length === 0);
@@ -85,7 +86,8 @@ const showContextBar = computed(() => {
     return user.value.show_token_counter && user.value.user_ui_level >= 2;
 });
 
-const systemTokens = computed(() => contextStatus.value?.zones?.system_context?.tokens || 0);
+const baseSystemTokens = computed(() => contextStatus.value?.zones?.system_context?.breakdown?.system_prompt?.tokens || 0);
+const systemTokens = computed(() => baseSystemTokens.value + dataZonesTokenCount.value);
 const historyTokens = computed(() => contextStatus.value?.zones?.message_history?.tokens || 0);
 const maxTokens = computed(() => contextStatus.value?.max_tokens || 1);
 
@@ -111,11 +113,11 @@ const totalPercentage = computed(() => {
     return (totalCurrentTokens.value / maxTokens.value) * 100;
 });
 
-const progressColorClass = computed(() => {
+const progressBorderColorClass = computed(() => {
     const percentage = totalPercentage.value;
-    if (percentage >= 90) return 'bg-red-500';
-    if (percentage >= 75) return 'bg-yellow-500';
-    return 'bg-blue-500';
+    if (percentage >= 90) return 'border-red-500 dark:border-red-400';
+    if (percentage >= 75) return 'border-yellow-500 dark:border-yellow-400';
+    return 'border-gray-300 dark:border-gray-600';
 });
 
 const showContextWarning = computed(() => totalPercentage.value > 90);
@@ -445,10 +447,10 @@ function removeImage(index) {
                     <div class="flex items-center gap-1.5"><IconToken class="w-4 h-4" /><span><a @click.prevent="showContext" href="#" class="cursor-pointer hover:underline" title="View full context breakdown">Context</a>: {{ systemTokens.toLocaleString() }} + {{ historyTokens.toLocaleString() }} + {{ inputTokenCount.toLocaleString() }}</span></div>
                     <span>{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
                 </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden">
-                    <div class="absolute top-0 left-0 h-full transition-all duration-300 opacity-50" :class="progressColorClass" :style="{ width: `${Math.min(systemTokensPercentage, 100)}%` }" title="System & Data"></div>
-                    <div class="absolute top-0 h-full transition-all duration-300 opacity-75" :class="progressColorClass" :style="{ left: `${Math.min(systemTokensPercentage, 100)}%`, width: `${Math.min(historyTokensPercentage, 100)}%` }" title="Message History"></div>
-                    <div class="absolute top-0 h-full transition-all duration-300" :class="progressColorClass" :style="{ left: `${Math.min(systemTokensPercentage + historyTokensPercentage, 100)}%`, width: `${Math.min(inputTokensPercentage, 100)}%` }" title="Current Input"></div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden border transition-colors duration-300" :class="progressBorderColorClass">
+                    <div class="progress-segment bg-blue-500 opacity-50" :style="{ width: `${Math.min(systemTokensPercentage, 100)}%` }" title="System & Data"></div>
+                    <div class="progress-segment bg-green-500 opacity-75" :style="{ left: `${Math.min(systemTokensPercentage, 100)}%`, width: `${Math.min(historyTokensPercentage, 100)}%` }" title="Message History"></div>
+                    <div class="progress-segment bg-purple-500" :style="{ left: `${Math.min(systemTokensPercentage + historyTokensPercentage, 100)}%`, width: `${Math.min(inputTokensPercentage, 100)}%` }" title="Current Input"></div>
                 </div>
                 <p v-if="showContextWarning" class="mt-1.5 text-xs text-center" :class="totalPercentage > 100 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'">{{ contextWarningMessage }}</p>
             </div>
@@ -457,13 +459,13 @@ function removeImage(index) {
                 <div v-if="uploadedImages.length > 0 || isUploading" class="mb-2 p-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md">
                     <div class="flex flex-wrap gap-2">
                         <div v-for="(image, index) in uploadedImages" :key="image.server_path" class="relative w-16 h-16"><img :src="image.local_url" class="w-full h-full object-cover rounded-md" alt="Image preview" /><button @click="removeImage(index)" class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold leading-none">×</button></div>
-                        <div v-if="isUploading" class="w-16 h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center"><IconAnimateSpin class="h-6 w-6 text-gray-500" /></div>
+                        <div v-if="isUploading" class="w-16 h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center"><IconAnimateSpin class="h-6 w-6 text-gray-500 animate-spin" /></div>
                     </div>
                 </div>
                 <input type="file" ref="imageInput" @change="handleImageSelection" multiple accept="image/*" class="hidden">
                 
                 <div v-if="generationInProgress" class="flex flex-row items-center justify-between p-2 h-[60px]">
-                    <div class="flex items-center space-x-3"><IconAnimateSpin class="h-6 w-6 text-blue-500" /><p class="text-sm font-semibold text-gray-600 dark:text-gray-300">Working...</p></div>
+                    <div class="flex items-center space-x-3"><IconAnimateSpin class="h-6 w-6 text-blue-500 animate-spin" /><p class="text-sm font-semibold text-gray-600 dark:text-gray-300">Working...</p></div>
                     <button @click="discussionsStore.stopGeneration" class="btn btn-danger !py-1 !px-3">Stop Generation</button>
                 </div>
                 
@@ -542,4 +544,5 @@ function removeImage(index) {
 .dark .cm-editor-container .cm-editor { border-color: theme('colors.gray.600'); }
 .cm-editor-container .cm-editor.cm-focused { border-color: theme('colors.blue.500'); box-shadow: 0 0 0 1px theme('colors.blue.500'); }
 .cm-editor-container .cm-scroller { overflow-y: auto; }
+.progress-segment { @apply absolute top-0 h-full transition-all duration-300 ease-out; }
 </style>

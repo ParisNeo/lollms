@@ -36,10 +36,14 @@ class DiscussionRagDatastoreUpdate(BaseModel):
 class DiscussionToolsUpdate(BaseModel):
     tools: List[str]
 
+class ContextBreakdownItem(BaseModel):
+    content: str
+    tokens: int
+
 class ContextZoneDetail(BaseModel):
     content: str
     tokens: int
-    breakdown: Optional[Dict[str, str]] = None
+    breakdown: Optional[Dict[str, ContextBreakdownItem]] = None
     message_count: Optional[int] = None
 
 class ContextStatusResponse(BaseModel):

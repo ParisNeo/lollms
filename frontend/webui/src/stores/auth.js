@@ -300,8 +300,6 @@ export const useAuthStore = defineStore('auth', () => {
         if (!isAuthenticated.value) return;
         try {
             const response = await apiClient.put('/api/auth/me/data-zone', { content });
-            // FIX: Use Object.assign to merge updates into the existing reactive user object,
-            // which is safer than replacing the whole object.
             if (user.value) {
                 Object.assign(user.value, response.data);
             } else {
@@ -317,15 +315,13 @@ export const useAuthStore = defineStore('auth', () => {
         if (!isAuthenticated.value) return;
         try {
             const response = await apiClient.put('/api/auth/me/memory', { content });
-            // FIX: Use Object.assign to merge updates into the existing reactive user object,
-            // which is safer than replacing the whole object.
             if (user.value) {
                 Object.assign(user.value, response.data);
             } else {
                 user.value = response.data;
             }
         } catch (error) {
-            useUiStore().addNotification('Failed to save data zone.', 'error');
+            useUiStore().addNotification('Failed to save memory.', 'error');
             throw error;
         }
     }
