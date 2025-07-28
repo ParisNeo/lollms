@@ -55,7 +55,7 @@ from backend.session import (
 from backend.discussion import get_user_discussion_manager, get_user_discussion
 from backend.config import APP_VERSION, SERVER_CONFIG
 from backend.task_manager import task_manager, Task
-
+from backend.session import get_current_db_user_from_token
 # safe_store is needed for RAG callbacks
 try:
     import safe_store
@@ -99,8 +99,10 @@ def _summarize_data_zone_task(task: Task, username: str, discussion_id: str):
     task.log("Summary complete and saved.")
     return {"discussion_id": discussion_id, "new_content": summary, "zone": "discussion"}
 
-def _memorize_ltm_task(task: Task, username: str, discussion_id: str):
+def _memorize_ltm_task(task: Task, username: str, discussion_id: str, db:Session):
     task.log("Starting long-term memory memorization task...")
+    db_user = db.query(DBUser).filter(DBUser.username == username).first()
+    
     discussion = get_user_discussion(username, discussion_id)
     if not discussion:
         raise ValueError("Discussion not found.")
@@ -109,6 +111,15 @@ def _memorize_ltm_task(task: Task, username: str, discussion_id: str):
     discussion.memorize()
     discussion.commit()
     task.set_progress(100)
+    db_user.memory = discussion.memory
+    try:
+        db.commit()
+        db.refresh(db_user)
+    except Exception as e:
+        trace_exception(e)
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    
     task.log("Memorization complete and saved.")
     return {"discussion_id": discussion_id, "new_content": discussion.memory, "zone": "memory"}
 
@@ -250,7 +261,7 @@ def get_all_data_zones(
         raise HTTPException(status_code=404, detail="Discussion not found")
     
     db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    
+    discussion.memory = db_user.memory
     return DataZones(
         user_data_zone=db_user.data_zone if db_user else "",
         discussion_data_zone=discussion.discussion_data_zone,
@@ -309,8 +320,10 @@ def summarize_discussion_data_zone(
 @discussion_router.post("/{discussion_id}/memorize", response_model=TaskInfo, status_code=202)
 def memorize_ltm(
     discussion_id: str,
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)    
 ):
+    
     discussion = get_user_discussion(current_user.username, discussion_id)
     if not discussion:
         raise HTTPException(status_code=404, detail="Discussion not found")
@@ -318,7 +331,7 @@ def memorize_ltm(
     db_task = task_manager.submit_task(
         name=f"Memorize LTM for: {discussion.metadata.get('title', 'Untitled')}",
         target=_memorize_ltm_task,
-        args=(current_user.username, discussion_id),
+        args=(current_user.username, discussion_id, db),
         description="AI is analyzing the conversation to extract key facts for long-term memory.",
         owner_username=current_user.username
     )
