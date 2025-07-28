@@ -38,6 +38,7 @@ from ascii_colors import ASCIIColors, trace_exception
 # Local Application Imports
 from backend.db import get_db
 from backend.db.models.user import User as DBUser, UserStarredDiscussion, UserMessageGrade
+from backend.db.models.db_task import DBTask
 from backend.db.models.personality import Personality as DBPersonality
 from backend.models import (
     UserAuthDetails, DiscussionInfo, DiscussionTitleUpdate,
@@ -65,6 +66,19 @@ except ImportError:
 message_grade_lock = threading.Lock()
 
 discussion_router = APIRouter(prefix="/api/discussions", tags=["Discussions"])
+
+def _to_task_info(db_task: DBTask) -> TaskInfo:
+    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
+    if not db_task:
+        return None
+    return TaskInfo(
+        id=db_task.id, name=db_task.name, description=db_task.description,
+        status=db_task.status, progress=db_task.progress,
+        logs=[log for log in (db_task.logs or [])], result=db_task.result, error=db_task.error,
+        created_at=db_task.created_at, started_at=db_task.started_at, completed_at=db_task.completed_at,
+        file_name=db_task.file_name, total_files=db_task.total_files,
+        owner_username=db_task.owner.username if db_task.owner else "System"
+    )
 
 # --- Task Functions ---
 def _summarize_data_zone_task(task: Task, username: str, discussion_id: str):
@@ -289,7 +303,7 @@ def summarize_discussion_data_zone(
         description=f"AI is summarizing the discussion data zone content.",
         owner_username=current_user.username
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 
 @discussion_router.post("/{discussion_id}/memorize", response_model=TaskInfo, status_code=202)
@@ -308,7 +322,7 @@ def memorize_ltm(
         description="AI is analyzing the conversation to extract key facts for long-term memory.",
         owner_username=current_user.username
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 
 @discussion_router.post("/prune", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
@@ -324,7 +338,7 @@ async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_cu
         description="Scans and deletes discussions with 0 or 1 message.",
         owner_username=current_user.username
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 
 @discussion_router.post("/{discussion_id}/auto-title", response_model=DiscussionInfo)

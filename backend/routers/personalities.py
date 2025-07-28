@@ -17,6 +17,7 @@ from sqlalchemy import or_, and_
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
+from backend.db.models.db_task import DBTask
 from backend.models import (
     UserAuthDetails, PersonalityPublic, PersonalityCreate,
     PersonalityUpdate, PersonalitySendRequest,
@@ -33,6 +34,19 @@ from backend.settings import settings
 
 personalities_router = APIRouter(prefix="/api/personalities", tags=["Personalities"])
 
+def _to_task_info(db_task: DBTask) -> TaskInfo:
+    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
+    if not db_task:
+        return None
+    return TaskInfo(
+        id=db_task.id, name=db_task.name, description=db_task.description,
+        status=db_task.status, progress=db_task.progress,
+        logs=[log for log in (db_task.logs or [])], result=db_task.result, error=db_task.error,
+        created_at=db_task.created_at, started_at=db_task.started_at, completed_at=db_task.completed_at,
+        file_name=db_task.file_name, total_files=db_task.total_files,
+        owner_username=db_task.owner.username if db_task.owner else "System"
+    )
+    
 # --- Task for Personality Generation ---
 def _generate_personality_task(task: Task, username: str, prompt: str):
     task.log("Starting personality generation...")
@@ -146,7 +160,7 @@ async def generate_personality_from_prompt(
         description=f"Generating personality from prompt: '{payload.prompt[:50]}...'",
         owner_username=current_user.username
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 # --- Prompt Enhancement Endpoint ---
 @personalities_router.post("/enhance_prompt", response_model=TaskInfo, status_code=202)
@@ -167,7 +181,7 @@ async def enhance_personality_prompt(
         description="Enhancing personality system prompt.",
         owner_username=current_user.username
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 
 def get_personality_public_from_db(db_personality: DBPersonality, owner_username: Optional[str] = None) -> PersonalityPublic:

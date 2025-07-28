@@ -17,7 +17,7 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.config import GlobalConfig as DBGlobalConfig, LLMBinding as DBLLMBinding
 from backend.security import get_password_hash as hash_password
 
-
+from backend.db.models.db_task import DBTask
 from backend.models import (
     UserAuthDetails,
     UserCreateAdmin,
@@ -56,6 +56,19 @@ from backend.task_manager import task_manager, Task
 
 
 admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependencies=[Depends(get_current_admin_user)])
+
+def _to_task_info(db_task: DBTask) -> TaskInfo:
+    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
+    if not db_task:
+        return None
+    return TaskInfo(
+        id=db_task.id, name=db_task.name, description=db_task.description,
+        status=db_task.status, progress=db_task.progress,
+        logs=[log for log in (db_task.logs or [])], result=db_task.result, error=db_task.error,
+        created_at=db_task.created_at, started_at=db_task.started_at, completed_at=db_task.completed_at,
+        file_name=db_task.file_name, total_files=db_task.total_files,
+        owner_username=db_task.owner.username if db_task.owner else "System"
+    )
 
 # --- Task Functions ---
 def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, background_color: Optional[str], send_as_text: bool):
@@ -345,7 +358,7 @@ async def email_users(
         description=f"Sending email with subject: '{payload.subject}'",
         owner_username=current_admin.username
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 @admin_router.post("/purge-unused-uploads", response_model=TaskInfo, status_code=202)
 async def purge_temp_files(current_admin: UserAuthDetails = Depends(get_current_admin_user)):
@@ -358,7 +371,7 @@ async def purge_temp_files(current_admin: UserAuthDetails = Depends(get_current_
         description="Scans all user temporary upload folders and deletes files older than 24 hours.",
         owner_username=current_admin.username
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 
 @admin_router.post("/enhance-email", response_model=EnhancedEmailResponse)

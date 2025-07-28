@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from backend.db import get_db
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp
+from backend.db.models.db_task import DBTask
 from backend.models import (
     AppZooRepositoryCreate, AppZooRepositoryPublic, ZooAppInfo, 
     AppInstallRequest, AppPublic, AppActionResponse, TaskInfo,
@@ -36,6 +37,19 @@ apps_management_router = APIRouter(
     tags=["Apps Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
+
+def _to_task_info(db_task: DBTask) -> TaskInfo:
+    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
+    if not db_task:
+        return None
+    return TaskInfo(
+        id=db_task.id, name=db_task.name, description=db_task.description,
+        status=db_task.status, progress=db_task.progress,
+        logs=[log for log in (db_task.logs or [])], result=db_task.result, error=db_task.error,
+        created_at=db_task.created_at, started_at=db_task.started_at, completed_at=db_task.completed_at,
+        file_name=db_task.file_name, total_files=db_task.total_files,
+        owner_username=db_task.owner.username if db_task.owner else "System"
+    )
 
 ZOO_ROOT_PATH = APP_DATA_DIR / ZOO_DIR_NAME
 ZOO_ROOT_PATH.mkdir(parents=True, exist_ok=True)
@@ -390,7 +404,7 @@ def pull_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
         args=(repo_id,),
         description=f"Updating local copy of '{repo.name}' from '{repo.url}'."
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 
 def _get_zoo_apps_metadata():
@@ -569,7 +583,7 @@ def install_zoo_app(request: AppInstallRequest):
         args=(request.repository, request.folder_name, request.port, request.autostart),
         description=f"Installing from repository '{request.repository}'."
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 
 # --- Installed App Management ---
@@ -612,7 +626,7 @@ def start_app(app_id: str, db: Session = Depends(get_db)):
         args=(app_id,),
         description=f"Starting the application '{app.name}' on port {app.port}."
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 # MODIFIED: stop_app is now a task-based endpoint
 @apps_management_router.post("/installed-apps/{app_id}/stop", response_model=TaskInfo, status_code=202)
@@ -630,7 +644,7 @@ def stop_app(app_id: str, db: Session = Depends(get_db)):
         args=(app_id,),
         description=f"Stopping the application '{app.name}'."
     )
-    return TaskInfo.from_orm(db_task)
+    return _to_task_info(db_task)
 
 
 @apps_management_router.put("/installed-apps/{app_id}", response_model=AppPublic)

@@ -13,7 +13,6 @@ from fastapi import (
     UploadFile,
     Form,
     APIRouter,
-    BackgroundTasks,
     status
 )
 from fastapi.responses import (
@@ -42,7 +41,7 @@ from backend.models import (
     TaskInfo
 )
 from backend.session import get_datastore_db_path
-
+from backend.db.models.db_task import DBTask
 # safe_store is expected to be installed
 try:
     import safe_store
@@ -62,7 +61,23 @@ from backend.session import (
 from backend.task_manager import task_manager, Task
 
 
+
+
 # --- Task Functions ---
+def _to_task_info(db_task: DBTask) -> TaskInfo:
+    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
+    if not db_task:
+        return None
+    return TaskInfo(
+        id=db_task.id, name=db_task.name, description=db_task.description,
+        status=db_task.status, progress=db_task.progress,
+        logs=[log for log in (db_task.logs or [])], result=db_task.result, error=db_task.error,
+        created_at=db_task.created_at, started_at=db_task.started_at, completed_at=db_task.completed_at,
+        file_name=db_task.file_name, total_files=db_task.total_files,
+        owner_username=db_task.owner.username if db_task.owner else "System"
+    )
+
+
 def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_paths: List[str], vectorizer_name: str):
     db = next(get_db())
     ss = None
@@ -164,7 +179,6 @@ async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDe
 @store_files_router.post("/revectorize", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def revectorize_datastore(
     datastore_id: str,
-    background_tasks: BackgroundTasks,
     vectorizer_name: str = Form(...),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -182,15 +196,14 @@ async def revectorize_datastore(
             if not (vectorizer_name in all_vectorizers or vectorizer_name.startswith("st:") or vectorizer_name.startswith("tfidf:")):
                  raise HTTPException(status_code=400, detail=f"Vectorizer '{vectorizer_name}' not found or invalid format.")
             
-            task = task_manager.submit_task(
+            db_task = task_manager.submit_task(
                 name=f"Revectorize DataStore: {datastore_record.name}",
                 target=_revectorize_datastore_task,
                 args=(current_user.username, datastore_id, vectorizer_name),
                 description=f"Revectorizing all documents in '{datastore_record.name}' with '{vectorizer_name}'.",
                 owner_username=current_user.username
             )
-            background_tasks.add_task(task.run)
-            return TaskInfo(**task.__dict__)
+            return _to_task_info(db_task)
 
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
@@ -201,7 +214,6 @@ async def revectorize_datastore(
 @store_files_router.post("/upload-files", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED) 
 async def upload_rag_documents_to_datastore(
     datastore_id: str,
-    background_tasks: BackgroundTasks,
     files: List[UploadFile] = File(...),
     vectorizer_name: str = Form(...),
     current_user: UserAuthDetails = Depends(get_current_active_user),
@@ -231,15 +243,14 @@ async def upload_rag_documents_to_datastore(
             raise HTTPException(status_code=500, detail=f"Failed to save file {s_filename}: {e}")
         finally: await file_upload.close()
 
-    task = task_manager.submit_task(
+    db_task = task_manager.submit_task(
         name=f"Add files to DataStore: {datastore_record.name}",
         target=_upload_rag_files_task,
         args=(current_user.username, datastore_id, saved_file_paths, vectorizer_name),
         description=f"Vectorizing and adding {len(files)} files to the '{datastore_record.name}' DataStore.",
         owner_username=current_user.username
     )
-    background_tasks.add_task(task.run)
-    return TaskInfo(**task.__dict__)
+    return _to_task_info(db_task)
 
 @store_files_router.get("/files", response_model=List[SafeStoreDocumentInfo])
 async def list_rag_documents_in_datastore(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[SafeStoreDocumentInfo]:
@@ -391,7 +402,7 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreBase, current_
 
 
 @datastore_router.delete("/{datastore_id}", status_code=status.HTTP_200_OK)
-async def delete_datastore(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db), background_tasks: BackgroundTasks = BackgroundTasks()) -> Dict[str, str]:
+async def delete_datastore(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
     
@@ -413,6 +424,9 @@ async def delete_datastore(datastore_id: str, current_user: UserAuthDetails = De
         if owner_username in user_sessions and datastore_id in user_sessions[owner_username].get("safe_store_instances", {}):
             del user_sessions[owner_username]["safe_store_instances"][datastore_id]
         
+        # Using background tasks for file deletion is safer for responsiveness
+        from fastapi import BackgroundTasks
+        background_tasks = BackgroundTasks()
         background_tasks.add_task(shutil.rmtree, ds_docs_path, ignore_errors=True)
         background_tasks.add_task(ds_file_path.unlink, missing_ok=True)
         background_tasks.add_task(ds_lock_file_path.unlink, missing_ok=True)
