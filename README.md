@@ -143,32 +143,6 @@ This project aims to provide a self-hostable, user-friendly chat interface that 
 *   **Swagger UI:** `http://localhost:9642/docs`
 *   **ReDoc:** `http://localhost:9642/redoc`
 
-## 📁 Folder Structure
-
-```text
-📁 lollms_chat/
-├─ 📁 data/                  # User data, DBs (created automatically)
-│  ├─ 📄 app_main.db         # Central SQLite DB
-│  └─ 📁 <username>/         # Per-user data
-│     ├─ 📁 discussions/
-│     ├─ 📁 discussion_assets/
-│     ├─ 📁 safestores/       # RAG DataStore DBs
-│     └─ 📁 temp_uploads/
-├─ 📁 locales/               # i18n JSON files
-├─ 📄 .gitignore
-├─ 📄 admin.html
-├─ 📄 config.toml
-├─ 📄 config_example.toml
-├─ 📄 database_setup.py      # SQLAlchemy models & DB init
-├─ 📄 index.html             # Main chat UI
-├─ 📄 LICENSE
-├─ 📄 main.js                # Frontend JavaScript
-├─ 📄 main.py                # FastAPI application
-├─ 📄 README.md              # This file
-├─ 📄 requirements.txt
-└─ 📄 style.css              # Custom CSS
-```
-
 ## 🤝 Contributing
 
 Contributions are welcome! Please open an issue or submit a pull request.
