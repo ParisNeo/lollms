@@ -7,7 +7,7 @@ One tool to rule them all!
 <!-- Add build status badge if CI is set up -->
 <!-- [![Build Status](https://img.shields.io/your_ci_badge_url)](your_ci_link) -->
 
-A multi-user FastAPI backend and responsive HTML/Tailwind CSS frontend application designed to provide a chat interface powered by the [`lollms-client`](https://github.com/ParisNeo/lollms-client) library. It features integrated Retrieval-Augmented Generation (RAG) using [`safe_store`](https://github.com/ParisNeo/safe_store), MCPs, Personalities system, multimodal chat, user personalities, a friend system, direct messaging, and enhanced sharing capabilities.
+A multi-user FastAPI backend and responsive HTML/Tailwind CSS frontend application designed to provide a chat interface powered by the [`lollms_client`](https://github.com/ParisNeo/lollms_client) library. It features integrated Retrieval-Augmented Generation (RAG) using [`safe_store`](https://github.com/ParisNeo/safe_store), MCPs, Personalities system, multimodal chat, user personalities, a friend system, direct messaging, and enhanced sharing capabilities.
 
 **Live Project:** [https://github.com/ParisNeo/lollms](https://github.com/ParisNeo/lollms)
 
