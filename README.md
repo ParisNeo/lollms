@@ -93,7 +93,7 @@ This project aims to provide a self-hostable, user-friendly chat interface that 
 *   An LLM backend accessible via `lollms-client`.
 
 ### Installation
-
+#### Manual installation
 1.  **Clone:**
     ```bash
     git clone https://github.com/ParisNeo/lollms_chat.git
@@ -116,8 +116,11 @@ This project aims to provide a self-hostable, user-friendly chat interface that 
     *   Review other settings.
 5.  **Run:**
     ```bash
-    uvicorn main:app --host 0.0.0.0 --port 9642
+    python main.py
     ```
+#### Automatic installation
+1. ** Windows ** execute install.bat
+2. ** Linux/MazcOs ** execute install.sh
 
 ### Usage
 
