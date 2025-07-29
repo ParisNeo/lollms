@@ -18,7 +18,7 @@ This project aims to provide a self-hostable, user-friendly chat interface that 
 ## ✨ Features
 
 *   **Multi-User Support:** Secure login via Token based authentication. Each user has their own isolated data.
-*   **Persistent Discussions:** Chat histories are saved per user (YAML files) and can be revisited, renamed, starred, and deleted.
+*   **Persistent Discussions:** Chat histories are saved per user (LightSQL3 database) and can be revisited, renamed, starred, and deleted.
 *   **LLM Integration:** Uses `lollms-client` to interact with various LLM backends.
 *   **Streaming Responses:** AI responses are streamed for a real-time experience.
 *   **Multimodal Chat:** Upload images with text prompts for vision-capable models.
