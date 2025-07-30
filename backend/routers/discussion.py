@@ -98,7 +98,7 @@ def _summarize_data_zone_task(task: Task, username: str, discussion_id: str, con
             task.set_progress(int(params['progress']))
 
     lc = get_user_lollms_client(username)
-    summary = lc.summarize(
+    summary = lc.long_context_processing(
         discussion.discussion_data_zone,
         contextual_prompt=contextual_prompt,
         streaming_callback=summary_callback
