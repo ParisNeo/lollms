@@ -330,7 +330,7 @@ async function exportDataZone() {
                             </div>
                         </div>
                         <div class="flex justify-end mt-4">
-                            <button @click="openSummaryPromptModal" class="btn btn-secondary btn-sm w-full" :disabled="isSummarizing || !discussionDataZone.trim()"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isSummarizing}"/>Process Content...</button>
+                            <button @click="openSummaryPromptModal" class="btn btn-secondary btn-sm w-full"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isSummarizing}"/>Process Content...</button>
                         </div>
                     </div>
                     <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-model="discussionDataZone" class="h-full" /></div>

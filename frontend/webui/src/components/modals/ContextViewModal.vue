@@ -6,10 +6,12 @@ import { storeToRefs } from 'pinia';
 import GenericModal from '../ui/GenericModal.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
-const { activeDiscussionContextStatus: contextStatus } = storeToRefs(discussionsStore);
+const { activeDiscussionContextStatus: contextStatus, activeDiscussion } = storeToRefs(discussionsStore);
+const isRefreshing = ref(false);
 
 const formatZoneName = (name) => {
     return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
@@ -41,6 +43,16 @@ const sortedZones = computed(() => {
     });
 });
 
+async function refreshContext() {
+    if (discussionsStore.activeDiscussion && !isRefreshing.value) {
+        isRefreshing.value = true;
+        try {
+            await discussionsStore.fetchContextStatus(discussionsStore.activeDiscussion.id);
+        } finally {
+            isRefreshing.value = false;
+        }
+    }
+}
 </script>
 
 <template>
@@ -99,7 +111,13 @@ const sortedZones = computed(() => {
             </div>
         </template>
         <template #footer>
-            <button @click="uiStore.closeModal('contextViewer')" class="btn btn-primary">Close</button>
+            <div class="flex justify-between items-center w-full">
+                <button @click="refreshContext" class="btn btn-secondary" :disabled="isRefreshing">
+                    <IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshing}" />
+                    {{ isRefreshing ? 'Refreshing...' : 'Refresh' }}
+                </button>
+                <button @click="uiStore.closeModal('contextViewer')" class="btn btn-primary">Close</button>
+            </div>
         </template>
     </GenericModal>
 </template>
