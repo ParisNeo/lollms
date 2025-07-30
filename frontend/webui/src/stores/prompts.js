@@ -69,6 +69,50 @@ export const usePromptsStore = defineStore('prompts', () => {
         }
     }
 
+    async function exportPrompts() {
+        try {
+            const response = await apiClient.get('/api/prompts/export');
+            const dataStr = JSON.stringify(response.data, null, 2);
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'lollms_prompts_export.json';
+            a.click();
+            URL.revokeObjectURL(url);
+            uiStore.addNotification('Prompts exported successfully!', 'success');
+        } catch (error) {
+            console.error("Failed to export prompts:", error);
+        }
+    }
+
+    async function importPrompts(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    const importData = JSON.parse(event.target.result);
+                    if (!importData || !Array.isArray(importData.prompts)) {
+                        throw new Error("Invalid import file format.");
+                    }
+                    const response = await apiClient.post('/api/prompts/import', importData);
+                    await fetchPrompts(); // Refresh list
+                    uiStore.addNotification(response.data.message, 'success');
+                    resolve();
+                } catch (error) {
+                    const message = error.response?.data?.detail || error.message || 'Failed to import prompts.';
+                    uiStore.addNotification(message, 'error');
+                    reject(error);
+                }
+            };
+            reader.onerror = (error) => {
+                uiStore.addNotification('Failed to read import file.', 'error');
+                reject(error);
+            };
+            reader.readAsText(file);
+        });
+    }
+
     return {
         savedPrompts,
         isLoading,
@@ -77,5 +121,7 @@ export const usePromptsStore = defineStore('prompts', () => {
         updatePrompt,
         deletePrompt,
         sharePrompt,
+        exportPrompts,
+        importPrompts,
     };
 });

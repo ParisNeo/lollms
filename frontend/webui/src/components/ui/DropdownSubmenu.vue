@@ -7,22 +7,32 @@
     </div>
 
     <Teleport to="body">
-      <div
-        v-if="isOpen"
-        ref="menuRef"
-        :style="menuStyle"
-        @mouseenter="openSubmenu" 
-        @mouseleave="closeSubmenu"
-        class="fixed z-50 p-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg min-w-max max-h-[80vh] overflow-y-auto"
+      <Transition
+        enter-active-class="transition ease-out duration-100"
+        enter-from-class="transform opacity-0 scale-95"
+        enter-to-class="transform opacity-100 scale-100"
+        leave-active-class="transition ease-in duration-75"
+        leave-from-class="transform opacity-100 scale-100"
+        leave-to-class="transform opacity-0 scale-95"
       >
-        <slot></slot>
-      </div>
+        <div
+          v-if="isOpen"
+          ref="menuRef"
+          :style="floatingStyles"
+          @mouseenter="cancelClose" 
+          @mouseleave="closeSubmenu"
+          class="fixed z-50 p-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg min-w-max max-h-[80vh] overflow-y-auto"
+        >
+          <slot></slot>
+        </div>
+      </Transition>
     </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, nextTick, onMounted, onUnmounted } from 'vue';
+import { ref, inject, provide } from 'vue';
+import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import EditorIcon from './EditorIcon.vue';
 
 const props = defineProps({
@@ -32,36 +42,38 @@ const props = defineProps({
 });
 
 const isOpen = ref(false);
-const timer = ref(null);
+let closeTimer = null;
 const triggerRef = ref(null);
 const menuRef = ref(null);
-const menuStyle = reactive({
-    top: '0px',
-    left: '0px',
-    visibility: 'hidden',
+
+// Inject context from parent menu
+const parentContext = inject('dropdown-context', { cancelClose: () => {} });
+
+const { floatingStyles } = useFloating(triggerRef, menuRef, {
+  placement: 'right-start',
+  middleware: [offset({ mainAxis: -4, crossAxis: -5 }), flip(), shift({ padding: 5 })],
+  whileElementsMounted: autoUpdate,
 });
 
-const updatePosition = () => {
-    if (!triggerRef.value) return;
-    const rect = triggerRef.value.getBoundingClientRect();
-    menuStyle.top = `${rect.top + window.scrollY}px`;
-    menuStyle.left = `${rect.right + window.scrollX + 4}px`;
-    menuStyle.visibility = 'visible';
-};
-
 const openSubmenu = () => {
-    if (timer.value) clearTimeout(timer.value);
+    parentContext.cancelClose(); // Prevent parent from closing
+    if (closeTimer) clearTimeout(closeTimer);
     isOpen.value = true;
-    menuStyle.visibility = 'hidden';
-    nextTick(updatePosition);
 };
 
 const closeSubmenu = () => {
-    timer.value = setTimeout(() => {
+    closeTimer = setTimeout(() => {
         isOpen.value = false;
     }, 200);
 };
 
-onMounted(() => window.addEventListener('resize', closeSubmenu));
-onUnmounted(() => window.removeEventListener('resize', closeSubmenu));
+const cancelClose = () => {
+    parentContext.cancelClose(); // Also prevent parent from closing
+    if (closeTimer) clearTimeout(closeTimer);
+};
+
+// Provide context for any nested submenus
+provide('dropdown-context', {
+  cancelClose
+});
 </script>

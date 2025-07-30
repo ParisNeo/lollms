@@ -32,6 +32,7 @@ import InteractiveOutputModal from './components/modals/InteractiveOutputModal.v
 import ShareDiscussionModal from './components/modals/ShareDiscussionModal.vue';
 import ResetPasswordModal from './components/modals/ResetPasswordModal.vue';
 import EmailAllUsersModal from './components/modals/EmailAllUsersModal.vue';
+import EmailListModal from './components/modals/EmailListModal.vue';
 import EmailUserModal from './components/modals/EmailUserModal.vue';
 import InsertImageModal from './components/modals/InsertImageModal.vue';
 import NewApiKeyModal from './components/modals/NewApiKeyModal.vue'; 
@@ -44,7 +45,8 @@ import GeneratePersonalityModal from './components/modals/GeneratePersonalityMod
 import TasksManagerModal from './components/modals/TasksManagerModal.vue';
 import EnhancePersonalityPromptModal from './components/modals/EnhancePersonalityPromptModal.vue';
 import ContextViewModal from './components/modals/ContextViewModal.vue';
-import SummaryPromptModal from './components/modals/SummaryPromptModal.vue';
+import DataZonePromptManagementModal from './components/modals/DataZonePromptManagementModal.vue';
+import FillPlaceholdersModal from './components/modals/FillPlaceholdersModal.vue'; // <-- ADDED IMPORT
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -124,26 +126,32 @@ onMounted(async () => {
     <PersonalityEditorModal v-if="activeModal === 'personalityEditor'" />
     <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
+    <ConfirmationModal v-if="activeModal === 'confirmation'" />
+    <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <SourceModal v-if="activeModal === 'sourceViewer'" />
-    <ContextViewModal v-if="activeModal === 'contextViewer'" />
+    <NotificationPanel />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
-    <ShareDiscussionModal v-if="activeModal === 'shareDiscussion'" />
     <ExportModal v-if="activeModal === 'export'" />
     <ImportModal v-if="activeModal === 'import'" />
     <InteractiveOutputModal v-if="activeModal === 'interactiveOutput'" />
+    <ShareDiscussionModal v-if="activeModal === 'shareDiscussion'" />
+    <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     <EmailAllUsersModal v-if="activeModal === 'emailAllUsers'" />
+    <EmailListModal v-if="activeModal === 'emailList'" />
     <EmailUserModal v-if="activeModal === 'adminUserEmail'" />
     <InsertImageModal v-if="activeModal === 'insertImage'" />
     <NewApiKeyModal v-if="activeModal === 'newApiKey'" />
+    <WhatsNextModal v-if="activeModal === 'whatsNext'" />
     <AppInstallModal v-if="activeModal === 'appInstall'" />
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
     <AppConfigModal v-if="activeModal === 'appConfig'" />
-    <WhatsNextModal v-if="activeModal === 'whatsNext'" />
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> 
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
-    <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
     <TasksManagerModal v-if="activeModal === 'tasksManager'" />
-    <SummaryPromptModal v-if="activeModal === 'summaryPromptModal'" />
+    <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
+    <ContextViewModal v-if="activeModal === 'contextViewer'" />
+    <DataZonePromptManagementModal v-if="activeModal === 'dataZonePromptManagement'" />
+    <FillPlaceholdersModal v-if="activeModal === 'fillPlaceholders'" /> <!-- <-- ADDED COMPONENT -->
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

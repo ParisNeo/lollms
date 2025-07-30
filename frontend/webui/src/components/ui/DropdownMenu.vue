@@ -1,7 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, provide } from 'vue';
 import { useFloating, offset, flip, shift } from '@floating-ui/vue';
-import { uiIconMap, languageIconMap } from '../../assets/icons/icon-maps';
 import ToolbarButton from './ToolbarButton.vue';
 
 const props = defineProps({
@@ -14,29 +13,42 @@ const props = defineProps({
 const isOpen = ref(false);
 const reference = ref(null);
 const floating = ref(null);
+let openTimer = null;
+let closeTimer = null;
 
 const { floatingStyles } = useFloating(reference, floating, {
   placement: 'bottom-start',
   middleware: [offset(5), flip(), shift({ padding: 5 })],
 });
 
-const iconComponent = computed(() => {
-  const map = props.collection === 'languages' ? languageIconMap : uiIconMap;
-  return map[props.icon] || null;
-});
-
 function openMenu() {
-  isOpen.value = true;
+  clearTimeout(closeTimer);
+  openTimer = setTimeout(() => {
+    isOpen.value = true;
+  }, 100);
 }
 
 function closeMenu() {
-  isOpen.value = false;
+  clearTimeout(openTimer);
+  closeTimer = setTimeout(() => {
+    isOpen.value = false;
+  }, 200);
 }
 
+function cancelClose() {
+  clearTimeout(closeTimer);
+}
+
+// Provide context for submenus
+provide('dropdown-context', {
+  cancelClose
+});
+
+// Click outside logic
 const vOnClickOutside = {
   mounted: (el, binding) => {
     el.clickOutsideEvent = event => {
-      const triggerEl = reference.value;
+      const triggerEl = reference.value?.$el;
       if (!(el === event.target || el.contains(event.target) || triggerEl?.contains(event.target))) {
         binding.value();
       }
@@ -50,14 +62,13 @@ const vOnClickOutside = {
 </script>
 
 <template>
-  <div class="relative">
+  <div class="relative" @mouseenter="openMenu" @mouseleave="closeMenu">
     <ToolbarButton
       ref="reference"
       :title="title"
       :icon="icon"
       :collection="collection"
       :button-class="buttonClass"
-      @click="isOpen = !isOpen"
     />
     <Teleport to="body">
       <Transition
@@ -71,7 +82,9 @@ const vOnClickOutside = {
         <div
           v-if="isOpen"
           ref="floating"
-          v-on-click-outside="closeMenu"
+          v-on-click-outside="() => isOpen = false"
+          @mouseenter="cancelClose"
+          @mouseleave="closeMenu"
           :style="floatingStyles"
           class="z-50 w-56 origin-top-left rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1"
         >

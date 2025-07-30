@@ -3,6 +3,7 @@ import { ref, computed, watch } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import useEventBus from '../services/eventBus';
+import { useDiscussionsStore } from './discussions'; // NEW: Import discussions store
 
 export const useTasksStore = defineStore('tasks', () => {
     const uiStore = useUiStore();
@@ -41,12 +42,29 @@ export const useTasksStore = defineStore('tasks', () => {
             const response = await apiClient.get('/api/tasks');
             const newTasks = response.data;
             tasks.value = newTasks;
+            
+            // NEW: Get discussions store instance
+            const discussionsStore = useDiscussionsStore();
 
             // Check for newly completed tasks and emit an event
             newTasks.forEach(newTask => {
                 const oldTask = oldTasks.get(newTask.id);
-                if (oldTask && (oldTask.status === 'running' || oldTask.status === 'pending') && (newTask.status === 'completed')) {
+                const justFinished = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending') && ['completed', 'failed', 'cancelled'].includes(newTask.status);
+                
+                if (justFinished) {
                     emit('task:completed', newTask);
+
+                    // NEW: Directly clear the active task from discussionsStore
+                    let discussionIdForTask = null;
+                    for (const [discussionId, activeTaskInfo] of Object.entries(discussionsStore.activeAiTasks)) {
+                        if (activeTaskInfo && activeTaskInfo.taskId === newTask.id) {
+                            discussionIdForTask = discussionId;
+                            break;
+                        }
+                    }
+                    if (discussionIdForTask) {
+                        discussionsStore._clearActiveAiTask(discussionIdForTask);
+                    }
                 }
             });
 

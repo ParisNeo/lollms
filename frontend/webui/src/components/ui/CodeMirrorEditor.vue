@@ -96,8 +96,7 @@
 </template>
 
 <script setup>
-// Script is unchanged from previous step.
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, defineExpose } from 'vue';
 import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder as cmPlaceholder } from "@codemirror/view";
 import { EditorState } from "@codemirror/state";
@@ -128,6 +127,8 @@ const emit = defineEmits(['update:modelValue', 'ready']);
 const editorRef = ref(null);
 const editorView = ref(null);
 let updatingFromSelf = false;
+
+defineExpose({ editorView });
 
 // --- STYLING ---
 const toolbarButtonBaseClass = computed(() => {

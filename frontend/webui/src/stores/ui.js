@@ -22,7 +22,9 @@ export const useUiStore = defineStore('ui', () => {
     const emailModalBackgroundColor = ref('#f4f4f8');
     const emailModalSendAsText = ref(false);
     const isSidebarOpen = ref(true);
-    const keywords = ref([]); // NEW
+    const keywords = ref([]);
+    const isDataZoneVisible = ref(false);
+    const isDataZoneExpanded = ref(false); // NEW: State for expanded view
     const generatePersonalityModalProps = ref({
         prompt: '',
         customEnhancePrompt: ''
@@ -177,7 +179,6 @@ export const useUiStore = defineStore('ui', () => {
         }
     }
     
-    // NEW ACTION
     async function fetchKeywords() {
         if (keywords.value.length > 0) return;
         try {
@@ -217,6 +218,18 @@ export const useUiStore = defineStore('ui', () => {
             isSidebarOpen.value = JSON.parse(storedState);
         }
     }
+    
+    function toggleDataZone() {
+        isDataZoneVisible.value = !isDataZoneVisible.value;
+        if (!isDataZoneVisible.value) {
+            isDataZoneExpanded.value = false; // Also shrink if hiding
+        }
+    }
+
+    // NEW: Action to toggle the expanded state
+    function toggleDataZoneExpansion() {
+        isDataZoneExpanded.value = !isDataZoneExpanded.value;
+    }
 
     return {
         mainView, activeModal, modalProps, notifications, currentTheme,
@@ -224,6 +237,7 @@ export const useUiStore = defineStore('ui', () => {
         isImageViewerOpen, imageViewerSrc, confirmationOptions,
         emailModalSubject, emailModalBody, emailModalBackgroundColor, emailModalSendAsText,
         isSidebarOpen, keywords, generatePersonalityModalProps,
+        isDataZoneVisible, isDataZoneExpanded, // EXPORT NEW STATE
         initEmailModalState,
         setMainView, openModal, closeModal, addNotification, removeNotification,
         setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages, fetchKeywords,
@@ -231,6 +245,7 @@ export const useUiStore = defineStore('ui', () => {
         isModalOpen, modalData,
         copyToClipboard,
         toggleSidebar, initializeSidebarState,
+        toggleDataZone, toggleDataZoneExpansion, // EXPORT NEW ACTION
         openGeneratePersonalityModal
     };
 });

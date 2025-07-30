@@ -1,12 +1,13 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from backend.db import get_db
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.dm import DirectMessage as DBDirectMessage
 from backend.db.models.user import User as DBUser
-from backend.models import UserAuthDetails, PromptCreate, PromptPublic, PromptUpdate, PromptShareRequest
+from backend.models import UserAuthDetails, PromptCreate, PromptPublic, PromptUpdate, PromptShareRequest, PromptsExport, PromptsImport
 from backend.session import get_current_active_user
 from backend.ws_manager import manager
 
@@ -106,3 +107,46 @@ async def share_prompt_as_dm(
 
     await manager.send_personal_message(message_data=response_data.model_dump(mode="json"), user_id=receiver.id)
     return {"message": f"Prompt successfully sent to {payload.target_username}."}
+
+@prompts_router.get("/export", response_model=PromptsExport)
+def export_user_prompts(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    prompts_db = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id == current_user.id).all()
+    prompts_to_export = [PromptBase(name=p.name, content=p.content) for p in prompts_db]
+    return PromptsExport(prompts=prompts_to_export)
+
+@prompts_router.post("/import", status_code=status.HTTP_201_CREATED)
+def import_user_prompts(
+    import_data: PromptsImport,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    imported_count = 0
+    skipped_count = 0
+    for prompt_data in import_data.prompts:
+        existing = db.query(DBSavedPrompt).filter(
+            DBSavedPrompt.owner_user_id == current_user.id,
+            DBSavedPrompt.name == prompt_data.name
+        ).first()
+        
+        if existing:
+            skipped_count += 1
+            continue
+
+        new_prompt = DBSavedPrompt(
+            name=prompt_data.name,
+            content=prompt_data.content,
+            owner_user_id=current_user.id
+        )
+        db.add(new_prompt)
+        imported_count += 1
+    
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="An integrity error occurred during import.")
+
+    return {"message": f"Successfully imported {imported_count} prompts. Skipped {skipped_count} due to name conflicts."}

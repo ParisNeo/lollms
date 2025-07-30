@@ -115,6 +115,11 @@ function handleEmailAllUsers() {
     }
 }
 
+function showEmailList() {
+    const eligibleUsers = allUsers.value.filter(u => u.is_active && u.receive_notification_emails && u.email);
+    uiStore.openModal('emailList', { users: eligibleUsers });
+}
+
 async function toggleUserStatus(user) {
     const action = user.is_active ? 'deactivate' : 'activate';
     const confirmation = await uiStore.showConfirmation({
@@ -163,6 +168,9 @@ async function deleteUser(user) {
                 <div class="flex items-center gap-x-3">
                     <button @click="handleEmailAllUsers" class="btn btn-primary">
                         Email Users
+                    </button>
+                    <button @click="showEmailList" class="btn btn-secondary">
+                        Show Emails
                     </button>
                     <button @click="openForceSettingsModal" class="btn btn-secondary">
                         Force Settings

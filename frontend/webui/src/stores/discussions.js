@@ -34,7 +34,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const generationInProgress = ref(false);
     const titleGenerationInProgressId = ref(null);
     const activeDiscussionContextStatus = ref(null);
-    const activeAiTasks = ref({}); // Tracks running AI tasks per discussion: { [discussionId]: 'summarize' | 'memorize' }
+    const activeAiTasks = ref({}); // Tracks running AI tasks per discussion: { [discussionId]: { type: 'summarize' | 'memorize', taskId: '...' } }
     const dataZonesTokenCount = ref(0);
     let tokenizeDataZonesDebounceTimer = null;
 
@@ -57,43 +57,57 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         return dataStore.getPersonalityById(personalityId);
     });
 
+    function _clearActiveAiTask(discussionId) {
+        if (activeAiTasks.value[discussionId]) {
+            const newActiveTasks = { ...activeAiTasks.value };
+            delete newActiveTasks[discussionId];
+            activeAiTasks.value = newActiveTasks;
+        }
+    }
+
     function handleTaskCompletion(task) {
-        // Handle prune task completion
         if (task && task.name.startsWith('Prune empty discussions')) {
-            loadDiscussions(); // Force a refresh of the discussion list
+            loadDiscussions();
             const deletedCount = task.result?.deleted_count || 0;
             uiStore.addNotification(`Pruning complete. ${deletedCount} discussion(s) removed.`, 'success');
             return;
         }
         
-        if (!task.result || !task.result.discussion_id) return;
-
-        const { discussion_id, new_content, zone } = task.result;
-        const discussion = discussions.value[discussion_id];
-
-        if (discussion) {
-            // Create a new object for reactivity
-            const updatedDiscussion = { ...discussion };
-
-            if (zone === 'discussion') {
-                updatedDiscussion.discussion_data_zone = new_content;
-                uiStore.addNotification('Data zone summarized successfully.', 'success');
-            } else if (zone === 'memory') {
-                updatedDiscussion.memory = new_content;
-                const authStore = useAuthStore();
-                if (authStore.user) {
-                    authStore.user.memory = new_content;
-                }
-                uiStore.addNotification('Memorization complete.', 'success');
+        let discussionIdForTask = null;
+        for (const [discussionId, activeTaskInfo] of Object.entries(activeAiTasks.value)) {
+            if (activeTaskInfo && activeTaskInfo.taskId === task.id) {
+                discussionIdForTask = discussionId;
+                break;
             }
-            
-            // Replace the object in the main ref to trigger reactivity
-            discussions.value[discussion_id] = updatedDiscussion;
         }
+
+        if (!discussionIdForTask) return;
         
-        if (activeAiTasks.value[discussion_id]) {
-            const { [discussion_id]: _, ...rest } = activeAiTasks.value;
-            activeAiTasks.value = rest;
+        // The responsibility of clearing the task is now moved to the tasksStore
+        // to ensure immediate reactivity. This handler now only processes the result.
+        
+        if (task.status === 'completed' && task.result) {
+            const { new_content, zone } = task.result;
+            const discussion = discussions.value[discussionIdForTask];
+            if (discussion) {
+                const updatedDiscussion = { ...discussion };
+                if (zone === 'discussion') {
+                    updatedDiscussion.discussion_data_zone = new_content;
+                    uiStore.addNotification('Data zone processed successfully.', 'success');
+                } else if (zone === 'memory') {
+                    updatedDiscussion.memory = new_content;
+                    const authStore = useAuthStore();
+                    if (authStore.user) {
+                        authStore.user.memory = new_content;
+                    }
+                    uiStore.addNotification('Memorization complete.', 'success');
+                }
+                discussions.value[discussionIdForTask] = updatedDiscussion;
+            }
+        } else if (task.status === 'failed') {
+            uiStore.addNotification(`Task '${task.name}' failed.`, 'error');
+        } else if (task.status === 'cancelled') {
+            uiStore.addNotification(`Task '${task.name}' was cancelled.`, 'warning');
         }
     }
 
@@ -106,6 +120,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     function processMessages(rawMessages) {
         if (!Array.isArray(rawMessages)) return [];
         return rawMessages.map(msg => processSingleMessage(msg));
+    }
+
+    function setUserDataZoneContent(discussionId, content) {
+        const discussion = discussions.value[discussionId];
+        if (discussion) {
+            discussions.value[discussionId] = { ...discussion, discussion_data_zone: content };
+        }
+    
+        const taskInfo = activeAiTasks.value[discussionId];
+        if (taskInfo?.type === 'summarize') {
+            _clearActiveAiTask(discussionId);
+            tasksStore.cancelTask(taskInfo.taskId);
+            uiStore.addNotification('Processing cancelled due to manual edit.', 'info');
+        }
     }
 
     async function updateDataZonesTokenCount(combinedText) {
@@ -194,7 +222,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     
     async function summarizeDiscussionDataZone(discussionId, prompt = null) {
         if (activeAiTasks.value[discussionId]) {
-            uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId]}) is already running for this discussion.`, 'warning');
+            uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId].type}) is already running for this discussion.`, 'warning');
             return;
         }
         if (!discussions.value[discussionId]) return;
@@ -208,7 +236,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             
             uiStore.closeModal('summaryPromptModal');
             
-            activeAiTasks.value[discussionId] = 'summarize';
+            activeAiTasks.value[discussionId] = { type: 'summarize', taskId: task.id };
             
             tasksStore.addTask(task);
             
@@ -225,14 +253,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     async function memorizeLTM(discussionId) {
         if (activeAiTasks.value[discussionId]) {
-            uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId]}) is already running for this discussion.`, 'warning');
+            uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId].type}) is already running for this discussion.`, 'warning');
             return;
         }
         if (!discussions.value[discussionId]) return;
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/memorize`);
             const task = response.data;
-            activeAiTasks.value[discussionId] = 'memorize';
+            activeAiTasks.value[discussionId] = { type: 'memorize', taskId: task.id };
             tasksStore.addTask(task);
             uiStore.addNotification('Memorization task started.', 'info');
         } catch (error) {
@@ -709,6 +737,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         summarizeDiscussionDataZone, memorizeLTM, activeAiTasks,
         dataZonesTokenCount, updateDataZonesTokenCount,
         initialize,
-        refreshDataZones
+        refreshDataZones,
+        setUserDataZoneContent,
+        _clearActiveAiTask
     };
 });

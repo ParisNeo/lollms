@@ -12,7 +12,6 @@ import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 
 // Icon Components
 import IconToken from '../../assets/icons/IconToken.vue';
-import IconDataZone from '../../assets/icons/IconDataZone.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconMcp from '../../assets/icons/IconMcp.vue';
@@ -40,8 +39,6 @@ const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
-
-const emit = defineEmits(['toggle-data-zone']);
 
 const messageText = ref('');
 const uploadedImages = ref([]);
@@ -473,7 +470,6 @@ function removeImage(index) {
                     <!-- Simple Mode Layout -->
                     <div v-if="!isAdvancedMode" class="flex items-end space-x-2">
                         <button @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary !p-2.5 self-end disabled:opacity-50" title="Upload Images"><IconPhoto class="w-6 h-6"/></button>
-                        <button @click="$emit('toggle-data-zone')" v-if="user.user_ui_level >= 2" class="btn btn-secondary !p-2.5 self-end" title="Toggle Data Zone"><IconDataZone class="w-6 h-6" /></button>
                         <div v-if="user.user_ui_level >= 3" class="self-end">
                             <MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary">
                                 <template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2.5" title="Select MCP Tools"><IconMcp class="w-6 h-6"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template>
@@ -506,7 +502,6 @@ function removeImage(index) {
                         <div class="flex items-center justify-between">
                             <div class="flex items-center space-x-2">
                                 <button @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary !p-2.5 disabled:opacity-50" title="Upload Images"><IconPhoto class="w-6 h-6"/></button>
-                                <button @click="$emit('toggle-data-zone')" v-if="user.user_ui_level >= 2" class="btn btn-secondary !p-2.5" title="Toggle Data Zone"><IconDataZone class="w-6 h-6" /></button>
                                 <div v-if="user.user_ui_level >= 3">
                                     <MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary">
                                         <template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2.5" title="Select MCP Tools"><IconMcp class="w-6 h-6"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template>

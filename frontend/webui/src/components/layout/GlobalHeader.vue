@@ -5,10 +5,13 @@ import { useUiStore } from '../../stores/ui';
 import TasksManagerButton from './TasksManagerButton.vue';
 import ThemeToggle from '../ui/ThemeToggle.vue';
 import IconPlusCircle from '../../assets/icons/IconPlusCircle.vue';
+import IconDataZone from '../../assets/icons/IconDataZone.vue';
 import logoUrl from '../../assets/logo.png';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
+
+const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 
 function newDiscussion() {
   discussionsStore.createNewDiscussion();
@@ -27,6 +30,10 @@ function newDiscussion() {
     <div class="flex items-center space-x-2">
       <ThemeToggle />
       <TasksManagerButton />
+
+      <button v-if="activeDiscussion" @click="uiStore.toggleDataZone()" class="btn-icon" title="Toggle Data Zone">
+        <IconDataZone class="w-5 h-5" />
+      </button>
 
       <button @click="newDiscussion" class="btn btn-secondary" title="New Discussion">
         <IconPlusCircle class="w-5 h-5" />

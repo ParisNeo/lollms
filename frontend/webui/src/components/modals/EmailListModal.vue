@@ -24,7 +24,7 @@ watch(selectAll, (newValue) => {
 });
 
 watch(selectedUserIds, (newSelection) => {
-    if (newSelection.length === allEligibleUsers.value.length) {
+    if (newSelection.length === allEligibleUsers.value.length && newSelection.length > 0) {
         selectAll.value = true;
     } else if (newSelection.length === 0) {
         selectAll.value = false;
@@ -44,11 +44,13 @@ const listCopied = ref(false);
 
 function copyEmailList() {
     if (selectedEmails.value.length === 0) return;
-    navigator.clipboard.writeText(emailsAsString.value).then(() => {
-        listCopied.value = true;
-        setTimeout(() => {
-            listCopied.value = false;
-        }, 2000);
+    uiStore.copyToClipboard(emailsAsString.value).then((success) => {
+        if (success) {
+            listCopied.value = true;
+            setTimeout(() => {
+                listCopied.value = false;
+            }, 2000);
+        }
     });
 }
 </script>

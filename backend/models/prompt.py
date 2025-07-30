@@ -1,5 +1,5 @@
 from pydantic import BaseModel, constr
-from typing import Optional
+from typing import Optional, List
 
 class PromptBase(BaseModel):
     name: constr(min_length=1, max_length=100)
@@ -21,3 +21,9 @@ class PromptPublic(PromptBase):
 class PromptShareRequest(BaseModel):
     prompt_content: str
     target_username: constr(min_length=3, max_length=50)
+
+class PromptsExport(BaseModel):
+    prompts: List[PromptBase]
+
+class PromptsImport(BaseModel):
+    prompts: List[PromptBase]

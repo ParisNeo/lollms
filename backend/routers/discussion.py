@@ -323,10 +323,10 @@ def summarize_discussion_data_zone(
         raise HTTPException(status_code=404, detail="Discussion not found")
     
     db_task = task_manager.submit_task(
-        name=f"Summarize Data Zone for: {discussion.metadata.get('title', 'Untitled')}",
+        name=f"Processing Data Zone for: {discussion.metadata.get('title', 'Untitled')}",
         target=_summarize_data_zone_task,
         args=(current_user.username, discussion_id, prompt),
-        description=f"AI is summarizing the discussion data zone content.",
+        description=f"AI is processing the discussion data zone content.",
         owner_username=current_user.username
     )
     return _to_task_info(db_task)
