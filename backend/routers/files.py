@@ -5,9 +5,9 @@ from pathlib import Path
 from typing import List, Dict
 
 from fastapi import (
-    APIRouter, Depends, File, UploadFile, HTTPException
+    APIRouter, Depends, File, UploadFile, HTTPException, Form
 )
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from werkzeug.utils import secure_filename
 import pipmaster
 pipmaster.ensure_packages(['pypdf','python-docx', 'python-pptx', 'openpyxl'])
@@ -35,6 +35,23 @@ files_router = APIRouter(prefix="/api/files", tags=["Files"])
 
 MAX_IMAGE_SIZE_MB = 10
 MAX_IMAGE_UPLOADS_PER_MESSAGE = 5
+
+@files_router.post("/export-markdown")
+async def export_as_markdown(
+    content: str = Form(...),
+    filename: str = Form("export.md")
+):
+    """
+    Accepts text content and returns it as a downloadable Markdown file.
+    """
+    safe_filename = secure_filename(filename)
+    if not safe_filename.endswith('.md'):
+        safe_filename += '.md'
+    
+    headers = {
+        'Content-Disposition': f'attachment; filename="{safe_filename}"'
+    }
+    return Response(content=content, media_type='text/markdown', headers=headers)
 
 @files_router.post("/extract-text")
 async def extract_text_from_files(files: List[UploadFile] = File(...), current_user: UserAuthDetails = Depends(get_current_active_user)):

@@ -22,6 +22,7 @@ import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconThinking from '../../assets/icons/IconThinking.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
+import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 
 // --- Store Initialization ---
 const discussionsStore = useDiscussionsStore();
@@ -131,7 +132,6 @@ onMounted(() => {
 
 onUnmounted(() => {
     off('task:completed', handleTaskCompletion);
-    // Clean up global listeners if resizing is somehow interrupted
     window.removeEventListener('mousemove', handleResize);
     window.removeEventListener('mouseup', stopResize);
 });
@@ -146,7 +146,7 @@ function handleTaskCompletion(task) {
     }
 }
 
-// NEW: Resizing Logic
+// Resizing Logic
 let startX = 0;
 let startWidth = 0;
 
@@ -163,9 +163,9 @@ function startResize(event) {
 function handleResize(event) {
     if (!isResizing.value) return;
     const dx = event.clientX - startX;
-    const newWidth = startWidth - dx; // Drag left to increase width
-    const minWidth = 320; // 20rem
-    const maxWidth = window.innerWidth * 0.75; // Max 75% of viewport
+    const newWidth = startWidth - dx;
+    const minWidth = 320;
+    const maxWidth = window.innerWidth * 0.75;
     dataZoneWidth.value = Math.max(minWidth, Math.min(newWidth, maxWidth));
 }
 
@@ -250,6 +250,41 @@ watch(placeholderToInsert, (newValue) => {
         });
     }
 });
+
+async function exportDataZone() {
+    if (!discussionDataZone.value.trim()) {
+        uiStore.addNotification('Data zone is empty, nothing to export.', 'info');
+        return;
+    }
+    try {
+        const formData = new FormData();
+        formData.append('content', discussionDataZone.value);
+        formData.append('filename', `data_zone_${activeDiscussion.value.id.substring(0,8)}.md`);
+
+        const response = await apiClient.post('/api/files/export-markdown', formData, {
+            responseType: 'blob',
+        });
+
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        const contentDisposition = response.headers['content-disposition'];
+        let filename = `data_zone_export.md`;
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+            if (filenameMatch.length === 2)
+                filename = filenameMatch[1];
+        }
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+    } catch (error) {
+        console.error("Failed to export data zone:", error);
+        uiStore.addNotification('Could not export data zone.', 'error');
+    }
+}
 </script>
 
 <template>
@@ -290,6 +325,7 @@ watch(placeholderToInsert, (newValue) => {
                             <h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data</h3>
                             <div class="flex items-center gap-2">
                                 <button @click="refreshDataZones" class="btn btn-secondary btn-sm" title="Refresh Data Zone"><IconRefresh class="w-4 h-4" /></button>
+                                <button @click="exportDataZone" class="btn btn-secondary btn-sm" title="Export to Markdown"><IconArrowUpTray class="w-4 h-4" /></button>
                                 <button @click="triggerKnowledgeFileUpload" class="btn btn-secondary btn-sm" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-4 h-4" /><IconPlus v-else class="w-4 h-4" /></button>
                             </div>
                         </div>

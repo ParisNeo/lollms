@@ -205,11 +205,21 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
             const response = await apiClient.post(`/api/discussions/${discussionId}/summarize_data_zone`, formData);
             const task = response.data;
+            
+            uiStore.closeModal('summaryPromptModal');
+            
             activeAiTasks.value[discussionId] = 'summarize';
+            
             tasksStore.addTask(task);
-            uiStore.addNotification('Summarization task started.', 'info');
+            
+            uiStore.addNotification(`Content processing started. This is a long process that runs in the background. Check the Task Manager for progress.`, 'info', { duration: 10000 });
+            
         } catch (error) {
             // Handled by interceptor
+            if (activeAiTasks.value[discussionId]) {
+                const { [discussionId]: _, ...rest } = activeAiTasks.value;
+                activeAiTasks.value = rest;
+            }
         }
     }
 
@@ -582,7 +592,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const discussionId = currentDiscussionId.value;
         const uiStore = useUiStore();
 
-        // Find the index for optimistic update
         const messageIndex = messages.value.findIndex(m => m.id === messageId);
         if (messageIndex === -1) {
             console.warn("Attempted to delete a message not in the current view. Re-fetching for safety.");
@@ -590,25 +599,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             return;
         }
 
-        // 1. Optimistic UI Update
         const oldMessages = [...messages.value];
-        // Remove the target message and all subsequent messages in the current branch view.
         messages.value.splice(messageIndex);
         
         try {
-            // 2. API Call
             await apiClient.delete(`/api/discussions/${discussionId}/messages/${messageId}`);
-            
-            // 3. Re-sync with backend state to handle any branch changes
-            // This also implicitly handles refreshing context status and data zones.
             await selectDiscussion(discussionId); 
-
             uiStore.addNotification('Message and branch deleted.', 'success');
-
         } catch (error) {
             console.error("Error deleting message:", error);
             uiStore.addNotification('Failed to delete message. Reverting change.', 'error');
-            // 4. Rollback UI on failure
             messages.value = oldMessages;
         }
     }
