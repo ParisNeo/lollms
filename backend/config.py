@@ -8,7 +8,7 @@ from pathlib import Path
 import toml
 
 # --- Application Version ---
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.7.0"
 PROJECT_ROOT = Path(__file__).resolve().parent.parent 
 LOCALS_DIR = PROJECT_ROOT / "frontend" / "webui" / "public" / "locals"
 

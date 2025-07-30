@@ -155,6 +155,10 @@ export const useDataStore = defineStore('data', () => {
     }
 
     async function loadAllInitialData() {
+        // Import prompts store locally to avoid circular dependency issues
+        const { usePromptsStore } = await import('./prompts');
+        const promptsStore = usePromptsStore();
+
         // Run all fetch operations, but catch individual errors so one failure doesn't stop the others.
         const promises = [
             fetchAvailableLollmsModels().catch(e => console.error("Error fetching models:", e)),
@@ -164,7 +168,8 @@ export const useDataStore = defineStore('data', () => {
             fetchMcpTools().catch(e => console.error("Error fetching MCP tools:", e)),
             fetchApps().catch(e => console.error("Error fetching apps:", e)),
             fetchLanguages().catch(e => console.error("Error fetching languages:", e)),
-            fetchApiKeys().catch(e => console.error("Error fetching API keys:", e))
+            fetchApiKeys().catch(e => console.error("Error fetching API keys:", e)),
+            promptsStore.fetchPrompts().catch(e => console.error("Error fetching saved prompts:", e)) // NEW
         ];
         
         // Wait for all of them to settle, regardless of success or failure.

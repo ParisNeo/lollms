@@ -63,31 +63,37 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             loadDiscussions(); // Force a refresh of the discussion list
             const deletedCount = task.result?.deleted_count || 0;
             uiStore.addNotification(`Pruning complete. ${deletedCount} discussion(s) removed.`, 'success');
-            return; // Stop further processing for this task type
+            return;
         }
         
-        // Existing logic for other tasks
         if (!task.result || !task.result.discussion_id) return;
 
         const { discussion_id, new_content, zone } = task.result;
         const discussion = discussions.value[discussion_id];
 
         if (discussion) {
+            // Create a new object for reactivity
+            const updatedDiscussion = { ...discussion };
+
             if (zone === 'discussion') {
-                discussion.discussion_data_zone = new_content;
+                updatedDiscussion.discussion_data_zone = new_content;
                 uiStore.addNotification('Data zone summarized successfully.', 'success');
             } else if (zone === 'memory') {
-                discussion.memory = new_content;
+                updatedDiscussion.memory = new_content;
                 const authStore = useAuthStore();
                 if (authStore.user) {
                     authStore.user.memory = new_content;
                 }
                 uiStore.addNotification('Memorization complete.', 'success');
             }
+            
+            // Replace the object in the main ref to trigger reactivity
+            discussions.value[discussion_id] = updatedDiscussion;
         }
         
         if (activeAiTasks.value[discussion_id]) {
-            delete activeAiTasks.value[discussion_id];
+            const { [discussion_id]: _, ...rest } = activeAiTasks.value;
+            activeAiTasks.value = rest;
         }
     }
 
@@ -118,6 +124,18 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 dataZonesTokenCount.value = 0; // Reset on error
             }
         }, 750);
+    }
+    
+    async function refreshDataZones(discussionId) {
+        const uiStore = useUiStore();
+        if (!discussions.value[discussionId]) return;
+        try {
+            uiStore.addNotification('Refreshing data zones...', 'info');
+            await fetchDataZones(discussionId);
+            uiStore.addNotification('Data zones refreshed.', 'success');
+        } catch(error) {
+            uiStore.addNotification('Failed to refresh data zones.', 'error');
+        }
     }
 
     async function sendDiscussion({ discussionId, targetUsername }) {
@@ -690,6 +708,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         fetchDataZones, updateDataZone, activePersonality,
         summarizeDiscussionDataZone, memorizeLTM, activeAiTasks,
         dataZonesTokenCount, updateDataZonesTokenCount,
-        initialize
+        initialize,
+        refreshDataZones
     };
 });

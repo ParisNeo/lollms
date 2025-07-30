@@ -12,3 +12,4 @@ from .datastore import *
 from .social import *
 from .friends import *
 from .dm import *
+from .prompt import *

@@ -44,6 +44,7 @@ import GeneratePersonalityModal from './components/modals/GeneratePersonalityMod
 import TasksManagerModal from './components/modals/TasksManagerModal.vue';
 import EnhancePersonalityPromptModal from './components/modals/EnhancePersonalityPromptModal.vue';
 import ContextViewModal from './components/modals/ContextViewModal.vue';
+import SummaryPromptModal from './components/modals/SummaryPromptModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -142,6 +143,7 @@ onMounted(async () => {
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
     <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
     <TasksManagerModal v-if="activeModal === 'tasksManager'" />
+    <SummaryPromptModal v-if="activeModal === 'summaryPromptModal'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

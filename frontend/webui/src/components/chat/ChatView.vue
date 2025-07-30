@@ -1,14 +1,16 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import apiClient from '../../services/api';
+import useEventBus from '../../services/eventBus';
 
 // Component Imports
 import MessageArea from './MessageArea.vue';
 import ChatInput from './ChatInput.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
+import SimpleSelectMenu from '../ui/SimpleSelectMenu.vue';
 
 // Asset & Icon Imports
 import logoUrl from '../../assets/logo.png';
@@ -19,11 +21,13 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconThinking from '../../assets/icons/IconThinking.vue';
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
 
 // --- Store Initialization ---
 const discussionsStore = useDiscussionsStore();
 const authStore = useAuthStore();
 const uiStore = useUiStore();
+const { on, off } = useEventBus();
 
 // --- Component State ---
 const isDataZoneVisible = ref(false);
@@ -31,7 +35,12 @@ const knowledgeFileInput = ref(null);
 const isExtractingText = ref(false);
 const activeDataZoneTab = ref('discussion');
 const userCodeMirrorEditor = ref(null);
-const summaryPrompt = ref(''); // NEW: For guided summary
+const summaryPrompt = ref('');
+const placeholderToInsert = ref(null);
+
+// NEW: State for resizable panel
+const dataZoneWidth = ref(448); // Default width (28rem)
+const isResizing = ref(false);
 
 // --- Data Zone State ---
 let discussionSaveDebounceTimer = null;
@@ -45,6 +54,14 @@ const showChatView = computed(() => activeDiscussion.value !== null);
 const isSummarizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id] === 'summarize');
 const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id] === 'memorize');
 
+const placeholderItems = computed(() => {
+    return uiStore.keywords.map(kw => ({
+        value: kw.keyword,
+        label: `${kw.keyword} - ${kw.description}`
+    }));
+});
+
+
 // --- Reactive Data Zone Management with Computed Properties ---
 const discussionDataZone = computed({
     get: () => activeDiscussion.value?.discussion_data_zone || '',
@@ -55,7 +72,6 @@ const discussionDataZone = computed({
                 discussionsStore.updateDataZone({ discussionId: activeDiscussion.value.id, content: newVal });
             }
         }, 750);
-        // Optimistic update for immediate UI feedback in the store
         if (activeDiscussion.value) {
             discussionsStore.discussions[activeDiscussion.value.id].discussion_data_zone = newVal;
         }
@@ -69,7 +85,6 @@ const userDataZone = computed({
         userSaveDebounceTimer = setTimeout(() => {
             authStore.updateDataZone(newVal);
         }, 750);
-        // Optimistic update
         if (authStore.user) {
             authStore.user.data_zone = newVal;
         }
@@ -85,7 +100,6 @@ const memory = computed({
         memorySaveDebounceTimer = setTimeout(() => {
             authStore.updateMemoryZone(newVal);
         }, 750);
-         // Optimistic update
         if (authStore.user) {
             authStore.user.memory = newVal;
         }
@@ -106,8 +120,65 @@ watch(combinedDataZoneContent, (newCombinedText) => {
     discussionsStore.updateDataZonesTokenCount(newCombinedText);
 }, { immediate: true });
 
+// --- LIFECYCLE HOOKS ---
+onMounted(() => {
+    on('task:completed', handleTaskCompletion);
+    const savedWidth = localStorage.getItem('lollms_dataZoneWidth');
+    if (savedWidth) {
+        dataZoneWidth.value = parseInt(savedWidth, 10);
+    }
+});
 
-// --- Methods ---
+onUnmounted(() => {
+    off('task:completed', handleTaskCompletion);
+    // Clean up global listeners if resizing is somehow interrupted
+    window.removeEventListener('mousemove', handleResize);
+    window.removeEventListener('mouseup', stopResize);
+});
+
+// --- METHODS ---
+function handleTaskCompletion(task) {
+    if (activeDiscussion.value && task?.result?.discussion_id === activeDiscussion.value.id) {
+        if (task.name.includes('Summarize') || task.name.includes('Memorize')) {
+            console.log('Relevant task completed, refreshing data zones...');
+            refreshDataZones();
+        }
+    }
+}
+
+// NEW: Resizing Logic
+let startX = 0;
+let startWidth = 0;
+
+function startResize(event) {
+    isResizing.value = true;
+    startX = event.clientX;
+    startWidth = dataZoneWidth.value;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    window.addEventListener('mousemove', handleResize);
+    window.addEventListener('mouseup', stopResize);
+}
+
+function handleResize(event) {
+    if (!isResizing.value) return;
+    const dx = event.clientX - startX;
+    const newWidth = startWidth - dx; // Drag left to increase width
+    const minWidth = 320; // 20rem
+    const maxWidth = window.innerWidth * 0.75; // Max 75% of viewport
+    dataZoneWidth.value = Math.max(minWidth, Math.min(newWidth, maxWidth));
+}
+
+function stopResize() {
+    isResizing.value = false;
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    window.removeEventListener('mousemove', handleResize);
+    window.removeEventListener('mouseup', stopResize);
+    localStorage.setItem('lollms_dataZoneWidth', dataZoneWidth.value);
+}
+
+
 async function toggleDataZone() {
     isDataZoneVisible.value = !isDataZoneVisible.value;
     if (isDataZoneVisible.value) {
@@ -129,7 +200,6 @@ async function handleKnowledgeFileUpload(event) {
         const response = await apiClient.post('/api/files/extract-text', formData);
         const extractedText = response.data.text;
         
-        // This will trigger the computed property's setter
         discussionDataZone.value = discussionDataZone.value ? `${discussionDataZone.value}\n\n${extractedText}` : extractedText;
         
         uiStore.addNotification(`Extracted text from ${files.length} file(s) and added to discussion data zone.`, 'success');
@@ -139,15 +209,29 @@ async function handleKnowledgeFileUpload(event) {
     }
 }
 
-function handleSummarize() {
+function handleSummarize(promptText) {
     if (!activeDiscussion.value) return;
-    discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, summaryPrompt.value);
+    discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, promptText);
 }
 
-function handleMemorize() {
+function openSummaryPromptModal() {
     if (!activeDiscussion.value) return;
-    discussionsStore.memorizeLTM(activeDiscussion.value.id);
+    uiStore.openModal('summaryPromptModal', {
+        discussionId: activeDiscussion.value.id,
+        initialPrompt: summaryPrompt.value,
+        onApply: (promptText) => {
+            summaryPrompt.value = promptText;
+            handleSummarize(promptText);
+        }
+    });
 }
+
+function refreshDataZones() {
+    if (activeDiscussion.value) {
+        discussionsStore.refreshDataZones(activeDiscussion.value.id);
+    }
+}
+
 
 function insertPlaceholder(keyword) {
     const view = userCodeMirrorEditor.value?.codeMirrorView;
@@ -157,6 +241,15 @@ function insertPlaceholder(keyword) {
         view.focus();
     }
 }
+
+watch(placeholderToInsert, (newValue) => {
+    if (newValue) {
+        insertPlaceholder(newValue);
+        nextTick(() => {
+            placeholderToInsert.value = null;
+        });
+    }
+});
 </script>
 
 <template>
@@ -174,8 +267,14 @@ function insertPlaceholder(keyword) {
             </div>
             <ChatInput @toggle-data-zone="toggleDataZone" :data-zone-content="combinedDataZoneContent" />
         </div>
+        
+        <div v-if="isDataZoneVisible && activeDiscussion" 
+             @mousedown.prevent="startResize"
+             class="flex-shrink-0 w-1.5 cursor-col-resize bg-gray-300 dark:bg-gray-600 hover:bg-blue-500 transition-colors duration-200">
+        </div>
+
         <transition enter-active-class="transition ease-in-out duration-300" enter-from-class="transform translate-x-full" enter-to-class="transform translate-x-0" leave-active-class="transition ease-in-out duration-300" leave-from-class="transform translate-x-0" leave-to-class="transform translate-x-full">
-            <aside v-if="isDataZoneVisible && activeDiscussion" class="w-1/3 max-w-md h-full flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700">
+            <aside v-if="isDataZoneVisible && activeDiscussion" :style="{ width: `${dataZoneWidth}px` }" class="h-full flex flex-col flex-shrink-0 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700">
                 <div class="flex-shrink-0 border-b border-gray-200 dark:border-gray-700">
                     <nav class="-mb-px flex space-x-2 px-4" aria-label="Tabs">
                         <button @click="activeDataZoneTab = 'discussion'" :class="['tab-btn', {'active': activeDataZoneTab === 'discussion'}]" title="Discussion Data">Discussion</button>
@@ -188,19 +287,15 @@ function insertPlaceholder(keyword) {
                 <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0">
                     <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                         <div class="flex justify-between items-center">
-                            <div>
-                                <h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data Zone</h3>
-                                <p class="text-xs text-gray-500 mt-1">Context for this discussion only.</p>
+                            <h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data</h3>
+                            <div class="flex items-center gap-2">
+                                <button @click="refreshDataZones" class="btn btn-secondary btn-sm" title="Refresh Data Zone"><IconRefresh class="w-4 h-4" /></button>
+                                <button @click="triggerKnowledgeFileUpload" class="btn btn-secondary btn-sm" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-4 h-4" /><IconPlus v-else class="w-4 h-4" /></button>
                             </div>
-                             <button @click="triggerKnowledgeFileUpload" class="btn btn-secondary btn-sm" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-4 h-4" /><IconPlus v-else class="w-4 h-4" /></button>
                         </div>
-                        <div class="mt-4">
-                             <textarea v-model="summaryPrompt" rows="2" class="input-field text-sm" placeholder="Optional: Enter a specific prompt for the summary..."></textarea>
-                             <div class="flex justify-end mt-2">
-                                <button @click="handleSummarize" class="btn btn-secondary btn-sm" title="Summarize content" :disabled="isSummarizing || !discussionDataZone.trim()"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isSummarizing}"/>Summarize</button>
-                             </div>
+                        <div class="flex justify-end mt-4">
+                            <button @click="openSummaryPromptModal" class="btn btn-secondary btn-sm w-full" :disabled="isSummarizing || !discussionDataZone.trim()"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isSummarizing}"/>Process Content...</button>
                         </div>
-
                     </div>
                     <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-model="discussionDataZone" class="h-full" /></div>
                 </div>
@@ -211,22 +306,13 @@ function insertPlaceholder(keyword) {
                            <h3 class="font-semibold flex items-center gap-2"><IconUserCircle class="w-5 h-5" /> User Data Zone</h3>
                            <p class="text-xs text-gray-500 mt-1">Context for all of your discussions.</p>
                         </div>
-                        <div class="relative group">
-                            <button type="button" class="btn btn-secondary btn-sm flex items-center gap-1.5"><IconInfo class="w-4 h-4" /> Insert</button>
-                            <div class="absolute bottom-full right-0 mb-2 w-72 p-3 bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-md shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-                                <h4 class="font-bold mb-2 text-sm">Dynamic Placeholders</h4>
-                                <p class="mb-3 text-xs text-gray-600 dark:text-gray-400">Click to insert a placeholder. It will be replaced with live data when you send a message.</p>
-                                <ul v-if="uiStore.keywords.length > 0" class="space-y-2">
-                                    <li v-for="kw in uiStore.keywords" :key="kw.keyword">
-                                        <button @click.prevent="insertPlaceholder(kw.keyword)" class="w-full text-left p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 pointer-events-auto">
-                                            <code class="text-blue-600 dark:text-blue-400 font-semibold">{{ kw.keyword }}</code>
-                                            <span class="text-xs text-gray-500 dark:text-gray-400 block">{{ kw.description }}</span>
-                                        </button>
-                                    </li>
-                                </ul>
-                                <p v-else class="text-xs text-gray-400 italic">Loading placeholders...</p>
-                            </div>
-                        </div>
+                        <SimpleSelectMenu v-model="placeholderToInsert" :items="placeholderItems">
+                            <template #button="{ toggle }">
+                                <button @click="toggle" type="button" class="btn btn-secondary btn-sm flex items-center gap-1.5">
+                                    <IconInfo class="w-4 h-4" /> Insert Placeholder
+                                </button>
+                            </template>
+                        </SimpleSelectMenu>
                     </div>
                     <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor ref="userCodeMirrorEditor" v-model="userDataZone" class="h-full" /></div>
                 </div>
