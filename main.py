@@ -227,7 +227,7 @@ if __name__ == "__main__":
     port_setting = int(settings.get("port", port))
     # Decide how many workers to run
     # Priority: env var LOLLMS_WORKERS > settings["workers"] > cpu_count()
-    workers = int(os.getenv("LOLLMS_WORKERS", settings.get("workers", cpu_count())))
+    workers = int(os.getenv("LOLLMS_WORKERS", settings.get("workers", SERVER_CONFIG.get("workers", cpu_count()))))
     ssl_params = {}
     if settings.get("https_enabled"):
         certfile = settings.get("ssl_certfile")
@@ -242,7 +242,8 @@ if __name__ == "__main__":
             print(f"         Keyfile path: '{keyfile}' (Exists: {Path(keyfile).is_file()})")
             print("         Server will start without HTTPS to avoid crashing.")
 
-    ASCIIColors.bg_cyan(f"--- LoLLMs Plateform (v{APP_VERSION}) ---")
+    print("")
+    ASCIIColors.cyan(f"--- LoLLMs Plateform (v{APP_VERSION}) ---")
     protocol = "https" if ssl_params else "http"
     
     if host_setting == "0.0.0.0":
@@ -262,5 +263,7 @@ if __name__ == "__main__":
             ASCIIColors.magenta(f"Access UI via FQDN: {protocol}://{fqdn}:{port_setting}/")
     else:
         ASCIIColors.magenta(f"Access UI at: {protocol}://{host_setting}:{port_setting}/")
+    ASCIIColors.green(f"Using {workers} Workers")
+    print("----------------------")
             
     uvicorn.run("main:app", host=host_setting, port=port_setting, reload=False, workers=workers, **ssl_params)
