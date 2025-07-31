@@ -4,8 +4,9 @@ from pathlib import Path
 from typing import Optional
 import os
 from multiprocessing import cpu_count
-from ascii_colors import ASCIIColors
+from urllib.parse import urlparse
 
+from ascii_colors import ASCIIColors
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
@@ -18,7 +19,8 @@ from backend.config import (
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.service import AppZooRepository as DBAppZooRepository
+from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP
+from backend.db.session import SessionLocal
 from backend.security import get_password_hash as hash_password
 from backend.discussion import LegacyDiscussion
 from backend.session import (
@@ -61,6 +63,58 @@ async def on_startup() -> None:
     init_database(APP_DB_URL)
     task_manager.init_app(db_session_module.SessionLocal)
     print("Database initialized.")
+
+    # --- DYNAMIC CORS Configuration ---
+    host = SERVER_CONFIG.get("host", "0.0.0.0")
+    port = SERVER_CONFIG.get("port", 9642)
+    https_enabled = SERVER_CONFIG.get("https_enabled", False)
+
+    allowed_origins = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+
+    if host == "0.0.0.0":
+        allowed_origins.append(f"http://localhost:{port}")
+        allowed_origins.append(f"http://127.0.0.1:{port}")
+        if https_enabled:
+            allowed_origins.append(f"https://localhost:{port}")
+            allowed_origins.append(f"https://127.0.0.1:{port}")
+    else:
+        allowed_origins.append(f"http://{host}:{port}")
+        if https_enabled:
+            allowed_origins.append(f"https://{host}:{port}")
+
+    # Add authenticated app origins
+    db = SessionLocal()
+    try:
+        sso_apps = db.query(DBApp).filter(DBApp.active == True, DBApp.authentication_type == 'lollms_sso').all()
+        sso_mcps = db.query(DBMCP).filter(DBMCP.active == True, DBMCP.authentication_type == 'lollms_sso').all()
+        
+        sso_services = sso_apps + sso_mcps
+        
+        for service in sso_services:
+            if service.url:
+                try:
+                    parsed_url = urlparse(service.url)
+                    origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                    if origin not in allowed_origins:
+                        allowed_origins.append(origin)
+                        ASCIIColors.green(f"CORS: Allowing authenticated app origin: {origin}")
+                except Exception as e:
+                    ASCIIColors.warning(f"CORS: Could not parse URL for service '{service.name}': {service.url}. Error: {e}")
+    finally:
+        db.close()
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    ASCIIColors.yellow("CORS Middleware configured.")
+
 
     # Clean up and autostart apps
     try:
@@ -152,35 +206,6 @@ async def on_startup() -> None:
         if db_for_defaults: db_for_defaults.rollback()
     finally:
         if db_for_defaults: db_for_defaults.close()
-
-# --- CORS Configuration ---
-host = SERVER_CONFIG.get("host", "0.0.0.0")
-port = SERVER_CONFIG.get("port", 9642)
-https_enabled = SERVER_CONFIG.get("https_enabled", False)
-
-allowed_origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
-if host == "0.0.0.0":
-    allowed_origins.append(f"http://localhost:{port}")
-    allowed_origins.append(f"http://127.0.0.1:{port}")
-    if https_enabled:
-        allowed_origins.append(f"https://localhost:{port}")
-        allowed_origins.append(f"https://127.0.0.1:{port}")
-else:
-    allowed_origins.append(f"http://{host}:{port}")
-    if https_enabled:
-        allowed_origins.append(f"https://{host}:{port}")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 app.include_router(auth_router)
 app.include_router(discussion_router)
