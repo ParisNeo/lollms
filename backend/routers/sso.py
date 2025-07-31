@@ -18,6 +18,7 @@ from backend.models import (
 )
 from backend.security import verify_password, ALGORITHM, create_sso_token, decode_sso_token
 from backend.session import get_current_active_user
+from backend.config import SECRET_KEY
 
 sso_router = APIRouter(prefix="/api/sso", tags=["SSO"])
 
@@ -68,7 +69,7 @@ def sso_login_for_token(
     """
     ASCIIColors.info(f"[SSO] Token request received for client_id: {client_id}, user: {username}")
     service = get_app_or_mcp_by_client_id(db, client_id)
-    if not service or not service.active or service.authentication_type != 'lollms_sso' or not service.sso_secret:
+    if not service or not service.active or service.authentication_type != 'lollms_sso':
         ASCIIColors.error(f"[SSO] Invalid client_id '{client_id}' or SSO not configured correctly.")
         raise HTTPException(status_code=400, detail="Invalid application or SSO not configured correctly.")
 
@@ -94,7 +95,7 @@ def sso_login_for_token(
     ASCIIColors.info(f"[SSO] User data being shared: {list(user_data_to_share.keys())}")
     to_encode = { "sub": user.username, "user_info": user_data_to_share }
     
-    encoded_jwt = create_sso_token(to_encode, service.sso_secret, audience=client_id)
+    encoded_jwt = create_sso_token(to_encode, SECRET_KEY, audience=client_id)
     ASCIIColors.green(f"[SSO] SSO token generated for user '{username}' and client '{client_id}'.")
     return {"access_token": encoded_jwt, "token_type": "bearer"}
 
@@ -107,7 +108,7 @@ def sso_authorize_logged_in_user(
     """Generates an SSO token for an already authenticated user."""
     ASCIIColors.info(f"[SSO] Authorization request for logged-in user '{current_user.username}' and client_id '{client_id}'.")
     service = get_app_or_mcp_by_client_id(db, client_id)
-    if not service or not service.active or service.authentication_type != 'lollms_sso' or not service.sso_secret:
+    if not service or not service.active or service.authentication_type != 'lollms_sso':
         ASCIIColors.error(f"[SSO] Invalid client_id '{client_id}' or SSO not configured correctly for logged-in user flow.")
         raise HTTPException(status_code=400, detail="Invalid application or SSO not configured correctly.")
 
@@ -126,7 +127,7 @@ def sso_authorize_logged_in_user(
     ASCIIColors.info(f"[SSO] User data being shared: {list(user_data_to_share.keys())}")
     to_encode = { "sub": user.username, "user_info": user_data_to_share }
     
-    encoded_jwt = create_sso_token(to_encode, service.sso_secret, audience=client_id)
+    encoded_jwt = create_sso_token(to_encode, SECRET_KEY, audience=client_id)
     ASCIIColors.green(f"[SSO] SSO token generated for user '{user.username}' and client '{client_id}'.")
     return {"access_token": encoded_jwt, "token_type": "bearer"}
 
@@ -151,11 +152,11 @@ def sso_introspect_token(
         return {"active": False, "error": f"Invalid token structure: {e}"}
 
     service = get_app_or_mcp_by_client_id(db, client_id)
-    if not service or not service.sso_secret:
-        ASCIIColors.error(f"[SSO] Introspection failed: Service for client_id '{client_id}' not found or has no SSO secret.")
+    if not service:
+        ASCIIColors.error(f"[SSO] Introspection failed: Service for client_id '{client_id}' not found.")
         return {"active": False, "error": "Application not found or SSO misconfigured."}
 
-    payload = decode_sso_token(token, service.sso_secret, audience=client_id)
+    payload = decode_sso_token(token, SECRET_KEY, audience=client_id)
     if not payload:
         ASCIIColors.warning(f"[SSO] Introspection failed: Token validation failed for client_id '{client_id}'.")
         return {"active": False, "error": "Token validation failed: Invalid signature, expiration, or audience."}

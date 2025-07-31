@@ -24,7 +24,7 @@ export const useUiStore = defineStore('ui', () => {
     const isSidebarOpen = ref(true);
     const keywords = ref([]);
     const isDataZoneVisible = ref(false);
-    const isDataZoneExpanded = ref(false); // NEW: State for expanded view
+    const isDataZoneExpanded = ref(false);
     const generatePersonalityModalProps = ref({
         prompt: '',
         customEnhancePrompt: ''
@@ -226,7 +226,6 @@ export const useUiStore = defineStore('ui', () => {
         }
     }
 
-    // NEW: Action to toggle the expanded state
     function toggleDataZoneExpansion() {
         isDataZoneExpanded.value = !isDataZoneExpanded.value;
     }
@@ -237,7 +236,7 @@ export const useUiStore = defineStore('ui', () => {
         isImageViewerOpen, imageViewerSrc, confirmationOptions,
         emailModalSubject, emailModalBody, emailModalBackgroundColor, emailModalSendAsText,
         isSidebarOpen, keywords, generatePersonalityModalProps,
-        isDataZoneVisible, isDataZoneExpanded, // EXPORT NEW STATE
+        isDataZoneVisible, isDataZoneExpanded,
         initEmailModalState,
         setMainView, openModal, closeModal, addNotification, removeNotification,
         setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages, fetchKeywords,
@@ -245,7 +244,7 @@ export const useUiStore = defineStore('ui', () => {
         isModalOpen, modalData,
         copyToClipboard,
         toggleSidebar, initializeSidebarState,
-        toggleDataZone, toggleDataZoneExpansion, // EXPORT NEW ACTION
+        toggleDataZone, toggleDataZoneExpansion,
         openGeneratePersonalityModal
     };
 });

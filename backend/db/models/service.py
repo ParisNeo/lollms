@@ -23,7 +23,6 @@ class MCP(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     authentication_type = Column(String, default="None", nullable=False)
     authentication_key = Column(String, nullable=True)
-    sso_secret = Column(String, nullable=True)
     sso_redirect_uri = Column(String, nullable=True)
     sso_user_infos_to_share = Column(JSON, nullable=True)
     owner = relationship("User", back_populates="personal_mcps")
@@ -53,7 +52,6 @@ class App(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     authentication_type = Column(String, default="None", nullable=False)
     authentication_key = Column(String, nullable=True)
-    sso_secret = Column(String, nullable=True)
     sso_redirect_uri = Column(String, nullable=True)
     sso_user_infos_to_share = Column(JSON, nullable=True)
     
@@ -84,6 +82,5 @@ class SystemApp(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     authentication_type = Column(String, default="None", nullable=False)
     authentication_key = Column(String, nullable=True)
-    sso_secret = Column(String, nullable=True)
     sso_redirect_uri = Column(String, nullable=True)
     sso_user_infos_to_share = Column(JSON, nullable=True)

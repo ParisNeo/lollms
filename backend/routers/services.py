@@ -16,7 +16,7 @@ from backend.models import (
     MCPCreate, MCPUpdate, MCPPublic, ToolInfo,
     AppCreate, AppUpdate, AppPublic,
     DiscussionToolsUpdate, DiscussionInfo, UserAuthDetails,
-    SSOSecretResponse, TaskInfo
+    TaskInfo
 )
 from backend.discussion import get_user_discussion
 from backend.task_manager import task_manager, Task
@@ -77,8 +77,7 @@ def _format_mcp_public(mcp: DBMCP) -> MCPPublic:
         owner_username=mcp.owner.username if mcp.owner else "System",
         created_at=mcp.created_at, updated_at=mcp.updated_at,
         sso_redirect_uri=mcp.sso_redirect_uri,
-        sso_user_infos_to_share=mcp.sso_user_infos_to_share or [],
-        sso_secret_exists=bool(mcp.sso_secret)
+        sso_user_infos_to_share=mcp.sso_user_infos_to_share or []
     )
 
 @mcp_router.get("", response_model=List[MCPPublic])
@@ -153,26 +152,6 @@ def update_mcp(
     _invalidate_user_mcp_cache(current_user.username)
     return _format_mcp_public(mcp_db)
 
-@mcp_router.post("/{mcp_id}/generate-sso-secret", response_model=SSOSecretResponse)
-def generate_mcp_sso_secret(
-    mcp_id: str,
-    db: Session = Depends(get_db),
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-):
-    mcp_db = db.query(DBMCP).filter(DBMCP.id == mcp_id).first()
-    if not mcp_db:
-        raise HTTPException(status_code=404, detail="MCP not found.")
-
-    is_owner = mcp_db.owner_user_id == current_user.id
-    if not is_owner and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized to generate a secret for this MCP.")
-
-    new_secret = generate_sso_secret()
-    mcp_db.sso_secret = new_secret
-    db.commit()
-    
-    return SSOSecretResponse(sso_secret=new_secret)
-
 @mcp_router.delete("/{mcp_id}", status_code=204)
 def delete_mcp(
     mcp_id: str,
@@ -204,7 +183,6 @@ def _format_app_public(app: DBApp) -> AppPublic:
         created_at=app.created_at, updated_at=app.updated_at,
         sso_redirect_uri=app.sso_redirect_uri,
         sso_user_infos_to_share=app.sso_user_infos_to_share or [],
-        sso_secret_exists=bool(app.sso_secret),
         is_installed=app.is_installed,
         port=app.port,
         status=app.status,
@@ -274,26 +252,6 @@ def update_app(app_id: str, app_update: AppUpdate, db: Session = Depends(get_db)
         db.rollback()
         raise HTTPException(status_code=409, detail="An app with the new name already exists.")
     return _format_app_public(app_db)
-
-@apps_router.post("/{app_id}/generate-sso-secret", response_model=SSOSecretResponse)
-def generate_app_sso_secret(
-    app_id: str,
-    db: Session = Depends(get_db),
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-):
-    app_db = db.query(DBApp).filter(DBApp.id == app_id).first()
-    if not app_db:
-        raise HTTPException(status_code=404, detail="App not found.")
-
-    is_owner = app_db.owner_user_id == current_user.id
-    if not is_owner and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="Not authorized to generate a secret for this App.")
-
-    new_secret = generate_sso_secret()
-    app_db.sso_secret = new_secret
-    db.commit()
-    
-    return SSOSecretResponse(sso_secret=new_secret)
 
 @apps_router.delete("/{app_id}", status_code=204)
 def delete_app(app_id: str, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):

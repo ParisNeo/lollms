@@ -63,7 +63,6 @@ class MCPPublic(MCPBase):
     owner_username: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    sso_secret_exists: bool = False
     class Config:
         from_attributes = True
 
@@ -170,7 +169,6 @@ class AppPublic(AppBase):
     owner_username: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    sso_secret_exists: bool = False
     status: Optional[str] = None
     pid: Optional[int] = None
     autostart: bool = False
@@ -182,9 +180,6 @@ class AppPublic(AppBase):
 
     class Config:
         from_attributes = True
-
-class SSOSecretResponse(BaseModel):
-    sso_secret: str
 
 class ToolInfo(BaseModel):
     name: str

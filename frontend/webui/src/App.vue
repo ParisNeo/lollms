@@ -46,7 +46,7 @@ import TasksManagerModal from './components/modals/TasksManagerModal.vue';
 import EnhancePersonalityPromptModal from './components/modals/EnhancePersonalityPromptModal.vue';
 import ContextViewModal from './components/modals/ContextViewModal.vue';
 import DataZonePromptManagementModal from './components/modals/DataZonePromptManagementModal.vue';
-import FillPlaceholdersModal from './components/modals/FillPlaceholdersModal.vue'; // <-- ADDED IMPORT
+import FillPlaceholdersModal from './components/modals/FillPlaceholdersModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -151,7 +151,7 @@ onMounted(async () => {
     <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
     <ContextViewModal v-if="activeModal === 'contextViewer'" />
     <DataZonePromptManagementModal v-if="activeModal === 'dataZonePromptManagement'" />
-    <FillPlaceholdersModal v-if="activeModal === 'fillPlaceholders'" /> <!-- <-- ADDED COMPONENT -->
+    <FillPlaceholdersModal v-if="activeModal === 'fillPlaceholders'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

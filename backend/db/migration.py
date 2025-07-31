@@ -260,7 +260,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "type": "VARCHAR",
             "icon": "TEXT",
             "authentication_type": "VARCHAR", "authentication_key": "VARCHAR",
-            "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON",
+            "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON",
             "client_id": "VARCHAR"
         }
         for col_name, col_sql_def in new_mcp_cols_defs.items():
@@ -334,7 +334,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "active": "BOOLEAN DEFAULT 1 NOT NULL",
             "type": "VARCHAR",
             "authentication_type": "VARCHAR", "authentication_key": "VARCHAR",
-            "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON",
+            "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON",
             "client_id": "VARCHAR",
             "description": "TEXT",
             "author": "VARCHAR",
@@ -391,7 +391,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if inspector.has_table("system_apps"):
         system_app_columns_db = [col['name'] for col in inspector.get_columns('system_apps')]
         new_system_app_cols_defs = {
-            "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON"
+            "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON"
         }
         for col_name, col_sql_def in new_system_app_cols_defs.items():
             if col_name not in system_app_columns_db:
