@@ -185,10 +185,9 @@ export const useAuthStore = defineStore('auth', () => {
         const formData = new FormData();
         formData.append('client_id', clientId);
         const response = await apiClient.post('/api/sso/authorize', formData);
-        const appDetailsResponse = await apiClient.get(`/api/sso/app_details/${clientId}`);
         return {
             access_token: response.data.access_token,
-            redirect_uri: appDetailsResponse.data.sso_redirect_uri,
+            redirect_uri: response.data.sso_redirect_uri,
         };
     }
     
