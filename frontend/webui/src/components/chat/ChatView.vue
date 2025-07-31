@@ -6,6 +6,7 @@ import { useUiStore } from '../../stores/ui';
 import { usePromptsStore } from '../../stores/prompts';
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
+import { storeToRefs } from 'pinia';
 
 // Component Imports
 import MessageArea from './MessageArea.vue';
@@ -36,6 +37,7 @@ const authStore = useAuthStore();
 const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
 const { on, off } = useEventBus();
+const { liveDataZoneTokens } = storeToRefs(discussionsStore); // Get reactive state
 
 // --- Component State ---
 const knowledgeFileInput = ref(null);
@@ -43,8 +45,6 @@ const isExtractingText = ref(false);
 const activeDataZoneTab = ref('discussion');
 const userCodeMirrorEditor = ref(null);
 const dataZonePromptText = ref('');
-
-// NEW: State for resizable panel
 const dataZoneWidth = ref(448); // Default width (28rem)
 const isResizing = ref(false);
 
@@ -52,16 +52,15 @@ const isResizing = ref(false);
 let discussionSaveDebounceTimer = null;
 let userSaveDebounceTimer = null;
 let memorySaveDebounceTimer = null;
+let tokenizeDebounceTimers = {};
 
 // --- History State for Undo/Redo ---
 const discussionHistory = ref([]);
 const discussionHistoryIndex = ref(-1);
 let discussionHistoryDebounceTimer = null;
-
 const userHistory = ref([]);
 const userHistoryIndex = ref(-1);
 let userHistoryDebounceTimer = null;
-
 const memoryHistory = ref([]);
 const memoryHistoryIndex = ref(-1);
 let memoryHistoryDebounceTimer = null;
@@ -81,11 +80,8 @@ const defaultPrompts = [
     { name: 'To Mindmap', content: 'Convert the following text into a MermaidJS mindmap format. Start with the central theme and branch out to main ideas and sub-points.' },
     { name: 'To Bullet Points', content: 'List the main ideas from the following text as a clear, nested bullet point list.' },
 ];
-
 const savedPrompts = computed(() => promptsStore.savedPrompts);
-const keywords = computed(() => uiStore.keywords); // NEW: For placeholders
-
-// --- Undo/Redo Computed Properties ---
+const keywords = computed(() => uiStore.keywords);
 const canUndoDiscussion = computed(() => discussionHistoryIndex.value > 0);
 const canRedoDiscussion = computed(() => discussionHistoryIndex.value < discussionHistory.value.length - 1);
 const canUndoUser = computed(() => userHistoryIndex.value > 0);
@@ -98,81 +94,77 @@ const discussionDataZone = computed({
     get: () => activeDiscussion.value?.discussion_data_zone || '',
     set: (newVal) => {
         if (activeDiscussion.value) {
-            // This action handles UI state changes and cancels running tasks correctly.
             discussionsStore.setUserDataZoneContent(activeDiscussion.value.id, newVal);
-
             clearTimeout(discussionSaveDebounceTimer);
             discussionSaveDebounceTimer = setTimeout(() => {
-                if (activeDiscussion.value) {
-                    discussionsStore.updateDataZone({ discussionId: activeDiscussion.value.id, content: newVal });
-                }
+                if (activeDiscussion.value) discussionsStore.updateDataZone({ discussionId: activeDiscussion.value.id, content: newVal });
             }, 750);
         }
     }
 });
-
 const userDataZone = computed({
     get: () => authStore.user?.data_zone || '',
     set: (newVal) => {
-        if (authStore.user) { authStore.user.data_zone = newVal; } // Update local state for immediate reactivity
+        if (authStore.user) { authStore.user.data_zone = newVal; }
         clearTimeout(userSaveDebounceTimer);
         userSaveDebounceTimer = setTimeout(() => { authStore.updateDataZone(newVal); }, 750);
     }
 });
-
 const personalityDataZone = computed(() => activeDiscussion.value?.personality_data_zone || '');
-
 const memory = computed({
     get: () => authStore.user?.memory || '',
     set: (newVal) => {
-        if (authStore.user) { authStore.user.memory = newVal; } // Update local state for immediate reactivity
+        if (authStore.user) { authStore.user.memory = newVal; }
         clearTimeout(memorySaveDebounceTimer);
         memorySaveDebounceTimer = setTimeout(() => { authStore.updateMemoryZone(newVal); }, 750);
     }
 });
 
-const combinedDataZoneContent = computed(() => {
-    return [
-        userDataZone.value ? `### User Data\n${userDataZone.value}` : '',
-        discussionDataZone.value ? `### Discussion Data\n${discussionDataZone.value}` : '',
-        personalityDataZone.value ? `### Personality Data\n${personalityDataZone.value}` : '',
-        memory.value ? `### Long-Term Memory\n${memory.value}` : ''
-    ].filter(Boolean).join('\n\n');
-});
-
-// NEW: Context Status Computed Properties
+// --- Context Status Computed Properties ---
 const contextStatus = computed(() => discussionsStore.activeDiscussionContextStatus);
 const maxTokens = computed(() => contextStatus.value?.max_tokens || 1);
-
-const discussionDataZoneTokens = computed(() => contextStatus.value?.zones?.system_context?.breakdown?.discussion_data_zone?.tokens || 0);
-const userDataZoneTokens = computed(() => contextStatus.value?.zones?.system_context?.breakdown?.user_data_zone?.tokens || 0);
-const personalityDataZoneTokens = computed(() => contextStatus.value?.zones?.system_context?.breakdown?.personality_data_zone?.tokens || 0);
-const memoryDataZoneTokens = computed(() => contextStatus.value?.zones?.system_context?.breakdown?.memory?.tokens || 0);
+const discussionDataZoneTokens = computed(() => liveDataZoneTokens.value.discussion);
+const userDataZoneTokens = computed(() => liveDataZoneTokens.value.user);
+const personalityDataZoneTokens = computed(() => liveDataZoneTokens.value.personality);
+const memoryDataZoneTokens = computed(() => liveDataZoneTokens.value.memory);
 
 const getPercentage = (tokens) => {
     if (maxTokens.value <= 0) return 0;
-    return Math.min((tokens / maxTokens.value) * 100, 100); // Capped at 100%
+    return Math.min((tokens / maxTokens.value) * 100, 100);
 };
+const formatNumber = (num) => num ? num.toLocaleString() : '0';
 
-const formatNumber = (num) => {
-    return num ? num.toLocaleString() : '0';
-};
+// --- DEBOUNCED TOKENIZATION ---
+async function tokenizeContent(content, zone) {
+    clearTimeout(tokenizeDebounceTimers[zone]);
+    if (!content || !content.trim()) {
+        discussionsStore.updateLiveTokenCount(zone, 0);
+        return;
+    }
+    tokenizeDebounceTimers[zone] = setTimeout(async () => {
+        try {
+            const response = await apiClient.post('/api/discussions/tokenize', { text: content });
+            discussionsStore.updateLiveTokenCount(zone, response.data.tokens);
+        } catch (error) {
+            console.error(`Tokenization for ${zone} failed:`, error);
+            discussionsStore.updateLiveTokenCount(zone, 0);
+        }
+    }, 750);
+}
 
-watch(combinedDataZoneContent, (newCombinedText) => {
-    discussionsStore.updateDataZonesTokenCount(newCombinedText);
-}, { immediate: true });
+// Watchers for live tokenization
+watch(discussionDataZone, (newVal) => { tokenizeContent(newVal, 'discussion'); });
+watch(userDataZone, (newVal) => { tokenizeContent(newVal, 'user'); });
+watch(memory, (newVal) => { tokenizeContent(newVal, 'memory'); });
 
 // --- LIFECYCLE HOOKS ---
 onMounted(() => {
     on('task:completed', handleTaskCompletion);
     const savedWidth = localStorage.getItem('lollms_dataZoneWidth');
-    if (savedWidth) { dataZoneWidth.value = parseInt(savedWidth, 10); }
-
-    // Initialize history for non-discussion zones
+    if (savedWidth) dataZoneWidth.value = parseInt(savedWidth, 10);
     setupHistory(userHistory, userHistoryIndex, userDataZone.value);
     setupHistory(memoryHistory, memoryHistoryIndex, memory.value);
 });
-
 onUnmounted(() => {
     off('task:completed', handleTaskCompletion);
     window.removeEventListener('mousemove', handleResize);
@@ -182,75 +174,48 @@ onUnmounted(() => {
 // --- METHODS ---
 function handleTaskCompletion(task) {
     if (activeDiscussion.value && task?.result?.discussion_id === activeDiscussion.value.id) {
-        if (task.name.includes('Summarize') || task.name.includes('Memorize')) {
-            refreshDataZones();
-        }
+        if (task.name.includes('Summarize') || task.name.includes('Memorize')) refreshDataZones();
     }
 }
-
-// --- History Methods ---
 function setupHistory(historyRef, indexRef, initialValue) {
     historyRef.value = [initialValue];
     indexRef.value = 0;
 }
-
 function recordHistory(historyRef, indexRef, debounceTimer, content) {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
         if (historyRef.value[indexRef.value] === content) return;
-
-        if (indexRef.value < historyRef.value.length - 1) {
-            historyRef.value.splice(indexRef.value + 1);
-        }
+        if (indexRef.value < historyRef.value.length - 1) historyRef.value.splice(indexRef.value + 1);
         historyRef.value.push(content);
         indexRef.value++;
     }, 500);
     return debounceTimer;
 }
+function undo(historyRef, indexRef, canUndo) { if (canUndo.value) { indexRef.value--; return historyRef.value[indexRef.value]; } }
+function redo(historyRef, indexRef, canRedo) { if (canRedo.value) { indexRef.value++; return historyRef.value[indexRef.value]; } }
 
-function undo(historyRef, indexRef, canUndo) {
-    if (canUndo.value) {
-        indexRef.value--;
-        return historyRef.value[indexRef.value];
-    }
-}
-
-function redo(historyRef, indexRef, canRedo) {
-    if (canRedo.value) {
-        indexRef.value++;
-        return historyRef.value[indexRef.value];
-    }
-}
-
-watch(discussionDataZone, (newVal) => {
-    discussionHistoryDebounceTimer = recordHistory(discussionHistory, discussionHistoryIndex, discussionHistoryDebounceTimer, newVal);
-});
-watch(userDataZone, (newVal) => {
-    userHistoryDebounceTimer = recordHistory(userHistory, userHistoryIndex, userHistoryDebounceTimer, newVal);
-});
-watch(memory, (newVal) => {
-    memoryHistoryDebounceTimer = recordHistory(memoryHistory, memoryHistoryIndex, memoryHistoryDebounceTimer, newVal);
-});
+watch(discussionDataZone, (newVal) => { discussionHistoryDebounceTimer = recordHistory(discussionHistory, discussionHistoryIndex, discussionHistoryDebounceTimer, newVal); });
+watch(userDataZone, (newVal) => { userHistoryDebounceTimer = recordHistory(userHistory, userHistoryIndex, userHistoryDebounceTimer, newVal); });
+watch(memory, (newVal) => { memoryHistoryDebounceTimer = recordHistory(memoryHistory, memoryHistoryIndex, memoryHistoryDebounceTimer, newVal); });
 
 watch(activeDiscussion, (newDiscussion) => {
     if (newDiscussion) {
         setupHistory(discussionHistory, discussionHistoryIndex, newDiscussion.discussion_data_zone || '');
+        // Initial tokenization when discussion changes
+        tokenizeContent(discussionDataZone.value, 'discussion');
+        tokenizeContent(userDataZone.value, 'user');
+        tokenizeContent(personalityDataZone.value, 'personality');
+        tokenizeContent(memory.value, 'memory');
     }
-}, { immediate: true });
+}, { immediate: true, deep: true });
 
 watch([isProcessing, isMemorizing], ([newIsProcessing, newIsMemorizing], [oldIsProcessing, oldIsMemorizing]) => {
     const taskFinished = (oldIsProcessing && !newIsProcessing) || (oldIsMemorizing && !newIsMemorizing);
-    if (taskFinished && activeDiscussion.value) {
-        // A task related to this discussion has just finished.
-        // Refresh the data from the backend to ensure the UI is up-to-date.
-        discussionsStore.refreshDataZones(activeDiscussion.value.id);
-    }
+    if (taskFinished && activeDiscussion.value) discussionsStore.refreshDataZones(activeDiscussion.value.id);
 });
 
-// Resizing Logic
 let startX = 0;
 let startWidth = 0;
-
 function startResize(event) {
     isResizing.value = true;
     startX = event.clientX;
@@ -260,7 +225,6 @@ function startResize(event) {
     window.addEventListener('mousemove', handleResize);
     window.addEventListener('mouseup', stopResize);
 }
-
 function handleResize(event) {
     if (!isResizing.value) return;
     const dx = event.clientX - startX;
@@ -269,7 +233,6 @@ function handleResize(event) {
     const maxWidth = window.innerWidth * 0.75;
     dataZoneWidth.value = Math.max(minWidth, Math.min(newWidth, maxWidth));
 }
-
 function stopResize() {
     isResizing.value = false;
     document.body.style.cursor = '';
@@ -278,27 +241,16 @@ function stopResize() {
     window.removeEventListener('mouseup', stopResize);
     localStorage.setItem('lollms_dataZoneWidth', dataZoneWidth.value);
 }
-
-watch(isDataZoneVisible, (isVisible) => { 
-    if (isVisible) { 
-        promptsStore.fetchPrompts();
-        uiStore.fetchKeywords();
-    } 
-});
+watch(isDataZoneVisible, (isVisible) => { if (isVisible) { promptsStore.fetchPrompts(); uiStore.fetchKeywords(); } });
 
 function insertPlaceholder(placeholder) {
     const view = userCodeMirrorEditor.value?.editorView;
     if (!view) return;
     const { from, to } = view.state.selection.main;
     const textToInsert = placeholder;
-    
-    view.dispatch({
-        changes: { from, to, insert: textToInsert },
-        selection: { anchor: from + textToInsert.length }
-    });
+    view.dispatch({ changes: { from, to, insert: textToInsert }, selection: { anchor: from + textToInsert.length } });
     view.focus();
 }
-
 function triggerKnowledgeFileUpload() { knowledgeFileInput.value?.click(); }
 
 async function handleKnowledgeFileUpload(event) {
@@ -317,46 +269,33 @@ async function handleKnowledgeFileUpload(event) {
         if (knowledgeFileInput.value) knowledgeFileInput.value.value = '';
     }
 }
-
 function handleProcessContent() {
     if (!activeDiscussion.value) return;
     const finalPrompt = dataZonePromptText.value.replace('{{data_zone}}', discussionDataZone.value);
     discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, finalPrompt);
 }
-
 function openPromptLibrary() {
     if (!activeDiscussion.value) return;
     uiStore.openModal('dataZonePromptManagement', {
         initialPrompt: dataZonePromptText.value,
-        onLoad: (loadedPrompt) => {
-            handlePromptSelection(loadedPrompt);
-        }
+        onLoad: (loadedPrompt) => { handlePromptSelection(loadedPrompt); }
     });
 }
-
 function handlePromptSelection(promptContent) {
     if (/@<.*?>@/g.test(promptContent)) {
         uiStore.openModal('fillPlaceholders', {
             promptTemplate: promptContent,
-            onConfirm: (filledPrompt) => {
-                dataZonePromptText.value = filledPrompt;
-            }
+            onConfirm: (filledPrompt) => { dataZonePromptText.value = filledPrompt; }
         });
     } else {
         dataZonePromptText.value = promptContent;
     }
 }
-
 function handleMemorize() {
     if (!activeDiscussion.value) return;
     discussionsStore.memorizeLTM(activeDiscussion.value.id);
 }
-
-function refreshDataZones() {
-    if (activeDiscussion.value) {
-        discussionsStore.refreshDataZones(activeDiscussion.value.id);
-    }
-}
+function refreshDataZones() { if (activeDiscussion.value) discussionsStore.refreshDataZones(activeDiscussion.value.id); }
 
 async function exportDataZone() {
     if (!discussionDataZone.value.trim()) {
@@ -433,13 +372,13 @@ async function exportDataZone() {
                                 <button @click="discussionDataZone = ''" class="btn-icon-danger" title="Clear All Text"><IconTrash class="w-5 h-5" /></button>
                             </div>
                         </div>
-                        <div v-if="contextStatus" class="mt-2">
+                        <div class="mt-2">
                             <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono">
                                 <span>Tokens</span>
                                 <span>{{ formatNumber(discussionDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
                             </div>
                             <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1">
-                                <div class="h-1.5 rounded-full bg-blue-500" :style="{ width: `${getPercentage(discussionDataZoneTokens)}%` }"></div>
+                                <div class="h-1.5 rounded-full bg-blue-500 transition-width duration-500" :style="{ width: `${getPercentage(discussionDataZoneTokens)}%` }"></div>
                             </div>
                         </div>
                     </div>
@@ -480,13 +419,13 @@ async function exportDataZone() {
                                 <button @click="userDataZone = redo(userHistory, userHistoryIndex, canRedoUser)" class="btn-icon" title="Redo" :disabled="!canRedoUser"><IconRedo class="w-5 h-5" /></button>
                             </div>
                         </div>
-                        <div v-if="contextStatus" class="mt-2">
+                        <div class="mt-2">
                             <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono">
                                 <span>Tokens</span>
                                 <span>{{ formatNumber(userDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
                             </div>
                             <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1">
-                                <div class="h-1.5 rounded-full bg-green-500" :style="{ width: `${getPercentage(userDataZoneTokens)}%` }"></div>
+                                <div class="h-1.5 rounded-full bg-green-500 transition-width duration-500" :style="{ width: `${getPercentage(userDataZoneTokens)}%` }"></div>
                             </div>
                         </div>
                     </div>
@@ -496,13 +435,13 @@ async function exportDataZone() {
                     <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                         <h3 class="font-semibold flex items-center gap-2"><IconSparkles class="w-5 h-5" /> Personality Data Zone</h3>
                         <p class="text-xs text-gray-500 mt-1">Read-only context from the active personality.</p>
-                        <div v-if="contextStatus" class="mt-2">
+                        <div class="mt-2">
                             <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono">
                                 <span>Tokens</span>
                                 <span>{{ formatNumber(personalityDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
                             </div>
                             <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1">
-                                <div class="h-1.5 rounded-full bg-purple-500" :style="{ width: `${getPercentage(personalityDataZoneTokens)}%` }"></div>
+                                <div class="h-1.5 rounded-full bg-purple-500 transition-width duration-500" :style="{ width: `${getPercentage(personalityDataZoneTokens)}%` }"></div>
                             </div>
                         </div>
                     </div>
@@ -520,13 +459,13 @@ async function exportDataZone() {
                                 <button @click="handleMemorize" class="btn btn-secondary btn-sm" title="Analyze discussion and memorize new facts" :disabled="isMemorizing"><IconSparkles class="w-4 h-4" :class="{'animate-pulse': isMemorizing}"/></button>
                             </div>
                         </div>
-                        <div v-if="contextStatus" class="mt-2">
+                        <div class="mt-2">
                             <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono">
                                 <span>Tokens</span>
                                 <span>{{ formatNumber(memoryDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
                             </div>
                             <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1">
-                                <div class="h-1.5 rounded-full bg-yellow-500" :style="{ width: `${getPercentage(memoryDataZoneTokens)}%` }"></div>
+                                <div class="h-1.5 rounded-full bg-yellow-500 transition-width duration-500" :style="{ width: `${getPercentage(memoryDataZoneTokens)}%` }"></div>
                             </div>
                         </div>
                     </div>

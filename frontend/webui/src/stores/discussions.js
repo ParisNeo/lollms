@@ -35,8 +35,22 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const titleGenerationInProgressId = ref(null);
     const activeDiscussionContextStatus = ref(null);
     const activeAiTasks = ref({}); // Tracks running AI tasks per discussion: { [discussionId]: { type: 'summarize' | 'memorize', taskId: '...' } }
-    const dataZonesTokenCount = ref(0);
-    let tokenizeDataZonesDebounceTimer = null;
+    
+    // MODIFIED: From single value to an object for individual tracking
+    const liveDataZoneTokens = ref({
+        discussion: 0,
+        user: 0,
+        personality: 0,
+        memory: 0
+    });
+
+    // MODIFIED: Computed property now sums up the live tokens
+    const dataZonesTokenCount = computed(() => {
+        return liveDataZoneTokens.value.discussion + 
+               liveDataZoneTokens.value.user + 
+               liveDataZoneTokens.value.personality + 
+               liveDataZoneTokens.value.memory;
+    });
 
 
     const sortedDiscussions = computed(() => {
@@ -126,22 +140,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    async function updateDataZonesTokenCount(combinedText) {
-        clearTimeout(tokenizeDataZonesDebounceTimer);
-        if (!combinedText || !combinedText.trim()) {
-            dataZonesTokenCount.value = 0;
-            return;
+    // NEW: Action to update live token counts
+    function updateLiveTokenCount(zone, count) {
+        if (liveDataZoneTokens.value.hasOwnProperty(zone)) {
+            liveDataZoneTokens.value[zone] = count;
         }
-
-        tokenizeDataZonesDebounceTimer = setTimeout(async () => {
-            try {
-                const response = await apiClient.post('/api/discussions/tokenize', { text: combinedText });
-                dataZonesTokenCount.value = response.data.tokens;
-            } catch (error) {
-                console.error("Data zone tokenization failed:", error);
-                dataZonesTokenCount.value = 0; // Reset on error
-            }
-        }, 750);
     }
     
     async function refreshDataZones(discussionId) {
@@ -173,6 +176,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.get(`/api/discussions/${discussionId}/context_status`);
             activeDiscussionContextStatus.value = response.data;
+            
+            // NEW: Sync live token counts with the official backend values
+            const breakdown = response.data?.zones?.system_context?.breakdown || {};
+            liveDataZoneTokens.value.discussion = breakdown.discussion_data_zone?.tokens || 0;
+            liveDataZoneTokens.value.user = breakdown.user_data_zone?.tokens || 0;
+            liveDataZoneTokens.value.personality = breakdown.personality_data_zone?.tokens || 0;
+            liveDataZoneTokens.value.memory = response.data?.zones?.memory?.tokens || 0;
+
         } catch (error) {
             console.error("Failed to fetch context status:", error);
             activeDiscussionContextStatus.value = null;
@@ -285,6 +296,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
         currentDiscussionId.value = id;
         messages.value = [];
+        // NEW: Reset live token counts on discussion switch
+        liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
         if (!discussions.value[id]) {
             currentDiscussionId.value = null;
             return;
@@ -776,7 +789,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         importDiscussions, sendDiscussion, $reset, activeDiscussionContextStatus, fetchContextStatus,
         fetchDataZones, updateDataZone, activePersonality,
         summarizeDiscussionDataZone, memorizeLTM, activeAiTasks,
-        dataZonesTokenCount, updateDataZonesTokenCount,
+        dataZonesTokenCount, liveDataZoneTokens, updateLiveTokenCount,
         initialize,
         refreshDataZones,
         setUserDataZoneContent,

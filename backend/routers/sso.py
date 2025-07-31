@@ -129,7 +129,7 @@ def sso_authorize_logged_in_user(
     
     encoded_jwt = create_sso_token(to_encode, SECRET_KEY, audience=client_id)
     ASCIIColors.green(f"[SSO] SSO token generated for user '{user.username}' and client '{client_id}'.")
-    return {"access_token": encoded_jwt, "token_type": "bearer"}
+    return {"access_token": encoded_jwt, "token_type": "bearer", "sso_redirect_uri":service.sso_redirect_uri}
 
 
 @sso_router.post("/introspect")
