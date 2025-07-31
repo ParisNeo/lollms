@@ -50,6 +50,7 @@ import IconTypescript from './languages/IconTypescript.vue';
 import IconVuejs from './languages/IconVuejs.vue';
 import IconXml from './languages/IconXml.vue';
 import IconYaml from './languages/IconYaml.vue';
+import IconTicket from './IconTicket.vue';
 
 // Manually map names to imported components
 export const uiIconMap = {
@@ -77,6 +78,7 @@ export const uiIconMap = {
     'terminal': IconTerminal,
     'type': IconType,
     'image': IconImage,
+    'ticket': IconTicket,
     // Add aliases for icons that might have different names in different places
     'equation': IconSigma, 
 };

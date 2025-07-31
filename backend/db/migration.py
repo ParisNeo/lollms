@@ -1,5 +1,6 @@
 # backend/db/migration.py
 import json
+import re
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, IntegrityError
 
@@ -259,12 +260,38 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "type": "VARCHAR",
             "icon": "TEXT",
             "authentication_type": "VARCHAR", "authentication_key": "VARCHAR",
-            "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON"
+            "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON",
+            "client_id": "VARCHAR"
         }
         for col_name, col_sql_def in new_mcp_cols_defs.items():
             if col_name not in mcp_columns_db:
                 connection.execute(text(f"ALTER TABLE mcps ADD COLUMN {col_name} {col_sql_def}"))
                 print(f"INFO: Added missing column '{col_name}' to 'mcps' table.")
+
+        if 'client_id' in new_mcp_cols_defs:
+            mcps_to_update = connection.execute(text("SELECT id, name FROM mcps WHERE client_id IS NULL")).fetchall()
+            if mcps_to_update:
+                print(f"INFO: Backfilling client_id for {len(mcps_to_update)} existing MCPs...")
+                for mcp_id, mcp_name in mcps_to_update:
+                    base_slug = re.sub(r'[^a-z0-9_]+', '', mcp_name.lower().replace(' ', '_'))
+                    new_client_id = base_slug
+                    counter = 1
+                    while True:
+                        app_conflict = connection.execute(text("SELECT 1 FROM apps WHERE client_id = :cid"), {"cid": new_client_id}).first()
+                        mcp_conflict = connection.execute(text("SELECT 1 FROM mcps WHERE client_id = :cid AND id != :mid"), {"cid": new_client_id, "mid": mcp_id}).first()
+                        if not app_conflict and not mcp_conflict: break
+                        new_client_id = f"{base_slug}_{counter}"
+                        counter += 1
+                    connection.execute(text("UPDATE mcps SET client_id = :cid WHERE id = :mid"), {"cid": new_client_id, "mid": mcp_id})
+                    print(f"  - Set client_id for '{mcp_name}' to '{new_client_id}'")
+
+        mcp_constraints = inspector.get_unique_constraints('mcps')
+        if 'client_id' in new_mcp_cols_defs and not any(c['name'] == 'uq_mcp_client_id' for c in mcp_constraints):
+            try:
+                connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_mcp_client_id ON mcps (client_id) WHERE client_id IS NOT NULL"))
+                print("INFO: Created unique index 'uq_mcp_client_id' on 'mcps.client_id'.")
+            except (OperationalError, IntegrityError) as e:
+                print(f"Warning: Could not create unique index on mcp client_id. Error: {e}")
 
     if inspector.has_table("apps"):
         app_columns_db = [col['name'] for col in inspector.get_columns('apps')]
@@ -299,6 +326,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "type": "VARCHAR",
             "authentication_type": "VARCHAR", "authentication_key": "VARCHAR",
             "sso_secret": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON",
+            "client_id": "VARCHAR",
             "description": "TEXT",
             "author": "VARCHAR",
             "version": "VARCHAR",
@@ -318,6 +346,23 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             if col_name not in app_columns_db_after_rebuild:
                 connection.execute(text(f"ALTER TABLE apps ADD COLUMN {col_name} {col_sql_def}"))
                 print(f"INFO: Added missing column '{col_name}' to 'apps' table.")
+
+        if 'client_id' in new_app_cols_defs:
+            apps_to_update = connection.execute(text("SELECT id, name FROM apps WHERE client_id IS NULL")).fetchall()
+            if apps_to_update:
+                print(f"INFO: Backfilling client_id for {len(apps_to_update)} existing Apps...")
+                for app_id, app_name in apps_to_update:
+                    base_slug = re.sub(r'[^a-z0-9_]+', '', app_name.lower().replace(' ', '_'))
+                    new_client_id = base_slug
+                    counter = 1
+                    while True:
+                        app_conflict = connection.execute(text("SELECT 1 FROM apps WHERE client_id = :cid AND id != :aid"), {"cid": new_client_id, "aid": app_id}).first()
+                        mcp_conflict = connection.execute(text("SELECT 1 FROM mcps WHERE client_id = :cid"), {"cid": new_client_id}).first()
+                        if not app_conflict and not mcp_conflict: break
+                        new_client_id = f"{base_slug}_{counter}"
+                        counter += 1
+                    connection.execute(text("UPDATE apps SET client_id = :cid WHERE id = :aid"), {"cid": new_client_id, "aid": app_id})
+                    print(f"  - Set client_id for '{app_name}' to '{new_client_id}'")
         
         app_constraints = inspector.get_unique_constraints('apps')
         if 'port' in new_app_cols_defs and not any(c['name'] == 'uq_app_port' for c in app_constraints):
@@ -326,6 +371,13 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print("INFO: Created unique index 'uq_app_port' on 'apps.port'.")
             except (OperationalError, IntegrityError) as e:
                 print(f"Warning: Could not create unique index on app port. Error: {e}")
+        
+        if 'client_id' in new_app_cols_defs and not any(c['name'] == 'uq_app_client_id' for c in app_constraints):
+            try:
+                connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_app_client_id ON apps (client_id) WHERE client_id IS NOT NULL"))
+                print("INFO: Created unique index 'uq_app_client_id' on 'apps.client_id'.")
+            except (OperationalError, IntegrityError) as e:
+                print(f"Warning: Could not create unique index on app client_id. Error: {e}")
 
     if inspector.has_table("system_apps"):
         system_app_columns_db = [col['name'] for col in inspector.get_columns('system_apps')]

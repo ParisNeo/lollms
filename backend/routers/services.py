@@ -1,5 +1,6 @@
 # backend/routers/mcp.py
 import traceback
+import re
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
@@ -23,6 +24,18 @@ from backend.task_manager import task_manager, Task
 mcp_router = APIRouter(prefix="/api/mcps", tags=["Services"])
 apps_router = APIRouter(prefix="/api/apps", tags=["Services"])
 discussion_tools_router = APIRouter(prefix="/api/discussions", tags=["Services"])
+
+def _generate_unique_client_id(db: Session, name: str) -> str:
+    base_slug = re.sub(r'[^a-z0-9_]+', '', name.lower().replace(' ', '_'))
+    client_id = base_slug
+    counter = 1
+    while True:
+        exists_in_apps = db.query(DBApp).filter(DBApp.client_id == client_id).first()
+        exists_in_mcps = db.query(DBMCP).filter(DBMCP.client_id == client_id).first()
+        if not exists_in_apps and not exists_in_mcps:
+            return client_id
+        client_id = f"{base_slug}_{counter}"
+        counter += 1
 
 def _to_task_info(db_task: DBTask) -> TaskInfo:
     """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
@@ -57,7 +70,7 @@ def _invalidate_user_mcp_cache(username: str):
 
 def _format_mcp_public(mcp: DBMCP) -> MCPPublic:
     return MCPPublic(
-        id=mcp.id, name=mcp.name, url=mcp.url, icon=mcp.icon,
+        id=mcp.id, name=mcp.name, client_id=mcp.client_id, url=mcp.url, icon=mcp.icon,
         active=mcp.active, type=mcp.type,
         authentication_type=mcp.authentication_type,
         authentication_key="********" if mcp.authentication_key else "",
@@ -90,8 +103,16 @@ def create_mcp(
         raise HTTPException(status_code=403, detail="Only admins can create system-level MCPs.")
     
     owner_id = current_user.id if mcp_data.type == 'user' else None
-    
-    new_mcp = DBMCP(**mcp_data.model_dump(), owner_user_id=owner_id)
+
+    if mcp_data.client_id:
+        if db.query(DBMCP).filter(DBMCP.client_id == mcp_data.client_id).first() or \
+           db.query(DBApp).filter(DBApp.client_id == mcp_data.client_id).first():
+            raise HTTPException(status_code=409, detail=f"Client ID '{mcp_data.client_id}' is already in use.")
+        client_id_to_set = mcp_data.client_id
+    else:
+        client_id_to_set = _generate_unique_client_id(db, mcp_data.name)
+
+    new_mcp = DBMCP(**mcp_data.model_dump(exclude={"client_id"}), client_id=client_id_to_set, owner_user_id=owner_id)
     db.add(new_mcp)
     try:
         db.commit()
@@ -175,7 +196,7 @@ def delete_mcp(
 
 def _format_app_public(app: DBApp) -> AppPublic:
     return AppPublic(
-        id=app.id, name=app.name, url=app.url, icon=app.icon,
+        id=app.id, name=app.name, client_id=app.client_id, url=app.url, icon=app.icon,
         active=app.active, type=app.type,
         authentication_type=app.authentication_type,
         authentication_key="********" if app.authentication_key else "",
@@ -206,7 +227,15 @@ def create_app(app_data: AppCreate, db: Session = Depends(get_db), current_user:
     
     owner_id = current_user.id if app_data.type == 'user' else None
     
-    new_app = DBApp(**app_data.model_dump(), owner_user_id=owner_id)
+    if app_data.client_id:
+        if db.query(DBMCP).filter(DBMCP.client_id == app_data.client_id).first() or \
+           db.query(DBApp).filter(DBApp.client_id == app_data.client_id).first():
+            raise HTTPException(status_code=409, detail=f"Client ID '{app_data.client_id}' is already in use.")
+        client_id_to_set = app_data.client_id
+    else:
+        client_id_to_set = _generate_unique_client_id(db, app_data.name)
+
+    new_app = DBApp(**app_data.model_dump(exclude={"client_id"}), client_id=client_id_to_set, owner_user_id=owner_id)
     db.add(new_app)
     try:
         db.commit()

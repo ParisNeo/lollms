@@ -13,6 +13,7 @@ class MCP(Base):
     __tablename__ = "mcps"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     name = Column(String, nullable=False, index=True)
+    client_id = Column(String, unique=True, index=True, nullable=True) # NEW: SSO identifier
     url = Column(String, nullable=False)
     icon = Column(Text, nullable=True)
     active = Column(Boolean, default=True, nullable=False)
@@ -41,6 +42,7 @@ class App(Base):
     __tablename__ = "apps"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     name = Column(String, nullable=False, index=True)
+    client_id = Column(String, unique=True, index=True, nullable=True) # NEW: SSO identifier
     folder_name = Column(String, nullable=True)
     url = Column(String, nullable=True)
     icon = Column(Text, nullable=True)

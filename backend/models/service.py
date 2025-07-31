@@ -34,6 +34,7 @@ class LLMBindingPublic(LLMBindingBase):
 
 class MCPBase(BaseModel):
     name: constr(min_length=1, max_length=100)
+    client_id: Optional[str] = None
     url: str
     icon: Optional[str] = None
     active: Optional[bool] = True
@@ -121,6 +122,7 @@ class AppActionResponse(BaseModel):
 
 class AppBase(BaseModel):
     name: constr(min_length=1, max_length=100)
+    client_id: Optional[str] = None
     url: Optional[str] = None
     icon: Optional[str] = None
     active: Optional[bool] = True

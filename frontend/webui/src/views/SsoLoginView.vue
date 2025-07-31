@@ -42,11 +42,12 @@
                         <strong class="font-semibold text-gray-800 dark:text-gray-100">{{ appDetails.name }}</strong> is requesting access to the following information:
                     </p>
                     <ul class="text-sm list-disc list-inside bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md space-y-1">
+                        <li>Username</li>
                         <li v-for="info in appDetails.sso_user_infos_to_share" :key="info">{{ formatScope(info) }}</li>
                     </ul>
                 </div>
                  <p v-else class="text-sm text-center text-gray-500 dark:text-gray-400">
-                    This application has not requested any personal information.
+                    This application has not requested any personal information beyond your username.
                 </p>
                 <button @click="handleAuthorize" class="btn btn-primary w-full" :disabled="isAuthorizing">
                     {{ isAuthorizing ? 'Authorizing...' : 'Authorize' }}
@@ -73,7 +74,7 @@ import apiClient from '../services/api';
 const route = useRoute();
 const authStore = useAuthStore();
 
-const appName = route.params.appName;
+const clientId = route.params.clientId;
 const appDetails = ref({});
 const isLoading = ref(true);
 const iconError = ref(false);
@@ -90,10 +91,13 @@ function formatScope(scope) {
 }
 
 async function fetchAppDetails() {
+    console.log(`[SSO LOG] Fetching details for client_id: ${clientId}`);
     try {
-        const response = await apiClient.get(`/api/sso/app_details/${appName}`);
+        const response = await apiClient.get(`/api/sso/app_details/${clientId}`);
         appDetails.value = response.data;
+        console.log('[SSO LOG] App details received:', response.data);
     } catch (error) {
+        console.error('[SSO LOG] Error fetching app details:', error.response?.data?.detail || error.message);
         fatalError.value = error.response?.data?.detail || 'This application is not configured for SSO.';
     } finally {
         isLoading.value = false;
@@ -103,14 +107,20 @@ async function fetchAppDetails() {
 async function handleLogin() {
     isAuthorizing.value = true;
     errorMessage.value = '';
+    console.log(`[SSO LOG] Attempting login for user '${username.value}' to authorize client '${clientId}'.`);
     try {
-        const tokenData = await authStore.ssoLoginWithPassword(appName, username.value, password.value);
+        const tokenData = await authStore.ssoLoginWithPassword(clientId, username.value, password.value);
         if (tokenData?.redirect_uri) {
             isAuthorized.value = true;
-            window.location.href = `${tokenData.redirect_uri}?token=${tokenData.access_token}`;
+            const redirectUrl = `${tokenData.redirect_uri}?token=${tokenData.access_token}`;
+            console.log(`[SSO LOG] Login successful. Redirecting to: ${redirectUrl}`);
+            window.location.href = redirectUrl;
+        } else {
+            throw new Error("Redirect URI not found after login.");
         }
     } catch (error) {
         errorMessage.value = error.response?.data?.detail || 'Login failed. Please check your credentials.';
+        console.error('[SSO LOG] Login failed:', errorMessage.value);
     } finally {
         isAuthorizing.value = false;
     }
@@ -119,24 +129,32 @@ async function handleLogin() {
 async function handleAuthorize() {
     isAuthorizing.value = true;
     errorMessage.value = '';
+    console.log(`[SSO LOG] Authorizing client '${clientId}' for logged-in user '${authStore.user.username}'.`);
     try {
-        const tokenData = await authStore.ssoAuthorizeApplication(appName);
+        const tokenData = await authStore.ssoAuthorizeApplication(clientId);
         if (tokenData?.redirect_uri) {
             isAuthorized.value = true;
-            window.location.href = `${tokenData.redirect_uri}?token=${tokenData.access_token}`;
+            const redirectUrl = `${tokenData.redirect_uri}?token=${tokenData.access_token}`;
+            console.log(`[SSO LOG] Authorization successful. Redirecting to: ${redirectUrl}`);
+            window.location.href = redirectUrl;
+        } else {
+             throw new Error("Redirect URI not found after authorization.");
         }
     } catch (error) {
         fatalError.value = 'Failed to authorize the application. Please try again.';
+        console.error('[SSO LOG] Authorization failed:', error);
     } finally {
         isAuthorizing.value = false;
     }
 }
 
 function handleLogout() {
+    console.log("[SSO LOG] User chose to logout and switch account.");
     authStore.logout();
 }
 
 onMounted(() => {
+    console.log('[SSO LOG] SSO Login View mounted.');
     authStore.attemptInitialAuth().then(() => {
         fetchAppDetails();
     });

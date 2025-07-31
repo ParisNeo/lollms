@@ -28,6 +28,7 @@ const ssoInfoOptions = [
 
 const getInitialFormState = (type = 'mcps') => ({
     name: '',
+    client_id: '',
     url: '',
     icon: '',
     active: true,
@@ -364,6 +365,21 @@ function handleFileSelect(event) {
                         
                         <div v-if="isSsoAuth" class="p-4 space-y-4 border rounded-md dark:border-gray-600">
                             <h4 class="font-medium text-gray-800 dark:text-gray-200">SSO Configuration</h4>
+                            <div>
+                                <label for="ssoClientId" class="block text-sm font-medium">Client ID</label>
+                                <input 
+                                    type="text" 
+                                    id="ssoClientId" 
+                                    v-model="form.client_id" 
+                                    class="input-field mt-1"
+                                    :class="{ 'bg-gray-100 dark:bg-gray-700': isEditMode && editingItem.client_id }"
+                                    :readonly="isEditMode && editingItem.client_id"
+                                    placeholder="e.g., my_cool_app_v1 (optional)">
+                                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                    A unique identifier for this application. URL-safe characters only. If left blank, one will be generated from the name. 
+                                    <strong class="font-semibold">Cannot be changed after creation.</strong>
+                                </p>
+                            </div>
                             <div>
                                 <label for="ssoRedirectUri" class="block text-sm font-medium">Redirect URI</label>
                                 <input type="url" id="ssoRedirectUri" v-model="form.sso_redirect_uri" class="input-field mt-1" placeholder="https://yourapp.com/lollms_auth" required>

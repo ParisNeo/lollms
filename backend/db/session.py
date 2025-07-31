@@ -15,8 +15,10 @@ def init_database(db_url: str):
     Base.metadata.create_all(bind=engine)
     print(f"INFO: Database tables checked/created using metadata at URL: {db_url}")
 
-    inspector = inspect(engine)
     with engine.connect() as connection:
+        # Create the inspector from the connection, ensuring it operates within the same transaction.
+        inspector = inspect(connection)
+        
         transaction = connection.begin()
         try:
             run_schema_migrations_and_bootstrap(connection, inspector)

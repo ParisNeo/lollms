@@ -65,7 +65,7 @@ const routes = [
     meta: { requiresGuest: true }
   },
   {
-    path: '/app/:appName',
+    path: '/app/:clientId',
     name: 'SsoLogin',
     component: SsoLoginView,
     meta: { isSsoRoute: true }

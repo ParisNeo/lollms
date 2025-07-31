@@ -8,6 +8,7 @@ import os
 import signal
 import datetime
 import time
+import re
 from packaging import version as packaging_version
 import psutil # NEW IMPORT
 from typing import Dict, Any # NEW IMPORT
@@ -37,6 +38,15 @@ apps_management_router = APIRouter(
     tags=["Apps Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
+
+def _generate_unique_client_id(db: Session, model_class, name: str) -> str:
+    base_slug = re.sub(r'[^a-z0-9_]+', '', name.lower().replace(' ', '_'))
+    client_id = base_slug
+    counter = 1
+    while db.query(model_class).filter(model_class.client_id == client_id).first():
+        client_id = f"{base_slug}_{counter}"
+        counter += 1
+    return client_id
 
 def _to_task_info(db_task: DBTask) -> TaskInfo:
     """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
@@ -538,8 +548,10 @@ def _install_app_task(task: Task, repository: str, folder_name: str, port: int, 
         if icon_path.exists():
             icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}"
 
+        client_id = _generate_unique_client_id(db_session, DBApp, app_name)
         new_app = DBApp(
             name=app_name,
+            client_id=client_id,
             folder_name=folder_name,
             icon=icon_base64,
             is_installed=True,
@@ -662,7 +674,7 @@ def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depen
         if db.query(DBApp).filter(DBApp.port == update_data['port'], DBApp.id != app_id).first():
             raise HTTPException(status_code=409, detail=f"Port {update_data['port']} is already in use by another app.")
 
-    unmodifiable_fields = ['name', 'url', 'active', 'type', 'is_installed', 'status', 'pid', 'folder_name']
+    unmodifiable_fields = ['name', 'url', 'active', 'type', 'is_installed', 'status', 'pid', 'folder_name', 'client_id']
     for field in unmodifiable_fields:
         if field in update_data:
             del update_data[field]
