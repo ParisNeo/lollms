@@ -272,12 +272,21 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             mcps_to_update = connection.execute(text("SELECT id, name FROM mcps WHERE client_id IS NULL")).fetchall()
             if mcps_to_update:
                 print(f"INFO: Backfilling client_id for {len(mcps_to_update)} existing MCPs...")
+                
+                # Defensively check for apps table and client_id column to prevent migration errors
+                app_columns_db = []
+                if inspector.has_table('apps'):
+                    app_columns_db = [col['name'] for col in inspector.get_columns('apps')]
+
                 for mcp_id, mcp_name in mcps_to_update:
                     base_slug = re.sub(r'[^a-z0-9_]+', '', mcp_name.lower().replace(' ', '_'))
                     new_client_id = base_slug
                     counter = 1
                     while True:
-                        app_conflict = connection.execute(text("SELECT 1 FROM apps WHERE client_id = :cid"), {"cid": new_client_id}).first()
+                        app_conflict = None
+                        if 'client_id' in app_columns_db:
+                            app_conflict = connection.execute(text("SELECT 1 FROM apps WHERE client_id = :cid"), {"cid": new_client_id}).first()
+                        
                         mcp_conflict = connection.execute(text("SELECT 1 FROM mcps WHERE client_id = :cid AND id != :mid"), {"cid": new_client_id, "mid": mcp_id}).first()
                         if not app_conflict and not mcp_conflict: break
                         new_client_id = f"{base_slug}_{counter}"
