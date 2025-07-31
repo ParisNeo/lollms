@@ -176,16 +176,16 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    async function ssoLoginWithPassword(appName, username, password) {
+    async function ssoLoginWithPassword(clientId, username, password) {
         await login(username, password);
-        return await ssoAuthorizeApplication(appName);
+        return await ssoAuthorizeApplication(clientId);
     }
 
-    async function ssoAuthorizeApplication(appName) {
+    async function ssoAuthorizeApplication(clientId) {
         const formData = new FormData();
-        formData.append('app_name', appName);
+        formData.append('client_id', clientId);
         const response = await apiClient.post('/api/sso/authorize', formData);
-        const appDetailsResponse = await apiClient.get(`/api/sso/app_details/${appName}`);
+        const appDetailsResponse = await apiClient.get(`/api/sso/app_details/${clientId}`);
         return {
             access_token: response.data.access_token,
             redirect_uri: appDetailsResponse.data.sso_redirect_uri,
