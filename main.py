@@ -58,16 +58,17 @@ app = FastAPI(
     version=APP_VERSION,
 )
 
+# --- DYNAMIC CORS Configuration ---
+host = SERVER_CONFIG.get("host", "0.0.0.0")
+port = SERVER_CONFIG.get("port", 9642)
+https_enabled = SERVER_CONFIG.get("https_enabled", False)
+
 @app.on_event("startup")
 async def on_startup() -> None:
     init_database(APP_DB_URL)
     task_manager.init_app(db_session_module.SessionLocal)
     print("Database initialized.")
 
-    # --- DYNAMIC CORS Configuration ---
-    host = SERVER_CONFIG.get("host", "0.0.0.0")
-    port = SERVER_CONFIG.get("port", 9642)
-    https_enabled = SERVER_CONFIG.get("https_enabled", False)
 
     allowed_origins = [
         "http://localhost:5173",
