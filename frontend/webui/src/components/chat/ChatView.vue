@@ -114,9 +114,9 @@ const discussionDataZone = computed({
 const userDataZone = computed({
     get: () => authStore.user?.data_zone || '',
     set: (newVal) => {
+        if (authStore.user) { authStore.user.data_zone = newVal; } // Update local state for immediate reactivity
         clearTimeout(userSaveDebounceTimer);
         userSaveDebounceTimer = setTimeout(() => { authStore.updateDataZone(newVal); }, 750);
-        if (authStore.user) { authStore.user.data_zone = newVal; }
     }
 });
 
@@ -125,9 +125,9 @@ const personalityDataZone = computed(() => activeDiscussion.value?.personality_d
 const memory = computed({
     get: () => authStore.user?.memory || '',
     set: (newVal) => {
+        if (authStore.user) { authStore.user.memory = newVal; } // Update local state for immediate reactivity
         clearTimeout(memorySaveDebounceTimer);
         memorySaveDebounceTimer = setTimeout(() => { authStore.updateMemoryZone(newVal); }, 750);
-        if (authStore.user) { authStore.user.memory = newVal; }
     }
 });
 
@@ -238,6 +238,14 @@ watch(activeDiscussion, (newDiscussion) => {
     }
 }, { immediate: true });
 
+watch([isProcessing, isMemorizing], ([newIsProcessing, newIsMemorizing], [oldIsProcessing, oldIsMemorizing]) => {
+    const taskFinished = (oldIsProcessing && !newIsProcessing) || (oldIsMemorizing && !newIsMemorizing);
+    if (taskFinished && activeDiscussion.value) {
+        // A task related to this discussion has just finished.
+        // Refresh the data from the backend to ensure the UI is up-to-date.
+        discussionsStore.refreshDataZones(activeDiscussion.value.id);
+    }
+});
 
 // Resizing Logic
 let startX = 0;

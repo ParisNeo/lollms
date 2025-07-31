@@ -277,11 +277,30 @@ onUnmounted(() => {
 // --- Chat Input Logic ---
 const ragStoreSelection = computed({
     get: () => activeDiscussion.value?.rag_datastore_ids || [],
-    set(newIds) { if (activeDiscussion.value) discussionsStore.updateDiscussionRagStore({ discussionId: activeDiscussion.value.id, ragDatastoreIds: newIds }); }
+    set(newIds) {
+        const currentIds = activeDiscussion.value?.rag_datastore_ids || [];
+        // Compare sorted arrays to ensure order doesn't matter
+        if (JSON.stringify([...newIds].sort()) === JSON.stringify([...currentIds].sort())) {
+            return;
+        }
+        if (activeDiscussion.value) {
+            discussionsStore.updateDiscussionRagStore({ discussionId: activeDiscussion.value.id, ragDatastoreIds: newIds });
+        }
+    }
 });
+
 const mcpToolSelection = computed({
     get: () => activeDiscussion.value?.active_tools || [],
-    set(newIds) { if (activeDiscussion.value) discussionsStore.updateDiscussionMcps({ discussionId: activeDiscussion.value.id, mcp_tool_ids: newIds }); }
+    set(newIds) {
+        const currentIds = activeDiscussion.value?.active_tools || [];
+        // Compare sorted arrays to ensure order doesn't matter
+        if (JSON.stringify([...newIds].sort()) === JSON.stringify([...currentIds].sort())) {
+            return;
+        }
+        if (activeDiscussion.value) {
+            discussionsStore.updateDiscussionMcps({ discussionId: activeDiscussion.value.id, mcp_tool_ids: newIds });
+        }
+    }
 });
 
 watch(activeDiscussion, (newDiscussion) => {
@@ -289,14 +308,9 @@ watch(activeDiscussion, (newDiscussion) => {
     if (newDiscussion && !isPositionModified.value) {
         currentChatboxPos.value = null; 
     }
-    if (newDiscussion) {
-        ragStoreSelection.value = newDiscussion.rag_datastore_ids || [];
-        mcpToolSelection.value = newDiscussion.active_tools || [];
-    } else {
-        isPositionModified.value = false;
-        ragStoreSelection.value = [];
-        mcpToolSelection.value = [];
-    }
+    // The computed properties `ragStoreSelection` and `mcpToolSelection` will
+    // automatically update their values from the new `activeDiscussion`.
+    // No need to manually set them here anymore.
 }, { immediate: true });
 
 async function refreshMcps() {

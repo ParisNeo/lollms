@@ -83,26 +83,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
         if (!discussionIdForTask) return;
         
-        // The responsibility of clearing the task is now moved to the tasksStore
-        // to ensure immediate reactivity. This handler now only processes the result.
-        
-        if (task.status === 'completed' && task.result) {
-            const { new_content, zone } = task.result;
-            const discussion = discussions.value[discussionIdForTask];
-            if (discussion) {
-                const updatedDiscussion = { ...discussion };
-                if (zone === 'discussion') {
-                    updatedDiscussion.discussion_data_zone = new_content;
-                    uiStore.addNotification('Data zone processed successfully.', 'success');
-                } else if (zone === 'memory') {
-                    updatedDiscussion.memory = new_content;
-                    const authStore = useAuthStore();
-                    if (authStore.user) {
-                        authStore.user.memory = new_content;
-                    }
-                    uiStore.addNotification('Memorization complete.', 'success');
-                }
-                discussions.value[discussionIdForTask] = updatedDiscussion;
+        // The component (`ChatView`) is now responsible for triggering the data refresh.
+        // This handler's only job is to show a final notification.
+        if (task.status === 'completed') {
+            const { zone } = task.result || {};
+            if (zone === 'discussion') {
+                uiStore.addNotification('Data zone processed successfully.', 'success');
+            } else if (zone === 'memory') {
+                uiStore.addNotification('Memorization complete.', 'success');
+            } else {
+                uiStore.addNotification(`Task '${task.name}' completed.`, 'success');
             }
         } else if (task.status === 'failed') {
             uiStore.addNotification(`Task '${task.name}' failed.`, 'error');
@@ -125,7 +115,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     function setUserDataZoneContent(discussionId, content) {
         const discussion = discussions.value[discussionId];
         if (discussion) {
-            discussions.value[discussionId] = { ...discussion, discussion_data_zone: content };
+            discussion.discussion_data_zone = content;
         }
     
         const taskInfo = activeAiTasks.value[discussionId];
@@ -158,9 +148,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const uiStore = useUiStore();
         if (!discussions.value[discussionId]) return;
         try {
-            uiStore.addNotification('Refreshing data zones...', 'info');
             await fetchDataZones(discussionId);
-            uiStore.addNotification('Data zones refreshed.', 'success');
         } catch(error) {
             uiStore.addNotification('Failed to refresh data zones.', 'error');
         }

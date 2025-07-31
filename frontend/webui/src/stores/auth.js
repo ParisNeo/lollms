@@ -299,11 +299,9 @@ export const useAuthStore = defineStore('auth', () => {
     async function updateDataZone(content) {
         if (!isAuthenticated.value) return;
         try {
-            const response = await apiClient.put('/api/auth/me/data-zone', { content });
+            await apiClient.put('/api/auth/me/data-zone', { content });
             if (user.value) {
-                Object.assign(user.value, response.data);
-            } else {
-                user.value = response.data;
+                user.value.data_zone = content;
             }
         } catch (error) {
             useUiStore().addNotification('Failed to save data zone.', 'error');
@@ -314,11 +312,9 @@ export const useAuthStore = defineStore('auth', () => {
     async function updateMemoryZone(content) {
         if (!isAuthenticated.value) return;
         try {
-            const response = await apiClient.put('/api/auth/me/memory', { content });
+            await apiClient.put('/api/auth/me/memory', { content });
             if (user.value) {
-                Object.assign(user.value, response.data);
-            } else {
-                user.value = response.data;
+                user.value.memory = content;
             }
         } catch (error) {
             useUiStore().addNotification('Failed to save memory.', 'error');

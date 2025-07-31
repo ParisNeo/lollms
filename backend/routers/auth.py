@@ -211,7 +211,7 @@ async def get_my_memory(
 ):
     return {"content": db_user.memory or ""}
 
-@auth_router.put("/me/data-zone", response_model=UserAuthDetails)
+@auth_router.put("/me/data-zone", status_code=status.HTTP_200_OK)
 async def update_my_data_zone(
     payload: DataZoneUpdate,
     db_user: DBUser = Depends(get_current_db_user_from_token),
@@ -220,14 +220,13 @@ async def update_my_data_zone(
     db_user.data_zone = payload.content
     try:
         db.commit()
-        db.refresh(db_user)
-        return get_current_active_user(db_user)
+        return {"message": "Data zone updated successfully."}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 
-@auth_router.put("/me/memory", response_model=UserAuthDetails)
+@auth_router.put("/me/memory", status_code=status.HTTP_200_OK)
 async def update_my_memory(
     payload: DataZoneUpdate,
     db_user: DBUser = Depends(get_current_db_user_from_token),
@@ -236,8 +235,7 @@ async def update_my_memory(
     db_user.memory = payload.content
     try:
         db.commit()
-        db.refresh(db_user)
-        return get_current_active_user(db_user)
+        return {"message": "Memory updated successfully."}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
