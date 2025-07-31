@@ -61,14 +61,7 @@ const handleClose = (notificationId) => {
 };
 
 const copyMessage = (message) => {
-  navigator.clipboard.writeText(message)
-    .then(() => {
-      uiStore.addNotification('Message copied to clipboard!', 'success', 2000);
-    })
-    .catch((err) => {
-      console.error('Failed to copy message:', err);
-      uiStore.addNotification('Failed to copy message.', 'error', 3000);
-    });
+  uiStore.copyToClipboard(message);
 };
 
 watch(notifications, (currentNotifications) => {
