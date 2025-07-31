@@ -142,7 +142,7 @@ def sso_introspect_token(
     """
     ASCIIColors.info(f"[SSO] Token introspection request received.")
     try:
-        unverified_payload = jwt.decode(token, SECRET_KEY, options={"verify_signature": False})
+        unverified_payload = jwt.decode(token, SECRET_KEY, options={"verify_signature": False, "verify_aud": False})
         client_id = unverified_payload.get("aud")
         if not client_id:
             raise JWTError("Audience (client_id) not found in token.")
