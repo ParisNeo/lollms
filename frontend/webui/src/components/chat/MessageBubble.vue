@@ -131,6 +131,11 @@ onMounted(() => {
     } else {
         isSourcesVisible.value = true;
     }
+    if (props.message.startInEditMode) {
+        toggleEdit();
+        // Clean up the flag
+        delete props.message.startInEditMode;
+    }
 });
 
 
@@ -177,6 +182,7 @@ const parsedStreamingContent = computed(() => parsedMarkdown(props.message.conte
 const isUser = computed(() => props.message.sender_type === 'user');
 const isAi = computed(() => props.message.sender_type === 'assistant');
 const isSystem = computed(() => props.message.sender_type === 'system');
+const isNewManualMessage = computed(() => props.message.id.startsWith('temp-manual-'));
 
 const senderName = computed(() => {
     if (isUser.value) return authStore.user?.username || 'You';
@@ -262,11 +268,32 @@ function toggleEdit() {
 }
 
 async function handleSaveEdit() {
-    await discussionsStore.updateMessageContent({ messageId: props.message.id, newContent: editedContent.value });
-    isEditing.value = false;
+    if (isNewManualMessage.value) {
+        await discussionsStore.saveManualMessage({
+            tempId: props.message.id,
+            content: editedContent.value
+        });
+        // No need to set isEditing to false, as the component will be replaced.
+    } else {
+        await discussionsStore.updateMessageContent({
+            messageId: props.message.id,
+            newContent: editedContent.value
+        });
+        isEditing.value = false;
+    }
 }
 
-function handleCancelEdit() { isEditing.value = false; }
+function handleCancelEdit() {
+    if (isNewManualMessage.value) {
+        // If it's a new manual message, cancel means removing it.
+        const index = discussionsStore.activeMessages.findIndex(m => m.id === props.message.id);
+        if (index !== -1) {
+            discussionsStore.activeMessages.splice(index, 1);
+        }
+    } else {
+        isEditing.value = false;
+    }
+}
 function handleEditorReady(payload) { codeMirrorView.value = payload.view; }
 function copyContent() { uiStore.copyToClipboard(props.message.content); }
 async function handleDelete() { const confirmed = await uiStore.showConfirmation({ title: 'Delete Message', message: 'This will delete the message and its entire branch.', confirmText: 'Delete' }); if (confirmed) discussionsStore.deleteMessage({ messageId: props.message.id}); }

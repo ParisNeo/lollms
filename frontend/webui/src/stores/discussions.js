@@ -593,6 +593,59 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         uiStore.addNotification('Generation stopped.', 'info');
     }
 
+    async function addManualMessage({ sender_type }) {
+        if (!currentDiscussionId.value) return;
+
+        const authStore = useAuthStore();
+        const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
+
+        let senderName = authStore.user.username;
+        if (sender_type === 'assistant') {
+            senderName = activePersonality.value?.name || 'assistant';
+        }
+
+        const newMessage = {
+            id: `temp-manual-${Date.now()}`,
+            sender: senderName,
+            sender_type: sender_type,
+            content: '',
+            created_at: new Date().toISOString(),
+            parent_message_id: lastMessage ? lastMessage.id : null,
+            startInEditMode: true // Special flag for the UI
+        };
+
+        messages.value.push(newMessage);
+    }
+
+    async function saveManualMessage({ tempId, content }) {
+        if (!currentDiscussionId.value) return;
+        const tempMessage = messages.value.find(m => m.id === tempId);
+        if (!tempMessage) return;
+
+        try {
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/messages`, {
+                content: content,
+                sender_type: tempMessage.sender_type,
+                parent_message_id: tempMessage.parent_message_id
+            });
+
+            const finalMessage = processSingleMessage(response.data);
+            const index = messages.value.findIndex(m => m.id === tempId);
+            if (index !== -1) {
+                messages.value.splice(index, 1, finalMessage);
+            }
+            uiStore.addNotification("Message added successfully.", "success");
+        } catch (error) {
+            // Error is handled by the interceptor
+            // Optionally, remove the temp message on failure
+            const index = messages.value.findIndex(m => m.id === tempId);
+            if (index !== -1) {
+                messages.value.splice(index, 1);
+            }
+        }
+    }
+
+
     async function updateMessageContent({ messageId, newContent }) {
         if (!currentDiscussionId.value) return;
         try {
@@ -727,6 +780,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         initialize,
         refreshDataZones,
         setUserDataZoneContent,
-        _clearActiveAiTask
+        _clearActiveAiTask,
+        addManualMessage,
+        saveManualMessage,
     };
 });

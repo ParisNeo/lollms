@@ -76,6 +76,11 @@ class MessageOutput(BaseModel):
 class MessageContentUpdate(BaseModel):
     content: str
 
+class ManualMessageCreate(BaseModel):
+    content: str
+    sender_type: str
+    parent_message_id: Optional[str] = None
+
 class MessageGradeUpdate(BaseModel):
     change: int
     @field_validator('change')

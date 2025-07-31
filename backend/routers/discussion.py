@@ -45,7 +45,7 @@ from backend.models import (
     DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,
     MessageGradeUpdate, DiscussionBranchSwitchRequest, DiscussionSendRequest,
     DiscussionExportRequest, ExportData, DiscussionImportRequest, ContextStatusResponse,
-    DiscussionDataZoneUpdate, DataZones, TaskInfo
+    DiscussionDataZoneUpdate, DataZones, TaskInfo, ManualMessageCreate
 )
 from backend.session import (
     get_current_active_user, get_user_lollms_client,
@@ -890,6 +890,56 @@ async def update_discussion_message(discussion_id: str, message_id: str, payload
         token_count=target_message.tokens, sources=msg_metadata.get('sources'), events=msg_metadata.get('events'),
         image_references=full_image_refs, user_grade=grade, created_at=target_message.created_at,
         branch_id=discussion_obj.active_branch_id, branches=None
+    )
+
+@discussion_router.post("/{discussion_id}/messages", response_model=MessageOutput)
+async def add_manual_message(
+    discussion_id: str,
+    payload: ManualMessageCreate,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    username = current_user.username
+    discussion_obj = get_user_discussion(username, discussion_id)
+    if not discussion_obj:
+        raise HTTPException(status_code=404, detail="Discussion not found.")
+
+    if payload.sender_type not in ['user', 'assistant']:
+        raise HTTPException(status_code=400, detail="Invalid sender_type.")
+
+    sender_name = username
+    if payload.sender_type == 'assistant':
+        db_pers = db.query(DBPersonality).filter(DBPersonality.id == current_user.active_personality_id).first()
+        sender_name = db_pers.name if db_pers else "assistant"
+
+    try:
+        new_message = discussion_obj.add_message(
+            sender=sender_name,
+            content=payload.content,
+            parent_id=payload.parent_message_id,
+            sender_type=payload.sender_type
+        )
+        discussion_obj.commit()
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to add message to discussion: {e}")
+
+    # Build the response
+    return MessageOutput(
+        id=new_message.id,
+        sender=new_message.sender,
+        sender_type=new_message.sender_type,
+        content=new_message.content,
+        parent_message_id=new_message.parent_id,
+        binding_name=new_message.binding_name,
+        model_name=new_message.model_name,
+        token_count=new_message.tokens,
+        sources=[],
+        events=[],
+        image_references=[],
+        user_grade=0,
+        created_at=new_message.created_at,
+        branch_id=discussion_obj.active_branch_id
     )
 
 @discussion_router.delete("/{discussion_id}/messages/{message_id}", status_code=200)
