@@ -11,7 +11,7 @@ const authStore = useAuthStore();
 const socialStore = useSocialStore();
 
 const content = ref('');
-const visibility = ref('PUBLIC');
+const visibility = ref('public');
 const isSubmitting = ref(false);
 
 const user = computed(() => authStore.user);
@@ -30,7 +30,7 @@ async function handleSubmit() {
       visibility: visibility.value,
     });
     content.value = '';
-    visibility.value = 'PUBLIC';
+    visibility.value = 'public';
     emit('posted');
   } catch (error) {
     // Error notification is handled by the store
@@ -60,9 +60,9 @@ function handleCancel() {
 
           <div class="flex items-center space-x-3">
             <select v-model="visibility" class="input-field !py-1.5 !px-2 text-sm">
-              <option value="PUBLIC">Public</option>
-              <option value="FOLLOWERS">Followers Only</option>
-              <option value="FRIENDS">Friends Only</option>
+              <option value="public">Public</option>
+              <option value="followers">Followers Only</option>
+              <option value="friends">Friends Only</option>
             </select>
             
             <button type="button" @click="handleCancel" class="btn btn-secondary">
