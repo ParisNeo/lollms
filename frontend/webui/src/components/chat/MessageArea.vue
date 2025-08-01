@@ -2,7 +2,8 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import MessageBubble from './MessageBubble.vue';
-import { useFloating, offset, flip, shift } from '@floating-ui/vue'; // NEW
+import useEventBus from '../../services/eventBus';
+import { useFloating, offset, flip, shift } from '@floating-ui/vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
@@ -16,6 +17,7 @@ const messageContainer = ref(null);
 const loadMoreTrigger = ref(null);
 const isNearBottom = ref(true);
 let observer;
+const { on, off } = useEventBus();
 
 // NEW: State for the custom "Add Message" dropdown
 const isAddMenuOpen = ref(false);
@@ -66,12 +68,14 @@ onMounted(() => {
     }, { root: messageContainer.value, threshold: 0.1 });
     if (loadMoreTrigger.value) observer.observe(loadMoreTrigger.value);
     document.addEventListener('mousedown', handleClickOutside);
+    on('discussion:refreshed', () => scrollToBottom(false));
 });
 
 onUnmounted(() => {
     messageContainer.value?.removeEventListener('scroll', handleScroll);
     if(observer && loadMoreTrigger.value) observer.unobserve(loadMoreTrigger.value);
     document.removeEventListener('mousedown', handleClickOutside);
+    off('discussion:refreshed');
 });
 
 watch(currentDiscussionId, (newId) => {

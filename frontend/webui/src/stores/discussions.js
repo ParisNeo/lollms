@@ -26,7 +26,7 @@ function processSingleMessage(msg) {
 export const useDiscussionsStore = defineStore('discussions', () => {
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
-    const { on } = useEventBus();
+    const { on, emit } = useEventBus();
 
     const discussions = ref({});
     const currentDiscussionId = ref(null);
@@ -124,6 +124,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     function processMessages(rawMessages) {
         if (!Array.isArray(rawMessages)) return [];
         return rawMessages.map(msg => processSingleMessage(msg));
+    }
+
+    async function refreshActiveDiscussionMessages() {
+        if (!currentDiscussionId.value) return;
+        try {
+            const response = await apiClient.get(`/api/discussions/${currentDiscussionId.value}`);
+            messages.value = processMessages(response.data);
+            emit('discussion:refreshed'); // Emit event for scrolling
+            
+            // Also refresh context status
+            await fetchContextStatus(currentDiscussionId.value);
+        } catch (error) {
+            useUiStore().addNotification('Could not refresh discussion after generation.', 'error');
+        }
     }
 
     function setUserDataZoneContent(discussionId, content) {
@@ -579,10 +593,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
             generationInProgress.value = false;
             activeGenerationAbortController = null;
+            await refreshActiveDiscussionMessages();
             loadDiscussions();
-            if (currentDiscussionId.value) {
-                fetchContextStatus(currentDiscussionId.value);
-            }
         }
     }
 
@@ -600,7 +612,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             } catch(e) { 
                 console.warn("Backend stop signal failed, but proceeding with client-side cleanup.", e);
             }
-            await selectDiscussion(currentDiscussionId.value);
+            await refreshActiveDiscussionMessages();
         }
 
         uiStore.addNotification('Generation stopped.', 'info');
@@ -781,15 +793,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     return {
         discussions, currentDiscussionId, messages, generationInProgress,
         titleGenerationInProgressId, activeDiscussion, activeMessages,
-        sortedDiscussions, loadDiscussions, selectDiscussion, createNewDiscussion,
+        activeDiscussionContextStatus, activePersonality, activeAiTasks,
+        sortedDiscussions, dataZonesTokenCount, liveDataZoneTokens, 
+        loadDiscussions, selectDiscussion, createNewDiscussion,
         deleteDiscussion, pruneDiscussions, generateAutoTitle, toggleStarDiscussion,
         updateDiscussionRagStore, renameDiscussion, updateDiscussionMcps,
         sendMessage, stopGeneration, updateMessageContent, gradeMessage,
         deleteMessage, initiateBranch, switchBranch, exportDiscussions,
-        importDiscussions, sendDiscussion, $reset, activeDiscussionContextStatus, fetchContextStatus,
-        fetchDataZones, updateDataZone, activePersonality,
-        summarizeDiscussionDataZone, memorizeLTM, activeAiTasks,
-        dataZonesTokenCount, liveDataZoneTokens, updateLiveTokenCount,
+        importDiscussions, sendDiscussion, $reset, fetchContextStatus,
+        fetchDataZones, updateDataZone,
+        summarizeDiscussionDataZone, memorizeLTM,
+        updateLiveTokenCount,
         initialize,
         refreshDataZones,
         setUserDataZoneContent,
