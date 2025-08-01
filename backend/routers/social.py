@@ -84,7 +84,7 @@ def create_post(
     new_post = DBPost(
         author_id=current_user.id,
         content=post_data.content,
-        visibility=post_data.visibility,
+        visibility=post_data.visibility.upper(),
         media=post_data.media
     )
     db.add(new_post)
