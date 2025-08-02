@@ -22,6 +22,8 @@ class DataZones(BaseModel):
     discussion_data_zone: Optional[str] = None
     personality_data_zone: Optional[str] = None
     memory: Optional[str] = None
+    discussion_images: List[str] = Field(default_factory=list)
+    active_discussion_images: List[bool] = Field(default_factory=list)
 
 class DiscussionBranchSwitchRequest(BaseModel):
     active_branch_id: str

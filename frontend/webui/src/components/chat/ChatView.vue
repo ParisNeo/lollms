@@ -78,6 +78,9 @@ const isDataZoneExpanded = computed(() => uiStore.isDataZoneExpanded);
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const showChatView = computed(() => activeDiscussion.value !== null);
 
+const discussionImages = computed(() => activeDiscussion.value?.discussion_images || []);
+const discussionActiveImages = computed(() => activeDiscussion.value?.active_discussion_images || []);
+
 const isProcessing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'summarize');
 const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'memorize');
 
@@ -181,7 +184,7 @@ onUnmounted(() => {
 // --- METHODS ---
 function handleTaskCompletion(task) {
     if (activeDiscussion.value && task?.result?.discussion_id === activeDiscussion.value.id) {
-        if (task.name.includes('Summarize') || task.name.includes('Memorize')) refreshDataZones();
+        if (task.name.includes('Process') || task.name.includes('Memorize')) refreshDataZones();
     }
 }
 function setupHistory(historyRef, indexRef, initialValue) {
@@ -250,6 +253,12 @@ function stopResize() {
 }
 watch(isDataZoneVisible, (isVisible) => { if (isVisible) { promptsStore.fetchPrompts(); uiStore.fetchKeywords(); } });
 
+function isImageActive(index) {
+    if (!discussionActiveImages.value || discussionActiveImages.value.length <= index) {
+        return true;
+    }
+    return discussionActiveImages.value[index];
+}
 function insertPlaceholder(placeholder) {
     const view = userCodeMirrorEditor.value?.editorView;
     if (!view) return;
@@ -405,21 +414,21 @@ async function handleDiscussionImageUpload(event) {
                             </div>
                         </div>
                     </div>
-                    <div v-if="activeDiscussion.discussion_images && activeDiscussion.discussion_images.length > 0" class="flex-shrink-0 p-2 border-b dark:border-gray-600">
-                        <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                            <div v-for="(img_b64, index) in activeDiscussion.discussion_images" :key="index" class="relative group/image">
-                                <img :src="'data:image/png;base64,' + img_b64" class="w-full h-20 object-cover rounded-md transition-all duration-300" :class="{'grayscale': !activeDiscussion.active_discussion_images[index]}"/>
+                    <div v-if="discussionImages.length > 0" class="flex-shrink-0 p-2 border-b dark:border-gray-600">
+                        <div class="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                            <div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="relative group/image">
+                                <img :src="'data:image/png;base64,' + img_b64" class="w-full h-16 object-cover rounded-md transition-all duration-300" :class="{'grayscale': !isImageActive(index)}"/>
                                 <div @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="absolute inset-0 cursor-pointer"></div>
                                 <div class="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                                    <button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" :title="activeDiscussion.active_discussion_images[index] ? 'Deactivate' : 'Activate'"><IconEye v-if="activeDiscussion.active_discussion_images[index]" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button>
+                                    <button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button>
                                     <button @click="discussionsStore.deleteDiscussionImage(index)" class="p-1.5 bg-red-500/80 text-white rounded-full hover:bg-red-600" title="Delete"><IconXMark class="w-4 h-4" /></button>
                                 </div>
                             </div>
                         </div>
                     </div>
                     <div v-if="isUploadingDiscussionImage" class="flex-shrink-0 p-2 border-b dark:border-gray-600">
-                        <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
-                            <div class="relative w-full h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center animate-pulse">
+                        <div class="grid grid-cols-4 sm:grid-cols-5 gap-2">
+                            <div class="relative w-full h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center animate-pulse">
                                 <IconPhoto class="w-8 h-8 text-gray-400 dark:text-gray-500" />
                             </div>
                         </div>
@@ -438,7 +447,7 @@ async function handleDiscussionImageUpload(event) {
                             </DropdownMenu>
                             <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process the data zone content..." rows="2" class="input-field text-sm flex-grow"></textarea>
                         </div>
-                        <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || !discussionDataZone.trim()">
+                        <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0)">
                             <IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Process Content' }}
                         </button>
                     </div>

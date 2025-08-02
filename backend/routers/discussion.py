@@ -82,12 +82,15 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
 
 # --- Task Functions ---
 def _process_data_zone_task(task: Task, username: str, discussion_id: str, contextual_prompt: Optional[str]):
-    task.log("Starting data zone summary task...")
+    task.log("Starting data zone processing task...")
     discussion = get_user_discussion(username, discussion_id)
     if not discussion:
         raise ValueError("Discussion not found.")
-    if not discussion.discussion_data_zone or not discussion.discussion_data_zone.strip():
-        task.log("Data zone is empty, nothing to summarize.", "WARNING")
+    
+    all_images_info = discussion.get_discussion_images()
+    
+    if (not discussion.discussion_data_zone or not discussion.discussion_data_zone.strip()) and not all_images_info:
+        task.log("Data zone is empty (no text or images), nothing to process.", "WARNING")
         return {"discussion_id": discussion_id, "new_content": ""}
     
     def summary_callback(message: str, msg_type: Any, params: Optional[Dict] = None):
@@ -96,14 +99,18 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
         task.set_description(message)
         if params and 'progress' in params:
             task.set_progress(int(params['progress']))
-    all_images_info = discussion.get_discussion_images()
-    
-    discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
+
+    prompt_to_use = contextual_prompt
+    if (not discussion.discussion_data_zone or not discussion.discussion_data_zone.strip()) and not prompt_to_use and all_images_info:
+        prompt_to_use = "Describe the attached image(s) in detail."
+        task.log(f"No text found. Using default prompt: '{prompt_to_use}'")
+
+    discussion_images_b64 = [img_info['data'] for img_info in all_images_info if img_info.get('active', True)]
     lc = get_user_lollms_client(username)
     summary = lc.long_context_processing(
         discussion.discussion_data_zone,
         images=discussion_images_b64,
-        contextual_prompt=contextual_prompt,
+        contextual_prompt=prompt_to_use,
         streaming_callback=summary_callback
     )
     
@@ -111,8 +118,8 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
     discussion.commit()
     
     task.set_progress(100)
-    task.set_description("Summary complete and saved.")
-    task.log("Summary complete and saved.")
+    task.set_description("Processing complete and saved.")
+    task.log("Processing complete and saved.")
     
     return {"discussion_id": discussion_id, "new_content": summary, "zone": "discussion"}
 
@@ -299,11 +306,30 @@ def get_all_data_zones(
     
     db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     discussion.memory = db_user.memory
+    
+    # --- NEW LOGIC TO EXTRACT IMAGE DATA ---
+    raw_images_info = discussion.metadata.get('discussion_images', [])
+    if not isinstance(raw_images_info, list):
+        raw_images_info = []
+
+    discussion_images_b64 = []
+    active_discussion_images = []
+    
+    for item in raw_images_info:
+        if isinstance(item, dict) and 'image' in item:
+            discussion_images_b64.append(item['image'])
+            active_discussion_images.append(item.get('active', True))
+        elif isinstance(item, str):
+            discussion_images_b64.append(item)
+            active_discussion_images.append(True)
+
     return DataZones(
         user_data_zone=db_user.data_zone if db_user else "",
         discussion_data_zone=discussion.discussion_data_zone,
         personality_data_zone=discussion.personality_data_zone,
-        memory=discussion.memory
+        memory=discussion.memory,
+        discussion_images=discussion_images_b64,
+        active_discussion_images=active_discussion_images
     )
 
 

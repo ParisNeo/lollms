@@ -223,20 +223,26 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     async function fetchDataZones(discussionId) {
-        if (!discussions.value[discussionId]) return;
+        const discussion = discussions.value[discussionId];
+        if (!discussion) return;
         try {
             const response = await apiClient.get(`/api/discussions/${discussionId}/data_zones`);
-            discussions.value[discussionId] = {
-                ...discussions.value[discussionId],
-                ...response.data
-            };
+            const data = response.data;
+            // *** THIS IS THE FIX ***
+            // Explicitly merge the fields to ensure reactivity and prevent overwriting.
+            discussion.user_data_zone = data.user_data_zone;
+            discussion.discussion_data_zone = data.discussion_data_zone;
+            discussion.personality_data_zone = data.personality_data_zone;
+            discussion.memory = data.memory;
+            discussion.discussion_images = data.discussion_images || [];
+            discussion.active_discussion_images = data.active_discussion_images || [];
         } catch (error) {
             useUiStore().addNotification('Could not load discussion data zones.', 'error');
-            if (discussions.value[discussionId]) {
-                 discussions.value[discussionId].discussion_data_zone = '';
-                 discussions.value[discussionId].personality_data_zone = '';
-                 discussions.value[discussionId].memory = '';
-            }
+            discussion.discussion_data_zone = '';
+            discussion.personality_data_zone = '';
+            discussion.memory = '';
+            discussion.discussion_images = [];
+            discussion.active_discussion_images = [];
         }
     }
 
@@ -869,13 +875,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (!currentDiscussionId.value) return;
         try {
             const response = await apiClient.delete(`/api/discussions/${currentDiscussionId.value}/images/${imageIndex}`);
-            const newDiscussions = { ...discussions.value };
-            if (newDiscussions[currentDiscussionId.value]) {
-                newDiscussions[currentDiscussionId.value] = {
-                    ...newDiscussions[currentDiscussionId.value],
-                    ...response.data
-                };
-                discussions.value = newDiscussions;
+            const disc = discussions.value[currentDiscussionId.value];
+            if (disc) {
+                disc.discussion_images = response.data.discussion_images || [];
+                disc.active_discussion_images = response.data.active_discussion_images || [];
             }
             await fetchContextStatus(currentDiscussionId.value);
         } catch(error) { /* Handled by interceptor */ }
