@@ -19,7 +19,17 @@ function processSingleMessage(msg) {
         events: msg.events || (msg.metadata?.events) || [],
         sources: msg.sources || (msg.metadata?.sources) || [],
         image_references: msg.image_references || [],
+        active_images: msg.active_images || [],
     };
+}
+
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
 }
 
 
@@ -50,6 +60,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                liveDataZoneTokens.value.user + 
                liveDataZoneTokens.value.personality + 
                liveDataZoneTokens.value.memory;
+    });
+
+    // NEW: Computed property to sum data zone tokens from the official context status
+    const dataZonesTokensFromContext = computed(() => {
+        if (!activeDiscussionContextStatus.value?.zones?.system_context?.breakdown || typeof activeDiscussionContextStatus.value.zones.system_context.breakdown !== 'object') {
+            return 0;
+        }
+        const breakdown = activeDiscussionContextStatus.value.zones.system_context.breakdown;
+        const zoneKeys = ['memory', 'user_data_zone', 'discussion_data_zone', 'personality_data_zone', 'pruning_summary'];
+        return zoneKeys.reduce((total, key) => total + (breakdown[key]?.tokens || 0), 0);
     });
 
 
@@ -115,11 +135,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    function initialize() {
-        onMounted(() => {
-            on('task:completed', handleTaskCompletion);
-        });
-    }
+    onMounted(() => {
+        on('task:completed', handleTaskCompletion);
+    });
 
     function processMessages(rawMessages) {
         if (!Array.isArray(rawMessages)) return [];
@@ -196,7 +214,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             liveDataZoneTokens.value.discussion = breakdown.discussion_data_zone?.tokens || 0;
             liveDataZoneTokens.value.user = breakdown.user_data_zone?.tokens || 0;
             liveDataZoneTokens.value.personality = breakdown.personality_data_zone?.tokens || 0;
-            liveDataZoneTokens.value.memory = response.data?.zones?.memory?.tokens || 0;
+            liveDataZoneTokens.value.memory = breakdown.memory?.tokens || 0;
 
         } catch (error) {
             console.error("Failed to fetch context status:", error);
@@ -244,7 +262,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             if (prompt) {
                 formData.append('prompt', prompt);
             }
-            const response = await apiClient.post(`/api/discussions/${discussionId}/summarize_data_zone`, formData);
+            const response = await apiClient.post(`/api/discussions/${discussionId}/process_data_zone`, formData);
             const task = response.data;
             
             uiStore.closeModal('summaryPromptModal');
@@ -618,6 +636,21 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         uiStore.addNotification('Generation stopped.', 'info');
     }
 
+    async function toggleImageActivation({ messageId, imageIndex }) {
+        if (!currentDiscussionId.value) return;
+        try {
+            const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/images/${imageIndex}/toggle`);
+            const updatedMessage = processSingleMessage(response.data);
+            const index = messages.value.findIndex(m => m.id === messageId);
+            if (index !== -1) {
+                messages.value[index] = updatedMessage;
+            }
+            await fetchContextStatus(currentDiscussionId.value);
+        } catch (error) {
+            uiStore.addNotification('Failed to toggle image status.', 'error');
+        }
+    }
+
     async function addManualMessage({ sender_type }) {
         if (!currentDiscussionId.value) return;
 
@@ -661,8 +694,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
             uiStore.addNotification("Message added successfully.", "success");
         } catch (error) {
-            // Error is handled by the interceptor
-            // Optionally, remove the temp message on failure
             const index = messages.value.findIndex(m => m.id === tempId);
             if (index !== -1) {
                 messages.value.splice(index, 1);
@@ -671,14 +702,29 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
 
-    async function updateMessageContent({ messageId, newContent }) {
+    async function saveMessageChanges({ messageId, newContent, keptImagesB64, newImageFiles }) {
         if (!currentDiscussionId.value) return;
+        
+        const newImagesAsBase64 = await Promise.all(newImageFiles.map(file => fileToBase64(file)));
+
+        const payload = {
+            content: newContent,
+            kept_images_b64: keptImagesB64,
+            new_images_b64: newImagesAsBase64
+        };
+
         try {
-            await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`, { content: newContent });
-            const message = messages.value.find(m => m.id === messageId);
-            if (message) message.content = newContent;
-            useUiStore().addNotification('Message updated.', 'success');
-        } catch(e) {}
+            const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`, payload);
+            const updatedMessage = processSingleMessage(response.data);
+            const index = messages.value.findIndex(m => m.id === messageId);
+            if (index !== -1) {
+                messages.value[index] = updatedMessage;
+            }
+            uiStore.addNotification('Message updated.', 'success');
+            await fetchContextStatus(currentDiscussionId.value);
+        } catch (e) {
+            // Error handled by global interceptor
+        }
     }
 
     async function deleteMessage({ messageId }) {
@@ -780,6 +826,62 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch (error) { console.error("Import failed:", error); }
     }
     
+    // NEW ACTIONS for discussion-level images
+    async function uploadDiscussionImage(file) {
+        if (!currentDiscussionId.value) return;
+        try {
+            const image_b64 = await fileToBase64(file);
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/images`, { image_b64 });
+            
+            const newDiscussions = { ...discussions.value };
+            if (newDiscussions[currentDiscussionId.value]) {
+                newDiscussions[currentDiscussionId.value] = { 
+                    ...newDiscussions[currentDiscussionId.value], 
+                    ...response.data 
+                };
+                discussions.value = newDiscussions;
+            }
+            await fetchContextStatus(currentDiscussionId.value);
+            uiStore.addNotification('Image added to discussion context.', 'success');
+        } catch(error) { 
+            uiStore.addNotification('Failed to add image to discussion.', 'error');
+            console.error("Failed to upload discussion image:", error);
+        }
+    }
+
+    async function toggleDiscussionImageActivation(imageIndex) {
+        if (!currentDiscussionId.value) return;
+        try {
+            const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/images/${imageIndex}/toggle`);
+            const newDiscussions = { ...discussions.value };
+            if (newDiscussions[currentDiscussionId.value]) {
+                newDiscussions[currentDiscussionId.value] = {
+                    ...newDiscussions[currentDiscussionId.value],
+                    ...response.data
+                };
+                discussions.value = newDiscussions;
+            }
+            await fetchContextStatus(currentDiscussionId.value);
+        } catch(error) { /* Handled by interceptor */ }
+    }
+
+    async function deleteDiscussionImage(imageIndex) {
+        if (!currentDiscussionId.value) return;
+        try {
+            const response = await apiClient.delete(`/api/discussions/${currentDiscussionId.value}/images/${imageIndex}`);
+            const newDiscussions = { ...discussions.value };
+            if (newDiscussions[currentDiscussionId.value]) {
+                newDiscussions[currentDiscussionId.value] = {
+                    ...newDiscussions[currentDiscussionId.value],
+                    ...response.data
+                };
+                discussions.value = newDiscussions;
+            }
+            await fetchContextStatus(currentDiscussionId.value);
+        } catch(error) { /* Handled by interceptor */ }
+    }
+
+
     function $reset() {
         discussions.value = {};
         currentDiscussionId.value = null;
@@ -795,20 +897,22 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         titleGenerationInProgressId, activeDiscussion, activeMessages,
         activeDiscussionContextStatus, activePersonality, activeAiTasks,
         sortedDiscussions, dataZonesTokenCount, liveDataZoneTokens, 
+        dataZonesTokensFromContext, // EXPORT NEW COMPUTED
         loadDiscussions, selectDiscussion, createNewDiscussion,
         deleteDiscussion, pruneDiscussions, generateAutoTitle, toggleStarDiscussion,
         updateDiscussionRagStore, renameDiscussion, updateDiscussionMcps,
-        sendMessage, stopGeneration, updateMessageContent, gradeMessage,
+        sendMessage, stopGeneration, saveMessageChanges, gradeMessage,
         deleteMessage, initiateBranch, switchBranch, exportDiscussions,
         importDiscussions, sendDiscussion, $reset, fetchContextStatus,
         fetchDataZones, updateDataZone,
         summarizeDiscussionDataZone, memorizeLTM,
         updateLiveTokenCount,
-        initialize,
         refreshDataZones,
         setUserDataZoneContent,
         _clearActiveAiTask,
         addManualMessage,
         saveManualMessage,
+        toggleImageActivation,
+        uploadDiscussionImage, toggleDiscussionImageActivation, deleteDiscussionImage, // EXPORT NEW ACTIONS
     };
 });

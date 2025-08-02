@@ -1,3 +1,4 @@
+# backend/session.py
 import json
 import traceback
 import datetime
@@ -23,6 +24,7 @@ from backend.config import (
     SAFE_STORE_DEFAULTS,
     TEMP_UPLOADS_DIR_NAME,
     DISCUSSION_ASSETS_DIR_NAME,
+    DM_ASSETS_DIR_NAME,
     DATASTORES_DIR_NAME,
 )
 from backend.settings import settings
@@ -433,6 +435,11 @@ def get_user_discussion_path(username: str) -> Path:
 
 def get_user_discussion_assets_path(username: str) -> Path:
     path = get_user_data_root(username) / DISCUSSION_ASSETS_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+def get_user_dm_assets_path(username: str) -> Path:
+    path = get_user_data_root(username) / DM_ASSETS_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
 

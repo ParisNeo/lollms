@@ -7,19 +7,18 @@ import GenericModal from '../ui/GenericModal.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
+import IconInfo from '../../assets/icons/IconInfo.vue';
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
-const { activeDiscussionContextStatus: contextStatus, activeDiscussion } = storeToRefs(discussionsStore);
+const { activeDiscussionContextStatus: contextStatus } = storeToRefs(discussionsStore);
 const isRefreshing = ref(false);
 
-const formatZoneName = (name) => {
-    return name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-};
-
-const formatNumber = (num) => {
-    return num ? num.toLocaleString() : '0';
-};
+const formatZoneName = (name) => name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+const formatNumber = (num) => num ? num.toLocaleString() : '0';
 
 const totalTokens = computed(() => contextStatus.value?.current_tokens || 0);
 const maxTokens = computed(() => contextStatus.value?.max_tokens || 1);
@@ -36,11 +35,9 @@ const progressColorClass = computed(() => {
 
 const sortedZones = computed(() => {
     if (!contextStatus.value?.zones) return [];
-    return Object.entries(contextStatus.value.zones).sort(([keyA], [keyB]) => {
-        if (keyA === 'system_context') return -1;
-        if (keyB === 'system_context') return 1;
-        return 0;
-    });
+    const zones = Object.entries(contextStatus.value.zones);
+    const order = ['system_context', 'message_history'];
+    return zones.sort(([keyA], [keyB]) => order.indexOf(keyA) - order.indexOf(keyB));
 });
 
 async function refreshContext() {
@@ -59,7 +56,6 @@ async function refreshContext() {
     <GenericModal modal-name="contextViewer" title="Context Breakdown" maxWidthClass="max-w-4xl">
         <template #body>
             <div v-if="contextStatus" class="space-y-6">
-                <!-- Overall Progress Bar -->
                 <div>
                     <div class="flex justify-between items-center mb-1 text-sm font-mono text-gray-700 dark:text-gray-300">
                         <span>Total Tokens</span>
@@ -73,7 +69,6 @@ async function refreshContext() {
                     </div>
                 </div>
 
-                <!-- Zones -->
                 <div class="space-y-4">
                     <details v-for="([zoneKey, zoneData]) in sortedZones" :key="zoneKey" class="bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg" open>
                         <summary class="flex items-center justify-between p-3 cursor-pointer select-none">
@@ -84,9 +79,9 @@ async function refreshContext() {
                             </div>
                             <span class="font-mono text-sm text-gray-600 dark:text-gray-400">{{ formatNumber(zoneData.tokens) }} tokens</span>
                         </summary>
-                        <div class="p-4 border-t dark:border-gray-700">
-                            <!-- Breakdown for System Context -->
-                            <div v-if="zoneData.breakdown" class="space-y-3">
+                        <div class="p-4 border-t dark:border-gray-700 space-y-3">
+                            <!-- System Context Breakdown -->
+                            <template v-if="zoneKey === 'system_context' && typeof zoneData.breakdown === 'object' && zoneData.breakdown">
                                 <details v-for="([breakdownKey, breakdownData]) in Object.entries(zoneData.breakdown)" :key="breakdownKey" class="bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-md">
                                     <summary class="flex items-center justify-between p-2 cursor-pointer select-none">
                                         <div class="flex items-center gap-2">
@@ -99,9 +94,38 @@ async function refreshContext() {
                                         <CodeMirrorEditor :model-value="breakdownData.content" :options="{ readOnly: true }" class="text-xs max-h-60" />
                                     </div>
                                 </details>
+                            </template>
+                            <!-- Message History Breakdown -->
+                            <template v-else-if="zoneKey === 'message_history' && zoneData.breakdown">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                    <div class="p-3 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-md flex items-center gap-3">
+                                        <IconFileText class="w-6 h-6 text-blue-500 flex-shrink-0" />
+                                        <div><div class="font-semibold">Text Tokens</div><div class="font-mono text-gray-600 dark:text-gray-400">{{ formatNumber(zoneData.breakdown.text_tokens) }}</div></div>
+                                    </div>
+                                    <div class="p-3 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-md flex items-center gap-3">
+                                        <IconPhoto class="w-6 h-6 text-green-500 flex-shrink-0" />
+                                        <div><div class="font-semibold">Image Tokens</div><div class="font-mono text-gray-600 dark:text-gray-400">{{ formatNumber(zoneData.breakdown.image_tokens) }}</div></div>
+                                    </div>
+                                </div>
+                                <details v-if="zoneData.breakdown.image_details && zoneData.breakdown.image_details.length > 0" class="bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-md">
+                                    <summary class="flex items-center justify-between p-2 cursor-pointer select-none">
+                                        <div class="flex items-center gap-2"><IconChevronRight class="w-4 h-4 text-gray-400 transition-transform details-arrow" /><h4 class="text-sm font-medium">Image Details</h4></div>
+                                    </summary>
+                                    <div class="p-2 border-t dark:border-gray-600 max-h-60 overflow-y-auto">
+                                        <ul class="text-xs font-mono divide-y dark:divide-gray-700">
+                                            <li v-for="img in zoneData.breakdown.image_details" :key="`${img.message_id}-${img.index}`" class="py-1.5 flex justify-between items-center">
+                                                <span>Msg: {{ img.message_id.substring(0, 8) }}... (Img #{{ img.index + 1 }})</span>
+                                                <span class="font-semibold">{{ formatNumber(img.tokens) }} tokens</span>
+                                            </li>
+                                        </ul>
+                                    </div>
+                                </details>
+                            </template>
+                             <!-- Fallback for other zones -->
+                            <div v-else class="flex items-start gap-3 p-3 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-md">
+                                <IconInfo class="w-5 h-5 mt-0.5 text-gray-500 flex-shrink-0" />
+                                <p class="text-sm text-gray-700 dark:text-gray-300">This zone contains the full text content, which is used for context but has no further breakdown available.</p>
                             </div>
-                            <!-- Full Content for other zones -->
-                            <CodeMirrorEditor v-else :model-value="zoneData.content" :options="{ readOnly: true }" class="text-xs max-h-96" />
                         </div>
                     </details>
                 </div>
@@ -113,7 +137,8 @@ async function refreshContext() {
         <template #footer>
             <div class="flex justify-between items-center w-full">
                 <button @click="refreshContext" class="btn btn-secondary" :disabled="isRefreshing">
-                    <IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshing}" />
+                    <IconAnimateSpin v-if="isRefreshing" class="w-4 h-4 mr-2" />
+                    <IconRefresh v-else class="w-4 h-4 mr-2" />
                     {{ isRefreshing ? 'Refreshing...' : 'Refresh' }}
                 </button>
                 <button @click="uiStore.closeModal('contextViewer')" class="btn btn-primary">Close</button>
@@ -123,13 +148,7 @@ async function refreshContext() {
 </template>
 
 <style scoped>
-details > summary {
-  list-style: none;
-}
-details > summary::-webkit-details-marker {
-  display: none;
-}
-details[open] > summary .details-arrow {
-  transform: rotate(90deg);
-}
+details > summary { list-style: none; }
+details > summary::-webkit-details-marker { display: none; }
+details[open] > summary .details-arrow { transform: rotate(90deg); }
 </style>

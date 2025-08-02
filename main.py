@@ -7,6 +7,12 @@ from multiprocessing import cpu_count
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors
 
+# NEW: Import multipart and increase the form part size limit
+from multipart.multipart import FormParser, parse_options_header
+
+# Increase the max size of a form part to 50MB (default is 1MB)
+FormParser.max_size = 50 * 1024 * 1024  # 50 MB
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session

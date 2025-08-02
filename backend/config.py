@@ -1,4 +1,4 @@
-# config.py
+# backend/config.py
 # Standard Library Imports
 import os
 import shutil
@@ -52,6 +52,7 @@ SERVER_CONFIG = config.get("server", {})
 # --- Constants for directory names ---
 TEMP_UPLOADS_DIR_NAME = "temp_uploads"
 DISCUSSION_ASSETS_DIR_NAME = "discussion_assets"
+DM_ASSETS_DIR_NAME = "dm_assets"
 DATASTORES_DIR_NAME = "safestores"
 APPS_DIR_NAME = "apps"
 CUSTOM_APPS_DIR_NAME = "custom_apps"

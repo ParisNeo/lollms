@@ -78,7 +78,6 @@ onMounted(async () => {
     if (authStore.isAuthenticated) {
         pyodideStore.initialize();
         tasksStore.startPolling();
-        discussionsStore.initialize();
     }
 });
 </script>

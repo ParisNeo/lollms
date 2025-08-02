@@ -14,6 +14,8 @@ class DiscussionInfo(BaseModel):
     last_activity_at: Optional[datetime.datetime] = None
     active_branch_id: Optional[str] = None
     data_zone: Optional[str] = None
+    discussion_images: List[str] = Field(default_factory=list)
+    active_discussion_images: List[bool] = Field(default_factory=list)
 
 class DataZones(BaseModel):
     user_data_zone: Optional[str] = None
@@ -41,9 +43,9 @@ class ContextBreakdownItem(BaseModel):
     tokens: int
 
 class ContextZoneDetail(BaseModel):
-    content: str
+    content: Optional[str] = None
     tokens: int
-    breakdown: Optional[Dict[str, ContextBreakdownItem]] = None
+    breakdown: Optional[Dict[str, Any]] = None
     message_count: Optional[int] = None
 
 class ContextStatusResponse(BaseModel):
@@ -64,6 +66,7 @@ class MessageOutput(BaseModel):
     sources: Optional[List[Dict]] = None
     events: Optional[List[Dict[str, Any]]] = None
     image_references: List[str] = []
+    active_images: List[bool] = Field(default_factory=list)
     user_grade: int = 0
     created_at: Optional[datetime.datetime] = None
     branch_id: Optional[str] = None
@@ -75,6 +78,14 @@ class MessageOutput(BaseModel):
 
 class MessageContentUpdate(BaseModel):
     content: str
+
+class MessageUpdateWithImages(BaseModel):
+    content: str
+    kept_images_b64: List[str] = Field(default_factory=list)
+    new_images_b64: List[str] = Field(default_factory=list)
+
+class DiscussionImageAddRequest(BaseModel):
+    image_b64: str
 
 class ManualMessageCreate(BaseModel):
     content: str

@@ -31,6 +31,9 @@ import IconScratchpad from '../../assets/icons/IconScratchpad.vue';
 import IconEventDefault from '../../assets/icons/IconEventDefault.vue';
 import IconStepStart from '../../assets/icons/IconStepStart.vue';
 import IconStepEnd from '../../assets/icons/IconStepEnd.vue';
+import IconEye from '../../assets/icons/IconEye.vue';
+import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
 
 const props = defineProps({
   message: {
@@ -51,13 +54,15 @@ const codeMirrorView = ref(null);
 const messageContentRef = ref(null);
 const isFormattingMenuOpen = ref(false);
 const isSourcesVisible = ref(false);
+const editedImages = ref([]);
+const newImageFiles = ref([]);
+const editImageInput = ref(null);
 
 const areActionsDisabled = computed(() => discussionsStore.generationInProgress);
 const user = computed(() => authStore.user);
 
 const senderPersonalityIcon = computed(() => {
     if (!isAi.value || !props.message.sender) return null;
-    // Search all personalities (user's and public) for one matching the sender name
     const personality = dataStore.allPersonalities.find(p => p.name === props.message.sender);
     return personality ? personality.icon_base64 : null;
 });
@@ -133,7 +138,6 @@ onMounted(() => {
     }
     if (props.message.startInEditMode) {
         toggleEdit();
-        // Clean up the flag
         delete props.message.startInEditMode;
     }
 });
@@ -144,6 +148,21 @@ const imagesToRender = computed(() => {
     if (props.message.image_references?.length > 0) return props.message.image_references;
     return [];
 });
+
+const isImageActive = (index) => {
+    if (!props.message.active_images || props.message.active_images.length <= index) {
+        return true; // Default to active if array is missing or out of bounds
+    }
+    return props.message.active_images[index];
+};
+
+const toggleImage = (index) => {
+    if (areActionsDisabled.value) return;
+    discussionsStore.toggleImageActivation({
+        messageId: props.message.id,
+        imageIndex: index
+    });
+};
 
 const messageParts = computed(() => {
     if (!props.message.content || props.message.isStreaming) return [];
@@ -186,7 +205,6 @@ const isNewManualMessage = computed(() => props.message.id.startsWith('temp-manu
 
 const senderName = computed(() => {
     if (isUser.value) return authStore.user?.username || 'You';
-    // Use the sender name stored with the message itself
     if (isAi.value) return props.message.sender || 'Assistant';
     return props.message.sender || 'System';
 });
@@ -263,25 +281,60 @@ function toggleEdit() {
     isEditing.value = !isEditing.value;
     if (isEditing.value) {
         editedContent.value = props.message.content;
+        // FIX: Ensure image_references is treated as an array even if it's null/undefined
+        editedImages.value = (props.message.image_references || []).map(url => ({ url, isNew: false, file: null }));
+        newImageFiles.value = [];
         isFormattingMenuOpen.value = false;
     }
 }
 
 async function handleSaveEdit() {
     if (isNewManualMessage.value) {
+        // This flow is simpler and should be handled separately if it needs image support
         await discussionsStore.saveManualMessage({
             tempId: props.message.id,
             content: editedContent.value
         });
-        // No need to set isEditing to false, as the component will be replaced.
     } else {
-        await discussionsStore.updateMessageContent({
+        const keptImagesB64 = editedImages.value
+            .filter(img => !img.isNew)
+            .map(img => img.url.split(',')[1]); // Extract base64 part
+
+        await discussionsStore.saveMessageChanges({
             messageId: props.message.id,
-            newContent: editedContent.value
+            newContent: editedContent.value,
+            keptImagesB64: keptImagesB64,
+            newImageFiles: newImageFiles.value
         });
         isEditing.value = false;
     }
 }
+
+function removeEditedImage(index) {
+    const removed = editedImages.value.splice(index, 1)[0];
+    if (removed.isNew) {
+        // Also remove from the new files list
+        const fileIndex = newImageFiles.value.findIndex(f => f === removed.file);
+        if (fileIndex > -1) {
+            newImageFiles.value.splice(fileIndex, 1);
+        }
+    }
+}
+
+function triggerEditImageUpload() {
+    editImageInput.value.click();
+}
+
+function handleEditImageSelected(event) {
+    const files = Array.from(event.target.files);
+    for (const file of files) {
+        const localUrl = URL.createObjectURL(file);
+        editedImages.value.push({ url: localUrl, isNew: true, file: file });
+        newImageFiles.value.push(file);
+    }
+    event.target.value = ''; // Reset input
+}
+
 
 function handleCancelEdit() {
     if (isNewManualMessage.value) {
@@ -361,8 +414,15 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                 <div class="message-content-wrapper">
                     <div v-if="!isEditing">
                         <div v-if="imagesToRender.length > 0" class="my-2 grid gap-2" :class="[imagesToRender.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
-                            <div v-for="(imgSrc, index) in imagesToRender" :key="index" class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer" @click="uiStore.openImageViewer(imgSrc)">
-                                <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain" />
+                            <div v-for="(imgSrc, index) in imagesToRender" :key="index" class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800">
+                                <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain transition-all duration-300" :class="{'grayscale': !isImageActive(index)}" />
+                                <div @click.stop="uiStore.openImageViewer(imgSrc)" class="absolute inset-0 cursor-pointer"></div>
+                                <div class="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover/image:opacity-100 transition-opacity duration-200">
+                                    <button @click.stop="toggleImage(index)" class="p-1.5 bg-black/60 text-white rounded-full hover:bg-black/80" :title="isImageActive(index) ? 'Deactivate Image' : 'Activate Image'">
+                                        <IconEye v-if="isImageActive(index)" class="w-4 h-4" />
+                                        <IconEyeOff v-else class="w-4 h-4" />
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <div :key="message.isStreaming ? 'streaming' : 'settled'" ref="messageContentRef">
@@ -389,6 +449,15 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                         </div>
                     </div>
                     <div v-else class="w-full">
+                        <input type="file" ref="editImageInput" @change="handleEditImageSelected" multiple accept="image/*" class="hidden">
+                        <div v-if="editedImages.length > 0" class="mb-2 p-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md">
+                            <div class="flex flex-wrap gap-2">
+                                <div v-for="(image, index) in editedImages" :key="image.url" class="relative w-16 h-16">
+                                    <img :src="image.url" class="w-full h-full object-cover rounded-md" alt="Image preview" />
+                                    <button @click="removeEditedImage(index)" class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold leading-none">×</button>
+                                </div>
+                            </div>
+                        </div>
                         <CodeMirrorEditor
                             v-model="editedContent"
                             placeholder="Enter your message..."
@@ -396,9 +465,14 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                             :extensions="editorExtensions"
                             @ready="handleEditorReady"
                         />
-                        <div class="flex justify-end space-x-2 mt-2">
-                            <button @click="handleCancelEdit" class="btn btn-secondary !py-1 !px-3">Cancel</button>
-                            <button @click="handleSaveEdit" class="btn btn-primary !py-1 !px-3">Save</button>
+                        <div class="flex justify-between items-center mt-2">
+                             <button @click="triggerEditImageUpload" class="btn btn-secondary !p-2" title="Add Images">
+                                <IconPhoto class="w-5 h-5" />
+                            </button>
+                            <div class="flex justify-end space-x-2">
+                                <button @click="handleCancelEdit" class="btn btn-secondary !py-1 !px-3">Cancel</button>
+                                <button @click="handleSaveEdit" class="btn btn-primary !py-1 !px-3">Save</button>
+                            </div>
                         </div>
                     </div>
                 </div>

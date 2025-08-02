@@ -30,6 +30,10 @@ import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconMinimize from '../../assets/icons/IconMinimize.vue';
 import IconUndo from '../../assets/icons/IconUndo.vue';
 import IconRedo from '../../assets/icons/IconRedo.vue';
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconEye from '../../assets/icons/IconEye.vue';
+import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
+import IconXMark from '../../assets/icons/IconXMark.vue';
 
 // --- Store Initialization ---
 const discussionsStore = useDiscussionsStore();
@@ -41,8 +45,11 @@ const { liveDataZoneTokens } = storeToRefs(discussionsStore); // Get reactive st
 
 // --- Component State ---
 const knowledgeFileInput = ref(null);
+const discussionImageInput = ref(null);
+const isUploadingDiscussionImage = ref(false);
 const isExtractingText = ref(false);
 const activeDataZoneTab = ref('discussion');
+const discussionCodeMirrorEditor = ref(null);
 const userCodeMirrorEditor = ref(null);
 const dataZonePromptText = ref('');
 const dataZoneWidth = ref(448); // Default width (28rem)
@@ -325,11 +332,26 @@ async function exportDataZone() {
         uiStore.addNotification('Could not export data zone.', 'error');
     }
 }
+
+function triggerDiscussionImageUpload() { discussionImageInput.value?.click(); }
+
+async function handleDiscussionImageUpload(event) {
+    const file = event.target.files[0];
+    if (!file || !activeDiscussion.value) return;
+    isUploadingDiscussionImage.value = true;
+    try {
+        await discussionsStore.uploadDiscussionImage(file);
+    } finally {
+        isUploadingDiscussionImage.value = false;
+        if (discussionImageInput.value) discussionImageInput.value.value = '';
+    }
+}
 </script>
 
 <template>
   <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
     <input type="file" ref="knowledgeFileInput" @change="handleKnowledgeFileUpload" multiple class="hidden" accept=".txt,.md,.pdf,.docx,.pptx,.xlsx,.xls, .py, .js, .html, .css, .json, .xml, .c, .cpp, .java">
+    <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*">
     <div class="flex-1 flex min-h-0">
         <div v-if="!isDataZoneExpanded" class="flex-1 flex flex-col min-w-0 relative">
             <MessageArea v-if="showChatView" class="flex-1 overflow-y-auto min-w-0" />
@@ -340,7 +362,7 @@ async function exportDataZone() {
                 <p class="text-gray-500 dark:text-gray-400 mt-2">Start a new conversation or select an existing one to begin.</p>
               </div>
             </div>
-            <ChatInput :data-zone-content="combinedDataZoneContent" />
+            <ChatInput />
         </div>
         
         <div v-if="isDataZoneVisible && !isDataZoneExpanded" @mousedown.prevent="startResize" class="flex-shrink-0 w-1.5 cursor-col-resize bg-gray-300 dark:bg-gray-600 hover:bg-blue-500 transition-colors duration-200"></div>
@@ -368,6 +390,7 @@ async function exportDataZone() {
                                 </button>
                                 <button @click="refreshDataZones" class="btn-icon" title="Refresh Data"><IconRefresh class="w-5 h-5" /></button>
                                 <button @click="exportDataZone" class="btn-icon" title="Export to Markdown"><IconArrowUpTray class="w-5 h-5" /></button>
+                                <button @click="triggerDiscussionImageUpload" class="btn-icon" title="Add Image" :disabled="isUploadingDiscussionImage"><IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-5 h-5" /><IconPhoto v-else class="w-5 h-5" /></button>
                                 <button @click="triggerKnowledgeFileUpload" class="btn-icon" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-5 h-5" /><IconPlus v-else class="w-5 h-5" /></button>
                                 <button @click="discussionDataZone = ''" class="btn-icon-danger" title="Clear All Text"><IconTrash class="w-5 h-5" /></button>
                             </div>
@@ -382,7 +405,26 @@ async function exportDataZone() {
                             </div>
                         </div>
                     </div>
-                    <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-model="discussionDataZone" class="h-full" /></div>
+                    <div v-if="activeDiscussion.discussion_images && activeDiscussion.discussion_images.length > 0" class="flex-shrink-0 p-2 border-b dark:border-gray-600">
+                        <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                            <div v-for="(img_b64, index) in activeDiscussion.discussion_images" :key="index" class="relative group/image">
+                                <img :src="'data:image/png;base64,' + img_b64" class="w-full h-20 object-cover rounded-md transition-all duration-300" :class="{'grayscale': !activeDiscussion.active_discussion_images[index]}"/>
+                                <div @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="absolute inset-0 cursor-pointer"></div>
+                                <div class="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                    <button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" :title="activeDiscussion.active_discussion_images[index] ? 'Deactivate' : 'Activate'"><IconEye v-if="activeDiscussion.active_discussion_images[index]" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button>
+                                    <button @click="discussionsStore.deleteDiscussionImage(index)" class="p-1.5 bg-red-500/80 text-white rounded-full hover:bg-red-600" title="Delete"><IconXMark class="w-4 h-4" /></button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div v-if="isUploadingDiscussionImage" class="flex-shrink-0 p-2 border-b dark:border-gray-600">
+                        <div class="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                            <div class="relative w-full h-20 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center animate-pulse">
+                                <IconPhoto class="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" /></div>
                     <div class="p-4 border-t dark:border-gray-600 flex-shrink-0 space-y-3">
                         <div class="flex items-center gap-2">
                             <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2">

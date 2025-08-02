@@ -117,6 +117,17 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
     if discussion:
         discussion.lollms_client = lc
         discussion.max_context_size = max_context_size  # Ensure it's correctly set on existing discussions
+
+        # --- FIX: In-place migration for legacy discussion_images format ---
+        if discussion.metadata and 'discussion_images' in discussion.metadata:
+            images = discussion.metadata['discussion_images']
+            # Check if migration is needed (if the list is not empty and the first item is a string)
+            if isinstance(images, list) and images and isinstance(images[0], str):
+                print(f"INFO: Migrating legacy image format for discussion {discussion_id}")
+                new_images_format = [{'image': img_b64, 'active': True} for img_b64 in images]
+                discussion.set_metadata_item('discussion_images', new_images_format)
+                discussion.commit() # Save the migrated format back to the DB
+
         return discussion
     elif create_if_missing:
         new_discussion = LollmsDiscussion.create_new(

@@ -19,7 +19,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import PlainTextResponse
 # Third-Party Imports
 from fastapi import (
-    HTTPException, Depends, Form,
+    HTTPException, Depends, Form, File, UploadFile,
     APIRouter, Query, BackgroundTasks, status)
 from pydantic import BaseModel
 from backend.models import DiscussionRagDatastoreUpdate # Make sure it's the updated one
@@ -45,7 +45,7 @@ from backend.models import (
     DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,
     MessageGradeUpdate, DiscussionBranchSwitchRequest, DiscussionSendRequest,
     DiscussionExportRequest, ExportData, DiscussionImportRequest, ContextStatusResponse,
-    DiscussionDataZoneUpdate, DataZones, TaskInfo, ManualMessageCreate
+    DiscussionDataZoneUpdate, DataZones, TaskInfo, ManualMessageCreate, MessageUpdateWithImages, DiscussionImageAddRequest
 )
 from backend.session import (
     get_current_active_user, get_user_lollms_client,
@@ -81,7 +81,7 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
     )
 
 # --- Task Functions ---
-def _summarize_data_zone_task(task: Task, username: str, discussion_id: str, contextual_prompt: Optional[str]):
+def _process_data_zone_task(task: Task, username: str, discussion_id: str, contextual_prompt: Optional[str]):
     task.log("Starting data zone summary task...")
     discussion = get_user_discussion(username, discussion_id)
     if not discussion:
@@ -96,10 +96,13 @@ def _summarize_data_zone_task(task: Task, username: str, discussion_id: str, con
         task.set_description(message)
         if params and 'progress' in params:
             task.set_progress(int(params['progress']))
-
+    all_images_info = discussion.get_discussion_images()
+    
+    discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
     lc = get_user_lollms_client(username)
     summary = lc.long_context_processing(
         discussion.discussion_data_zone,
+        images=discussion_images_b64,
         contextual_prompt=contextual_prompt,
         streaming_callback=summary_callback
     )
@@ -232,6 +235,24 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
     for disc_data in discussions_from_db:
         disc_id = disc_data['id']
         metadata = disc_data.get('discussion_metadata', {})
+        
+        # Robustly handle discussion images, which might be a list of strings (legacy) or dicts
+        raw_images_info = metadata.get('discussion_images', [])
+        if not isinstance(raw_images_info, list):
+            raw_images_info = []
+
+        discussion_images_b64 = []
+        active_discussion_images = []
+        
+        for item in raw_images_info:
+            if isinstance(item, dict) and 'image' in item:
+                discussion_images_b64.append(item['image'])
+                active_discussion_images.append(item.get('active', True)) # Default to active if key is missing
+            elif isinstance(item, str):
+                # Handle legacy format where it was just a list of b64 strings
+                discussion_images_b64.append(item)
+                active_discussion_images.append(True) # Assume active for legacy
+
         infos.append(DiscussionInfo(
             id=disc_id,
             title=metadata.get('title', f"Discussion {disc_id[:8]}"),
@@ -240,7 +261,9 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
             active_tools=metadata.get('active_tools', []),
             active_branch_id=disc_data.get('active_branch_id'),
             created_at=disc_data.get('created_at'),
-            last_activity_at=disc_data.get('updated_at')
+            last_activity_at=disc_data.get('updated_at'),
+            discussion_images=discussion_images_b64,
+            active_discussion_images=active_discussion_images
         ))
     return sorted(infos, key=lambda d: d.last_activity_at or datetime.datetime.min, reverse=True)
 
@@ -312,7 +335,7 @@ def update_discussion_data_zone(
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to update Data Zone: {e}")
 
-@discussion_router.post("/{discussion_id}/summarize_data_zone", response_model=TaskInfo, status_code=202)
+@discussion_router.post("/{discussion_id}/process_data_zone", response_model=TaskInfo, status_code=202)
 def summarize_discussion_data_zone(
     discussion_id: str,
     prompt: Optional[str] = Form(None),
@@ -324,7 +347,7 @@ def summarize_discussion_data_zone(
     
     db_task = task_manager.submit_task(
         name=f"Processing Data Zone for: {discussion.metadata.get('title', 'Untitled')}",
-        target=_summarize_data_zone_task,
+        target=_process_data_zone_task,
         args=(current_user.username, discussion_id, prompt),
         description=f"AI is processing the discussion data zone content.",
         owner_username=current_user.username
@@ -352,6 +375,98 @@ def memorize_ltm(
     )
     return _to_task_info(db_task)
 
+
+@discussion_router.post("/{discussion_id}/images", response_model=Dict[str, List[Any]])
+async def add_discussion_image(
+    discussion_id: str,
+    payload: DiscussionImageAddRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+
+    try:
+        # Strip data URI prefix if present, as lollms-client expects raw base64
+        try:
+            _, encoded_b64 = payload.image_b64.split(",", 1)
+        except ValueError:
+            encoded_b64 = payload.image_b64
+
+        discussion.add_discussion_image(encoded_b64)
+        discussion.commit()
+
+        all_images_info = discussion.get_discussion_images()
+        
+        discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
+        active_discussion_images = [img_info['active'] for img_info in all_images_info]
+        
+        return {
+            "discussion_images": discussion_images_b64,
+            "active_discussion_images": active_discussion_images
+        }
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to add image to discussion: {str(e)}")
+
+@discussion_router.put("/{discussion_id}/images/{image_index}/toggle", response_model=Dict[str, List[Any]])
+async def toggle_discussion_image(
+    discussion_id: str,
+    image_index: int,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    try:
+        discussion.toggle_discussion_image_activation(image_index)
+        discussion.commit()
+
+        all_images_info = discussion.get_discussion_images()
+        discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
+        active_discussion_images = [img_info['active'] for img_info in all_images_info]
+        
+        return {
+            "discussion_images": discussion_images_b64,
+            "active_discussion_images": active_discussion_images
+        }
+    except IndexError:
+        raise HTTPException(status_code=404, detail="Image index out of bounds.")
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to toggle image activation: {str(e)}")
+
+@discussion_router.delete("/{discussion_id}/images/{image_index}", response_model=Dict[str, List[Any]])
+async def delete_discussion_image_from_discussion(
+    discussion_id: str,
+    image_index: int,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    try:
+        images_info = discussion.get_discussion_images()
+        if not (0 <= image_index < len(images_info)):
+            raise IndexError("Image index out of bounds.")
+        
+        images_info.pop(image_index)
+        discussion.set_metadata_item('discussion_images', images_info)
+        discussion.commit()
+
+        all_images_info = discussion.get_discussion_images()
+        discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
+        active_discussion_images = [img_info['active'] for img_info in all_images_info]
+        
+        return {
+            "discussion_images": discussion_images_b64,
+            "active_discussion_images": active_discussion_images
+        }
+    except IndexError:
+        raise HTTPException(status_code=404, detail="Image index out of bounds.")
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to delete image from discussion: {str(e)}")
 
 @discussion_router.post("/prune", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_current_active_user)):
@@ -415,12 +530,27 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
 
     messages_output = []
     for msg in messages_in_branch:
-        images_list = msg.images or []
-        if isinstance(images_list, str):
-            try: images_list = json.loads(images_list)
+        # --- START FIX ---
+        # Robustly handle message image data which could be a JSON string, a list of strings (legacy),
+        # or a list of dictionaries (current).
+        images_list_raw = msg.images or []
+        images_list = []
+        if isinstance(images_list_raw, str):
+            try: images_list = json.loads(images_list_raw)
             except json.JSONDecodeError: images_list = []
-        if not isinstance(images_list, list): images_list = []
-        full_image_refs = [ f"data:image/png;base64,{img}" for img in images_list]
+        elif isinstance(images_list_raw, list):
+            images_list = images_list_raw
+        
+        full_image_refs = []
+        active_images_bools = []
+        for img_data in images_list:
+            if isinstance(img_data, dict) and 'image' in img_data:
+                full_image_refs.append(f"data:image/png;base64,{img_data['image']}")
+                active_images_bools.append(img_data.get('active', True))
+            elif isinstance(img_data, str):
+                full_image_refs.append(f"data:image/png;base64,{img_data}")
+                active_images_bools.append(True) # Legacy format is always active
+        # --- END FIX ---
         
         msg_metadata_raw = msg.metadata
         if isinstance(msg_metadata_raw, str):
@@ -434,7 +564,9 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
                 id=msg.id, sender=msg.sender, sender_type=msg.sender_type, content=msg.content,
                 parent_message_id=msg.parent_id, binding_name=msg.binding_name, model_name=msg.model_name,
                 token_count=msg.tokens, sources=msg_metadata.get('sources'), events=msg_metadata.get('events'),
-                image_references=full_image_refs, user_grade=user_grades.get(msg.id, 0),
+                image_references=full_image_refs,
+                active_images=active_images_bools,
+                user_grade=user_grades.get(msg.id, 0),
                 created_at=msg.created_at, branch_id=branch_tip_to_load, branches=None
             )
         )
@@ -870,26 +1002,52 @@ async def grade_discussion_message(discussion_id: str, message_id: str, grade_up
     )
 
 @discussion_router.put("/{discussion_id}/messages/{message_id}", response_model=MessageOutput)
-async def update_discussion_message(discussion_id: str, message_id: str, payload: MessageContentUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def update_discussion_message(
+    discussion_id: str,
+    message_id: str,
+    payload: MessageUpdateWithImages,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     username = current_user.username
     discussion_obj = get_user_discussion(username, discussion_id)
-    if not discussion_obj: raise HTTPException(status_code=404, detail="Discussion not found.")
-    branch = discussion_obj.get_branch(discussion_obj.active_branch_id)
-    target_message = next((msg for msg in branch if msg.id == message_id), None)
-    if not target_message: raise HTTPException(status_code=404, detail="Message not found in active branch.")
+    if not discussion_obj:
+        raise HTTPException(status_code=404, detail="Discussion not found.")
+    
+    target_message = discussion_obj.get_message(message_id)
+    if not target_message:
+        raise HTTPException(status_code=404, detail="Message not found in discussion.")
+
     target_message.content = payload.content
+
+    final_images_b64 = []
+    final_images_b64.extend(payload.kept_images_b64)
+
+    for b64_data_uri in payload.new_images_b64:
+        try:
+            _, encoded = b64_data_uri.split(",", 1)
+            final_images_b64.append(encoded)
+        except ValueError:
+            final_images_b64.append(b64_data_uri) # Assume raw base64
+    
+    target_message.images = final_images_b64
     discussion_obj.commit()
+
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
     grade = db.query(UserMessageGrade.grade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).scalar() or 0
-    full_image_refs = [ f"data:image/png;base64,{img}" for img in target_message.images or []]
+    
+    full_image_refs = [f"data:image/png;base64,{img}" for img in target_message.images or []]
+    active_images = [True] * len(full_image_refs) # Edited images are always active
 
     msg_metadata = target_message.metadata or {}
     return MessageOutput(
-        id=target_message.id, sender=target_message.sender, sender_type=target_message.sender_type, content=target_message.content,
-        parent_message_id=target_message.parent_id, binding_name=target_message.binding_name, model_name=target_message.model_name,
-        token_count=target_message.tokens, sources=msg_metadata.get('sources'), events=msg_metadata.get('events'),
-        image_references=full_image_refs, user_grade=grade, created_at=target_message.created_at,
-        branch_id=discussion_obj.active_branch_id, branches=None
+        id=target_message.id, sender=target_message.sender, sender_type=target_message.sender_type,
+        content=target_message.content, parent_message_id=target_message.parent_id,
+        binding_name=target_message.binding_name, model_name=target_message.model_name,
+        token_count=target_message.tokens, sources=msg_metadata.get('sources'),
+        events=msg_metadata.get('events'), image_references=full_image_refs,
+        active_images=active_images, user_grade=grade,
+        created_at=target_message.created_at, branch_id=discussion_obj.active_branch_id
     )
 
 @discussion_router.post("/{discussion_id}/messages", response_model=MessageOutput)
