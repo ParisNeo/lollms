@@ -8,6 +8,7 @@ import yaml
 from dataclasses import dataclass, field as dataclass_field
 from lollms_client import LollmsClient, LollmsDataManager, LollmsDiscussion
 
+
 from backend.session import user_sessions, get_user_data_root, get_user_lollms_client
 
 @dataclass
@@ -120,14 +121,30 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
 
         # --- FIX: In-place migration for legacy discussion_images format ---
         if discussion.metadata and 'discussion_images' in discussion.metadata:
-            images = discussion.metadata['discussion_images']
-            # Check if migration is needed (if the list is not empty and the first item is a string)
-            if isinstance(images, list) and images and isinstance(images[0], str):
+            images_data = discussion.metadata['discussion_images']
+            # Check if migration is needed (if it is a list, not a dict with 'data' key)
+            if isinstance(images_data, list):
                 print(f"INFO: Migrating legacy image format for discussion {discussion_id}")
-                new_images_format = [{'image': img_b64, 'active': True} for img_b64 in images]
-                discussion.set_metadata_item('discussion_images', new_images_format)
-                discussion.commit() # Save the migrated format back to the DB
+                
+                # Handle list of strings (oldest format) or list of dicts (intermediate format)
+                image_list = []
+                active_list = []
+                for item in images_data:
+                    if isinstance(item, dict) and 'image' in item:
+                        image_list.append(item['image'])
+                        active_list.append(item.get('active', True))
+                    elif isinstance(item, str):
+                        image_list.append(item)
+                        active_list.append(True)
 
+                new_images_format = {
+                    'data': image_list,
+                    'active': active_list
+                }
+                discussion.set_metadata_item('discussion_images', new_images_format)
+                # The object in memory now has the old format. We need to update it.
+                discussion.images = new_images_format['data']
+                discussion.active_images = new_images_format['active']
         return discussion
     elif create_if_missing:
         new_discussion = LollmsDiscussion.create_new(

@@ -41,9 +41,10 @@ class Task:
         with self.db_session_factory() as db:
             task = db.query(DBTask).filter(DBTask.id == self.id).first()
             if task:
-                current_logs = task.logs or []
-                current_logs.append(log_entry)
-                task.logs = current_logs
+                # By creating a new list with the appended log entry, we ensure
+                # SQLAlchemy's mutation tracking detects the change and persists it.
+                # In-place appends to the existing list might not be detected.
+                task.logs = (task.logs or []) + [log_entry]
                 db.commit()
 
     def set_progress(self, value: int):

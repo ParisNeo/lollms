@@ -414,9 +414,11 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                 <div class="message-content-wrapper">
                     <div v-if="!isEditing">
                         <div v-if="imagesToRender.length > 0" class="my-2 grid gap-2" :class="[imagesToRender.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
-                            <div v-for="(imgSrc, index) in imagesToRender" :key="index" class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800">
+                            <div v-for="(imgSrc, index) in imagesToRender" 
+                                 :key="index"
+                                 @click.stop="uiStore.openImageViewer(imgSrc)"
+                                 class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer">
                                 <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain transition-all duration-300" :class="{'grayscale': !isImageActive(index)}" />
-                                <div @click.stop="uiStore.openImageViewer(imgSrc)" class="absolute inset-0 cursor-pointer"></div>
                                 <div class="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover/image:opacity-100 transition-opacity duration-200">
                                     <button @click.stop="toggleImage(index)" class="p-1.5 bg-black/60 text-white rounded-full hover:bg-black/80" :title="isImageActive(index) ? 'Deactivate Image' : 'Activate Image'">
                                         <IconEye v-if="isImageActive(index)" class="w-4 h-4" />

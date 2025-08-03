@@ -32,8 +32,10 @@ from fastapi.responses import (
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from lollms_client import (
-    LollmsClient, MSG_TYPE, LollmsDiscussion, LollmsPersonality, LollmsMessage
+    LollmsClient, MSG_TYPE, LollmsPersonality
 )
+from lollms_client import LollmsDiscussion, LollmsMessage
+
 from ascii_colors import ASCIIColors, trace_exception
 # Local Application Imports
 from backend.db import get_db
@@ -243,22 +245,22 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
         disc_id = disc_data['id']
         metadata = disc_data.get('discussion_metadata', {})
         
-        # Robustly handle discussion images, which might be a list of strings (legacy) or dicts
-        raw_images_info = metadata.get('discussion_images', [])
-        if not isinstance(raw_images_info, list):
-            raw_images_info = []
-
+        image_data = metadata.get("discussion_images", {})
         discussion_images_b64 = []
         active_discussion_images = []
-        
-        for item in raw_images_info:
-            if isinstance(item, dict) and 'image' in item:
-                discussion_images_b64.append(item['image'])
-                active_discussion_images.append(item.get('active', True)) # Default to active if key is missing
-            elif isinstance(item, str):
-                # Handle legacy format where it was just a list of b64 strings
-                discussion_images_b64.append(item)
-                active_discussion_images.append(True) # Assume active for legacy
+
+        if isinstance(image_data, dict) and 'data' in image_data:
+            discussion_images_b64 = image_data.get('data', [])
+            active_discussion_images = image_data.get('active', [])
+        elif isinstance(image_data, list):
+             # handle legacy format if migration hasn't run for some reason
+            for item in image_data:
+                if isinstance(item, dict) and 'image' in item:
+                    discussion_images_b64.append(item['image'])
+                    active_discussion_images.append(item.get('active', True))
+                elif isinstance(item, str):
+                    discussion_images_b64.append(item)
+                    active_discussion_images.append(True)
 
         infos.append(DiscussionInfo(
             id=disc_id,
@@ -307,29 +309,13 @@ def get_all_data_zones(
     db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     discussion.memory = db_user.memory
     
-    # --- NEW LOGIC TO EXTRACT IMAGE DATA ---
-    raw_images_info = discussion.metadata.get('discussion_images', [])
-    if not isinstance(raw_images_info, list):
-        raw_images_info = []
-
-    discussion_images_b64 = []
-    active_discussion_images = []
-    
-    for item in raw_images_info:
-        if isinstance(item, dict) and 'image' in item:
-            discussion_images_b64.append(item['image'])
-            active_discussion_images.append(item.get('active', True))
-        elif isinstance(item, str):
-            discussion_images_b64.append(item)
-            active_discussion_images.append(True)
-
     return DataZones(
         user_data_zone=db_user.data_zone if db_user else "",
         discussion_data_zone=discussion.discussion_data_zone,
         personality_data_zone=discussion.personality_data_zone,
         memory=discussion.memory,
-        discussion_images=discussion_images_b64,
-        active_discussion_images=active_discussion_images
+        discussion_images=discussion.images or [],
+        active_discussion_images=discussion.active_images or []
     )
 
 
@@ -472,12 +458,7 @@ async def delete_discussion_image_from_discussion(
     if not discussion:
         raise HTTPException(status_code=404, detail="Discussion not found")
     try:
-        images_info = discussion.get_discussion_images()
-        if not (0 <= image_index < len(images_info)):
-            raise IndexError("Image index out of bounds.")
-        
-        images_info.pop(image_index)
-        discussion.set_metadata_item('discussion_images', images_info)
+        discussion.remove_discussion_image(image_index)
         discussion.commit()
 
         all_images_info = discussion.get_discussion_images()
