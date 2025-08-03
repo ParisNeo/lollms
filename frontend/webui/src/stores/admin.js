@@ -548,6 +548,20 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    // NEW App Config Actions
+    async function fetchAppConfigSchema(appId) {
+        const response = await apiClient.get(`/api/apps-management/installed-apps/${appId}/config-schema`);
+        return response.data;
+    }
+    async function fetchAppConfig(appId) {
+        const response = await apiClient.get(`/api/apps-management/installed-apps/${appId}/config`);
+        return response.data;
+    }
+    async function updateAppConfig(appId, configData) {
+        const response = await apiClient.put(`/api/apps-management/installed-apps/${appId}/config`, configData);
+        uiStore.addNotification(response.data.message || 'Configuration saved.', 'success');
+    }
+
     return {
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers,
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
@@ -566,6 +580,10 @@ export const useAdminStore = defineStore('admin', () => {
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
         purgeUnusedUploads,
         updateInstalledApp, fetchAppLog,
-        systemStatus, isLoadingSystemStatus, fetchSystemStatus
+        systemStatus, isLoadingSystemStatus, fetchSystemStatus,
+        fetchAppConfigSchema, fetchAppConfig, updateAppConfig, // NEW
     };
 });
+// This store manages admin-related functionalities, including user management, LLM bindings, global settings, and app management.
+// It provides actions to fetch, update, and delete resources, as well as to handle tasks related to these resources.
+// The store uses the Pinia state management library and integrates with an API client for backend communication.

@@ -9,12 +9,15 @@ import signal
 import datetime
 import time
 import re
+import json
+import yaml
+import toml
+from jsonschema import validate, ValidationError
 from packaging import version as packaging_version
 import psutil
 from typing import Dict, Any
 
-import yaml
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session, joinedload
 
@@ -22,7 +25,7 @@ from backend.db import get_db
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCPZooRepository as DBMCPZooRepository
 from backend.db.models.db_task import DBTask
 from backend.models import (
-    AppZooRepositoryCreate, AppZooRepositoryPublic, ZooAppInfo, 
+    AppZooRepositoryCreate, AppZooRepositoryPublic, ZooAppInfo,
     AppInstallRequest, AppPublic, AppActionResponse, TaskInfo,
     AppUpdate, AppLog, MCPZooRepositoryCreate, MCPZooRepositoryPublic, ZooMCPInfo
 )
@@ -38,6 +41,12 @@ apps_management_router = APIRouter(
     tags=["Apps Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
+
+def _get_installed_app_path(db: Session, app_id: str) -> Path:
+    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+    if not app or not app.folder_name:
+        raise HTTPException(status_code=404, detail="Installed app not found or is corrupted.")
+    return APPS_ROOT_PATH / app.folder_name
 
 def _generate_unique_client_id(db: Session, model_class, name: str) -> str:
     base_slug = re.sub(r'[^a-z0-9_]+', '', name.lower().replace(' ', '_'))
@@ -487,13 +496,20 @@ def _get_zoo_apps_metadata():
     for repo_dir in ZOO_ROOT_PATH.iterdir():
         if repo_dir.is_dir():
             for app_dir in repo_dir.iterdir():
-                if app_dir.is_dir() and (app_dir / "app_info.yaml").exists():
+                info_file_path = None
+                if (app_dir / "app_info.yaml").exists():
+                    info_file_path = app_dir / "app_info.yaml"
+                elif (app_dir / "description.yaml").exists():
+                    info_file_path = app_dir / "description.yaml"
+
+                if app_dir.is_dir() and info_file_path:
                     try:
-                        with open(app_dir / "app_info.yaml", "r", encoding='utf-8') as f:
+                        with open(info_file_path, "r", encoding='utf-8') as f:
                             info = yaml.safe_load(f)
-                            apps_metadata[info['name']] = info
+                            if info and 'name' in info:
+                                apps_metadata[info['name']] = info
                     except Exception as e:
-                        print(f"Warning: Could not parse app_info.yaml for {app_dir.name}. Error: {e}")
+                        print(f"Warning: Could not parse metadata file for {app_dir.name}. Error: {e}")
     return apps_metadata
 
 @apps_management_router.get("/zoo/available-apps", response_model=list[ZooAppInfo])
@@ -504,16 +520,35 @@ def get_available_zoo_apps(db: Session = Depends(get_db)):
     for repo_dir in ZOO_ROOT_PATH.iterdir():
         if repo_dir.is_dir():
             for app_dir in repo_dir.iterdir():
-                if app_dir.is_dir() and (app_dir / "app_info.yaml").exists():
+                info_file_path = None
+                if (app_dir / "app_info.yaml").exists():
+                    info_file_path = app_dir / "app_info.yaml"
+                elif (app_dir / "description.yaml").exists():
+                    info_file_path = app_dir / "description.yaml"
+
+                if app_dir.is_dir() and info_file_path:
                     try:
-                        with open(app_dir / "app_info.yaml", "r", encoding='utf-8') as f: info = yaml.safe_load(f)
+                        with open(info_file_path, "r", encoding='utf-8') as f: info = yaml.safe_load(f)
+                        if not info or 'name' not in info: continue
+                        
+                        model_data = {
+                            "name": info.get('name', app_dir.name),
+                            "repository": repo_dir.name,
+                            "folder_name": app_dir.name,
+                            "is_installed": info.get('name', app_dir.name) in installed_apps,
+                            "has_readme": (app_dir / "README.md").exists()
+                        }
+                        
+                        for field in ZooAppInfo.model_fields:
+                            if field not in model_data and field in info:
+                                model_data[field] = info[field]
+
                         icon_path = app_dir / "assets" / "logo.png"
-                        icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path.exists() else None
-                        apps_list.append(ZooAppInfo(
-                            name=info.get('name', app_dir.name), repository=repo_dir.name, folder_name=app_dir.name,
-                            icon=icon_base64, is_installed=(info.get('name', app_dir.name) in installed_apps),
-                            has_readme=(app_dir / "README.md").exists(), **info
-                        ))
+                        if not icon_path.exists(): icon_path = app_dir / "icon.png"
+                        if icon_path.exists():
+                            model_data['icon'] = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}"
+                        
+                        apps_list.append(ZooAppInfo(**model_data))
                     except Exception as e:
                         print(f"Warning: Could not process app at {app_dir}. Error: {e}")
     return apps_list
@@ -590,16 +625,34 @@ def get_available_zoo_mcps(db: Session = Depends(get_db)):
     for repo_dir in MCP_ZOO_ROOT_PATH.iterdir():
         if repo_dir.is_dir():
             for mcp_dir in repo_dir.iterdir():
-                if mcp_dir.is_dir() and (mcp_dir / "description.yaml").exists():
+                info_file_path = None
+                if (mcp_dir / "description.yaml").exists():
+                    info_file_path = mcp_dir / "description.yaml"
+                elif (mcp_dir / "app_info.yaml").exists():
+                    info_file_path = mcp_dir / "app_info.yaml"
+
+                if mcp_dir.is_dir() and info_file_path:
                     try:
-                        with open(mcp_dir / "description.yaml", "r", encoding='utf-8') as f: info = yaml.safe_load(f)
+                        with open(info_file_path, "r", encoding='utf-8') as f: info = yaml.safe_load(f)
+                        if not info or 'name' not in info: continue
+                        
+                        model_data = {
+                            "name": info.get('name', mcp_dir.name),
+                            "repository": repo_dir.name,
+                            "folder_name": mcp_dir.name,
+                            "is_installed": info.get('name', mcp_dir.name) in installed_items,
+                            "has_readme": (mcp_dir / "README.md").exists()
+                        }
+
+                        for field in ZooMCPInfo.model_fields:
+                            if field not in model_data and field in info:
+                                model_data[field] = info[field]
+
                         icon_path = mcp_dir / "icon.png"
-                        icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path.exists() else None
-                        mcps_list.append(ZooMCPInfo(
-                            name=info.get('name', mcp_dir.name), repository=repo_dir.name, folder_name=mcp_dir.name,
-                            icon=icon_base64, is_installed=(info.get('name', mcp_dir.name) in installed_items),
-                            has_readme=(mcp_dir / "README.md").exists(), **info
-                        ))
+                        if icon_path.exists():
+                            model_data['icon'] = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}"
+                        
+                        mcps_list.append(ZooMCPInfo(**model_data))
                     except Exception as e:
                         print(f"Warning: Could not process mcp at {mcp_dir}. Error: {e}")
     return mcps_list
@@ -632,6 +685,12 @@ def get_installed_apps(db: Session = Depends(get_db)):
     for app in installed_apps:
         app_public = AppPublic.from_orm(app)
         app_public.update_available = False
+        
+        # Check for schema file
+        app_path = APPS_ROOT_PATH / app.folder_name if app.folder_name else None
+        if app_path and (app_path / 'schema.config.json').is_file():
+            app_public.has_config_schema = True
+
         zoo_version_info = zoo_apps_metadata.get(app.name)
         if zoo_version_info:
             try:
@@ -645,6 +704,111 @@ def get_installed_apps(db: Session = Depends(get_db)):
                 print(f"Warning: Could not compare version for app '{app.name}'. Error: {e}")
         response_apps.append(app_public)
     return response_apps
+
+@apps_management_router.get("/installed-apps/{app_id}/config-schema", response_model=Dict[str, Any])
+def get_app_config_schema(app_id: str, db: Session = Depends(get_db)):
+    app_path = _get_installed_app_path(db, app_id)
+    schema_path = app_path / 'schema.config.json'
+    if not schema_path.is_file():
+        return {}
+    try:
+        with open(schema_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read or parse schema.config.json: {e}")
+
+@apps_management_router.get("/installed-apps/{app_id}/config", response_model=Dict[str, Any])
+def get_app_config(app_id: str, db: Session = Depends(get_db)):
+    app_path = _get_installed_app_path(db, app_id)
+    schema_path = app_path / 'schema.config.json'
+    if not schema_path.is_file():
+        return {"config": {}, "metadata": {}}
+
+    try:
+        with open(schema_path, 'r', encoding='utf-8') as f:
+            schema = json.load(f)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not load config schema.")
+
+    # 1. Start with schema defaults
+    config = {key: prop.get('default') for key, prop in schema.get('properties', {}).items()}
+    
+    # 2. Load from file
+    config_yaml_path = app_path / 'config.yaml'
+    config_toml_path = app_path / 'config.toml'
+    file_config = {}
+    if config_yaml_path.is_file():
+        with open(config_yaml_path, 'r', encoding='utf-8') as f:
+            file_config = yaml.safe_load(f) or {}
+    elif config_toml_path.is_file():
+        with open(config_toml_path, 'r', encoding='utf-8') as f:
+            file_config = toml.load(f) or {}
+    config.update(file_config)
+    
+    # 3. Override with environment variables and build metadata
+    metadata = {"env_overrides": [], "sensitive_keys": []}
+    for key, prop in schema.get('properties', {}).items():
+        env_var = prop.get('envVar')
+        if env_var and env_var in os.environ:
+            env_value = os.environ[env_var]
+            # Attempt to cast env var string to the correct type
+            prop_type = prop.get('type')
+            try:
+                if prop_type == 'integer':
+                    config[key] = int(env_value)
+                elif prop_type == 'number':
+                    config[key] = float(env_value)
+                elif prop_type == 'boolean':
+                    config[key] = env_value.lower() in ['true', '1', 'yes']
+                else:
+                    config[key] = env_value
+            except ValueError:
+                config[key] = env_value # Keep as string if cast fails
+            
+            metadata["env_overrides"].append(key)
+        
+        if prop.get('sensitive'):
+            metadata["sensitive_keys"].append(key)
+            if key not in metadata["env_overrides"]:
+                config[key] = "********" # Mask non-env sensitive values
+                
+    return {"config": config, "metadata": metadata}
+
+
+@apps_management_router.put("/installed-apps/{app_id}/config", response_model=AppActionResponse)
+def set_app_config(app_id: str, config_data: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
+    app_path = _get_installed_app_path(db, app_id)
+    schema_path = app_path / 'schema.config.json'
+    if not schema_path.is_file():
+        raise HTTPException(status_code=404, detail="No configuration schema found for this app.")
+
+    try:
+        with open(schema_path, 'r', encoding='utf-8') as f:
+            schema = json.load(f)
+        validate(instance=config_data, schema=schema)
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="Schema file disappeared.")
+    except (json.JSONDecodeError, ValidationError) as e:
+        raise HTTPException(status_code=400, detail=f"Invalid configuration data: {e.message}")
+
+    # Load existing config to preserve any fields not managed by the schema
+    config_yaml_path = app_path / 'config.yaml'
+    final_config = {}
+    if config_yaml_path.is_file():
+        with open(config_yaml_path, 'r', encoding='utf-8') as f:
+            final_config = yaml.safe_load(f) or {}
+
+    # Update only non-env-managed values
+    for key, prop in schema.get('properties', {}).items():
+        if key in config_data and not prop.get('envVar'):
+            final_config[key] = config_data[key]
+    
+    try:
+        with open(config_yaml_path, 'w', encoding='utf-8') as f:
+            yaml.dump(final_config, f, sort_keys=False)
+        return AppActionResponse(success=True, message="Configuration saved successfully.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to write configuration file: {e}")
 
 @apps_management_router.post("/installed-apps/{app_id}/start", response_model=TaskInfo, status_code=202)
 def start_app(app_id: str, db: Session = Depends(get_db)):

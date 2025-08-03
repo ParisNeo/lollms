@@ -10,7 +10,7 @@ import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
 import IconArrowUpCircle from '../../assets/icons/IconArrowUpCircle.vue';
-import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconCog from '../../assets/icons/IconCog.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
 import IconArrowUp from '../../assets/icons/IconArrowUp.vue';
 import IconArrowDown from '../../assets/icons/IconArrowDown.vue';
@@ -169,16 +169,10 @@ const groupedItems = computed(() => {
 
 const sortedInstalledItems = computed(() => {
     if (!Array.isArray(installedApps.value)) return [];
-    
-    // Determine which set of original items to check against (apps or mcps)
-    const referenceItems = mainTab.value === 'apps' ? zooApps.value : zooMcps.value;
-    const referenceItemNames = new Set(referenceItems.map(item => item.name));
-
-    // Filter installedApps based on whether their name exists in the reference set
-    const filtered = installedApps.value.filter(installed => referenceItemNames.has(installed.name));
-
-    return [...filtered].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    // CORRECTED: Do not filter the installed apps list. It should show all installed items.
+    return [...installedApps.value].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 });
+
 
 const installedItemsWithTaskStatus = computed(() => {
     const taskMap = new Map();
@@ -443,7 +437,7 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                             <button v-if="app.update_available" @click="handleUpdateApp(app)" class="btn btn-warning btn-sm p-2" title="Update App"><IconArrowUpCircle class="w-5 h-5" /></button>
                             <span class="px-2 py-1 text-xs font-semibold rounded-full" :class="{ 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300': app.status === 'running', 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300': app.status === 'stopped', 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300': app.status === 'error' }">{{ app.status }}</span>
                             <a v-if="app.status === 'running' && app.url" :href="app.url" target="_blank" class="btn btn-secondary btn-sm p-2" title="Open App"><IconGlobeAlt class="w-5 h-5" /></a>
-                            <button @click="handleEditApp(app)" class="btn btn-secondary btn-sm p-2" title="Edit App Settings"><IconPencil class="w-5 h-5" /></button>
+                            <button v-if="app.has_config_schema" @click="handleEditApp(app)" class="btn btn-secondary btn-sm p-2" title="Configure App"><IconCog class="w-5 h-5" /></button>
                             <button @click="handleShowLogs(app)" class="btn btn-secondary btn-sm p-2" title="View App Logs"><IconCode class="w-5 h-5" /></button>
                             <button v-if="app.status !== 'running'" @click="handleAppAction(app.id, 'start')" class="btn btn-success btn-sm p-2" :disabled="isLoadingAction === `start-${app.id}`" title="Start App"><IconPlayCircle class="w-5 h-5" /></button>
                             <button v-if="app.status === 'running' || (app.status === 'error' && app.pid)" @click="handleAppAction(app.id, 'stop')" class="btn btn-warning btn-sm p-2" :disabled="isLoadingAction === `stop-${app.id}`" title="Stop App"><IconStopCircle class="w-5 h-5" /></button>

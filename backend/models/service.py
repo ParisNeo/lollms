@@ -219,6 +219,7 @@ class AppPublic(AppBase):
     pid: Optional[int] = None
     autostart: bool = False
     update_available: bool = False
+    has_config_schema: bool = False
 
     @field_validator('sso_user_infos_to_share', mode='before')
     def provide_default_for_sso_infos(cls, v):
