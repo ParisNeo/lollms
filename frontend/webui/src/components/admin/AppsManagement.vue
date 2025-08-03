@@ -22,10 +22,16 @@ const adminStore = useAdminStore();
 const tasksStore = useTasksStore();
 const uiStore = useUiStore();
 
-const { zooRepositories, isLoadingZooRepositories, zooApps, isLoadingZooApps, installedApps, isLoadingInstalledApps } = storeToRefs(adminStore);
+const { 
+    zooRepositories, isLoadingZooRepositories, zooApps, isLoadingZooApps, 
+    mcpZooRepositories, isLoadingMcpZooRepositories, zooMcps, isLoadingZooMcps,
+    installedApps, isLoadingInstalledApps 
+} = storeToRefs(adminStore);
+
 const { tasks } = storeToRefs(tasksStore);
 
-const activeTab = ref('repositories');
+const mainTab = ref('apps'); // 'apps' or 'mcps'
+const activeSubTab = ref('repositories');
 const isAddFormVisible = ref(false);
 const newRepo = ref({ name: '', url: '' });
 const isLoadingAction = ref(null);
@@ -35,7 +41,7 @@ const installationStatusFilter = ref('All');
 const isPullingAll = ref(false);
 const sortKey = ref('last_update_date');
 const sortOrder = ref('desc');
-const starredApps = ref(JSON.parse(localStorage.getItem('starredApps') || '[]'));
+const starredItems = ref(JSON.parse(localStorage.getItem('starredItems') || '[]'));
 
 const sortOptions = [
     { value: 'last_update_date', label: 'Last Updated' },
@@ -46,13 +52,20 @@ const sortOptions = [
 
 onMounted(() => {
     adminStore.fetchZooRepositories();
+    adminStore.fetchMcpZooRepositories();
     adminStore.fetchZooApps();
+    adminStore.fetchZooMcps();
     adminStore.fetchInstalledApps();
 });
 
-watch(activeTab, (newTab) => {
-    if (newTab === 'available_apps') {
-        adminStore.fetchZooApps();
+watch(mainTab, () => {
+    activeSubTab.value = 'repositories';
+});
+
+watch(activeSubTab, (newTab) => {
+    if (newTab === 'available_items') {
+        if (mainTab.value === 'apps') adminStore.fetchZooApps();
+        else adminStore.fetchZooMcps();
         adminStore.fetchInstalledApps();
     }
     if (newTab === 'installed_apps') {
@@ -60,61 +73,67 @@ watch(activeTab, (newTab) => {
     }
 });
 
-watch(starredApps, (newStarred) => {
-    localStorage.setItem('starredApps', JSON.stringify(newStarred));
+watch(starredItems, (newStarred) => {
+    localStorage.setItem('starredItems', JSON.stringify(newStarred));
 }, { deep: true });
 
-const appsWithTaskStatus = computed(() => {
-    if (!Array.isArray(zooApps.value)) return [];
+const currentRepositories = computed(() => mainTab.value === 'apps' ? zooRepositories.value : mcpZooRepositories.value);
+const isLoadingCurrentRepositories = computed(() => mainTab.value === 'apps' ? isLoadingZooRepositories.value : isLoadingMcpZooRepositories.value);
+const currentZooItems = computed(() => mainTab.value === 'apps' ? zooApps.value : zooMcps.value);
+const isLoadingCurrentZooItems = computed(() => mainTab.value === 'apps' ? isLoadingZooApps.value : isLoadingZooMcps.value);
+
+const itemsWithTaskStatus = computed(() => {
+    if (!Array.isArray(currentZooItems.value)) return [];
 
     const taskMap = new Map();
+    const taskPrefix = 'Installing app: '; // Both MCPs and Apps are installed as 'apps'
     if (Array.isArray(tasks.value)) {
         tasks.value.forEach(task => {
-            if (task && task.name && task.name.startsWith('Installing app: ')) {
-                const appName = task.name.replace('Installing app: ', '');
-                if (!taskMap.has(appName) || new Date(task.created_at) > new Date(taskMap.get(appName).created_at)) {
-                    taskMap.set(appName, task);
+            if (task && task.name && task.name.startsWith(taskPrefix)) {
+                const itemName = task.name.replace(taskPrefix, '');
+                if (!taskMap.has(itemName) || new Date(task.created_at) > new Date(taskMap.get(itemName).created_at)) {
+                    taskMap.set(itemName, task);
                 }
             }
         });
     }
 
-    return zooApps.value.map(app => {
-        const task = taskMap.get(app.name);
+    return currentZooItems.value.map(item => {
+        const task = taskMap.get(item.folder_name); // Match by folder_name which is used in task name
         return {
-            ...app,
+            ...item,
             task: (task && (task.status === 'running' || task.status === 'pending')) ? task : null,
         };
     });
 });
 
 const sortedRepositories = computed(() => {
-    if (!Array.isArray(zooRepositories.value)) return [];
-    return [...zooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    if (!Array.isArray(currentRepositories.value)) return [];
+    return [...currentRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 });
 
 const categories = computed(() => {
-    if (!Array.isArray(zooApps.value)) return ['All'];
-    const allCats = new Set(zooApps.value.map(app => app.category || 'Uncategorized'));
+    if (!Array.isArray(currentZooItems.value)) return ['All'];
+    const allCats = new Set(currentZooItems.value.map(item => item.category || 'Uncategorized'));
     return ['All', ...Array.from(allCats).sort()];
 });
 
-const filteredAndSortedApps = computed(() => {
-    let apps = appsWithTaskStatus.value.filter(app => {
+const filteredAndSortedItems = computed(() => {
+    let items = itemsWithTaskStatus.value.filter(item => {
         const matchesStatus = installationStatusFilter.value === 'All' ||
-                              (installationStatusFilter.value === 'Installed' && app.is_installed) ||
-                              (installationStatusFilter.value === 'Uninstalled' && !app.is_installed && !app.task);
-        const matchesCategory = selectedCategory.value === 'All' || app.category === selectedCategory.value;
+                              (installationStatusFilter.value === 'Installed' && item.is_installed) ||
+                              (installationStatusFilter.value === 'Uninstalled' && !item.is_installed && !item.task);
+        const matchesCategory = selectedCategory.value === 'All' || item.category === selectedCategory.value;
         const matchesSearch = !searchQuery.value || 
-                              app.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-                              (app.description && app.description.toLowerCase().includes(searchQuery.value.toLowerCase())) ||
-                              (app.author && app.author.toLowerCase().includes(searchQuery.value.toLowerCase()));
+                              item.name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+                              (item.description && item.description.toLowerCase().includes(searchQuery.value.toLowerCase())) ||
+                              (item.author && item.author.toLowerCase().includes(searchQuery.value.toLowerCase()));
         return matchesStatus && matchesCategory && matchesSearch;
     });
 
-    apps.sort((a, b) => {
-        const isAStarred = starredApps.value.includes(a.name);
-        const isBStarred = starredApps.value.includes(b.name);
+    items.sort((a, b) => {
+        const isAStarred = starredItems.value.includes(a.name);
+        const isBStarred = starredItems.value.includes(b.name);
         if (isAStarred && !isBStarred) return -1;
         if (!isAStarred && isBStarred) return 1;
 
@@ -135,16 +154,15 @@ const filteredAndSortedApps = computed(() => {
         return sortOrder.value === 'asc' ? valA - valB : valB - valA;
     });
 
-    return apps;
+    return items;
 });
 
-const groupedApps = computed(() => {
+const groupedItems = computed(() => {
     if (sortKey.value !== 'author') return null;
-
-    return filteredAndSortedApps.value.reduce((acc, app) => {
-        const author = app.author || 'Unknown Author';
+    return filteredAndSortedItems.value.reduce((acc, item) => {
+        const author = item.author || 'Unknown Author';
         if (!acc[author]) acc[author] = [];
-        acc[author].push(app);
+        acc[author].push(item);
         return acc;
     }, {});
 });
@@ -174,14 +192,14 @@ const installedAppsWithTaskStatus = computed(() => {
 
     return sortedInstalledApps.value.map(app => ({
         ...app,
-        task: taskMap.get(app.name) || null,
+        task: taskMap.get(app.folder_name) || null,
     }));
 });
 
-function handleStarToggle(appName) {
-    const index = starredApps.value.indexOf(appName);
-    if (index > -1) starredApps.value.splice(index, 1);
-    else starredApps.value.push(appName);
+function handleStarToggle(itemName) {
+    const index = starredItems.value.indexOf(itemName);
+    if (index > -1) starredItems.value.splice(index, 1);
+    else starredItems.value.push(itemName);
 }
 
 function formatDateTime(isoString) {
@@ -196,7 +214,11 @@ async function handleAddRepository() {
     }
     isLoadingAction.value = 'add';
     try {
-        await adminStore.addZooRepository(newRepo.value.name, newRepo.value.url);
+        if (mainTab.value === 'apps') {
+            await adminStore.addZooRepository(newRepo.value.name, newRepo.value.url);
+        } else {
+            await adminStore.addMcpZooRepository(newRepo.value.name, newRepo.value.url);
+        }
         newRepo.value = { name: '', url: '' };
         isAddFormVisible.value = false;
     } finally {
@@ -207,7 +229,11 @@ async function handleAddRepository() {
 async function handlePullRepository(repo) {
     isLoadingAction.value = repo.id;
     try {
-        await adminStore.pullZooRepository(repo.id);
+        if (mainTab.value === 'apps') {
+            await adminStore.pullZooRepository(repo.id);
+        } else {
+            await adminStore.pullMcpZooRepository(repo.id);
+        }
     } finally {
         isLoadingAction.value = null;
     }
@@ -216,7 +242,11 @@ async function handlePullRepository(repo) {
 async function handlePullAll() {
     isPullingAll.value = true;
     try {
-        await adminStore.pullAllZooRepositories();
+        if (mainTab.value === 'apps') {
+            await adminStore.pullAllZooRepositories();
+        } else {
+            await adminStore.pullAllMcpZooRepositories();
+        }
     } finally {
         isPullingAll.value = false;
     }
@@ -227,23 +257,30 @@ async function handleDeleteRepository(repo) {
     if (confirmed) {
         isLoadingAction.value = repo.id;
         try {
-            await adminStore.deleteZooRepository(repo.id);
+            if (mainTab.value === 'apps') {
+                await adminStore.deleteZooRepository(repo.id);
+            } else {
+                await adminStore.deleteMcpZooRepository(repo.id);
+            }
         } finally {
             isLoadingAction.value = null;
         }
     }
 }
 
-function handleInstallApp(app) { uiStore.openModal('appInstall', { app }); }
+function handleInstallItem(item) { 
+    const installData = { app: item, type: mainTab.value };
+    uiStore.openModal('appInstall', installData); 
+}
 
 function handleUpdateApp(app) {
-    const zooAppDetails = zooApps.value.find(zooApp => zooApp.name === app.name);
-    if (!zooAppDetails) {
-        uiStore.addNotification(`Could not find app details for '${app.name}' in the zoo. Try refreshing repositories.`, 'error');
+    const zooItemDetails = currentZooItems.value.find(zooItem => zooItem.name === app.name);
+    if (!zooItemDetails) {
+        uiStore.addNotification(`Could not find details for '${app.name}' in the zoo. Try refreshing repositories.`, 'error');
         return;
     }
-    uiStore.showConfirmation({ title: `Update '${app.name}'?`, message: 'This will reinstall the app with the latest version. The app will be stopped. Are you sure?', confirmText: 'Update' })
-        .then(confirmed => { if (confirmed) handleInstallApp(zooAppDetails); });
+    uiStore.showConfirmation({ title: `Update '${app.name}'?`, message: 'This will reinstall it with the latest version. It will be stopped. Are you sure?', confirmText: 'Update' })
+        .then(confirmed => { if (confirmed) handleInstallItem(zooItemDetails); });
 }
 
 async function handleAppAction(appId, action) {
@@ -257,7 +294,7 @@ async function handleAppAction(appId, action) {
 }
 
 async function handleUninstallApp(app) {
-    const confirmed = await uiStore.showConfirmation({ title: `Uninstall '${app.name}'?`, message: 'This will permanently delete all app files. This cannot be undone.', confirmText: 'Uninstall' });
+    const confirmed = await uiStore.showConfirmation({ title: `Uninstall '${app.name}'?`, message: 'This will permanently delete all files. This cannot be undone.', confirmText: 'Uninstall' });
     if (confirmed) {
         isLoadingAction.value = `uninstall-${app.id}`;
         try {
@@ -268,7 +305,7 @@ async function handleUninstallApp(app) {
     }
 }
 
-function showAppDetails(app) { uiStore.openModal('appDetails', { app }); }
+function showItemDetails(item) { uiStore.openModal('appDetails', { app: item }); }
 function handleEditApp(app) { uiStore.openModal('appConfig', { app }); }
 
 async function handleShowLogs(app) {
@@ -276,9 +313,11 @@ async function handleShowLogs(app) {
     uiStore.openModal('sourceViewer', { title: `Logs: ${app.name}`, content: logContent || 'No log content found.', language: 'log' });
 }
 
-async function showAppHelp(app) {
-    const readmeContent = await adminStore.fetchAppReadme(app.repository, app.folder_name);
-    uiStore.openModal('sourceViewer', { title: `README: ${app.name}`, content: readmeContent, language: 'markdown' });
+async function showItemHelp(item) {
+    const readmeContent = mainTab.value === 'apps' 
+        ? await adminStore.fetchAppReadme(item.repository, item.folder_name)
+        : await adminStore.fetchMcpReadme(item.repository, item.folder_name);
+    uiStore.openModal('sourceViewer', { title: `README: ${item.name}`, content: readmeContent, language: 'markdown' });
 }
 
 async function handleCancelTask(taskId) { await tasksStore.cancelTask(taskId); }
@@ -296,21 +335,28 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
 <template>
     <div class="space-y-8">
         <div>
-            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Apps Management</h2>
-            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Install and manage LOLLMS Applications from various sources (Zoos).</p>
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Apps & MCPs Zoo</h2>
+            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">Install and manage LOLLMS Applications and MCPs from various sources (Zoos).</p>
         </div>
 
         <div class="border-b border-gray-200 dark:border-gray-700">
-            <nav class="-mb-px flex space-x-6" aria-label="Tabs">
-                <button @click="activeTab = 'repositories'" class="tab-button" :class="activeTab === 'repositories' ? 'active' : 'inactive'">Repositories</button>
-                <button @click="activeTab = 'available_apps'" class="tab-button" :class="activeTab === 'available_apps' ? 'active' : 'inactive'">Available Apps</button>
-                <button @click="activeTab = 'installed_apps'" class="tab-button" :class="activeTab === 'installed_apps' ? 'active' : 'inactive'">Installed Apps</button>
+            <nav class="-mb-px flex space-x-6" aria-label="Main Tabs">
+                <button @click="mainTab = 'apps'" class="tab-button" :class="mainTab === 'apps' ? 'active' : 'inactive'">Apps Zoo</button>
+                <button @click="mainTab = 'mcps'" class="tab-button" :class="mainTab === 'mcps' ? 'active' : 'inactive'">MCPs Zoo</button>
+            </nav>
+        </div>
+        
+        <div class="border-b border-gray-200 dark:border-gray-700">
+            <nav class="-mb-px flex space-x-6" aria-label="Sub Tabs">
+                <button @click="activeSubTab = 'repositories'" class="tab-button" :class="activeSubTab === 'repositories' ? 'active' : 'inactive'">Repositories</button>
+                <button @click="activeSubTab = 'available_items'" class="tab-button" :class="activeSubTab === 'available_items' ? 'active' : 'inactive'">Available {{ mainTab === 'apps' ? 'Apps' : 'MCPs' }}</button>
+                <button @click="activeSubTab = 'installed_apps'" class="tab-button" :class="activeSubTab === 'installed_apps' ? 'active' : 'inactive'">Installed</button>
             </nav>
         </div>
 
-        <section v-if="activeTab === 'repositories'">
+        <section v-if="activeSubTab === 'repositories'">
             <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <h3 class="text-xl font-semibold">App Zoo Repositories</h3>
+                <h3 class="text-xl font-semibold">{{ mainTab === 'apps' ? 'App' : 'MCP' }} Zoo Repositories</h3>
                 <div class="flex items-center gap-2">
                     <button @click="handlePullAll" class="btn btn-secondary" :disabled="isPullingAll"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isPullingAll}" /><span class="ml-2">Pull All</span></button>
                     <button @click="isAddFormVisible = !isAddFormVisible" class="btn btn-primary">{{ isAddFormVisible ? 'Cancel' : 'Add Repository' }}</button>
@@ -327,8 +373,8 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                     </form>
                 </div>
             </transition>
-            <div v-if="isLoadingZooRepositories" class="text-center p-4">Loading repositories...</div>
-            <div v-else-if="!sortedRepositories || sortedRepositories.length === 0" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p>No App Zoo repositories have been added yet.</p></div>
+            <div v-if="isLoadingCurrentRepositories" class="text-center p-4">Loading repositories...</div>
+            <div v-else-if="!sortedRepositories || sortedRepositories.length === 0" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p>No {{ mainTab === 'apps' ? 'App' : 'MCP' }} Zoo repositories have been added yet.</p></div>
             <div v-else class="space-y-4">
                 <div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div class="flex-grow truncate">
@@ -338,20 +384,20 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                     </div>
                     <div class="flex items-center gap-x-2 flex-shrink-0">
                         <button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm" :disabled="isLoadingAction === repo.id" title="Refresh (git pull)"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingAction === repo.id}" /><span class="ml-1">Pull</span></button>
-                        <button @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm" :disabled="isLoadingAction === repo.id" title="Delete"><IconTrash class="w-4 h-4" /></button>
+                        <button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm" :disabled="isLoadingAction === repo.id" title="Delete"><IconTrash class="w-4 h-4" /></button>
                     </div>
                 </div>
             </div>
         </section>
 
-        <section v-if="activeTab === 'available_apps'">
+        <section v-if="activeSubTab === 'available_items'">
             <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <h3 class="text-xl font-semibold">Available Apps</h3>
-                <button @click="adminStore.fetchZooApps()" class="btn btn-secondary" :disabled="isLoadingZooApps"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingZooApps}" /><span class="ml-2">Rescan All Sources</span></button>
+                <h3 class="text-xl font-semibold">Available {{ mainTab === 'apps' ? 'Apps' : 'MCPs' }}</h3>
+                <button @click="mainTab === 'apps' ? adminStore.fetchZooApps() : adminStore.fetchZooMcps()" class="btn btn-secondary" :disabled="isLoadingCurrentZooItems"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingCurrentZooItems}" /><span class="ml-2">Rescan All Sources</span></button>
             </div>
             <div class="space-y-4">
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                    <div class="relative lg:col-span-1"><input type="text" v-model="searchQuery" placeholder="Search apps..." class="input-field w-full pl-10" /><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div></div>
+                    <div class="relative lg:col-span-1"><input type="text" v-model="searchQuery" :placeholder="`Search ${mainTab}...`" class="input-field w-full pl-10" /><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div></div>
                     <div class="grid grid-cols-2 lg:col-span-2 gap-4">
                         <select v-model="installationStatusFilter" class="input-field"><option value="All">All Statuses</option><option value="Installed">Installed</option><option value="Uninstalled">Uninstalled</option></select>
                         <select v-model="selectedCategory" class="input-field"><option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option></select>
@@ -361,21 +407,22 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                     <select v-model="sortKey" class="input-field w-48"><option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">Sort by {{ opt.label }}</option></select>
                     <button @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'" class="btn btn-secondary p-2"><IconArrowUp v-if="sortOrder === 'asc'" class="w-5 h-5" /><IconArrowDown v-else class="w-5 h-5" /></button>
                 </div>
-                <div v-if="isLoadingZooApps" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6"><AppCardSkeleton v-for="i in 8" :key="i" /></div>
-                <div v-else-if="!zooApps || zooApps.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Apps Found</h4><p class="text-sm text-gray-500">Please add and pull a repository to see available apps.</p></div>
-                <div v-else-if="filteredAndSortedApps.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Matching Apps</h4><p class="text-sm text-gray-500">Try adjusting your search or filter.</p></div>
+                <div v-if="isLoadingCurrentZooItems" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6"><AppCardSkeleton v-for="i in 8" :key="i" /></div>
+                <div v-else-if="!currentZooItems || currentZooItems.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Items Found</h4><p class="text-sm text-gray-500">Please add and pull a repository to see available {{ mainTab }}.</p></div>
+                <div v-else-if="filteredAndSortedItems.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Matching Items</h4><p class="text-sm text-gray-500">Try adjusting your search or filter.</p></div>
                 <div v-else>
-                    <div v-if="groupedApps" class="space-y-8">
-                        <div v-for="(authorApps, author) in groupedApps" :key="author"><h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3 border-b pb-2 dark:border-gray-700">{{ author }}</h3><div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6"><AppCard v-for="app in authorApps" :key="`${app.repository}/${app.folder_name}`" :app="app" :task="app.task" :is-starred="starredApps.includes(app.name)" @star="handleStarToggle(app.name)" @install="handleInstallApp(app)" @details="showAppDetails(app)" @help="showAppHelp(app)" @view-task="viewTask" @cancel-install="handleCancelTask" /></div></div>
+                    <div v-if="groupedItems" class="space-y-8">
+                        <div v-for="(authorItems, author) in groupedItems" :key="author"><h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-3 border-b pb-2 dark:border-gray-700">{{ author }}</h3><div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6"><AppCard v-for="item in authorItems" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @details="showItemDetails(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask" /></div></div>
                     </div>
-                    <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6"><AppCard v-for="app in filteredAndSortedApps" :key="`${app.repository}/${app.folder_name}`" :app="app" :task="app.task" :is-starred="starredApps.includes(app.name)" @star="handleStarToggle(app.name)" @install="handleInstallApp(app)" @update="handleUpdateApp(app)" @details="showAppDetails(app)" @help="showAppHelp(app)" @view-task="viewTask" @cancel-install="handleCancelTask" /></div>
+                    <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6"><AppCard v-for="item in filteredAndSortedItems" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @details="showItemDetails(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask" /></div>
                 </div>
             </div>
         </section>
         
-        <section v-if="activeTab === 'installed_apps'">
-            <div v-if="isLoadingInstalledApps" class="text-center p-10">Loading installed apps...</div>
-            <div v-else-if="!installedAppsWithTaskStatus || installedAppsWithTaskStatus.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Apps Installed</h4><p class="text-sm text-gray-500">Go to the "Available Apps" tab to install an application.</p></div>
+        <section v-if="activeSubTab === 'installed_apps'">
+             <h3 class="text-xl font-semibold mb-4">Installed Items</h3>
+            <div v-if="isLoadingInstalledApps" class="text-center p-10">Loading installed items...</div>
+            <div v-else-if="!installedAppsWithTaskStatus || installedAppsWithTaskStatus.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Items Installed</h4><p class="text-sm text-gray-500">Go to the "Available" tab to install an application or MCP.</p></div>
             <div v-else class="space-y-4">
                 <div v-for="app in installedAppsWithTaskStatus" :key="app.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div class="flex items-center gap-4 flex-grow truncate">

@@ -182,6 +182,31 @@ onUnmounted(() => {
 });
 
 // --- METHODS ---
+async function handlePasteInDataZone(event) {
+    const items = (event.clipboardData || window.clipboardData).items;
+    if (!items) return;
+
+    const filesToUpload = [];
+    for (const item of items) {
+        if (item.kind === 'file' && (item.type.startsWith('image/') || item.type === 'application/pdf')) {
+            const file = item.getAsFile();
+            if (file) {
+                filesToUpload.push(file);
+            }
+        }
+    }
+
+    if (filesToUpload.length > 0) {
+        event.preventDefault(); // Prevent default paste behavior
+        isUploadingDiscussionImage.value = true;
+        try {
+            await Promise.all(filesToUpload.map(file => discussionsStore.uploadDiscussionImage(file)));
+        } finally {
+            isUploadingDiscussionImage.value = false;
+        }
+    }
+}
+
 function handleTaskCompletion(task) {
     if (activeDiscussion.value && task?.result?.discussion_id === activeDiscussion.value.id) {
         if (task.name.includes('Process') || task.name.includes('Memorize')) refreshDataZones();
@@ -360,7 +385,7 @@ async function handleDiscussionImageUpload(event) {
 <template>
   <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
     <input type="file" ref="knowledgeFileInput" @change="handleKnowledgeFileUpload" multiple class="hidden" accept=".txt,.md,.pdf,.docx,.pptx,.xlsx,.xls, .py, .js, .html, .css, .json, .xml, .c, .cpp, .java">
-    <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*">
+    <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf">
     <div class="flex-1 flex min-h-0">
         <div v-if="!isDataZoneExpanded" class="flex-1 flex flex-col min-w-0 relative">
             <MessageArea v-if="showChatView" class="flex-1 overflow-y-auto min-w-0" />
@@ -387,7 +412,7 @@ async function handleDiscussionImageUpload(event) {
                     </nav>
                 </div>
                 <!-- Discussion Data Zone -->
-                <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0">
+                <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0" @paste="handlePasteInDataZone">
                     <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                         <div class="flex justify-between items-center"><h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data</h3>
                             <div class="flex items-center gap-1">
@@ -399,7 +424,7 @@ async function handleDiscussionImageUpload(event) {
                                 </button>
                                 <button @click="refreshDataZones" class="btn-icon" title="Refresh Data"><IconRefresh class="w-5 h-5" /></button>
                                 <button @click="exportDataZone" class="btn-icon" title="Export to Markdown"><IconArrowUpTray class="w-5 h-5" /></button>
-                                <button @click="triggerDiscussionImageUpload" class="btn-icon" title="Add Image" :disabled="isUploadingDiscussionImage"><IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-5 h-5" /><IconPhoto v-else class="w-5 h-5" /></button>
+                                <button @click="triggerDiscussionImageUpload" class="btn-icon" title="Add Image or PDF" :disabled="isUploadingDiscussionImage"><IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-5 h-5" /><IconPhoto v-else class="w-5 h-5" /></button>
                                 <button @click="triggerKnowledgeFileUpload" class="btn-icon" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-5 h-5" /><IconPlus v-else class="w-5 h-5" /></button>
                                 <button @click="discussionDataZone = ''" class="btn-icon-danger" title="Clear All Text"><IconTrash class="w-5 h-5" /></button>
                             </div>
@@ -418,8 +443,8 @@ async function handleDiscussionImageUpload(event) {
                         <div class="grid grid-cols-4 sm:grid-cols-5 gap-2">
                             <div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="relative group/image">
                                 <img :src="'data:image/png;base64,' + img_b64" class="w-full h-16 object-cover rounded-md transition-all duration-300" :class="{'grayscale': !isImageActive(index)}"/>
-                                <div @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="absolute inset-0 cursor-pointer"></div>
-                                <div class="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                <div class="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-1">
+                                    <button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" title="View Image"><IconMaximize class="w-4 h-4" /></button>
                                     <button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button>
                                     <button @click="discussionsStore.deleteDiscussionImage(index)" class="p-1.5 bg-red-500/80 text-white rounded-full hover:bg-red-600" title="Delete"><IconXMark class="w-4 h-4" /></button>
                                 </div>

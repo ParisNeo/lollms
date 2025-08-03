@@ -36,6 +36,16 @@ class AppZooRepository(Base):
     url = Column(String, unique=True, nullable=False)
     last_pulled_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_deletable = Column(Boolean, default=True, nullable=False)
+
+class MCPZooRepository(Base):
+    __tablename__ = "mcp_zoo_repositories"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    url = Column(String, unique=True, nullable=False)
+    last_pulled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_deletable = Column(Boolean, default=True, nullable=False)
 
 class App(Base):
     __tablename__ = "apps"

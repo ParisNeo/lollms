@@ -63,3 +63,6 @@ openpyxl
 
 psutil
 pynvml
+
+# required for uploading pdfs
+PyMuPDF

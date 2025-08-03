@@ -35,6 +35,7 @@ from lollms_client import (
     LollmsClient, MSG_TYPE, LollmsPersonality
 )
 from lollms_client import LollmsDiscussion, LollmsMessage
+import fitz  # PyMuPDF
 
 from ascii_colors import ASCIIColors, trace_exception
 # Local Application Imports
@@ -47,7 +48,7 @@ from backend.models import (
     DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,
     MessageGradeUpdate, DiscussionBranchSwitchRequest, DiscussionSendRequest,
     DiscussionExportRequest, ExportData, DiscussionImportRequest, ContextStatusResponse,
-    DiscussionDataZoneUpdate, DataZones, TaskInfo, ManualMessageCreate, MessageUpdateWithImages, DiscussionImageAddRequest
+    DiscussionDataZoneUpdate, DataZones, TaskInfo, ManualMessageCreate, MessageUpdateWithImages
 )
 from backend.session import (
     get_current_active_user, get_user_lollms_client,
@@ -391,7 +392,7 @@ def memorize_ltm(
 @discussion_router.post("/{discussion_id}/images", response_model=Dict[str, List[Any]])
 async def add_discussion_image(
     discussion_id: str,
-    payload: DiscussionImageAddRequest,
+    file: UploadFile = File(...),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     discussion = get_user_discussion(current_user.username, discussion_id)
@@ -399,17 +400,30 @@ async def add_discussion_image(
         raise HTTPException(status_code=404, detail="Discussion not found")
 
     try:
-        # Strip data URI prefix if present, as lollms-client expects raw base64
-        try:
-            _, encoded_b64 = payload.image_b64.split(",", 1)
-        except ValueError:
-            encoded_b64 = payload.image_b64
+        content_type = file.content_type
+        images_b64 = []
 
-        discussion.add_discussion_image(encoded_b64)
-        discussion.commit()
+        if content_type.startswith("image/"):
+            image_bytes = await file.read()
+            images_b64.append(base64.b64encode(image_bytes).decode('utf-8'))
+        elif content_type == "application/pdf":
+            pdf_bytes = await file.read()
+            pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+            for page_num in range(len(pdf_doc)):
+                page = pdf_doc.load_page(page_num)
+                pix = page.get_pixmap(dpi=150)  # Render at 150 DPI
+                img_bytes = pix.tobytes("png")
+                images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
+            pdf_doc.close()
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported file type. Please upload an image or a PDF.")
 
-        all_images_info = discussion.get_discussion_images()
+        for b64_data in images_b64:
+            discussion.add_discussion_image(b64_data)
         
+        discussion.commit()
+        
+        all_images_info = discussion.get_discussion_images()
         discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
         active_discussion_images = [img_info['active'] for img_info in all_images_info]
         
@@ -419,7 +433,10 @@ async def add_discussion_image(
         }
     except Exception as e:
         trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"Failed to add image to discussion: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to add file to discussion: {str(e)}")
+    finally:
+        await file.close()
+
 
 @discussion_router.put("/{discussion_id}/images/{image_index}/toggle", response_model=Dict[str, List[Any]])
 async def toggle_discussion_image(

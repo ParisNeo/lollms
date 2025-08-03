@@ -32,9 +32,14 @@ export const useAdminStore = defineStore('admin', () => {
 
     const zooRepositories = ref([]);
     const isLoadingZooRepositories = ref(false);
+    const mcpZooRepositories = ref([]);
+    const isLoadingMcpZooRepositories = ref(false);
+
 
     const zooApps = ref([]);
     const isLoadingZooApps = ref(false);
+    const zooMcps = ref([]);
+    const isLoadingZooMcps = ref(false);
 
     const installedApps = ref([]);
     const isLoadingInstalledApps = ref(false);
@@ -305,7 +310,7 @@ export const useAdminStore = defineStore('admin', () => {
             zooRepositories.value.push(response.data);
             uiStore.addNotification(`Repository '${name}' added.`, 'success');
         } catch (error) {
-            throw error; // Let the component handle UI feedback on error
+            throw error;
         }
     }
     async function deleteZooRepository(repoId) {
@@ -343,6 +348,63 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    // MCP Zoo Repositories
+    async function fetchMcpZooRepositories() {
+        isLoadingMcpZooRepositories.value = true;
+        try {
+            const response = await apiClient.get('/api/apps-management/mcp-zoo/repositories');
+            mcpZooRepositories.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Could not load MCP Zoo repositories.', 'error');
+        } finally {
+            isLoadingMcpZooRepositories.value = false;
+        }
+    }
+    async function addMcpZooRepository(name, url) {
+        try {
+            const response = await apiClient.post('/api/apps-management/mcp-zoo/repositories', { name, url });
+            mcpZooRepositories.value.push(response.data);
+            uiStore.addNotification(`MCP Repository '${name}' added.`, 'success');
+        } catch (error) {
+            throw error;
+        }
+    }
+    async function deleteMcpZooRepository(repoId) {
+        try {
+            await apiClient.delete(`/api/apps-management/mcp-zoo/repositories/${repoId}`);
+            mcpZooRepositories.value = mcpZooRepositories.value.filter(r => r.id !== repoId);
+            uiStore.addNotification('MCP Repository deleted.', 'success');
+        } catch (error) {
+            throw error;
+        }
+    }
+    async function pullMcpZooRepository(repoId) {
+        try {
+            const response = await apiClient.post(`/api/apps-management/mcp-zoo/repositories/${repoId}/pull`);
+            const task = response.data;
+            uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
+            tasksStore.addTask(task);
+            return task;
+        } catch (error) {
+            throw error;
+        }
+    }
+    async function pullAllMcpZooRepositories() {
+        if (mcpZooRepositories.value.length === 0) {
+            uiStore.addNotification('No MCP repositories to pull.', 'info');
+            return;
+        }
+        uiStore.addNotification('Starting to pull all MCP repositories...', 'info');
+        for (const repo of mcpZooRepositories.value) {
+            try {
+                await pullMcpZooRepository(repo.id);
+            } catch (error) {
+                console.error(`Failed to start pull task for MCP repository: ${repo.name}`, error);
+            }
+        }
+    }
+
+
     // Available Zoo Apps
     async function fetchZooApps() {
         isLoadingZooApps.value = true;
@@ -356,9 +418,34 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    // Available Zoo MCPs
+    async function fetchZooMcps() {
+        isLoadingZooMcps.value = true;
+        try {
+            const response = await apiClient.get('/api/apps-management/mcp-zoo/available-mcps');
+            zooMcps.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Could not load available MCPs from the zoo.', 'error');
+        } finally {
+            isLoadingZooMcps.value = false;
+        }
+    }
+
+
     async function fetchAppReadme(repository, folder_name) {
         try {
             const response = await apiClient.get('/api/apps-management/zoo/app-readme', {
+                params: { repository, folder_name }
+            });
+            return response.data;
+        } catch (error) {
+            throw error;
+        }
+    }
+
+    async function fetchMcpReadme(repository, folder_name) {
+        try {
+            const response = await apiClient.get('/api/apps-management/mcp-zoo/mcp-readme', {
                 params: { repository, folder_name }
             });
             return response.data;
@@ -380,6 +467,19 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
     
+    async function installZooMcp(payload) {
+        try {
+            const response = await apiClient.post('/api/apps-management/mcp-zoo/install-mcp', payload);
+            const task = response.data;
+            uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
+            await fetchZooMcps();
+            tasksStore.addTask(task);
+            return task;
+        } catch (error) {
+            throw error;
+        }
+    }
+
     // Installed Apps Management
     async function fetchInstalledApps() {
         isLoadingInstalledApps.value = true;
@@ -422,6 +522,7 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification(response.data.message, 'success');
         await fetchInstalledApps();
         await fetchZooApps();
+        await fetchZooMcps();
     }
 
     async function updateInstalledApp(appId, payload) {
@@ -459,7 +560,9 @@ export const useAdminStore = defineStore('admin', () => {
         batchUpdateUsers,
         isEnhancingEmail, enhanceEmail,
         zooRepositories, isLoadingZooRepositories, fetchZooRepositories, addZooRepository, deleteZooRepository, pullZooRepository, pullAllZooRepositories,
+        mcpZooRepositories, isLoadingMcpZooRepositories, fetchMcpZooRepositories, addMcpZooRepository, deleteMcpZooRepository, pullMcpZooRepository, pullAllMcpZooRepositories,
         zooApps, isLoadingZooApps, fetchZooApps, installZooApp, fetchAppReadme,
+        zooMcps, isLoadingZooMcps, fetchZooMcps, fetchMcpReadme, installZooMcp,
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
         purgeUnusedUploads,
         updateInstalledApp, fetchAppLog,

@@ -398,6 +398,18 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text(f"ALTER TABLE system_apps ADD COLUMN {col_name} {col_sql_def}"))
                 print(f"INFO: Added missing column '{col_name}' to 'system_apps' table.")
 
+    if inspector.has_table("app_zoo_repositories"):
+        columns_db = [col['name'] for col in inspector.get_columns('app_zoo_repositories')]
+        if 'is_deletable' not in columns_db:
+            connection.execute(text("ALTER TABLE app_zoo_repositories ADD COLUMN is_deletable BOOLEAN DEFAULT 1 NOT NULL"))
+            print("INFO: Added 'is_deletable' column to 'app_zoo_repositories' table.")
+
+    if inspector.has_table("mcp_zoo_repositories"):
+        columns_db = [col['name'] for col in inspector.get_columns('mcp_zoo_repositories')]
+        if 'is_deletable' not in columns_db:
+            connection.execute(text("ALTER TABLE mcp_zoo_repositories ADD COLUMN is_deletable BOOLEAN DEFAULT 1 NOT NULL"))
+            print("INFO: Added 'is_deletable' column to 'mcp_zoo_repositories' table.")
+
 def check_and_update_db_version(SessionLocal):
     session = SessionLocal()
     try:

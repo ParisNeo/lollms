@@ -836,8 +836,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     async function uploadDiscussionImage(file) {
         if (!currentDiscussionId.value) return;
         try {
-            const image_b64 = await fileToBase64(file);
-            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/images`, { image_b64 });
+            const formData = new FormData();
+            formData.append('file', file);
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/images`, formData);
             
             const newDiscussions = { ...discussions.value };
             if (newDiscussions[currentDiscussionId.value]) {
@@ -848,10 +849,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 discussions.value = newDiscussions;
             }
             await fetchContextStatus(currentDiscussionId.value);
-            uiStore.addNotification('Image added to discussion context.', 'success');
+            const message = file.type === 'application/pdf' ? 'PDF processed and pages added as images.' : 'Image added to discussion context.';
+            uiStore.addNotification(message, 'success');
         } catch(error) { 
-            uiStore.addNotification('Failed to add image to discussion.', 'error');
-            console.error("Failed to upload discussion image:", error);
+            uiStore.addNotification('Failed to add file to discussion.', 'error');
+            console.error("Failed to upload discussion file:", error);
         }
     }
 

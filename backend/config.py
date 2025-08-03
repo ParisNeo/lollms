@@ -57,6 +57,7 @@ DATASTORES_DIR_NAME = "safestores"
 APPS_DIR_NAME = "apps"
 CUSTOM_APPS_DIR_NAME = "custom_apps"
 ZOO_DIR_NAME = "zoo"
+MCP_ZOO_DIR_NAME = "mcp_zoo"
 
 
 # --- Security Constants (Not moved to DB) ---

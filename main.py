@@ -16,7 +16,7 @@ FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
@@ -25,7 +25,7 @@ from backend.config import (
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP
+from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository
 from backend.security import get_password_hash as hash_password
 from backend.discussion import LegacyDiscussion
 from backend.session import (
@@ -128,36 +128,88 @@ async def on_startup() -> None:
             if db_session: db_session.close()
         print("--- Migration Finished ---\n")
 
+    # --- Setup Defaults (Admin, Personalities, Repositories) ---
+    ASCIIColors.yellow("--- Verifying Default Database Entries ---")
     db_for_defaults: Optional[Session] = None
     try:
         db_for_defaults = next(get_db())
+        
+        # 1. Initial Admin User
         admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
         admin_password = INITIAL_ADMIN_USER_CONFIG.get("password")
         if admin_username and admin_password and not db_for_defaults.query(DBUser).filter(DBUser.username == admin_username).first():
             new_admin = DBUser(username=admin_username, hashed_password=hash_password(admin_password), is_admin=True)
             db_for_defaults.add(new_admin)
-            print(f"INFO: Initial admin user '{admin_username}' created successfully.")
+            db_for_defaults.commit()
+            ASCIIColors.green(f"INFO: Initial admin user '{admin_username}' created successfully.")
         
+        # 2. Default Personalities
         for default_pers_data in DEFAULT_PERSONALITIES:
             if not db_for_defaults.query(DBPersonality).filter(DBPersonality.name == default_pers_data["name"], DBPersonality.is_public == True, DBPersonality.owner_user_id == None).first():
-                new_pers = DBPersonality(name=default_pers_data["name"], author=default_pers_data.get("author", "System"), description=default_pers_data.get("description"), prompt_text=default_pers_data["prompt_text"], is_public=True, owner_user_id=None, **{k:v for k,v in default_pers_data.items() if k not in ["name", "author", "description", "prompt_text"]})
+                new_pers_data = default_pers_data.copy()
+                new_pers_data['owner_user_id'] = None
+                new_pers = DBPersonality(**new_pers_data)
                 db_for_defaults.add(new_pers)
-                print(f"INFO: Added default public personality: '{new_pers.name}'")
-        
-        repo_count = db_for_defaults.query(func.count(DBAppZooRepository.id)).scalar()
-        if repo_count == 0:
-            default_repo = DBAppZooRepository(
-                name="Official LoLLMs Apps Zoo",
-                url="https://github.com/ParisNeo/lollms_apps_zoo.git"
-            )
-            db_for_defaults.add(default_repo)
-            print("INFO: Added default LoLLMs App Zoo repository.")
-
-        db_for_defaults.commit()
+                db_for_defaults.commit()
+                ASCIIColors.green(f"INFO: Added default public personality: '{new_pers.name}'")
     except Exception as e:
+        ASCIIColors.error(f"ERROR during admin/personality setup: {e}")
         if db_for_defaults: db_for_defaults.rollback()
     finally:
         if db_for_defaults: db_for_defaults.close()
+
+    # 3. Default App Zoo Repository (Isolated Transaction)
+    db_for_repos: Optional[Session] = None
+    try:
+        db_for_repos = next(get_db())
+        app_zoo_name = "Official LoLLMs Apps Zoo"
+        app_zoo_url = "https://github.com/ParisNeo/lollms_apps_zoo.git"
+        app_zoo_repo = db_for_repos.query(DBAppZooRepository).filter(or_(DBAppZooRepository.name == app_zoo_name, DBAppZooRepository.url == app_zoo_url)).first()
+
+        if not app_zoo_repo:
+            default_repo = DBAppZooRepository(name=app_zoo_name, url=app_zoo_url, is_deletable=False)
+            db_for_repos.add(default_repo)
+            ASCIIColors.green(f"INFO: Default App Zoo repository '{app_zoo_name}' not found. Creating it now.")
+        elif app_zoo_repo.is_deletable or app_zoo_repo.name != app_zoo_name:
+            app_zoo_repo.is_deletable = False
+            app_zoo_repo.name = app_zoo_name # Ensure name is correct
+            ASCIIColors.yellow(f"INFO: Updating default App Zoo repository to be correct and non-deletable.")
+        else:
+            ASCIIColors.cyan(f"INFO: Default App Zoo repository '{app_zoo_name}' already exists.")
+        db_for_repos.commit()
+    except Exception as e:
+        ASCIIColors.error(f"ERROR during App Zoo repository setup: {e}")
+        if db_for_repos: db_for_repos.rollback()
+    finally:
+        if db_for_repos: db_for_repos.close()
+        
+    # 4. Default MCP Zoo Repository (Isolated Transaction)
+    db_for_mcps: Optional[Session] = None
+    try:
+        db_for_mcps = next(get_db())
+        mcp_zoo_name = "lollms_mcps_zoo"
+        mcp_zoo_url = "https://github.com/ParisNeo/lollms_mcps_zoo.git"
+        mcp_zoo_repo = db_for_mcps.query(DBMCPZooRepository).filter(or_(DBMCPZooRepository.name == mcp_zoo_name, DBMCPZooRepository.url == mcp_zoo_url)).first()
+        
+        if not mcp_zoo_repo:
+            default_mcp_repo = DBMCPZooRepository(name=mcp_zoo_name, url=mcp_zoo_url, is_deletable=False)
+            db_for_mcps.add(default_mcp_repo)
+            ASCIIColors.green(f"INFO: Default MCP Zoo repository '{mcp_zoo_name}' not found. Creating it now.")
+        elif mcp_zoo_repo.is_deletable or mcp_zoo_repo.name != mcp_zoo_name:
+            mcp_zoo_repo.is_deletable = False
+            mcp_zoo_repo.name = mcp_zoo_name # Ensure name is correct
+            ASCIIColors.yellow(f"INFO: Updating default MCP Zoo repository to be correct and non-deletable.")
+        else:
+            ASCIIColors.cyan(f"INFO: Default MCP Zoo repository '{mcp_zoo_name}' already exists.")
+        db_for_mcps.commit()
+    except Exception as e:
+        ASCIIColors.error(f"ERROR during MCP Zoo repository setup: {e}")
+        if db_for_mcps: db_for_mcps.rollback()
+    finally:
+        if db_for_mcps: db_for_mcps.close()
+
+    ASCIIColors.yellow("--- Default Database Entries Verified ---")
+
 
 # --- CORS Configuration ---
 host = SERVER_CONFIG.get("host", "0.0.0.0")

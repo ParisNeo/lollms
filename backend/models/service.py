@@ -77,6 +77,22 @@ class AppZooRepositoryPublic(AppZooRepositoryBase):
     id: int
     last_pulled_at: Optional[datetime.datetime] = None
     created_at: datetime.datetime
+    is_deletable: bool = True
+    class Config:
+        from_attributes = True
+
+class MCPZooRepositoryBase(BaseModel):
+    name: constr(min_length=1, max_length=100)
+    url: str
+
+class MCPZooRepositoryCreate(MCPZooRepositoryBase):
+    pass
+
+class MCPZooRepositoryPublic(MCPZooRepositoryBase):
+    id: int
+    last_pulled_at: Optional[datetime.datetime] = None
+    created_at: datetime.datetime
+    is_deletable: bool = True
     class Config:
         from_attributes = True
 
@@ -108,6 +124,36 @@ class ZooAppInfo(BaseModel):
     
     class Config:
         populate_by_name = True
+
+class ZooMCPInfo(BaseModel):
+    name: str
+    repository: str
+    folder_name: str
+    icon: Optional[str] = None
+    is_installed: bool = False
+    has_readme: bool = False
+    author: Optional[str] = None
+    category: Optional[str] = None
+    creation_date: Optional[str] = None
+    description: Optional[str] = None
+    disclaimer: Optional[str] = None
+    last_update_date: Optional[str] = None
+    model: Optional[str] = None
+    version: Optional[str] = None
+    features: Optional[Any] = None
+    tags: Optional[List[str]] = None
+    license: Optional[str] = None
+    documentation: Optional[str] = None
+    
+    @field_validator('version', 'creation_date', 'last_update_date', mode='before')
+    def coerce_to_string(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        populate_by_name = True
+
 
 class AppInstallRequest(BaseModel):
     repository: str

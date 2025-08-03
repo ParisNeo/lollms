@@ -13,6 +13,7 @@ const adminStore = useAdminStore();
 
 const props = computed(() => uiStore.modalData('appInstall'));
 const app = computed(() => props.value?.app);
+const installType = computed(() => props.value?.type); // 'apps' or 'mcps'
 
 const port = ref(null);
 const autostart = ref(false);
@@ -71,13 +72,19 @@ async function handleInstall() {
     }
 
     isLoading.value = true;
+    const payload = {
+        repository: app.value.repository,
+        folder_name: app.value.folder_name,
+        port: port.value,
+        autostart: autostart.value
+    };
+
     try {
-        await adminStore.installZooApp({
-            repository: app.value.repository,
-            folder_name: app.value.folder_name,
-            port: port.value,
-            autostart: autostart.value
-        });
+        if (installType.value === 'mcps') {
+            await adminStore.installZooMcp(payload);
+        } else {
+            await adminStore.installZooApp(payload);
+        }
         uiStore.closeModal('appInstall');
     } catch (error) {
         // Error is handled globally
@@ -90,7 +97,7 @@ async function handleInstall() {
 <template>
     <GenericModal
         modal-name="appInstall"
-        :title="app ? `Install App: ${app.name}` : 'Install App'"
+        :title="app ? `Install ${installType === 'mcps' ? 'MCP' : 'App'}: ${app.name}` : 'Install'"
         max-width-class="max-w-lg"
     >
         <template #body>
@@ -127,7 +134,7 @@ async function handleInstall() {
                 <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                     <span class="flex-grow flex flex-col">
                         <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Start on System Startup</span>
-                        <span class="text-sm text-gray-500 dark:text-gray-400">Automatically launch this app when the main server starts.</span>
+                        <span class="text-sm text-gray-500 dark:text-gray-400">Automatically launch this item when the main server starts.</span>
                     </span>
                     <button @click="autostart = !autostart" type="button" :class="[autostart ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                         <span :class="[autostart ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
