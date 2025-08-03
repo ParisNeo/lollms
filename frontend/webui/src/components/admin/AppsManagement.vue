@@ -167,12 +167,20 @@ const groupedItems = computed(() => {
     }, {});
 });
 
-const sortedInstalledApps = computed(() => {
+const sortedInstalledItems = computed(() => {
     if (!Array.isArray(installedApps.value)) return [];
-    return [...installedApps.value].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    
+    // Determine which set of original items to check against (apps or mcps)
+    const referenceItems = mainTab.value === 'apps' ? zooApps.value : zooMcps.value;
+    const referenceItemNames = new Set(referenceItems.map(item => item.name));
+
+    // Filter installedApps based on whether their name exists in the reference set
+    const filtered = installedApps.value.filter(installed => referenceItemNames.has(installed.name));
+
+    return [...filtered].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 });
 
-const installedAppsWithTaskStatus = computed(() => {
+const installedItemsWithTaskStatus = computed(() => {
     const taskMap = new Map();
     if (Array.isArray(tasks.value)) {
         tasks.value.forEach(task => {
@@ -190,7 +198,7 @@ const installedAppsWithTaskStatus = computed(() => {
         });
     }
 
-    return sortedInstalledApps.value.map(app => ({
+    return sortedInstalledItems.value.map(app => ({
         ...app,
         task: taskMap.get(app.folder_name) || null,
     }));
@@ -422,9 +430,9 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
         <section v-if="activeSubTab === 'installed_apps'">
              <h3 class="text-xl font-semibold mb-4">Installed Items</h3>
             <div v-if="isLoadingInstalledApps" class="text-center p-10">Loading installed items...</div>
-            <div v-else-if="!installedAppsWithTaskStatus || installedAppsWithTaskStatus.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No Items Installed</h4><p class="text-sm text-gray-500">Go to the "Available" tab to install an application or MCP.</p></div>
+            <div v-else-if="!installedItemsWithTaskStatus || installedItemsWithTaskStatus.length === 0" class="text-center p-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><h4 class="font-semibold">No {{ mainTab === 'apps' ? 'Apps' : 'MCPs' }} Installed</h4><p class="text-sm text-gray-500">Go to the "Available" tab to install an item.</p></div>
             <div v-else class="space-y-4">
-                <div v-for="app in installedAppsWithTaskStatus" :key="app.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div v-for="app in installedItemsWithTaskStatus" :key="app.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div class="flex items-center gap-4 flex-grow truncate">
                         <img v-if="app.icon" :src="app.icon" class="h-10 w-10 rounded-md flex-shrink-0 object-cover" alt="App Icon">
                         <div class="flex-grow truncate"><p class="font-semibold text-gray-900 dark:text-white truncate" :title="app.name">{{ app.name }}</p><p class="text-xs text-gray-500 dark:text-gray-400 font-mono truncate" :title="`Port: ${app.port}`">Port: {{ app.port }}</p></div>
