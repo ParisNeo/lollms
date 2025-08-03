@@ -60,6 +60,13 @@ function getStatusInfo(status) {
             return { color: 'gray', text: 'Pending' };
     }
 }
+
+function formatResult(result) {
+    if (typeof result === 'object' && result !== null) {
+        return JSON.stringify(result, null, 2);
+    }
+    return String(result);
+}
 </script>
 
 <template>
@@ -134,6 +141,12 @@ function getStatusInfo(status) {
                         <p><strong>Completed:</strong> {{ formatDateTime(selectedTask.completed_at) }}</p>
                         <div v-if="selectedTask.error" class="text-red-500 p-2 bg-red-50 dark:bg-red-900/20 rounded">
                             <strong>Error:</strong> {{ selectedTask.error }}
+                        </div>
+                        <div v-if="selectedTask.result" class="pt-2">
+                            <strong class="text-gray-800 dark:text-gray-200">Result:</strong>
+                            <div class="mt-1 p-2 bg-gray-100 dark:bg-gray-900 rounded-md">
+                                <pre class="whitespace-pre-wrap break-words text-xs font-mono max-h-48 overflow-y-auto">{{ formatResult(selectedTask.result) }}</pre>
+                            </div>
                         </div>
                     </div>
                     <div class="flex-grow p-4 border-t dark:border-gray-700 overflow-hidden flex flex-col">

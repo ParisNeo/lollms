@@ -168,7 +168,7 @@ function getLogLevelClass(level) {
                                 <div v-if="selectedTask.error" class="text-red-500 p-2 bg-red-50 dark:bg-red-900/20 rounded">
                                     <strong>Error:</strong> <pre class="whitespace-pre-wrap font-mono text-xs">{{ selectedTask.error }}</pre>
                                 </div>
-                                 <div v-if="selectedTask.result" class="text-green-700 dark:text-green-300 p-2 bg-green-50 dark:bg-green-900/20 rounded">
+                                 <div v-if="selectedTask.result" class="text-green-700 dark:text-green-300 p-2 bg-green-50 dark:bg-green-900/20 rounded max-h-48 overflow-y-auto">
                                     <strong>Result:</strong> <pre class="whitespace-pre-wrap font-mono text-xs">{{ JSON.stringify(selectedTask.result, null, 2) }}</pre>
                                 </div>
                             </div>
