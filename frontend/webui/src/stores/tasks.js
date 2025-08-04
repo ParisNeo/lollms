@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import useEventBus from '../services/eventBus';
-import { useDiscussionsStore } from './discussions'; // NEW: Import discussions store
+import { useDiscussionsStore } from './discussions';
 
 export const useTasksStore = defineStore('tasks', () => {
     const uiStore = useUiStore();
@@ -43,18 +43,34 @@ export const useTasksStore = defineStore('tasks', () => {
             const newTasks = response.data;
             tasks.value = newTasks;
             
-            // NEW: Get discussions store instance
             const discussionsStore = useDiscussionsStore();
+            const { useDataStore } = await import('./data'); 
+            const dataStore = useDataStore();
+            const { useAdminStore } = await import('./admin');
+            const adminStore = useAdminStore();
+
 
             // Check for newly completed tasks and emit an event
             newTasks.forEach(newTask => {
                 const oldTask = oldTasks.get(newTask.id);
+                const justFinishedSuccessfully = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending') && newTask.status === 'completed';
                 const justFinished = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending') && ['completed', 'failed', 'cancelled'].includes(newTask.status);
-                
+
                 if (justFinished) {
                     emit('task:completed', newTask);
+                }
 
-                    // NEW: Directly clear the active task from discussionsStore
+                if (justFinishedSuccessfully) {
+                    if (newTask.name && newTask.name.startsWith('Installing app: ')) {
+                        console.log("Installation task completed, refreshing stores...");
+                        adminStore.fetchInstalledApps();
+                        adminStore.fetchZooApps();
+                        adminStore.fetchZooMcps();
+                        dataStore.triggerMcpReload();
+                    }
+                }
+
+                if (justFinished) {
                     let discussionIdForTask = null;
                     for (const [discussionId, activeTaskInfo] of Object.entries(discussionsStore.activeAiTasks)) {
                         if (activeTaskInfo && activeTaskInfo.taskId === newTask.id) {

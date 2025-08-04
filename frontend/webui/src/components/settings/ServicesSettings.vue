@@ -8,6 +8,7 @@ import McpCard from '../ui/McpCard.vue';
 import IconWrenchScrewdriver from '../../assets/icons/IconWrenchScrewdriver.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
+import IconInfo from '../../assets/icons/IconInfo.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
@@ -259,6 +260,20 @@ function handleFileSelect(event) {
 
 <template>
     <div class="space-y-10">
+        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400 text-blue-800 dark:text-blue-200">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <IconInfo class="h-5 w-5 text-blue-400" aria-hidden="true" />
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm">
+                        This section is for registering personal, external Apps and MCPs by providing a URL.
+                        <br>
+                        For locally installed and hosted services with advanced configuration, please visit the <router-link to="/admin" class="font-medium underline hover:text-blue-600 dark:hover:text-blue-300">Admin Panel</router-link>.
+                    </p>
+                </div>
+            </div>
+        </div>
         <!-- TABS for MCPs and Apps -->
         <div class="border-b border-gray-200 dark:border-gray-700">
             <nav class="-mb-px flex space-x-6" aria-label="Tabs">
@@ -276,11 +291,8 @@ function handleFileSelect(event) {
             <div v-if="isFormVisible" class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
                 <div class="px-4 py-5 sm:p-6">
                     <h2 class="text-xl font-bold leading-6 text-gray-900 dark:text-white capitalize">
-                        {{ isEditMode ? 'Edit' : 'Add' }} {{ form.type }} {{ activeTab === 'mcps' ? 'MCP Server' : 'Application' }}
+                        {{ isEditMode ? 'Edit' : 'Add New' }} {{ activeTab === 'mcps' ? 'MCP Server' : 'Application' }}
                     </h2>
-                    <p class="mt-1 max-w-2xl text-sm text-gray-500 dark:text-gray-400">
-                        {{ form.type === 'user' ? 'This is only available to you.' : 'This is available to all users.' }}
-                    </p>
                 </div>
                 <div class="border-t border-gray-200 dark:border-gray-700">
                      <form @submit.prevent="handleFormSubmit" class="p-4 sm:p-6 space-y-6">

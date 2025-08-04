@@ -15,7 +15,6 @@ const GlobalSettings = defineAsyncComponent(() => import('./GlobalSettings.vue')
 const BindingsSettings = defineAsyncComponent(() => import('./BindingsSettings.vue'));
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
 const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
-const ServicesSettings = defineAsyncComponent(() => import('./ServicesSettings.vue'));
 const HttpsSettings = defineAsyncComponent(() => import('./HttpsSettings.vue'));
 const AppsManagement = defineAsyncComponent(() => import('./AppsManagement.vue'));
 const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
@@ -26,7 +25,6 @@ const tabs = [
     { id: 'tasks', component: TaskManager },
     { id: 'https', component: HttpsSettings },
     { id: 'bindings', component: BindingsSettings },
-    { id: 'services', component: ServicesSettings },
     { id: 'apps', component: AppsManagement },
     { id: 'global_settings', component: GlobalSettings },
     { id: 'email', component: EmailSettings },

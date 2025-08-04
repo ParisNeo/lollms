@@ -20,9 +20,10 @@ from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session, joinedload
+from pydantic import ValidationError as PydanticValidationError
 
 from backend.db import get_db
-from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCPZooRepository as DBMCPZooRepository
+from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCPZooRepository as DBMCPZooRepository, MCP as DBMCP
 from backend.db.models.db_task import DBTask
 from backend.models import (
     AppZooRepositoryCreate, AppZooRepositoryPublic, ZooAppInfo,
@@ -30,7 +31,7 @@ from backend.models import (
     AppUpdate, AppLog, MCPZooRepositoryCreate, MCPZooRepositoryPublic, ZooMCPInfo
 )
 from backend.session import get_current_admin_user
-from backend.config import APP_DATA_DIR, ZOO_DIR_NAME, APPS_DIR_NAME, CUSTOM_APPS_DIR_NAME, MCP_ZOO_DIR_NAME
+from backend.config import APP_DATA_DIR, ZOO_DIR_NAME, APPS_DIR_NAME, CUSTOM_APPS_DIR_NAME, MCP_ZOO_DIR_NAME, MCPS_DIR_NAME
 from backend.task_manager import task_manager, Task
 
 from backend.settings import settings
@@ -42,11 +43,27 @@ apps_management_router = APIRouter(
     dependencies=[Depends(get_current_admin_user)]
 )
 
+# --- NEW: In-memory cache for Zoo metadata ---
+_zoo_apps_metadata_cache = {}
+_zoo_apps_last_updated = 0
+ZOO_CACHE_TTL = 60  # seconds
+
+def _clear_zoo_cache():
+    global _zoo_apps_last_updated
+    _zoo_apps_last_updated = 0
+    print("INFO: Zoo metadata cache invalidated.")
+
+
 def _get_installed_app_path(db: Session, app_id: str) -> Path:
     app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
     if not app or not app.folder_name:
         raise HTTPException(status_code=404, detail="Installed app not found or is corrupted.")
-    return APPS_ROOT_PATH / app.folder_name
+    
+    if app.app_metadata and app.app_metadata.get('item_type') == 'mcp':
+        return MCPS_ROOT_PATH / app.folder_name
+    else:
+        return APPS_ROOT_PATH / app.folder_name
+
 
 def _generate_unique_client_id(db: Session, model_class, name: str) -> str:
     base_slug = re.sub(r'[^a-z0-9_]+', '', name.lower().replace(' ', '_'))
@@ -76,6 +93,8 @@ MCP_ZOO_ROOT_PATH = APP_DATA_DIR / MCP_ZOO_DIR_NAME
 MCP_ZOO_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 APPS_ROOT_PATH = APP_DATA_DIR / APPS_DIR_NAME
 APPS_ROOT_PATH.mkdir(parents=True, exist_ok=True)
+MCPS_ROOT_PATH = APP_DATA_DIR / MCPS_DIR_NAME
+MCPS_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 CUSTOM_APPS_ROOT_PATH = APP_DATA_DIR / CUSTOM_APPS_DIR_NAME
 CUSTOM_APPS_ROOT_PATH.mkdir(parents=True, exist_ok=True)
 
@@ -140,15 +159,10 @@ def _start_app_task(task: Task, app_id: str):
     process = None
     log_file_handle = None
     try:
-        app = db_session.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
-        if not app:
-            raise ValueError("Installed app not found.")
-        
-        app_folder_name = app.folder_name
-        if not app_folder_name:
-            raise ValueError("App installation is corrupted: missing folder name.")
-            
-        app_path = APPS_ROOT_PATH / app_folder_name
+        app_path = _get_installed_app_path(db_session, app_id)
+
+        app = db_session.query(DBApp).filter(DBApp.id == app_id).first()
+        if not app: raise ValueError("Installed app metadata not found.")
 
         if not app_path.exists():
             app.status = 'error'
@@ -282,17 +296,19 @@ def _stop_app_task(task: Task, app_id: str):
     finally:
         db_session.close()
 
-# --- REFACTORED INSTALLATION TASK ---
 def _install_item_task(task: Task, repository: str, folder_name: str, port: int, autostart: bool, source_root_path: Path):
     db_session = next(get_db())
     item_info = {}
     try:
+        is_mcp = source_root_path == MCP_ZOO_ROOT_PATH
         source_item_path = source_root_path / repository / folder_name
         if not source_item_path.exists():
             raise FileNotFoundError(f"Source directory not found at {source_item_path}")
         
-        # Determine info file name based on source path
-        info_file_name = "description.yaml" if source_root_path == MCP_ZOO_ROOT_PATH else "app_info.yaml"
+        info_file_name = "app_info.yaml"
+        if not (source_item_path / info_file_name).exists():
+            info_file_name = "description.yaml"
+
         with open(source_item_path / info_file_name, "r", encoding='utf-8') as f:
             item_info = yaml.safe_load(f)
         
@@ -308,14 +324,12 @@ def _install_item_task(task: Task, repository: str, folder_name: str, port: int,
                 db_session.delete(existing_app)
                 db_session.commit()
         
-        dest_app_path = APPS_ROOT_PATH / folder_name
-        if dest_app_path.exists():
-            task.log(f"Removing existing destination directory: {dest_app_path}")
-            shutil.rmtree(dest_app_path, ignore_errors=True)
-
+        dest_app_path = (MCPS_ROOT_PATH if is_mcp else APPS_ROOT_PATH) / folder_name
+        
         task.log(f"Copying files from {source_item_path} to {dest_app_path}")
         task.set_progress(10)
-        shutil.copytree(source_item_path, dest_app_path)
+        # MODIFIED: Use dirs_exist_ok=True to prevent FileExistsError on reinstall.
+        shutil.copytree(source_item_path, dest_app_path, dirs_exist_ok=True)
         task.set_progress(30)
         
         task.log("Creating virtual environment...")
@@ -343,17 +357,45 @@ def _install_item_task(task: Task, repository: str, folder_name: str, port: int,
         if icon_path.exists():
             icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}"
 
+        item_info['item_type'] = 'mcp' if is_mcp else 'app'
+        
         client_id = _generate_unique_client_id(db_session, DBApp, item_name)
         new_app = DBApp(
             name=item_name, client_id=client_id, folder_name=folder_name,
             icon=icon_base64, is_installed=True, status='stopped',
             port=port, autostart=autostart,
-            version=item_info.get('version'), author=item_info.get('author'),
+            version=str(item_info.get('version', 'N/A')), author=item_info.get('author'),
             description=item_info.get('description'), category=item_info.get('category'),
             tags=item_info.get('tags'), app_metadata=item_info,
         )
         db_session.add(new_app)
         db_session.commit()
+        db_session.refresh(new_app)
+
+        # NEW LOGIC: If it's an MCP, also create a system DBMCP entry
+        if is_mcp:
+            task.log(f"Registering '{item_name}' as a system MCP server.")
+            existing_mcp = db_session.query(DBMCP).filter(DBMCP.name == item_name, DBMCP.type == 'system').first()
+            
+            if existing_mcp:
+                task.log(f"System MCP '{item_name}' already exists. Updating its URL and icon.", "WARNING")
+                existing_mcp.url = f"http://localhost:{port}"
+                existing_mcp.icon = icon_base64
+                existing_mcp.active = True
+            else:
+                mcp_client_id = _generate_unique_client_id(db_session, DBMCP, item_name)
+                new_mcp = DBMCP(
+                    name=item_name,
+                    client_id=mcp_client_id,
+                    url=f"http://localhost:{port}",
+                    icon=icon_base64,
+                    active=True,
+                    type='system',
+                    owner_user_id=None
+                )
+                db_session.add(new_mcp)
+            db_session.commit()
+            task.log("Successfully registered system MCP.")
         
         task.set_progress(100)
         task.log(f"Item '{item_name}' installed successfully.")
@@ -410,6 +452,7 @@ def add_zoo_repository(repo: AppZooRepositoryCreate, db: Session = Depends(get_d
     db.add(new_repo)
     db.commit()
     db.refresh(new_repo)
+    _clear_zoo_cache()
     return new_repo
 
 @apps_management_router.delete("/zoo/repositories/{repo_id}", status_code=204)
@@ -426,6 +469,7 @@ def delete_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     
     db.delete(repo)
     db.commit()
+    _clear_zoo_cache()
     return None
 
 def _pull_repo_task(task: Task, repo_id: int, repo_model, root_path: Path):
@@ -464,7 +508,8 @@ def _pull_repo_task(task: Task, repo_id: int, repo_model, root_path: Path):
         
         repo.last_pulled_at = datetime.datetime.now(datetime.timezone.utc)
         db_session.commit()
-        task.log("Updated repository pull time.")
+        _clear_zoo_cache()
+        task.log("Updated repository pull time and cleared cache.")
         task.set_progress(100)
         return {"message": "Repository pulled successfully."}
 
@@ -491,8 +536,19 @@ def pull_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
 
 
 def _get_zoo_apps_metadata():
+    global _zoo_apps_metadata_cache, _zoo_apps_last_updated
+    
+    current_time = time.time()
+    if current_time - _zoo_apps_last_updated < ZOO_CACHE_TTL and _zoo_apps_metadata_cache:
+        return _zoo_apps_metadata_cache
+
+    print("INFO: Refreshing Zoo apps metadata cache...")
     apps_metadata = {}
-    if not ZOO_ROOT_PATH.exists(): return {}
+    if not ZOO_ROOT_PATH.exists():
+        _zoo_apps_metadata_cache = {}
+        _zoo_apps_last_updated = current_time
+        return {}
+        
     for repo_dir in ZOO_ROOT_PATH.iterdir():
         if repo_dir.is_dir():
             for app_dir in repo_dir.iterdir():
@@ -510,13 +566,18 @@ def _get_zoo_apps_metadata():
                                 apps_metadata[info['name']] = info
                     except Exception as e:
                         print(f"Warning: Could not parse metadata file for {app_dir.name}. Error: {e}")
-    return apps_metadata
+
+    _zoo_apps_metadata_cache = apps_metadata
+    _zoo_apps_last_updated = current_time
+    return _zoo_apps_metadata_cache
 
 @apps_management_router.get("/zoo/available-apps", response_model=list[ZooAppInfo])
 def get_available_zoo_apps(db: Session = Depends(get_db)):
     if not ZOO_ROOT_PATH.exists(): return []
     installed_apps = {app.name for app in db.query(DBApp.name).filter(DBApp.is_installed == True).all()}
-    apps_list = []
+    
+    apps_dict = {}
+
     for repo_dir in ZOO_ROOT_PATH.iterdir():
         if repo_dir.is_dir():
             for app_dir in repo_dir.iterdir():
@@ -529,13 +590,21 @@ def get_available_zoo_apps(db: Session = Depends(get_db)):
                 if app_dir.is_dir() and info_file_path:
                     try:
                         with open(info_file_path, "r", encoding='utf-8') as f: info = yaml.safe_load(f)
-                        if not info or 'name' not in info: continue
+                        if not info or not isinstance(info, dict) or 'name' not in info:
+                            print(f"Warning: Skipping invalid or malformed metadata file: {info_file_path}")
+                            continue
                         
+                        app_name = info.get('name')
+                        is_installed = app_name in installed_apps
+                        
+                        if app_name in apps_dict and not is_installed:
+                            continue
+
                         model_data = {
-                            "name": info.get('name', app_dir.name),
+                            "name": app_name,
                             "repository": repo_dir.name,
                             "folder_name": app_dir.name,
-                            "is_installed": info.get('name', app_dir.name) in installed_apps,
+                            "is_installed": is_installed,
                             "has_readme": (app_dir / "README.md").exists()
                         }
                         
@@ -548,10 +617,14 @@ def get_available_zoo_apps(db: Session = Depends(get_db)):
                         if icon_path.exists():
                             model_data['icon'] = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}"
                         
-                        apps_list.append(ZooAppInfo(**model_data))
+                        apps_dict[app_name] = ZooAppInfo(**model_data)
+                    except (yaml.YAMLError, PydanticValidationError) as e:
+                        print(f"ERROR: Could not process app at {app_dir}. Invalid metadata. Error: {e}")
                     except Exception as e:
-                        print(f"Warning: Could not process app at {app_dir}. Error: {e}")
-    return apps_list
+                        print(f"ERROR: An unexpected error occurred while processing app at {app_dir}. Error: {e}")
+    
+    return list(apps_dict.values())
+
 
 @apps_management_router.get("/zoo/app-readme", response_class=PlainTextResponse)
 def get_app_readme(repository: str, folder_name: str):
@@ -621,7 +694,8 @@ def pull_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
 def get_available_zoo_mcps(db: Session = Depends(get_db)):
     if not MCP_ZOO_ROOT_PATH.exists(): return []
     installed_items = {app.name for app in db.query(DBApp.name).filter(DBApp.is_installed == True).all()}
-    mcps_list = []
+    mcps_dict = {}
+
     for repo_dir in MCP_ZOO_ROOT_PATH.iterdir():
         if repo_dir.is_dir():
             for mcp_dir in repo_dir.iterdir():
@@ -634,13 +708,21 @@ def get_available_zoo_mcps(db: Session = Depends(get_db)):
                 if mcp_dir.is_dir() and info_file_path:
                     try:
                         with open(info_file_path, "r", encoding='utf-8') as f: info = yaml.safe_load(f)
-                        if not info or 'name' not in info: continue
+                        if not info or not isinstance(info, dict) or 'name' not in info:
+                            print(f"Warning: Skipping invalid or malformed metadata file: {info_file_path}")
+                            continue
                         
+                        mcp_name = info.get('name')
+                        is_installed = mcp_name in installed_items
+
+                        if mcp_name in mcps_dict and not is_installed:
+                            continue
+
                         model_data = {
-                            "name": info.get('name', mcp_dir.name),
+                            "name": mcp_name,
                             "repository": repo_dir.name,
                             "folder_name": mcp_dir.name,
-                            "is_installed": info.get('name', mcp_dir.name) in installed_items,
+                            "is_installed": is_installed,
                             "has_readme": (mcp_dir / "README.md").exists()
                         }
 
@@ -652,10 +734,14 @@ def get_available_zoo_mcps(db: Session = Depends(get_db)):
                         if icon_path.exists():
                             model_data['icon'] = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}"
                         
-                        mcps_list.append(ZooMCPInfo(**model_data))
+                        mcps_dict[mcp_name] = ZooMCPInfo(**model_data)
+                    except (yaml.YAMLError, PydanticValidationError) as e:
+                        print(f"ERROR: Could not process MCP at {mcp_dir}. Invalid metadata. Error: {e}")
                     except Exception as e:
-                        print(f"Warning: Could not process mcp at {mcp_dir}. Error: {e}")
-    return mcps_list
+                        print(f"ERROR: An unexpected error occurred while processing MCP at {mcp_dir}. Error: {e}")
+
+    return list(mcps_dict.values())
+
 
 @apps_management_router.get("/mcp-zoo/mcp-readme", response_class=PlainTextResponse)
 def get_mcp_readme(repository: str, folder_name: str):
@@ -685,10 +771,12 @@ def get_installed_apps(db: Session = Depends(get_db)):
     for app in installed_apps:
         app_public = AppPublic.from_orm(app)
         app_public.update_available = False
-        
+        if app.app_metadata:
+            app_public.item_type = app.app_metadata.get('item_type', 'app')
+
         # Check for schema file
-        app_path = APPS_ROOT_PATH / app.folder_name if app.folder_name else None
-        if app_path and (app_path / 'schema.config.json').is_file():
+        app_path = _get_installed_app_path(db, app.id)
+        if (app_path / 'schema.config.json').is_file():
             app_public.has_config_schema = True
 
         zoo_version_info = zoo_apps_metadata.get(app.name)
@@ -879,15 +967,7 @@ def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depen
 
 @apps_management_router.get("/installed-apps/{app_id}/logs", response_model=AppLog)
 def get_app_logs(app_id: str, db: Session = Depends(get_db)):
-    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
-    if not app:
-        raise HTTPException(status_code=404, detail="Installed app not found.")
-
-    app_folder_name = app.folder_name
-    if not app_folder_name:
-        return AppLog(log_content="App installation is corrupted: missing folder name.")
-        
-    app_path = APPS_ROOT_PATH / app_folder_name
+    app_path = _get_installed_app_path(db, app_id)
     log_file_path = app_path / "app.log"
 
     if not log_file_path.is_file():
@@ -904,18 +984,32 @@ def uninstall_app(app_id: str, db: Session = Depends(get_db)):
     app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
     if not app:
         raise HTTPException(status_code=404, detail="Installed app not found.")
+    
     if app.status == 'running' and app.pid:
         try:
             os.kill(app.pid, signal.SIGTERM)
         except Exception as e:
             print(f"Warning: Could not stop process {app.pid} during uninstall: {e}")
 
-    app_folder_name = app.folder_name
-    if app_folder_name:
-        app_path = APPS_ROOT_PATH / app_folder_name
-        if app_path.exists():
-            shutil.rmtree(app_path, ignore_errors=True)
+    if app.id in open_log_files:
+        try:
+            open_log_files[app.id].close()
+            del open_log_files[app.id]
+            print(f"INFO: Closed dangling log file handle for uninstalled app '{app.name}'.")
+        except Exception as e:
+            print(f"Warning: Could not close log file for app '{app.name}' during uninstall: {e}")
+
+    app_name = app.name 
+    app_path = _get_installed_app_path(db, app.id)
     
+    if app_path.exists():
+        shutil.rmtree(app_path, ignore_errors=True)
+    
+    corresponding_mcp = db.query(DBMCP).filter(DBMCP.name == app_name, DBMCP.type == 'system').first()
+    if corresponding_mcp:
+        print(f"INFO: Deleting corresponding system MCP entry for uninstalled app '{app_name}'.")
+        db.delete(corresponding_mcp)
+
     db.delete(app)
     db.commit()
     

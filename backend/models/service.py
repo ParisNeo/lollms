@@ -220,6 +220,7 @@ class AppPublic(AppBase):
     autostart: bool = False
     update_available: bool = False
     has_config_schema: bool = False
+    item_type: Optional[str] = 'app'
 
     @field_validator('sso_user_infos_to_share', mode='before')
     def provide_default_for_sso_infos(cls, v):

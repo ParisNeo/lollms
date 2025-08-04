@@ -66,3 +66,5 @@ pynvml
 
 # required for uploading pdfs
 PyMuPDF
+pyyaml
+jsonschema

@@ -33,8 +33,7 @@ const tabs = [
     { id: 'tasks', label: 'Tasks', icon: IconTicket },
     { id: 'https', label: 'Server/HTTPS', icon: IconCpuChip },
     { id: 'bindings', label: 'LLM Bindings', icon: IconLink },
-    { id: 'services', label: 'Services', icon: IconWrenchScrewdriver },
-    { id: 'apps', label: 'Apps & MCPs Zoo', icon: IconSquares2x2 },
+    { id: 'apps', label: 'Apps, MCPs & Services', icon: IconSquares2x2 },
     { id: 'global_settings', label: 'Global Settings', icon: IconCog },
     { id: 'email', label: 'Email Settings', icon: IconMessage },
     { id: 'import', label: 'Import', icon: IconArrowDownTray }
