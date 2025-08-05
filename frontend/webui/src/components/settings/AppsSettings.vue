@@ -3,13 +3,16 @@ import { computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
+import { useAuthStore } from '../../stores/auth'; // Import auth store
 import McpCard from '../ui/McpCard.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
+const authStore = useAuthStore(); // Use auth store
 
 const { userApps } = storeToRefs(dataStore);
+const { isAdmin } = storeToRefs(authStore); // Get admin status
 
 onMounted(() => {
     dataStore.fetchApps();
@@ -19,7 +22,11 @@ const sortedUserApps = computed(() => userApps.value.filter(a => a.type === 'use
 const sortedSystemApps = computed(() => userApps.value.filter(a => a.type === 'system' && !a.is_installed).sort((a, b) => a.name.localeCompare(b.name)));
 
 function showAddForm() {
-    uiStore.openModal('serviceRegistration', { itemType: 'app' });
+    uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'user' });
+}
+
+function showAddSystemForm() {
+    uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'system' });
 }
 
 function startEditing(item) {
@@ -52,7 +59,13 @@ async function handleDeleteItem(item) {
         </div>
 
         <section>
-            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-bold">Your Personal Apps</h3><button @click="showAddForm" class="btn btn-primary text-sm">+ Add App</button></div>
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <h3 class="text-xl font-bold">Your Personal Apps</h3>
+                <div class="flex items-center gap-x-2">
+                    <button @click="showAddForm" class="btn btn-primary text-sm">+ Add Personal App</button>
+                    <button v-if="isAdmin" @click="showAddSystemForm" class="btn btn-secondary text-sm">+ Add System App</button>
+                </div>
+            </div>
             <div v-if="sortedUserApps.length === 0" class="empty-state-card"><p>You haven't added any personal Apps.</p></div>
             <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"><McpCard v-for="app in sortedUserApps" :key="app.id" :mcp="app" is-editable @edit="startEditing(app)" @delete="handleDeleteItem(app)" /></div>
         </section>
@@ -60,7 +73,9 @@ async function handleDeleteItem(item) {
         <section>
             <h3 class="text-xl font-bold my-4">System Apps</h3>
             <div v-if="sortedSystemApps.length === 0" class="empty-state-card"><p>No system-wide Apps available.</p></div>
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"><McpCard v-for="app in sortedSystemApps" :key="app.id" :mcp="app" /></div>
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                <McpCard v-for="app in sortedSystemApps" :key="app.id" :mcp="app" :is-editable="isAdmin" @edit="startEditing(app)" @delete="handleDeleteItem(app)" />
+            </div>
         </section>
     </div>
 </template>

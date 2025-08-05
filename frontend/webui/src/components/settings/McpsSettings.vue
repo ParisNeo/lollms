@@ -3,13 +3,16 @@ import { ref, computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
+import { useAuthStore } from '../../stores/auth'; // Import auth store
 import McpCard from '../ui/McpCard.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
+const authStore = useAuthStore(); // Use auth store
 
 const { userMcps } = storeToRefs(dataStore);
+const { isAdmin } = storeToRefs(authStore); // Get admin status
 
 const isReloading = ref(false);
 
@@ -21,7 +24,11 @@ const sortedUserMcps = computed(() => userMcps.value.filter(m => m.type === 'use
 const sortedSystemMcps = computed(() => userMcps.value.filter(m => m.type === 'system').sort((a, b) => a.name.localeCompare(b.name)));
 
 function showAddForm() {
-    uiStore.openModal('serviceRegistration', { itemType: 'mcp' });
+    uiStore.openModal('serviceRegistration', { itemType: 'mcp', ownerType: 'user' });
+}
+
+function showAddSystemForm() {
+    uiStore.openModal('serviceRegistration', { itemType: 'mcp', ownerType: 'system' });
 }
 
 function startEditing(item) {
@@ -60,7 +67,13 @@ async function handleDeleteItem(item) {
         </div>
 
         <section>
-            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-bold">Your Personal MCPs</h3><button @click="showAddForm" class="btn btn-primary text-sm">+ Add Personal Server</button></div>
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <h3 class="text-xl font-bold">Your Personal MCPs</h3>
+                <div class="flex items-center gap-x-2">
+                    <button @click="showAddForm" class="btn btn-primary text-sm">+ Add Personal Server</button>
+                    <button v-if="isAdmin" @click="showAddSystemForm" class="btn btn-secondary text-sm">+ Add System Server</button>
+                </div>
+            </div>
             <div v-if="sortedUserMcps.length === 0" class="empty-state-card"><p>You haven't added any personal MCPs.</p></div>
             <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"><McpCard v-for="mcp in sortedUserMcps" :key="mcp.id" :mcp="mcp" is-editable @edit="startEditing(mcp)" @delete="handleDeleteItem(mcp)" /></div>
         </section>
@@ -68,7 +81,9 @@ async function handleDeleteItem(item) {
         <section>
             <div class="flex justify-between items-center my-4"><h3 class="text-xl font-bold">System MCPs</h3><button @click="handleReloadServers()" class="btn btn-secondary text-sm" :disabled="isReloading">{{ isReloading ? 'Reloading...' : 'Reload All' }}</button></div>
             <div v-if="sortedSystemMcps.length === 0" class="empty-state-card"><p>No system-wide MCPs available.</p></div>
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"><McpCard v-for="mcp in sortedSystemMcps" :key="mcp.id" :mcp="mcp" /></div>
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                <McpCard v-for="mcp in sortedSystemMcps" :key="mcp.id" :mcp="mcp" :is-editable="isAdmin" @edit="startEditing(mcp)" @delete="handleDeleteItem(mcp)" />
+            </div>
         </section>
     </div>
 </template>
