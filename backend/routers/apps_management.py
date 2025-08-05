@@ -31,7 +31,7 @@ from backend.models import (
     AppUpdate, AppLog, MCPZooRepositoryCreate, MCPZooRepositoryPublic, ZooMCPInfo, ZooMCPInfoResponse
 )
 from backend.session import get_current_admin_user
-from backend.config import ZOO_ROOT_PATH, APPS_ROOT_PATH, MCP_ZOO_ROOT_PATH, MCPS_ROOT_PATH
+from backend.config import APPS_ZOO_ROOT_PATH, APPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH, MCPS_ROOT_PATH
 from backend.task_manager import task_manager, Task
 from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache, refresh_repo_cache
 
@@ -290,7 +290,7 @@ def _install_item_task(task: Task, repository: str, folder_name: str, port: int,
     db_session = next(get_db())
     item_info = {}
     try:
-        is_mcp = source_root_path == MCP_ZOO_ROOT_PATH
+        is_mcp = source_root_path == MCPS_ZOO_ROOT_PATH
         source_item_path = source_root_path / repository / folder_name
         if not source_item_path.exists():
             raise FileNotFoundError(f"Source directory not found at {source_item_path}")
@@ -534,7 +534,7 @@ def delete_app_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     if not repo.is_deletable:
         raise HTTPException(status_code=403, detail="This is a default repository and cannot be deleted.")
     
-    repo_path = ZOO_ROOT_PATH / repo.name
+    repo_path = APPS_ZOO_ROOT_PATH / repo.name
     if repo_path.exists():
         shutil.rmtree(repo_path, ignore_errors=True)
     
@@ -550,7 +550,7 @@ def pull_app_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     db_task = task_manager.submit_task(
         name=f"Pulling App repository: {repo.name}",
         target=_pull_repo_task,
-        args=(repo_id, DBAppZooRepository, ZOO_ROOT_PATH, 'app'),
+        args=(repo_id, DBAppZooRepository, APPS_ZOO_ROOT_PATH, 'app'),
         description=f"Updating local copy of '{repo.name}' from '{repo.url}'."
     )
     return _to_task_info(db_task)
@@ -575,7 +575,7 @@ def get_available_zoo_apps(
             model_data = {
                 "name": info.get('name'), "repository": info.get('repository'), "folder_name": info.get('folder_name'),
                 "icon": info.get('icon'),
-                "is_installed": info.get('name') in installed_apps, "has_readme": (ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists(),
+                "is_installed": info.get('name') in installed_apps, "has_readme": (APPS_ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists(),
                 **{f: info.get(f) for f in ZooAppInfo.model_fields if f not in ['name', 'repository', 'folder_name', 'is_installed', 'has_readme', 'icon']}
             }
             all_items.append(ZooAppInfo(**model_data))
@@ -620,7 +620,7 @@ def get_available_zoo_apps(
 
 @apps_management_router.get("/app-zoo/app-readme", response_class=PlainTextResponse)
 def get_app_readme(repository: str, folder_name: str):
-    readme_path = ZOO_ROOT_PATH / repository / folder_name / "README.md"
+    readme_path = APPS_ZOO_ROOT_PATH / repository / folder_name / "README.md"
     if not readme_path.exists():
         raise HTTPException(status_code=404, detail="README.md not found for this app.")
     return readme_path.read_text(encoding="utf-8")
@@ -630,7 +630,7 @@ def install_zoo_app(request: AppInstallRequest):
     db_task = task_manager.submit_task(
         name=f"Installing app: {request.folder_name}",
         target=_install_item_task,
-        args=(request.repository, request.folder_name, request.port, request.autostart, ZOO_ROOT_PATH),
+        args=(request.repository, request.folder_name, request.port, request.autostart, APPS_ZOO_ROOT_PATH),
         description=f"Installing from repository '{request.repository}'."
     )
     return _to_task_info(db_task)
@@ -663,7 +663,7 @@ def delete_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     if not repo.is_deletable:
         raise HTTPException(status_code=403, detail="This is a default repository and cannot be deleted.")
     
-    repo_path = MCP_ZOO_ROOT_PATH / repo.name
+    repo_path = MCPS_ZOO_ROOT_PATH / repo.name
     if repo_path.exists():
         shutil.rmtree(repo_path, ignore_errors=True)
     
@@ -679,7 +679,7 @@ def pull_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     db_task = task_manager.submit_task(
         name=f"Pulling MCP repository: {repo.name}",
         target=_pull_repo_task,
-        args=(repo_id, DBMCPZooRepository, MCP_ZOO_ROOT_PATH, 'mcp'),
+        args=(repo_id, DBMCPZooRepository, MCPS_ZOO_ROOT_PATH, 'mcp'),
         description=f"Updating local copy of '{repo.name}' from '{repo.url}'."
     )
     return _to_task_info(db_task)
@@ -708,7 +708,7 @@ def get_available_zoo_mcps(
             model_data = {
                 "name": info.get('name'), "repository": info.get('repository'), "folder_name": info.get('folder_name'),
                 "icon": info.get('icon'),
-                "is_installed": info.get('name') in installed_items, "has_readme": (MCP_ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists(),
+                "is_installed": info.get('name') in installed_items, "has_readme": (MCPS_ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists(),
                 **{f: info.get(f) for f in ZooMCPInfo.model_fields if f not in ['name', 'repository', 'folder_name', 'is_installed', 'has_readme', 'icon']}
             }
             all_items.append(ZooMCPInfo(**model_data))
@@ -750,7 +750,7 @@ def get_available_zoo_mcps(
 
 @apps_management_router.get("/mcp-zoo/mcp-readme", response_class=PlainTextResponse)
 def get_mcp_readme(repository: str, folder_name: str):
-    readme_path = MCP_ZOO_ROOT_PATH / repository / folder_name / "README.md"
+    readme_path = MCPS_ZOO_ROOT_PATH / repository / folder_name / "README.md"
     if not readme_path.exists():
         raise HTTPException(status_code=404, detail="README.md not found for this mcp.")
     return readme_path.read_text(encoding="utf-8")
@@ -760,7 +760,7 @@ def install_zoo_mcp(request: AppInstallRequest):
     db_task = task_manager.submit_task(
         name=f"Installing MCP: {request.folder_name}",
         target=_install_item_task,
-        args=(request.repository, request.folder_name, request.port, request.autostart, MCP_ZOO_ROOT_PATH),
+        args=(request.repository, request.folder_name, request.port, request.autostart, MCPS_ZOO_ROOT_PATH),
         description=f"Installing MCP from repository '{request.repository}'."
     )
     return _to_task_info(db_task)
