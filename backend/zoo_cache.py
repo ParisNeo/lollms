@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 from typing import Dict, List, Any
 
-from backend.config import ZOO_ROOT_PATH, MCP_ZOO_ROOT_PATH
+from backend.config import APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH
 
 _app_zoo_cache: Dict[str, List[Dict[str, Any]]] = {}
 _mcp_zoo_cache: Dict[str, List[Dict[str, Any]]] = {}
@@ -55,14 +55,14 @@ def build_full_cache():
     print("INFO: Building full Zoo metadata cache...")
     with _cache_lock:
         global _app_zoo_cache, _mcp_zoo_cache
-        _app_zoo_cache = _scan_zoo_directory(ZOO_ROOT_PATH)
-        _mcp_zoo_cache = _scan_zoo_directory(MCP_ZOO_ROOT_PATH)
+        _app_zoo_cache = _scan_zoo_directory(APPS_ZOO_ROOT_PATH)
+        _mcp_zoo_cache = _scan_zoo_directory(MCPS_ZOO_ROOT_PATH)
     print("INFO: Zoo metadata cache build complete.")
 
 def refresh_repo_cache(repo_name: str, item_type: str):
     """Refreshes the cache for a single repository."""
     print(f"INFO: Refreshing cache for '{repo_name}' ({item_type} zoo)...")
-    zoo_path = ZOO_ROOT_PATH if item_type == 'app' else MCP_ZOO_ROOT_PATH
+    zoo_path = APPS_ZOO_ROOT_PATH if item_type == 'app' else MCPS_ZOO_ROOT_PATH
     target_cache = _app_zoo_cache if item_type == 'app' else _mcp_zoo_cache
 
     repo_dir = zoo_path / repo_name
