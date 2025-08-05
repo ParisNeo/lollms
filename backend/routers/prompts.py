@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -17,13 +17,18 @@ prompts_router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 
-@prompts_router.get("", response_model=List[PromptPublic])
-def get_user_saved_prompts(
+@prompts_router.get("", response_model=Dict[str, List[PromptPublic]])
+def get_prompts(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    prompts = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id == current_user.id).order_by(DBSavedPrompt.name).all()
-    return prompts
+    user_prompts = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id == current_user.id).order_by(DBSavedPrompt.name).all()
+    system_prompts = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id.is_(None)).order_by(DBSavedPrompt.name).all()
+    
+    return {
+        "user_prompts": user_prompts,
+        "system_prompts": system_prompts
+    }
 
 @prompts_router.post("", response_model=PromptPublic, status_code=status.HTTP_201_CREATED)
 def create_saved_prompt(

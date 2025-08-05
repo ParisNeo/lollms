@@ -8,6 +8,7 @@ from backend.config import LOLLMS_CLIENT_DEFAULTS, config
 from backend.db.base import CURRENT_DB_VERSION
 from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
 from backend.db.models.service import App
+from backend.db.models.prompt import SavedPrompt
 from ascii_colors import ASCIIColors, trace_exception
 
 def _bootstrap_global_settings(connection):
@@ -151,6 +152,35 @@ def _bootstrap_global_settings(connection):
 def run_schema_migrations_and_bootstrap(connection, inspector):
     if inspector.has_table("global_configs"):
         _bootstrap_global_settings(connection)
+
+    if inspector.has_table("saved_prompts"):
+        full_columns_info = inspector.get_columns('saved_prompts')
+        owner_user_id_col_info_full = next((col for col in full_columns_info if col['name'] == 'owner_user_id'), None)
+        
+        if owner_user_id_col_info_full and owner_user_id_col_info_full.get('nullable') == False:
+            print("INFO: 'owner_user_id' column in 'saved_prompts' table is NOT NULL. Attempting to migrate schema...")
+            try:
+                # The transaction is managed by the calling function in session.py
+                connection.execute(text("PRAGMA foreign_keys=off;"))
+                connection.execute(text("ALTER TABLE saved_prompts RENAME TO _saved_prompts_old;"))
+                
+                # Create the new table based on the updated model definition
+                SavedPrompt.__table__.create(connection)
+                
+                old_cols = [c['name'] for c in inspector.get_columns('_saved_prompts_old')]
+                new_cols = [c.name for c in SavedPrompt.__table__.columns]
+                common_cols = [c for c in old_cols if c in new_cols]
+                cols_str = ", ".join(common_cols)
+
+                connection.execute(text(f"INSERT INTO saved_prompts ({cols_str}) SELECT {cols_str} FROM _saved_prompts_old;"))
+                connection.execute(text("DROP TABLE _saved_prompts_old;"))
+                
+                connection.execute(text("PRAGMA foreign_keys=on;"))
+                print("INFO: Successfully migrated 'saved_prompts' table to make 'owner_user_id' column nullable.")
+            except Exception as e:
+                print(f"CRITICAL: Failed to migrate 'saved_prompts' table schema. Error: {e}")
+                # Re-raise the exception to trigger the rollback in the calling function
+                raise e
 
     if inspector.has_table("llm_bindings"):
         llm_bindings_columns_db = [col['name'] for col in inspector.get_columns('llm_bindings')]                        

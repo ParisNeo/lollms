@@ -39,11 +39,11 @@ function handleCancelInstall(taskId) {
                 <IconStar v-else class="w-5 h-5" />
             </button>
             <div @click="handleAction('details')" class="cursor-pointer">
-                <div class="flex items-start gap-4 mb-3 pr-8">
+                <div class="flex items-start gap-4 mb-3">
                     <img v-if="app.icon" :src="app.icon" class="h-12 w-12 rounded-md flex-shrink-0 object-cover" alt="App Icon">
-                    <div>
+                    <div class="flex-grow min-w-0">
                         <h3 class="font-semibold text-gray-900 dark:text-white truncate" :title="app.name">{{ app.name }}</h3>
-                        <p class-="text-xs text-gray-500 dark:text-gray-400">by {{ app.author || 'Unknown' }}</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 truncate">by {{ app.author || 'Unknown' }}</p>
                     </div>
                 </div>
                 <p class="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 h-10">{{ app.description }}</p>

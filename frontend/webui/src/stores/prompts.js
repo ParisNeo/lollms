@@ -6,17 +6,28 @@ import { useUiStore } from './ui';
 export const usePromptsStore = defineStore('prompts', () => {
     const uiStore = useUiStore();
 
-    const savedPrompts = ref([]);
+    const userPrompts = ref([]);
+    const systemPrompts = ref([]);
+    const lollmsPrompts = ref([]);
     const isLoading = ref(false);
 
     async function fetchPrompts() {
         isLoading.value = true;
         try {
             const response = await apiClient.get('/api/prompts');
-            savedPrompts.value = response.data;
+            userPrompts.value = response.data.user_prompts || [];
+            systemPrompts.value = response.data.system_prompts || [];
+            
+            lollmsPrompts.value = [
+                { id: 'default-summarize', name: 'Summarize', content: 'Provide a concise summary of the key points in the following text.' },
+                { id: 'default-mindmap', name: 'To Mindmap', content: 'Convert the following text into a MermaidJS mindmap format. Start with the central theme and branch out to main ideas and sub-points.' },
+                { id: 'default-bullets', name: 'To Bullet Points', content: 'List the main ideas from the following text as a clear, nested bullet point list.' },
+                { id: 'default-translate', name: 'Translate', content: 'Translate the following text to @<language>@.\n\n@<language>@\ntitle: Language to translate to\ntype: str\noptions: English, French, Spanish, German, Italian, Arabic, Chinese, Japanese, Russian\n@</language>@' },
+            ];
         } catch (error) {
-            console.error("Failed to fetch saved prompts:", error);
-            savedPrompts.value = [];
+            console.error("Failed to fetch prompts:", error);
+            userPrompts.value = [];
+            systemPrompts.value = [];
         } finally {
             isLoading.value = false;
         }
@@ -25,8 +36,8 @@ export const usePromptsStore = defineStore('prompts', () => {
     async function savePrompt(name, content) {
         try {
             const response = await apiClient.post('/api/prompts', { name, content });
-            savedPrompts.value.push(response.data);
-            savedPrompts.value.sort((a, b) => a.name.localeCompare(b.name));
+            userPrompts.value.push(response.data);
+            userPrompts.value.sort((a, b) => a.name.localeCompare(b.name));
             uiStore.addNotification('Prompt saved successfully!', 'success');
             return response.data;
         } catch (error) {
@@ -37,10 +48,10 @@ export const usePromptsStore = defineStore('prompts', () => {
     async function updatePrompt(id, name, content) {
         try {
             const response = await apiClient.put(`/api/prompts/${id}`, { name, content });
-            const index = savedPrompts.value.findIndex(p => p.id === id);
+            const index = userPrompts.value.findIndex(p => p.id === id);
             if (index !== -1) {
-                savedPrompts.value[index] = response.data;
-                savedPrompts.value.sort((a, b) => a.name.localeCompare(b.name));
+                userPrompts.value[index] = response.data;
+                userPrompts.value.sort((a, b) => a.name.localeCompare(b.name));
             }
             uiStore.addNotification('Prompt updated successfully!', 'success');
             return response.data;
@@ -52,7 +63,7 @@ export const usePromptsStore = defineStore('prompts', () => {
     async function deletePrompt(id) {
         try {
             await apiClient.delete(`/api/prompts/${id}`);
-            savedPrompts.value = savedPrompts.value.filter(p => p.id !== id);
+            userPrompts.value = userPrompts.value.filter(p => p.id !== id);
             uiStore.addNotification('Prompt deleted.', 'success');
         } catch (error) {
             throw error;
@@ -114,7 +125,9 @@ export const usePromptsStore = defineStore('prompts', () => {
     }
 
     return {
-        savedPrompts,
+        userPrompts,
+        systemPrompts,
+        lollmsPrompts,
         isLoading,
         fetchPrompts,
         savePrompt,

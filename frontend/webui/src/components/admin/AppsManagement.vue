@@ -57,6 +57,10 @@ const pageInfo = computed(() => {
 });
 
 async function fetchZooItems() {
+    if (selectedCategory.value === 'Starred') {
+        // Client-side filtering for starred items
+        return;
+    }
     const params = {
         page: currentPage.value, page_size: pageSize.value, sort_by: sortKey.value,
         sort_order: sortOrder.value, category: selectedCategory.value !== 'All' ? selectedCategory.value : undefined,
@@ -89,6 +93,13 @@ onMounted(() => {
 
 const itemsWithTaskStatus = computed(() => {
     if (!Array.isArray(zooApps.value.items)) return [];
+    let items = zooApps.value.items;
+    
+    // Client-side filter for starred items
+    if (selectedCategory.value === 'Starred') {
+        items = items.filter(item => starredItems.value.includes(item.name));
+    }
+
     const taskMap = new Map();
     const taskPrefix = 'Installing app: ';
     tasks.value.forEach(task => {
@@ -99,14 +110,14 @@ const itemsWithTaskStatus = computed(() => {
             }
         }
     });
-    return zooApps.value.items.map(item => ({ ...item, task: taskMap.get(item.folder_name) || null }));
+    return items.map(item => ({ ...item, task: taskMap.get(item.folder_name) || null }));
 });
 
 const sortedRepositories = computed(() => Array.isArray(zooRepositories.value) ? [...zooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || '')) : []);
 const categories = computed(() => {
-    if (!Array.isArray(adminStore.zooApps.items)) return ['All'];
+    if (!Array.isArray(adminStore.zooApps.items)) return ['All', 'Starred'];
     const allCats = new Set(adminStore.zooApps.items.map(item => item.category || 'Uncategorized'));
-    return ['All', ...Array.from(allCats).sort()];
+    return ['All', 'Starred', ...Array.from(allCats).sort()];
 });
 
 const installedItemsWithTaskStatus = computed(() => {
@@ -210,6 +221,7 @@ async function handleCancelTask(taskId) { await tasksStore.cancelTask(taskId); }
 function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: taskId }); }
 </script>
 
+<!-- Template remains the same -->
 <style scoped>
 .tab-button { @apply px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors; }
 .tab-button.active { @apply border-blue-500 text-blue-600 dark:text-blue-400; }
@@ -264,12 +276,12 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-4"><div class="relative lg:col-span-1"><input type="text" v-model="searchQuery" placeholder="Search apps..." class="input-field w-full pl-10" /><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div></div><div class="grid grid-cols-2 lg:col-span-2 gap-4"><select v-model="installationStatusFilter" class="input-field"><option value="All">All Statuses</option><option value="Installed">Installed</option><option value="Uninstalled">Uninstalled</option></select><select v-model="selectedCategory" class="input-field"><option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option></select></div></div>
                 <div class="flex items-center gap-2"><select v-model="sortKey" class="input-field w-48"><option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">Sort by {{ opt.label }}</option></select><button @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'" class="btn btn-secondary p-2"><IconArrowUp v-if="sortOrder === 'asc'" class="w-5 h-5" /><IconArrowDown v-else class="w-5 h-5" /></button></div>
                 <div v-if="isLoadingZooApps" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6"><AppCardSkeleton v-for="i in 8" :key="i" /></div>
-                <div v-else-if="!zooApps.items || zooApps.items.length === 0" class="empty-state-card"><h4 class="font-semibold">No Apps Found</h4><p class="text-sm">No apps match your criteria. Please add and pull a repository or adjust your filters.</p></div>
+                <div v-else-if="!itemsWithTaskStatus || itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Apps Found</h4><p class="text-sm">No apps match your criteria. Please add and pull a repository or adjust your filters.</p></div>
                 <div v-else>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
                         <AppCard v-for="item in itemsWithTaskStatus" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @details="showItemDetails(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" />
                     </div>
-                    <div class="mt-6 flex justify-between items-center">
+                    <div v-if="selectedCategory !== 'Starred'" class="mt-6 flex justify-between items-center">
                         <p class="text-sm text-gray-500">{{ pageInfo }}</p>
                         <div class="flex gap-2">
                             <button @click="currentPage--" :disabled="currentPage <= 1" class="btn btn-secondary">Previous</button>

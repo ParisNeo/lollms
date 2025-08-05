@@ -11,15 +11,15 @@ const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore(); // Use auth store
 
-const { userApps } = storeToRefs(dataStore);
+const { userApps, systemApps } = storeToRefs(dataStore);
 const { isAdmin } = storeToRefs(authStore); // Get admin status
 
 onMounted(() => {
     dataStore.fetchApps();
 });
 
-const sortedUserApps = computed(() => userApps.value.filter(a => a.type === 'user' && !a.is_installed).sort((a, b) => a.name.localeCompare(b.name)));
-const sortedSystemApps = computed(() => userApps.value.filter(a => a.type === 'system' && !a.is_installed).sort((a, b) => a.name.localeCompare(b.name)));
+const sortedUserApps = computed(() => userApps.value.filter(a => !a.is_installed).sort((a, b) => a.name.localeCompare(b.name)));
+const sortedSystemApps = computed(() => systemApps.value.filter(a => !a.is_installed).sort((a, b) => a.name.localeCompare(b.name)));
 
 function showAddForm() {
     uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'user' });

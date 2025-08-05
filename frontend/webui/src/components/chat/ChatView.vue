@@ -13,6 +13,7 @@ import MessageArea from './MessageArea.vue';
 import ChatInput from './ChatInput.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import DropdownMenu from '../ui/DropdownMenu.vue';
+import DropdownSubmenu from '../ui/DropdownSubmenu.vue';
 
 // Asset & Icon Imports
 import logoUrl from '../../assets/logo.png';
@@ -34,6 +35,9 @@ import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
+import IconServer from '../../assets/icons/IconServer.vue';
+import IconUser from '../../assets/icons/IconUser.vue';
+import IconLollms from '../../assets/icons/IconLollms.vue';
 
 // --- Store Initialization ---
 const discussionsStore = useDiscussionsStore();
@@ -42,6 +46,7 @@ const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
 const { on, off } = useEventBus();
 const { liveDataZoneTokens } = storeToRefs(discussionsStore); // Get reactive state
+const { lollmsPrompts, systemPrompts, userPrompts } = storeToRefs(promptsStore);
 
 // --- Component State ---
 const knowledgeFileInput = ref(null);
@@ -84,13 +89,6 @@ const discussionActiveImages = computed(() => activeDiscussion.value?.active_dis
 const isProcessing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'summarize');
 const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'memorize');
 
-const defaultPrompts = [
-    { name: 'Translate', content: 'Translate the following text to @<language:text:French>@. Keep the original formatting and style.' },
-    { name: 'Summarize', content: 'Provide a concise summary of the key points in the following text.' },
-    { name: 'To Mindmap', content: 'Convert the following text into a MermaidJS mindmap format. Start with the central theme and branch out to main ideas and sub-points.' },
-    { name: 'To Bullet Points', content: 'List the main ideas from the following text as a clear, nested bullet point list.' },
-];
-const savedPrompts = computed(() => promptsStore.savedPrompts);
 const keywords = computed(() => uiStore.keywords);
 const canUndoDiscussion = computed(() => discussionHistoryIndex.value > 0);
 const canRedoDiscussion = computed(() => discussionHistoryIndex.value < discussionHistory.value.length - 1);
@@ -317,10 +315,7 @@ function handleProcessContent() {
 }
 function openPromptLibrary() {
     if (!activeDiscussion.value) return;
-    uiStore.openModal('dataZonePromptManagement', {
-        initialPrompt: dataZonePromptText.value,
-        onLoad: (loadedPrompt) => { handlePromptSelection(loadedPrompt); }
-    });
+    uiStore.openModal('dataZonePromptManagement');
 }
 function handlePromptSelection(promptContent) {
     if (/@<.*?>@/g.test(promptContent)) {
@@ -462,13 +457,17 @@ async function handleDiscussionImageUpload(event) {
                     <div class="p-4 border-t dark:border-gray-600 flex-shrink-0 space-y-3">
                         <div class="flex items-center gap-2">
                             <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2">
-                                <div class="px-1 py-1"><div class="px-2 py-1.5 text-xs font-semibold text-gray-500">Default</div></div>
-                                <button v-for="p in defaultPrompts" :key="p.name" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span>{{ p.name }}</span></button>
-                                <div class="my-1 border-t dark:border-gray-600"></div>
-                                <div class="px-1 py-1"><div class="px-2 py-1.5 text-xs font-semibold text-gray-500">Saved</div></div>
-                                <button v-for="p in savedPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span>{{ p.name }}</span></button>
-                                <div class="my-1 border-t dark:border-gray-600"></div>
-                                <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage Prompts...</button>
+                                <DropdownSubmenu v-if="lollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
+                                    <button v-for="p in lollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span>{{ p.name }}</span></button>
+                                </DropdownSubmenu>
+                                <DropdownSubmenu v-if="systemPrompts.length > 0" title="System" icon="server" collection="ui">
+                                    <button v-for="p in systemPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span>{{ p.name }}</span></button>
+                                </DropdownSubmenu>
+                                <DropdownSubmenu v-if="userPrompts.length > 0" title="User" icon="user" collection="ui">
+                                    <button v-for="p in userPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span>{{ p.name }}</span></button>
+                                </DropdownSubmenu>
+                                <div v-if="(lollmsPrompts.length + systemPrompts.length + userPrompts.length) > 0" class="my-1 border-t dark:border-gray-600"></div>
+                                <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
                             </DropdownMenu>
                             <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process the data zone content..." rows="2" class="input-field text-sm flex-grow"></textarea>
                         </div>

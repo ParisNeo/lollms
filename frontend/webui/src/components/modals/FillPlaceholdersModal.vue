@@ -1,96 +1,134 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
-import GenericModal from '../ui/GenericModal.vue';
+import { ref, computed, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
-import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
+import GenericModal from '../ui/GenericModal.vue';
 
 const uiStore = useUiStore();
-const modalProps = computed(() => uiStore.modalData('fillPlaceholders'));
-const promptTemplate = computed(() => modalProps.value?.promptTemplate || '');
-const onConfirm = computed(() => modalProps.value?.onConfirm);
+const props = computed(() => uiStore.modalData('fillPlaceholders'));
 
 const placeholders = ref([]);
-const formData = ref({});
-const finalPrompt = ref('');
+const values = ref({});
+const templateWithoutDefs = ref('');
 
-const placeholderRegex = /@<([^:]+):([^:]+):([^:@]+)(?::([^@]+))?>@/g;
+function parsePromptTemplate(template) {
+    const parsedPlaceholders = {};
+    
+    const defRegex = /@<(\w+?)>@([\s\S]*?)@<\/\1>@/g;
+    let remainingTemplate = template.replace(defRegex, (match, name, content) => {
+        const details = {
+            name: name,
+            title: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            type: 'text',
+            options: null,
+            help: null,
+            value: ''
+        };
+        
+        content.split('\n').forEach(line => {
+            const [key, ...valueParts] = line.split(':');
+            const value = valueParts.join(':').trim();
+            if (key && value) {
+                const keyTrimmed = key.trim();
+                if (keyTrimmed === 'title') details.title = value;
+                if (keyTrimmed === 'type' && ['str', 'text', 'int', 'float'].includes(value)) details.type = value;
+                if (keyTrimmed === 'options') details.options = value.split(',').map(s => s.trim());
+                if (keyTrimmed === 'help') details.help = value;
+            }
+        });
 
-function parsePlaceholders() {
-    const found = [];
-    const initialFormData = {};
-    if (promptTemplate.value) {
-        let match;
-        while ((match = placeholderRegex.exec(promptTemplate.value)) !== null) {
-            const [fullMatch, name, type, defaultValue, optionsStr] = match;
-            found.push({
-                name,
-                type,
-                defaultValue,
-                options: optionsStr ? optionsStr.split('|') : null,
-            });
-            initialFormData[name] = defaultValue;
+        if (details.options && details.options.length > 0) {
+            details.value = details.options[0];
+        } else if (details.type === 'int' || details.type === 'float') {
+            details.value = 0;
+        }
+        
+        parsedPlaceholders[name] = details;
+        return '';
+    });
+
+    const simpleRegex = /@<(\w+?)>@/g;
+    let match;
+    while ((match = simpleRegex.exec(remainingTemplate)) !== null) {
+        const name = match[1];
+        if (!parsedPlaceholders[name]) {
+            parsedPlaceholders[name] = {
+                name: name,
+                title: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+                type: 'text',
+                options: null,
+                help: null,
+                value: ''
+            };
         }
     }
-    placeholders.value = found;
-    formData.value = initialFormData;
+    
+    return {
+        placeholders: Object.values(parsedPlaceholders),
+        templateWithoutDefs: remainingTemplate.trim()
+    };
 }
 
-function updateFinalPrompt() {
-    if (!promptTemplate.value) {
-        finalPrompt.value = '';
-        return;
+onMounted(() => {
+    if (props.value?.promptTemplate) {
+        const { placeholders: parsed, templateWithoutDefs: template } = parsePromptTemplate(props.value.promptTemplate);
+        placeholders.value = parsed;
+        templateWithoutDefs.value = template;
+        values.value = parsed.reduce((acc, p) => {
+            acc[p.name] = p.value;
+            return acc;
+        }, {});
     }
-    let updated = promptTemplate.value;
-    for (const placeholder of placeholders.value) {
-        const value = formData.value[placeholder.name] || '';
-        const regex = new RegExp(`@<${placeholder.name}:.*?@`, 'g');
-        updated = updated.replace(regex, value);
-    }
-    finalPrompt.value = updated;
-}
-
-watch(promptTemplate, () => {
-    parsePlaceholders();
-    updateFinalPrompt();
-}, { immediate: true });
-
-watch(formData, updateFinalPrompt, { deep: true });
+});
 
 function handleConfirm() {
-    if (onConfirm.value) {
-        onConfirm.value(finalPrompt.value);
+    let filledPrompt = templateWithoutDefs.value;
+    for (const placeholder of placeholders.value) {
+        const valueToInsert = values.value[placeholder.name] || '';
+        const regex = new RegExp(`@<${placeholder.name}>@`, 'g');
+        filledPrompt = filledPrompt.replace(regex, valueToInsert);
+    }
+    
+    if (props.value?.onConfirm) {
+        props.value.onConfirm(filledPrompt);
     }
     uiStore.closeModal('fillPlaceholders');
+}
+
+function getInputType(type) {
+    if (type === 'int') return 'number';
+    if (type === 'float') return 'number';
+    return 'text';
+}
+
+function getStepForNumber(type) {
+    return type === 'float' ? 'any' : '1';
 }
 </script>
 
 <template>
-    <GenericModal modal-name="fillPlaceholders" title="Fill Prompt Placeholders" maxWidthClass="max-w-3xl">
+    <GenericModal modalName="fillPlaceholders" title="Fill Prompt Placeholders">
         <template #body>
-            <div class="space-y-6">
-                <div v-if="placeholders.length === 0" class="text-center text-gray-500">
-                    No placeholders found in this prompt.
-                </div>
-                <form v-else @submit.prevent="handleConfirm" class="space-y-4">
-                    <div v-for="p in placeholders" :key="p.name" class="space-y-1">
-                        <label :for="`ph-${p.name}`" class="block text-sm font-medium capitalize">{{ p.name.replace(/_/g, ' ') }}</label>
-                        <select v-if="p.options" v-model="formData[p.name]" :id="`ph-${p.name}`" class="input-field">
-                            <option v-for="option in p.options" :key="option" :value="option">{{ option }}</option>
-                        </select>
-                        <textarea v-else-if="p.type === 'text'" v-model="formData[p.name]" :id="`ph-${p.name}`" rows="3" class="input-field"></textarea>
-                        <input v-else :type="p.type" v-model="formData[p.name]" :id="`ph-${p.name}`" class="input-field" />
-                    </div>
-                </form>
+            <div v-if="placeholders.length > 0" class="space-y-4">
+                <div v-for="p in placeholders" :key="p.name">
+                    <label :for="`placeholder-${p.name}`" class="label">{{ p.title }}</label>
+                    <p v-if="p.help" class="text-xs text-gray-500 mb-1">{{ p.help }}</p>
+                    
+                    <select v-if="p.options" v-model="values[p.name]" :id="`placeholder-${p.name}`" class="input-field">
+                        <option v-for="option in p.options" :key="option" :value="option">{{ option }}</option>
+                    </select>
 
-                <div>
-                    <h4 class="text-sm font-medium mb-2">Final Prompt Preview</h4>
-                    <CodeMirrorEditor :model-value="finalPrompt" :options="{ readOnly: true }" class="text-sm max-h-60" />
+                    <textarea v-else-if="p.type === 'text'" v-model="values[p.name]" :id="`placeholder-${p.name}`" rows="4" class="input-field"></textarea>
+                    
+                    <input v-else :type="getInputType(p.type)" :step="getStepForNumber(p.type)" v-model="values[p.name]" :id="`placeholder-${p.name}`" class="input-field">
                 </div>
+            </div>
+            <div v-else class="text-center text-gray-500">
+                <p>No placeholders were found in this prompt.</p>
             </div>
         </template>
         <template #footer>
-            <button type="button" @click="uiStore.closeModal('fillPlaceholders')" class="btn btn-secondary">Cancel</button>
-            <button type="button" @click="handleConfirm" class="btn btn-primary">Use Prompt</button>
+            <button @click="uiStore.closeModal('fillPlaceholders')" class="btn btn-secondary">Cancel</button>
+            <button @click="handleConfirm" class="btn btn-primary">Confirm</button>
         </template>
     </GenericModal>
 </template>

@@ -41,8 +41,12 @@ else:
 DATABASE_URL_CONFIG_KEY = "database_url"
 
 APP_SETTINGS = config.get("app_settings", {})
-APP_DATA_DIR = Path(APP_SETTINGS.get("data_dir", "data")).resolve()
+# --- FIX: Use absolute path for data directory ---
+# This ensures that no matter where the app is run from, it finds the correct data folder.
+APP_DATA_DIR = PROJECT_ROOT / APP_SETTINGS.get("data_dir", "data")
+APP_DATA_DIR.mkdir(exist_ok=True, parents=True) # Ensure it exists
 APP_DB_URL = APP_SETTINGS.get(DATABASE_URL_CONFIG_KEY, f"sqlite:///{APP_DATA_DIR / 'app_main.db'}")
+
 
 LOLLMS_CLIENT_DEFAULTS = config.get("lollms_client_defaults", {})
 SAFE_STORE_DEFAULTS = config.get("safe_store_defaults", {})

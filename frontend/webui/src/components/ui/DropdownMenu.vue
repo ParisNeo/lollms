@@ -49,7 +49,9 @@ const vOnClickOutside = {
   mounted: (el, binding) => {
     el.clickOutsideEvent = event => {
       const triggerEl = reference.value?.$el;
-      if (!(el === event.target || el.contains(event.target) || triggerEl?.contains(event.target))) {
+      // FIX: Check if the click is inside a submenu panel before closing
+      const targetIsSubmenuPanel = event.target.closest('.is-submenu-panel');
+      if (!(el === event.target || el.contains(event.target) || triggerEl?.contains(event.target) || targetIsSubmenuPanel)) {
         binding.value();
       }
     };

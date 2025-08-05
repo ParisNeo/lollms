@@ -21,7 +21,7 @@
           :style="floatingStyles"
           @mouseenter="cancelClose" 
           @mouseleave="closeSubmenu"
-          class="fixed z-50 p-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg min-w-max max-h-[80vh] overflow-y-auto"
+          class="fixed z-50 p-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-md shadow-lg min-w-max max-h-[80vh] overflow-y-auto is-submenu-panel"
         >
           <slot></slot>
         </div>

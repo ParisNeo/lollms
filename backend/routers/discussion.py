@@ -117,6 +117,15 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
         streaming_callback=summary_callback
     )
     
+    if isinstance(summary, dict) and 'error' in summary:
+        error_message = f"Failed to process data zone: {summary['error']}"
+        task.log(error_message, "ERROR")
+        raise Exception(error_message)
+
+    if not isinstance(summary, str):
+        task.log(f"Unexpected non-string result from processing: {type(summary)}. Converting to string.", "WARNING")
+        summary = str(summary)
+        
     discussion.discussion_data_zone = summary
     discussion.commit()
     

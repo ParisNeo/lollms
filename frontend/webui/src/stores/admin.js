@@ -296,7 +296,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchZooRepositories() {
         isLoadingZooRepositories.value = true;
         try {
-            const response = await apiClient.get('/api/apps-management/app-zoo/repositories');
+            const response = await apiClient.get('/api/apps_zoo/repositories');
             zooRepositories.value = response.data;
         } catch (error) {
             uiStore.addNotification('Could not load App Zoo repositories.', 'error');
@@ -306,7 +306,7 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function addZooRepository(name, url) {
         try {
-            const response = await apiClient.post('/api/apps-management/app-zoo/repositories', { name, url });
+            const response = await apiClient.post('/api/apps_zoo/repositories', { name, url });
             zooRepositories.value.push(response.data);
             uiStore.addNotification(`Repository '${name}' added.`, 'success');
         } catch (error) {
@@ -315,7 +315,7 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function deleteZooRepository(repoId) {
         try {
-            await apiClient.delete(`/api/apps-management/app-zoo/repositories/${repoId}`);
+            await apiClient.delete(`/api/apps_zoo/repositories/${repoId}`);
             zooRepositories.value = zooRepositories.value.filter(r => r.id !== repoId);
             uiStore.addNotification('Repository deleted.', 'success');
         } catch (error) {
@@ -324,7 +324,7 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function pullZooRepository(repoId) {
         try {
-            const response = await apiClient.post(`/api/apps-management/app-zoo/repositories/${repoId}/pull`);
+            const response = await apiClient.post(`/api/apps_zoo/repositories/${repoId}/pull`);
             const task = response.data;
             uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
             tasksStore.addTask(task);
@@ -352,7 +352,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchMcpZooRepositories() {
         isLoadingMcpZooRepositories.value = true;
         try {
-            const response = await apiClient.get('/api/apps-management/mcp-zoo/repositories');
+            const response = await apiClient.get('/api/mcps_zoo/repositories');
             mcpZooRepositories.value = response.data;
         } catch (error) {
             uiStore.addNotification('Could not load MCP Zoo repositories.', 'error');
@@ -362,7 +362,7 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function addMcpZooRepository(name, url) {
         try {
-            const response = await apiClient.post('/api/apps-management/mcp-zoo/repositories', { name, url });
+            const response = await apiClient.post('/api/mcps_zoo/repositories', { name, url });
             mcpZooRepositories.value.push(response.data);
             uiStore.addNotification(`MCP Repository '${name}' added.`, 'success');
         } catch (error) {
@@ -371,7 +371,7 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function deleteMcpZooRepository(repoId) {
         try {
-            await apiClient.delete(`/api/apps-management/mcp-zoo/repositories/${repoId}`);
+            await apiClient.delete(`/api/mcps_zoo/repositories/${repoId}`);
             mcpZooRepositories.value = mcpZooRepositories.value.filter(r => r.id !== repoId);
             uiStore.addNotification('MCP Repository deleted.', 'success');
         } catch (error) {
@@ -380,7 +380,7 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function pullMcpZooRepository(repoId) {
         try {
-            const response = await apiClient.post(`/api/apps-management/mcp-zoo/repositories/${repoId}/pull`);
+            const response = await apiClient.post(`/api/mcps_zoo/repositories/${repoId}/pull`);
             const task = response.data;
             uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
             tasksStore.addTask(task);
@@ -404,12 +404,11 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
-
     // Available Zoo Apps
     async function fetchZooApps(params = {}) {
         isLoadingZooApps.value = true;
         try {
-            const response = await apiClient.get('/api/apps-management/app-zoo/available-apps', { params });
+            const response = await apiClient.get('/api/apps_zoo/available', { params });
             zooApps.value = response.data;
         } catch (error) {
             uiStore.addNotification('Could not load available apps from the zoo.', 'error');
@@ -422,7 +421,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchZooMcps(params = {}) {
         isLoadingZooMcps.value = true;
         try {
-            const response = await apiClient.get('/api/apps-management/mcp-zoo/available-mcps', { params });
+            const response = await apiClient.get('/api/mcps_zoo/available', { params });
             zooMcps.value = response.data;
         } catch (error) {
             uiStore.addNotification('Could not load available MCPs from the zoo.', 'error');
@@ -434,7 +433,7 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function fetchAppReadme(repository, folder_name) {
         try {
-            const response = await apiClient.get('/api/apps-management/app-zoo/app-readme', {
+            const response = await apiClient.get('/api/apps_zoo/readme', {
                 params: { repository, folder_name }
             });
             return response.data;
@@ -445,7 +444,7 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function fetchMcpReadme(repository, folder_name) {
         try {
-            const response = await apiClient.get('/api/apps-management/mcp-zoo/mcp-readme', {
+            const response = await apiClient.get('/api/mcps_zoo/readme', {
                 params: { repository, folder_name }
             });
             return response.data;
@@ -456,7 +455,7 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function installZooApp(payload) {
         try {
-            const response = await apiClient.post('/api/apps-management/app-zoo/install-app', payload);
+            const response = await apiClient.post('/api/apps_zoo/install', payload);
             const task = response.data;
             uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
             await fetchInstalledApps(); // Refresh installed list
@@ -469,7 +468,7 @@ export const useAdminStore = defineStore('admin', () => {
     
     async function installZooMcp(payload) {
         try {
-            const response = await apiClient.post('/api/apps-management/mcp-zoo/install-mcp', payload);
+            const response = await apiClient.post('/api/mcps_zoo/install', payload);
             const task = response.data;
             uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
             await fetchInstalledApps(); // Refresh installed list
@@ -484,7 +483,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchInstalledApps() {
         isLoadingInstalledApps.value = true;
         try {
-            const response = await apiClient.get('/api/apps-management/installed-apps');
+            const response = await apiClient.get('/api/apps_zoo/installed');
             installedApps.value = response.data;
         } catch (error) {
             uiStore.addNotification('Could not load installed apps.', 'error');
@@ -496,7 +495,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchNextAvailablePort(port = null) {
         try {
             const params = port ? { port } : {};
-            const response = await apiClient.get('/api/apps-management/apps/get-next-available-port', { params });
+            const response = await apiClient.get('/api/apps_zoo/get-next-available-port', { params });
             return response.data.port;
         } catch (error) {
             if (port) throw error; // Re-throw for specific port checks
@@ -506,19 +505,19 @@ export const useAdminStore = defineStore('admin', () => {
     }
 
     async function startApp(appId) {
-        const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/start`);
+        const response = await apiClient.post(`/api/apps_zoo/installed/${appId}/start`);
         const task = response.data;
         uiStore.addNotification(`Task '${task.name}' started.`, 'info');
         tasksStore.addTask(task);
     }
     async function stopApp(appId) {
-        const response = await apiClient.post(`/api/apps-management/installed-apps/${appId}/stop`);
+        const response = await apiClient.post(`/api/apps_zoo/installed/${appId}/stop`);
         const task = response.data;
         uiStore.addNotification(`Task '${task.name}' started.`, 'info');
         tasksStore.addTask(task);
     }
     async function uninstallApp(appId) {
-        const response = await apiClient.delete(`/api/apps-management/installed-apps/${appId}`);
+        const response = await apiClient.delete(`/api/apps_zoo/installed/${appId}`);
         uiStore.addNotification(response.data.message, 'success');
         await fetchInstalledApps();
         // No need to fetch Zoo apps here, their status is determined on the fly
@@ -526,7 +525,7 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function updateInstalledApp(appId, payload) {
         try {
-            const response = await apiClient.put(`/api/apps-management/installed-apps/${appId}`, payload);
+            const response = await apiClient.put(`/api/apps_zoo/installed/${appId}`, payload);
             uiStore.addNotification(`App '${response.data.name}' updated successfully.`, 'success');
             const index = installedApps.value.findIndex(app => app.id === appId);
             if (index !== -1) {
@@ -540,7 +539,7 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function fetchAppLog(appId) {
         try {
-            const response = await apiClient.get(`/api/apps-management/installed-apps/${appId}/logs`);
+            const response = await apiClient.get(`/api/apps_zoo/installed/${appId}/logs`);
             return response.data.log_content;
         } catch (error) {
             throw error;
@@ -549,15 +548,15 @@ export const useAdminStore = defineStore('admin', () => {
 
     // NEW App Config Actions
     async function fetchAppConfigSchema(appId) {
-        const response = await apiClient.get(`/api/apps-management/installed-apps/${appId}/config-schema`);
+        const response = await apiClient.get(`/api/apps_zoo/installed/${appId}/config-schema`);
         return response.data;
     }
     async function fetchAppConfig(appId) {
-        const response = await apiClient.get(`/api/apps-management/installed-apps/${appId}/config`);
+        const response = await apiClient.get(`/api/apps_zoo/installed/${appId}/config`);
         return response.data;
     }
     async function updateAppConfig(appId, configData) {
-        const response = await apiClient.put(`/api/apps-management/installed-apps/${appId}/config`, configData);
+        const response = await apiClient.put(`/api/apps_zoo/installed/${appId}/config`, configData);
         uiStore.addNotification(response.data.message || 'Configuration saved.', 'success');
     }
 

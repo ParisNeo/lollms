@@ -3,28 +3,28 @@ import datetime
 from pathlib import Path
 from typing import Optional
 import os
+import subprocess
 from multiprocessing import cpu_count
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors
 
-# NEW: Import multipart and increase the form part size limit
-from multipart.multipart import FormParser, parse_options_header
-
-# Increase the max size of a form part to 50MB (default is 1MB)
+from multipart.multipart import FormParser
 FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_
+from sqlalchemy import or_
 
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
-    INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG, DEFAULT_PERSONALITIES
+    INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG, DEFAULT_PERSONALITIES,
+    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
+from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository
 from backend.security import get_password_hash as hash_password
 from backend.discussion import LegacyDiscussion
@@ -51,35 +51,22 @@ from backend.routers.lollms_config import lollms_config_router
 from backend.routers.files import upload_router, assets_router, files_router
 from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
-from backend.routers.apps_management import apps_management_router, _cleanup_and_autostart_apps
+from backend.routers.app_utils import cleanup_and_autostart_apps
+from backend.routers.apps_zoo import apps_zoo_router
+from backend.routers.mcps_zoo import mcps_zoo_router
 from backend.routers.tasks import tasks_router
-from backend.routers.help import help_router
 from backend.task_manager import task_manager # Import the singleton instance
+
+from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.zoo_cache import build_full_cache
 
-app = FastAPI(
-    title="LoLLMs Platform",
-    description="API for a multi-user LoLLMs and SafeStore chat application with social features and AI hub.",
-    version=APP_VERSION,
-)
+app = FastAPI(title="LoLLMs Platform", description="API for a multi-user LoLLMs and SafeStore chat application.", version=APP_VERSION)
 
 @app.on_event("startup")
 async def on_startup() -> None:
     task_manager.init_app(db_session_module.SessionLocal)
     print("Database initialized.")
-
-    # Build the initial Zoo cache
-    try:
-        build_full_cache()
-    except Exception as e:
-        print(f"ERROR during initial Zoo cache build: {e}")
-
-    # Clean up and autostart apps
-    try:
-        _cleanup_and_autostart_apps()
-    except Exception as e:
-        print(f"ERROR during app cleanup and autostart: {e}")
 
     print("\n--- Running Automated Discussion Migration ---")
     db_session = None
@@ -136,7 +123,7 @@ async def on_startup() -> None:
         print("--- Migration Finished ---\n")
 
     # --- Setup Defaults (Admin, Personalities, Repositories) ---
-    ASCIIColors.yellow("--- Verifying Default Database Entries ---")
+    ASCIIColors.yellow("--- Verifying Default Database Entries & Repositories ---")
     db_for_defaults: Optional[Session] = None
     try:
         db_for_defaults = next(get_db())
@@ -150,7 +137,7 @@ async def on_startup() -> None:
             db_for_defaults.commit()
             ASCIIColors.green(f"INFO: Initial admin user '{admin_username}' created successfully.")
         
-        # 2. Default Personalities
+        # 2. Default Personalities (Kept for backward compatibility)
         for default_pers_data in DEFAULT_PERSONALITIES:
             if not db_for_defaults.query(DBPersonality).filter(DBPersonality.name == default_pers_data["name"], DBPersonality.is_public == True, DBPersonality.owner_user_id == None).first():
                 new_pers_data = default_pers_data.copy()
@@ -159,66 +146,211 @@ async def on_startup() -> None:
                 db_for_defaults.add(new_pers)
                 db_for_defaults.commit()
                 ASCIIColors.green(f"INFO: Added default public personality: '{new_pers.name}'")
+        
+        # 3. NEW: Hardcoded Default System Prompts
+        DEFAULT_PROMPTS = [
+            # Writing & Communication
+            {
+                "name": "Enhance Email",
+                "content": """@<style>@
+title: Email Style
+type: str
+options: Formal, Friendly & Casual, Persuasive, Direct & Concise
+help: The desired tone for the email.
+@</style>@
+Enhance the following email draft to be more @<style>@. Refine the language, structure, and tone accordingly."""
+            },
+            {
+                "name": "Improve Text",
+                "content": """@<style>@
+title: Writing Style
+type: str
+options: Professional, Academic, Creative, Simple & Clear
+@</style>@
+@<goal>@
+title: Main Goal
+type: text
+help: e.g., 'convince the reader', 'explain a complex topic simply', 'inspire action'
+@</goal>@
+Revise the following text to make it more @<style>@. The main goal is to @<goal>@. Improve clarity, flow, and impact."""
+            },
+            {
+                "name": "Translate",
+                "content": """@<language>@
+title: Target Language
+type: str
+options: English, French, Spanish, German, Italian, Chinese, Japanese, Arabic, Russian
+help: The language to translate the text into.
+@</language>@
+Translate the text to @<language>@. Make sure your translation is accurate and natural.
+If you add any comments in the translated text, please also write them in @<language>@."""
+            },
+            # Coding & Development
+            {
+                "name": "Code Syntax Check",
+                "content": """@<language>@
+title: Programming Language
+type: str
+options: Python, JavaScript, C++, Java, TypeScript, HTML, CSS, SQL
+help: The programming language of the code to be checked.
+@</language>@
+You are a code syntax and style checker. Review the following @<language>@ code. Identify any syntax errors, potential bugs, style guide violations (like PEP 8 for Python), or areas for improvement. Provide your feedback as a list of suggestions."""
+            },
+            {
+                "name": "Translate Code",
+                "content": """@<source_language>@
+title: Source Language
+type: str
+options: Python, JavaScript, C++, Java, C#, Go, Rust
+@</source_language>@
+@<target_language>@
+title: Target Language
+type: str
+options: Python, JavaScript, C++, Java, C#, Go, Rust
+@</target_language>@
+@<constraints>@
+title: Constraints
+type: text
+help: e.g., 'must be object-oriented', 'avoid external libraries', 'prioritize performance'
+@</constraints>@
+Translate the following code from @<source_language>@ to @<target_language>@. Adhere to the following constraints: @<constraints>@."""
+            },
+            # Creative & Fun
+            {
+                "name": "Creative Writer",
+                "content": """@<genre>@
+title: Genre
+type: str
+options: Fantasy, Science Fiction, Mystery, Horror, Romance, Comedy
+@</genre>@
+@<topic>@
+title: Topic
+type: text
+help: What should the story be about? (e.g., a lost dragon, a space detective)
+@</topic>@
+Write a short @<genre>@ story about @<topic>@."""
+            },
+            {
+                "name": "Poem Generator",
+                "content": """@<style>@
+title: Poem Style
+type: str
+options: Haiku, Sonnet, Free Verse, Limerick, Ballad
+@</style>@
+@<topic>@
+title: Topic
+type: text
+help: What should the poem be about?
+@</topic>@
+Write a `@<style>@` poem about `@<topic>@`."""
+            },
+            # Education & Learning
+            {
+                "name": "Math Problem Solver",
+                "content": """@<problem>@
+title: Math Problem
+type: text
+help: Enter the math problem you want to solve.
+@</problem>@
+Solve the following math problem step-by-step, explaining your reasoning for each step:
+@<problem>@"""
+            },
+            {
+                "name": "Quiz Generator",
+                "content": """@<num_questions>@
+title: Number of Questions
+type: int
+help: How many questions to generate.
+@</num_questions>@
+@<question_type>@
+title: Question Type
+type: str
+options: Multiple Choice, True/False, Short Answer
+@</question_type>@
+@<source_material>@
+title: Source Material
+type: text
+help: Paste the text to base the quiz on.
+@</source_material>@
+Generate a quiz with @<num_questions>@ `@<question_type>@` questions based on the provided source material. Include a separate answer key at the end.
+Source Material:
+@<source_material>@"""
+            }
+        ]
+
+        for default_prompt_data in DEFAULT_PROMPTS:
+            if not db_for_defaults.query(DBSavedPrompt).filter(DBSavedPrompt.name == default_prompt_data["name"], DBSavedPrompt.owner_user_id.is_(None)).first():
+                new_prompt = DBSavedPrompt(
+                    name=default_prompt_data["name"],
+                    content=default_prompt_data["content"],
+                    owner_user_id=None
+                )
+                db_for_defaults.add(new_prompt)
+                db_for_defaults.commit()
+                ASCIIColors.green(f"INFO: Added default system prompt: '{new_prompt.name}'")
+
     except Exception as e:
-        ASCIIColors.error(f"ERROR during admin/personality setup: {e}")
+        ASCIIColors.error(f"ERROR during admin/personality/prompt setup: {e}")
         if db_for_defaults: db_for_defaults.rollback()
     finally:
         if db_for_defaults: db_for_defaults.close()
 
-    # 3. Default App Zoo Repository (Isolated Transaction)
+    # 3. Default App Zoo Repository (DB and Filesystem)
     db_for_repos: Optional[Session] = None
     try:
         db_for_repos = next(get_db())
         app_zoo_name = "Official LoLLMs Apps Zoo"
         app_zoo_url = "https://github.com/ParisNeo/lollms_apps_zoo.git"
-        app_zoo_repo = db_for_repos.query(DBAppZooRepository).filter(or_(DBAppZooRepository.name == app_zoo_name, DBAppZooRepository.url == app_zoo_url)).first()
-
-        if not app_zoo_repo:
+        app_zoo_repo_path = APPS_ZOO_ROOT_PATH / app_zoo_name
+        
+        if not db_for_repos.query(DBAppZooRepository).filter(DBAppZooRepository.name == app_zoo_name).first():
             default_repo = DBAppZooRepository(name=app_zoo_name, url=app_zoo_url, is_deletable=False)
             db_for_repos.add(default_repo)
-            ASCIIColors.green(f"INFO: Default App Zoo repository '{app_zoo_name}' not found. Creating it now.")
-        elif app_zoo_repo.is_deletable or app_zoo_repo.name != app_zoo_name:
-            app_zoo_repo.is_deletable = False
-            app_zoo_repo.name = app_zoo_name # Ensure name is correct
-            ASCIIColors.yellow(f"INFO: Updating default App Zoo repository to be correct and non-deletable.")
-        else:
-            ASCIIColors.cyan(f"INFO: Default App Zoo repository '{app_zoo_name}' already exists.")
-        db_for_repos.commit()
+            db_for_repos.commit()
+            ASCIIColors.green(f"INFO: Default App Zoo repo '{app_zoo_name}' added to DB.")
+
+        if not app_zoo_repo_path.exists():
+            ASCIIColors.yellow(f"First setup: Cloning '{app_zoo_name}'. This may take a moment...")
+            subprocess.run(["git", "clone", app_zoo_url, str(app_zoo_repo_path)], check=True)
+            ASCIIColors.green("Cloning complete.")
+
     except Exception as e:
         ASCIIColors.error(f"ERROR during App Zoo repository setup: {e}")
         if db_for_repos: db_for_repos.rollback()
     finally:
         if db_for_repos: db_for_repos.close()
         
-    # 4. Default MCP Zoo Repository (Isolated Transaction)
+    # 4. Default MCP Zoo Repository (DB and Filesystem)
     db_for_mcps: Optional[Session] = None
     try:
         db_for_mcps = next(get_db())
         mcp_zoo_name = "lollms_mcps_zoo"
         mcp_zoo_url = "https://github.com/ParisNeo/lollms_mcps_zoo.git"
-        mcp_zoo_repo = db_for_mcps.query(DBMCPZooRepository).filter(or_(DBMCPZooRepository.name == mcp_zoo_name, DBMCPZooRepository.url == mcp_zoo_url)).first()
-        
-        if not mcp_zoo_repo:
+        mcp_zoo_repo_path = MCPS_ZOO_ROOT_PATH / mcp_zoo_name
+
+        if not db_for_mcps.query(DBMCPZooRepository).filter(DBMCPZooRepository.name == mcp_zoo_name).first():
             default_mcp_repo = DBMCPZooRepository(name=mcp_zoo_name, url=mcp_zoo_url, is_deletable=False)
             db_for_mcps.add(default_mcp_repo)
-            ASCIIColors.green(f"INFO: Default MCP Zoo repository '{mcp_zoo_name}' not found. Creating it now.")
-        elif mcp_zoo_repo.is_deletable or mcp_zoo_repo.name != mcp_zoo_name:
-            mcp_zoo_repo.is_deletable = False
-            mcp_zoo_repo.name = mcp_zoo_name # Ensure name is correct
-            ASCIIColors.yellow(f"INFO: Updating default MCP Zoo repository to be correct and non-deletable.")
-        else:
-            ASCIIColors.cyan(f"INFO: Default MCP Zoo repository '{mcp_zoo_name}' already exists.")
-        db_for_mcps.commit()
+            db_for_mcps.commit()
+            ASCIIColors.green(f"INFO: Default MCP Zoo repo '{mcp_zoo_name}' added to DB.")
+
+        if not mcp_zoo_repo_path.exists():
+            ASCIIColors.yellow(f"First setup: Cloning '{mcp_zoo_name}'. This may take a moment...")
+            subprocess.run(["git", "clone", mcp_zoo_url, str(mcp_zoo_repo_path)], check=True)
+            ASCIIColors.green("Cloning complete.")
     except Exception as e:
         ASCIIColors.error(f"ERROR during MCP Zoo repository setup: {e}")
         if db_for_mcps: db_for_mcps.rollback()
     finally:
         if db_for_mcps: db_for_mcps.close()
 
-    ASCIIColors.yellow("--- Default Database Entries Verified ---")
+    ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
 
-
-# --- CORS Configuration ---
+    # Build cache AFTER ensuring repos are cloned
+    build_full_cache()
+    cleanup_and_autostart_apps()
+    
+# CORS Configuration... (remains the same)
 host = SERVER_CONFIG.get("host", "0.0.0.0")
 port = SERVER_CONFIG.get("port", 9642)
 https_enabled = SERVER_CONFIG.get("https_enabled", False)
@@ -269,6 +401,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include Routers
 app.include_router(auth_router)
 app.include_router(discussion_router)
 app.include_router(admin_router)
@@ -287,34 +420,29 @@ app.include_router(dm_ws_router)
 app.include_router(api_keys_router)
 app.include_router(openai_v1_router)
 app.include_router(lollms_config_router)
-app.include_router(upload_router)
-app.include_router(assets_router)
 app.include_router(files_router)
 app.include_router(ui_router)
 app.include_router(sso_router)
-app.include_router(apps_management_router)
+app.include_router(apps_zoo_router)
+app.include_router(mcps_zoo_router)
 app.include_router(tasks_router)
 app.include_router(help_router)
 app.include_router(prompts_router)
 
-
+# UI and Assets routers
+app.include_router(upload_router)
+app.include_router(assets_router)
 add_ui_routes(app)
 
 if __name__ == "__main__":
     import uvicorn
     from backend.settings import settings
-    import socket
-    import psutil  # Requires `pip install psutil`
-
     init_database(APP_DB_URL)
-    
     settings.refresh()
-    
     host_setting = settings.get("host", host)
     port_setting = int(settings.get("port", port))
-    # Decide how many workers to run
-    # Priority: env var LOLLMS_WORKERS > settings["workers"] > cpu_count()
     workers = int(os.getenv("LOLLMS_WORKERS", settings.get("workers", SERVER_CONFIG.get("workers", cpu_count()))))
+    
     ssl_params = {}
     if settings.get("https_enabled"):
         certfile = settings.get("ssl_certfile")
@@ -334,6 +462,8 @@ if __name__ == "__main__":
     protocol = "https" if ssl_params else "http"
     
     if host_setting == "0.0.0.0":
+        import psutil
+        import socket
         # Always include localhost
         ASCIIColors.magenta(f"Access UI at: {protocol}://localhost:{port_setting}/")
 
