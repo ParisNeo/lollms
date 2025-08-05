@@ -1,103 +1,164 @@
-import base64
 import yaml
-import threading
+import json
+import time
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import List, Dict, Any, Literal
+from sqlalchemy.orm import Session
+from backend.db import get_db
+from backend.db.models.service import AppZooRepository, MCPZooRepository, PromptZooRepository
+from backend.db.models.prompt import SavedPrompt
+from backend.config import APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH
 
-from backend.config import APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH
+ITEM_TYPES = Literal['app', 'mcp', 'prompt']
+CACHE_FILE = Path(__file__).parent / "zoo_cache.json"
+CACHE_EXPIRY = 3600  # 1 hour
 
-_app_zoo_cache: Dict[str, List[Dict[str, Any]]] = {}
-_mcp_zoo_cache: Dict[str, List[Dict[str, Any]]] = {}
-_cache_lock = threading.Lock()
+_cache: Dict[str, Any] = {"timestamp": 0, "data": {}}
 
-def _scan_zoo_directory(zoo_root_path: Path) -> Dict[str, List[Dict[str, Any]]]:
-    """Scans a full zoo directory and returns structured metadata."""
-    repo_data = {}
-    if not zoo_root_path.exists():
-        return {}
+def get_zoo_root_path(item_type: ITEM_TYPES) -> Path:
+    if item_type == 'app': return APPS_ZOO_ROOT_PATH
+    if item_type == 'mcp': return MCPS_ZOO_ROOT_PATH
+    if item_type == 'prompt': return PROMPTS_ZOO_ROOT_PATH
+    raise ValueError(f"Invalid item type: {item_type}")
 
-    for repo_dir in zoo_root_path.iterdir():
-        if repo_dir.is_dir():
-            repo_items = []
-            for item_dir in repo_dir.iterdir():
-                info_file_path = None
-                if (item_dir / "app_info.yaml").is_file():
-                    info_file_path = item_dir / "app_info.yaml"
-                elif (item_dir / "description.yaml").is_file():
-                    info_file_path = item_dir / "description.yaml"
+def get_db_repo_model(item_type: ITEM_TYPES):
+    if item_type == 'app': return AppZooRepository
+    if item_type == 'mcp': return MCPZooRepository
+    if item_type == 'prompt': return PromptZooRepository
+    raise ValueError(f"Invalid item type: {item_type}")
 
-                if item_dir.is_dir() and info_file_path:
-                    try:
-                        with open(info_file_path, "r", encoding='utf-8') as f:
-                            info = yaml.safe_load(f)
-                            if info and isinstance(info, dict) and 'name' in info:
-                                info['repository'] = repo_dir.name
-                                info['folder_name'] = item_dir.name
-                                
-                                # Add icon data URL to cache
-                                icon_path = None
-                                if (item_dir / "assets" / "logo.png").is_file():
-                                    icon_path = item_dir / "assets" / "logo.png"
-                                elif (item_dir / "icon.png").is_file():
-                                    icon_path = item_dir / "icon.png"
-                                
-                                if icon_path:
-                                    info['icon'] = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}"
+def get_installed_items(db: Session, item_type: ITEM_TYPES) -> set:
+    if item_type in ['app', 'mcp']:
+        from backend.db.models.service import App as DBApp
+        return {item.name for item in db.query(DBApp.name).filter(DBApp.is_installed == True, DBApp.app_metadata['item_type'].as_string() == item_type).all()}
+    if item_type == 'prompt':
+        return {item.name for item in db.query(SavedPrompt.name).filter(SavedPrompt.owner_user_id.is_(None)).all()}
+    return set()
 
-                                repo_items.append(info)
-                    except Exception as e:
-                        print(f"Warning: Could not parse metadata for {item_dir.name}. Error: {e}")
-            repo_data[repo_dir.name] = repo_items
-    return repo_data
+def parse_item_metadata(item_path: Path, item_type: ITEM_TYPES) -> Dict[str, Any]:
+    metadata = {}
+    if item_type in ['app', 'mcp']:
+        config_path = item_path / "config.yaml"
+        if config_path.exists():
+            with open(config_path, 'r', encoding='utf-8') as f:
+                metadata = yaml.safe_load(f)
+    elif item_type == 'prompt':
+        desc_path = item_path / "description.yaml"
+        prompt_path = item_path / "prompt.txt"
+        if desc_path.exists() and prompt_path.exists():
+            with open(desc_path, 'r', encoding='utf-8') as f:
+                metadata = yaml.safe_load(f) or {}
+            # The prompt content itself is not needed for the listing, only for installation.
+    return metadata
+
+def _build_cache_for_type(db: Session, item_type: ITEM_TYPES) -> List[Dict[str, Any]]:
+    items = []
+    zoo_root = get_zoo_root_path(item_type)
+    repo_model = get_db_repo_model(item_type)
+    
+    repositories = db.query(repo_model).all()
+    
+    for repo in repositories:
+        repo_path = zoo_root / repo.name
+        if not repo_path.is_dir(): continue
+        
+        for item_folder in repo_path.iterdir():
+            if item_folder.is_dir() and not item_folder.name.startswith('.'):
+                try:
+                    metadata = parse_item_metadata(item_folder, item_type)
+                    if not metadata or not metadata.get('name'):
+                        metadata['name'] = item_folder.name
+                    
+                    icon_path_png = item_folder / "icon.png"
+                    icon_b64 = None
+                    if icon_path_png.exists():
+                        import base64
+                        with open(icon_path_png, 'rb') as f:
+                            icon_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
+
+                    items.append({
+                        **metadata,
+                        'repository': repo.name,
+                        'folder_name': item_folder.name,
+                        'icon': icon_b64
+                    })
+                except Exception as e:
+                    print(f"Warning: Could not process {item_type} item '{item_folder.name}' in repo '{repo.name}': {e}")
+    return items
 
 def build_full_cache():
-    """Builds or rebuilds the entire in-memory cache for both App and MCP Zoos."""
-    print("INFO: Building full Zoo metadata cache...")
-    with _cache_lock:
-        global _app_zoo_cache, _mcp_zoo_cache
-        _app_zoo_cache = _scan_zoo_directory(APPS_ZOO_ROOT_PATH)
-        _mcp_zoo_cache = _scan_zoo_directory(MCPS_ZOO_ROOT_PATH)
-    print("INFO: Zoo metadata cache build complete.")
+    global _cache
+    print("INFO: Building full Zoo cache...")
+    db = next(get_db())
+    try:
+        _cache["data"] = {
+            'app': _build_cache_for_type(db, 'app'),
+            'mcp': _build_cache_for_type(db, 'mcp'),
+            'prompt': _build_cache_for_type(db, 'prompt'),
+        }
+        _cache["timestamp"] = time.time()
+        with open(CACHE_FILE, 'w') as f:
+            json.dump(_cache, f)
+        print("INFO: Zoo cache rebuild complete.")
+    finally:
+        db.close()
 
-def refresh_repo_cache(repo_name: str, item_type: str):
-    """Refreshes the cache for a single repository."""
-    print(f"INFO: Refreshing cache for '{repo_name}' ({item_type} zoo)...")
-    zoo_path = APPS_ZOO_ROOT_PATH if item_type == 'app' else MCPS_ZOO_ROOT_PATH
-    target_cache = _app_zoo_cache if item_type == 'app' else _mcp_zoo_cache
-
-    repo_dir = zoo_path / repo_name
-    if not repo_dir.is_dir():
-        with _cache_lock:
-            if repo_name in target_cache:
-                del target_cache[repo_name]
-        print(f"INFO: Repository '{repo_name}' removed from cache.")
-        return
-
-    # Rescan just this one repository
-    scanned_data = _scan_zoo_directory(repo_dir.parent)
+def refresh_repo_cache(repo_name: str, item_type: ITEM_TYPES):
+    global _cache
+    if not _cache["data"]:
+        load_cache()
     
-    with _cache_lock:
-        if repo_name in scanned_data:
-            target_cache[repo_name] = scanned_data[repo_name]
-        elif repo_name in target_cache: # It might have been valid before but now is empty/invalid
-            del target_cache[repo_name]
+    # Remove old items from this repo
+    _cache["data"][item_type] = [item for item in _cache["data"].get(item_type, []) if item.get('repository') != repo_name]
+    
+    # Add new items from this repo
+    db = next(get_db())
+    try:
+        repo = db.query(get_db_repo_model(item_type)).filter_by(name=repo_name).first()
+        if repo:
+            repo_path = get_zoo_root_path(item_type) / repo.name
+            if repo_path.is_dir():
+                for item_folder in repo_path.iterdir():
+                    if item_folder.is_dir() and not item_folder.name.startswith('.'):
+                        try:
+                            metadata = parse_item_metadata(item_folder, item_type)
+                            if not metadata.get('name'): metadata['name'] = item_folder.name
+                            icon_path_png = item_folder / "icon.png"
+                            icon_b64 = None
+                            if icon_path_png.exists():
+                                import base64
+                                with open(icon_path_png, 'rb') as f: icon_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
+                            
+                            _cache["data"][item_type].append({**metadata, 'repository': repo.name, 'folder_name': item_folder.name, 'icon': icon_b64})
+                        except Exception as e:
+                            print(f"Warning: Could not process item '{item_folder.name}' on refresh: {e}")
 
-    print(f"INFO: Cache for '{repo_name}' refreshed.")
+        _cache["timestamp"] = time.time()
+        with open(CACHE_FILE, 'w') as f: json.dump(_cache, f)
+    finally:
+        db.close()
 
 
-def get_all_items(item_type: str) -> List[Dict[str, Any]]:
-    """Gets all items of a specific type, deduplicating by name."""
-    with _cache_lock:
-        source_cache = _app_zoo_cache if item_type == 'app' else _mcp_zoo_cache
-        all_items_dict = {}
-        # Flatten and deduplicate. The last one found wins in case of conflict.
-        for repo_items in source_cache.values():
-            for item in repo_items:
-                all_items_dict[item['name']] = item
-    return list(all_items_dict.values())
+def load_cache():
+    global _cache
+    if CACHE_FILE.exists():
+        try:
+            with open(CACHE_FILE, 'r') as f:
+                _cache = json.load(f)
+        except (json.JSONDecodeError, TypeError):
+            print("Warning: Could not load cache file. Rebuilding.")
+            _cache = {"timestamp": 0, "data": {}}
+    if time.time() - _cache.get("timestamp", 0) > CACHE_EXPIRY:
+        build_full_cache()
 
-def get_all_categories(item_type: str) -> List[str]:
-    """Gets all unique categories for a given item type from the cache."""
-    all_items = get_all_items(item_type)
-    categories = {item.get('category', 'Uncategorized') for item in all_items if item.get('category')}
+def get_all_items(item_type: ITEM_TYPES) -> List[Dict[str, Any]]:
+    load_cache()
+    return _cache.get("data", {}).get(item_type, [])
+
+def get_all_categories(item_type: ITEM_TYPES) -> List[str]:
+    items = get_all_items(item_type)
+    categories = {'All'}
+    for item in items:
+        if item.get('category'):
+            categories.add(item['category'])
     return sorted(list(categories))

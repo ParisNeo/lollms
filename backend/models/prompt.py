@@ -4,6 +4,10 @@ from typing import Optional, List
 class PromptBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     content: str
+    category: Optional[str] = None
+    author: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
 
 class PromptCreate(PromptBase):
     pass
@@ -11,6 +15,10 @@ class PromptCreate(PromptBase):
 class PromptUpdate(BaseModel):
     name: Optional[constr(min_length=1, max_length=100)] = None
     content: Optional[str] = None
+    category: Optional[str] = None
+    author: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
 
 class PromptPublic(PromptBase):
     id: str

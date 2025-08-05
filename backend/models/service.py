@@ -96,6 +96,21 @@ class MCPZooRepositoryPublic(MCPZooRepositoryBase):
     class Config:
         from_attributes = True
 
+class PromptZooRepositoryBase(BaseModel):
+    name: constr(min_length=1, max_length=100)
+    url: str
+
+class PromptZooRepositoryCreate(PromptZooRepositoryBase):
+    pass
+
+class PromptZooRepositoryPublic(PromptZooRepositoryBase):
+    id: int
+    last_pulled_at: Optional[datetime.datetime] = None
+    created_at: datetime.datetime
+    is_deletable: bool = True
+    class Config:
+        from_attributes = True
+
 class ZooAppInfo(BaseModel):
     name: str
     repository: str
@@ -166,12 +181,47 @@ class ZooMCPInfoResponse(BaseModel):
     page: int
     pages: int
 
+class ZooPromptInfo(BaseModel):
+    name: str
+    repository: str
+    folder_name: str
+    icon: Optional[str] = None
+    is_installed: bool = False
+    has_readme: bool = False
+    author: Optional[str] = None
+    category: Optional[str] = None
+    creation_date: Optional[str] = None
+    description: Optional[str] = None
+    disclaimer: Optional[str] = None
+    last_update_date: Optional[str] = None
+    version: Optional[str] = None
+    tags: Optional[List[str]] = None
+    
+    @field_validator('version', 'creation_date', 'last_update_date', mode='before')
+    def coerce_to_string(cls, v):
+        if v is not None:
+            return str(v)
+        return v
+    
+    class Config:
+        populate_by_name = True
+
+class ZooPromptInfoResponse(BaseModel):
+    items: List[ZooPromptInfo]
+    total: int
+    page: int
+    pages: int
+
 
 class AppInstallRequest(BaseModel):
     repository: str
     folder_name: str
     port: int = Field(..., gt=1024, lt=65536)
     autostart: bool = False
+
+class PromptInstallRequest(BaseModel):
+    repository: str
+    folder_name: str
 
 class AppActionResponse(BaseModel):
     success: bool

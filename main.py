@@ -19,13 +19,13 @@ from sqlalchemy import or_
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG, DEFAULT_PERSONALITIES,
-    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH
+    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
-from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository
+from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository
 from backend.security import get_password_hash as hash_password
 from backend.discussion import LegacyDiscussion
 from backend.session import (
@@ -54,6 +54,7 @@ from backend.routers.sso import sso_router
 from backend.routers.app_utils import cleanup_and_autostart_apps
 from backend.routers.apps_zoo import apps_zoo_router
 from backend.routers.mcps_zoo import mcps_zoo_router
+from backend.routers.prompts_zoo import prompts_zoo_router
 from backend.routers.tasks import tasks_router
 from backend.task_manager import task_manager # Import the singleton instance
 
@@ -343,6 +344,31 @@ Source Material:
         if db_for_mcps: db_for_mcps.rollback()
     finally:
         if db_for_mcps: db_for_mcps.close()
+    
+    # 5. Default Prompt Zoo Repository (DB and Filesystem)
+    db_for_prompts: Optional[Session] = None
+    try:
+        db_for_prompts = next(get_db())
+        prompt_zoo_name = "lollms_prompts_zoo"
+        prompt_zoo_url = "https://github.com/ParisNeo/lollms_prompts_zoo.git"
+        prompt_zoo_repo_path = PROMPTS_ZOO_ROOT_PATH / prompt_zoo_name
+
+        if not db_for_prompts.query(DBPromptZooRepository).filter(DBPromptZooRepository.name == prompt_zoo_name).first():
+            default_prompt_repo = DBPromptZooRepository(name=prompt_zoo_name, url=prompt_zoo_url, is_deletable=False)
+            db_for_prompts.add(default_prompt_repo)
+            db_for_prompts.commit()
+            ASCIIColors.green(f"INFO: Default Prompt Zoo repo '{prompt_zoo_name}' added to DB.")
+
+        if not prompt_zoo_repo_path.exists():
+            ASCIIColors.yellow(f"First setup: Cloning '{prompt_zoo_name}'. This may take a moment...")
+            subprocess.run(["git", "clone", prompt_zoo_url, str(prompt_zoo_repo_path)], check=True)
+            ASCIIColors.green("Cloning complete.")
+    except Exception as e:
+        ASCIIColors.error(f"ERROR during Prompt Zoo repository setup: {e}")
+        if db_for_prompts: db_for_prompts.rollback()
+    finally:
+        if db_for_prompts: db_for_prompts.close()
+
 
     ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
 
@@ -425,6 +451,7 @@ app.include_router(ui_router)
 app.include_router(sso_router)
 app.include_router(apps_zoo_router)
 app.include_router(mcps_zoo_router)
+app.include_router(prompts_zoo_router)
 app.include_router(tasks_router)
 app.include_router(help_router)
 app.include_router(prompts_router)

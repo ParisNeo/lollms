@@ -154,6 +154,19 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         _bootstrap_global_settings(connection)
 
     if inspector.has_table("saved_prompts"):
+        columns_db = [col['name'] for col in inspector.get_columns('saved_prompts')]
+        
+        new_cols_defs = {
+            "category": "VARCHAR",
+            "author": "VARCHAR",
+            "description": "TEXT",
+            "icon": "TEXT"
+        }
+        for col_name, col_sql_def in new_cols_defs.items():
+            if col_name not in columns_db:
+                connection.execute(text(f"ALTER TABLE saved_prompts ADD COLUMN {col_name} {col_sql_def}"))
+                print(f"INFO: Added missing column '{col_name}' to 'saved_prompts' table.")
+
         full_columns_info = inspector.get_columns('saved_prompts')
         owner_user_id_col_info_full = next((col for col in full_columns_info if col['name'] == 'owner_user_id'), None)
         
@@ -439,6 +452,13 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'is_deletable' not in columns_db:
             connection.execute(text("ALTER TABLE mcp_zoo_repositories ADD COLUMN is_deletable BOOLEAN DEFAULT 1 NOT NULL"))
             print("INFO: Added 'is_deletable' column to 'mcp_zoo_repositories' table.")
+
+    if inspector.has_table("prompt_zoo_repositories"):
+        columns_db = [col['name'] for col in inspector.get_columns('prompt_zoo_repositories')]
+        if 'is_deletable' not in columns_db:
+            connection.execute(text("ALTER TABLE prompt_zoo_repositories ADD COLUMN is_deletable BOOLEAN DEFAULT 1 NOT NULL"))
+            print("INFO: Added 'is_deletable' column to 'prompt_zoo_repositories' table.")
+
 
 def check_and_update_db_version(SessionLocal):
     session = SessionLocal()

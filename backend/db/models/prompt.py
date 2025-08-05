@@ -12,6 +12,12 @@ class SavedPrompt(Base):
     name = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    
+    # NEW: Fields for Zoo integration
+    category = Column(String, nullable=True, index=True)
+    author = Column(String, nullable=True)
+    description = Column(Text, nullable=True)
+    icon = Column(Text, nullable=True) # Base64 icon
 
     owner = relationship("User")
     

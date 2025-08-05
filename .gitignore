@@ -179,3 +179,5 @@ app_main.db
 
 # vscode
 .vscode
+# zoo cache file
+zoo_cache.json

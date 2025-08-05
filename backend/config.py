@@ -64,16 +64,20 @@ CUSTOM_APPS_DIR_NAME = "custom_apps"
 ZOO_DIR_NAME = "zoo"
 MCP_ZOO_DIR_NAME = "mcps_zoo"
 APPS_ZOO_DIR_NAME = "apps_zoo"
+PROMPTS_ZOO_DIR_NAME = "prompts_zoo"
 
 # --- Full Path Constants ---
 APPS_ZOO_ROOT_PATH= APP_DATA_DIR / APPS_ZOO_DIR_NAME
 MCPS_ZOO_ROOT_PATH = APP_DATA_DIR / MCP_ZOO_DIR_NAME
+PROMPTS_ZOO_ROOT_PATH = APP_DATA_DIR / PROMPTS_ZOO_DIR_NAME
 APPS_ROOT_PATH = APP_DATA_DIR / APPS_DIR_NAME
 MCPS_ROOT_PATH = APP_DATA_DIR / MCPS_DIR_NAME
 CUSTOM_APPS_ROOT_PATH = APP_DATA_DIR / CUSTOM_APPS_DIR_NAME
 
 MCPS_ZOO_ROOT_PATH.mkdir(exist_ok=True, parents=True)
 APPS_ROOT_PATH.mkdir(exist_ok=True, parents=True)
+PROMPTS_ZOO_ROOT_PATH.mkdir(exist_ok=True, parents=True)
+
 # --- Security Constants (Not moved to DB) ---
 # These are fundamental to the application's security posture and should
 # remain configured via environment or a secure file, not a dynamic DB setting.
