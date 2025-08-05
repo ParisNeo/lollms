@@ -60,21 +60,18 @@ CUSTOM_APPS_DIR_NAME = "custom_apps"
 ZOO_DIR_NAME = "zoo"
 MCP_ZOO_DIR_NAME = "mcp_zoo"
 
+# --- Full Path Constants ---
+ZOO_ROOT_PATH = APP_DATA_DIR / ZOO_DIR_NAME
+MCP_ZOO_ROOT_PATH = APP_DATA_DIR / MCP_ZOO_DIR_NAME
+APPS_ROOT_PATH = APP_DATA_DIR / APPS_DIR_NAME
+MCPS_ROOT_PATH = APP_DATA_DIR / MCPS_DIR_NAME
+CUSTOM_APPS_ROOT_PATH = APP_DATA_DIR / CUSTOM_APPS_DIR_NAME
 
 # --- Security Constants (Not moved to DB) ---
 # These are fundamental to the application's security posture and should
 # remain configured via environment or a secure file, not a dynamic DB setting.
 ALGORITHM = "HS256"
 SECRET_KEY = APP_SETTINGS.get("secret_key", os.environ.get("LOLLMS_SECRET_KEY", "a_very_secret_key_that_should_be_changed_for_production"))
-
-# --- REMOVED: ACCESS_TOKEN_EXPIRE_MINUTES ---
-# This value is now managed in the database via the GlobalConfig table.
-# It is bootstrapped from config.toml by `database_setup.py`.
-#
-# Example of settings to have in your config.toml under [app_settings]:
-# allow_new_registrations = true
-# registration_mode = "admin_approval"  # options: "direct", "admin_approval"
-# access_token_expire_minutes = 43200   # 30 days in minutes
 
 DEFAULT_PERSONALITIES = config.get("default_personas", {})
 DEFAULT_MCPS = config.get("default_mcps", [])

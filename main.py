@@ -55,7 +55,8 @@ from backend.routers.apps_management import apps_management_router, _cleanup_and
 from backend.routers.tasks import tasks_router
 from backend.routers.help import help_router
 from backend.task_manager import task_manager # Import the singleton instance
-from backend.routers.prompts import prompts_router 
+from backend.routers.prompts import prompts_router
+from backend.zoo_cache import build_full_cache
 
 app = FastAPI(
     title="LoLLMs Platform",
@@ -67,6 +68,12 @@ app = FastAPI(
 async def on_startup() -> None:
     task_manager.init_app(db_session_module.SessionLocal)
     print("Database initialized.")
+
+    # Build the initial Zoo cache
+    try:
+        build_full_cache()
+    except Exception as e:
+        print(f"ERROR during initial Zoo cache build: {e}")
 
     # Clean up and autostart apps
     try:

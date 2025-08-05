@@ -161,55 +161,38 @@ def load_mcps(username):
     servers_infos = {}
     db_for_mcp = next(get_db())
     try:
-        system_mcps = db_for_mcp.query(DBMCP).filter(DBMCP.type == 'system').all()
+        system_mcps = db_for_mcp.query(DBMCP).filter(DBMCP.type == 'system', DBMCP.active == True).all()
         user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
+        
+        personal_mcps = []
         if user_db:
             session["access_token"] = create_access_token(data={"sub": user_db.username})
-            for mcp in system_mcps:
-                if mcp.active:
-                    if mcp.authentication_type=="lollms_chat_auth":
-                        servers_infos[mcp.name] = {
-                            "server_url": mcp.url,
-                            "auth_config": {
-                                "type": "bearer",
-                                "token": session.get("access_token") 
-                            }
-                        }
-                    elif mcp.authentication_type=="bearer":
-                        servers_infos[mcp.name] = {
-                            "server_url": mcp.url,
-                            "auth_config": {
-                                "type": "bearer",
-                                "token": mcp.authentication_key
-                            }
-                        }
-                    else:
-                        servers_infos[mcp.name] = {
-                            "server_url": mcp.url
-                        }
-                
-            for mcp in user_db.personal_mcps:
-                if mcp.active:
-                    if mcp.authentication_type=="lollms_chat_auth":
-                        servers_infos[mcp.name] = {
-                            "server_url": mcp.url,
-                            "auth_config": {
-                                "type": "bearer",
-                                "token": session.get("access_token") 
-                            }
-                        }
-                    elif mcp.authentication_type=="bearer":
-                        servers_infos[mcp.name] = {
-                            "server_url": mcp.url,
-                            "auth_config": {
-                                "type": "bearer",
-                                "token": mcp.authentication_key
-                            }
-                        }
-                    else:
-                        servers_infos[mcp.name] = {
-                            "server_url": mcp.url
-                        }
+            personal_mcps = [mcp for mcp in user_db.personal_mcps if mcp.active]
+
+        all_active_mcps = system_mcps + personal_mcps
+
+        for mcp in all_active_mcps:
+            mcp_base_url = mcp.url.rstrip('/')
+            # Ensure /mcp is present, but don't add it if it's already the suffix
+            if not mcp_base_url.endswith('/mcp'):
+                mcp_full_url = f"{mcp_base_url}/mcp"
+            else:
+                mcp_full_url = mcp_base_url
+            
+            server_info = {"server_url": mcp_full_url}
+            
+            if mcp.authentication_type == "lollms_chat_auth":
+                server_info["auth_config"] = {
+                    "type": "bearer",
+                    "token": session.get("access_token")
+                }
+            elif mcp.authentication_type == "bearer":
+                server_info["auth_config"] = {
+                    "type": "bearer",
+                    "token": mcp.authentication_key
+                }
+
+            servers_infos[mcp.name] = server_info
                 
     finally:
         db_for_mcp.close()

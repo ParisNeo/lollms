@@ -3,7 +3,7 @@ import HomeView from '../views/HomeView.vue';
 import ProfileView from '../views/ProfileView.vue';
 import SettingsView from '../views/SettingsView.vue';
 import MessagesView from '../views/MessagesView.vue';
-import HelpView from '../views/HelpView.vue'; // NEW IMPORT
+import HelpView from '../views/HelpView.vue';
 import ResetPasswordView from '../views/ResetPasswordView.vue';
 import AdminView from '../views/AdminView.vue';
 import DataStoresView from '../views/DataStoresView.vue';
@@ -52,10 +52,10 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/help', // NEW ROUTE
+    path: '/help',
     name: 'Help',
     component: HelpView,
-    props: (route) => ({ topic: route.query.topic, section: route.query.section }), // Pass query params as props
+    props: (route) => ({ topic: route.query.topic, section: route.query.section }),
     meta: { requiresAuth: true }
   },
   {

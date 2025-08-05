@@ -17,6 +17,7 @@ const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
 const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
 const HttpsSettings = defineAsyncComponent(() => import('./HttpsSettings.vue'));
 const AppsManagement = defineAsyncComponent(() => import('./AppsManagement.vue'));
+const McpsManagement = defineAsyncComponent(() => import('./McpsManagement.vue'));
 const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
 
 const tabs = [
@@ -26,6 +27,7 @@ const tabs = [
     { id: 'https', component: HttpsSettings },
     { id: 'bindings', component: BindingsSettings },
     { id: 'apps', component: AppsManagement },
+    { id: 'mcps', component: McpsManagement },
     { id: 'global_settings', component: GlobalSettings },
     { id: 'email', component: EmailSettings },
     { id: 'import', component: ImportTools }

@@ -125,6 +125,12 @@ class ZooAppInfo(BaseModel):
     class Config:
         populate_by_name = True
 
+class ZooAppInfoResponse(BaseModel):
+    items: List[ZooAppInfo]
+    total: int
+    page: int
+    pages: int
+
 class ZooMCPInfo(BaseModel):
     name: str
     repository: str
@@ -153,6 +159,12 @@ class ZooMCPInfo(BaseModel):
     
     class Config:
         populate_by_name = True
+
+class ZooMCPInfoResponse(BaseModel):
+    items: List[ZooMCPInfo]
+    total: int
+    page: int
+    pages: int
 
 
 class AppInstallRequest(BaseModel):

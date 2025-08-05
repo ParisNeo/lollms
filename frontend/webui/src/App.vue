@@ -47,6 +47,7 @@ import EnhancePersonalityPromptModal from './components/modals/EnhancePersonalit
 import ContextViewModal from './components/modals/ContextViewModal.vue';
 import DataZonePromptManagementModal from './components/modals/DataZonePromptManagementModal.vue';
 import FillPlaceholdersModal from './components/modals/FillPlaceholdersModal.vue';
+import ServiceRegistrationModal from './components/modals/ServiceRegistrationModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -151,6 +152,7 @@ onMounted(async () => {
     <ContextViewModal v-if="activeModal === 'contextViewer'" />
     <DataZonePromptManagementModal v-if="activeModal === 'dataZonePromptManagement'" />
     <FillPlaceholdersModal v-if="activeModal === 'fillPlaceholders'" />
+    <ServiceRegistrationModal v-if="activeModal === 'serviceRegistration'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

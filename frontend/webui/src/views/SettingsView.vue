@@ -8,15 +8,17 @@ import IconSettings from '../assets/icons/IconSettings.vue';
 import IconCog from '../assets/icons/IconCog.vue';
 import IconSparkles from '../assets/icons/IconSparkles.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
-import IconWrenchScrewdriver from '../assets/icons/IconWrenchScrewdriver.vue';
 import IconKey from '../assets/icons/IconKey.vue';
+import IconSquares2x2 from '../assets/icons/IconSquares2x2.vue';
+import IconMcp from '../assets/icons/IconMcp.vue';
 
 const AccountSettings = defineAsyncComponent(() => import('../components/settings/AccountSettings.vue'));
 const GeneralSettings = defineAsyncComponent(() => import('../components/settings/GeneralSettings.vue'));
 const LLMSettings = defineAsyncComponent(() => import('../components/settings/LLMSettings.vue'));
 const PersonalitiesSettings = defineAsyncComponent(() => import('../components/settings/PersonalitiesSettings.vue'));
 const RAGSettings = defineAsyncComponent(() => import('../components/settings/RAGSettings.vue'));
-const ServicesSettings = defineAsyncComponent(() => import('../components/settings/ServicesSettings.vue'));
+const AppsSettings = defineAsyncComponent(() => import('../components/settings/AppsSettings.vue'));
+const McpsSettings = defineAsyncComponent(() => import('../components/settings/McpsSettings.vue'));
 const ApiKeysSettings = defineAsyncComponent(() => import('../components/settings/ApiKeysSettings.vue'));
 
 const authStore = useAuthStore();
@@ -29,7 +31,8 @@ const tabs = [
     { id: 'llmConfig', label: 'LLM Config', icon: IconCog, component: LLMSettings },
     { id: 'personalities', label: 'Personalities', icon: IconSparkles, component: PersonalitiesSettings },
     { id: 'rag', label: 'RAG', minLevel: 1, icon: IconDatabase, component: RAGSettings },
-    { id: 'services', label: 'Services', minLevel: 3, icon: IconWrenchScrewdriver, component: ServicesSettings },
+    { id: 'apps', label: 'Apps', minLevel: 3, icon: IconSquares2x2, component: AppsSettings },
+    { id: 'mcps', label: 'MCPs', minLevel: 3, icon: IconMcp, component: McpsSettings },
     { id: 'apiKeys', label: 'API Keys', minLevel: 2, icon: IconKey, component: ApiKeysSettings }
 ];
 
