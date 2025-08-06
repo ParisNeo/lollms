@@ -98,10 +98,10 @@ Now, create a JSON object for the new prompt based on the user's request.
 
 def _install_prompt_task(task: Task, repo_name: str, folder_name: str):
     prompt_path = PROMPTS_ZOO_ROOT_PATH / repo_name / folder_name
-    config_path = prompt_path / "config.yaml"
+    config_path = prompt_path / "description.yaml"
     
     if not config_path.exists():
-        raise FileNotFoundError("config.yaml not found in prompt folder.")
+        raise FileNotFoundError("description.yaml not found in prompt folder.")
 
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
