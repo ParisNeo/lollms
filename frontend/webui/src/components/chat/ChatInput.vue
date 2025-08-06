@@ -456,13 +456,13 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
                 </div></div>
                 <input type="file" ref="imageInput" @change="handleImageSelection" multiple accept="image/*" class="hidden">
                 <div v-if="generationInProgress" class="flex flex-row items-center justify-between p-2 h-[60px]"><div class="flex items-center space-x-3"><IconAnimateSpin class="h-6 w-6 text-blue-500 animate-spin" /><p class="text-sm font-semibold text-gray-600 dark:text-gray-300">Working...</p></div><button @click="discussionsStore.stopGeneration" class="btn btn-danger !py-1 !px-3">Stop Generation</button></div>
-                <div v-else class="flex items-end gap-2">
+                <div v-else class="flex items-center gap-2">
                     <!-- Action Buttons -->
-                    <div class="flex items-center flex-shrink-0">
-                        <button @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary !p-2 disabled:opacity-50" title="Upload Images"><IconPhoto class="w-5 h-5"/></button>
-                        <div v-if="user.user_ui_level >= 3"><MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2" title="Select MCP Tools"><IconMcp class="w-5 h-5"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshMcps" :disabled="isRefreshingMcps" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingMcps}"/><span>{{ isRefreshingMcps ? 'Refreshing...' : 'Refresh Tools' }}</span></button></div></template></MultiSelectMenu></div>
-                        <div v-if="user.user_ui_level >= 1"><MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2" title="Select RAG Store"><IconDatabase class="w-5 h-5" /><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshRags" :disabled="isRefreshingRags" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingRags}"/><span>{{ isRefreshingRags ? 'Refreshing...' : 'Refresh Stores' }}</span></button></div></template></MultiSelectMenu></div>
-                        <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn btn-secondary !p-2">
+                    <div class="flex flex-shrink-0 gap-2">
+                        <button @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary chat-action-button disabled:opacity-50" title="Upload Images"><IconPhoto class="w-5 h-5"/></button>
+                        <div v-if="user.user_ui_level >= 3"><MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select MCP Tools"><IconMcp class="w-5 h-5"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshMcps" :disabled="isRefreshingMcps" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingMcps}"/><span>{{ isRefreshingMcps ? 'Refreshing...' : 'Refresh Tools' }}</span></button></div></template></MultiSelectMenu></div>
+                        <div v-if="user.user_ui_level >= 1"><MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select RAG Store"><IconDatabase class="w-5 h-5" /><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshRags" :disabled="isRefreshingRags" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingRags}"/><span>{{ isRefreshingRags ? 'Refreshing...' : 'Refresh Stores' }}</span></button></div></template></MultiSelectMenu></div>
+                        <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn btn-secondary chat-action-button">
                             <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
                                 <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
                                     <span class="truncate">{{ p.name }}</span>
@@ -506,7 +506,7 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
 
                     <!-- Send Button -->
                     <div class="flex-shrink-0">
-                        <button @click="handleSendMessage" :disabled="isSendDisabled" class="btn btn-primary !p-2" title="Send Message (Enter or Ctrl+Enter)"><IconSend class="w-5 h-5"/></button>
+                        <button @click="handleSendMessage" :disabled="isSendDisabled" class="btn btn-primary chat-action-button" title="Send Message (Enter or Ctrl+Enter)"><IconSend class="w-5 h-5"/></button>
                     </div>
                 </div>
             </div>
@@ -517,7 +517,7 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
 </template>
 
 <style>
-.simple-chat-input { @apply w-full flex-1 p-2 bg-transparent rounded-md border border-gray-300 dark:border-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm resize-none overflow-y-auto; min-height: 42px; }
+.simple-chat-input { @apply w-full flex-1 p-2 bg-transparent rounded-md border border-gray-300 dark:border-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm resize-none overflow-y-auto; height: 40px; }
 .cm-editor-container .cm-editor { border: 1px solid theme('colors.gray.300'); border-radius: theme('borderRadius.md'); padding-top: 0.5rem; padding-bottom: 0.5rem; font-size: theme('fontSize.sm'); outline: none; }
 .dark .cm-editor-container .cm-editor { border-color: theme('colors.gray.600'); }
 .cm-editor-container .cm-editor.cm-focused { border-color: theme('colors.blue.500'); box-shadow: 0 0 0 1px theme('colors.blue.500'); }
@@ -525,4 +525,5 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
 .progress-segment { @apply absolute top-0 h-full transition-all duration-300 ease-out opacity-80; }
 .category-header { @apply px-3 py-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 sticky top-0 bg-gray-50 dark:bg-gray-700 z-10; }
 .menu-item { @apply w-full text-left px-3 py-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center; }
+
 </style>

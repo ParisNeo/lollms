@@ -289,7 +289,12 @@ header, footer {
     .btn-success {
         @apply text-white bg-green-600 hover:bg-green-700 focus:ring-green-500 disabled:bg-green-400/50;
     }
-
+    .chat-action-button {
+    @apply h-5 w-5 flex items-center justify-center p-0 rounded-md;
+    }
+    .chat-action-button svg {
+    @apply w-5 h-5;
+    }
     .input-field {
         @apply block w-full px-3 py-2 border rounded-md shadow-sm sm:text-sm;
         @apply bg-gray-50 border-gray-300 placeholder-gray-400;
