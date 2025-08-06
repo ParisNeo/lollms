@@ -36,15 +36,24 @@ def create_saved_prompt(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # For user-created prompts, the author is always the user.
     new_prompt = DBSavedPrompt(
-        name=prompt_data.name,
-        content=prompt_data.content,
-        owner_user_id=current_user.id
+        **prompt_data.model_dump(),
+        owner_user_id=current_user.id,
+        author=current_user.username
     )
     db.add(new_prompt)
-    db.commit()
-    db.refresh(new_prompt)
-    return new_prompt
+    try:
+        db.commit()
+        db.refresh(new_prompt)
+        return new_prompt
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"A prompt with the name '{prompt_data.name}' already exists in your collection."
+        )
+
 
 @prompts_router.put("/{prompt_id}", response_model=PromptPublic)
 def update_saved_prompt(
@@ -58,12 +67,33 @@ def update_saved_prompt(
         raise HTTPException(status_code=404, detail="Prompt not found.")
     
     update_data = prompt_data.model_dump(exclude_unset=True)
+    
+    # Check for name conflict if name is being changed
+    if 'name' in update_data and update_data['name'] != prompt_to_update.name:
+        existing = db.query(DBSavedPrompt).filter(
+            DBSavedPrompt.id != prompt_id,
+            DBSavedPrompt.owner_user_id == current_user.id,
+            DBSavedPrompt.name == update_data['name']
+        ).first()
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail=f"A prompt with the name '{update_data['name']}' already exists in your collection."
+            )
+
     for key, value in update_data.items():
         setattr(prompt_to_update, key, value)
     
-    db.commit()
-    db.refresh(prompt_to_update)
-    return prompt_to_update
+    try:
+        db.commit()
+        db.refresh(prompt_to_update)
+        return prompt_to_update
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A prompt with that name already exists."
+        )
 
 @prompts_router.delete("/{prompt_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_saved_prompt(

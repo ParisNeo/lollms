@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
@@ -41,8 +42,9 @@ const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
+const router = useRouter();
 const { dataZonesTokensFromContext } = storeToRefs(discussionsStore);
-const { lollmsPrompts, userPrompts, systemPromptsByZooCategory } = storeToRefs(promptsStore);
+const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 
 const messageText = ref('');
 const uploadedImages = ref([]);
@@ -66,7 +68,8 @@ const startDragPos = ref({ x: 0, y: 0 });
 const startChatboxPos = ref({ x: 0, y: 0 });
 const currentChatboxPos = ref(null);
 
-const promptSearchTerm = ref('');
+const userPromptSearchTerm = ref('');
+const zooPromptSearchTerm = ref('');
 
 const user = computed(() => authStore.user);
 const generationInProgress = computed(() => discussionsStore.generationInProgress);
@@ -77,36 +80,43 @@ const contextStatus = computed(() => discussionsStore.activeDiscussionContextSta
 
 const filteredLollmsPrompts = computed(() => {
     if (!Array.isArray(lollmsPrompts.value)) return [];
-    if (!promptSearchTerm.value) return lollmsPrompts.value;
-    const term = promptSearchTerm.value.toLowerCase();
+    const term = userPromptSearchTerm.value.toLowerCase(); // Share search with user prompts for simplicity
+    if (!term) return lollmsPrompts.value;
     return lollmsPrompts.value.filter(p => p.name.toLowerCase().includes(term));
 });
 
-const filteredUserPrompts = computed(() => {
-    if (!Array.isArray(userPrompts.value)) return [];
-    if (!promptSearchTerm.value) return userPrompts.value;
-    const term = promptSearchTerm.value.toLowerCase();
-    return userPrompts.value.filter(p => p.name.toLowerCase().includes(term));
-});
-
-const filteredSystemPromptsByZooCategory = computed(() => {
-    const term = promptSearchTerm.value.toLowerCase();
-    if (!systemPromptsByZooCategory.value || typeof systemPromptsByZooCategory.value !== 'object') return {};
+const filteredUserPromptsByCategory = computed(() => {
+    const term = userPromptSearchTerm.value.toLowerCase();
+    const source = userPromptsByCategory.value;
+    if (!source || typeof source !== 'object') return {};
     
-    if (!term) return systemPromptsByZooCategory.value;
+    if (!term) return source;
     
     const filtered = {};
-    for (const category in systemPromptsByZooCategory.value) {
-        const filteredPrompts = systemPromptsByZooCategory.value[category].filter(p => p.name.toLowerCase().includes(term));
+    for (const category in source) {
+        const filteredPrompts = source[category].filter(p => p.name.toLowerCase().includes(term));
         if (filteredPrompts.length > 0) {
             filtered[category] = filteredPrompts;
         }
     }
-    const sortedFiltered = {};
-    Object.keys(filtered).sort().forEach(key => {
-        sortedFiltered[key] = filtered[key];
-    });
-    return sortedFiltered;
+    return filtered;
+});
+
+const filteredSystemPromptsByZooCategory = computed(() => {
+    const term = zooPromptSearchTerm.value.toLowerCase();
+    const source = systemPromptsByZooCategory.value;
+    if (!source || typeof source !== 'object') return {};
+    
+    if (!term) return source;
+    
+    const filtered = {};
+    for (const category in source) {
+        const filteredPrompts = source[category].filter(p => p.name.toLowerCase().includes(term));
+        if (filteredPrompts.length > 0) {
+            filtered[category] = filteredPrompts;
+        }
+    }
+    return filtered;
 });
 
 const isSendDisabled = computed(() => {
@@ -334,6 +344,10 @@ function handlePromptSelection(promptContent) {
     }
 }
 
+function manageMyPrompts() {
+    router.push({ path: '/settings', query: { tab: 'prompts' } });
+}
+
 async function handleSendMessage() {
     if (isSendDisabled.value) return;
     try {
@@ -414,7 +428,7 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
 <template>
   <div>
     <Transition enter-active-class="transition ease-out duration-300" enter-from-class="transform opacity-0 scale-50" enter-to-class="transform opacity-100 scale-100" leave-active-class="transition ease-in duration-200" leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-50">
-      <button v-if="isShrunk" @click="toggleShrink" class="fixed bottom-4 right-4 z-[60] p-3 bg-blue-500 dark:bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-600 dark:hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-400 dark:focus:ring-offset-gray-900" title="Expand Chat"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg></button>
+      <button v-if="isShrunk" @click="toggleShrink" class="fixed bottom-4 right-4 z-[60] p-3 bg-blue-500 dark:bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-600 dark:hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-400 dark:focus:ring-offset-gray-900" title="Expand Chat"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2-2h-5l-5 5v-5z" /></svg></button>
     </Transition>
 
     <Transition enter-active-class="transition ease-out duration-300" enter-from-class="transform opacity-0 scale-95 translate-y-4" enter-to-class="transform opacity-100 scale-100 translate-y-0" leave-active-class="transition ease-in duration-200" leave-from-class="transform opacity-100 scale-100 translate-y-0" leave-to-class="transform opacity-0 scale-95 translate-y-4">
@@ -468,15 +482,25 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
                                     <span class="truncate">{{ p.name }}</span>
                                 </button>
                             </DropdownSubmenu>
-                            <DropdownSubmenu v-if="filteredUserPrompts.length > 0" title="User" icon="user" collection="ui">
-                                <button v-for="p in filteredUserPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
-                                    <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
-                                    <span class="truncate">{{ p.name }}</span>
-                                </button>
-                            </DropdownSubmenu>
-                            <DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui">
+                            <DropdownSubmenu v-if="Object.keys(userPromptsByCategory).length > 0" title="User" icon="user" collection="ui">
                                 <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10">
-                                    <input type="text" v-model="promptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm">
+                                    <input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm">
+                                </div>
+                                <div class="max-h-60 overflow-y-auto">
+                                    <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category">
+                                        <h3 class="category-header">{{ category }}</h3>
+                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
+                                            <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
+                                            <IconTicket v-else class="h-5 w-5 mr-2 flex-shrink-0 text-gray-400" />
+                                            <span class="truncate">{{ p.name }}</span>
+                                        </button>
+                                    </div>
+                                     <div v-if="Object.keys(filteredUserPromptsByCategory).length === 0" class="px-3 py-2 text-sm text-gray-500 italic">No matching prompts.</div>
+                                </div>
+                            </DropdownSubmenu>
+                            <DropdownSubmenu v-if="Object.keys(systemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui">
+                                <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10">
+                                    <input type="text" v-model="zooPromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm">
                                 </div>
                                 <div class="max-h-60 overflow-y-auto">
                                     <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category">
@@ -486,8 +510,11 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
                                             <span class="truncate">{{ p.name }}</span>
                                         </button>
                                     </div>
+                                    <div v-if="Object.keys(filteredSystemPromptsByZooCategory).length === 0" class="px-3 py-2 text-sm text-gray-500 italic">No matching prompts.</div>
                                 </div>
                             </DropdownSubmenu>
+                            <div class="my-1 border-t dark:border-gray-600"></div>
+                            <button @click="manageMyPrompts" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
                         </DropdownMenu>
                     </div>
                     

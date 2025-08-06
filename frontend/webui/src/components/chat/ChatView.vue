@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { useRouter } from 'vue-router';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
@@ -44,6 +45,7 @@ const discussionsStore = useDiscussionsStore();
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
+const router = useRouter();
 const { on, off } = useEventBus();
 const { liveDataZoneTokens } = storeToRefs(discussionsStore);
 const { lollmsPrompts, userPrompts, systemPromptsByZooCategory } = storeToRefs(promptsStore);
@@ -300,7 +302,9 @@ function handleProcessContent() {
     if (!activeDiscussion.value) return; const finalPrompt = dataZonePromptText.value.replace('{{data_zone}}', discussionDataZone.value);
     discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, finalPrompt);
 }
-function openPromptLibrary() { if (!activeDiscussion.value) return; uiStore.openModal('dataZonePromptManagement'); }
+function openPromptLibrary() {
+    router.push({ path: '/settings', query: { tab: 'prompts' } });
+}
 function handlePromptSelection(promptContent) {
     if (/@<.*?>@/g.test(promptContent)) {
         uiStore.openModal('fillPlaceholders', { promptTemplate: promptContent, onConfirm: (filledPrompt) => { dataZonePromptText.value = filledPrompt; } });
@@ -408,11 +412,19 @@ async function handleDiscussionImageUpload(event) {
                                     <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
                                         <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button>
                                     </DropdownSubmenu>
-                                    <DropdownSubmenu v-if="filteredUserPrompts.length > 0" title="User" icon="user" collection="ui">
-                                        <button v-for="p in filteredUserPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
-                                            <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
-                                            <span class="truncate">{{ p.name }}</span>
-                                        </button>
+                                    <DropdownSubmenu v-if="Object.keys(promptsStore.userPromptsByCategory).length > 0" title="User" icon="user" collection="ui">
+                                        <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10">
+                                            <input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm">
+                                        </div>
+                                        <div class="max-h-60 overflow-y-auto">
+                                            <div v-for="(prompts, category) in promptsStore.userPromptsByCategory" :key="category">
+                                                <h3 class="category-header">{{ category }}</h3>
+                                                <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
+                                                    <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
+                                                    <span class="truncate">{{ p.name }}</span>
+                                                </button>
+                                            </div>
+                                        </div>
                                     </DropdownSubmenu>
                                     <DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui">
                                         <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10">

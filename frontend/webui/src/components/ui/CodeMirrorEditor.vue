@@ -1,5 +1,5 @@
 <template>
-    <div :class="['markdown-editor-container border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden', editorClass]">
+    <div :class="['markdown-editor-container  flex flex-col h-full border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden', editorClass]">
         <div :class="['toolbar bg-gray-100 dark:bg-gray-700 p-1 border-b border-gray-300 dark:border-gray-600', toolbarClass]">
             <div class="flex flex-nowrap overflow-x-auto items-center gap-1">
                 <ToolbarButton :title="getButtonTitle('bold')" @click="applyFormat('bold')" icon="bold" :button-class="toolbarButtonBaseClass" collection="ui"/>
@@ -91,7 +91,9 @@
                 </DropdownMenu>
             </div>
         </div>
-        <div ref="editorRef" class="editor-wrapper"></div>
+        <div class="editor-content flex-1 overflow-auto">
+        <div ref="editorRef" class="editor-wrapper h-full w-full"></div>
+        </div>
     </div>
 </template>
 

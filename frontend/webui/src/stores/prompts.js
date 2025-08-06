@@ -33,6 +33,28 @@ export const usePromptsStore = defineStore('prompts', () => {
         return sortedCategories;
     });
 
+    const userPromptsByCategory = computed(() => {
+        if (!Array.isArray(userPrompts.value)) return {};
+        const categories = {};
+        userPrompts.value.forEach(prompt => {
+            const category = prompt.category || 'Uncategorized';
+            if (!categories[category]) {
+                categories[category] = [];
+            }
+            categories[category].push(prompt);
+        });
+        // Sort prompts within each category
+        for (const category in categories) {
+            categories[category].sort((a, b) => a.name.localeCompare(b.name));
+        }
+        // Sort categories
+        const sortedCategories = {};
+        Object.keys(categories).sort().forEach(key => {
+            sortedCategories[key] = categories[key];
+        });
+        return sortedCategories;
+    });
+
     async function fetchPrompts() {
         isLoading.value = true;
         try {
@@ -55,9 +77,9 @@ export const usePromptsStore = defineStore('prompts', () => {
         }
     }
 
-    async function savePrompt(name, content) {
+    async function createPrompt(promptData) {
         try {
-            const response = await apiClient.post('/api/prompts', { name, content });
+            const response = await apiClient.post('/api/prompts', promptData);
             userPrompts.value.push(response.data);
             userPrompts.value.sort((a, b) => a.name.localeCompare(b.name));
             uiStore.addNotification('Prompt saved successfully!', 'success');
@@ -67,13 +89,12 @@ export const usePromptsStore = defineStore('prompts', () => {
         }
     }
 
-    async function updatePrompt(id, name, content) {
+    async function updatePrompt(id, promptData) {
         try {
-            const response = await apiClient.put(`/api/prompts/${id}`, { name, content });
+            const response = await apiClient.put(`/api/prompts/${id}`, promptData);
             const index = userPrompts.value.findIndex(p => p.id === id);
             if (index !== -1) {
                 userPrompts.value[index] = response.data;
-                userPrompts.value.sort((a, b) => a.name.localeCompare(b.name));
             }
             uiStore.addNotification('Prompt updated successfully!', 'success');
             return response.data;
@@ -152,8 +173,9 @@ export const usePromptsStore = defineStore('prompts', () => {
         lollmsPrompts,
         isLoading,
         systemPromptsByZooCategory,
+        userPromptsByCategory,
         fetchPrompts,
-        savePrompt,
+        createPrompt,
         updatePrompt,
         deletePrompt,
         sharePrompt,
