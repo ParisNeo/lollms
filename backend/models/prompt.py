@@ -35,3 +35,6 @@ class PromptsExport(BaseModel):
 
 class PromptsImport(BaseModel):
     prompts: List[PromptBase]
+
+class GeneratePromptRequest(BaseModel):
+    prompt: constr(min_length=10)

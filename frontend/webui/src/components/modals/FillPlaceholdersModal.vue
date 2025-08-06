@@ -1,134 +1,129 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, watch, computed } from 'vue';
 import { useUiStore } from '../../stores/ui';
+import placeholderParser from '../../services/placeholderParser';
 import GenericModal from '../ui/GenericModal.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue'; // Import the editor
 
 const uiStore = useUiStore();
-const props = computed(() => uiStore.modalData('fillPlaceholders'));
+const modalData = computed(() => uiStore.modalData('fillPlaceholders'));
 
 const placeholders = ref([]);
-const values = ref({});
-const templateWithoutDefs = ref('');
+const formValues = ref({});
 
-function parsePromptTemplate(template) {
-    const parsedPlaceholders = {};
-    
-    const defRegex = /@<(\w+?)>@([\s\S]*?)@<\/\1>@/g;
-    let remainingTemplate = template.replace(defRegex, (match, name, content) => {
-        const details = {
-            name: name,
-            title: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-            type: 'text',
-            options: null,
-            help: null,
-            value: ''
-        };
+watch(() => modalData.value?.promptTemplate, (newTemplate) => {
+    if (newTemplate) {
+        const parsed = placeholderParser.parse(newTemplate);
+        placeholders.value = parsed;
         
-        content.split('\n').forEach(line => {
-            const [key, ...valueParts] = line.split(':');
-            const value = valueParts.join(':').trim();
-            if (key && value) {
-                const keyTrimmed = key.trim();
-                if (keyTrimmed === 'title') details.title = value;
-                if (keyTrimmed === 'type' && ['str', 'text', 'int', 'float'].includes(value)) details.type = value;
-                if (keyTrimmed === 'options') details.options = value.split(',').map(s => s.trim());
-                if (keyTrimmed === 'help') details.help = value;
+        const initialValues = {};
+        parsed.forEach(p => {
+            if (p.type === 'bool') {
+                initialValues[p.name] = p.default === 'true';
+            } else {
+                initialValues[p.name] = p.default || '';
             }
         });
+        formValues.value = initialValues;
+    } else {
+        placeholders.value = [];
+        formValues.value = {};
+    }
+}, { immediate: true });
 
-        if (details.options && details.options.length > 0) {
-            details.value = details.options[0];
-        } else if (details.type === 'int' || details.type === 'float') {
-            details.value = 0;
-        }
+function handleSubmit() {
+    let filledTemplate = modalData.value.promptTemplate;
+    
+    // Process in reverse to handle nested placeholders correctly if they were ever a thing
+    [...placeholders.value].reverse().forEach(p => {
+        const value = formValues.value[p.name];
+        const complexRegex = new RegExp(`@<${p.name}>@[\\s\\S]*?@<\\/${p.name}>@`, 'g');
+        const simpleRegex = new RegExp(`@<${p.name}>@`, 'g');
         
-        parsedPlaceholders[name] = details;
-        return '';
+        filledTemplate = filledTemplate.replace(complexRegex, String(value));
+        filledTemplate = filledTemplate.replace(simpleRegex, String(value));
     });
 
-    const simpleRegex = /@<(\w+?)>@/g;
-    let match;
-    while ((match = simpleRegex.exec(remainingTemplate)) !== null) {
-        const name = match[1];
-        if (!parsedPlaceholders[name]) {
-            parsedPlaceholders[name] = {
-                name: name,
-                title: name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
-                type: 'text',
-                options: null,
-                help: null,
-                value: ''
-            };
-        }
+    if (modalData.value?.onConfirm) {
+        modalData.value.onConfirm(filledTemplate);
     }
-    
-    return {
-        placeholders: Object.values(parsedPlaceholders),
-        templateWithoutDefs: remainingTemplate.trim()
-    };
+    handleClose();
 }
 
-onMounted(() => {
-    if (props.value?.promptTemplate) {
-        const { placeholders: parsed, templateWithoutDefs: template } = parsePromptTemplate(props.value.promptTemplate);
-        placeholders.value = parsed;
-        templateWithoutDefs.value = template;
-        values.value = parsed.reduce((acc, p) => {
-            acc[p.name] = p.value;
-            return acc;
-        }, {});
-    }
-});
-
-function handleConfirm() {
-    let filledPrompt = templateWithoutDefs.value;
-    for (const placeholder of placeholders.value) {
-        const valueToInsert = values.value[placeholder.name] || '';
-        const regex = new RegExp(`@<${placeholder.name}>@`, 'g');
-        filledPrompt = filledPrompt.replace(regex, valueToInsert);
-    }
-    
-    if (props.value?.onConfirm) {
-        props.value.onConfirm(filledPrompt);
-    }
+function handleClose() {
     uiStore.closeModal('fillPlaceholders');
-}
-
-function getInputType(type) {
-    if (type === 'int') return 'number';
-    if (type === 'float') return 'number';
-    return 'text';
-}
-
-function getStepForNumber(type) {
-    return type === 'float' ? 'any' : '1';
 }
 </script>
 
 <template>
-    <GenericModal modalName="fillPlaceholders" title="Fill Prompt Placeholders">
-        <template #body>
-            <div v-if="placeholders.length > 0" class="space-y-4">
-                <div v-for="p in placeholders" :key="p.name">
-                    <label :for="`placeholder-${p.name}`" class="label">{{ p.title }}</label>
-                    <p v-if="p.help" class="text-xs text-gray-500 mb-1">{{ p.help }}</p>
-                    
-                    <select v-if="p.options" v-model="values[p.name]" :id="`placeholder-${p.name}`" class="input-field">
-                        <option v-for="option in p.options" :key="option" :value="option">{{ option }}</option>
-                    </select>
+  <GenericModal
+    modalName="fillPlaceholders"
+    title="Fill in Prompt Details"
+    maxWidthClass="max-w-2xl"
+    @close="handleClose"
+  >
+    <template #body>
+      <form v-if="placeholders.length > 0" @submit.prevent="handleSubmit" class="space-y-4">
+        <div v-for="placeholder in placeholders" :key="placeholder.name">
+          <label :for="`placeholder-${placeholder.name}`" class="block text-sm font-medium text-gray-700 dark:text-gray-300">
+            {{ placeholder.title }}
+          </label>
+          <p v-if="placeholder.help" class="text-xs text-gray-500 mb-1">{{ placeholder.help }}</p>
 
-                    <textarea v-else-if="p.type === 'text'" v-model="values[p.name]" :id="`placeholder-${p.name}`" rows="4" class="input-field"></textarea>
-                    
-                    <input v-else :type="getInputType(p.type)" :step="getStepForNumber(p.type)" v-model="values[p.name]" :id="`placeholder-${p.name}`" class="input-field">
-                </div>
-            </div>
-            <div v-else class="text-center text-gray-500">
-                <p>No placeholders were found in this prompt.</p>
-            </div>
-        </template>
-        <template #footer>
-            <button @click="uiStore.closeModal('fillPlaceholders')" class="btn btn-secondary">Cancel</button>
-            <button @click="handleConfirm" class="btn btn-primary">Confirm</button>
-        </template>
-    </GenericModal>
+          <!-- Dropdown Select -->
+          <select
+            v-if="placeholder.options && placeholder.options.length > 0"
+            :id="`placeholder-${placeholder.name}`"
+            v-model="formValues[placeholder.name]"
+            class="input-field mt-1"
+          >
+            <option v-for="option in placeholder.options" :key="option" :value="option">
+              {{ option }}
+            </option>
+          </select>
+
+          <!-- Checkbox for Boolean -->
+          <div v-else-if="placeholder.type === 'bool'" class="mt-2 flex items-center">
+            <input
+              :id="`placeholder-${placeholder.name}`"
+              type="checkbox"
+              v-model="formValues[placeholder.name]"
+              class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <label :for="`placeholder-${placeholder.name}`" class="ml-2 block text-sm text-gray-900 dark:text-gray-100">
+              Enable
+            </label>
+          </div>
+
+          <!-- CodeMirror Editor for 'text' type -->
+          <CodeMirrorEditor
+            v-else-if="placeholder.type === 'text'"
+            :id="`placeholder-${placeholder.name}`"
+            v-model="formValues[placeholder.name]"
+            class="mt-1 h-40"
+          />
+
+          <!-- Input for other types (str, int, float) -->
+          <input
+            v-else
+            :type="placeholder.type === 'int' || placeholder.type === 'float' ? 'number' : 'text'"
+            :id="`placeholder-${placeholder.name}`"
+            v-model="formValues[placeholder.name]"
+            class="input-field mt-1"
+          />
+        </div>
+      </form>
+      <div v-else class="text-center text-gray-500">
+        No placeholders were found in this prompt.
+      </div>
+    </template>
+    <template #footer>
+      <button @click="handleClose" type="button" class="btn btn-secondary">
+        Cancel
+      </button>
+      <button @click="handleSubmit" type="button" class="btn btn-primary">
+        Confirm
+      </button>
+    </template>
+  </GenericModal>
 </template>

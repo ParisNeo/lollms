@@ -121,6 +121,10 @@ class DiscussionSendRequest(BaseModel):
     discussion_id: str
     target_username: constr(min_length=3, max_length=50)
 
+class MessageCodeExportRequest(BaseModel):
+    content: str
+    discussion_title: Optional[str] = "discussion"
+
 class PaginatedDiscussionInfo(PaginatedResponse[DiscussionInfo]):
     pass
 

@@ -48,6 +48,8 @@ export const useTasksStore = defineStore('tasks', () => {
             const dataStore = useDataStore();
             const { useAdminStore } = await import('./admin');
             const adminStore = useAdminStore();
+            const { usePromptsStore } = await import('./prompts');
+            const promptsStore = usePromptsStore();
 
 
             // Check for newly completed tasks and emit an event
@@ -67,6 +69,10 @@ export const useTasksStore = defineStore('tasks', () => {
                         adminStore.fetchZooApps();
                         adminStore.fetchZooMcps();
                         dataStore.triggerMcpReload();
+                    }
+                    if (newTask.name && (newTask.name.startsWith('Generate Prompt:') || newTask.name.startsWith('Installing prompt:'))) {
+                        console.log("Prompt task completed, refreshing prompts...");
+                        promptsStore.fetchPrompts();
                     }
                 }
 

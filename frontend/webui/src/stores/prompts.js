@@ -2,9 +2,11 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
+import { useTasksStore } from './tasks';
 
 export const usePromptsStore = defineStore('prompts', () => {
     const uiStore = useUiStore();
+    const tasksStore = useTasksStore();
 
     const userPrompts = ref([]);
     const systemPrompts = ref([]);
@@ -113,6 +115,17 @@ export const usePromptsStore = defineStore('prompts', () => {
         }
     }
 
+    async function generatePrompt(prompt) {
+        try {
+            const response = await apiClient.post('/api/prompts/generate-with-ai', { prompt });
+            tasksStore.addTask(response.data);
+            uiStore.addNotification(`Task '${response.data.name}' started.`, 'info');
+            return response.data;
+        } catch (error) {
+            throw error;
+        }
+    }
+
     async function sharePrompt(prompt_content, target_username) {
         try {
             const response = await apiClient.post('/api/prompts/share', { prompt_content, target_username });
@@ -178,6 +191,7 @@ export const usePromptsStore = defineStore('prompts', () => {
         createPrompt,
         updatePrompt,
         deletePrompt,
+        generatePrompt,
         sharePrompt,
         exportPrompts,
         importPrompts,

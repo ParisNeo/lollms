@@ -210,6 +210,13 @@ export const useAdminStore = defineStore('admin', () => {
     async function createSystemPrompt(promptData) { await apiClient.post('/api/prompts_zoo/installed', promptData); uiStore.addNotification('System prompt created.', 'success'); await promptsStore.fetchPrompts(); }
     async function updateSystemPrompt(promptId, promptData) { await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); uiStore.addNotification('System prompt updated.', 'success'); await promptsStore.fetchPrompts(); }
     async function deleteSystemPrompt(promptId) { await apiClient.delete(`/api/prompts_zoo/installed/${promptId}`); uiStore.addNotification('System prompt deleted.', 'success'); await promptsStore.fetchPrompts(); }
+    async function generateSystemPrompt(prompt) {
+        const res = await apiClient.post('/api/prompts_zoo/generate_from_prompt', { prompt });
+        tasksStore.addTask(res.data);
+        uiStore.addNotification(`Task '${res.data.name}' started.`, 'info');
+        return res.data;
+    }
+
 
     // --- Installed Apps ---
     async function fetchInstalledApps() { isLoadingInstalledApps.value = true; try { const res = await apiClient.get('/api/apps_zoo/installed'); installedApps.value = res.data; } finally { isLoadingInstalledApps.value = false; } }
@@ -241,6 +248,6 @@ export const useAdminStore = defineStore('admin', () => {
         systemStatus, isLoadingSystemStatus, fetchSystemStatus,
         fetchAppConfigSchema, fetchAppConfig, updateAppConfig,
         installZooApp, fetchAppReadme,
-        createSystemPrompt, updateSystemPrompt, deleteSystemPrompt
+        createSystemPrompt, updateSystemPrompt, deleteSystemPrompt, generateSystemPrompt
     };
 });

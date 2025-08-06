@@ -1,21 +1,24 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../stores/admin';
 import { useTasksStore } from '../../stores/tasks';
 import { useUiStore } from '../../stores/ui';
 import { usePromptsStore } from '../../stores/prompts';
+import useEventBus from '../../services/eventBus';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import AppCard from '../ui/AppCard.vue';
 import AppCardSkeleton from '../ui/AppCardSkeleton.vue';
 import GenericModal from '../ui/GenericModal.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
 const adminStore = useAdminStore();
 const tasksStore = useTasksStore();
 const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
+const { on, off } = useEventBus();
 
 const { promptZooRepositories, isLoadingPromptZooRepositories, zooPrompts, isLoadingZooPrompts } = storeToRefs(adminStore);
 const { systemPrompts: installedPrompts, isLoading: isLoadingInstalled } = storeToRefs(promptsStore);
@@ -36,6 +39,7 @@ const starredItems = ref(JSON.parse(localStorage.getItem('starredPrompts') || '[
 const currentPage = ref(1);
 const pageSize = ref(24);
 let debounceTimer = null;
+const pendingGenerationTaskId = ref(null);
 
 const sortOptions = [
     { value: 'last_update_date', label: 'Last Updated' }, { value: 'creation_date', label: 'Creation Date' },
@@ -70,6 +74,11 @@ onMounted(() => {
     promptsStore.fetchPrompts();
     adminStore.fetchPromptZooRepositories();
     fetchZooItems();
+    on('task:completed', handleTaskCompletion);
+});
+
+onUnmounted(() => {
+    off('task:completed', handleTaskCompletion);
 });
 
 const itemsWithTaskStatus = computed(() => {
@@ -106,6 +115,32 @@ function handleStarToggle(itemName) { const i = starredItems.value.indexOf(itemN
 
 const currentPrompt = ref(null);
 function handleAddPrompt() { currentPrompt.value = { name: '', content: '', category: '', author: '', description: '', icon: null }; uiStore.openModal('editSystemPrompt'); }
+
+function handleGeneratePrompt() {
+    uiStore.openModal('generatePrompt', { 
+        isSystemPrompt: true,
+        onTaskSubmitted: (taskId) => {
+            pendingGenerationTaskId.value = taskId;
+        }
+    });
+}
+
+function handleTaskCompletion(task) {
+    if (task && task.id === pendingGenerationTaskId.value) {
+        pendingGenerationTaskId.value = null;
+        
+        if (uiStore.isModalOpen('tasksManager')) {
+            uiStore.closeModal('tasksManager');
+        }
+
+        if (task.status === 'completed' && task.result) {
+            handleEditPrompt(task.result);
+        } else {
+            uiStore.addNotification('System prompt generation did not complete successfully.', 'warning');
+        }
+    }
+}
+
 function handleEditPrompt(prompt) { currentPrompt.value = { ...prompt }; uiStore.openModal('editSystemPrompt'); }
 async function handleSavePrompt() {
     if (!currentPrompt.value) return;
@@ -143,7 +178,16 @@ async function handleDeletePrompt(prompt) {
         </div>
 
         <section v-if="activeSubTab === 'installed'">
-            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Installed System Prompts</h3><button @click="handleAddPrompt" class="btn btn-primary">Add Prompt</button></div>
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold">Installed System Prompts</h3>
+                <div class="flex items-center gap-2">
+                    <button @click="handleGeneratePrompt" class="btn btn-secondary">
+                        <IconSparkles class="w-4 h-4 mr-2" />
+                        Generate with AI
+                    </button>
+                    <button @click="handleAddPrompt" class="btn btn-primary">Add Prompt</button>
+                </div>
+            </div>
             <div v-if="isLoadingInstalled" class="text-center p-4">Loading...</div>
             <div v-else-if="!installedPrompts || installedPrompts.length === 0" class="empty-state-card"><p>No system prompts installed.</p></div>
             <div v-else class="space-y-3">
@@ -182,7 +226,7 @@ async function handleDeletePrompt(prompt) {
         </section>
     </div>
 
-    <GenericModal :modalName="'editSystemPrompt'" :title="currentPrompt && currentPrompt.id ? 'Edit System Prompt' : 'Add System Prompt'" @close="uiStore.closeModal('editSystemPrompt')">
+    <GenericModal :modalName="'editSystemPrompt'" :title="currentPrompt && currentPrompt.id ? 'Edit System Prompt' : 'Add System Prompt'">
         <template #body>
             <form v-if="currentPrompt" @submit.prevent="handleSavePrompt" class="space-y-4">
                 <div><label for="prompt-name" class="block text-sm font-medium">Name</label><input id="prompt-name" v-model="currentPrompt.name" type="text" class="input-field mt-1" required></div>

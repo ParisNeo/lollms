@@ -34,6 +34,7 @@ import IconStepEnd from '../../assets/icons/IconStepEnd.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconCode from '../../assets/icons/IconCode.vue';
 
 const props = defineProps({
   message: {
@@ -203,6 +204,10 @@ const isAi = computed(() => props.message.sender_type === 'assistant');
 const isSystem = computed(() => props.message.sender_type === 'system');
 const isNewManualMessage = computed(() => props.message.id.startsWith('temp-manual-'));
 
+const containsCode = computed(() => {
+    return props.message.content && props.message.content.includes('```');
+});
+
 const senderName = computed(() => {
     if (isUser.value) return authStore.user?.username || 'You';
     if (isAi.value) return props.message.sender || 'Assistant';
@@ -351,6 +356,13 @@ function handleEditorReady(payload) { codeMirrorView.value = payload.view; }
 function copyContent() { uiStore.copyToClipboard(props.message.content); }
 async function handleDelete() { const confirmed = await uiStore.showConfirmation({ title: 'Delete Message', message: 'This will delete the message and its entire branch.', confirmText: 'Delete' }); if (confirmed) discussionsStore.deleteMessage({ messageId: props.message.id}); }
 function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.message.id, change }); }
+
+function handleExportCode() {
+    discussionsStore.exportMessageCodeToZip({
+        content: props.message.content,
+        title: discussionsStore.activeDiscussion?.title || 'discussion'
+    });
+}
 
 function handleBranchOrRegenerate() {
     let messageToBranchFrom = props.message.sender_type === 'user' ? props.message : null;
@@ -517,6 +529,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                     </div>
                     <div v-if="!isEditing" class="flex-shrink-0 flex items-center gap-1">
                         <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button v-if="containsCode" :disabled="areActionsDisabled" @click="handleExportCode" title="Export Code" class="action-btn"><IconCode class="w-4 h-4" /></button>
                             <button :disabled="areActionsDisabled" @click="copyContent" title="Copy" class="action-btn"><IconCopy /></button>
                             <button :disabled="areActionsDisabled" @click="toggleEdit" title="Edit" class="action-btn"><IconPencil /></button>
                             <button :disabled="areActionsDisabled" @click="handleBranchOrRegenerate" :title="isUser ? 'Resend / Branch' : 'Regenerate'" class="action-btn"><IconRefresh /></button>

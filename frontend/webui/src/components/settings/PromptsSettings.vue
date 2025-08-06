@@ -1,7 +1,8 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { usePromptsStore } from '../../stores/prompts';
 import { useUiStore } from '../../stores/ui';
+import useEventBus from '../../services/eventBus';
 import GenericModal from '../ui/GenericModal.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
@@ -9,17 +10,25 @@ import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconTicket from '../../assets/icons/IconTicket.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
 const promptsStore = usePromptsStore();
 const uiStore = useUiStore();
+const { on, off } = useEventBus();
 
 const currentPrompt = ref(null);
 const fileInput = ref(null);
 const isEditMode = computed(() => currentPrompt.value && currentPrompt.value.id);
 const openedCategories = ref({});
+const pendingGenerationTaskId = ref(null);
 
 onMounted(() => {
     promptsStore.fetchPrompts();
+    on('task:completed', handleTaskCompletion);
+});
+
+onUnmounted(() => {
+    off('task:completed', handleTaskCompletion);
 });
 
 const userPromptsByCategory = computed(() => promptsStore.userPromptsByCategory);
@@ -38,6 +47,30 @@ function handleAddPrompt() {
         icon: null
     };
     uiStore.openModal('promptEditor');
+}
+
+function handleGeneratePrompt() {
+    uiStore.openModal('generatePrompt', {
+        onTaskSubmitted: (taskId) => {
+            pendingGenerationTaskId.value = taskId;
+        }
+    });
+}
+
+function handleTaskCompletion(task) {
+    if (task && task.id === pendingGenerationTaskId.value) {
+        pendingGenerationTaskId.value = null;
+        
+        if (uiStore.isModalOpen('tasksManager')) {
+            uiStore.closeModal('tasksManager');
+        }
+
+        if (task.status === 'completed' && task.result) {
+            handleEditPrompt(task.result);
+        } else {
+            uiStore.addNotification('Prompt generation did not complete successfully.', 'warning');
+        }
+    }
 }
 
 function handleEditPrompt(prompt) {
@@ -104,7 +137,13 @@ function removeIcon() {
                 <h2 class="text-xl font-bold">My Prompts</h2>
                 <p class="text-sm text-gray-500">Manage your personal library of reusable prompts.</p>
             </div>
-            <button @click="handleAddPrompt" class="btn btn-primary">Add New Prompt</button>
+            <div class="flex items-center gap-2">
+                <button @click="handleGeneratePrompt" class="btn btn-secondary">
+                    <IconSparkles class="w-4 h-4 mr-2" />
+                    Generate with AI
+                </button>
+                <button @click="handleAddPrompt" class="btn btn-primary">Add New Prompt</button>
+            </div>
         </div>
 
         <div v-if="promptsStore.isLoading" class="text-center p-4">Loading prompts...</div>
@@ -181,8 +220,9 @@ function removeIcon() {
                             <p>For advanced options with a user-friendly form:</p>
                             <pre class="whitespace-pre-wrap font-mono text-xs bg-blue-100 dark:bg-blue-900/40 p-2 rounded">@&lt;name&gt;@
 title: Display Title
-type: str | int | float | bool
+type: str | text | int | float | bool
 options: comma, separated, list
+default: default value used if the user doesn't set it
 help: A helpful tip for the user.
 @&lt;/name&gt;@</pre>
                         </div>

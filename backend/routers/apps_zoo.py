@@ -6,6 +6,7 @@ from pathlib import Path
 from packaging import version as packaging_version
 from typing import Dict, Any, List, Optional
 import datetime
+import signal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import PlainTextResponse
@@ -206,11 +207,34 @@ def stop_app(app_id: str, db: Session = Depends(get_db)):
 @apps_zoo_router.put("/installed/{app_id}", response_model=AppPublic)
 def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depends(get_db)):
     app = db.query(DBApp).filter(DBApp.id == app_id).first()
-    if not app: raise HTTPException(404)
-    # (Update logic omitted for brevity)
-    db.commit()
-    db.refresh(app)
-    return app
+    if not app:
+        raise HTTPException(status_code=404, detail="App not found.")
+
+    update_data = app_update.model_dump(exclude_unset=True)
+    
+    for key, value in update_data.items():
+        setattr(app, key, value)
+    
+    try:
+        db.commit()
+        db.refresh(app, attribute_names=['owner'])
+        
+        zoo_meta = get_all_zoo_metadata()
+        app_public = AppPublic.from_orm(app)
+        app_public.item_type = (app.app_metadata or {}).get('item_type', 'app')
+        app_public.has_config_schema = (get_installed_app_path(db, app.id) / 'schema.config.json').is_file()
+        zoo_info = zoo_meta.get(app.name)
+        if zoo_info and app.version and zoo_info.get('version'):
+            try:
+                if packaging_version.parse(str(zoo_info['version'])) > packaging_version.parse(str(app.version)):
+                    app_public.update_available = True
+            except Exception:
+                pass
+        
+        return app_public
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error during app update: {str(e)}")
 
 @apps_zoo_router.get("/installed/{app_id}/logs", response_model=AppLog)
 def get_app_logs(app_id: str, db: Session = Depends(get_db)):

@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/discussions.js
 import { defineStore } from 'pinia';
 import { ref, computed, onMounted } from 'vue';
 import apiClient from '../services/api';
@@ -82,6 +83,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     });
     const activeDiscussion = computed(() => currentDiscussionId.value ? discussions.value[currentDiscussionId.value] : null);
     const activeMessages = computed(() => messages.value);
+
+    const activeDiscussionContainsCode = computed(() => {
+        if (!activeMessages.value || activeMessages.value.length === 0) return false;
+        return activeMessages.value.some(msg => msg.content && msg.content.includes('```'));
+    });
 
     const activePersonality = computed(() => {
         const authStore = useAuthStore();
@@ -819,6 +825,98 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch (error) { console.error("Export failed:", error); }
     }
 
+    async function exportCodeToZip(discussionId) {
+        if (!discussionId) return;
+        const uiStore = useUiStore();
+        uiStore.addNotification('Preparing code export...', 'info');
+        try {
+            const response = await apiClient.get(`/api/discussions/${discussionId}/export-code`, {
+                responseType: 'blob'
+            });
+            const blob = new Blob([response.data], { type: 'application/zip' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            
+            let filename = `code_export_${discussionId.substring(0, 8)}.zip`;
+            const contentDisposition = response.headers['content-disposition'];
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                if (filenameMatch && filenameMatch.length === 2) {
+                    filename = filenameMatch[1];
+                }
+            }
+            
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+        } catch (error) {
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const errorJson = JSON.parse(reader.result);
+                    uiStore.addNotification(errorJson.detail || 'Failed to export code.', 'error');
+                } catch {
+                    uiStore.addNotification('An unknown error occurred during code export.', 'error');
+                }
+            };
+            reader.readAsText(error.response.data);
+            console.error("Code export failed:", error);
+        }
+    }
+
+    async function exportMessageCodeToZip({ content, title }) {
+        if (!content || !content.includes('```')) {
+            uiStore.addNotification('No code blocks found in this message.', 'info');
+            return;
+        }
+        uiStore.addNotification('Preparing code export...', 'info');
+        try {
+            const response = await apiClient.post('/api/discussions/export-message-code', {
+                content: content,
+                discussion_title: title,
+            }, {
+                responseType: 'blob'
+            });
+
+            const blob = new Blob([response.data], { type: 'application/zip' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            
+            let filename = `code_export_${title.replace(/\s/g, '_')}.zip`;
+            const contentDisposition = response.headers['content-disposition'];
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                if (filenameMatch && filenameMatch.length === 2) {
+                    filename = filenameMatch[1];
+                }
+            }
+            
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+
+        } catch (error) {
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const errorJson = JSON.parse(reader.result);
+                    uiStore.addNotification(errorJson.detail || 'Failed to export code from message.', 'error');
+                } catch {
+                    uiStore.addNotification('An unknown error occurred during code export.', 'error');
+                }
+            };
+            reader.readAsText(error.response.data);
+            console.error("Code export from message failed:", error);
+        }
+    }
+
     async function importDiscussions({ file, discussionIdsToImport }) {
         const uiStore = useUiStore();
         uiStore.addNotification('Importing discussions...', 'info');
@@ -896,7 +994,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     return {
         discussions, currentDiscussionId, messages, generationInProgress,
-        titleGenerationInProgressId, activeDiscussion, activeMessages,
+        titleGenerationInProgressId, activeDiscussion, activeMessages, activeDiscussionContainsCode,
         activeDiscussionContextStatus, activePersonality, activeAiTasks,
         sortedDiscussions, dataZonesTokenCount, liveDataZoneTokens, 
         dataZonesTokensFromContext, // EXPORT NEW COMPUTED
@@ -904,8 +1002,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         deleteDiscussion, pruneDiscussions, generateAutoTitle, toggleStarDiscussion,
         updateDiscussionRagStore, renameDiscussion, updateDiscussionMcps,
         sendMessage, stopGeneration, saveMessageChanges, gradeMessage,
-        deleteMessage, initiateBranch, switchBranch, exportDiscussions,
-        importDiscussions, sendDiscussion, $reset, fetchContextStatus,
+        deleteMessage, initiateBranch, switchBranch, exportDiscussions, importDiscussions,
+        exportCodeToZip, exportMessageCodeToZip, sendDiscussion, $reset, fetchContextStatus,
         fetchDataZones, updateDataZone,
         summarizeDiscussionDataZone, memorizeLTM,
         updateLiveTokenCount,

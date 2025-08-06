@@ -1,3 +1,4 @@
+# backend/routers/prompts.py
 from typing import List, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -7,15 +8,137 @@ from backend.db import get_db
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.dm import DirectMessage as DBDirectMessage
 from backend.db.models.user import User as DBUser
-from backend.models import UserAuthDetails, PromptCreate, PromptPublic, PromptUpdate, PromptShareRequest, PromptsExport, PromptsImport
-from backend.session import get_current_active_user
+from backend.db.models.db_task import DBTask
+from backend.models import UserAuthDetails, PromptCreate, PromptPublic, PromptUpdate, PromptShareRequest, PromptsExport, PromptsImport, GeneratePromptRequest, TaskInfo
+from backend.session import get_current_active_user, get_user_lollms_client
 from backend.ws_manager import manager
+from backend.task_manager import task_manager, Task
+from backend.settings import settings
 
 prompts_router = APIRouter(
     prefix="/api/prompts",
     tags=["Prompts"],
     dependencies=[Depends(get_current_active_user)]
 )
+
+def _to_task_info(db_task: DBTask) -> TaskInfo:
+    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
+    if not db_task:
+        return None
+    return TaskInfo(
+        id=db_task.id, name=db_task.name, description=db_task.description,
+        status=db_task.status, progress=db_task.progress,
+        logs=[log for log in (db_task.logs or [])], result=db_task.result, error=db_task.error,
+        created_at=db_task.created_at, started_at=db_task.started_at, completed_at=db_task.completed_at,
+        file_name=db_task.file_name, total_files=db_task.total_files,
+        owner_username=db_task.owner.username if db_task.owner else "System"
+    )
+
+def _generate_prompt_task(task: Task, username: str, user_prompt: str):
+    task.log("Starting prompt generation...")
+    task.set_progress(10)
+    
+    with task.db_session_factory() as db:
+        lc = get_user_lollms_client(username)
+        current_user = db.query(DBUser).filter(DBUser.username == username).first()
+        if not current_user:
+            raise Exception("User not found for prompt generation task.")
+
+        prompt_schema = {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "A short, descriptive name for the prompt."},
+                "category": {"type": "string", "description": "A category for the prompt (e.g., 'Writing', 'Coding')."},
+                "description": {"type": "string", "description": "A brief description of what the prompt does."},
+                "content": {"type": "string", "description": "The full content of the prompt itself, including placeholders if needed."},
+                "icon": {"type": "string", "description": "Optional: a base64 encoded icon for the prompt. Can be empty."}
+            },
+            "required": ["name", "content"],
+            "description": "JSON object defining a LoLLMs saved prompt."
+        }
+        
+        system_prompt = """You are an expert prompt designer. Create a new prompt based on the user's request. The author will be set automatically.
+When creating the prompt content, you can use LoLLMs placeholders to make it interactive. Here's how they work:
+
+1.  **Simple Placeholder**: For a basic text input field, use `@<placeholder_name>@`.
+    Example: `Summarize the following text: @<text_to_summarize>@`
+
+2.  **Advanced Placeholder**: For more control, you can define a form with fields like title, type, options, default value, and help text. Use the following block format:
+    ```
+    @<name>@
+    title: The title displayed to the user
+    type: str | text | int | float | bool
+    options: option1, option2, option3
+    default: A default value
+    help: A helpful tip for the user.
+    @</name>@
+    ```
+    - `title`: The label for the input field.
+    - `type`: Can be `str` (single-line text), `text` (multi-line text area), `int` (integer), `float` (number with decimals), or `bool` (checkbox).
+    - `options`: (Optional) A comma-separated list of choices for a dropdown menu.
+    - `default`: (Optional) The pre-filled value for the field.
+    - `help`: (Optional) A tooltip to guide the user.
+
+Example of an advanced placeholder in a prompt:
+```
+Translate the following text to @<language>@.
+
+@<language>@
+title: Target Language
+type: str
+options: English, French, Spanish, German
+default: French
+help: Select the language you want to translate the text into.
+@</language>@
+```"""
+        
+        task.log("Sending request to LLM for structured prompt generation...")
+        task.set_progress(30)
+        
+        generated_data = lc.generate_structured_content(
+            user_prompt,
+            system_prompt=system_prompt,
+            schema=prompt_schema,
+            n_predict=settings.get("default_llm_ctx_size", 4096)
+        )
+
+        task.log("Creating new prompt in the database...")
+        task.set_progress(90)
+        
+        if db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id == current_user.id, DBSavedPrompt.name == generated_data.get("name")).first():
+            task.log(f"Prompt '{generated_data.get('name')}' already exists. Appending UUID.", "WARNING")
+            generated_data["name"] = f"{generated_data.get('name')} {task.id.split('-')[0]}"
+
+        new_prompt = DBSavedPrompt(
+            **generated_data,
+            author=current_user.username,
+            owner_user_id=current_user.id
+        )
+        db.add(new_prompt)
+        db.commit()
+        db.refresh(new_prompt)
+
+        task.log("Prompt created successfully.")
+        task.set_progress(100)
+        
+        return PromptPublic.from_orm(new_prompt).model_dump(mode='json')
+
+@prompts_router.post("/generate-with-ai", response_model=TaskInfo, status_code=202)
+async def generate_prompt_from_prompt(
+    payload: GeneratePromptRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Triggers a background task to generate a new user-owned prompt using AI.
+    """
+    db_task = task_manager.submit_task(
+        name=f"Generate Prompt: {payload.prompt[:30]}...",
+        target=_generate_prompt_task,
+        args=(current_user.username, payload.prompt),
+        description=f"Generating a new prompt based on the request: '{payload.prompt[:100]}...'",
+        owner_username=current_user.username
+    )
+    return _to_task_info(db_task)
 
 @prompts_router.get("", response_model=Dict[str, List[PromptPublic]])
 def get_prompts(

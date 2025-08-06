@@ -17,6 +17,9 @@ from functools import partial
 from ascii_colors import trace_exception
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import PlainTextResponse
+import zipfile
+import io
+import re
 # Third-Party Imports
 from fastapi import (
     HTTPException, Depends, Form, File, UploadFile,
@@ -48,7 +51,8 @@ from backend.models import (
     DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,
     MessageGradeUpdate, DiscussionBranchSwitchRequest, DiscussionSendRequest,
     DiscussionExportRequest, ExportData, DiscussionImportRequest, ContextStatusResponse,
-    DiscussionDataZoneUpdate, DataZones, TaskInfo, ManualMessageCreate, MessageUpdateWithImages
+    DiscussionDataZoneUpdate, DataZones, TaskInfo, ManualMessageCreate, MessageUpdateWithImages,
+    MessageCodeExportRequest
 )
 from backend.session import (
     get_current_active_user, get_user_lollms_client,
@@ -305,6 +309,176 @@ async def create_new_discussion(current_user: UserAuthDetails = Depends(get_curr
         created_at=discussion_obj.created_at,
         last_activity_at=discussion_obj.updated_at
     )
+
+@discussion_router.get("/{discussion_id}/export-code", response_class=StreamingResponse)
+async def export_discussion_code(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Exports all code blocks from a discussion into a single ZIP file.
+    """
+    username = current_user.username
+    discussion_obj = get_user_discussion(username, discussion_id)
+    if not discussion_obj:
+        raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
+
+    code_files = []
+    code_block_counter = 1
+    
+    code_block_pattern = re.compile(r"```(\w*)\n([\s\S]*?)\n```")
+    filename_pattern = re.compile(
+        r"^(?:----?\s*)?(?:\[(?:CREATE|UPDATE)\]\s*)?([a-zA-Z0-9_./\\-]+?\.\w+)(?:\s*----?)?$",
+        re.MULTILINE
+    )
+    lang_ext_map = {
+        'python': 'py', 'javascript': 'js', 'typescript': 'ts', 'html': 'html',
+        'css': 'css', 'json': 'json', 'xml': 'xml', 'sql': 'sql', 'bash': 'sh',
+        'shell': 'sh', 'text': 'txt', 'markdown': 'md', 'java': 'java',
+        'c++': 'cpp', 'cpp': 'cpp', 'c': 'c', 'csharp': 'cs', 'go': 'go',
+        'rust': 'rs', 'php': 'php', 'ruby': 'rb', 'swift': 'swift',
+        'kotlin': 'kt', 'yaml': 'yaml', 'yml': 'yaml'
+    }
+
+    all_messages_orm = discussion_obj.db_manager.get_all_messages(discussion_id)
+    if not all_messages_orm:
+        raise HTTPException(status_code=404, detail="No messages in discussion to export from.")
+
+    for msg in all_messages_orm:
+        if not msg.content or '```' not in msg.content:
+            continue
+        
+        parts = code_block_pattern.split(msg.content)
+        if len(parts) < 3:
+            continue
+
+        preceding_texts = parts[0::3]
+        languages = parts[1::3]
+        codes = parts[2::3]
+
+        for i in range(len(codes)):
+            preceding_text = preceding_texts[i]
+            lang = languages[i].lower()
+            code_content = codes[i]
+            filename = ""
+
+            lines_before = preceding_text.strip().split('\n')
+            if lines_before:
+                for line in reversed(lines_before[-5:]):
+                    match = filename_pattern.match(line.strip())
+                    if match:
+                        filename = match.group(1)
+                        break
+            
+            if filename:
+                if ".." in filename or Path(filename).is_absolute():
+                    filename = ""
+                else:
+                    filename = filename.replace("\\", "/")
+
+            if not filename:
+                ext = lang_ext_map.get(lang, 'txt')
+                filename = f"script_{code_block_counter}.{ext}"
+                code_block_counter += 1
+            
+            code_files.append((filename, code_content))
+
+    if not code_files:
+        raise HTTPException(status_code=404, detail="No valid code blocks found to export.")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for filepath, content in code_files:
+            zf.writestr(filepath, content)
+    
+    zip_buffer.seek(0)
+    
+    safe_title = re.sub(r'[^a-zA-Z0-9_-]', '', discussion_obj.metadata.get('title', 'discussion').replace(' ', '_'))
+    zip_filename = f"code_export_{safe_title}_{discussion_id[:8]}.zip"
+    
+    headers = {'Content-Disposition': f'attachment; filename="{zip_filename}"'}
+    return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
+
+@discussion_router.post("/export-message-code", response_class=StreamingResponse)
+async def export_message_code(
+    payload: MessageCodeExportRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Exports all code blocks from a single message content string into a ZIP file.
+    """
+    code_files = []
+    code_block_counter = 1
+    
+    code_block_pattern = re.compile(r"```(\w*)\n([\s\S]*?)\n```")
+    filename_pattern = re.compile(
+        r"^(?:----?\s*)?(?:\[(?:CREATE|UPDATE)\]\s*)?([a-zA-Z0-9_./\\-]+?\.\w+)(?:\s*----?)?$",
+        re.MULTILINE
+    )
+    lang_ext_map = {
+        'python': 'py', 'javascript': 'js', 'typescript': 'ts', 'html': 'html',
+        'css': 'css', 'json': 'json', 'xml': 'xml', 'sql': 'sql', 'bash': 'sh',
+        'shell': 'sh', 'text': 'txt', 'markdown': 'md', 'java': 'java',
+        'c++': 'cpp', 'cpp': 'cpp', 'c': 'c', 'csharp': 'cs', 'go': 'go',
+        'rust': 'rs', 'php': 'php', 'ruby': 'rb', 'swift': 'swift',
+        'kotlin': 'kt', 'yaml': 'yaml', 'yml': 'yaml'
+    }
+
+    content = payload.content
+    if not content or '```' not in content:
+        raise HTTPException(status_code=404, detail="No code blocks found in the provided content.")
+
+    parts = code_block_pattern.split(content)
+    if len(parts) < 3:
+        raise HTTPException(status_code=404, detail="No valid code blocks found in the provided content.")
+
+    preceding_texts = parts[0::3]
+    languages = parts[1::3]
+    codes = parts[2::3]
+
+    for i in range(len(codes)):
+        preceding_text = preceding_texts[i]
+        lang = languages[i].lower()
+        code_content = codes[i]
+        filename = ""
+
+        lines_before = preceding_text.strip().split('\n')
+        if lines_before:
+            for line in reversed(lines_before[-5:]): # Check last 5 lines before code block for filename
+                match = filename_pattern.match(line.strip())
+                if match:
+                    filename = match.group(1)
+                    break
+        
+        if filename:
+            # Sanitize filename
+            if ".." in filename or Path(filename).is_absolute():
+                filename = "" # Discard unsafe path
+            else:
+                filename = filename.replace("\\", "/")
+
+        if not filename:
+            ext = lang_ext_map.get(lang, 'txt')
+            filename = f"script_{code_block_counter}.{ext}"
+            code_block_counter += 1
+        
+        code_files.append((filename, code_content))
+
+    if not code_files:
+        raise HTTPException(status_code=404, detail="No valid code blocks found to export.")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for filepath, content in code_files:
+            zf.writestr(filepath, content)
+    
+    zip_buffer.seek(0)
+    
+    safe_title = re.sub(r'[^a-zA-Z0-9_-]', '', payload.discussion_title.replace(' ', '_'))
+    zip_filename = f"code_export_{safe_title}.zip"
+    
+    headers = {'Content-Disposition': f'attachment; filename="{zip_filename}"'}
+    return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
 
 @discussion_router.get("/{discussion_id}/data_zones", response_model=DataZones)
 def get_all_data_zones(
