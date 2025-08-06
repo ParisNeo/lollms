@@ -7,10 +7,10 @@ from sqlalchemy.orm import Session
 from backend.db import get_db
 from backend.db.models.service import AppZooRepository, MCPZooRepository, PromptZooRepository
 from backend.db.models.prompt import SavedPrompt
-from backend.config import APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH
+from backend.config import APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, APP_DATA_DIR
 
 ITEM_TYPES = Literal['app', 'mcp', 'prompt']
-CACHE_FILE = Path(__file__).parent / "zoo_cache.json"
+CACHE_FILE = APP_DATA_DIR / "zoo_cache.json"
 CACHE_EXPIRY = 3600  # 1 hour
 
 _cache: Dict[str, Any] = {"timestamp": 0, "data": {}}

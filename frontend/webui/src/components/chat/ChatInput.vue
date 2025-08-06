@@ -42,7 +42,7 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
 const { dataZonesTokensFromContext } = storeToRefs(discussionsStore);
-const { lollmsPrompts, systemPrompts, userPrompts } = storeToRefs(promptsStore);
+const { lollmsPrompts, userPrompts, systemPromptsByZooCategory } = storeToRefs(promptsStore);
 
 const messageText = ref('');
 const uploadedImages = ref([]);
@@ -66,12 +66,48 @@ const startDragPos = ref({ x: 0, y: 0 });
 const startChatboxPos = ref({ x: 0, y: 0 });
 const currentChatboxPos = ref(null);
 
+const promptSearchTerm = ref('');
+
 const user = computed(() => authStore.user);
 const generationInProgress = computed(() => discussionsStore.generationInProgress);
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const availableRagStores = computed(() => dataStore.availableRagStores);
 const availableMcpTools = computed(() => dataStore.availableMcpToolsForSelector);
 const contextStatus = computed(() => discussionsStore.activeDiscussionContextStatus);
+
+const filteredLollmsPrompts = computed(() => {
+    if (!Array.isArray(lollmsPrompts.value)) return [];
+    if (!promptSearchTerm.value) return lollmsPrompts.value;
+    const term = promptSearchTerm.value.toLowerCase();
+    return lollmsPrompts.value.filter(p => p.name.toLowerCase().includes(term));
+});
+
+const filteredUserPrompts = computed(() => {
+    if (!Array.isArray(userPrompts.value)) return [];
+    if (!promptSearchTerm.value) return userPrompts.value;
+    const term = promptSearchTerm.value.toLowerCase();
+    return userPrompts.value.filter(p => p.name.toLowerCase().includes(term));
+});
+
+const filteredSystemPromptsByZooCategory = computed(() => {
+    const term = promptSearchTerm.value.toLowerCase();
+    if (!systemPromptsByZooCategory.value || typeof systemPromptsByZooCategory.value !== 'object') return {};
+    
+    if (!term) return systemPromptsByZooCategory.value;
+    
+    const filtered = {};
+    for (const category in systemPromptsByZooCategory.value) {
+        const filteredPrompts = systemPromptsByZooCategory.value[category].filter(p => p.name.toLowerCase().includes(term));
+        if (filteredPrompts.length > 0) {
+            filtered[category] = filteredPrompts;
+        }
+    }
+    const sortedFiltered = {};
+    Object.keys(filtered).sort().forEach(key => {
+        sortedFiltered[key] = filtered[key];
+    });
+    return sortedFiltered;
+});
 
 const isSendDisabled = computed(() => {
   return generationInProgress.value || (messageText.value.trim() === '' && uploadedImages.value.length === 0);
@@ -427,16 +463,32 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
                         <div v-if="user.user_ui_level >= 3"><MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2" title="Select MCP Tools"><IconMcp class="w-5 h-5"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshMcps" :disabled="isRefreshingMcps" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingMcps}"/><span>{{ isRefreshingMcps ? 'Refreshing...' : 'Refresh Tools' }}</span></button></div></template></MultiSelectMenu></div>
                         <div v-if="user.user_ui_level >= 1"><MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn !p-2" title="Select RAG Store"><IconDatabase class="w-5 h-5" /><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshRags" :disabled="isRefreshingRags" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingRags}"/><span>{{ isRefreshingRags ? 'Refreshing...' : 'Refresh Stores' }}</span></button></div></template></MultiSelectMenu></div>
                         <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn btn-secondary !p-2">
-                            <DropdownSubmenu v-if="lollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
-                                <button v-for="p in lollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><span>{{ p.name }}</span></button>
+                            <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
+                                <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
+                                    <span class="truncate">{{ p.name }}</span>
+                                </button>
                             </DropdownSubmenu>
-                            <DropdownSubmenu v-if="systemPrompts.length > 0" title="System" icon="server" collection="ui">
-                                <button v-for="p in systemPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><span>{{ p.name }}</span></button>
+                            <DropdownSubmenu v-if="filteredUserPrompts.length > 0" title="User" icon="user" collection="ui">
+                                <button v-for="p in filteredUserPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
+                                    <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
+                                    <span class="truncate">{{ p.name }}</span>
+                                </button>
                             </DropdownSubmenu>
-                            <DropdownSubmenu v-if="userPrompts.length > 0" title="User" icon="user" collection="ui">
-                                <button v-for="p in userPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><span>{{ p.name }}</span></button>
+                            <DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui">
+                                <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10">
+                                    <input type="text" v-model="promptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm">
+                                </div>
+                                <div class="max-h-60 overflow-y-auto">
+                                    <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category">
+                                        <h3 class="category-header">{{ category }}</h3>
+                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
+                                            <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
+                                            <span class="truncate">{{ p.name }}</span>
+                                        </button>
+                                    </div>
+                                </div>
                             </DropdownSubmenu>
-                        </DropdownMenu>                        
+                        </DropdownMenu>
                     </div>
                     
                     <!-- Input Area -->
@@ -471,4 +523,6 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
 .cm-editor-container .cm-editor.cm-focused { border-color: theme('colors.blue.500'); box-shadow: 0 0 0 1px theme('colors.blue.500'); }
 .cm-editor-container .cm-scroller { overflow-y: auto; }
 .progress-segment { @apply absolute top-0 h-full transition-all duration-300 ease-out opacity-80; }
+.category-header { @apply px-3 py-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 sticky top-0 bg-gray-50 dark:bg-gray-700 z-10; }
+.menu-item { @apply w-full text-left px-3 py-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center; }
 </style>

@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 
@@ -10,6 +10,28 @@ export const usePromptsStore = defineStore('prompts', () => {
     const systemPrompts = ref([]);
     const lollmsPrompts = ref([]);
     const isLoading = ref(false);
+
+    const systemPromptsByZooCategory = computed(() => {
+        if (!Array.isArray(systemPrompts.value)) return {};
+        const categories = {};
+        systemPrompts.value.forEach(prompt => {
+            const category = prompt.category || 'Uncategorized';
+            if (!categories[category]) {
+                categories[category] = [];
+            }
+            categories[category].push(prompt);
+        });
+        // Sort prompts within each category
+        for (const category in categories) {
+            categories[category].sort((a, b) => a.name.localeCompare(b.name));
+        }
+        // Sort categories
+        const sortedCategories = {};
+        Object.keys(categories).sort().forEach(key => {
+            sortedCategories[key] = categories[key];
+        });
+        return sortedCategories;
+    });
 
     async function fetchPrompts() {
         isLoading.value = true;
@@ -129,6 +151,7 @@ export const usePromptsStore = defineStore('prompts', () => {
         systemPrompts,
         lollmsPrompts,
         isLoading,
+        systemPromptsByZooCategory,
         fetchPrompts,
         savePrompt,
         updatePrompt,
