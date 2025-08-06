@@ -7,30 +7,26 @@ import { useUiStore } from '../../stores/ui';
 import { usePromptsStore } from '../../stores/prompts';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
+import IconPencil from '../../assets/icons/IconPencil.vue';
 import AppCard from '../ui/AppCard.vue';
 import AppCardSkeleton from '../ui/AppCardSkeleton.vue';
-import TaskProgressIndicator from '../ui/TaskProgressIndicator.vue';
+import GenericModal from '../ui/GenericModal.vue';
 
 const adminStore = useAdminStore();
 const tasksStore = useTasksStore();
 const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
 
-const { 
-    promptZooRepositories, isLoadingPromptZooRepositories, zooPrompts, isLoadingZooPrompts
-} = storeToRefs(adminStore);
+const { promptZooRepositories, isLoadingPromptZooRepositories, zooPrompts, isLoadingZooPrompts } = storeToRefs(adminStore);
 const { systemPrompts: installedPrompts, isLoading: isLoadingInstalled } = storeToRefs(promptsStore);
 const { tasks } = storeToRefs(tasksStore);
 
 const activeSubTab = ref('installed');
 
-// --- Repositories Tab State ---
 const newRepo = ref({ name: '', url: '' });
 const isAddRepoFormVisible = ref(false);
 const isLoadingAction = ref(null);
 const isPullingAll = ref(false);
-
-// --- Available Tab State ---
 const searchQuery = ref('');
 const selectedCategory = ref('All');
 const installationStatusFilter = ref('All');
@@ -63,113 +59,67 @@ async function fetchZooItems() {
     await adminStore.fetchZooPrompts(params);
 }
 
-function debouncedFetch() {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => { currentPage.value = 1; fetchZooItems(); }, 300);
-}
+function debouncedFetch() { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentPage.value = 1; fetchZooItems(); }, 300); }
 
-watch([sortKey, sortOrder, selectedCategory, installationStatusFilter], () => { currentPage.value = 1; fetchZooItems(); });
+watch([sortKey, sortOrder, selectedCategory, installationStatusFilter, activeSubTab], () => { if (activeSubTab.value === 'available') { currentPage.value = 1; fetchZooItems(); } });
 watch(searchQuery, debouncedFetch);
 watch(currentPage, fetchZooItems);
 watch(starredItems, (newStarred) => { localStorage.setItem('starredPrompts', JSON.stringify(newStarred)); }, { deep: true });
 
 onMounted(() => {
-    promptsStore.fetchPrompts(); // For installed prompts
+    promptsStore.fetchPrompts();
     adminStore.fetchPromptZooRepositories();
     fetchZooItems();
 });
 
 const itemsWithTaskStatus = computed(() => {
     if (!Array.isArray(zooPrompts.value.items)) return [];
-    let items = zooPrompts.value.items;
-    
     const taskMap = new Map();
-    // No tasks for prompts yet, but keep structure for future
-    return items.map(item => ({ ...item, task: taskMap.get(item.folder_name) || null }));
+    tasks.value.forEach(task => { if (task?.name?.startsWith('Installing prompt: ')) { const itemName = task.name.replace('Installing prompt: ', ''); taskMap.set(itemName, task); } });
+    return zooPrompts.value.items.map(item => ({ ...item, task: taskMap.get(item.folder_name) || null }));
 });
-
 const sortedRepositories = computed(() => Array.isArray(promptZooRepositories.value) ? [...promptZooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || '')) : []);
-const categories = computed(() => ['All', ...adminStore.zooPrompts.categories]);
-
-function handleStarToggle(itemName) {
-    const index = starredItems.value.indexOf(itemName);
-    if (index > -1) starredItems.value.splice(index, 1);
-    else starredItems.value.push(itemName);
-}
+const categories = computed(() => {
+    const allCats = new Set(zooPrompts.value.items.map(item => item.category).filter(Boolean));
+    return ['All', ...Array.from(allCats).sort()];
+});
 
 function formatDateTime(isoString) { if (!isoString) return 'Never'; return new Date(isoString).toLocaleString(); }
 
-// --- Repository Actions ---
 async function handleAddRepository() {
-    if (!newRepo.value.name || !newRepo.value.url) { uiStore.addNotification('Repository name and URL are required.', 'warning'); return; }
+    if (!newRepo.value.name || !newRepo.value.url) return;
     isLoadingAction.value = 'add';
-    try {
-        await adminStore.addPromptZooRepository(newRepo.value.name, newRepo.value.url);
-        newRepo.value = { name: '', url: '' };
-        isAddRepoFormVisible.value = false;
-    } finally { isLoadingAction.value = null; }
-}
-async function handlePullRepository(repo) {
-    isLoadingAction.value = repo.id;
-    try { await adminStore.pullPromptZooRepository(repo.id); } 
+    try { await adminStore.addPromptZooRepository(newRepo.value); newRepo.value = { name: '', url: '' }; isAddRepoFormVisible.value = false; }
     finally { isLoadingAction.value = null; }
 }
-async function handlePullAll() {
-    isPullingAll.value = true;
-    try { await adminStore.pullAllPromptZooRepositories(); } 
-    finally { isPullingAll.value = false; }
-}
+async function handlePullRepository(repo) { isLoadingAction.value = repo.id; try { await adminStore.pullPromptZooRepository(repo.id); } finally { isLoadingAction.value = null; } }
+async function handlePullAll() { isPullingAll.value = true; try { await adminStore.pullAllPromptZooRepositories(); } finally { isPullingAll.value = false; } }
 async function handleDeleteRepository(repo) {
-    const confirmed = await uiStore.showConfirmation({ title: `Delete Repository '${repo.name}'?`, message: 'This will remove the repository and its cached files.', confirmText: 'Delete' });
-    if (confirmed) {
+    if (await uiStore.showConfirmation({ title: `Delete Repository '${repo.name}'?` })) {
         isLoadingAction.value = repo.id;
-        try { await adminStore.deletePromptZooRepository(repo.id); } 
-        finally { isLoadingAction.value = null; }
+        try { await adminStore.deletePromptZooRepository(repo.id); } finally { isLoadingAction.value = null; }
     }
 }
+async function handleInstallItem(item) { await adminStore.installZooPrompt({ repository: item.repository, folder_name: item.folder_name }); }
+async function showItemHelp(item) { const readme = await adminStore.fetchPromptReadme(item.repository, item.folder_name); uiStore.openModal('sourceViewer', { title: `README: ${item.name}`, content: readme, language: 'markdown' }); }
+function handleStarToggle(itemName) { const i = starredItems.value.indexOf(itemName); if (i > -1) starredItems.value.splice(i, 1); else starredItems.value.push(itemName); }
 
-// --- Prompt Actions ---
-async function handleInstallItem(item) {
+const currentPrompt = ref(null);
+function handleAddPrompt() { currentPrompt.value = { name: '', content: '', category: '', author: '', description: '', icon: null }; uiStore.openModal('editSystemPrompt'); }
+function handleEditPrompt(prompt) { currentPrompt.value = { ...prompt }; uiStore.openModal('editSystemPrompt'); }
+async function handleSavePrompt() {
+    if (!currentPrompt.value) return;
+    const { id, ...data } = currentPrompt.value;
     try {
-        await adminStore.installZooPrompt({ repository: item.repository, folder_name: item.folder_name });
-        await fetchZooItems(); // To update 'is_installed' status
-        await promptsStore.fetchPrompts(); // To update the installed list
+        if (id) await adminStore.updateSystemPrompt(id, data);
+        else await adminStore.createSystemPrompt(data);
+        uiStore.closeModal('editSystemPrompt');
     } catch(e) {}
 }
-async function showItemHelp(item) {
-    const readmeContent = await adminStore.fetchPromptReadme(item.repository, item.folder_name);
-    uiStore.openModal('sourceViewer', { title: `README: ${item.name}`, content: readmeContent, language: 'markdown' });
-}
-
-// --- Installed Prompts Actions ---
-const isEditModalVisible = ref(false);
-const currentPrompt = ref(null);
-
-function handleAddPrompt() {
-  currentPrompt.value = { name: '', content: '' };
-  isEditModalVisible.value = true;
-}
-function handleEditPrompt(prompt) {
-  currentPrompt.value = { ...prompt };
-  isEditModalVisible.value = true;
-}
-async function handleSavePrompt() {
-  if (!currentPrompt.value) return;
-  const { id, name, content } = currentPrompt.value;
-  try {
-    if (id) {
-      await adminStore.updateSystemPrompt(id, { name, content });
-    } else {
-      await adminStore.createSystemPrompt({ name, content });
-    }
-    isEditModalVisible.value = false;
-  } catch(e) {}
-}
 async function handleDeletePrompt(prompt) {
-  const confirmed = await uiStore.showConfirmation({ title: `Delete '${prompt.name}'?` });
-  if (confirmed) {
-    await adminStore.deleteSystemPrompt(prompt.id);
-  }
+    if (await uiStore.showConfirmation({ title: `Delete '${prompt.name}'?` })) {
+        await adminStore.deleteSystemPrompt(prompt.id);
+    }
 }
 </script>
 
@@ -193,56 +143,46 @@ async function handleDeletePrompt(prompt) {
         </div>
 
         <section v-if="activeSubTab === 'installed'">
-            <!-- Content from old SystemPromptsManagement.vue -->
+            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Installed System Prompts</h3><button @click="handleAddPrompt" class="btn btn-primary">Add Prompt</button></div>
+            <div v-if="isLoadingInstalled" class="text-center p-4">Loading...</div>
+            <div v-else-if="!installedPrompts || installedPrompts.length === 0" class="empty-state-card"><p>No system prompts installed.</p></div>
+            <div v-else class="space-y-3">
+                <div v-for="prompt in installedPrompts" :key="prompt.id" class="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3 flex-grow truncate"><img v-if="prompt.icon" :src="prompt.icon" class="h-8 w-8 rounded-md flex-shrink-0 object-cover" alt="Icon"><p class="font-medium truncate">{{ prompt.name }}</p></div>
+                    <div class="flex items-center gap-x-2 flex-shrink-0"><button @click="handleEditPrompt(prompt)" class="btn btn-secondary btn-sm p-2" title="Edit"><IconPencil class="w-4 h-4" /></button><button @click="handleDeletePrompt(prompt)" class="btn btn-danger btn-sm p-2" title="Delete"><IconTrash class="w-4 h-4" /></button></div>
+                </div>
+            </div>
         </section>
 
         <section v-if="activeSubTab === 'available'">
              <div class="space-y-4">
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4"><div class="relative lg:col-span-1"><input type="text" v-model="searchQuery" placeholder="Search Prompts..." class="input-field w-full pl-10" /><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div></div><div class="grid grid-cols-2 lg:col-span-2 gap-4"><select v-model="installationStatusFilter" class="input-field"><option value="All">All Statuses</option><option value="Installed">Installed</option><option value="Uninstalled">Uninstalled</option></select><select v-model="selectedCategory" class="input-field"><option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option></select></div></div>
-                <div class="flex items-center gap-2"><select v-model="sortKey" class="input-field w-48"><option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">Sort by {{ opt.label }}</option></select><button @click="sortOrder = sortOrder === 'asc' ? 'desc' : 'asc'" class="btn btn-secondary p-2"><IconArrowUp v-if="sortOrder === 'asc'" class="w-5 h-5" /><IconArrowDown v-else class="w-5 h-5" /></button></div>
-                <div v-if="isLoadingZooPrompts" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6"><AppCardSkeleton v-for="i in 8" :key="i" /></div>
-                <div v-else-if="!itemsWithTaskStatus || itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Prompts Found</h4><p class="text-sm">No prompts match your criteria. Add and pull a repository or adjust filters.</p></div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4"><input type="text" v-model="searchQuery" placeholder="Search Prompts..." class="input-field" /><select v-model="selectedCategory" class="input-field"><option value="All">All Categories</option><option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option></select></div>
+                <div v-if="isLoadingZooPrompts" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"><AppCardSkeleton v-for="i in 6" :key="i" /></div>
+                <div v-else-if="!itemsWithTaskStatus || itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Prompts Found</h4></div>
                 <div v-else>
-                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         <AppCard v-for="item in itemsWithTaskStatus" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" item-type-name="Prompt" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @help="showItemHelp(item)" />
                     </div>
-                    <div class="mt-6 flex justify-between items-center"><p class="text-sm text-gray-500">{{ pageInfo }}</p><div class="flex gap-2"><button @click="currentPage--" :disabled="currentPage <= 1" class="btn btn-secondary">Previous</button><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div></div>
+                    <div class="mt-6 flex justify-between items-center"><p class="text-sm text-gray-500">{{ pageInfo }}</p><div class="flex gap-2"><button @click="currentPage--" :disabled="currentPage <= 1" class="btn btn-secondary">Prev</button><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div></div>
                 </div>
             </div>
         </section>
         
         <section v-if="activeSubTab === 'repositories'">
-            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <h3 class="text-xl font-semibold">Prompt Zoo Repositories</h3>
-                <div class="flex items-center gap-2">
-                    <button @click="handlePullAll" class="btn btn-secondary" :disabled="isPullingAll"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isPullingAll}" /><span class="ml-2">Pull All</span></button>
-                    <button @click="isAddRepoFormVisible = !isAddRepoFormVisible" class="btn btn-primary">{{ isAddRepoFormVisible ? 'Cancel' : 'Add Repository' }}</button>
-                </div>
-            </div>
-            <transition name="form-fade">
-                <div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6 overflow-hidden">
-                    <form @submit.prevent="handleAddRepository" class="space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div><label for="repo-name-prompt" class="block text-sm font-medium">Name</label><input id="repo-name-prompt" v-model="newRepo.name" type="text" class="input-field mt-1" required></div>
-                            <div class="md:col-span-2"><label for="repo-url-prompt" class="block text-sm font-medium">Git URL</label><input id="repo-url-prompt" v-model="newRepo.url" type="url" class="input-field mt-1" required></div>
-                        </div>
-                        <div class="flex justify-end"><button type="submit" class="btn btn-primary" :disabled="isLoadingAction === 'add'">{{ isLoadingAction === 'add' ? 'Adding...' : 'Add' }}</button></div>
-                    </form>
-                </div>
-            </transition>
+            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Prompt Zoo Repositories</h3><div class="flex items-center gap-2"><button @click="handlePullAll" class="btn btn-secondary" :disabled="isPullingAll"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isPullingAll}" /><span class="ml-2">Pull All</span></button><button @click="isAddRepoFormVisible = !isAddRepoFormVisible" class="btn btn-primary">{{ isAddRepoFormVisible ? 'Cancel' : 'Add' }}</button></div></div>
+            <transition name="form-fade"><div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6"><form @submit.prevent="handleAddRepository" class="flex gap-4"><input v-model="newRepo.name" type="text" placeholder="Name" class="input-field flex-1" required><input v-model="newRepo.url" type="url" placeholder="Git URL" class="input-field flex-grow-[2]" required><button type="submit" class="btn btn-primary" :disabled="isLoadingAction === 'add'">Add</button></form></div></transition>
             <div v-if="isLoadingPromptZooRepositories" class="text-center p-4">Loading...</div>
             <div v-else-if="!sortedRepositories || sortedRepositories.length === 0" class="empty-state-card"><p>No repositories added.</p></div>
             <div v-else class="space-y-4">
-                <div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div class="flex-grow truncate"><p class="font-semibold">{{ repo.name }}</p><p class="text-sm text-gray-500 font-mono truncate">{{ repo.url }}</p><p class="text-xs text-gray-400 mt-1">Last updated: {{ formatDateTime(repo.last_pulled_at) }}</p></div>
-                    <div class="flex items-center gap-x-2 flex-shrink-0"><button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm" :disabled="isLoadingAction === repo.id"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingAction === repo.id}" /><span class="ml-1">Pull</span></button><button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm" :disabled="isLoadingAction === repo.id"><IconTrash class="w-4 h-4" /></button></div>
+                <div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex items-center justify-between gap-4">
+                    <div class="flex-grow truncate"><p class="font-semibold">{{ repo.name }}</p><p class="text-sm text-gray-500 font-mono truncate">{{ repo.url }}</p><p class="text-xs text-gray-400 mt-1">Updated: {{ formatDateTime(repo.last_pulled_at) }}</p></div>
+                    <div class="flex items-center gap-x-2"><button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm" :disabled="isLoadingAction === repo.id"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingAction === repo.id}" /> Pull</button><button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm" :disabled="isLoadingAction === repo.id"><IconTrash class="w-4 h-4" /></button></div>
                 </div>
             </div>
         </section>
     </div>
 
-     <!-- Modal from old SystemPromptsManagement.vue -->
-    <GenericModal :modalName="'editSystemPrompt'" :title="currentPrompt && currentPrompt.id ? 'Edit System Prompt' : 'Add System Prompt'" @close="isEditModalVisible = false">
+    <GenericModal :modalName="'editSystemPrompt'" :title="currentPrompt && currentPrompt.id ? 'Edit System Prompt' : 'Add System Prompt'" @close="uiStore.closeModal('editSystemPrompt')">
         <template #body>
             <form v-if="currentPrompt" @submit.prevent="handleSavePrompt" class="space-y-4">
                 <div><label for="prompt-name" class="block text-sm font-medium">Name</label><input id="prompt-name" v-model="currentPrompt.name" type="text" class="input-field mt-1" required></div>
@@ -250,7 +190,7 @@ async function handleDeletePrompt(prompt) {
             </form>
         </template>
         <template #footer>
-            <button @click="isEditModalVisible = false" class="btn btn-secondary">Cancel</button>
+            <button @click="uiStore.closeModal('editSystemPrompt')" class="btn btn-secondary">Cancel</button>
             <button @click="handleSavePrompt" class="btn btn-primary">Save</button>
         </template>
     </GenericModal>

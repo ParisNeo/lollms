@@ -76,55 +76,6 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
         owner_username=db_task.owner.username if db_task.owner else "System"
     )
 
-# --- System Prompts Endpoints ---
-@admin_router.get("/system-prompts", response_model=List[PromptPublic])
-def get_system_prompts(db: Session = Depends(get_db)):
-    prompts = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id.is_(None)).order_by(DBSavedPrompt.name).all()
-    return prompts
-
-@admin_router.post("/system-prompts", response_model=PromptPublic, status_code=status.HTTP_201_CREATED)
-def create_system_prompt(prompt_data: PromptCreate, db: Session = Depends(get_db)):
-    if db.query(DBSavedPrompt).filter(DBSavedPrompt.name == prompt_data.name, DBSavedPrompt.owner_user_id.is_(None)).first():
-        raise HTTPException(status_code=409, detail="A system prompt with this name already exists.")
-    
-    new_prompt = DBSavedPrompt(
-        name=prompt_data.name,
-        content=prompt_data.content,
-        owner_user_id=None
-    )
-    db.add(new_prompt)
-    db.commit()
-    db.refresh(new_prompt)
-    return new_prompt
-
-@admin_router.put("/system-prompts/{prompt_id}", response_model=PromptPublic)
-def update_system_prompt(prompt_id: str, prompt_data: PromptUpdate, db: Session = Depends(get_db)):
-    prompt_to_update = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id, DBSavedPrompt.owner_user_id.is_(None)).first()
-    if not prompt_to_update:
-        raise HTTPException(status_code=404, detail="System prompt not found.")
-    
-    update_data = prompt_data.model_dump(exclude_unset=True)
-    if 'name' in update_data and update_data['name'] != prompt_to_update.name:
-        if db.query(DBSavedPrompt).filter(DBSavedPrompt.name == update_data['name'], DBSavedPrompt.owner_user_id.is_(None), DBSavedPrompt.id != prompt_id).first():
-            raise HTTPException(status_code=409, detail="Another system prompt with this name already exists.")
-
-    for key, value in update_data.items():
-        setattr(prompt_to_update, key, value)
-    
-    db.commit()
-    db.refresh(prompt_to_update)
-    return prompt_to_update
-
-@admin_router.delete("/system-prompts/{prompt_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_system_prompt(prompt_id: str, db: Session = Depends(get_db)):
-    prompt_to_delete = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id, DBSavedPrompt.owner_user_id.is_(None)).first()
-    if not prompt_to_delete:
-        raise HTTPException(status_code=404, detail="System prompt not found.")
-    
-    db.delete(prompt_to_delete)
-    db.commit()
-    return None
-
 # --- Task Functions ---
 def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, background_color: Optional[str], send_as_text: bool):
     db_session_local = next(get_db())

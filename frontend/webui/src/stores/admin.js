@@ -2,48 +2,43 @@ import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
-import { useTasksStore } from './tasks'; // Import the new tasks store
+import { useTasksStore } from './tasks';
+import { usePromptsStore } from './prompts';
 
 export const useAdminStore = defineStore('admin', () => {
     const uiStore = useUiStore();
-    const tasksStore = useTasksStore(); // Get instance of tasks store
+    const tasksStore = useTasksStore();
+    const promptsStore = usePromptsStore();
 
     // --- State ---
     const allUsers = ref([]);
     const isLoadingUsers = ref(false);
-
     const bindings = ref([]);
     const isLoadingBindings = ref(false);
     const availableBindingTypes = ref([]);
-
     const globalSettings = ref([]);
     const isLoadingSettings = ref(false);
-
     const isImporting = ref(false);
-    
     const mcps = ref([]);
     const apps = ref([]);
     const isLoadingServices = ref(false);
-
     const isEnhancingEmail = ref(false);
-    
     const adminAvailableLollmsModels = ref([]);
     const isLoadingLollmsModels = ref(false);
-
     const zooRepositories = ref([]);
     const isLoadingZooRepositories = ref(false);
     const mcpZooRepositories = ref([]);
     const isLoadingMcpZooRepositories = ref(false);
-
-
-    const zooApps = ref({ items: [], total: 0, pages: 1 });
+    const promptZooRepositories = ref([]);
+    const isLoadingPromptZooRepositories = ref(false);
+    const zooApps = ref({ items: [], total: 0, pages: 1, categories: [] });
     const isLoadingZooApps = ref(false);
-    const zooMcps = ref({ items: [], total: 0, pages: 1 });
+    const zooMcps = ref({ items: [], total: 0, pages: 1, categories: [] });
     const isLoadingZooMcps = ref(false);
-
+    const zooPrompts = ref({ items: [], total: 0, pages: 1, categories: [] });
+    const isLoadingZooPrompts = ref(false);
     const installedApps = ref([]);
     const isLoadingInstalledApps = ref(false);
-
     const systemStatus = ref(null);
     const isLoadingSystemStatus = ref(false);
 
@@ -54,35 +49,27 @@ export const useAdminStore = defineStore('admin', () => {
             const response = await apiClient.get('/api/admin/system-status');
             systemStatus.value = response.data;
         } catch (error) {
-            systemStatus.value = null; // Clear on error
+            systemStatus.value = null;
             uiStore.addNotification('Could not load system status.', 'error');
         } finally {
             isLoadingSystemStatus.value = false;
         }
     }
 
-
-    // Purge Task - an admin-only action
     async function purgeUnusedUploads() {
-        try {
-            const response = await apiClient.post('/api/admin/purge-unused-uploads');
-            const task = response.data;
-            uiStore.addNotification(`Task '${task.name}' started.`, 'info');
-            tasksStore.addTask(task); // Use the tasks store to refresh
-            return task;
-        } catch (error) {
-            throw error;
-        }
+        const response = await apiClient.post('/api/admin/purge-unused-uploads');
+        const task = response.data;
+        uiStore.addNotification(`Task '${task.name}' started.`, 'info');
+        tasksStore.addTask(task);
+        return task;
     }
 
-    // Users
     async function fetchAllUsers() {
         isLoadingUsers.value = true;
         try {
             const response = await apiClient.get('/api/admin/users');
             allUsers.value = response.data;
         } catch (error) {
-            console.error("Failed to fetch users:", error);
             uiStore.addNotification('Could not load user list.', 'error');
         } finally {
             isLoadingUsers.value = false;
@@ -90,22 +77,12 @@ export const useAdminStore = defineStore('admin', () => {
     }
     
     async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) {
-        try {
-            const payload = {
-                subject,
-                body,
-                user_ids,
-                background_color: backgroundColor,
-                send_as_text: sendAsText
-            };
-            const response = await apiClient.post('/api/admin/email-users', payload);
-            const task = response.data;
-            uiStore.addNotification(`Email task '${task.name}' started.`, 'success');
-            tasksStore.addTask(task);
-            return true;
-        } catch (error) {
-            return false;
-        }
+        const payload = { subject, body, user_ids, background_color: backgroundColor, send_as_text: sendAsText };
+        const response = await apiClient.post('/api/admin/email-users', payload);
+        const task = response.data;
+        uiStore.addNotification(`Email task '${task.name}' started.`, 'success');
+        tasksStore.addTask(task);
+        return true;
     }
     
     async function enhanceEmail(subject, body, backgroundColor, prompt) {
@@ -114,22 +91,15 @@ export const useAdminStore = defineStore('admin', () => {
             const response = await apiClient.post('/api/admin/enhance-email', { subject, body, background_color: backgroundColor, prompt });
             uiStore.addNotification('Email content enhanced by AI.', 'success');
             return response.data;
-        } catch (error) {
-            // Error handled by global interceptor
-            return null;
         } finally {
             isEnhancingEmail.value = false;
         }
     }
 
     async function batchUpdateUsers(payload) {
-        try {
-            const response = await apiClient.post('/api/admin/users/batch-update-settings', payload);
-            uiStore.addNotification(response.data.message || 'Settings applied successfully.', 'success');
-            await fetchAllUsers();
-        } catch (error) {
-            throw error;
-        }
+        const response = await apiClient.post('/api/admin/users/batch-update-settings', payload);
+        uiStore.addNotification(response.data.message || 'Settings applied successfully.', 'success');
+        await fetchAllUsers();
     }
     
     async function fetchAdminAvailableLollmsModels() {
@@ -139,14 +109,12 @@ export const useAdminStore = defineStore('admin', () => {
             const response = await apiClient.get('/api/admin/available-models');
             adminAvailableLollmsModels.value = response.data;
         } catch (error) {
-            uiStore.addNotification("Could not fetch available LLM models for admin.", 'error');
             adminAvailableLollmsModels.value = [];
         } finally {
             isLoadingLollmsModels.value = false;
         }
     }
 
-    // Bindings
     async function fetchBindings() {
         isLoadingBindings.value = true;
         try {
@@ -159,12 +127,8 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
     async function fetchAvailableBindingTypes() {
-        try {
-            const response = await apiClient.get('/api/admin/bindings/available_types');
-            availableBindingTypes.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Could not load available binding types.', 'error');
-        }
+        const response = await apiClient.get('/api/admin/bindings/available_types');
+        availableBindingTypes.value = response.data;
     }
     async function addBinding(payload) {
         const response = await apiClient.post('/api/admin/bindings', payload);
@@ -174,9 +138,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateBinding(id, payload) {
         const response = await apiClient.put(`/api/admin/bindings/${id}`, payload);
         const index = bindings.value.findIndex(b => b.id === id);
-        if (index !== -1) {
-            bindings.value[index] = response.data;
-        }
+        if (index !== -1) bindings.value[index] = response.data;
         uiStore.addNotification(`Binding '${response.data.alias}' updated.`, 'success');
     }
     async function deleteBinding(id) {
@@ -185,7 +147,6 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('Binding deleted successfully.', 'success');
     }
 
-    // Global Settings
     async function fetchGlobalSettings() {
         isLoadingSettings.value = true;
         try {
@@ -203,7 +164,6 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification(response.data.message, 'success');
     }
 
-    // Import
     async function importOpenWebUIData(file) {
         isImporting.value = true;
         const formData = new FormData();
@@ -216,370 +176,71 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
     
-    // MCPs
-    async function fetchMcps() {
-        isLoadingServices.value = true;
-        try {
-            const response = await apiClient.get('/api/mcps');
-            mcps.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Could not load MCPs.', 'error');
-        } finally {
-            isLoadingServices.value = false;
-        }
-    }
-    async function addMcp(payload) {
-        const response = await apiClient.post('/api/mcps', payload);
-        mcps.value.push(response.data);
-        uiStore.addNotification(`MCP '${response.data.name}' created successfully.`, 'success');
-    }
-    async function updateMcp(id, payload) {
-        const response = await apiClient.put(`/api/mcps/${id}`, payload);
-        const index = mcps.value.findIndex(m => m.id === id);
-        if (index !== -1) mcps.value[index] = response.data;
-        uiStore.addNotification(`MCP '${response.data.name}' updated successfully.`, 'success');
-    }
-    async function deleteMcp(id) {
-        await apiClient.delete(`/api/mcps/${id}`);
-        mcps.value = mcps.value.filter(m => m.id !== id);
-        uiStore.addNotification('MCP deleted successfully.', 'success');
-    }
-    async function generateMcpSsoSecret(id) {
-        try {
-            const response = await apiClient.post(`/api/mcps/${id}/generate-sso-secret`);
-            await fetchMcps();
-            return response.data.sso_secret;
-        } catch (error) {
-            throw error;
-        }
-    }
-
-    // Apps
-    async function fetchApps() {
-        isLoadingServices.value = true;
-        try {
-            const response = await apiClient.get('/api/apps');
-            apps.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Could not load Apps.', 'error');
-        } finally {
-            isLoadingServices.value = false;
-        }
-    }
-    async function addApp(payload) {
-        const response = await apiClient.post('/api/apps', payload);
-        apps.value.push(response.data);
-        uiStore.addNotification(`App '${response.data.name}' created successfully.`, 'success');
-    }
-    async function updateApp(id, payload) {
-        const response = await apiClient.put(`/api/apps/${id}`, payload);
-        const index = apps.value.findIndex(a => a.id === id);
-        if (index !== -1) apps.value[index] = response.data;
-        uiStore.addNotification(`App '${response.data.name}' updated successfully.`, 'success');
-    }
-    async function deleteApp(id) {
-        await apiClient.delete(`/api/apps/${id}`);
-        apps.value = apps.value.filter(a => a.id !== id);
-        uiStore.addNotification('App deleted successfully.', 'success');
-    }
-    async function generateAppSsoSecret(id) {
-        try {
-            const response = await apiClient.post(`/api/apps/${id}/generate-sso-secret`);
-            await fetchApps();
-            return response.data.sso_secret;
-        } catch (error) {
-            throw error;
-        }
-    }
-
-    // App Zoo Repositories
-    async function fetchZooRepositories() {
-        isLoadingZooRepositories.value = true;
-        try {
-            const response = await apiClient.get('/api/apps_zoo/repositories');
-            zooRepositories.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Could not load App Zoo repositories.', 'error');
-        } finally {
-            isLoadingZooRepositories.value = false;
-        }
-    }
-    async function addZooRepository(name, url) {
-        try {
-            const response = await apiClient.post('/api/apps_zoo/repositories', { name, url });
-            zooRepositories.value.push(response.data);
-            uiStore.addNotification(`Repository '${name}' added.`, 'success');
-        } catch (error) {
-            throw error;
-        }
-    }
-    async function deleteZooRepository(repoId) {
-        try {
-            await apiClient.delete(`/api/apps_zoo/repositories/${repoId}`);
-            zooRepositories.value = zooRepositories.value.filter(r => r.id !== repoId);
-            uiStore.addNotification('Repository deleted.', 'success');
-        } catch (error) {
-            throw error;
-        }
-    }
-    async function pullZooRepository(repoId) {
-        try {
-            const response = await apiClient.post(`/api/apps_zoo/repositories/${repoId}/pull`);
-            const task = response.data;
-            uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
-            tasksStore.addTask(task);
-            return task;
-        } catch (error) {
-            throw error;
-        }
-    }
-    async function pullAllZooRepositories() {
-        if (zooRepositories.value.length === 0) {
-            uiStore.addNotification('No repositories to pull.', 'info');
-            return;
-        }
-        uiStore.addNotification('Starting to pull all repositories...', 'info');
-        for (const repo of zooRepositories.value) {
-            try {
-                await pullZooRepository(repo.id);
-            } catch (error) {
-                console.error(`Failed to start pull task for repository: ${repo.name}`, error);
-            }
-        }
-    }
-
-    // MCP Zoo Repositories
-    async function fetchMcpZooRepositories() {
-        isLoadingMcpZooRepositories.value = true;
-        try {
-            const response = await apiClient.get('/api/mcps_zoo/repositories');
-            mcpZooRepositories.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Could not load MCP Zoo repositories.', 'error');
-        } finally {
-            isLoadingMcpZooRepositories.value = false;
-        }
-    }
-    async function addMcpZooRepository(name, url) {
-        try {
-            const response = await apiClient.post('/api/mcps_zoo/repositories', { name, url });
-            mcpZooRepositories.value.push(response.data);
-            uiStore.addNotification(`MCP Repository '${name}' added.`, 'success');
-        } catch (error) {
-            throw error;
-        }
-    }
-    async function deleteMcpZooRepository(repoId) {
-        try {
-            await apiClient.delete(`/api/mcps_zoo/repositories/${repoId}`);
-            mcpZooRepositories.value = mcpZooRepositories.value.filter(r => r.id !== repoId);
-            uiStore.addNotification('MCP Repository deleted.', 'success');
-        } catch (error) {
-            throw error;
-        }
-    }
-    async function pullMcpZooRepository(repoId) {
-        try {
-            const response = await apiClient.post(`/api/mcps_zoo/repositories/${repoId}/pull`);
-            const task = response.data;
-            uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
-            tasksStore.addTask(task);
-            return task;
-        } catch (error) {
-            throw error;
-        }
-    }
-    async function pullAllMcpZooRepositories() {
-        if (mcpZooRepositories.value.length === 0) {
-            uiStore.addNotification('No MCP repositories to pull.', 'info');
-            return;
-        }
-        uiStore.addNotification('Starting to pull all MCP repositories...', 'info');
-        for (const repo of mcpZooRepositories.value) {
-            try {
-                await pullMcpZooRepository(repo.id);
-            } catch (error) {
-                console.error(`Failed to start pull task for MCP repository: ${repo.name}`, error);
-            }
-        }
-    }
-
-    // Available Zoo Apps
-    async function fetchZooApps(params = {}) {
-        isLoadingZooApps.value = true;
-        try {
-            const response = await apiClient.get('/api/apps_zoo/available', { params });
-            zooApps.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Could not load available apps from the zoo.', 'error');
-        } finally {
-            isLoadingZooApps.value = false;
-        }
-    }
-
-    // Available Zoo MCPs
-    async function fetchZooMcps(params = {}) {
-        isLoadingZooMcps.value = true;
-        try {
-            const response = await apiClient.get('/api/mcps_zoo/available', { params });
-            zooMcps.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Could not load available MCPs from the zoo.', 'error');
-        } finally {
-            isLoadingZooMcps.value = false;
-        }
-    }
-
-
-    async function fetchAppReadme(repository, folder_name) {
-        try {
-            const response = await apiClient.get('/api/apps_zoo/readme', {
-                params: { repository, folder_name }
-            });
-            return response.data;
-        } catch (error) {
-            throw error;
-        }
-    }
-
-    async function fetchMcpReadme(repository, folder_name) {
-        try {
-            const response = await apiClient.get('/api/mcps_zoo/readme', {
-                params: { repository, folder_name }
-            });
-            return response.data;
-        } catch (error) {
-            throw error;
-        }
-    }
-
-    async function installZooApp(payload) {
-        try {
-            const response = await apiClient.post('/api/apps_zoo/install', payload);
-            const task = response.data;
-            uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
-            await fetchInstalledApps(); // Refresh installed list
-            tasksStore.addTask(task);
-            return task;
-        } catch (error) {
-            throw error;
-        }
-    }
+    // --- App Zoo ---
+    async function fetchZooRepositories() { isLoadingZooRepositories.value = true; try { const res = await apiClient.get('/api/apps_zoo/repositories'); zooRepositories.value = res.data; } finally { isLoadingZooRepositories.value = false; } }
+    async function addZooRepository(name, url) { const res = await apiClient.post('/api/apps_zoo/repositories', { name, url }); zooRepositories.value.push(res.data); uiStore.addNotification(`Repo '${name}' added.`, 'success'); }
+    async function deleteZooRepository(repoId) { await apiClient.delete(`/api/apps_zoo/repositories/${repoId}`); zooRepositories.value = zooRepositories.value.filter(r => r.id !== repoId); uiStore.addNotification('Repo deleted.', 'success'); }
+    async function pullZooRepository(repoId) { const res = await apiClient.post(`/api/apps_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); uiStore.addNotification(res.data.name + ' started.', 'info'); }
+    async function pullAllZooRepositories() { uiStore.addNotification('Pulling all app repos...', 'info'); for (const repo of zooRepositories.value) await pullZooRepository(repo.id); }
+    async function fetchZooApps(params = {}) { isLoadingZooApps.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/apps_zoo/categories'), apiClient.get('/api/apps_zoo/available', { params })]); zooApps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooApps.value = false; } }
+    async function installZooApp(payload) { const res = await apiClient.post('/api/apps_zoo/install', payload); tasksStore.addTask(res.data); uiStore.addNotification(res.data.name + ' started.', 'info'); await fetchInstalledApps(); }
+    async function fetchAppReadme(repo, folder) { const res = await apiClient.get('/api/apps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
     
-    async function installZooMcp(payload) {
-        try {
-            const response = await apiClient.post('/api/mcps_zoo/install', payload);
-            const task = response.data;
-            uiStore.addNotification(task.name + ' started.', 'info', { duration: 5000 });
-            await fetchInstalledApps(); // Refresh installed list
-            tasksStore.addTask(task);
-            return task;
-        } catch (error) {
-            throw error;
-        }
-    }
+    // --- MCP Zoo ---
+    async function fetchMcpZooRepositories() { isLoadingMcpZooRepositories.value = true; try { const res = await apiClient.get('/api/mcps_zoo/repositories'); mcpZooRepositories.value = res.data; } finally { isLoadingMcpZooRepositories.value = false; } }
+    async function addMcpZooRepository(name, url) { const res = await apiClient.post('/api/mcps_zoo/repositories', { name, url }); mcpZooRepositories.value.push(res.data); uiStore.addNotification(`MCP Repo '${name}' added.`, 'success'); }
+    async function deleteMcpZooRepository(repoId) { await apiClient.delete(`/api/mcps_zoo/repositories/${repoId}`); mcpZooRepositories.value = mcpZooRepositories.value.filter(r => r.id !== repoId); uiStore.addNotification('MCP Repo deleted.', 'success'); }
+    async function pullMcpZooRepository(repoId) { const res = await apiClient.post(`/api/mcps_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); uiStore.addNotification(res.data.name + ' started.', 'info'); }
+    async function pullAllMcpZooRepositories() { uiStore.addNotification('Pulling all MCP repos...', 'info'); for (const repo of mcpZooRepositories.value) await pullMcpZooRepository(repo.id); }
+    async function fetchZooMcps(params = {}) { isLoadingZooMcps.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/mcps_zoo/categories'), apiClient.get('/api/mcps_zoo/available', { params })]); zooMcps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooMcps.value = false; } }
+    async function installZooMcp(payload) { const res = await apiClient.post('/api/mcps_zoo/install', payload); tasksStore.addTask(res.data); uiStore.addNotification(res.data.name + ' started.', 'info'); await fetchInstalledApps(); }
+    async function fetchMcpReadme(repo, folder) { const res = await apiClient.get('/api/mcps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
+    
+    // --- Prompt Zoo ---
+    async function fetchPromptZooRepositories() { isLoadingPromptZooRepositories.value = true; try { const res = await apiClient.get('/api/prompts_zoo/repositories'); promptZooRepositories.value = res.data; } finally { isLoadingPromptZooRepositories.value = false; } }
+    async function addPromptZooRepository(repoData) { const res = await apiClient.post('/api/prompts_zoo/repositories', repoData); promptZooRepositories.value.push(res.data); uiStore.addNotification(`Prompt Repo '${repoData.name}' added.`, 'success'); }
+    async function deletePromptZooRepository(repoId) { await apiClient.delete(`/api/prompts_zoo/repositories/${repoId}`); promptZooRepositories.value = promptZooRepositories.value.filter(r => r.id !== repoId); uiStore.addNotification('Prompt Repo deleted.', 'success'); }
+    async function pullPromptZooRepository(repoId) { const res = await apiClient.post(`/api/prompts_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); uiStore.addNotification(res.data.name + ' started.', 'info'); }
+    async function pullAllPromptZooRepositories() { uiStore.addNotification('Pulling all prompt repos...', 'info'); for (const repo of promptZooRepositories.value) await pullPromptZooRepository(repo.id); }
+    async function fetchZooPrompts(params = {}) { isLoadingZooPrompts.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/prompts_zoo/categories'), apiClient.get('/api/prompts_zoo/available', { params })]); zooPrompts.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooPrompts.value = false; } }
+    async function installZooPrompt(payload) { const res = await apiClient.post('/api/prompts_zoo/install', payload); tasksStore.addTask(res.data); uiStore.addNotification(res.data.name + ' started.', 'info'); }
+    async function fetchPromptReadme(repo, folder) { const res = await apiClient.get('/api/prompts_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
 
-    // Installed Apps Management
-    async function fetchInstalledApps() {
-        isLoadingInstalledApps.value = true;
-        try {
-            const response = await apiClient.get('/api/apps_zoo/installed');
-            installedApps.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Could not load installed apps.', 'error');
-        } finally {
-            isLoadingInstalledApps.value = false;
-        }
-    }
+    // --- System Prompt Management ---
+    async function createSystemPrompt(promptData) { await apiClient.post('/api/prompts_zoo/installed', promptData); uiStore.addNotification('System prompt created.', 'success'); await promptsStore.fetchPrompts(); }
+    async function updateSystemPrompt(promptId, promptData) { await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); uiStore.addNotification('System prompt updated.', 'success'); await promptsStore.fetchPrompts(); }
+    async function deleteSystemPrompt(promptId) { await apiClient.delete(`/api/prompts_zoo/installed/${promptId}`); uiStore.addNotification('System prompt deleted.', 'success'); await promptsStore.fetchPrompts(); }
 
-    async function fetchNextAvailablePort(port = null) {
-        try {
-            const params = port ? { port } : {};
-            const response = await apiClient.get('/api/apps_zoo/get-next-available-port', { params });
-            return response.data.port;
-        } catch (error) {
-            if (port) throw error; // Re-throw for specific port checks
-            uiStore.addNotification('Could not determine an available port.', 'warning');
-            return 9601; // Fallback
-        }
-    }
-
-    async function startApp(appId) {
-        const response = await apiClient.post(`/api/apps_zoo/installed/${appId}/start`);
-        const task = response.data;
-        uiStore.addNotification(`Task '${task.name}' started.`, 'info');
-        tasksStore.addTask(task);
-    }
-    async function stopApp(appId) {
-        const response = await apiClient.post(`/api/apps_zoo/installed/${appId}/stop`);
-        const task = response.data;
-        uiStore.addNotification(`Task '${task.name}' started.`, 'info');
-        tasksStore.addTask(task);
-    }
-    async function uninstallApp(appId) {
-        const response = await apiClient.delete(`/api/apps_zoo/installed/${appId}`);
-        uiStore.addNotification(response.data.message, 'success');
-        await fetchInstalledApps();
-        // No need to fetch Zoo apps here, their status is determined on the fly
-    }
-
-    async function updateInstalledApp(appId, payload) {
-        try {
-            const response = await apiClient.put(`/api/apps_zoo/installed/${appId}`, payload);
-            uiStore.addNotification(`App '${response.data.name}' updated successfully.`, 'success');
-            const index = installedApps.value.findIndex(app => app.id === appId);
-            if (index !== -1) {
-                installedApps.value[index] = response.data;
-            }
-            return response.data;
-        } catch (error) {
-            throw error;
-        }
-    }
-
-    async function fetchAppLog(appId) {
-        try {
-            const response = await apiClient.get(`/api/apps_zoo/installed/${appId}/logs`);
-            return response.data.log_content;
-        } catch (error) {
-            throw error;
-        }
-    }
-
-    // NEW App Config Actions
-    async function fetchAppConfigSchema(appId) {
-        const response = await apiClient.get(`/api/apps_zoo/installed/${appId}/config-schema`);
-        return response.data;
-    }
-    async function fetchAppConfig(appId) {
-        const response = await apiClient.get(`/api/apps_zoo/installed/${appId}/config`);
-        return response.data;
-    }
-    async function updateAppConfig(appId, configData) {
-        const response = await apiClient.put(`/api/apps_zoo/installed/${appId}/config`, configData);
-        uiStore.addNotification(response.data.message || 'Configuration saved.', 'success');
-    }
+    // --- Installed Apps ---
+    async function fetchInstalledApps() { isLoadingInstalledApps.value = true; try { const res = await apiClient.get('/api/apps_zoo/installed'); installedApps.value = res.data; } finally { isLoadingInstalledApps.value = false; } }
+    async function fetchNextAvailablePort(port = null) { const params = port ? { port } : {}; const res = await apiClient.get('/api/apps_zoo/get-next-available-port', { params }); return res.data.port; }
+    async function startApp(appId) { const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/start`); tasksStore.addTask(res.data); uiStore.addNotification(`Task '${res.data.name}' started.`, 'info'); }
+    async function stopApp(appId) { const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/stop`); tasksStore.addTask(res.data); uiStore.addNotification(`Task '${res.data.name}' started.`, 'info'); }
+    async function uninstallApp(appId) { const res = await apiClient.delete(`/api/apps_zoo/installed/${appId}`); uiStore.addNotification(res.data.message, 'success'); await fetchInstalledApps(); }
+    async function updateInstalledApp(appId, payload) { const res = await apiClient.put(`/api/apps_zoo/installed/${appId}`, payload); uiStore.addNotification(`App '${res.data.name}' updated.`, 'success'); const i = installedApps.value.findIndex(a => a.id === appId); if (i !== -1) installedApps.value[i] = res.data; return res.data; }
+    async function fetchAppLog(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/logs`); return res.data.log_content; }
+    async function fetchAppConfigSchema(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config-schema`); return res.data; }
+    async function fetchAppConfig(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config`); return res.data; }
+    async function updateAppConfig(appId, configData) { const res = await apiClient.put(`/api/apps_zoo/installed/${appId}/config`, configData); uiStore.addNotification(res.data.message || 'Config saved.', 'success'); }
 
     return {
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers,
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings,
         isImporting, importOpenWebUIData,
-        mcps, apps, isLoadingServices,
-        fetchMcps, addMcp, updateMcp, deleteMcp, generateMcpSsoSecret,
-        fetchApps, addApp, updateApp, deleteApp, generateAppSsoSecret,
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
-        batchUpdateUsers,
-        isEnhancingEmail, enhanceEmail,
+        batchUpdateUsers, isEnhancingEmail, enhanceEmail,
         zooRepositories, isLoadingZooRepositories, fetchZooRepositories, addZooRepository, deleteZooRepository, pullZooRepository, pullAllZooRepositories,
         mcpZooRepositories, isLoadingMcpZooRepositories, fetchMcpZooRepositories, addMcpZooRepository, deleteMcpZooRepository, pullMcpZooRepository, pullAllMcpZooRepositories,
+        promptZooRepositories, isLoadingPromptZooRepositories, fetchPromptZooRepositories, addPromptZooRepository, deletePromptZooRepository, pullPromptZooRepository, pullAllPromptZooRepositories,
         zooApps, isLoadingZooApps, fetchZooApps,
         zooMcps, isLoadingZooMcps, fetchZooMcps, fetchMcpReadme, installZooMcp,
+        zooPrompts, isLoadingZooPrompts, fetchZooPrompts, fetchPromptReadme, installZooPrompt,
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
-        purgeUnusedUploads,
-        updateInstalledApp, fetchAppLog,
+        purgeUnusedUploads, updateInstalledApp, fetchAppLog,
         systemStatus, isLoadingSystemStatus, fetchSystemStatus,
         fetchAppConfigSchema, fetchAppConfig, updateAppConfig,
-        installZooApp, fetchAppReadme
+        installZooApp, fetchAppReadme,
+        createSystemPrompt, updateSystemPrompt, deleteSystemPrompt
     };
 });

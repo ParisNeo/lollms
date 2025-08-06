@@ -15,10 +15,9 @@ import IconCog from '../assets/icons/IconCog.vue';
 import IconMessage from '../assets/icons/IconMessage.vue';
 import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
 import IconSquares2x2 from '../assets/icons/IconSquares2x2.vue';
-import IconTicket from '../assets/icons/IconTicket.vue';
 import IconTasks from '../assets/icons/IconTasks.vue';
 import IconMcp from '../assets/icons/IconMcp.vue';
-import IconPrompt from '../assets/icons/IconTicket.vue';
+import IconSparkles from '../assets/icons/IconSparkles.vue';
 
 const AdminPanel = defineAsyncComponent(() => import('../components/admin/AdminPanel.vue'));
 const adminStore = useAdminStore();
@@ -32,12 +31,12 @@ const activeTab = ref('dashboard');
 const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: IconHome },
     { id: 'users', label: 'User Management', icon: IconUserGroup },
-    { id: 'tasks', label: 'Tasks', icon: IconTicket },
+    { id: 'tasks', label: 'Tasks', icon: IconTasks },
     { id: 'https', label: 'Server/HTTPS', icon: IconCpuChip },
     { id: 'bindings', label: 'LLM Bindings', icon: IconLink },
     { id: 'apps', label: 'Apps', icon: IconSquares2x2 },
     { id: 'mcps', label: 'MCPs', icon: IconMcp },
-    { id: 'prompts', label: 'Prompts', icon: IconPrompt },
+    { id: 'prompts', label: 'Prompts', icon: IconSparkles },
     { id: 'global_settings', label: 'Global Settings', icon: IconCog },
     { id: 'email', label: 'Email Settings', icon: IconMessage },
     { id: 'import', label: 'Import', icon: IconArrowDownTray }
