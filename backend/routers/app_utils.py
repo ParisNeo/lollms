@@ -38,6 +38,7 @@ def get_installed_app_path(db: Session, app_id: str) -> Path:
     if app.app_metadata and app.app_metadata.get('item_type') == 'mcp':
         return MCPS_ROOT_PATH / app.folder_name
     
+    # Fallback check for robustness
     if (MCPS_ROOT_PATH / app.folder_name).exists():
         return MCPS_ROOT_PATH / app.folder_name
         
@@ -207,7 +208,18 @@ def pull_repo_task(task: Task, repo_id: int, repo_model, root_path: Path, item_t
     db_session = next(get_db())
     repo = db_session.query(repo_model).filter(repo_model.id == repo_id).first()
     if not repo: raise ValueError("Repository not found.")
+
     try:
+        if repo.type == 'local':
+            task.log(f"'{repo.name}' is a local folder. Rescanning for items...", "INFO")
+            repo.last_pulled_at = datetime.datetime.now(datetime.timezone.utc)
+            db_session.commit()
+            from backend.zoo_cache import refresh_repo_cache
+            refresh_repo_cache(repo.name, item_type)
+            task.set_progress(100)
+            return {"message": "Local folder rescanned successfully."}
+        
+        # Git logic below
         repo_path = root_path / repo.name
         command = ["git", "clone", repo.url, str(repo_path)] if not repo_path.exists() else ["git", "pull"]
         cwd = str(root_path) if not repo_path.exists() else str(repo_path)

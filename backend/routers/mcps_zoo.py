@@ -2,6 +2,8 @@ import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import datetime
+import yaml
+from packaging import version as packaging_version
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
@@ -17,7 +19,7 @@ from backend.models import (
 from backend.session import get_current_admin_user
 from backend.config import MCPS_ZOO_ROOT_PATH
 from backend.task_manager import task_manager
-from backend.zoo_cache import get_all_items, get_all_categories
+from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
 from .app_utils import to_task_info, pull_repo_task, install_item_task
 
 mcps_zoo_router = APIRouter(
@@ -38,10 +40,20 @@ def get_mcp_zoo_repositories(db: Session = Depends(get_db)):
 def add_mcp_zoo_repository(repo: MCPZooRepositoryCreate, db: Session = Depends(get_db)):
     if db.query(DBMCPZooRepository).filter(DBMCPZooRepository.name == repo.name).first():
         raise HTTPException(status_code=409, detail="A repository with this name already exists.")
-    new_repo = DBMCPZooRepository(**repo.model_dump(), is_deletable=True)
+    
+    repo_type = "local" if repo.path else "git"
+    url_or_path = repo.path if repo.path else repo.url
+
+    if repo_type == "local":
+        path = Path(url_or_path)
+        if not path.is_dir() or not path.exists():
+            raise HTTPException(status_code=400, detail=f"The provided local path is not a valid directory: {url_or_path}")
+
+    new_repo = DBMCPZooRepository(name=repo.name, url=url_or_path, type=repo_type, is_deletable=True)
     db.add(new_repo)
     db.commit()
     db.refresh(new_repo)
+    build_full_cache()
     return new_repo
 
 @mcps_zoo_router.delete("/repositories/{repo_id}", status_code=204)
@@ -49,9 +61,13 @@ def delete_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     repo = db.query(DBMCPZooRepository).filter(DBMCPZooRepository.id == repo_id).first()
     if not repo: raise HTTPException(status_code=404, detail="Repository not found.")
     if not repo.is_deletable: raise HTTPException(status_code=403, detail="This is a default repository.")
-    shutil.rmtree(MCPS_ZOO_ROOT_PATH / repo.name, ignore_errors=True)
+    
+    if repo.type == 'git':
+        shutil.rmtree(MCPS_ZOO_ROOT_PATH / repo.name, ignore_errors=True)
+        
     db.delete(repo)
     db.commit()
+    build_full_cache()
 
 @mcps_zoo_router.post("/repositories/{repo_id}/pull", response_model=TaskInfo, status_code=202)
 def pull_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
@@ -67,16 +83,27 @@ def pull_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
 @mcps_zoo_router.get("/available", response_model=ZooMCPInfoResponse)
 def get_available_zoo_mcps(db: Session = Depends(get_db), page: int = 1, page_size: int = 24, sort_by: str = 'last_update_date', sort_order: str = 'desc', category: Optional[str] = None, search_query: Optional[str] = None, installation_status: Optional[str] = None):
     all_items_raw = get_all_items('mcp')
-    installed_items = {item.name for item in db.query(DBApp.name).filter(DBApp.is_installed == True, DBApp.app_metadata['item_type'].as_string() == 'mcp').all()}
+    installed_mcps_q = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.app_metadata['item_type'].as_string() == 'mcp').all()
+    installed_mcps = {item.name: item for item in installed_mcps_q}
     
     all_items = []
     for info in all_items_raw:
         try:
+            is_installed = info.get('name') in installed_mcps
+            update_available = False
+            if is_installed:
+                installed_app = installed_mcps[info.get('name')]
+                try:
+                    if installed_app.version and info.get('version') and packaging_version.parse(str(info.get('version'))) > packaging_version.parse(str(installed_app.version)):
+                        update_available = True
+                except (packaging_version.InvalidVersion, TypeError):
+                    pass
+
             model_data = {
                 "name": info.get('name'), "repository": info.get('repository'), "folder_name": info.get('folder_name'),
-                "icon": info.get('icon'),
-                "is_installed": info.get('name') in installed_items, "has_readme": (MCPS_ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists(),
-                **{f: info.get(f) for f in ZooMCPInfo.model_fields if f not in ['name', 'repository', 'folder_name', 'is_installed', 'has_readme', 'icon']}
+                "icon": info.get('icon'), "is_installed": is_installed, "update_available": update_available,
+                "has_readme": (MCPS_ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists(),
+                **{f: info.get(f) for f in ZooMCPInfo.model_fields if f not in ['name', 'repository', 'folder_name', 'is_installed', 'has_readme', 'icon', 'update_available']}
             }
             all_items.append(ZooMCPInfo(**model_data))
         except (PydanticValidationError, Exception) as e:

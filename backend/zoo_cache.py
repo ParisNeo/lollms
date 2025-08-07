@@ -55,8 +55,7 @@ def parse_item_metadata(item_path: Path, item_type: ITEM_TYPES) -> Dict[str, Any
                 metadata = yaml.safe_load(f)
     elif item_type == 'prompt':
         desc_path = item_path / "description.yaml"
-        prompt_path = item_path / "prompt.txt"
-        if desc_path.exists() and prompt_path.exists():
+        if desc_path.exists():
             with open(desc_path, 'r', encoding='utf-8') as f:
                 metadata = yaml.safe_load(f) or {}
     return metadata
@@ -69,8 +68,15 @@ def _build_cache_for_type(db: Session, item_type: ITEM_TYPES) -> List[Dict[str, 
     repositories = db.query(repo_model).all()
     
     for repo in repositories:
-        repo_path = zoo_root / repo.name
-        if not repo_path.is_dir(): continue
+        repo_path = None
+        if repo.type == 'git':
+            repo_path = zoo_root / repo.name
+        elif repo.type == 'local':
+            repo_path = Path(repo.url)
+        else:
+            continue
+
+        if not repo_path or not repo_path.is_dir(): continue
         
         for item_folder in repo_path.iterdir():
             if item_folder.is_dir() and not item_folder.name.startswith('.'):
@@ -115,9 +121,13 @@ def build_full_cache():
 
 def refresh_repo_cache(repo_name: str, item_type: ITEM_TYPES):
     global _cache
-    if not _cache["data"]:
+    if not _cache.get("data"):
         load_cache()
     
+    # Ensure item_type key exists
+    if item_type not in _cache.get("data", {}):
+        _cache["data"][item_type] = []
+        
     # Remove old items from this repo
     _cache["data"][item_type] = [item for item in _cache["data"].get(item_type, []) if item.get('repository') != repo_name]
     
@@ -126,8 +136,13 @@ def refresh_repo_cache(repo_name: str, item_type: ITEM_TYPES):
     try:
         repo = db.query(get_db_repo_model(item_type)).filter_by(name=repo_name).first()
         if repo:
-            repo_path = get_zoo_root_path(item_type) / repo.name
-            if repo_path.is_dir():
+            repo_path = None
+            if repo.type == 'git':
+                repo_path = get_zoo_root_path(item_type) / repo.name
+            elif repo.type == 'local':
+                repo_path = Path(repo.url)
+            
+            if repo_path and repo_path.is_dir():
                 for item_folder in repo_path.iterdir():
                     if item_folder.is_dir() and not item_folder.name.startswith('.'):
                         try:

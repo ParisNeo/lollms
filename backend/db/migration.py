@@ -449,18 +449,27 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'is_deletable' not in columns_db:
             connection.execute(text("ALTER TABLE app_zoo_repositories ADD COLUMN is_deletable BOOLEAN DEFAULT 1 NOT NULL"))
             print("INFO: Added 'is_deletable' column to 'app_zoo_repositories' table.")
+        if 'type' not in columns_db:
+            connection.execute(text("ALTER TABLE app_zoo_repositories ADD COLUMN type VARCHAR DEFAULT 'git' NOT NULL"))
+            print("INFO: Added 'type' column to 'app_zoo_repositories' table.")
 
     if inspector.has_table("mcp_zoo_repositories"):
         columns_db = [col['name'] for col in inspector.get_columns('mcp_zoo_repositories')]
         if 'is_deletable' not in columns_db:
             connection.execute(text("ALTER TABLE mcp_zoo_repositories ADD COLUMN is_deletable BOOLEAN DEFAULT 1 NOT NULL"))
             print("INFO: Added 'is_deletable' column to 'mcp_zoo_repositories' table.")
+        if 'type' not in columns_db:
+            connection.execute(text("ALTER TABLE mcp_zoo_repositories ADD COLUMN type VARCHAR DEFAULT 'git' NOT NULL"))
+            print("INFO: Added 'type' column to 'mcp_zoo_repositories' table.")
 
     if inspector.has_table("prompt_zoo_repositories"):
         columns_db = [col['name'] for col in inspector.get_columns('prompt_zoo_repositories')]
         if 'is_deletable' not in columns_db:
             connection.execute(text("ALTER TABLE prompt_zoo_repositories ADD COLUMN is_deletable BOOLEAN DEFAULT 1 NOT NULL"))
             print("INFO: Added 'is_deletable' column to 'prompt_zoo_repositories' table.")
+        if 'type' not in columns_db:
+            connection.execute(text("ALTER TABLE prompt_zoo_repositories ADD COLUMN type VARCHAR DEFAULT 'git' NOT NULL"))
+            print("INFO: Added 'type' column to 'prompt_zoo_repositories' table.")
 
 
 def check_and_update_db_version(SessionLocal):

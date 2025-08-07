@@ -56,11 +56,20 @@ def get_app_zoo_repositories(db: Session = Depends(get_db)):
 def add_app_zoo_repository(repo: AppZooRepositoryCreate, db: Session = Depends(get_db)):
     if db.query(DBAppZooRepository).filter(DBAppZooRepository.name == repo.name).first():
         raise HTTPException(status_code=409, detail="A repository with this name already exists.")
-    new_repo = DBAppZooRepository(**repo.model_dump())
+
+    repo_type = "local" if repo.path else "git"
+    url_or_path = repo.path if repo.path else repo.url
+
+    if repo_type == "local":
+        path = Path(url_or_path)
+        if not path.is_dir() or not path.exists():
+            raise HTTPException(status_code=400, detail=f"The provided local path is not a valid directory: {url_or_path}")
+    
+    new_repo = DBAppZooRepository(name=repo.name, url=url_or_path, type=repo_type)
     db.add(new_repo)
     db.commit()
     db.refresh(new_repo)
-    build_full_cache()
+    build_full_cache() # Rescan all to include the new one
     return new_repo
 
 @apps_zoo_router.delete("/repositories/{repo_id}", status_code=204)
@@ -68,7 +77,10 @@ def delete_app_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     repo = db.query(DBAppZooRepository).filter(DBAppZooRepository.id == repo_id).first()
     if not repo: raise HTTPException(status_code=404, detail="Repository not found.")
     if not repo.is_deletable: raise HTTPException(status_code=403, detail="This is a default repository.")
-    shutil.rmtree(APPS_ZOO_ROOT_PATH / repo.name, ignore_errors=True)
+    
+    if repo.type == 'git':
+        shutil.rmtree(APPS_ZOO_ROOT_PATH / repo.name, ignore_errors=True)
+    
     db.delete(repo)
     db.commit()
     build_full_cache()

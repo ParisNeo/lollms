@@ -27,7 +27,7 @@ const { tasks } = storeToRefs(tasksStore);
 
 const activeSubTab = ref('installed');
 
-const newRepo = ref({ name: '', url: '' });
+const newRepo = ref({ type: 'git', name: '', url: '', path: '' });
 const isAddRepoFormVisible = ref(false);
 const isLoadingAction = ref(null);
 const isPullingAll = ref(false);
@@ -66,6 +66,11 @@ async function fetchZooItems() {
 
 function debouncedFetch() { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentPage.value = 1; fetchZooItems(); }, 300); }
 
+watch(() => newRepo.value.type, (newType) => {
+    if (newType === 'git') newRepo.value.path = '';
+    else newRepo.value.url = '';
+});
+
 watch([sortKey, sortOrder, selectedCategory, installationStatusFilter, activeSubTab], () => { if (activeSubTab.value === 'available') { currentPage.value = 1; fetchZooItems(); } });
 watch(searchQuery, debouncedFetch);
 watch(currentPage, fetchZooItems);
@@ -96,10 +101,33 @@ const categories = computed(() => {
 function formatDateTime(isoString) { if (!isoString) return 'Never'; return new Date(isoString).toLocaleString(); }
 
 async function handleAddRepository() {
-    if (!newRepo.value.name || !newRepo.value.url) return;
+    if (!newRepo.value.name) {
+        uiStore.addNotification('Repository name is required.', 'warning');
+        return;
+    }
+    const payload = { name: newRepo.value.name };
+    if (newRepo.value.type === 'git') {
+        if (!newRepo.value.url) {
+            uiStore.addNotification('Git URL is required.', 'warning');
+            return;
+        }
+        payload.url = newRepo.value.url;
+    } else {
+        if (!newRepo.value.path) {
+            uiStore.addNotification('Local Folder Path is required.', 'warning');
+            return;
+        }
+        payload.path = newRepo.value.path;
+    }
+
     isLoadingAction.value = 'add';
-    try { await adminStore.addPromptZooRepository(newRepo.value); newRepo.value = { name: '', url: '' }; isAddRepoFormVisible.value = false; }
-    finally { isLoadingAction.value = null; }
+    try {
+        await adminStore.addPromptZooRepository(payload);
+        newRepo.value = { type: 'git', name: '', url: '', path: '' };
+        isAddRepoFormVisible.value = false;
+    } finally {
+        isLoadingAction.value = null;
+    }
 }
 async function handlePullRepository(repo) { isLoadingAction.value = repo.id; try { await adminStore.pullPromptZooRepository(repo.id); } finally { isLoadingAction.value = null; } }
 async function handlePullAll() { isPullingAll.value = true; try { await adminStore.pullAllPromptZooRepositories(); } finally { isPullingAll.value = false; } }
@@ -248,13 +276,41 @@ async function handleDeletePrompt(prompt) {
         
         <section v-if="activeSubTab === 'repositories'">
             <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Prompt Zoo Repositories</h3><div class="flex items-center gap-2"><button @click="handlePullAll" class="btn btn-secondary" :disabled="isPullingAll"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isPullingAll}" /><span class="ml-2">Pull All</span></button><button @click="isAddRepoFormVisible = !isAddRepoFormVisible" class="btn btn-primary">{{ isAddRepoFormVisible ? 'Cancel' : 'Add' }}</button></div></div>
-            <transition name="form-fade"><div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6"><form @submit.prevent="handleAddRepository" class="flex gap-4"><input v-model="newRepo.name" type="text" placeholder="Name" class="input-field flex-1" required><input v-model="newRepo.url" type="url" placeholder="Git URL" class="input-field flex-grow-[2]" required><button type="submit" class="btn btn-primary" :disabled="isLoadingAction === 'add'">Add</button></form></div></transition>
+            <transition name="form-fade">
+                <div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6 overflow-hidden">
+                    <form @submit.prevent="handleAddRepository" class="space-y-4">
+                        <div class="flex items-center gap-x-4 border-b pb-4 dark:border-gray-700">
+                            <label class="flex items-center gap-x-2 cursor-pointer text-sm font-medium"><input type="radio" v-model="newRepo.type" value="git" class="radio-input"> Git Repository</label>
+                            <label class="flex items-center gap-x-2 cursor-pointer text-sm font-medium"><input type="radio" v-model="newRepo.type" value="local" class="radio-input"> Local Folder</label>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div><label for="repo-name-prompt" class="block text-sm font-medium mb-1">Name</label><input id="repo-name-prompt" v-model="newRepo.name" type="text" class="input-field" placeholder="e.g., Official Prompts Zoo" required></div>
+                            <div class="md:col-span-2" v-if="newRepo.type === 'git'"><label for="repo-url-prompt" class="block text-sm font-medium mb-1">Git URL</label><input id="repo-url-prompt" v-model="newRepo.url" type="url" class="input-field" placeholder="https://github.com/ParisNeo/lollms_prompts_zoo.git" :required="newRepo.type === 'git'"></div>
+                            <div class="md:col-span-2" v-if="newRepo.type === 'local'"><label for="repo-path-prompt" class="block text-sm font-medium mb-1">Full Folder Path</label><input id="repo-path-prompt" v-model="newRepo.path" type="text" class="input-field" placeholder="e.g., C:\lollms-zoos\my-prompts-zoo" :required="newRepo.type === 'local'"></div>
+                        </div>
+                        <div class="flex justify-end"><button type="submit" class="btn btn-primary" :disabled="isLoadingAction === 'add'">Add</button></div>
+                    </form>
+                </div>
+            </transition>
             <div v-if="isLoadingPromptZooRepositories" class="text-center p-4">Loading...</div>
             <div v-else-if="!sortedRepositories || sortedRepositories.length === 0" class="empty-state-card"><p>No repositories added.</p></div>
             <div v-else class="space-y-4">
                 <div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex items-center justify-between gap-4">
-                    <div class="flex-grow truncate"><p class="font-semibold">{{ repo.name }}</p><p class="text-sm text-gray-500 font-mono truncate">{{ repo.url }}</p><p class="text-xs text-gray-400 mt-1">Updated: {{ formatDateTime(repo.last_pulled_at) }}</p></div>
-                    <div class="flex items-center gap-x-2"><button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm" :disabled="isLoadingAction === repo.id"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingAction === repo.id}" /> Pull</button><button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm" :disabled="isLoadingAction === repo.id"><IconTrash class="w-4 h-4" /></button></div>
+                    <div class="flex-grow truncate">
+                        <div class="flex items-center gap-2">
+                             <span class="px-2 py-0.5 text-xs font-semibold rounded-full" :class="repo.type === 'git' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'">{{ repo.type }}</span>
+                            <p class="font-semibold">{{ repo.name }}</p>
+                        </div>
+                        <p class="text-sm text-gray-500 font-mono truncate mt-1" :title="repo.url">{{ repo.url }}</p>
+                        <p class="text-xs text-gray-400 mt-1">Updated: {{ formatDateTime(repo.last_pulled_at) }}</p>
+                    </div>
+                    <div class="flex items-center gap-x-2">
+                        <button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm" :disabled="isLoadingAction === repo.id">
+                            <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingAction === repo.id}" /> 
+                            {{ repo.type === 'git' ? 'Pull' : 'Rescan' }}
+                        </button>
+                        <button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm" :disabled="isLoadingAction === repo.id"><IconTrash class="w-4 h-4" /></button>
+                    </div>
                 </div>
             </div>
         </section>

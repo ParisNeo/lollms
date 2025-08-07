@@ -1,6 +1,6 @@
 # backend/models/service.py
 import datetime
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field, constr, field_validator, model_validator
 
 class LLMBindingBase(BaseModel):
@@ -67,45 +67,69 @@ class MCPPublic(MCPBase):
     class Config:
         from_attributes = True
 
-class AppZooRepositoryBase(BaseModel):
+class AppZooRepositoryCreate(BaseModel):
     name: constr(min_length=1, max_length=100)
-    url: str
+    url: Optional[str] = None
+    path: Optional[str] = None
 
-class AppZooRepositoryCreate(AppZooRepositoryBase):
-    pass
+    @model_validator(mode='before')
+    def check_url_or_path_exclusive(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        url, path = values.get('url'), values.get('path')
+        if not (url or path) or (url and path):
+            raise ValueError('Either url or path must be provided, but not both.')
+        return values
 
-class AppZooRepositoryPublic(AppZooRepositoryBase):
+class AppZooRepositoryPublic(BaseModel):
     id: int
+    name: str
+    url: str
+    type: str
     last_pulled_at: Optional[datetime.datetime] = None
     created_at: datetime.datetime
     is_deletable: bool = True
     class Config:
         from_attributes = True
 
-class MCPZooRepositoryBase(BaseModel):
+class MCPZooRepositoryCreate(BaseModel):
     name: constr(min_length=1, max_length=100)
-    url: str
+    url: Optional[str] = None
+    path: Optional[str] = None
 
-class MCPZooRepositoryCreate(MCPZooRepositoryBase):
-    pass
+    @model_validator(mode='before')
+    def check_url_or_path_exclusive(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        url, path = values.get('url'), values.get('path')
+        if not (url or path) or (url and path):
+            raise ValueError('Either url or path must be provided, but not both.')
+        return values
 
-class MCPZooRepositoryPublic(MCPZooRepositoryBase):
+class MCPZooRepositoryPublic(BaseModel):
     id: int
+    name: str
+    url: str
+    type: str
     last_pulled_at: Optional[datetime.datetime] = None
     created_at: datetime.datetime
     is_deletable: bool = True
     class Config:
         from_attributes = True
 
-class PromptZooRepositoryBase(BaseModel):
+class PromptZooRepositoryCreate(BaseModel):
     name: constr(min_length=1, max_length=100)
-    url: str
+    url: Optional[str] = None
+    path: Optional[str] = None
 
-class PromptZooRepositoryCreate(PromptZooRepositoryBase):
-    pass
+    @model_validator(mode='before')
+    def check_url_or_path_exclusive(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        url, path = values.get('url'), values.get('path')
+        if not (url or path) or (url and path):
+            raise ValueError('Either url or path must be provided, but not both.')
+        return values
 
-class PromptZooRepositoryPublic(PromptZooRepositoryBase):
+class PromptZooRepositoryPublic(BaseModel):
     id: int
+    name: str
+    url: str
+    type: str
     last_pulled_at: Optional[datetime.datetime] = None
     created_at: datetime.datetime
     is_deletable: bool = True
@@ -199,6 +223,7 @@ class ZooPromptInfo(BaseModel):
     last_update_date: Optional[str] = None
     version: Optional[str] = None
     tags: Optional[List[str]] = None
+    update_available: bool = False
     
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
     def coerce_to_string(cls, v):
