@@ -1,3 +1,4 @@
+# backend/db/models/prompt.py
 import uuid
 from sqlalchemy import (
     Column, String, Text, ForeignKey, Integer, Index
@@ -18,6 +19,9 @@ class SavedPrompt(Base):
     author = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     icon = Column(Text, nullable=True) # Base64 icon
+    version = Column(String, nullable=True)
+    repository = Column(String, nullable=True)
+    folder_name = Column(String, nullable=True)
 
     owner = relationship("User")
     

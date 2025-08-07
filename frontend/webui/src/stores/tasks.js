@@ -3,7 +3,6 @@ import { ref, computed, watch } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import useEventBus from '../services/eventBus';
-import { useDiscussionsStore } from './discussions';
 
 export const useTasksStore = defineStore('tasks', () => {
     const uiStore = useUiStore();
@@ -43,40 +42,43 @@ export const useTasksStore = defineStore('tasks', () => {
             const newTasks = response.data;
             tasks.value = newTasks;
             
-            const discussionsStore = useDiscussionsStore();
-            const { useDataStore } = await import('./data'); 
-            const dataStore = useDataStore();
+            // Dynamically import stores only when needed to avoid circular dependencies
+            const { useDiscussionsStore } = await import('./discussions');
             const { useAdminStore } = await import('./admin');
-            const adminStore = useAdminStore();
             const { usePromptsStore } = await import('./prompts');
+            const { useDataStore } = await import('./data');
+            const discussionsStore = useDiscussionsStore();
+            const adminStore = useAdminStore();
             const promptsStore = usePromptsStore();
-
+            const dataStore = useDataStore();
 
             // Check for newly completed tasks and emit an event
             newTasks.forEach(newTask => {
                 const oldTask = oldTasks.get(newTask.id);
-                const justFinishedSuccessfully = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending') && newTask.status === 'completed';
                 const justFinished = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending') && ['completed', 'failed', 'cancelled'].includes(newTask.status);
 
                 if (justFinished) {
                     emit('task:completed', newTask);
-                }
 
-                if (justFinishedSuccessfully) {
-                    if (newTask.name && newTask.name.startsWith('Installing app: ')) {
-                        console.log("Installation task completed, refreshing stores...");
-                        adminStore.fetchInstalledApps();
-                        adminStore.fetchZooApps();
-                        adminStore.fetchZooMcps();
-                        dataStore.triggerMcpReload();
+                    // --- NEW: Trigger store refreshes based on task name ---
+                    const taskName = newTask.name || '';
+                    if (newTask.status === 'completed') {
+                        if (taskName.startsWith('Installing app:') || taskName.startsWith('Installing MCP:') || taskName.startsWith('Start app:') || taskName.startsWith('Stop app:')) {
+                            console.log(`Task '${taskName}' completed, refreshing installed apps.`);
+                            adminStore.fetchInstalledApps();
+                            if (taskName.startsWith('Installing app:')) adminStore.fetchZooApps();
+                            if (taskName.startsWith('Installing MCP:')) adminStore.fetchZooMcps();
+                            if (taskName.startsWith('Installing')) { // If it's an install, reload tools
+                                dataStore.triggerMcpReload();
+                            }
+                        } else if (taskName.startsWith('Installing prompt:')) {
+                            console.log(`Task '${taskName}' completed, refreshing prompts.`);
+                            promptsStore.fetchPrompts();
+                            adminStore.fetchZooPrompts();
+                        }
                     }
-                    if (newTask.name && (newTask.name.startsWith('Generate Prompt:') || newTask.name.startsWith('Installing prompt:'))) {
-                        console.log("Prompt task completed, refreshing prompts...");
-                        promptsStore.fetchPrompts();
-                    }
-                }
+                    // --- END NEW ---
 
-                if (justFinished) {
                     let discussionIdForTask = null;
                     for (const [discussionId, activeTaskInfo] of Object.entries(discussionsStore.activeAiTasks)) {
                         if (activeTaskInfo && activeTaskInfo.taskId === newTask.id) {

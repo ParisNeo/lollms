@@ -3,6 +3,7 @@ from typing import List, Dict
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from packaging import version as packaging_version
 
 from backend.db import get_db
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
@@ -14,6 +15,7 @@ from backend.session import get_current_active_user, get_user_lollms_client
 from backend.ws_manager import manager
 from backend.task_manager import task_manager, Task
 from backend.settings import settings
+from backend.zoo_cache import get_all_items
 
 prompts_router = APIRouter(
     prefix="/api/prompts",
@@ -145,12 +147,33 @@ def get_prompts(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    user_prompts = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id == current_user.id).order_by(DBSavedPrompt.name).all()
-    system_prompts = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id.is_(None)).order_by(DBSavedPrompt.name).all()
+    user_prompts_db = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id == current_user.id).order_by(DBSavedPrompt.name).all()
+    system_prompts_db = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id.is_(None)).order_by(DBSavedPrompt.name).all()
     
+    zoo_prompts_meta = { (item['repository'], item['folder_name']): item for item in get_all_items('prompt') }
+    
+    system_prompts_public = []
+    for p in system_prompts_db:
+        prompt_public = PromptPublic.from_orm(p)
+        if p.repository and p.folder_name:
+            zoo_key = (p.repository, p.folder_name)
+            zoo_item = zoo_prompts_meta.get(zoo_key)
+            if zoo_item:
+                prompt_public.repo_version = str(zoo_item.get('version', 'N/A'))
+                try:
+                    installed_ver = str(p.version or '0.0.0')
+                    repo_ver = str(zoo_item.get('version', '0.0.0'))
+                    if packaging_version.parse(repo_ver) > packaging_version.parse(installed_ver):
+                        prompt_public.update_available = True
+                except (packaging_version.InvalidVersion, TypeError):
+                    pass # Ignore version parsing errors
+        system_prompts_public.append(prompt_public)
+        
+    user_prompts_public = [PromptPublic.from_orm(p) for p in user_prompts_db]
+
     return {
-        "user_prompts": user_prompts,
-        "system_prompts": system_prompts
+        "user_prompts": user_prompts_public,
+        "system_prompts": system_prompts_public
     }
 
 @prompts_router.post("", response_model=PromptPublic, status_code=status.HTTP_201_CREATED)

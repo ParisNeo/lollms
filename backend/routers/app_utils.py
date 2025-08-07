@@ -24,7 +24,7 @@ from backend.db import get_db
 from backend.db.models.service import App as DBApp, MCP as DBMCP
 from backend.db.models.db_task import DBTask
 from backend.models import TaskInfo
-from backend.config import APPS_ROOT_PATH, MCPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH
+from backend.config import APPS_ROOT_PATH, MCPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH, APPS_ZOO_ROOT_PATH
 from backend.task_manager import task_manager, Task
 from backend.zoo_cache import get_all_items
 
@@ -245,8 +245,8 @@ def install_item_task(task: Task, repository: str, folder_name: str, port: int, 
         if not source_item_path.exists():
             raise FileNotFoundError(f"Source directory not found at {source_item_path}")
         
-        info_file = next((p for p in [source_item_path / "app_info.yaml", source_item_path / "description.yaml"] if p.exists()), None)
-        if not info_file: raise FileNotFoundError("Metadata file (app_info.yaml or description.yaml) not found.")
+        info_file = next((p for p in [source_item_path / "description.yaml"] if p.exists()), None)
+        if not info_file: raise FileNotFoundError("Metadata file (description.yaml) not found.")
         with open(info_file, "r", encoding='utf-8') as f:
             item_info = yaml.safe_load(f)
         
@@ -286,6 +286,8 @@ app.mount("/", StaticFiles(directory=str(Path(__file__).parent / '{static_dir}')
         icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
         
         item_info['item_type'] = 'mcp' if is_mcp else 'app'
+        item_info['repository'] = repository
+        item_info['folder_name'] = folder_name
         client_id = generate_unique_client_id(db_session, DBApp, item_name)
         new_app = DBApp(name=item_name, client_id=client_id, folder_name=folder_name, icon=icon_base64, is_installed=True, status='stopped', port=port, autostart=autostart, version=str(item_info.get('version', 'N/A')), author=item_info.get('author'), description=item_info.get('description'), category=item_info.get('category'), tags=item_info.get('tags'), app_metadata=item_info)
         db_session.add(new_app)
@@ -312,3 +314,104 @@ app.mount("/", StaticFiles(directory=str(Path(__file__).parent / '{static_dir}')
         raise e
     finally:
         db_session.close()
+
+
+def update_item_task(task: Task, app_id: str):
+    db = next(get_db())
+    app = db.query(DBApp).filter(DBApp.id == app_id).first()
+    if not app:
+        raise ValueError("App to update not found in database.")
+
+    try:
+        task.log("Starting update process...")
+        if app.status == 'running':
+            task.log("App is running, attempting to stop it first...")
+            # Execute stop logic directly and wait
+            stop_app_task(task, app.id)
+
+            # Poll the database to confirm the app has stopped
+            for _ in range(30): # Wait up to 30 seconds
+                db.refresh(app)
+                if app.status == 'stopped':
+                    task.log("App confirmed stopped.")
+                    break
+                time.sleep(1)
+            else:
+                raise Exception("Failed to stop running app before update (timeout).")
+        
+        task.set_progress(10)
+        
+        installed_path = get_installed_app_path(db, app.id)
+        config_path = installed_path / 'config.yaml'
+        log_path = installed_path / 'app.log'
+        
+        config_data = config_path.read_text() if config_path.exists() else None
+        log_data = log_path.read_text() if log_path.exists() else None
+        
+        task.log("Backing up configuration and logs...")
+        
+        # Get source path from Zoo
+        zoo_meta = (app.app_metadata or {})
+        repo_name = zoo_meta.get('repository')
+        folder_name = zoo_meta.get('folder_name')
+        item_type = zoo_meta.get('item_type', 'app')
+        source_root_path = APPS_ZOO_ROOT_PATH if item_type == 'app' else MCPS_ZOO_ROOT_PATH
+        
+        if not repo_name or not folder_name:
+            raise ValueError("App metadata is missing repository/folder information needed for update.")
+
+        source_path = source_root_path / repo_name / folder_name
+        if not source_path.is_dir():
+            raise FileNotFoundError(f"Source directory not found in zoo: {source_path}")
+
+        task.log(f"Updating files from {source_path} to {installed_path}")
+        task.set_progress(25)
+        
+        shutil.rmtree(installed_path)
+        shutil.copytree(source_path, installed_path)
+
+        if config_data:
+            config_path.write_text(config_data)
+            task.log("Restored user configuration.")
+        if log_data:
+            log_path.write_text(log_data)
+            task.log("Restored previous logs.")
+
+        task.set_progress(50)
+        task.log("Re-installing dependencies...")
+        
+        venv_path = installed_path / "venv"
+        pip_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
+        requirements_path = installed_path / "requirements.txt"
+        
+        subprocess.run([sys.executable, "-m", "venv", str(venv_path)], check=True, capture_output=True)
+        if requirements_path.exists():
+            subprocess.run([str(pip_executable), "install", "-r", str(requirements_path)], check=True, capture_output=True)
+
+        task.set_progress(80)
+        task.log("Updating database record...")
+        
+        info_file = installed_path / "description.yaml"
+        new_info = {}
+        if info_file.exists():
+            with open(info_file, "r", encoding='utf-8') as f:
+                new_info = yaml.safe_load(f)
+
+        app.version = str(new_info.get('version', app.version))
+        app.app_metadata = {**zoo_meta, **new_info}
+        db.commit()
+
+        if app.autostart:
+            task.log("Autostart is enabled, restarting app...")
+            start_app_task(task, app.id)
+        
+        task.set_progress(100)
+        task.log("Update completed successfully.")
+        return {"success": True, "message": "Update successful."}
+
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise e
+    finally:
+        db.close()

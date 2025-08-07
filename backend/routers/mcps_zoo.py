@@ -107,7 +107,10 @@ def get_available_zoo_mcps(db: Session = Depends(get_db), page: int = 1, page_si
                 return 0.0
         return str(val or '').lower()
 
-    all_items.sort(key=sort_key_func, reverse=(sort_order == 'desc'))
+    installed_items_sorted = sorted([item for item in all_items if item.is_installed], key=sort_key_func, reverse=(sort_order == 'desc'))
+    uninstalled_items_sorted = sorted([item for item in all_items if not item.is_installed], key=sort_key_func, reverse=(sort_order == 'desc'))
+    
+    all_items = installed_items_sorted + uninstalled_items_sorted
 
     # --- PAGINATION ---
     total_items = len(all_items)

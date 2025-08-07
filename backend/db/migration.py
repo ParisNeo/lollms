@@ -160,7 +160,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "category": "VARCHAR",
             "author": "VARCHAR",
             "description": "TEXT",
-            "icon": "TEXT"
+            "icon": "TEXT",
+            "version": "VARCHAR",
+            "repository": "VARCHAR",
+            "folder_name": "VARCHAR"
         }
         for col_name, col_sql_def in new_cols_defs.items():
             if col_name not in columns_db:

@@ -1,3 +1,4 @@
+# backend/models/service.py
 import datetime
 from typing import List, Optional, Any
 from pydantic import BaseModel, Field, constr, field_validator, model_validator
@@ -130,6 +131,7 @@ class ZooAppInfo(BaseModel):
     tags: Optional[List[str]] = None
     license: Optional[str] = None
     documentation: Optional[str] = None
+    update_available: bool = False
     
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
     def coerce_to_string(cls, v):
@@ -165,6 +167,7 @@ class ZooMCPInfo(BaseModel):
     tags: Optional[List[str]] = None
     license: Optional[str] = None
     documentation: Optional[str] = None
+    update_available: bool = False
     
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
     def coerce_to_string(cls, v):
@@ -281,6 +284,7 @@ class AppPublic(AppBase):
     pid: Optional[int] = None
     autostart: bool = False
     update_available: bool = False
+    repo_version: Optional[str] = None
     has_config_schema: bool = False
     item_type: Optional[str] = 'app'
 

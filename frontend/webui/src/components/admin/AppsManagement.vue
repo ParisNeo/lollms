@@ -15,7 +15,8 @@ import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import AppCard from '../ui/AppCard.vue';
 import AppCardSkeleton from '../ui/AppCardSkeleton.vue';
-import TaskProgressIndicator from '../ui/TaskProgressIndicator.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconTicket from '../../assets/icons/IconTicket.vue';
 
 const adminStore = useAdminStore();
 const tasksStore = useTasksStore();
@@ -101,23 +102,26 @@ const itemsWithTaskStatus = computed(() => {
     }
 
     const taskMap = new Map();
-    const taskPrefix = 'Installing app: ';
+    const taskPrefixes = ['Installing app: ', 'Updating app: '];
     tasks.value.forEach(task => {
-        if (task?.name?.startsWith(taskPrefix)) {
-            const itemName = task.name.replace(taskPrefix, '');
-            if (!taskMap.has(itemName) || new Date(task.created_at) > new Date(taskMap.get(itemName).created_at)) {
-                taskMap.set(itemName, task);
+        if (task?.name) {
+            for (const prefix of taskPrefixes) {
+                if (task.name.startsWith(prefix) && (task.status === 'running' || task.status === 'pending')) {
+                    const itemName = task.name.replace(prefix, '');
+                    if (!taskMap.has(itemName) || new Date(task.created_at) > new Date(taskMap.get(itemName).created_at)) {
+                        taskMap.set(itemName, task);
+                    }
+                    break; 
+                }
             }
         }
     });
-    return items.map(item => ({ ...item, task: taskMap.get(item.folder_name) || null }));
+    return items.map(item => ({ ...item, task: taskMap.get(item.name) || taskMap.get(item.folder_name) || null }));
 });
 
 const sortedRepositories = computed(() => Array.isArray(zooRepositories.value) ? [...zooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || '')) : []);
 const categories = computed(() => {
-    if (!Array.isArray(adminStore.zooApps.items)) return ['All', 'Starred'];
-    const allCats = new Set(adminStore.zooApps.items.map(item => item.category || 'Uncategorized'));
-    return ['All', 'Starred', ...Array.from(allCats).sort()];
+    return zooApps.value.categories || ['All', 'Starred'];
 });
 
 const installedItemsWithTaskStatus = computed(() => {
@@ -128,18 +132,34 @@ const installedItemsWithTaskStatus = computed(() => {
     tasks.value.forEach(task => {
         if (!task?.name) return;
         let appName = '';
-        if (task.name.startsWith('Start app: ')) appName = task.name.replace('Start app: ', '');
-        else if (task.name.startsWith('Stop app: ')) appName = task.name.replace('Stop app: ', '');
-        else if (task.name.startsWith('Installing ')){
-            appName = task.name.split(': ')[1];
+        let activityType = null;
+        if (task.name.startsWith('Start app: ')) {
+            appName = task.name.replace('Start app: ', '');
+            activityType = 'starting';
         }
+        else if (task.name.startsWith('Stop app: ')) {
+            appName = task.name.replace('Stop app: ', '');
+            activityType = 'stopping';
+        }
+        else if (task.name.startsWith('Updating app: ')) {
+            appName = task.name.replace('Updating app: ', '');
+            activityType = 'updating';
+        }
+        
         if (appName && (task.status === 'running' || task.status === 'pending')) {
             if (!taskMap.has(appName) || new Date(task.created_at) > new Date(taskMap.get(appName).created_at)) {
-                taskMap.set(appName, task);
+                taskMap.set(appName, { task, activityType }); // Store both task and activity type
             }
         }
     });
-    return sorted.map(app => ({ ...app, task: taskMap.get(app.folder_name) || null }));
+    return sorted.map(app => {
+        const taskInfo = taskMap.get(app.name);
+        return { 
+            ...app, 
+            task: taskInfo ? taskInfo.task : null,
+            activity_status: taskInfo ? taskInfo.activityType : null // Add activity status
+        }
+    });
 });
 
 function handleStarToggle(itemName) {
@@ -183,11 +203,15 @@ async function handleDeleteRepository(repo) {
 
 function handleInstallItem(item) { uiStore.openModal('appInstall', { app: item, type: 'apps' }); }
 
-function handleUpdateApp(app) {
-    const zooItemDetails = zooApps.value.items.find(zooItem => zooItem.name === app.name);
-    if (!zooItemDetails) { uiStore.addNotification(`Could not find details for '${app.name}' in the zoo. Try refreshing repositories.`, 'error'); return; }
-    uiStore.showConfirmation({ title: `Update '${app.name}'?`, message: 'This will reinstall it with the latest version. It will be stopped. Are you sure?', confirmText: 'Update' })
-        .then(confirmed => { if (confirmed) handleInstallItem(zooItemDetails); });
+async function handleUpdateApp(app) {
+    const confirmed = await uiStore.showConfirmation({ 
+        title: `Update '${app.name}'?`, 
+        message: 'This will update the app to the latest version while preserving your configuration. The app will be stopped during the update.',
+        confirmText: 'Update'
+    });
+    if (confirmed) {
+        await adminStore.updateApp(app.id);
+    }
 }
 
 async function handleAppAction(appId, action) {
@@ -206,7 +230,13 @@ async function handleUninstallApp(app) {
     }
 }
 
-function showItemDetails(item) { uiStore.openModal('appDetails', { app: item }); }
+function showItemDetails(item) {
+    uiStore.openModal('sourceViewer', {
+        title: `Details: ${item.name}`,
+        content: item.description || 'No description available.',
+        language: 'text'
+    });
+}
 function handleConfigureApp(app) { uiStore.openModal('appConfig', { app }); }
 function handleEditRegistration(app) { uiStore.openModal('serviceRegistration', { item: app, itemType: 'app', isInstalled: true }); }
 async function handleShowLogs(app) {
@@ -220,8 +250,6 @@ async function showItemHelp(item) {
 async function handleCancelTask(taskId) { await tasksStore.cancelTask(taskId); }
 function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: taskId }); }
 </script>
-
-<!-- Template remains the same -->
 <style scoped>
 .tab-button { @apply px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors; }
 .tab-button.active { @apply border-blue-500 text-blue-600 dark:text-blue-400; }
@@ -279,7 +307,7 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                 <div v-else-if="!itemsWithTaskStatus || itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Apps Found</h4><p class="text-sm">No apps match your criteria. Please add and pull a repository or adjust your filters.</p></div>
                 <div v-else>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-                        <AppCard v-for="item in itemsWithTaskStatus" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @details="showItemDetails(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" />
+                        <AppCard v-for="item in itemsWithTaskStatus" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @uninstall="handleUninstallApp(item)" @details="showItemDetails(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" />
                     </div>
                     <div v-if="selectedCategory !== 'Starred'" class="mt-6 flex justify-between items-center">
                         <p class="text-sm text-gray-500">{{ pageInfo }}</p>
@@ -297,16 +325,43 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
             <div v-if="isLoadingInstalledApps" class="text-center p-10">Loading...</div>
             <div v-else-if="!installedItemsWithTaskStatus || installedItemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Apps Installed</h4><p class="text-sm">Go to "Available" to install an app.</p></div>
             <div v-else class="space-y-4">
-                <div v-for="app in installedItemsWithTaskStatus" :key="app.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div class="flex items-center gap-4 flex-grow truncate"><img v-if="app.icon" :src="app.icon" class="h-10 w-10 rounded-md flex-shrink-0 object-cover" alt="Icon"><div class="flex-grow truncate"><p class="font-semibold truncate">{{ app.name }}</p><p class="text-xs text-gray-500 font-mono truncate">Port: {{ app.port }}</p></div></div>
+                <div v-for="app in installedItemsWithTaskStatus" :key="app.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors duration-300"
+                :class="{
+                    'bg-blue-50 dark:bg-blue-900/30 animate-pulse': app.activity_status === 'starting',
+                    'bg-yellow-50 dark:bg-yellow-900/30 animate-pulse': app.activity_status === 'stopping',
+                    'bg-purple-50 dark:bg-purple-900/30 animate-pulse': app.activity_status === 'updating'
+                }">
+                    <div class="flex items-center gap-4 flex-grow truncate"><img v-if="app.icon" :src="app.icon" class="h-10 w-10 rounded-md flex-shrink-0 object-cover" alt="Icon">
+                        <div class="flex-grow truncate">
+                            <p class="font-semibold truncate">{{ app.name }}</p>
+                            <p class="text-xs text-gray-500 font-mono truncate">Port: {{ app.port }}
+                                <span v-if="app.version"> | v{{ app.version }}
+                                    <span v-if="app.update_available" class="text-yellow-500 font-semibold">(repo: v{{ app.repo_version }})</span>
+                                </span>
+                            </p>
+                        </div>
+                    </div>
                     <div class="flex items-center gap-x-2 flex-shrink-0 flex-wrap justify-end">
-                        <TaskProgressIndicator v-if="app.task" :task="app.task" @view="viewTask(app.task.id)" @cancel="handleCancelTask(app.task.id)"/>
+                        <template v-if="app.activity_status">
+                            <div class="flex items-center gap-2 text-sm font-semibold"
+                                 :class="{
+                                     'text-blue-700 dark:text-blue-300': app.activity_status === 'starting',
+                                     'text-yellow-700 dark:text-yellow-300': app.activity_status === 'stopping',
+                                     'text-purple-700 dark:text-purple-300': app.activity_status === 'updating'
+                                 }">
+                                <IconAnimateSpin class="w-5 h-5" />
+                                <span class="capitalize">{{ app.activity_status }}...</span>
+                            </div>
+                            <button @click="viewTask(app.task.id)" class="btn btn-secondary btn-sm !p-1.5" title="View Task Details">
+                                <IconTicket class="w-4 h-4" />
+                            </button>
+                        </template>
                         <template v-else>
                             <button v-if="app.update_available" @click="handleUpdateApp(app)" class="btn btn-warning btn-sm p-2" title="Update"><IconArrowUpCircle class="w-5 h-5" /></button>
-                            <span class="px-2 py-1 text-xs font-semibold rounded-full" :class="{ 'bg-green-100 text-green-800': app.status === 'running', 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300': app.status === 'stopped', 'bg-red-100 text-red-800': app.status === 'error' }">{{ app.status }}</span>
+                            <span class="px-2 py-1 text-xs font-semibold rounded-full" :class="{ 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300': app.status === 'running', 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300': app.status === 'stopped', 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300': app.status === 'error' }">{{ app.status }}</span>
                             <a v-if="app.status === 'running' && app.url" :href="app.url" target="_blank" class="btn btn-secondary btn-sm p-2" title="Open"><IconGlobeAlt class="w-5 h-5" /></a>
                             <button @click="handleEditRegistration(app)" class="btn btn-secondary btn-sm p-2" title="Edit Registration"><IconPencil class="w-5 h-5" /></button>
-                            <button @click="handleConfigureApp(app)" class="btn btn-secondary btn-sm p-2" title="Configure"><IconCog class="w-5 h-5" /></button>
+                            <button v-if="app.has_config_schema" @click="handleConfigureApp(app)" class="btn btn-secondary btn-sm p-2" title="Configure"><IconCog class="w-5 h-5" /></button>
                             <button @click="handleShowLogs(app)" class="btn btn-secondary btn-sm p-2" title="Logs"><IconCode class="w-5 h-5" /></button>
                             <button v-if="app.status !== 'running'" @click="handleAppAction(app.id, 'start')" class="btn btn-success btn-sm p-2" :disabled="isLoadingAction === `start-${app.id}`" title="Start">Start</button>
                             <button v-if="app.status === 'running' || (app.status === 'error' && app.pid)" @click="handleAppAction(app.id, 'stop')" class="btn btn-warning btn-sm p-2" :disabled="isLoadingAction === `stop-${app.id}`" title="Stop">Stop</button>

@@ -9,6 +9,7 @@ import useEventBus from '../../services/eventBus';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconArrowUpCircle from '../../assets/icons/IconArrowUpCircle.vue';
 import AppCard from '../ui/AppCard.vue';
 import AppCardSkeleton from '../ui/AppCardSkeleton.vue';
 import GenericModal from '../ui/GenericModal.vue';
@@ -89,8 +90,7 @@ const itemsWithTaskStatus = computed(() => {
 });
 const sortedRepositories = computed(() => Array.isArray(promptZooRepositories.value) ? [...promptZooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || '')) : []);
 const categories = computed(() => {
-    const allCats = new Set(zooPrompts.value.items.map(item => item.category).filter(Boolean));
-    return ['All', ...Array.from(allCats).sort()];
+    return zooPrompts.value.categories || ['All'];
 });
 
 function formatDateTime(isoString) { if (!isoString) return 'Never'; return new Date(isoString).toLocaleString(); }
@@ -110,7 +110,24 @@ async function handleDeleteRepository(repo) {
     }
 }
 async function handleInstallItem(item) { await adminStore.installZooPrompt({ repository: item.repository, folder_name: item.folder_name }); }
+async function handleUninstallItem(item) {
+    const installedPrompt = installedPrompts.value.find(p => p.name === item.name);
+    if (!installedPrompt) {
+        uiStore.addNotification(`Cannot find installed prompt '${item.name}' to uninstall. Please refresh.`, 'error');
+        return;
+    }
+    if (await uiStore.showConfirmation({ title: `Uninstall '${item.name}'?`, message: 'This will remove the prompt from the system.' })) {
+        await adminStore.deleteSystemPrompt(installedPrompt.id);
+    }
+}
 async function showItemHelp(item) { const readme = await adminStore.fetchPromptReadme(item.repository, item.folder_name); uiStore.openModal('sourceViewer', { title: `README: ${item.name}`, content: readme, language: 'markdown' }); }
+function showItemDetails(item) {
+    uiStore.openModal('sourceViewer', { 
+        title: `Details: ${item.name}`, 
+        content: item.description || 'No description available.', 
+        language: 'text' 
+    });
+}
 function handleStarToggle(itemName) { const i = starredItems.value.indexOf(itemName); if (i > -1) starredItems.value.splice(i, 1); else starredItems.value.push(itemName); }
 
 const currentPrompt = ref(null);
@@ -139,6 +156,10 @@ function handleTaskCompletion(task) {
             uiStore.addNotification('System prompt generation did not complete successfully.', 'warning');
         }
     }
+}
+
+async function handleUpdatePrompt(prompt) {
+    await adminStore.updateSystemPromptFromZoo(prompt.id);
 }
 
 function handleEditPrompt(prompt) { currentPrompt.value = { ...prompt }; uiStore.openModal('editSystemPrompt'); }
@@ -192,8 +213,21 @@ async function handleDeletePrompt(prompt) {
             <div v-else-if="!installedPrompts || installedPrompts.length === 0" class="empty-state-card"><p>No system prompts installed.</p></div>
             <div v-else class="space-y-3">
                 <div v-for="prompt in installedPrompts" :key="prompt.id" class="bg-white dark:bg-gray-800 p-3 rounded-lg shadow-sm flex items-center justify-between gap-4">
-                    <div class="flex items-center gap-3 flex-grow truncate"><img v-if="prompt.icon" :src="prompt.icon" class="h-8 w-8 rounded-md flex-shrink-0 object-cover" alt="Icon"><p class="font-medium truncate">{{ prompt.name }}</p></div>
-                    <div class="flex items-center gap-x-2 flex-shrink-0"><button @click="handleEditPrompt(prompt)" class="btn btn-secondary btn-sm p-2" title="Edit"><IconPencil class="w-4 h-4" /></button><button @click="handleDeletePrompt(prompt)" class="btn btn-danger btn-sm p-2" title="Delete"><IconTrash class="w-4 h-4" /></button></div>
+                    <div class="flex items-center gap-3 flex-grow truncate">
+                        <img v-if="prompt.icon" :src="prompt.icon" class="h-8 w-8 rounded-md flex-shrink-0 object-cover" alt="Icon">
+                        <div class="flex-grow truncate">
+                            <p class="font-medium truncate">{{ prompt.name }}</p>
+                            <div v-if="prompt.version" class="text-xs text-gray-500 flex items-center gap-2">
+                                <span>v{{ prompt.version }}</span>
+                                <span v-if="prompt.update_available" class="text-yellow-600 dark:text-yellow-400 font-semibold">(repo: v{{ prompt.repo_version }})</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-x-2 flex-shrink-0">
+                        <button v-if="prompt.update_available" @click="handleUpdatePrompt(prompt)" class="btn btn-warning btn-sm p-2" title="Update"><IconArrowUpCircle class="w-4 h-4" /></button>
+                        <button @click="handleEditPrompt(prompt)" class="btn btn-secondary btn-sm p-2" title="Edit"><IconPencil class="w-4 h-4" /></button>
+                        <button @click="handleDeletePrompt(prompt)" class="btn btn-danger btn-sm p-2" title="Delete"><IconTrash class="w-4 h-4" /></button>
+                    </div>
                 </div>
             </div>
         </section>
@@ -205,7 +239,7 @@ async function handleDeletePrompt(prompt) {
                 <div v-else-if="!itemsWithTaskStatus || itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Prompts Found</h4></div>
                 <div v-else>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                        <AppCard v-for="item in itemsWithTaskStatus" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" item-type-name="Prompt" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @help="showItemHelp(item)" />
+                        <AppCard v-for="item in itemsWithTaskStatus" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" item-type-name="Prompt" @star="handleStarToggle(item.name)" @install="handleInstallItem" @uninstall="handleUninstallItem" @help="showItemHelp" @details="showItemDetails" />
                     </div>
                     <div class="mt-6 flex justify-between items-center"><p class="text-sm text-gray-500">{{ pageInfo }}</p><div class="flex gap-2"><button @click="currentPage--" :disabled="currentPage <= 1" class="btn btn-secondary">Prev</button><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div></div>
                 </div>

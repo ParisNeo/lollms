@@ -8,12 +8,23 @@ from backend.db import get_db
 from backend.db.models.service import AppZooRepository, MCPZooRepository, PromptZooRepository
 from backend.db.models.prompt import SavedPrompt
 from backend.config import APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, APP_DATA_DIR
+import datetime
 
 ITEM_TYPES = Literal['app', 'mcp', 'prompt']
 CACHE_FILE = APP_DATA_DIR / "zoo_cache.json"
 CACHE_EXPIRY = 3600  # 1 hour
 
 _cache: Dict[str, Any] = {"timestamp": 0, "data": {}}
+
+def _sanitize_for_json(data: Any) -> Any:
+    """Recursively sanitizes data to ensure it's JSON serializable."""
+    if isinstance(data, (datetime.datetime, datetime.date)):
+        return data.isoformat()
+    if isinstance(data, dict):
+        return {k: _sanitize_for_json(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_sanitize_for_json(v) for v in data]
+    return data
 
 def get_zoo_root_path(item_type: ITEM_TYPES) -> Path:
     if item_type == 'app': return APPS_ZOO_ROOT_PATH
@@ -38,7 +49,7 @@ def get_installed_items(db: Session, item_type: ITEM_TYPES) -> set:
 def parse_item_metadata(item_path: Path, item_type: ITEM_TYPES) -> Dict[str, Any]:
     metadata = {}
     if item_type in ['app', 'mcp']:
-        config_path = item_path / "config.yaml"
+        config_path = item_path / "description.yaml"
         if config_path.exists():
             with open(config_path, 'r', encoding='utf-8') as f:
                 metadata = yaml.safe_load(f)
@@ -48,7 +59,6 @@ def parse_item_metadata(item_path: Path, item_type: ITEM_TYPES) -> Dict[str, Any
         if desc_path.exists() and prompt_path.exists():
             with open(desc_path, 'r', encoding='utf-8') as f:
                 metadata = yaml.safe_load(f) or {}
-            # The prompt content itself is not needed for the listing, only for installation.
     return metadata
 
 def _build_cache_for_type(db: Session, item_type: ITEM_TYPES) -> List[Dict[str, Any]]:
@@ -76,12 +86,12 @@ def _build_cache_for_type(db: Session, item_type: ITEM_TYPES) -> List[Dict[str, 
                         with open(icon_path_png, 'rb') as f:
                             icon_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
 
-                    items.append({
+                    items.append(_sanitize_for_json({
                         **metadata,
                         'repository': repo.name,
                         'folder_name': item_folder.name,
                         'icon': icon_b64
-                    })
+                    }))
                 except Exception as e:
                     print(f"Warning: Could not process {item_type} item '{item_folder.name}' in repo '{repo.name}': {e}")
     return items
@@ -129,7 +139,7 @@ def refresh_repo_cache(repo_name: str, item_type: ITEM_TYPES):
                                 import base64
                                 with open(icon_path_png, 'rb') as f: icon_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
                             
-                            _cache["data"][item_type].append({**metadata, 'repository': repo.name, 'folder_name': item_folder.name, 'icon': icon_b64})
+                            _cache["data"][item_type].append(_sanitize_for_json({**metadata, 'repository': repo.name, 'folder_name': item_folder.name, 'icon': icon_b64}))
                         except Exception as e:
                             print(f"Warning: Could not process item '{item_folder.name}' on refresh: {e}")
 

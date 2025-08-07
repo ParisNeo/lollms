@@ -1,3 +1,4 @@
+# backend/routers/prompts_zoo.py
 import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -117,13 +118,52 @@ def _install_prompt_task(task: Task, repo_name: str, folder_name: str):
             description=config.get('description'),
             content=config.get('content', ''),
             category=config.get('category'),
-            owner_user_id=None
+            owner_user_id=None,
+            version=str(config.get('version', 'N/A')),
+            repository=repo_name,
+            folder_name=folder_name
         )
         db.add(new_prompt)
         db.commit()
     
     task.log(f"Prompt '{config['name']}' installed successfully.", "INFO")
     return {"message": "Prompt installed."}
+
+def _update_prompt_task(task: Task, prompt_id: str):
+    task.log("Starting prompt update process...")
+    with task.db_session_factory() as db:
+        prompt = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id).first()
+        if not prompt:
+            raise ValueError("Prompt to update not found in database.")
+        
+        if not prompt.repository or not prompt.folder_name:
+            raise ValueError("Prompt is not from a zoo, cannot update.")
+
+        task.set_progress(10)
+        
+        source_path = PROMPTS_ZOO_ROOT_PATH / prompt.repository / prompt.folder_name
+        config_path = source_path / "description.yaml"
+        if not config_path.exists():
+            raise FileNotFoundError(f"Source description.yaml not found at {config_path}")
+
+        with open(config_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        task.log(f"Updating prompt '{prompt.name}' from version {prompt.version} to {config.get('version')}")
+        task.set_progress(50)
+
+        prompt.name = config.get('name', prompt.name)
+        prompt.author = config.get('author', prompt.author)
+        prompt.description = config.get('description', prompt.description)
+        prompt.content = config.get('content', prompt.content)
+        prompt.category = config.get('category', prompt.category)
+        prompt.version = str(config.get('version', prompt.version))
+        
+        db.commit()
+        task.set_progress(100)
+        task.log("Prompt updated successfully in the database.")
+    
+    return {"message": "Update successful."}
 
 
 @prompts_zoo_router.post("/generate_from_prompt", response_model=TaskInfo, status_code=202)
@@ -197,7 +237,11 @@ def get_available_zoo_prompts(db: Session = Depends(get_db), page: int = 1, page
     if search_query: q = search_query.lower(); all_items = [item for item in all_items if q in item.name.lower()]
     
     def sort_key_func(item): val = getattr(item, sort_by, None); return str(val or '').lower()
-    all_items.sort(key=sort_key_func, reverse=(sort_order == 'desc'))
+    
+    installed_items_sorted = sorted([item for item in all_items if item.is_installed], key=sort_key_func, reverse=(sort_order == 'desc'))
+    uninstalled_items_sorted = sorted([item for item in all_items if not item.is_installed], key=sort_key_func, reverse=(sort_order == 'desc'))
+    
+    all_items = installed_items_sorted + uninstalled_items_sorted
     
     total_items = len(all_items)
     start = (page - 1) * page_size
@@ -220,6 +264,18 @@ def install_zoo_prompt(request: PromptInstallRequest):
     )
     return to_task_info(task)
     
+@prompts_zoo_router.post("/installed/{prompt_id}/update", response_model=TaskInfo, status_code=202)
+def update_installed_prompt(prompt_id: str, db: Session = Depends(get_db)):
+    prompt = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id).first()
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Installed prompt not found.")
+    task = task_manager.submit_task(
+        name=f"Updating prompt: {prompt.name}",
+        target=_update_prompt_task,
+        args=(prompt.id,)
+    )
+    return to_task_info(task)
+
 @prompts_zoo_router.post("/installed", response_model=PromptPublic, status_code=status.HTTP_201_CREATED)
 def create_system_prompt(prompt_data: PromptCreate, db: Session = Depends(get_db)):
     new_prompt = DBSavedPrompt(**prompt_data.model_dump(), owner_user_id=None)

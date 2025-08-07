@@ -1,93 +1,79 @@
 <script setup>
-import { computed } from 'vue';
 import IconStar from '../../assets/icons/IconStar.vue';
 import IconStarFilled from '../../assets/icons/IconStarFilled.vue';
-import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
-import IconInfo from '../../assets/icons/IconInfo.vue';
+import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
+import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconArrowUpCircle from '../../assets/icons/IconArrowUpCircle.vue';
-import TaskProgressIndicator from './TaskProgressIndicator.vue'; // NEW IMPORT
+import IconTrash from '../../assets/icons/IconTrash.vue';
+import TaskProgressIndicator from './TaskProgressIndicator.vue';
 
 const props = defineProps({
     app: { type: Object, required: true },
-    task: { type: Object, default: null }, // NEW PROP
-    isStarred: { type: Boolean, default: false }
+    task: { type: Object, default: null },
+    isStarred: { type: Boolean, default: false },
+    itemTypeName: { type: String, default: 'App' }
 });
 
-const emit = defineEmits(['install', 'update', 'details', 'help', 'star', 'view-task', 'cancel-install']); // UPDATED EMITS
+const emit = defineEmits(['star', 'install', 'update', 'uninstall', 'details', 'help', 'view-task', 'cancel-install']);
 
-const canInstall = computed(() => !props.app.is_installed && !props.task);
+const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0idy02IGgtNiI+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMy4zNzUgMS41YTguMjc1IDguMjc1IDAgMCAwLTguMjc1IDguMjc1YzAgNC4xMjIgMi41NjEgNy42MyA2LjA3NyA4LjgzNWEuNzUuNzUgMCAwIDAgLjc2NC0uMTExYy4xMjUtLjA3OC4yNTgtLjE5LjM5OS0uMzE0bC4wMDQtLjAwNSNhLjQ5OC40OTggMCAwIDEgLjYxMy0uMDIzbDIuNDQyIDEuMTM4YTEuNSAxLjUgMCAwIDAgMS42OTktLjkxM2w0LjQxMy05LjU3N2E4LjI1IDE4LjI1IDAgMCAwLTkuOTU0LTkuOTU0bC05LjU3NyA0LjQxM2ExLjUgMS41IDAgMCAwLS45MTMgMS42OTlsMS4xMzggMi40NDJhLjQ5OC40OTggMCAwIDEgLS4wMjMuNjEzbC0uMDA1LjAwNC0uMzE0LjM5OWEuNzUuNzUgMCAwIDAtLjExMS43NjRBMTEuMjIgMTEuMjIgMCAwIDEtMy4zNzUgMTguNWMtNS4wNzIgMC05LjE4OC00LjExNi05LjE4OC05LjE4OGE5LjE4OCA5LjE4OCAwIDAgMSAxLjYxNy01LjE2MmMuMjQ2LS40Mi4wMzgtLjkxOC0uMzY4LTEuMTU3bC0xLjQyNS0uODM4YTEuNSAxLjUgMCAwIDAtMi4wODYuNDlMMy4zNzUgMS41em00LjQ4OCAxMy4wMjNhLjUuNSAwIDAgMS0uMzU0LS4xNDdsLTEuNTQyLTEuNTQxYS41LjUgMCAxIDEgLjcwOC0uNzA4bDEuNTQxIDEuNTQyYS41LjUgMCAwIDEgLS4zNTQuODU0em0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em0tMi45NC0yLjk0YS41LjUgMCAwIDEtLjM1My0uMTQ2bC0xLjU0Mi0xLjU0MmEuNS41IDAgMCAxIC43MDctLjcwN2wxLjU0MiAxLjU0MWEuNS41IDAgMCAxLS4zNTQuODUzem0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em00LjQ4OC0uNzU3YS41LjUgMCAwIDEtLjM1NC0uMTQ3bC0xLjU0Mi0xLjU0MWEuNS41IDAgMCAxIC43MDgtLjcwOGwxLjU0MSAxLjU0MWEuNS41IDAgMCAxLS4zNTQuODU0em0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em0tMS40NzEtNC40N2EuNS41IDAgMCAxLS4zNTQtLjE0N2wtMS41NDItMS41NDFhLjUuNSAwIDAgMSAuNzA4LS43MDhsMS41NDEgMS41NDFhLjUuNSAwIDAgMS0uMzU0Ljg1NHoiIGNsaXAtcnVsZT0iZXZlbm9kZCIgLz4KPC9zdmc+Cg==';
 
-function handleAction(action) {
-    emit(action, props.app);
-}
-
-function handleViewTask(taskId) {
-    emit('view-task', taskId);
-}
-
-function handleCancelInstall(taskId) {
-    emit('cancel-install', taskId);
-}
 </script>
 
 <template>
-    <div class="relative flex flex-col h-full bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow transition-all hover:shadow-lg">
-        <div class="flex-grow p-4">
-            <button @click.stop="emit('star')" class="absolute top-2 right-2 p-1 rounded-full text-gray-400 hover:text-yellow-400 z-10">
-                <IconStarFilled v-if="isStarred" class="w-5 h-5 text-yellow-400" />
-                <IconStar v-else class="w-5 h-5" />
-            </button>
-            <div @click="handleAction('details')" class="cursor-pointer">
-                <div class="flex items-start gap-4 mb-3">
-                    <img v-if="app.icon" :src="app.icon" class="h-12 w-12 rounded-md flex-shrink-0 object-cover" alt="App Icon">
-                    <div class="flex-grow min-w-0">
-                        <h3 class="font-semibold text-gray-900 dark:text-white truncate" :title="app.name">{{ app.name }}</h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 truncate">by {{ app.author || 'Unknown' }}</p>
-                    </div>
+    <div class="card">
+        <div class="card-header">
+            <img :src="app.icon || defaultIcon" :alt="app.name" class="card-icon" />
+            <div class="flex-grow min-w-0">
+                <div class="flex justify-between items-start">
+                    <h3 class="card-title" :title="app.name">{{ app.name }}</h3>
+                    <button @click.stop="$emit('star', app.name)" class="p-1.5 rounded-full transition-colors flex-shrink-0" :class="isStarred ? 'bg-yellow-400/20 text-yellow-500' : 'text-gray-400 hover:text-yellow-500'">
+                        <IconStarFilled v-if="isStarred" class="w-5 h-5" />
+                        <IconStar v-else class="w-5 h-5" />
+                    </button>
                 </div>
-                <p class="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 h-10">{{ app.description }}</p>
+                <div class="card-tags">
+                    <span v-if="app.is_installed" class="tag installed-tag">Installed</span>
+                    <span v-if="app.author" class="tag">by {{ app.author }}</span>
+                    <span v-if="app.category" class="tag">{{ app.category }}</span>
+                    <span v-if="app.version" class="tag">v{{ app.version }}</span>
+                </div>
             </div>
         </div>
-        <div class="px-4 py-3 bg-gray-50 dark:bg-gray-700/50 border-t dark:border-gray-700 rounded-b-lg">
-             <!-- Task Progress Indicator -->
-            <TaskProgressIndicator 
-                v-if="task" 
-                :task="task" 
-                @view="handleViewTask" 
-                @cancel="handleCancelInstall" 
-            />
-            <!-- Action Buttons -->
-            <div v-else class="flex items-center justify-between">
-                <div class="flex items-center gap-1">
-                     <button @click="handleAction('details')" class="btn btn-secondary btn-sm !p-1.5" title="More Info">
-                        <IconInfo class="w-4 h-4" />
-                    </button>
-                    <button v-if="app.has_readme" @click="handleAction('help')" class="btn btn-secondary btn-sm !p-1.5" title="View README">
-                        <IconBookOpen class="w-4 h-4" />
-                    </button>
+
+        <div class="card-body">
+            <p class="card-description" :title="app.description">{{ app.description }}</p>
+        </div>
+
+        <div class="card-footer">
+            <div class="flex-1 min-w-0">
+                <TaskProgressIndicator v-if="task" :task="task" @view="$emit('view-task', task.id)" @cancel="$emit('cancel-install')" />
+                <div v-else class="flex gap-2">
+                    <button v-if="!app.is_installed" @click="$emit('install', app)" class="btn btn-primary w-full"><IconArrowDownTray class="w-4 h-4 mr-2" />Install</button>
+                    <template v-else>
+                         <button v-if="app.update_available" @click="$emit('update', app)" class="btn btn-warning w-full"><IconArrowUpCircle class="w-4 h-4 mr-2" />Update</button>
+                         <button v-else @click="$emit('uninstall', app)" class="btn btn-danger-outline w-full"><IconTrash class="w-4 h-4 mr-2" />Uninstall</button>
+                    </template>
                 </div>
-                <div class="flex items-center gap-2">
-                    <span v-if="app.is_installed" class="flex items-center text-sm text-green-600 dark:text-green-400">
-                        <IconCheckCircle class="w-5 h-5 mr-1" />
-                        Installed
-                    </span>
-                    <button v-if="app.update_available" @click="handleAction('update')" class="btn btn-warning btn-sm">
-                        <IconArrowUpCircle class="w-4 h-4 mr-1"/>
-                        Update
-                    </button>
-                    <button v-if="canInstall" @click="handleAction('install')" class="btn btn-primary btn-sm">Install</button>
-                </div>
+            </div>
+            <div class="flex-shrink-0 flex gap-1">
+                <button @click="$emit('details', app)" class="btn btn-secondary p-2" title="Details"><IconInfo class="w-4 h-4" /></button>
+                <button v-if="app.has_readme" @click="$emit('help', app)" class="btn btn-secondary p-2" title="Help"><IconBookOpen class="w-4 h-4" /></button>
             </div>
         </div>
     </div>
 </template>
 
 <style scoped>
-.line-clamp-2 {
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-}
+.card { @apply bg-white dark:bg-gray-800 rounded-lg shadow-md flex flex-col overflow-hidden transition-shadow hover:shadow-lg h-full; }
+.card-header { @apply flex items-start p-4 gap-4; }
+.card-icon { @apply w-12 h-12 object-cover rounded-md flex-shrink-0; }
+.card-body { @apply px-4 pb-4 flex-grow; }
+.card-title { @apply font-bold text-base leading-tight; }
+.card-tags { @apply flex flex-wrap gap-x-2 gap-y-1 mt-1; }
+.tag { @apply text-xs bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-gray-600 dark:text-gray-300; }
+.installed-tag { @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300; }
+.card-description { @apply text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-4; }
+.card-footer { @apply p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between gap-2 mt-auto; }
 </style>
