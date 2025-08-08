@@ -7,6 +7,10 @@ import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconArrowUpCircle from '../../assets/icons/IconArrowUpCircle.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import TaskProgressIndicator from './TaskProgressIndicator.vue';
+import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
+import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
+import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
+import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 
 const props = defineProps({
     app: { type: Object, required: true },
@@ -15,7 +19,7 @@ const props = defineProps({
     itemTypeName: { type: String, default: 'App' }
 });
 
-const emit = defineEmits(['star', 'install', 'update', 'uninstall', 'details', 'help', 'view-task', 'cancel-install']);
+const emit = defineEmits(['star', 'install', 'update', 'uninstall', 'details', 'help', 'view-task', 'cancel-install', 'start', 'stop']);
 
 const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0idy02IGgtNiI+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMy4zNzUgMS41YTguMjc1IDguMjc1IDAgMCAwLTguMjc1IDguMjc1YzAgNC4xMjIgMi41NjEgNy42MyA2LjA3NyA4LjgzNWEuNzUuNzUgMCAwIDAgLjc2NC0uMTExYy4xMjUtLjA3OC4yNTgtLjE5LjM5OS0uMzE0bC4wMDQtLjAwNSNhLjQ5OC40OTggMCAwIDEgLjYxMy0uMDIzbDIuNDQyIDEuMTM4YTEuNSAxLjUgMCAwIDAgMS42OTktLjkxM2w0LjQxMy05LjU3N2E4LjI1IDE4LjI1IDAgMCAwLTkuOTU0LTkuOTU0bC05LjU3NyA0LjQxM2ExLjUgMS41IDAgMCAwLS45MTMgMS42OTlsMS4xMzggMi40NDJhLjQ5OC40OTggMCAwIDEgLS4wMjMuNjEzbC0uMDA1LjAwNC0uMzE0LjM5OWEuNzUuNzUgMCAwIDAtLjExMS43NjRBMTEuMjIgMTEuMjIgMCAwIDEtMy4zNzUgMTguNWMtNS4wNzIgMC05LjE4OC00LjExNi05LjE4OC05LjE4OGE5LjE4OCA5LjE4OCAwIDAgMSAxLjYxNy01LjE2MmMuMjQ2LS40Mi4wMzgtLjkxOC0uMzY4LTEuMTU3bC0xLjQyNS0uODM4YTEuNSAxLjUgMCAwIDAtMi4wODYuNDlMMy4zNzUgMS41em00LjQ4OCAxMy4wMjNhLjUuNSAwIDAgMS0uMzU0LS4xNDdsLTEuNTQyLTEuNTQxYS41LjUgMCAxIDEgLjcwOC0uNzA4bDEuNTQxIDEuNTQyYS41LjUgMCAwIDEgLS4zNTQuODU0em0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em0tMi45NC0yLjk0YS41LjUgMCAwIDEtLjM1My0uMTQ2bC0xLjU0Mi0xLjU0MmEuNS41IDAgMCAxIC43MDctLjcwN2wxLjU0MiAxLjU0MWEuNS41IDAgMCAxLS4zNTQuODUzem0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em00LjQ4OC0uNzU3YS41LjUgMCAwIDEtLjM1NC0uMTQ3bC0xLjU0Mi0xLjU0MWEuNS41IDAgMCAxIC43MDgtLjcwOGwxLjU0MSAxLjU0MWEuNS41IDAgMCAxLS4zNTQuODU0em0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em0tMS40NzEtNC40N2EuNS41IDAgMCAxLS4zNTQtLjE0N2wtMS41NDItMS41NDFhLjUuNSAwIDAgMSAuNzA4LS43MDhsMS41NDEgMS41NDFhLjUuNSAwIDAgMS0uMzU0Ljg1NHoiIGNsaXAtcnVsZT0iZXZlbm9kZCIgLz4KPC9zdmc+Cg==';
 
@@ -34,7 +38,7 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
                     </button>
                 </div>
                 <div class="card-tags">
-                    <span v-if="app.is_installed" class="tag installed-tag">Installed</span>
+                    <span v-if="app.is_installed" class="tag" :class="{ 'installed-tag-running': app.status === 'running', 'installed-tag-stopped': app.status !== 'running' }">{{ app.status || 'Installed' }}</span>
                     <span v-if="app.author" class="tag">by {{ app.author }}</span>
                     <span v-if="app.category" class="tag">{{ app.category }}</span>
                     <span v-if="app.version" class="tag">v{{ app.version }}</span>
@@ -44,6 +48,11 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
 
         <div class="card-body">
             <p class="card-description" :title="app.description">{{ app.description }}</p>
+        </div>
+        
+        <div class="px-4 pb-2 text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1">
+            <IconGitBranch class="w-3 h-3" />
+            <span class="truncate" :title="`From: ${app.repository}`">{{ app.repository }}</span>
         </div>
 
         <div class="card-footer">
@@ -58,6 +67,11 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
                 </div>
             </div>
             <div class="flex-shrink-0 flex gap-1">
+                <template v-if="app.is_installed && !task">
+                    <a v-if="app.status === 'running' && app.url" :href="app.url" target="_blank" class="btn btn-secondary p-2" title="Open"><IconGlobeAlt class="w-4 h-4" /></a>
+                    <button v-if="app.status !== 'running'" @click="$emit('start', app)" class="btn btn-success p-2" title="Start"><IconPlayCircle class="w-4 h-4" /></button>
+                    <button v-if="app.status === 'running'" @click="$emit('stop', app)" class="btn btn-warning p-2" title="Stop"><IconStopCircle class="w-4 h-4" /></button>
+                </template>
                 <button @click="$emit('details', app)" class="btn btn-secondary p-2" title="Details"><IconInfo class="w-4 h-4" /></button>
                 <button v-if="app.has_readme" @click="$emit('help', app)" class="btn btn-secondary p-2" title="Help"><IconBookOpen class="w-4 h-4" /></button>
             </div>
@@ -72,8 +86,9 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
 .card-body { @apply px-4 pb-4 flex-grow; }
 .card-title { @apply font-bold text-base leading-tight; }
 .card-tags { @apply flex flex-wrap gap-x-2 gap-y-1 mt-1; }
-.tag { @apply text-xs bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-gray-600 dark:text-gray-300; }
-.installed-tag { @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300; }
+.tag { @apply text-xs bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-gray-600 dark:text-gray-300 capitalize; }
+.installed-tag-running { @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300; }
+.installed-tag-stopped { @apply bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-300; }
 .card-description { @apply text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-4; }
 .card-footer { @apply p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between gap-2 mt-auto; }
 </style>

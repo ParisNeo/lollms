@@ -17,6 +17,8 @@ import AppCard from '../ui/AppCard.vue';
 import AppCardSkeleton from '../ui/AppCardSkeleton.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconTicket from '../../assets/icons/IconTicket.vue';
+import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
+import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 
 const adminStore = useAdminStore();
 const tasksStore = useTasksStore();
@@ -55,6 +57,14 @@ const pageInfo = computed(() => {
     const start = (currentPage.value - 1) * pageSize.value + 1;
     const end = Math.min(currentPage.value * pageSize.value, totalItems.value);
     return `Showing ${start}-${end} of ${totalItems.value}`;
+});
+
+const repoAppCounts = computed(() => {
+    if (!zooApps.value.items) return {};
+    return zooApps.value.items.reduce((acc, app) => {
+        acc[app.repository] = (acc[app.repository] || 0) + 1;
+        return acc;
+    }, {});
 });
 
 async function fetchZooItems() {
@@ -326,6 +336,7 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                         <div class="flex items-center gap-2">
                             <span class="px-2 py-0.5 text-xs font-semibold rounded-full" :class="repo.type === 'git' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'">{{ repo.type }}</span>
                             <p class="font-semibold">{{ repo.name }}</p>
+                            <span class="text-sm text-gray-500">({{ repoAppCounts[repo.name] || 0 }} items)</span>
                         </div>
                         <p class="text-sm text-gray-500 font-mono truncate mt-1" :title="repo.url">{{ repo.url }}</p>
                         <p class="text-xs text-gray-400 mt-1">Last updated: {{ formatDateTime(repo.last_pulled_at) }}</p>
@@ -344,7 +355,7 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
                 <div v-else-if="!itemsWithTaskStatus || itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Apps Found</h4><p class="text-sm">No apps match your criteria. Please add and pull a repository or adjust your filters.</p></div>
                 <div v-else>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-                        <AppCard v-for="item in itemsWithTaskStatus" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @uninstall="handleUninstallApp(item)" @details="showItemDetails(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" />
+                        <AppCard v-for="item in itemsWithTaskStatus" :key="`${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @uninstall="handleUninstallApp(item)" @details="showItemDetails(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" @start="handleAppAction(item.id, 'start')" @stop="handleAppAction(item.id, 'stop')" />
                     </div>
                     <div v-if="selectedCategory !== 'Starred'" class="mt-6 flex justify-between items-center">
                         <p class="text-sm text-gray-500">{{ pageInfo }}</p>
@@ -361,49 +372,14 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
              <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Installed Apps</h3><button @click="adminStore.fetchInstalledApps" class="btn btn-secondary" :disabled="isLoadingInstalledApps"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingInstalledApps}" /><span class="ml-2">Refresh</span></button></div>
             <div v-if="isLoadingInstalledApps" class="text-center p-10">Loading...</div>
             <div v-else-if="!installedItemsWithTaskStatus || installedItemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Apps Installed</h4><p class="text-sm">Go to "Available" to install an app.</p></div>
-            <div v-else class="space-y-4">
-                <div v-for="app in installedItemsWithTaskStatus" :key="app.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 transition-colors duration-300"
-                :class="{
-                    'bg-blue-50 dark:bg-blue-900/30 animate-pulse': app.activity_status === 'starting',
-                    'bg-yellow-50 dark:bg-yellow-900/30 animate-pulse': app.activity_status === 'stopping',
-                    'bg-purple-50 dark:bg-purple-900/30 animate-pulse': app.activity_status === 'updating'
-                }">
-                    <div class="flex items-center gap-4 flex-grow truncate"><img v-if="app.icon" :src="app.icon" class="h-10 w-10 rounded-md flex-shrink-0 object-cover" alt="Icon">
-                        <div class="flex-grow truncate">
-                            <p class="font-semibold truncate">{{ app.name }}</p>
-                            <p class="text-xs text-gray-500 font-mono truncate">Port: {{ app.port }}
-                                <span v-if="app.version"> | v{{ app.version }}
-                                    <span v-if="app.update_available" class="text-yellow-500 font-semibold">(repo: v{{ app.repo_version }})</span>
-                                </span>
-                            </p>
-                        </div>
-                    </div>
-                    <div class="flex items-center gap-x-2 flex-shrink-0 flex-wrap justify-end">
-                        <template v-if="app.activity_status">
-                            <div class="flex items-center gap-2 text-sm font-semibold"
-                                 :class="{
-                                     'text-blue-700 dark:text-blue-300': app.activity_status === 'starting',
-                                     'text-yellow-700 dark:text-yellow-300': app.activity_status === 'stopping',
-                                     'text-purple-700 dark:text-purple-300': app.activity_status === 'updating'
-                                 }">
-                                <IconAnimateSpin class="w-5 h-5" />
-                                <span class="capitalize">{{ app.activity_status }}...</span>
-                            </div>
-                            <button @click="viewTask(app.task.id)" class="btn btn-secondary btn-sm !p-1.5" title="View Task Details">
-                                <IconTicket class="w-4 h-4" />
-                            </button>
-                        </template>
-                        <template v-else>
-                            <button v-if="app.update_available" @click="handleUpdateApp(app)" class="btn btn-warning btn-sm p-2" title="Update"><IconArrowUpCircle class="w-5 h-5" /></button>
-                            <span class="px-2 py-1 text-xs font-semibold rounded-full" :class="{ 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300': app.status === 'running', 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300': app.status === 'stopped', 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300': app.status === 'error' }">{{ app.status }}</span>
-                            <a v-if="app.status === 'running' && app.url" :href="app.url" target="_blank" class="btn btn-secondary btn-sm p-2" title="Open"><IconGlobeAlt class="w-5 h-5" /></a>
-                            <button @click="handleEditRegistration(app)" class="btn btn-secondary btn-sm p-2" title="Edit Registration"><IconPencil class="w-5 h-5" /></button>
-                            <button v-if="app.has_config_schema" @click="handleConfigureApp(app)" class="btn btn-secondary btn-sm p-2" title="Configure"><IconCog class="w-5 h-5" /></button>
-                            <button @click="handleShowLogs(app)" class="btn btn-secondary btn-sm p-2" title="Logs"><IconCode class="w-5 h-5" /></button>
-                            <button v-if="app.status !== 'running'" @click="handleAppAction(app.id, 'start')" class="btn btn-success btn-sm p-2" :disabled="isLoadingAction === `start-${app.id}`" title="Start">Start</button>
-                            <button v-if="app.status === 'running' || (app.status === 'error' && app.pid)" @click="handleAppAction(app.id, 'stop')" class="btn btn-warning btn-sm p-2" :disabled="isLoadingAction === `stop-${app.id}`" title="Stop">Stop</button>
-                            <button @click="handleUninstallApp(app)" class="btn btn-danger btn-sm p-2" title="Uninstall"><IconTrash class="w-5 h-5" /></button>
-                        </template>
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
+                 <div v-for="app in installedItemsWithTaskStatus" :key="app.id" class="flex flex-col">
+                    <AppCard :app="app" :task="app.task" @update="handleUpdateApp(app)" @uninstall="handleUninstallApp(app)" @start="handleAppAction(app.id, 'start')" @stop="handleAppAction(app.id, 'stop')" />
+                    <div class="bg-white dark:bg-gray-800 rounded-b-lg p-2 flex justify-around items-center text-sm border-t border-gray-200 dark:border-gray-700">
+                        <a v-if="app.status === 'running' && app.url" :href="app.url" target="_blank" class="btn-footer" title="Open"><IconGlobeAlt class="w-5 h-5" /></a>
+                        <button @click="handleEditRegistration(app)" class="btn-footer" title="Edit Registration"><IconPencil class="w-5 h-5" /></button>
+                        <button v-if="app.has_config_schema" @click="handleConfigureApp(app)" class="btn-footer" title="Configure"><IconCog class="w-5 h-5" /></button>
+                        <button @click="handleShowLogs(app)" class="btn-footer" title="Logs"><IconCode class="w-5 h-5" /></button>
                     </div>
                 </div>
             </div>

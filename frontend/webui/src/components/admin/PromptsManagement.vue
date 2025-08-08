@@ -55,6 +55,14 @@ const pageInfo = computed(() => {
     return `Showing ${start}-${end} of ${totalItems.value}`;
 });
 
+const repoPromptCounts = computed(() => {
+    if (!zooPrompts.value.items) return {};
+    return zooPrompts.value.items.reduce((acc, prompt) => {
+        acc[prompt.repository] = (acc[prompt.repository] || 0) + 1;
+        return acc;
+    }, {});
+});
+
 async function fetchZooItems() {
     const params = {
         page: currentPage.value, page_size: pageSize.value, sort_by: sortKey.value,
@@ -295,16 +303,17 @@ async function handleDeletePrompt(prompt) {
             <div v-if="isLoadingPromptZooRepositories" class="text-center p-4">Loading...</div>
             <div v-else-if="!sortedRepositories || sortedRepositories.length === 0" class="empty-state-card"><p>No repositories added.</p></div>
             <div v-else class="space-y-4">
-                <div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex items-center justify-between gap-4">
+                <div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col md:flex-row items-center justify-between gap-4">
                     <div class="flex-grow truncate">
                         <div class="flex items-center gap-2">
-                             <span class="px-2 py-0.5 text-xs font-semibold rounded-full" :class="repo.type === 'git' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'">{{ repo.type }}</span>
+                            <span class="px-2 py-0.5 text-xs font-semibold rounded-full" :class="repo.type === 'git' ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300' : 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'">{{ repo.type }}</span>
                             <p class="font-semibold">{{ repo.name }}</p>
+                            <span class="text-sm text-gray-500">({{ repoPromptCounts[repo.name] || 0 }} items)</span>
                         </div>
                         <p class="text-sm text-gray-500 font-mono truncate mt-1" :title="repo.url">{{ repo.url }}</p>
                         <p class="text-xs text-gray-400 mt-1">Updated: {{ formatDateTime(repo.last_pulled_at) }}</p>
                     </div>
-                    <div class="flex items-center gap-x-2">
+                    <div class="flex items-center gap-x-2 flex-shrink-0">
                         <button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm" :disabled="isLoadingAction === repo.id">
                             <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingAction === repo.id}" /> 
                             {{ repo.type === 'git' ? 'Pull' : 'Rescan' }}
