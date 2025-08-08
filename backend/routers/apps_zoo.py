@@ -218,7 +218,33 @@ def get_installed_apps(db: Session = Depends(get_db)):
     zoo_meta = get_all_zoo_metadata()
     response = []
     for app in installed:
-        app_public = AppPublic.from_orm(app)
+        # --- FIX: Replace from_orm with manual construction for robustness ---
+        app_public = AppPublic(
+            id=app.id,
+            name=app.name,
+            client_id=app.client_id,
+            url=app.url,
+            icon=app.icon,
+            active=app.active,
+            type=app.type,
+            authentication_type=app.authentication_type,
+            authentication_key=app.authentication_key,
+            sso_redirect_uri=app.sso_redirect_uri,
+            sso_user_infos_to_share=app.sso_user_infos_to_share or [], # Handles None from DB
+            description=app.description,
+            author=app.author,
+            version=app.version,
+            category=app.category,
+            tags=app.tags or [], # Handles None from DB
+            is_installed=app.is_installed,
+            autostart=app.autostart,
+            port=app.port,
+            status=app.status,
+            pid=app.pid,
+            owner_username=app.owner.username if app.owner else "System"
+        )
+        # --- END FIX ---
+        
         app_public.item_type = (app.app_metadata or {}).get('item_type', 'app')
         app_public.has_config_schema = (get_installed_app_path(db, app.id) / 'schema.config.json').is_file()
         zoo_info = zoo_meta.get(app.name)
