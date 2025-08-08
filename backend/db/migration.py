@@ -180,7 +180,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if owner_user_id_col_info_full and owner_user_id_col_info_full.get('nullable') == False:
             print("INFO: 'owner_user_id' column in 'saved_prompts' table is NOT NULL. Attempting to migrate schema...")
             
-            # NEW: Self-healing pre-flight check
+            # Self-healing pre-flight check
             if inspector.has_table("_saved_prompts_old"):
                 print("INFO: Found backup table '_saved_prompts_old'. Attempting recovery from previous failed migration.")
                 try:
@@ -380,6 +380,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print("INFO: Found backup table '_apps_old'. Attempting recovery from previous failed migration.")
                 try:
                     connection.execute(text("DROP TABLE IF EXISTS apps;"))
+                    connection.execute(text("DROP INDEX IF EXISTS ix_apps_id;"))
                     connection.execute(text("ALTER TABLE _apps_old RENAME TO apps;"))
                     print("INFO: Recovery successful. The original 'apps' table has been restored.")
                 except Exception as recovery_error:
