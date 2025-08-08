@@ -1,6 +1,7 @@
 # backend/db/migration.py
 import json
 import re
+from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, IntegrityError
 
@@ -362,8 +363,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             print("WARNING: 'url' column in 'apps' table is NOT NULL. Attempting to migrate schema using data-safe reset.")
             try:
                 # 1. Backup data in memory
-                old_cols_info = inspector.get_columns('apps')
-                old_cols_names = [c['name'] for c in old_cols_info]
                 data = connection.execute(text("SELECT * FROM apps")).mappings().all()
                 
                 # 2. Drop the old table completely
@@ -379,8 +378,17 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                     new_cols_names = [c.name for c in App.__table__.columns]
                     restored_count = 0
                     for row in data:
-                        # Only map columns that exist in the new table
                         row_data = {k: v for k, v in row.items() if k in new_cols_names}
+                        
+                        # FIX: Convert string timestamps to datetime objects
+                        if 'created_at' in row_data and isinstance(row_data['created_at'], str):
+                            try: row_data['created_at'] = datetime.fromisoformat(row_data['created_at'])
+                            except ValueError: row_data['created_at'] = None
+                        
+                        if 'updated_at' in row_data and isinstance(row_data['updated_at'], str):
+                            try: row_data['updated_at'] = datetime.fromisoformat(row_data['updated_at'])
+                            except ValueError: row_data['updated_at'] = None
+                        
                         connection.execute(App.__table__.insert().values(row_data))
                         restored_count += 1
                     print(f"INFO: Restored {restored_count} rows to 'apps' table.")
