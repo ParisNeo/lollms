@@ -361,7 +361,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             print("WARNING: 'url' column in 'apps' table is NOT NULL. Attempting to migrate schema...")
             try:
                 connection.execute(text("PRAGMA foreign_keys=off;"))
-                connection.execute(text("BEGIN TRANSACTION;"))
                 connection.execute(text("ALTER TABLE apps RENAME TO _apps_old;"))
                 App.__table__.create(connection)
                 
@@ -372,13 +371,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
                 connection.execute(text(f"INSERT INTO apps ({cols_str}) SELECT {cols_str} FROM _apps_old;"))
                 connection.execute(text("DROP TABLE _apps_old;"))
-                connection.execute(text("COMMIT;"))
                 connection.execute(text("PRAGMA foreign_keys=on;"))
                 print("INFO: Successfully migrated 'apps' table to make 'url' column nullable.")
             except Exception as e:
                 print(f"CRITICAL: Failed to migrate 'apps' table schema. Error: {e}")
-                connection.execute(text("ROLLBACK;"))
                 connection.execute(text("PRAGMA foreign_keys=on;"))
+                raise e
 
         new_app_cols_defs = {
             "icon": "TEXT",
