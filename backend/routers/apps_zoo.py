@@ -238,12 +238,16 @@ def set_app_config(app_id: str, config_data: Dict[str, Any] = Body(...), db: Ses
 @apps_zoo_router.post("/installed/{app_id}/start", response_model=TaskInfo, status_code=202)
 def start_app(app_id: str, db: Session = Depends(get_db)):
     app = db.query(DBApp).filter(DBApp.id == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="App to start not found in the database.")
     task = task_manager.submit_task(name=f"Start app: {app.name}", target=start_app_task, args=(app_id,))
     return to_task_info(task)
 
 @apps_zoo_router.post("/installed/{app_id}/stop", response_model=TaskInfo, status_code=202)
 def stop_app(app_id: str, db: Session = Depends(get_db)):
     app = db.query(DBApp).filter(DBApp.id == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="App to stop not found in the database.")
     task = task_manager.submit_task(name=f"Stop app: {app.name}", target=stop_app_task, args=(app_id,))
     return to_task_info(task)
 
