@@ -180,12 +180,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if owner_user_id_col_info_full and owner_user_id_col_info_full.get('nullable') == False:
             print("INFO: 'owner_user_id' column in 'saved_prompts' table is NOT NULL. Attempting to migrate schema...")
             try:
-                # The transaction is managed by the calling function in session.py
                 connection.execute(text("PRAGMA foreign_keys=off;"))
                 connection.execute(text("ALTER TABLE saved_prompts RENAME TO _saved_prompts_old;"))
                 
-                # Create the new table based on the updated model definition
-                SavedPrompt.__table__.create(connection, checkfirst=True)
+                SavedPrompt.__table__.create(connection)
                 
                 old_cols = [c['name'] for c in inspector.get_columns('_saved_prompts_old')]
                 new_cols = [c.name for c in SavedPrompt.__table__.columns]
@@ -199,7 +197,14 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print("INFO: Successfully migrated 'saved_prompts' table to make 'owner_user_id' column nullable.")
             except Exception as e:
                 print(f"CRITICAL: Failed to migrate 'saved_prompts' table schema. Error: {e}")
-                # Re-raise the exception to trigger the rollback in the calling function
+                print("INFO: Attempting to recover from failed migration...")
+                try:
+                    connection.execute(text("DROP TABLE IF EXISTS saved_prompts;"))
+                    connection.execute(text("ALTER TABLE _saved_prompts_old RENAME TO saved_prompts;"))
+                    connection.execute(text("PRAGMA foreign_keys=on;"))
+                    print("INFO: Recovery successful. Original table restored.")
+                except Exception as recover_e:
+                    print(f"CRITICAL: Recovery failed! DB may be in an inconsistent state. Error: {recover_e}")
                 raise e
 
     if inspector.has_table("llm_bindings"):
@@ -228,12 +233,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if inspector.has_table("users"):
         user_columns_db = [col['name'] for col in inspector.get_columns('users')]
         
-        # --- Migration from scratchpad to data_zone ---
         if 'scratchpad' in user_columns_db and 'data_zone' not in user_columns_db:
             try:
                 connection.execute(text("ALTER TABLE users RENAME COLUMN scratchpad TO data_zone"))
                 print("INFO: Migrated column 'users.scratchpad' to 'users.data_zone'.")
-                # Refresh columns after rename
                 user_columns_db = [col['name'] for col in inspector.get_columns('users')]
             except Exception as e:
                 print(f"ERROR: Could not rename 'scratchpad' to 'data_zone': {e}")
@@ -324,7 +327,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             if mcps_to_update:
                 print(f"INFO: Backfilling client_id for {len(mcps_to_update)} existing MCPs...")
                 
-                # Defensively check for apps table and client_id column to prevent migration errors
                 app_columns_db = []
                 if inspector.has_table('apps'):
                     app_columns_db = [col['name'] for col in inspector.get_columns('apps')]
@@ -362,7 +364,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             try:
                 connection.execute(text("PRAGMA foreign_keys=off;"))
                 connection.execute(text("ALTER TABLE apps RENAME TO _apps_old;"))
-                App.__table__.create(connection, checkfirst=True)
+                App.__table__.create(connection)
                 
                 old_cols = [c['name'] for c in inspector.get_columns('_apps_old')]
                 new_cols = [c['name'] for c in inspector.get_columns('apps')]
@@ -375,7 +377,14 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print("INFO: Successfully migrated 'apps' table to make 'url' column nullable.")
             except Exception as e:
                 print(f"CRITICAL: Failed to migrate 'apps' table schema. Error: {e}")
-                connection.execute(text("PRAGMA foreign_keys=on;"))
+                print("INFO: Attempting to recover from failed migration...")
+                try:
+                    connection.execute(text("DROP TABLE IF EXISTS apps;"))
+                    connection.execute(text("ALTER TABLE _apps_old RENAME TO apps;"))
+                    connection.execute(text("PRAGMA foreign_keys=on;"))
+                    print("INFO: Recovery successful. Original table restored.")
+                except Exception as recover_e:
+                    print(f"CRITICAL: Recovery failed! DB may be in an inconsistent state. Error: {recover_e}")
                 raise e
 
         new_app_cols_defs = {
