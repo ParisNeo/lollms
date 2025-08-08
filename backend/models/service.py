@@ -240,7 +240,6 @@ class ZooPromptInfo(BaseModel):
     folder_name: str
     icon: Optional[str] = None
     is_installed: bool = False
-    is_broken: bool = False
     has_readme: bool = False
     author: Optional[str] = None
     category: Optional[str] = None
