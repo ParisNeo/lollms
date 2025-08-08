@@ -179,6 +179,18 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         
         if owner_user_id_col_info_full and owner_user_id_col_info_full.get('nullable') == False:
             print("INFO: 'owner_user_id' column in 'saved_prompts' table is NOT NULL. Attempting to migrate schema...")
+            
+            # NEW: Self-healing pre-flight check
+            if inspector.has_table("_saved_prompts_old"):
+                print("INFO: Found backup table '_saved_prompts_old'. Attempting recovery from previous failed migration.")
+                try:
+                    connection.execute(text("DROP TABLE IF EXISTS saved_prompts;"))
+                    connection.execute(text("ALTER TABLE _saved_prompts_old RENAME TO saved_prompts;"))
+                    print("INFO: Recovery successful. The original 'saved_prompts' table has been restored.")
+                except Exception as recovery_error:
+                    print(f"CRITICAL: Automatic recovery for 'saved_prompts' failed. DB may be inconsistent. Error: {recovery_error}")
+                    raise recovery_error
+
             try:
                 connection.execute(text("PRAGMA foreign_keys=off;"))
                 connection.execute(text("ALTER TABLE saved_prompts RENAME TO _saved_prompts_old;"))
@@ -197,14 +209,15 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print("INFO: Successfully migrated 'saved_prompts' table to make 'owner_user_id' column nullable.")
             except Exception as e:
                 print(f"CRITICAL: Failed to migrate 'saved_prompts' table schema. Error: {e}")
-                print("INFO: Attempting to recover from failed migration...")
+                print("INFO: Attempting to recover from this migration attempt...")
                 try:
-                    connection.execute(text("DROP TABLE IF EXISTS saved_prompts;"))
-                    connection.execute(text("ALTER TABLE _saved_prompts_old RENAME TO saved_prompts;"))
+                    if inspector.has_table("_saved_prompts_old"):
+                        connection.execute(text("DROP TABLE IF EXISTS saved_prompts;"))
+                        connection.execute(text("ALTER TABLE _saved_prompts_old RENAME TO saved_prompts;"))
+                        print("INFO: Recovery successful. Original table restored.")
                     connection.execute(text("PRAGMA foreign_keys=on;"))
-                    print("INFO: Recovery successful. Original table restored.")
                 except Exception as recover_e:
-                    print(f"CRITICAL: Recovery failed! DB may be in an inconsistent state. Error: {recover_e}")
+                    print(f"CRITICAL: Recovery failed! DB may be inconsistent. Error: {recover_e}")
                 raise e
 
     if inspector.has_table("llm_bindings"):
@@ -361,6 +374,18 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
         if url_col_info and url_col_info.get('nullable') == 0:
             print("WARNING: 'url' column in 'apps' table is NOT NULL. Attempting to migrate schema...")
+            
+            # NEW: Self-healing pre-flight check
+            if inspector.has_table("_apps_old"):
+                print("INFO: Found backup table '_apps_old'. Attempting recovery from previous failed migration.")
+                try:
+                    connection.execute(text("DROP TABLE IF EXISTS apps;"))
+                    connection.execute(text("ALTER TABLE _apps_old RENAME TO apps;"))
+                    print("INFO: Recovery successful. The original 'apps' table has been restored.")
+                except Exception as recovery_error:
+                    print(f"CRITICAL: Automatic recovery for 'apps' failed. DB may be inconsistent. Error: {recovery_error}")
+                    raise recovery_error
+
             try:
                 connection.execute(text("PRAGMA foreign_keys=off;"))
                 connection.execute(text("ALTER TABLE apps RENAME TO _apps_old;"))
@@ -377,14 +402,15 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print("INFO: Successfully migrated 'apps' table to make 'url' column nullable.")
             except Exception as e:
                 print(f"CRITICAL: Failed to migrate 'apps' table schema. Error: {e}")
-                print("INFO: Attempting to recover from failed migration...")
+                print("INFO: Attempting to recover from this migration attempt...")
                 try:
-                    connection.execute(text("DROP TABLE IF EXISTS apps;"))
-                    connection.execute(text("ALTER TABLE _apps_old RENAME TO apps;"))
+                    if inspector.has_table("_apps_old"):
+                        connection.execute(text("DROP TABLE IF EXISTS apps;"))
+                        connection.execute(text("ALTER TABLE _apps_old RENAME TO apps;"))
+                        print("INFO: Recovery successful. Original table restored.")
                     connection.execute(text("PRAGMA foreign_keys=on;"))
-                    print("INFO: Recovery successful. Original table restored.")
                 except Exception as recover_e:
-                    print(f"CRITICAL: Recovery failed! DB may be in an inconsistent state. Error: {recover_e}")
+                    print(f"CRITICAL: Recovery failed! DB may be inconsistent. Error: {recover_e}")
                 raise e
 
         new_app_cols_defs = {
