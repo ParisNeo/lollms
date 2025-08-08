@@ -19,6 +19,7 @@ from typing import Dict, Any, List
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 
 from backend.db import get_db
 from backend.db.models.service import App as DBApp, MCP as DBMCP, AppZooRepository, MCPZooRepository
@@ -70,6 +71,117 @@ def get_all_zoo_metadata():
     for item in get_all_items('app') + get_all_items('mcp'):
         all_items_dict[item['name']] = item
     return all_items_dict
+
+def sync_installs_task(task: Task):
+    task.log("Starting synchronization of installed items with the database.")
+    fixed_ghosts = 0
+    removed_orphans = 0
+
+    with task.db_session_factory() as db:
+        # --- Step 1: Find ghost installations (filesystem folder exists, but no DB record) ---
+        task.log("Scanning for ghost installations (files without DB entry)...")
+        task.set_progress(10)
+        
+        installed_folders = {
+            'app': {f.name for f in APPS_ROOT_PATH.iterdir() if f.is_dir()},
+            'mcp': {f.name for f in MCPS_ROOT_PATH.iterdir() if f.is_dir()}
+        }
+        
+        db_folder_names = {r[0] for r in db.query(DBApp.folder_name).filter(DBApp.is_installed == True).all()}
+        
+        ghost_folders = {
+            'app': installed_folders['app'] - db_folder_names,
+            'mcp': installed_folders['mcp'] - db_folder_names
+        }
+
+        for item_type, folders in ghost_folders.items():
+            if not folders:
+                task.log(f"No ghost installations found for type: {item_type.upper()}")
+                continue
+            
+            task.log(f"Found {len(folders)} ghost installations for type: {item_type.upper()}. Attempting to repair...")
+            root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
+            
+            for folder_name in folders:
+                item_path = root_path / folder_name
+                desc_path = item_path / "description.yaml"
+                
+                if not desc_path.exists():
+                    task.log(f"  - SKIPPING '{folder_name}': No description.yaml found. Cannot automatically repair.", "WARNING")
+                    continue
+                
+                try:
+                    with open(desc_path, 'r', encoding='utf-8') as f:
+                        item_info = yaml.safe_load(f) or {}
+                    
+                    item_name = item_info.get("name", folder_name)
+                    
+                    # Check if a record with the same name already exists to avoid conflicts
+                    if db.query(DBApp).filter(func.lower(DBApp.name) == func.lower(item_name), DBApp.is_installed == True).first():
+                        task.log(f"  - SKIPPING '{folder_name}': A different installed item with the name '{item_name}' already exists in the database.", "WARNING")
+                        continue
+
+                    task.log(f"  - REPAIRING '{folder_name}': Creating database entry for '{item_name}'.")
+                    
+                    icon_path = next((p for p in [item_path / "assets" / "logo.png", item_path / "icon.png"] if p.exists()), None)
+                    icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
+                    
+                    item_info['item_type'] = item_type
+                    item_info['folder_name'] = folder_name
+                    
+                    client_id = generate_unique_client_id(db, DBApp, item_name)
+                    
+                    # Create a sensible default port, assuming it might not be running
+                    used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
+                    next_port = 9601
+                    while next_port in used_ports:
+                        next_port += 1
+
+                    new_app_record = DBApp(
+                        name=item_name, client_id=client_id, folder_name=folder_name,
+                        icon=icon_base64, is_installed=True, status='stopped', port=next_port,
+                        autostart=False, version=str(item_info.get('version', 'N/A')),
+                        author=item_info.get('author'), description=item_info.get('description'),
+                        category=item_info.get('category'), tags=item_info.get('tags'),
+                        app_metadata=item_info
+                    )
+                    db.add(new_app_record)
+                    fixed_ghosts += 1
+                except Exception as e:
+                    task.log(f"  - FAILED to repair '{folder_name}': {e}", "ERROR")
+                    traceback.print_exc()
+
+        task.set_progress(50)
+        
+        # --- Step 2: Find orphaned DB records (DB record exists, but folder is missing) ---
+        task.log("Scanning for orphaned database records (DB entry without files)...")
+        
+        db_installed_items = db.query(DBApp).filter(DBApp.is_installed == True).all()
+        orphaned_items = []
+        for item in db_installed_items:
+            item_type = (item.app_metadata or {}).get('item_type', 'app')
+            root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
+            if not (root_path / item.folder_name).exists():
+                orphaned_items.append(item)
+
+        if not orphaned_items:
+            task.log("No orphaned database records found.")
+        else:
+            task.log(f"Found {len(orphaned_items)} orphaned records. Removing from database...")
+            for item in orphaned_items:
+                task.log(f"  - REMOVING orphan record: '{item.name}' (folder: {item.folder_name})")
+                db.delete(item)
+                removed_orphans += 1
+
+        db.commit()
+        task.set_progress(100)
+        task.log("Synchronization complete.")
+        
+        return {
+            "message": "Sync complete.",
+            "fixed_ghost_installations": fixed_ghosts,
+            "removed_orphaned_records": removed_orphans
+        }
 
 def cleanup_and_autostart_apps():
     db_session = None

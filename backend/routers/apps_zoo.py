@@ -30,7 +30,7 @@ from backend.settings import settings
 from .app_utils import (
     to_task_info, pull_repo_task, install_item_task, get_all_zoo_metadata, 
     get_installed_app_path, start_app_task, stop_app_task, open_log_files,
-    update_item_task
+    update_item_task, sync_installs_task
 )
 
 apps_zoo_router = APIRouter(
@@ -38,6 +38,19 @@ apps_zoo_router = APIRouter(
     tags=["Apps Zoo Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
+
+@apps_zoo_router.post("/sync-installs", response_model=TaskInfo, status_code=202)
+def sync_installed_items():
+    """
+    Triggers a background task to synchronize the filesystem installations with the database.
+    Fixes ghost installations and removes orphaned database records.
+    """
+    task = task_manager.submit_task(
+        name="Sync Installed Items",
+        target=sync_installs_task,
+        description="Scanning installation folders and database to fix inconsistencies."
+    )
+    return to_task_info(task)
 
 @apps_zoo_router.post("/rescan", response_model=Dict[str, str])
 def rescan_all_zoos():

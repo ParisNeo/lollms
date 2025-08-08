@@ -37,6 +37,18 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingSystemStatus = ref(false);
 
     // --- Actions ---
+    async function syncInstallations() {
+        const { useTasksStore } = await import('./tasks');
+        const tasksStore = useTasksStore();
+        try {
+            const response = await apiClient.post('/api/apps_zoo/sync-installs');
+            tasksStore.addTask(response.data);
+            uiStore.addNotification('Installation sync task started.', 'info');
+        } catch (error) {
+            // Error is handled by global interceptor
+        }
+    }
+
     async function fetchSystemStatus() {
         isLoadingSystemStatus.value = true;
         try {
@@ -310,6 +322,7 @@ export const useAdminStore = defineStore('admin', () => {
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
         updateInstalledApp, fetchAppLog, fetchAppConfigSchema, fetchAppConfig, updateApp,
         // System & Tasks
-        purgeUnusedUploads, systemStatus, isLoadingSystemStatus, fetchSystemStatus
+        purgeUnusedUploads, systemStatus, isLoadingSystemStatus, fetchSystemStatus,
+        syncInstallations
     };
 });

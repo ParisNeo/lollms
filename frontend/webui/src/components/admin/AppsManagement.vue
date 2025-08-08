@@ -284,6 +284,16 @@ async function showItemHelp(item) {
 }
 async function handleCancelTask(taskId) { await tasksStore.cancelTask(taskId); }
 function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: taskId }); }
+async function handleSync() {
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Sync Installations?',
+        message: 'This will scan for installed items on disk that are missing from the database and try to repair them. It will also remove database entries for items that no longer exist on disk. This can fix "ghost" installations.',
+        confirmText: 'Sync Now'
+    });
+    if (confirmed) {
+        await adminStore.syncInstallations();
+    }
+}
 </script>
 <style scoped>
 .tab-button { @apply px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors; }
@@ -369,7 +379,12 @@ function viewTask(taskId) { uiStore.openModal('tasksManager', { initialTaskId: t
         </section>
         
         <section v-if="activeSubTab === 'installed_apps'">
-             <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Installed Apps</h3><button @click="adminStore.fetchInstalledApps" class="btn btn-secondary" :disabled="isLoadingInstalledApps"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingInstalledApps}" /><span class="ml-2">Refresh</span></button></div>
+             <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Installed Apps</h3>
+                <div class="flex items-center gap-2">
+                    <button @click="handleSync" class="btn btn-secondary-outline" title="Repair broken installations and remove orphaned DB entries.">Sync Installations</button>
+                    <button @click="adminStore.fetchInstalledApps" class="btn btn-secondary" :disabled="isLoadingInstalledApps"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingInstalledApps}" /><span class="ml-2">Refresh</span></button>
+                </div>
+            </div>
             <div v-if="isLoadingInstalledApps" class="text-center p-10">Loading...</div>
             <div v-else-if="!installedItemsWithTaskStatus || installedItemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Apps Installed</h4><p class="text-sm">Go to "Available" to install an app.</p></div>
             <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
