@@ -23,7 +23,7 @@ from backend.models import (
     AppInstallRequest, AppPublic, AppActionResponse, TaskInfo, AppUpdate, AppLog
 )
 from backend.session import get_current_admin_user
-from backend.config import APPS_ZOO_ROOT_PATH
+from backend.config import APPS_ZOO_ROOT_PATH, APPS_ROOT_PATH
 from backend.task_manager import task_manager
 from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache, refresh_repo_cache
 from backend.settings import settings
@@ -114,11 +114,15 @@ def get_available_zoo_apps(db: Session = Depends(get_db), page: int = 1, page_si
     all_items_raw = get_all_items('app')
     installed_apps_q = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.app_metadata['item_type'].as_string() == 'app').all()
     installed_apps = {app.name: app for app in installed_apps_q}
+    installed_folders = {f.name for f in APPS_ROOT_PATH.iterdir() if f.is_dir()}
 
     all_items = []
     for info in all_items_raw:
         try:
             is_installed = info.get('name') in installed_apps
+            folder_exists = info.get('folder_name') in installed_folders
+            is_broken = folder_exists and not is_installed
+
             update_available = False
             if is_installed:
                 installed_app = installed_apps[info.get('name')]
@@ -130,9 +134,9 @@ def get_available_zoo_apps(db: Session = Depends(get_db), page: int = 1, page_si
             
             model_data = {
                 "name": info.get('name'), "repository": info.get('repository'), "folder_name": info.get('folder_name'),
-                "icon": info.get('icon'), "is_installed": is_installed, "update_available": update_available,
+                "icon": info.get('icon'), "is_installed": is_installed, "is_broken": is_broken, "update_available": update_available,
                 "has_readme": (APPS_ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists(),
-                **{f: info.get(f) for f in ZooAppInfo.model_fields if f not in ['name', 'repository', 'folder_name', 'is_installed', 'has_readme', 'icon', 'update_available']}
+                **{f: info.get(f) for f in ZooAppInfo.model_fields if f not in ['name', 'repository', 'folder_name', 'is_installed', 'has_readme', 'icon', 'update_available', 'is_broken']}
             }
             all_items.append(ZooAppInfo(**model_data))
         except (PydanticValidationError, Exception) as e:
@@ -143,7 +147,9 @@ def get_available_zoo_apps(db: Session = Depends(get_db), page: int = 1, page_si
         if installation_status == 'Installed':
             all_items = [item for item in all_items if item.is_installed]
         elif installation_status == 'Uninstalled':
-            all_items = [item for item in all_items if not item.is_installed]
+            all_items = [item for item in all_items if not item.is_installed and not item.is_broken]
+        elif installation_status == 'Broken':
+            all_items = [item for item in all_items if item.is_broken]
     if category and category != 'All':
         all_items = [item for item in all_items if item.category == category]
     if search_query:
@@ -163,10 +169,12 @@ def get_available_zoo_apps(db: Session = Depends(get_db), page: int = 1, page_si
                 return 0.0
         return str(val or '').lower()
     
+    # Prioritize broken, then installed
+    broken_items = sorted([item for item in all_items if item.is_broken], key=sort_key_func, reverse=(sort_order == 'desc'))
     installed_items_sorted = sorted([item for item in all_items if item.is_installed], key=sort_key_func, reverse=(sort_order == 'desc'))
-    uninstalled_items_sorted = sorted([item for item in all_items if not item.is_installed], key=sort_key_func, reverse=(sort_order == 'desc'))
+    uninstalled_items_sorted = sorted([item for item in all_items if not item.is_installed and not item.is_broken], key=sort_key_func, reverse=(sort_order == 'desc'))
     
-    all_items = installed_items_sorted + uninstalled_items_sorted
+    all_items = broken_items + installed_items_sorted + uninstalled_items_sorted
 
     # --- PAGINATION ---
     total_items = len(all_items)
