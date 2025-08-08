@@ -291,15 +291,23 @@ class AppBase(BaseModel):
     authentication_type: Optional[str] = "none"
     authentication_key: Optional[str] = ""
     sso_redirect_uri: Optional[str] = None
-    sso_user_infos_to_share: List[str] = Field(default_factory=list)
+    sso_user_infos_to_share: Optional[List[str]] = None # Changed to Optional
     description: Optional[str] = None
     author: Optional[str] = None
     version: Optional[str] = None
     category: Optional[str] = None
-    tags: Optional[List[str]] = None
+    tags: Optional[List[str]] = None # Already Optional
     is_installed: bool = False
     autostart: bool = False
     port: Optional[int] = None
+    
+    @model_validator(mode='after')
+    def set_default_lists(self) -> 'AppBase':
+        if self.sso_user_infos_to_share is None:
+            self.sso_user_infos_to_share = []
+        if self.tags is None:
+            self.tags = []
+        return self
 
 class AppCreate(AppBase):
     @model_validator(mode='after')
@@ -338,10 +346,6 @@ class AppPublic(AppBase):
     repo_version: Optional[str] = None
     has_config_schema: bool = False
     item_type: Optional[str] = 'app'
-
-    @field_validator('sso_user_infos_to_share', mode='before')
-    def provide_default_for_sso_infos(cls, v):
-        return v if v is not None else []
 
     class Config:
         from_attributes = True
