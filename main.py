@@ -7,6 +7,7 @@ import subprocess
 from multiprocessing import cpu_count
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors
+from contextlib import asynccontextmanager
 
 from multipart.multipart import FormParser
 FormParser.max_size = 50 * 1024 * 1024  # 50 MB
@@ -62,10 +63,10 @@ from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.zoo_cache import build_full_cache
 
-app = FastAPI(title="LoLLMs Platform", description="API for a multi-user LoLLMs and SafeStore chat application.", version=APP_VERSION)
-
-@app.on_event("startup")
-async def on_startup() -> None:
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Code to be executed on startup ---
+    ASCIIColors.info("Application startup...")
     task_manager.init_app(db_session_module.SessionLocal)
     print("Database initialized.")
 
@@ -296,7 +297,6 @@ Source Material:
     finally:
         if db_for_defaults: db_for_defaults.close()
 
-    # 3. Default App Zoo Repository (DB and Filesystem)
     db_for_repos: Optional[Session] = None
     try:
         db_for_repos = next(get_db())
@@ -304,7 +304,7 @@ Source Material:
         app_zoo_url = "https://github.com/ParisNeo/lollms_apps_zoo.git"
         app_zoo_repo_path = APPS_ZOO_ROOT_PATH / app_zoo_name
         
-        if not db_for_repos.query(DBAppZooRepository).filter(DBAppZooRepository.name == app_zoo_name).first():
+        if not db_for_repos.query(DBAppZooRepository).filter(or_(DBAppZooRepository.name == app_zoo_name, DBAppZooRepository.url == app_zoo_url)).first():
             default_repo = DBAppZooRepository(name=app_zoo_name, url=app_zoo_url, is_deletable=False)
             db_for_repos.add(default_repo)
             db_for_repos.commit()
@@ -321,7 +321,6 @@ Source Material:
     finally:
         if db_for_repos: db_for_repos.close()
         
-    # 4. Default MCP Zoo Repository (DB and Filesystem)
     db_for_mcps: Optional[Session] = None
     try:
         db_for_mcps = next(get_db())
@@ -329,7 +328,7 @@ Source Material:
         mcp_zoo_url = "https://github.com/ParisNeo/lollms_mcps_zoo.git"
         mcp_zoo_repo_path = MCPS_ZOO_ROOT_PATH / mcp_zoo_name
 
-        if not db_for_mcps.query(DBMCPZooRepository).filter(DBMCPZooRepository.name == mcp_zoo_name).first():
+        if not db_for_mcps.query(DBMCPZooRepository).filter(or_(DBMCPZooRepository.name == mcp_zoo_name, DBMCPZooRepository.url == mcp_zoo_url)).first():
             default_mcp_repo = DBMCPZooRepository(name=mcp_zoo_name, url=mcp_zoo_url, is_deletable=False)
             db_for_mcps.add(default_mcp_repo)
             db_for_mcps.commit()
@@ -345,7 +344,6 @@ Source Material:
     finally:
         if db_for_mcps: db_for_mcps.close()
     
-    # 5. Default Prompt Zoo Repository (DB and Filesystem)
     db_for_prompts: Optional[Session] = None
     try:
         db_for_prompts = next(get_db())
@@ -353,7 +351,7 @@ Source Material:
         prompt_zoo_url = "https://github.com/ParisNeo/lollms_prompts_zoo.git"
         prompt_zoo_repo_path = PROMPTS_ZOO_ROOT_PATH / prompt_zoo_name
 
-        if not db_for_prompts.query(DBPromptZooRepository).filter(DBPromptZooRepository.name == prompt_zoo_name).first():
+        if not db_for_prompts.query(DBPromptZooRepository).filter(or_(DBPromptZooRepository.name == prompt_zoo_name, DBPromptZooRepository.url == prompt_zoo_url)).first():
             default_prompt_repo = DBPromptZooRepository(name=prompt_zoo_name, url=prompt_zoo_url, is_deletable=False)
             db_for_prompts.add(default_prompt_repo)
             db_for_prompts.commit()
@@ -372,9 +370,21 @@ Source Material:
 
     ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
 
-    # Build cache AFTER ensuring repos are cloned
     build_full_cache()
     cleanup_and_autostart_apps()
+    
+    ASCIIColors.info("--- Startup complete. Application is ready. ---")
+    yield
+    # --- Code to be executed on shutdown ---
+    ASCIIColors.info("--- Application shutting down. ---")
+
+
+app = FastAPI(
+    title="LoLLMs Platform", 
+    description="API for a multi-user LoLLMs and SafeStore chat application.", 
+    version=APP_VERSION,
+    lifespan=lifespan
+)
     
 # CORS Configuration... (remains the same)
 host = SERVER_CONFIG.get("host", "0.0.0.0")
