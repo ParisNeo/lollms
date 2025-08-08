@@ -123,29 +123,35 @@ const uniqueId = `menu-trigger-${Math.random().toString(36).substr(2, 9)}`;
                       {{ item.label }}
                   </div>
                   <li v-for="subItem in item.items" :title="subItem.description" :key="subItem.id" @click="selectOption(subItem.id)" class="menu-item" :class="{'is-selected': subItem.id === modelValue}">
-                      <div class="flex items-center space-x-2">
+                      <div class="flex items-center space-x-2 flex-grow min-w-0">
                           <img v-if="subItem.icon_base64" :src="subItem.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0"/>
                           <div v-else class="h-6 w-6 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
                             <slot name="item-icon-default"></slot>
                           </div>
                           <span class="font-normal block truncate">{{ subItem.name }}</span>
                       </div>
-                      <span v-if="subItem.id === modelValue" class="check-mark">
-                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
-                      </span>
+                      <div class="flex-shrink-0 flex items-center">
+                        <slot name="item-extra" :item="subItem"></slot>
+                        <span v-if="subItem.id === modelValue" class="check-mark">
+                          <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                        </span>
+                      </div>
                   </li>
               </div>
               <li v-else @click="selectOption(item.id)" class="menu-item" :class="{'is-selected': item.id === modelValue}">
-                <div class="flex items-center space-x-2">
+                <div class="flex items-center space-x-2 flex-grow min-w-0">
                   <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0"/>
                   <div v-else class="h-6 w-6 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
                      <slot name="item-icon-default"></slot>
                   </div>
                   <span class="font-normal block truncate">{{ item.name }}</span>
                 </div>
-                 <span v-if="item.id === modelValue" class="check-mark">
-                    <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
-                  </span>
+                <div class="flex-shrink-0 flex items-center">
+                    <slot name="item-extra" :item="item"></slot>
+                    <span v-if="item.id === modelValue" class="check-mark">
+                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                    </span>
+                </div>
               </li>
             </template>
           </ul>

@@ -7,41 +7,63 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.session import get_current_active_user, get_user_lollms_client, user_sessions
 from backend.models import UserLLMParams, ModelInfo, UserAuthDetails
+from backend.settings import settings
 
 lollms_config_router = APIRouter(prefix="/api/config", tags=["LoLLMs Configuration"])
 
 @lollms_config_router.get("/lollms-models", response_model=List[ModelInfo])
-async def get_available_lollms_models(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def get_lollms_models(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     all_models = []
     active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+    model_display_mode = settings.get("model_display_mode", "mixed")
 
     for binding in active_bindings:
         try:
             lc = get_user_lollms_client(current_user.username, binding.alias)
-            models = lc.listModels()
+            models_from_binding = lc.listModels()
             
-            if isinstance(models, list):
-                for item in models:
-                    model_name = None
-                    if isinstance(item, str):
-                        model_name = item
-                    elif isinstance(item, dict):
-                        model_name = item.get("name") or item.get("id") or item.get("model_name")
-                    
-                    if model_name:
-                        all_models.append({
-                            "id": f"{binding.alias}/{model_name}",
-                            "name": model_name
-                        })
+            raw_model_names = []
+            if isinstance(models_from_binding, list):
+                for item in models_from_binding:
+                    model_id = None
+                    if isinstance(item, str): model_id = item
+                    elif isinstance(item, dict): model_id = item.get("name") or item.get("id") or item.get("model_name")
+                    if model_id: raw_model_names.append(model_id)
+
+            model_aliases = binding.model_aliases or {}
+
+            for model_name in raw_model_names:
+                alias_data = model_aliases.get(model_name)
+                
+                if model_display_mode == 'aliased' and not alias_data:
+                    continue
+                
+                model_info = {
+                    "id": f"{binding.alias}/{model_name}",
+                    "name": model_name,
+                    "alias": alias_data
+                }
+
+                if model_display_mode == 'original':
+                    model_info["name"] = f"{binding.alias}/{model_name}"
+                elif alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
+                    model_info["name"] = alias_data.get('title', model_name)
+                else: # mixed mode, no alias
+                    model_info["name"] = f"{binding.alias}/{model_name}"
+
+                all_models.append(model_info)
+
         except Exception as e:
             print(f"WARNING: Could not fetch models from binding '{binding.alias}': {e}")
             continue
 
     if not all_models:
-        raise HTTPException(status_code=404, detail="No models found from any active bindings.")
-    
-    unique_models = {m["id"]: m for m in all_models}
-    return sorted(list(unique_models.values()), key=lambda x: x['id'])
+        raise HTTPException(status_code=404, detail="No models found from any active bindings. Please contact an administrator.")
+
+    return sorted(all_models, key=lambda x: x['name'])
 
 
 @lollms_config_router.post("/lollms-model")

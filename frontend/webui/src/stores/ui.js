@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/ui.js
 import { ref, computed } from 'vue';
 import { defineStore } from 'pinia';
 

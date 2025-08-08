@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/data.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -71,12 +72,17 @@ export const useDataStore = defineStore('data', () => {
                 console.warn("Skipping invalid model entry in availableLollmsModels:", model);
                 return acc;
             }
-            const [bindingAlias, ...modelNameParts] = model.id.split('/');
-            const modelName = modelNameParts.join('/');
+            const [bindingAlias] = model.id.split('/');
             if (!acc[bindingAlias]) {
                 acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
             }
-            acc[bindingAlias].items.push({ id: model.id, name: modelName || bindingAlias });
+            acc[bindingAlias].items.push({ 
+                id: model.id, 
+                name: model.name, // The backend now provides the correct display name
+                icon_base64: model.alias?.icon,
+                description: model.alias?.description,
+                alias: model.alias // Pass the whole alias object
+            });
             return acc;
         }, {});
         Object.values(grouped).forEach(group => {

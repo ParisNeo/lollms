@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 import psutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
 from lollms_client.lollms_llm_binding import get_available_bindings
 
@@ -37,14 +38,17 @@ from backend.models import (
     EnhancedEmailResponse,
     LLMBindingCreate,
     LLMBindingUpdate,
-    LLMBindingPublic,
+    LLMBindingPublicAdmin,
     TaskInfo,
     SystemUsageStats,
     GPUInfo,
     DiskInfo,
     PromptCreate,
     PromptPublic,
-    PromptUpdate
+    PromptUpdate,
+    ModelAliasUpdate,
+    ModelAliasDelete,
+    BindingModel
 )
 from backend.session import (
     get_user_data_root,
@@ -247,11 +251,11 @@ async def get_available_binding_types():
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to get available binding types: {e}")
 
-@admin_router.get("/bindings", response_model=List[LLMBindingPublic])
+@admin_router.get("/bindings", response_model=List[LLMBindingPublicAdmin])
 async def get_all_bindings(db: Session = Depends(get_db)):
     return db.query(DBLLMBinding).all()
 
-@admin_router.post("/bindings", response_model=LLMBindingPublic, status_code=201)
+@admin_router.post("/bindings", response_model=LLMBindingPublicAdmin, status_code=201)
 async def create_binding(binding_data: LLMBindingCreate, db: Session = Depends(get_db)):
     if db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_data.alias).first():
         raise HTTPException(status_code=400, detail="A binding with this alias already exists.")
@@ -269,7 +273,7 @@ async def create_binding(binding_data: LLMBindingCreate, db: Session = Depends(g
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-@admin_router.put("/bindings/{binding_id}", response_model=LLMBindingPublic)
+@admin_router.put("/bindings/{binding_id}", response_model=LLMBindingPublicAdmin)
 async def update_binding(binding_id: int, update_data: LLMBindingUpdate, db: Session = Depends(get_db)):
     binding_to_update = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
     if not binding_to_update:
@@ -311,6 +315,69 @@ async def delete_binding(binding_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+# --- NEW: Model Alias Endpoints ---
+
+@admin_router.get("/bindings/{binding_id}/models", response_model=List[BindingModel])
+async def get_binding_models(binding_id: int, current_admin: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    try:
+        lc = get_user_lollms_client(current_admin.username, binding.alias)
+        raw_models = lc.listModels()
+        
+        models_list = []
+        if isinstance(raw_models, list):
+            for item in raw_models:
+                model_id = None
+                if isinstance(item, str): model_id = item
+                elif isinstance(item, dict): model_id = item.get("name") or item.get("id") or item.get("model_name")
+                if model_id: models_list.append(model_id)
+        
+        model_aliases = binding.model_aliases or {}
+        
+        result = []
+        for model_name in sorted(models_list):
+            result.append(BindingModel(
+                original_model_name=model_name,
+                alias=model_aliases.get(model_name)
+            ))
+        return result
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Could not fetch models from binding '{binding.alias}': {e}")
+
+@admin_router.put("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
+async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    if binding.model_aliases is None:
+        binding.model_aliases = {}
+    
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    return binding
+
+@admin_router.delete("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
+async def delete_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="Binding not found.")
+        
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    return binding
 
 
 # --- Existing Admin Endpoints ---

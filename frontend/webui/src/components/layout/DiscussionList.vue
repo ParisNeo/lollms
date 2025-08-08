@@ -5,7 +5,6 @@ import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
 import DiscussionItem from './DiscussionItem.vue';
-import IconSelectMenu from '../ui/IconSelectMenu.vue';
 
 import IconHome from '../../assets/icons/IconHome.vue';
 import IconAdjustmentsHorizontal from '../../assets/icons/IconAdjustmentsHorizontal.vue';
@@ -15,9 +14,6 @@ import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconScissors from '../../assets/icons/IconScissors.vue';
-import IconChevronDown from '../../assets/icons/IconChevronDown.vue';
-import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
-import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 
 const store = useDiscussionsStore();
@@ -48,24 +44,6 @@ const filteredAndSortedDiscussions = computed(() => {
 
 const starredDiscussions = computed(() => filteredAndSortedDiscussions.value.filter(d => d.is_starred));
 const unstarredDiscussions = computed(() => filteredAndSortedDiscussions.value.filter(d => !d.is_starred));
-
-const activePersonalityId = computed({
-    get: () => user.value?.active_personality_id,
-    set: (id) => authStore.updateUserPreferences({ active_personality_id: id })
-});
-const activeModelName = computed({
-    get: () => user.value?.lollms_model_name,
-    set: (name) => authStore.updateUserPreferences({ lollms_model_name: name })
-});
-
-const availablePersonalities = computed(() => {
-    return [
-        { isGroup: true, label: 'Personal', items: dataStore.userPersonalities.sort((a, b) => a.name.localeCompare(b.name)) },
-        { isGroup: true, label: 'Public', items: dataStore.publicPersonalities.sort((a, b) => a.name.localeCompare(b.name)) }
-    ].filter(group => group.items.length > 0);
-});
-
-const formattedAvailableModels = computed(() => dataStore.availableLollmsModelsGrouped);
 
 function handleNewDiscussion() { store.createNewDiscussion(); }
 function handleImportClick() { uiStore.openModal('import'); }
@@ -122,45 +100,6 @@ onUnmounted(() => {
                 </button>
             </div>
             <div v-if="user && user.user_ui_level >= 4 && showToolbox" class="p-2 bg-gray-50 dark:bg-gray-900/50 rounded-lg space-y-3">
-                <div class="grid grid-cols-2 gap-2">
-                    <IconSelectMenu 
-                        v-model="activeModelName" 
-                        :items="formattedAvailableModels"
-                        :is-loading="dataStore.isLoadingLollmsModels"
-                        placeholder="Default Model"
-                    >
-                        <template #button="{ toggle, selectedItem }">
-                             <button @click="toggle" class="toolbox-select truncate w-full flex items-center justify-between">
-                                <div class="flex items-center space-x-2 truncate">
-                                    <span class="w-4 h-4 flex-shrink-0 text-gray-500 dark:text-gray-400"><IconCpuChip class="w-4 h-4" /></span>
-                                    <span class="truncate">{{ selectedItem?.id || 'Default Model' }}</span>
-                                </div>
-                                <IconChevronDown class="w-4 h-4 text-gray-400 flex-shrink-0" />
-                            </button>
-                        </template>
-                         <template #placeholder-icon><IconCpuChip class="w-4 h-4" /></template>
-                        <template #item-icon-default><IconCpuChip class="w-4 h-4" /></template>
-                    </IconSelectMenu>
-                    <IconSelectMenu 
-                        v-model="activePersonalityId" 
-                        :items="availablePersonalities" 
-                        :is-loading="dataStore.isLoadingPersonalities"
-                        placeholder="Default Personality"
-                    >
-                        <template #button="{ toggle, selectedItem }">
-                            <button @click="toggle" class="toolbox-select truncate w-full flex items-center justify-between">
-                                <div class="flex items-center space-x-2 truncate">
-                                    <img v-if="selectedItem?.icon_base64" :src="selectedItem.icon_base64" class="h-4 w-4 rounded-full object-cover"/>
-                                    <span v-else class="w-4 h-4 flex-shrink-0 text-gray-500 dark:text-gray-400"><IconUserCircle class="w-4 h-4" /></span>
-                                    <span class="truncate">{{ selectedItem?.name || 'Default Persona' }}</span>
-                                </div>
-                                <IconChevronDown class="w-4 h-4 text-gray-400 flex-shrink-0" />
-                            </button>
-                        </template>
-                         <template #placeholder-icon><IconUserCircle class="w-4 h-4" /></template>
-                        <template #item-icon-default><IconUserCircle class="w-4 h-4" /></template>
-                    </IconSelectMenu>
-                </div>
                 <div class="flex items-center justify-around border-t dark:border-gray-700/50 pt-2 mt-2">
                     <button @click="handleImportClick" class="btn-footer" title="Import"><IconArrowDownTray class="h-5 w-5" /></button>
                     <button @click="handleExportClick" class="btn-footer" title="Export"><IconArrowUpTray class="h-5 w-5" /></button>

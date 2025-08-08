@@ -29,9 +29,33 @@ class LLMBindingPublic(LLMBindingBase):
     id: int
     created_at: datetime.datetime
     updated_at: datetime.datetime
+    model_aliases: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
+
+class LLMBindingPublicAdmin(LLMBindingPublic):
+    service_key: Optional[str] = None
+
+# NEW: Model Alias Management Models
+class ModelAlias(BaseModel):
+    icon: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    has_vision: bool = True
+
+class ModelAliasUpdate(BaseModel):
+    original_model_name: str
+    alias: ModelAlias
+
+class ModelAliasDelete(BaseModel):
+    original_model_name: str
+
+class BindingModel(BaseModel):
+    original_model_name: str
+    alias: Optional[ModelAlias] = None
+
+# END NEW
 
 class MCPBase(BaseModel):
     name: constr(min_length=1, max_length=100)

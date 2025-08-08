@@ -117,6 +117,10 @@ def _bootstrap_global_settings(connection):
         "openai_api_service_enabled": {
             "value": False,
             "type": "boolean", "description": "Enable the OpenAI-compatible API endpoint for users.", "category": "Services"
+        },
+        "model_display_mode": {
+            "value": "mixed",
+            "type": "string", "description": "How models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
         }
     }
 
@@ -201,7 +205,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if inspector.has_table("llm_bindings"):
         llm_bindings_columns_db = [col['name'] for col in inspector.get_columns('llm_bindings')]                        
         new_llm_bindings_cols_defs = {
-            "verify_ssl_certificate": "BOOLEAN DEFAULT 1 NOT NULL"
+            "verify_ssl_certificate": "BOOLEAN DEFAULT 1 NOT NULL",
+            "model_aliases": "JSON"
         }
         for col_name, col_sql_def in new_llm_bindings_cols_defs.items():
             if col_name not in llm_bindings_columns_db:

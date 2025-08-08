@@ -17,6 +17,7 @@ class LLMBinding(Base):
     service_key = Column(String)
     default_model_name = Column(String)
     verify_ssl_certificate = Column(Boolean, default=True, nullable=False)
+    model_aliases = Column(JSON, nullable=True)  # NEW: For model aliases
     is_active = Column(Boolean, default=True, nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

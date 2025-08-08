@@ -73,6 +73,7 @@ class MessageOutput(BaseModel):
     created_at: Optional[datetime.datetime] = None
     branch_id: Optional[str] = None
     branches: Optional[List[str]] = None
+    vision_support: bool = True  # NEW: Flag for vision support
     
     @field_validator('user_grade', mode='before')
     def provide_default_grade(cls, value):

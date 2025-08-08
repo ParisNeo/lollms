@@ -1,6 +1,7 @@
 import datetime
 from typing import List, Optional, Any, TypeVar, Generic, Dict
 from pydantic import BaseModel
+from .service import ModelAlias
 
 T = TypeVar('T')
 
@@ -14,7 +15,8 @@ class PaginatedResponse(BaseModel, Generic[T]):
 class ModelInfo(BaseModel):
     name: str
     id: Optional[str] = None
-    icon_base64: Optional[str] = None
+    alias: Optional[ModelAlias] = None # NEW: Rich alias information
+
 
 class AdminDashboardStats(BaseModel):
     total_users: int

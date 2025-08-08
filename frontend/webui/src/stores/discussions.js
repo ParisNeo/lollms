@@ -13,7 +13,14 @@ let activeGenerationAbortController = null;
 function processSingleMessage(msg) {
     if (!msg) return null;
     const authStore = useAuthStore();
+    const dataStore = useDataStore();
     const username = authStore.user?.username?.toLowerCase();
+    
+    // Determine if the model used supports vision
+    const modelUsedId = `${msg.binding_name}/${msg.model_name}`;
+    const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelUsedId);
+    const visionSupport = modelInfo?.alias?.has_vision ?? true; // Default to true if no alias info
+
     return {
         ...msg,
         sender_type: msg.sender_type || (msg.sender?.toLowerCase() === username ? 'user' : 'assistant'),
@@ -21,6 +28,7 @@ function processSingleMessage(msg) {
         sources: msg.sources || (msg.metadata?.sources) || [],
         image_references: msg.image_references || [],
         active_images: msg.active_images || [],
+        vision_support: visionSupport, // Add vision support flag
     };
 }
 
@@ -491,6 +499,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     async function sendMessage(payload) {
         const uiStore = useUiStore();
+        const dataStore = useDataStore();
+        const authStore = useAuthStore();
+        
         if (generationInProgress.value) {
             uiStore.addNotification('A generation is already in progress.', 'warning');
             return;
@@ -503,7 +514,22 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
         }
         if (!activeDiscussion.value) return;
-        const authStore = useAuthStore();
+
+        const selectedModelId = authStore.user?.lollms_model_name;
+        const selectedModel = dataStore.availableLollmsModels.find(m => m.id === selectedModelId);
+        const hasVision = selectedModel?.alias?.has_vision ?? true;
+        let imagesToSend = payload.image_server_paths || [];
+        
+        if (!hasVision && imagesToSend.length > 0) {
+            uiStore.addNotification(
+                `The selected model '${selectedModel.name}' does not support vision. Images will be ignored.`,
+                'warning',
+                6000
+            );
+            imagesToSend = [];
+        }
+
+
         generationInProgress.value = true;
         activeGenerationAbortController = new AbortController();
         const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
@@ -528,7 +554,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
         const formData = new FormData();
         formData.append('prompt', payload.prompt);
-        formData.append('image_server_paths_json', JSON.stringify(payload.image_server_paths || []));
+        formData.append('image_server_paths_json', JSON.stringify(imagesToSend));
         if (payload.is_resend) formData.append('is_resend', 'true');
 
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);

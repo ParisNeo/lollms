@@ -145,6 +145,38 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('Binding deleted successfully.', 'success');
     }
 
+    // --- NEW: Model Alias Actions ---
+    async function fetchBindingModels(bindingId) {
+        try {
+            const response = await apiClient.get(`/api/admin/bindings/${bindingId}/models`);
+            return response.data;
+        } catch (error) {
+            uiStore.addNotification(`Could not load models for binding.`, 'error');
+            return [];
+        }
+    }
+
+    async function saveModelAlias(bindingId, payload) {
+        const response = await apiClient.put(`/api/admin/bindings/${bindingId}/alias`, payload);
+        const index = bindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) {
+            bindings.value[index] = response.data;
+        }
+        uiStore.addNotification(`Alias for '${payload.original_model_name}' saved.`, 'success');
+    }
+
+    async function deleteModelAlias(bindingId, modelName) {
+        const response = await apiClient.delete(`/api/admin/bindings/${bindingId}/alias`, {
+            data: { original_model_name: modelName }
+        });
+        const index = bindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) {
+            bindings.value[index] = response.data;
+        }
+        uiStore.addNotification(`Alias for '${modelName}' deleted.`, 'success');
+    }
+    // --- END NEW ---
+
     async function fetchGlobalSettings() {
         isLoadingSettings.value = true;
         try {
@@ -254,6 +286,8 @@ export const useAdminStore = defineStore('admin', () => {
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers, batchUpdateUsers,
         // Bindings
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
+        // Model Aliases
+        fetchBindingModels, saveModelAlias, deleteModelAlias,
         // Global Settings
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings,
         // Import
