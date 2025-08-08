@@ -230,17 +230,19 @@ def get_installed_apps(db: Session = Depends(get_db)):
             authentication_type=app.authentication_type,
             authentication_key=app.authentication_key,
             sso_redirect_uri=app.sso_redirect_uri,
-            sso_user_infos_to_share=app.sso_user_infos_to_share or [], # Handles None from DB
+            sso_user_infos_to_share=app.sso_user_infos_to_share or [],
             description=app.description,
             author=app.author,
             version=app.version,
             category=app.category,
-            tags=app.tags or [], # Handles None from DB
+            tags=app.tags or [],
             is_installed=app.is_installed,
             autostart=app.autostart,
             port=app.port,
             status=app.status,
             pid=app.pid,
+            created_at=app.created_at, # Added missing required field
+            updated_at=app.updated_at, # Added missing required field
             owner_username=app.owner.username if app.owner else "System"
         )
         # --- END FIX ---
