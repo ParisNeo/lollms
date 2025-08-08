@@ -291,23 +291,15 @@ class AppBase(BaseModel):
     authentication_type: Optional[str] = "none"
     authentication_key: Optional[str] = ""
     sso_redirect_uri: Optional[str] = None
-    sso_user_infos_to_share: Optional[List[str]] = None # Changed to Optional
+    sso_user_infos_to_share: List[str] = Field(default_factory=list)
     description: Optional[str] = None
     author: Optional[str] = None
     version: Optional[str] = None
     category: Optional[str] = None
-    tags: Optional[List[str]] = None # Already Optional
+    tags: List[str] = Field(default_factory=list)
     is_installed: bool = False
     autostart: bool = False
     port: Optional[int] = None
-    
-    @model_validator(mode='after')
-    def set_default_lists(self) -> 'AppBase':
-        if self.sso_user_infos_to_share is None:
-            self.sso_user_infos_to_share = []
-        if self.tags is None:
-            self.tags = []
-        return self
 
 class AppCreate(AppBase):
     @model_validator(mode='after')

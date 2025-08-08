@@ -215,6 +215,15 @@ def update_installed_app_from_zoo(app_id: str, db: Session = Depends(get_db)):
 @apps_zoo_router.get("/installed", response_model=list[AppPublic])
 def get_installed_apps(db: Session = Depends(get_db)):
     installed = db.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.is_installed == True).order_by(DBApp.name).all()
+    
+    # --- FIX: Manually pre-process SQLAlchemy objects before Pydantic conversion ---
+    for app_record in installed:
+        if app_record.tags is None:
+            app_record.tags = []
+        if app_record.sso_user_infos_to_share is None:
+            app_record.sso_user_infos_to_share = []
+    # --- END FIX ---
+            
     zoo_meta = get_all_zoo_metadata()
     response = []
     for app in installed:
@@ -288,10 +297,17 @@ def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depen
         db.commit()
         db.refresh(app, attribute_names=['owner'])
         
-        zoo_meta = get_all_zoo_metadata()
+        # We need to manually fix potential None values before converting back
+        if app.tags is None:
+            app.tags = []
+        if app.sso_user_infos_to_share is None:
+            app.sso_user_infos_to_share = []
+            
         app_public = AppPublic.from_orm(app)
+        
         app_public.item_type = (app.app_metadata or {}).get('item_type', 'app')
         app_public.has_config_schema = (get_installed_app_path(db, app.id) / 'schema.config.json').is_file()
+        zoo_meta = get_all_zoo_metadata()
         zoo_info = zoo_meta.get(app.name)
         if zoo_info:
             app_public.repo_version = str(zoo_info.get('version', 'N/A'))
