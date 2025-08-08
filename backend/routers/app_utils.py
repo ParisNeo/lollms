@@ -251,97 +251,94 @@ def pull_repo_task(task: Task, repo_id: int, repo_model, root_path: Path, item_t
         db_session.close()
 
 def install_item_task(task: Task, repository: str, folder_name: str, port: int, autostart: bool, source_root_path: Path):
-    db_session = next(get_db())
-    try:
-        repo_model = None
-        if source_root_path == APPS_ZOO_ROOT_PATH:
-            repo_model = AppZooRepository
-        elif source_root_path == MCPS_ZOO_ROOT_PATH:
-            repo_model = MCPZooRepository
+    with task.db_session_factory() as db_session:
+        try:
+            repo_model = None
+            if source_root_path == APPS_ZOO_ROOT_PATH:
+                repo_model = AppZooRepository
+            elif source_root_path == MCPS_ZOO_ROOT_PATH:
+                repo_model = MCPZooRepository
 
-        source_item_path = None
-        if repo_model:
-            repo = db_session.query(repo_model).filter_by(name=repository).first()
-            if repo and repo.type == 'local':
-                source_item_path = Path(repo.url) / folder_name
+            source_item_path = None
+            if repo_model:
+                repo = db_session.query(repo_model).filter_by(name=repository).first()
+                if repo and repo.type == 'local':
+                    source_item_path = Path(repo.url) / folder_name
+                else:
+                    source_item_path = source_root_path / repository / folder_name
             else:
                 source_item_path = source_root_path / repository / folder_name
-        else:
-            source_item_path = source_root_path / repository / folder_name
-        
-        if not source_item_path.exists():
-            raise FileNotFoundError(f"Source directory not found at {source_item_path}")
-        
-        info_file = next((p for p in [source_item_path / "description.yaml"] if p.exists()), None)
-        if not info_file: raise FileNotFoundError("Metadata file (description.yaml) not found.")
-        with open(info_file, "r", encoding='utf-8') as f:
-            item_info = yaml.safe_load(f)
-        
-        item_name = item_info.get("name", folder_name)
-        is_mcp = source_root_path == MCPS_ZOO_ROOT_PATH
-        dest_app_path = (MCPS_ROOT_PATH if is_mcp else APPS_ROOT_PATH) / folder_name
-        
-        shutil.copytree(source_item_path, dest_app_path, dirs_exist_ok=True)
-        task.set_progress(20)
 
-        server_py_path = dest_app_path / "server.py"
-        if not server_py_path.exists() and 'run_command' not in item_info:
-            static_dir = next((d for d in ["dist", "static", "."] if (dest_app_path / d / "index.html").exists()), None)
-            if static_dir:
-                server_py_path.write_text(f"""
+            if not source_item_path.exists():
+                raise FileNotFoundError(f"Source directory not found at {source_item_path}")
+            
+            info_file = next((p for p in [source_item_path / "description.yaml"] if p.exists()), None)
+            if not info_file: raise FileNotFoundError("Metadata file (description.yaml) not found.")
+            with open(info_file, "r", encoding='utf-8') as f:
+                item_info = yaml.safe_load(f)
+            
+            item_name = item_info.get("name", folder_name)
+            is_mcp = source_root_path == MCPS_ZOO_ROOT_PATH
+            dest_app_path = (MCPS_ROOT_PATH if is_mcp else APPS_ROOT_PATH) / folder_name
+            
+            shutil.copytree(source_item_path, dest_app_path, dirs_exist_ok=True)
+            task.set_progress(20)
+
+            server_py_path = dest_app_path / "server.py"
+            if not server_py_path.exists() and 'run_command' not in item_info:
+                static_dir = next((d for d in ["dist", "static", "."] if (dest_app_path / d / "index.html").exists()), None)
+                if static_dir:
+                    server_py_path.write_text(f"""
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 app = FastAPI()
 app.mount("/", StaticFiles(directory=str(Path(__file__).parent / '{static_dir}'), html=True), name="static")
-                """.strip())
-        
-        venv_path = dest_app_path / "venv"
-        subprocess.run([sys.executable, "-m", "venv", str(venv_path)], check=True, capture_output=True)
-        task.set_progress(40)
+                    """.strip())
+            
+            venv_path = dest_app_path / "venv"
+            subprocess.run([sys.executable, "-m", "venv", str(venv_path)], check=True, capture_output=True)
+            task.set_progress(40)
 
-        pip_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
-        requirements_path = dest_app_path / "requirements.txt"
-        if requirements_path.exists():
-            subprocess.run([str(pip_executable), "install", "-r", str(requirements_path)], check=True, capture_output=True)
+            pip_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "pip"
+            requirements_path = dest_app_path / "requirements.txt"
+            if requirements_path.exists():
+                subprocess.run([str(pip_executable), "install", "-r", str(requirements_path)], check=True, capture_output=True)
 
-        if 'run_command' not in item_info:
-            subprocess.run([str(pip_executable), "install", "fastapi", "uvicorn[standard]"], check=True, capture_output=True)
-        task.set_progress(80)
+            if 'run_command' not in item_info:
+                subprocess.run([str(pip_executable), "install", "fastapi", "uvicorn[standard]"], check=True, capture_output=True)
+            task.set_progress(80)
 
-        icon_path = next((p for p in [dest_app_path / "assets" / "logo.png", dest_app_path / "icon.png"] if p.exists()), None)
-        icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
-        
-        item_info['item_type'] = 'mcp' if is_mcp else 'app'
-        item_info['repository'] = repository
-        item_info['folder_name'] = folder_name
-        client_id = generate_unique_client_id(db_session, DBApp, item_name)
-        new_app = DBApp(name=item_name, client_id=client_id, folder_name=folder_name, icon=icon_base64, is_installed=True, status='stopped', port=port, autostart=autostart, version=str(item_info.get('version', 'N/A')), author=item_info.get('author'), description=item_info.get('description'), category=item_info.get('category'), tags=item_info.get('tags'), app_metadata=item_info)
-        db_session.add(new_app)
-        db_session.flush()
+            icon_path = next((p for p in [dest_app_path / "assets" / "logo.png", dest_app_path / "icon.png"] if p.exists()), None)
+            icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
+            
+            item_info['item_type'] = 'mcp' if is_mcp else 'app'
+            item_info['repository'] = repository
+            item_info['folder_name'] = folder_name
+            client_id = generate_unique_client_id(db_session, DBApp, item_name)
+            new_app = DBApp(name=item_name, client_id=client_id, folder_name=folder_name, icon=icon_base64, is_installed=True, status='stopped', port=port, autostart=autostart, version=str(item_info.get('version', 'N/A')), author=item_info.get('author'), description=item_info.get('description'), category=item_info.get('category'), tags=item_info.get('tags'), app_metadata=item_info)
+            db_session.add(new_app)
+            db_session.flush()
 
-        service_model, service_type_str = (DBMCP, "MCP") if is_mcp else (DBApp, "App")
-        existing_service = db_session.query(service_model).filter(service_model.name == item_name, service_model.type == 'system').first()
-        if existing_service:
-            existing_service.url = f"http://localhost:{port}"
-            existing_service.icon = icon_base64
-            existing_service.active = True
-        else:
-            service_client_id = generate_unique_client_id(db_session, service_model, item_name)
-            new_service = service_model(name=item_name, client_id=service_client_id, url=f"http://localhost:{port}", icon=icon_base64, active=True, type='system', owner_user_id=None, **({'description':item_info.get('description'),'author':item_info.get('author'),'version':str(item_info.get('version', 'N/A')),'category':item_info.get('category'),'tags':item_info.get('tags')} if not is_mcp else {}))
-            db_session.add(new_service)
-        
-        db_session.commit()
-        task.set_progress(100)
-        
-        if autostart: start_app_task(task, new_app.id)
-        return {"success": True, "message": "Installation successful."}
-    except Exception as e:
-        if isinstance(e, subprocess.CalledProcessError): task.log(f"STDERR: {e.stderr}", "ERROR")
-        raise e
-    finally:
-        db_session.close()
-
+            service_model, service_type_str = (DBMCP, "MCP") if is_mcp else (DBApp, "App")
+            existing_service = db_session.query(service_model).filter(service_model.name == item_name, service_model.type == 'system').first()
+            if existing_service:
+                existing_service.url = f"http://localhost:{port}"
+                existing_service.icon = icon_base64
+                existing_service.active = True
+            else:
+                service_client_id = generate_unique_client_id(db_session, service_model, item_name)
+                new_service = service_model(name=item_name, client_id=service_client_id, url=f"http://localhost:{port}", icon=icon_base64, active=True, type='system', owner_user_id=None, **({'description':item_info.get('description'),'author':item_info.get('author'),'version':str(item_info.get('version', 'N/A')),'category':item_info.get('category'),'tags':item_info.get('tags')} if not is_mcp else {}))
+                db_session.add(new_service)
+            
+            db_session.commit()
+            task.set_progress(100)
+            
+            if autostart: start_app_task(task, new_app.id)
+            return {"success": True, "message": "Installation successful."}
+        except Exception as e:
+            if isinstance(e, subprocess.CalledProcessError): task.log(f"STDERR: {e.stderr}", "ERROR")
+            raise e
 
 def update_item_task(task: Task, app_id: str):
     db = next(get_db())
