@@ -21,7 +21,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
-from backend.db.models.service import App as DBApp, MCP as DBMCP
+from backend.db.models.service import App as DBApp, MCP as DBMCP, AppZooRepository, MCPZooRepository
 from backend.db.models.db_task import DBTask
 from backend.models import TaskInfo
 from backend.config import APPS_ROOT_PATH, MCPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH, APPS_ZOO_ROOT_PATH
@@ -253,7 +253,22 @@ def pull_repo_task(task: Task, repo_id: int, repo_model, root_path: Path, item_t
 def install_item_task(task: Task, repository: str, folder_name: str, port: int, autostart: bool, source_root_path: Path):
     db_session = next(get_db())
     try:
-        source_item_path = source_root_path / repository / folder_name
+        repo_model = None
+        if source_root_path == APPS_ZOO_ROOT_PATH:
+            repo_model = AppZooRepository
+        elif source_root_path == MCPS_ZOO_ROOT_PATH:
+            repo_model = MCPZooRepository
+
+        source_item_path = None
+        if repo_model:
+            repo = db_session.query(repo_model).filter_by(name=repository).first()
+            if repo and repo.type == 'local':
+                source_item_path = Path(repo.url) / folder_name
+            else:
+                source_item_path = source_root_path / repository / folder_name
+        else:
+            source_item_path = source_root_path / repository / folder_name
+        
         if not source_item_path.exists():
             raise FileNotFoundError(f"Source directory not found at {source_item_path}")
         
