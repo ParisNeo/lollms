@@ -185,7 +185,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("ALTER TABLE saved_prompts RENAME TO _saved_prompts_old;"))
                 
                 # Create the new table based on the updated model definition
-                SavedPrompt.__table__.create(connection)
+                SavedPrompt.__table__.create(connection, checkfirst=True)
                 
                 old_cols = [c['name'] for c in inspector.get_columns('_saved_prompts_old')]
                 new_cols = [c.name for c in SavedPrompt.__table__.columns]
@@ -362,7 +362,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             try:
                 connection.execute(text("PRAGMA foreign_keys=off;"))
                 connection.execute(text("ALTER TABLE apps RENAME TO _apps_old;"))
-                App.__table__.create(connection)
+                App.__table__.create(connection, checkfirst=True)
                 
                 old_cols = [c['name'] for c in inspector.get_columns('_apps_old')]
                 new_cols = [c['name'] for c in inspector.get_columns('apps')]
