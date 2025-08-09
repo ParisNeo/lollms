@@ -214,53 +214,59 @@ def update_installed_app_from_zoo(app_id: str, db: Session = Depends(get_db)):
 
 @apps_zoo_router.get("/installed", response_model=list[AppPublic])
 def get_installed_apps(db: Session = Depends(get_db)):
-    installed = db.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.is_installed == True).order_by(DBApp.name).all()
+    installed_db_objects = db.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.is_installed == True).order_by(DBApp.name).all()
     zoo_meta = get_all_zoo_metadata()
     response = []
-    for app in installed:
-        # --- DEFINITIVE FIX: Manually construct the Pydantic object, bypassing from_orm ---
-        app_public = AppPublic(
-            # Fields from AppPublic
-            id=app.id,
-            owner_username=app.owner.username if app.owner else "System",
-            created_at=app.created_at,
-            updated_at=app.updated_at,
-            status=app.status,
-            pid=app.pid,
-            # Fields from AppBase (parent model)
-            name=app.name,
-            client_id=app.client_id,
-            url=app.url,
-            icon=app.icon,
-            active=app.active,
-            type=app.type,
-            authentication_type=app.authentication_type,
-            authentication_key=app.authentication_key,
-            sso_redirect_uri=app.sso_redirect_uri,
-            sso_user_infos_to_share=app.sso_user_infos_to_share or [],
-            description=app.description,
-            author=app.author,
-            version=app.version,
-            category=app.category,
-            tags=app.tags or [],
-            is_installed=app.is_installed,
-            autostart=app.autostart,
-            port=app.port
-        )
-        # --- END FIX ---
-        
-        app_public.item_type = (app.app_metadata or {}).get('item_type', 'app')
-        app_public.has_config_schema = (get_installed_app_path(db, app.id) / 'schema.config.json').is_file()
-        zoo_info = zoo_meta.get(app.name)
-        if zoo_info:
-            app_public.repo_version = str(zoo_info.get('version', 'N/A'))
-            if app.version and zoo_info.get('version'):
-                try:
-                    if packaging_version.parse(str(zoo_info.get('version'))) > packaging_version.parse(str(app.version)):
-                        app_public.update_available = True
-                except (packaging_version.InvalidVersion, TypeError):
-                    pass
-        response.append(app_public)
+    
+    for app in installed_db_objects:
+        try:
+            # --- DEFINITIVE FIX: Manually construct the Pydantic object, bypassing from_orm ---
+            app_public = AppPublic(
+                id=app.id,
+                name=app.name,
+                client_id=app.client_id,
+                url=app.url,
+                icon=app.icon,
+                active=app.active,
+                type=app.type,
+                authentication_type=app.authentication_type,
+                authentication_key=app.authentication_key,
+                sso_redirect_uri=app.sso_redirect_uri,
+                sso_user_infos_to_share=app.sso_user_infos_to_share or [],
+                description=app.description,
+                author=app.author,
+                version=app.version,
+                category=app.category,
+                tags=app.tags or [],
+                is_installed=app.is_installed,
+                autostart=app.autostart,
+                port=app.port,
+                owner_username=app.owner.username if app.owner else "System",
+                created_at=app.created_at,
+                updated_at=app.updated_at,
+                status=app.status,
+                pid=app.pid
+            )
+            # --- END FIX ---
+            
+            app_public.item_type = (app.app_metadata or {}).get('item_type', 'app')
+            app_public.has_config_schema = (get_installed_app_path(db, app.id) / 'schema.config.json').is_file()
+            zoo_info = zoo_meta.get(app.name)
+            if zoo_info:
+                app_public.repo_version = str(zoo_info.get('version', 'N/A'))
+                if app.version and zoo_info.get('version'):
+                    try:
+                        if packaging_version.parse(str(zoo_info.get('version'))) > packaging_version.parse(str(app.version)):
+                            app_public.update_available = True
+                    except (packaging_version.InvalidVersion, TypeError):
+                        pass
+            response.append(app_public)
+        except Exception as e:
+            print(f"CRITICAL: Failed to process installed app '{app.name}' for UI. Error: {e}")
+            traceback.print_exc()
+            # Skip this item instead of crashing the entire endpoint
+            continue
+            
     return response
 
 @apps_zoo_router.get("/installed/{app_id}/config-schema", response_model=Dict[str, Any])
@@ -315,16 +321,21 @@ def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depen
     
     try:
         db.commit()
-        db.refresh(app, attribute_names=['owner'])
-        
-        # We need to manually fix potential None values before converting back
-        if app.tags is None:
-            app.tags = []
-        if app.sso_user_infos_to_share is None:
-            app.sso_user_infos_to_share = []
-            
-        app_public = AppPublic.from_orm(app)
-        
+        db.refresh(app, ["owner"])
+
+        # --- DEFINITIVE FIX: Use manual construction here as well ---
+        app_public = AppPublic(
+            id=app.id, name=app.name, client_id=app.client_id, url=app.url, icon=app.icon,
+            active=app.active, type=app.type, authentication_type=app.authentication_type,
+            authentication_key=app.authentication_key, sso_redirect_uri=app.sso_redirect_uri,
+            sso_user_infos_to_share=app.sso_user_infos_to_share or [],
+            description=app.description, author=app.author, version=app.version,
+            category=app.category, tags=app.tags or [], is_installed=app.is_installed,
+            autostart=app.autostart, port=app.port, owner_username=app.owner.username if app.owner else "System",
+            created_at=app.created_at, updated_at=app.updated_at, status=app.status, pid=app.pid
+        )
+        # --- END FIX ---
+
         app_public.item_type = (app.app_metadata or {}).get('item_type', 'app')
         app_public.has_config_schema = (get_installed_app_path(db, app.id) / 'schema.config.json').is_file()
         zoo_meta = get_all_zoo_metadata()
@@ -345,7 +356,7 @@ def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depen
 
 @apps_zoo_router.get("/installed/{app_id}/logs", response_model=AppLog)
 def get_app_logs(app_id: str, db: Session = Depends(get_db)):
-    log_path = get_installed_app_path(db, app.id) / "app.log"
+    log_path = get_installed_app_path(db, app_id) / "app.log"
     return AppLog(log_content=log_path.read_text(encoding="utf-8") if log_path.exists() else "No logs.")
 
 @apps_zoo_router.delete("/installed/{app_id}", response_model=AppActionResponse)
