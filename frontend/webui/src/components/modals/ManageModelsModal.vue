@@ -53,6 +53,18 @@
                             </div>
                             
                             <IconUploader v-model="form.icon" />
+                            
+                            <div>
+                                <label for="alias-ctx-size" class="label">Context Size (tokens)</label>
+                                <div class="flex items-center gap-2">
+                                    <input id="alias-ctx-size" v-model.number="form.ctx_size" type="number" class="input-field" placeholder="e.g., 8192">
+                                    <button type="button" @click="fetchCtxSize" class="btn btn-secondary p-2" title="Auto-detect max context size from binding" :disabled="isFetchingCtxSize">
+                                        <IconAnimateSpin v-if="isFetchingCtxSize" class="w-5 h-5" />
+                                        <IconRefresh v-else class="w-5 h-5"/>
+                                    </button>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-1">Leave blank to use user's default setting unless locked.</p>
+                            </div>
 
                              <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                                 <span class="flex-grow flex flex-col">
@@ -61,6 +73,16 @@
                                 </span>
                                 <button @click="form.has_vision = !form.has_vision" type="button" :class="[form.has_vision ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.has_vision ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                </button>
+                            </div>
+
+                             <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                                <span class="flex-grow flex flex-col">
+                                    <span class="text-sm font-medium">Lock Context Size</span>
+                                    <span class="text-sm text-gray-500 dark:text-gray-400">If enabled, users cannot override the context size for this model.</span>
+                                </span>
+                                <button @click="form.ctx_size_locked = !form.ctx_size_locked" type="button" :class="[form.ctx_size_locked ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                    <span :class="[form.ctx_size_locked ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
 
@@ -101,6 +123,8 @@ import { useAdminStore } from '../../stores/admin';
 import { storeToRefs } from 'pinia';
 import GenericModal from '../ui/GenericModal.vue';
 import IconUploader from '../ui/IconUploader.vue';
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
@@ -113,6 +137,7 @@ const isLoading = ref(true);
 const isSaving = ref(false);
 const isSettingBindingDefault = ref(false);
 const isSettingGlobalDefault = ref(false);
+const isFetchingCtxSize = ref(false);
 
 const models = ref([]);
 const selectedModel = ref(null);
@@ -122,7 +147,9 @@ const getInitialFormState = () => ({
     icon: '',
     title: '',
     description: '',
-    has_vision: true
+    has_vision: true,
+    ctx_size: null,
+    ctx_size_locked: false
 });
 
 const form = ref(getInitialFormState());
@@ -161,13 +188,31 @@ function selectModel(model) {
     form.value = { ...getInitialFormState(), ...(model.alias || {}) };
 }
 
+async function fetchCtxSize() {
+    if (!selectedModel.value || !binding.value) return;
+    isFetchingCtxSize.value = true;
+    try {
+        const size = await adminStore.getModelCtxSize(binding.value.id, selectedModel.value.original_model_name);
+        if (size !== null) {
+            form.value.ctx_size = size;
+        }
+    } finally {
+        isFetchingCtxSize.value = false;
+    }
+}
+
 async function saveAlias() {
     if (!selectedModel.value || !binding.value) return;
     isSaving.value = true;
     try {
+        // Ensure ctx_size is either a number or null, not an empty string
+        const payload = {
+            ...form.value,
+            ctx_size: form.value.ctx_size === '' || form.value.ctx_size === undefined ? null : Number(form.value.ctx_size)
+        };
         await adminStore.saveModelAlias(binding.value.id, {
             original_model_name: selectedModel.value.original_model_name,
-            alias: form.value
+            alias: payload
         });
         await fetchModels();
         const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);

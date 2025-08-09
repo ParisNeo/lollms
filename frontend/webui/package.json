@@ -43,6 +43,7 @@
     "marked": "^13.0.0",
     "mermaid": "^11.4.0",
     "pinia": "^2.1.7",
+    "svg-pan-zoom": "^3.6.2",
     "vue": "^3.4.27",
     "vue-codemirror": "^6.1.1",
     "vue-router": "^4.3.2"

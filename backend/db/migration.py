@@ -126,6 +126,10 @@ def _bootstrap_global_settings(connection):
         "model_display_mode": {
             "value": "mixed",
             "type": "string", "description": "How models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
+        },
+        "lock_all_context_sizes": {
+            "value": False,
+            "type": "boolean", "description": "Lock context size for all aliased models, preventing users from changing it.", "category": "Models"
         }
     }
 

@@ -1,341 +1,341 @@
+<template>
+  <div ref="wrapperRef" class="w-full h-full relative bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700/50 overflow-hidden">
+    <!-- Mount point for the Mermaid SVG -->
+    <div ref="mountRef" class="w-full h-full mermaid-container"></div>
+
+    <!-- Diagram type label -->
+    <div v-if="detectedTypeLabel" class="absolute top-3 right-3 px-2 py-1 text-xs rounded-md bg-black/10 dark:bg-white/10 text-gray-800 dark:text-gray-100 backdrop-blur-sm">
+      {{ detectedTypeLabel }}
+    </div>
+
+    <!-- Controls -->
+    <div class="absolute left-3 top-3 flex gap-2 z-20">
+      <button @click="resetView" class="px-2 py-1 text-xs rounded-md bg-white/80 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-700 shadow-sm hover:opacity-90 backdrop-blur-sm">
+        Reset View
+      </button>
+      <button @click="exportPNG()" class="px-2 py-1 text-xs rounded-md bg-white/80 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-700 shadow-sm hover:opacity-90 backdrop-blur-sm">
+        Export PNG
+      </button>
+      <button @click="exportSVG()" class="px-2 py-1 text-xs rounded-md bg-white/80 dark:bg-gray-900/80 border border-gray-200 dark:border-gray-700 shadow-sm hover:opacity-90 backdrop-blur-sm">
+        Export SVG
+      </button>
+    </div>
+
+    <!-- Interactive SVG Indicator -->
+    <div v-if="isInteractive" class="absolute left-4 bottom-4 text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2 z-10 p-1 rounded-md bg-white/50 dark:bg-black/50 backdrop-blur-sm">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" /></svg>
+      <span>Interactive SVG (Pan & Zoom enabled)</span>
+    </div>
+
+    <!-- Error Message Display -->
+    <div v-if="errorMessage" class="absolute inset-0 flex items-center justify-center pointer-events-none z-30">
+      <div class="pointer-events-auto bg-white/95 dark:bg-gray-900/95 border border-red-300 dark:border-red-700 rounded-lg p-4 max-w-2xl mx-4 shadow-2xl">
+        <div class="flex items-start gap-3">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-red-500 dark:text-red-400 flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M12 9v4m0 4h.01"/>
+          </svg>
+          <div class="flex-1">
+            <div class="text-sm font-semibold text-red-800 dark:text-red-200 mb-1">Mermaid Rendering Error</div>
+            <pre class="text-xs text-red-700 dark:text-red-400 whitespace-pre-wrap max-h-48 overflow-auto p-2 bg-red-50 dark:bg-red-900/20 rounded-md">{{ errorMessage }}</pre>
+            <div class="mt-3">
+              <button @click="copyErrorMessage" class="px-3 py-1 rounded-md bg-red-600 hover:bg-red-700 text-white text-sm text-left">{{ errorCopyLabel }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue';
-import cytoscape from 'cytoscape';
-import dagre from 'cytoscape-dagre';
-import mermaid from 'mermaid';
-import { useUiStore } from '../../stores/ui';
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import mermaid from 'mermaid'
+import svgPanZoom from 'svg-pan-zoom'
+import { useUiStore } from '../../stores/ui' // Assuming this store provides the current theme
 
 const props = defineProps({
-    mermaidCode: {
-        type: String,
-        required: true
-    }
-});
+  mermaidCode: { type: String, required: true }
+})
 
-const emit = defineEmits(['error', 'ready']);
+const emit = defineEmits(['error','ready'])
 
-const cyRef = ref(null);
-const errorMessage = ref('');
-let cy = null;
+const wrapperRef = ref(null)
+const mountRef = ref(null)
+let panZoomInstance = null
+let resizeObserver = null
 
-const uiStore = useUiStore();
+const uiStore = useUiStore()
+const errorMessage = ref('')
+const errorCopyLabel = ref("Copy Error Message")
+const detectedType = ref('')
+const isInteractive = ref(false)
 
-cytoscape.use(dagre);
+const detectedTypeLabel = computed(() => {
+  if (!detectedType.value) return ''
+  const type = detectedType.value.charAt(0).toUpperCase() + detectedType.value.slice(1);
+  return `Mermaid: ${type}`
+})
 
-function getShape(type) {
-    switch (type?.toLowerCase()) {
-        case 'stadium': return 'round-rectangle';
-        case 'circle': return 'ellipse';
-        case 'rhombus': return 'diamond';
-        case 'hexagon': return 'hexagon';
-        case 'ellipse': return 'ellipse';
-        case 'roundrect':
-        case 'round-rectangle': return 'round-rectangle';
-        default: return 'rectangle';
-    }
+function cleanup() {
+  isInteractive.value = false
+  if (panZoomInstance) {
+    panZoomInstance.destroy()
+    panZoomInstance = null
+  }
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+  if (mountRef.value) {
+    mountRef.value.innerHTML = ''
+  }
 }
 
-function parseShapeAndColor(node) {
-    let shape = getShape(node.type);
-    let color = uiStore.currentTheme === 'dark' ? '#374151' : '#F3F4F6';
-    let textColor = uiStore.currentTheme === 'dark' ? '#F9FAFB' : '#111827';
+async function renderDiagram() {
+  cleanup()
+  errorMessage.value = ''
+  if (!props.mermaidCode || !props.mermaidCode.trim()) return
 
-    if (node.styles && node.styles.length) {
-        node.styles.forEach(styleStr => {
-            if (styleStr.includes('fill:')) {
-                const match = styleStr.match(/fill:\s*([^;]+)/);
-                if (match) color = match[1].trim();
-            }
-            if (styleStr.includes('color:')) {
-                const match = styleStr.match(/color:\s*([^;]+)/);
-                if (match) textColor = match[1].trim();
-            }
-            if (styleStr.includes('shape:')) {
-                const match = styleStr.match(/shape:\s*([^;]+)/);
-                if (match) shape = getShape(match[1].trim());
-            }
-        });
-    }
-    return { shape, color, textColor };
-}
+  const mermaidId = `mermaid-svg-${Date.now()}`
 
-function transformMermaidToCytoscape(diagram) {
-    const elements = [];
-
-    // Flowchart / Graph (Mermaid >= 10.x)
-    if (typeof diagram.getNodes === 'function' && typeof diagram.getLinks === 'function') {
-        const nodes = diagram.getNodes();
-        const links = diagram.getLinks();
-        nodes.forEach(node => {
-            const { shape, color, textColor } = parseShapeAndColor(node);
-            elements.push({
-                group: 'nodes',
-                data: {
-                    id: node.id,
-                    label: (node.text || '').replace(/<br\s*\/?>/gi, '\n').replace(/\\n/g, '\n'),
-                    shape,
-                    backgroundColor: color,
-                    textColor
-                }
-            });
-        });
-        links.forEach((link, index) => {
-            elements.push({
-                group: 'edges',
-                data: {
-                    id: `e${index}`,
-                    source: link.source,
-                    target: link.target,
-                    label: link.text || '',
-                    color: link.style?.includes('stroke:')
-                        ? link.style.match(/stroke:\s*([^;]+)/)?.[1].trim()
-                        : '#9CA3AF'
-                }
-            });
-        });
-        return elements;
-    }
-
-    // Flowchart / Graph (Mermaid <= 9.x)
-    if (diagram.db?.getVertices && diagram.db?.getEdges) {
-        const vertices = diagram.db.getVertices();
-        const edges = diagram.db.getEdges();
-        for (const id in vertices) {
-            const vertex = vertices[id];
-            const { shape, color, textColor } = parseShapeAndColor(vertex);
-            elements.push({
-                group: 'nodes',
-                data: {
-                    id: vertex.id,
-                    label: (vertex.text || '').replace(/<br\s*\/?>/gi, '\n').replace(/\\n/g, '\n'),
-                    shape,
-                    backgroundColor: color,
-                    textColor
-                }
-            });
-        }
-        edges.forEach((edge, index) => {
-            elements.push({
-                group: 'edges',
-                data: {
-                    id: `e${index}`,
-                    source: edge.start,
-                    target: edge.end,
-                    label: edge.text || '',
-                    color: edge.style?.includes('stroke:')
-                        ? edge.style.match(/stroke:\s*([^;]+)/)?.[1].trim()
-                        : '#9CA3AF'
-                }
-            });
-        });
-        return elements;
-    }
-
-    // Class Diagram
-    if (diagram.db?.getClasses && diagram.db?.getRelations) {
-        const classes = diagram.db.getClasses();
-        const relations = diagram.db.getRelations();
-        Object.keys(classes).forEach(classId => {
-            const cls = classes[classId];
-            elements.push({
-                group: 'nodes',
-                data: {
-                    id: classId,
-                    label: cls.id || classId,
-                    shape: 'round-rectangle',
-                    backgroundColor: uiStore.currentTheme === 'dark' ? '#1E3A8A' : '#BFDBFE',
-                    textColor: uiStore.currentTheme === 'dark' ? '#F9FAFB' : '#111827'
-                }
-            });
-        });
-        relations.forEach((rel, i) => {
-            elements.push({
-                group: 'edges',
-                data: {
-                    id: `classRel${i}`,
-                    source: rel.id1,
-                    target: rel.id2,
-                    label: rel.relation?.type || '',
-                    color: '#9CA3AF'
-                }
-            });
-        });
-        return elements;
-    }
-
-    // Sequence Diagram
-    if (diagram.db?.actors && diagram.db?.messages) {
-        Object.keys(diagram.db.actors).forEach(actorId => {
-            elements.push({
-                group: 'nodes',
-                data: {
-                    id: actorId,
-                    label: diagram.db.actors[actorId].description || actorId,
-                    shape: 'rectangle',
-                    backgroundColor: uiStore.currentTheme === 'dark' ? '#047857' : '#A7F3D0',
-                    textColor: uiStore.currentTheme === 'dark' ? '#F9FAFB' : '#111827'
-                }
-            });
-        });
-        diagram.db.messages.forEach((msg, i) => {
-            elements.push({
-                group: 'edges',
-                data: {
-                    id: `seq${i}`,
-                    source: msg.from,
-                    target: msg.to,
-                    label: msg.message || '',
-                    color: '#9CA3AF'
-                }
-            });
-        });
-        return elements;
-    }
-
-    // State Diagram
-    if (diagram.db?.states && diagram.db?.transitions) {
-        Object.keys(diagram.db.states).forEach(stateId => {
-            elements.push({
-                group: 'nodes',
-                data: {
-                    id: stateId,
-                    label: stateId,
-                    shape: 'round-rectangle',
-                    backgroundColor: uiStore.currentTheme === 'dark' ? '#6B21A8' : '#E9D5FF',
-                    textColor: uiStore.currentTheme === 'dark' ? '#F9FAFB' : '#111827'
-                }
-            });
-        });
-        diagram.db.transitions.forEach((t, i) => {
-            elements.push({
-                group: 'edges',
-                data: {
-                    id: `state${i}`,
-                    source: t.from,
-                    target: t.to,
-                    label: t.label || '',
-                    color: '#9CA3AF'
-                }
-            });
-        });
-        return elements;
-    }
-
-    // Fallback: Show one node saying "Unsupported diagram type"
-    elements.push({
-        group: 'nodes',
-        data: {
-            id: 'unsupported',
-            label: 'Unsupported Mermaid diagram type',
-            shape: 'rectangle',
-            backgroundColor: '#F87171',
-            textColor: '#FFFFFF'
-        }
-    });
-    return elements;
-}
-
-async function updateGraph() {
-    errorMessage.value = '';
-    if (!cy) return;
+  try {
     try {
-        let diagram;
-        if (typeof mermaid.getDiagramFromText === 'function') {
-            diagram = await mermaid.getDiagramFromText(props.mermaidCode);
-        } else if (mermaid.mermaidAPI?.getDiagramFromText) {
-            console.warn("Using fallback mermaid.mermaidAPI.getDiagramFromText. Please update Mermaid.");
-            diagram = await mermaid.mermaidAPI.getDiagramFromText(props.mermaidCode);
-        } else {
-            throw new Error("No compatible Mermaid parser found.");
-        }
-        const elements = transformMermaidToCytoscape(diagram);
-        cy.json({ elements });
-        cy.layout({
-            name: 'dagre',
-            padding: 30,
-            spacingFactor: 1.25,
-            rankDir: 'TB',
-        }).run();
-        emit('ready', cy);
-    } catch (error) {
-        console.error("Mermaid parsing error:", error);
-        errorMessage.value = error.message || 'Failed to parse Mermaid diagram.';
-        emit('error', errorMessage.value);
+      detectedType.value = mermaid.detectType(props.mermaidCode, { default: {type: 'flowchart'} });
+    } catch (e) {
+      detectedType.value = 'Unknown'
     }
+
+    const { svg } = await mermaid.render(mermaidId, props.mermaidCode)
+    if (mountRef.value) mountRef.value.innerHTML = svg
+
+    const svgEl = mountRef.value?.querySelector('svg')
+    if (!svgEl) throw new Error("Mermaid failed to produce an SVG element.")
+    
+    svgEl.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+
+    // Dynamically trim the viewBox to fit the diagram content, removing excess whitespace.
+    // This is crucial for the 'fit' functionality to work correctly.
+    const mainGroup = svgEl.querySelector('g');
+    if (mainGroup) {
+        try {
+            const bbox = mainGroup.getBBox();
+            if (bbox.width > 0 && bbox.height > 0) {
+                const padding = 20; // Visual padding
+                svgEl.setAttribute('viewBox', `${bbox.x - padding} ${bbox.y - padding} ${bbox.width + (padding * 2)} ${bbox.height + (padding * 2)}`);
+            }
+        } catch (e) {
+            console.warn("Could not get bounding box to trim SVG whitespace.", e);
+        }
+    }
+
+    panZoomInstance = svgPanZoom(svgEl, {
+      zoomEnabled: true,
+      panEnabled: true,
+      controlIconsEnabled: false,
+      fit: true,
+      center: true,
+      minZoom: 0.1,
+      maxZoom: 20,
+    })
+
+    resizeObserver = new ResizeObserver(() => {
+      panZoomInstance?.resize()
+      panZoomInstance?.fit()
+      panZoomInstance?.center()
+    })
+    resizeObserver.observe(wrapperRef.value)
+    
+    isInteractive.value = true
+    await nextTick()
+    emit('ready', { panZoom: panZoomInstance, svg: svgEl })
+
+  } catch (error) {
+    let message = 'An unknown error occurred during rendering.'
+    if (error instanceof Error) message = error.message;
+    else if (typeof error === 'string') message = error;
+    else if (error && typeof error.str === 'string') message = error.str; // Mermaid error object
+    
+    errorMessage.value = message
+    emit('error', error)
+  }
 }
 
-function exportPNG(filename = 'diagram.png', bgColor = '#FFFFFF') {
-    if (!cy) return;
-    const pngContent = cy.png({ output: 'base64', bg: bgColor, full: true, scale: 2 });
-    const a = document.createElement('a');
-    a.href = `data:image/png;base64,${pngContent}`;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+function copyErrorMessage() {
+  navigator.clipboard.writeText(errorMessage.value).then(() => {
+    errorCopyLabel.value = "Copied!"
+    setTimeout(() => { errorCopyLabel.value = "Copy Error Message" }, 2000)
+  })
+}
+
+/**
+ * A robust helper to get a clean, cloned SVG element and its true dimensions.
+ * It relies on the viewBox for accurate sizing, which is essential for high-quality exports.
+ * @returns {{svg: SVGElement, width: number, height: number} | null}
+ */
+function getSvgForExport() {
+    const svgEl = mountRef.value?.querySelector('svg');
+    if (!svgEl) {
+        console.error("Export failed: SVG element not found.");
+        return null;
+    }
+
+    const clonedSvg = svgEl.cloneNode(true);
+    let width = 0, height = 0;
+
+    // The viewBox is the most reliable source for the diagram's intrinsic dimensions.
+    const viewBox = clonedSvg.getAttribute('viewBox');
+    if (viewBox) {
+        const parts = viewBox.split(/\s+|,/).map(Number);
+        if (parts.length === 4) {
+            width = parts[2];
+            height = parts[3];
+        }
+    } else {
+        // Fallback for SVGs without a viewBox (less common for Mermaid).
+        const rect = clonedSvg.getBoundingClientRect();
+        width = rect.width;
+        height = rect.height;
+    }
+
+    if (width === 0 || height === 0) {
+        console.error("Export failed: SVG has zero dimensions.");
+        return null;
+    }
+    
+    // Set explicit width/height attributes for better compatibility with external tools.
+    clonedSvg.setAttribute('width', Math.ceil(width));
+    clonedSvg.setAttribute('height', Math.ceil(height));
+
+    return { svg: clonedSvg, width: Math.ceil(width), height: Math.ceil(height) };
+}
+
+/**
+ * Exports the diagram as a high-quality, readable PNG file.
+ */
+function exportPNG({ filename = 'diagram.png', scale = 2, bgColor = '#FFFFFF' } = {}) {
+    const result = getSvgForExport();
+    if (!result) return;
+    const { svg, width, height } = result;
+
+    if (bgColor) {
+        const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        rect.setAttribute('width', '100%');
+        rect.setAttribute('height', '100%');
+        rect.setAttribute('fill', bgColor);
+        svg.insertBefore(rect, svg.firstChild);
+    }
+
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(svg);
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    const img = new Image();
+    img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = width * scale;
+        canvas.height = height * scale;
+        
+        const ctx = canvas.getContext('2d');
+        if (bgColor) {
+          ctx.fillStyle = bgColor;
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        
+        // This is the key to high-quality PNGs: drawing the SVG onto the canvas
+        // at the target size, which forces the browser to re-render the vector
+        // graphics at high resolution, preventing pixelation.
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        URL.revokeObjectURL(url);
+
+        const a = document.createElement('a');
+        a.href = canvas.toDataURL('image/png');
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    };
+    img.onerror = (err) => {
+        console.error("Failed to load SVG into Image for PNG export.", err);
+        URL.revokeObjectURL(url);
+    };
+    img.src = url;
+}
+
+/**
+ * Exports the diagram as a clean, self-contained SVG file.
+ */
+function exportSVG({ filename = 'diagram.svg', bgColor = null } = {}) {
+  const result = getSvgForExport();
+  if (!result) return;
+  const { svg } = result;
+
+  if (bgColor) {
+    const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+    rect.setAttribute('width', '100%');
+    rect.setAttribute('height', '100%');
+    rect.setAttribute('fill', bgColor);
+    svg.insertBefore(rect, svg.firstChild);
+  }
+
+  const serializer = new XMLSerializer();
+  const svgString = '<?xml version="1.0" standalone="no"?>\r\n' + serializer.serializeToString(svg);
+  const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function resetView() {
+  if (panZoomInstance) {
+    panZoomInstance.reset();
+    panZoomInstance.fit();
+    panZoomInstance.center();
+  }
 }
 
 onMounted(() => {
-    mermaid.initialize({ startOnLoad: false });
-    cy = cytoscape({
-        container: cyRef.value,
-        style: [
-            {
-                selector: 'node',
-                style: {
-                    'background-color': 'data(backgroundColor)',
-                    'border-color': uiStore.currentTheme === 'dark' ? '#9CA3AF' : '#6B7280',
-                    'border-width': 1,
-                    'label': 'data(label)',
-                    'text-wrap': 'wrap',
-                    'text-valign': 'center',
-                    'text-halign': 'center',
-                    'shape': 'data(shape)',
-                    'color': 'data(textColor)',
-                    'font-size': '14px',
-                    'padding': '15px',
-                    'width': 'label',
-                    'height': 'label'
-                }
-            },
-            {
-                selector: 'edge',
-                style: {
-                    'width': 2,
-                    'line-color': 'data(color)',
-                    'target-arrow-color': 'data(color)',
-                    'target-arrow-shape': 'triangle',
-                    'curve-style': 'bezier',
-                    'label': 'data(label)',
-                    'font-size': '12px',
-                    'color': uiStore.currentTheme === 'dark' ? '#D1D5DB' : '#374151',
-                    'text-background-color': uiStore.currentTheme === 'dark' ? '#1F2937' : '#FFFFFF',
-                    'text-background-opacity': 1,
-                    'text-background-padding': '3px',
-                    'text-background-shape': 'round-rectangle'
-                }
-            }
-        ],
-        layout: { name: 'grid' }
-    });
-    updateGraph();
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'loose',
+    theme: uiStore.currentTheme === 'dark' ? 'dark' : 'default',
+    themeVariables: { fontSize: "15px" }
+  });
+  renderDiagram();
 });
 
 onUnmounted(() => {
-    if (cy) cy.destroy();
+  cleanup();
 });
 
-watch(() => props.mermaidCode, updateGraph);
+watch(() => props.mermaidCode, renderDiagram);
+watch(() => uiStore.currentTheme, (newTheme) => {
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: 'loose',
+    theme: newTheme === 'dark' ? 'dark' : 'default',
+    themeVariables: { fontSize: "15px" }
+  });
+  renderDiagram();
+});
 
-defineExpose({ cy, exportPNG });
+defineExpose({ exportPNG, exportSVG, resetView });
 </script>
 
-<template>
-    <div class="w-full h-full relative">
-        <div ref="cyRef" class="w-full h-full"></div>
-        <div v-if="errorMessage" class="absolute inset-0 bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-200 p-4 rounded-md overflow-y-auto">
-            <h4 class="font-bold mb-2">Mermaid Parsing Error</h4>
-            <pre class="whitespace-pre-wrap font-mono text-sm">{{ errorMessage }}</pre>
-        </div>
-    </div>
-</template>
+<style>
+/* Style the container and the SVG for proper scaling and interaction. */
+.mermaid-container svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  margin: 0 auto;
+}
+</style>

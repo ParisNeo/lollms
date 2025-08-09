@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
+import { storeToRefs } from 'pinia';
 
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer.vue';
@@ -46,6 +47,7 @@ const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const dataStore = useDataStore();
+const { currentModelVisionSupport } = storeToRefs(discussionsStore);
 
 const isEventsCollapsed = ref(true);
 const isEditing = ref(false);
@@ -331,7 +333,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                                  class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer">
                                 <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain transition-all duration-300" :class="{'grayscale': !isImageActive(index)}" />
                                 <div class="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover/image:opacity-100 transition-opacity duration-200">
-                                    <button @click.stop="toggleImage(index)" class="p-1.5 bg-black/60 text-white rounded-full hover:bg-black/80" :title="isImageActive(index) ? 'Deactivate Image' : 'Activate Image'">
+                                    <button v-if="currentModelVisionSupport" @click.stop="toggleImage(index)" class="p-1.5 bg-black/60 text-white rounded-full hover:bg-black/80" :title="isImageActive(index) ? 'Deactivate Image' : 'Activate Image'">
                                         <IconEye v-if="isImageActive(index)" class="w-4 h-4" />
                                         <IconEyeOff v-else class="w-4 h-4" />
                                     </button>
@@ -366,7 +368,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                             @ready="handleEditorReady"
                         />
                         <div class="flex justify-between items-center mt-2">
-                             <button @click="triggerEditImageUpload" class="btn btn-secondary !p-2" title="Add Images">
+                             <button v-if="currentModelVisionSupport" @click="triggerEditImageUpload" class="btn btn-secondary !p-2" title="Add Images">
                                 <IconPhoto class="w-5 h-5" />
                             </button>
                             <div class="flex justify-end space-x-2">

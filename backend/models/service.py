@@ -43,6 +43,8 @@ class ModelAlias(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     has_vision: bool = True
+    ctx_size: Optional[int] = Field(None, ge=1)
+    ctx_size_locked: bool = False
 
 class ModelAliasUpdate(BaseModel):
     original_model_name: str
@@ -54,6 +56,9 @@ class ModelAliasDelete(BaseModel):
 class BindingModel(BaseModel):
     original_model_name: str
     alias: Optional[ModelAlias] = None
+
+class ModelNamePayload(BaseModel):
+    model_name: str
 
 # END NEW
 

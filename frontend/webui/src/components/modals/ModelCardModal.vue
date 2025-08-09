@@ -21,6 +21,10 @@
                         {{ model.alias.has_vision ? 'Enabled' : 'Disabled' }}
                     </p>
                 </div>
+                <div v-if="model.alias.ctx_size">
+                    <h3 class="font-semibold mb-1">Context Size</h3>
+                    <p class="text-sm font-mono text-gray-600 dark:text-gray-300">{{ model.alias.ctx_size.toLocaleString() }} tokens</p>
+                </div>
             </div>
              <div v-else class="text-center p-4 text-gray-500">
                 Model information not available.

@@ -15,6 +15,7 @@ import ChatInput from './ChatInput.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import DropdownMenu from '../ui/DropdownMenu.vue';
 import DropdownSubmenu from '../ui/DropdownSubmenu.vue';
+import MessageContentRenderer from '../ui/MessageContentRenderer.vue';
 
 // Asset & Icon Imports
 import logoUrl from '../../assets/logo.png';
@@ -34,6 +35,7 @@ import IconUndo from '../../assets/icons/IconUndo.vue';
 import IconRedo from '../../assets/icons/IconRedo.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
+import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
@@ -47,7 +49,7 @@ const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
 const router = useRouter();
 const { on, off } = useEventBus();
-const { liveDataZoneTokens } = storeToRefs(discussionsStore);
+const { liveDataZoneTokens, currentModelVisionSupport } = storeToRefs(discussionsStore);
 const { lollmsPrompts, userPrompts, systemPromptsByZooCategory } = storeToRefs(promptsStore);
 
 // --- Component State ---
@@ -59,9 +61,15 @@ const activeDataZoneTab = ref('discussion');
 const discussionCodeMirrorEditor = ref(null);
 const userCodeMirrorEditor = ref(null);
 const dataZonePromptText = ref('');
-const dataZoneWidth = ref(448);
+const dataZoneWidth = ref(768); // Increased default width
 const isResizing = ref(false);
 const dataZonePromptSearchTerm = ref('');
+const dataZoneViewModes = ref({
+    discussion: 'edit',
+    user: 'edit',
+    personality: 'view',
+    ltm: 'edit'
+});
 
 // --- Data Zone State ---
 let discussionSaveDebounceTimer = null;
@@ -143,6 +151,25 @@ const discussionDataZone = computed({
         }
     }
 });
+
+const parsedDocuments = computed(() => {
+    const content = discussionDataZone.value;
+    if (!content) return [];
+    const docs = [];
+    const regex = /^---\s*Document:\s*(.*?)\s*---$\n([\s\S]*?)\n^---\s*End Document:\s*\1\s*---$/gm;
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+        docs.push({ filename: match[1].trim() });
+    }
+    return docs;
+});
+
+function deleteDocument(filename) {
+    const escapedFilename = filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`^---\\s*Document:\\s*${escapedFilename}\\s*---\\n[\\s\\S]*?\\n^---\\s*End Document:\\s*${escapedFilename}\\s*---\\n*`, 'gm');
+    discussionDataZone.value = discussionDataZone.value.replace(regex, '');
+}
+
 const userDataZone = computed({
     get: () => authStore.user?.data_zone || '',
     set: (newVal) => {
@@ -209,6 +236,7 @@ onUnmounted(() => {
 });
 
 async function handlePasteInDataZone(event) {
+    if (!currentModelVisionSupport.value) return;
     const items = (event.clipboardData || window.clipboardData).items;
     if (!items) return;
     const filesToUpload = [];
@@ -293,11 +321,24 @@ async function handleKnowledgeFileUpload(event) {
     isExtractingText.value = true; const formData = new FormData();
     for (const file of files) { formData.append('files', file); }
     try {
-        const response = await apiClient.post('/api/files/extract-text', formData); const extractedText = response.data.text;
-        discussionDataZone.value = discussionDataZone.value ? `${discussionDataZone.value}\n\n${extractedText}` : extractedText;
+        const response = await apiClient.post('/api/files/extract-files-text-content', formData);
+        let newContent = discussionDataZone.value;
+        if (newContent && !newContent.endsWith('\n\n')) {
+            newContent += '\n\n';
+        }
+        
+        const filesWithText = response.data.files_text;
+        if (filesWithText && typeof filesWithText === 'object') {
+            Object.entries(filesWithText).forEach(([filename, text]) => {
+                newContent += `--- Document: ${filename} ---\n${text}\n--- End Document: ${filename} ---\n\n`;
+            });
+        }
+
+        discussionDataZone.value = newContent;
         uiStore.addNotification(`Extracted text from ${files.length} file(s) and added to discussion data zone.`, 'success');
     } finally { isExtractingText.value = false; if (knowledgeFileInput.value) knowledgeFileInput.value.value = ''; }
 }
+
 function handleProcessContent() {
     if (!activeDiscussion.value) return; const finalPrompt = dataZonePromptText.value.replace('{{data_zone}}', discussionDataZone.value);
     discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, finalPrompt);
@@ -326,16 +367,26 @@ async function exportDataZone() {
 }
 function triggerDiscussionImageUpload() { discussionImageInput.value?.click(); }
 async function handleDiscussionImageUpload(event) {
-    const file = event.target.files[0]; if (!file || !activeDiscussion.value) return;
+    const files = Array.from(event.target.files); 
+    if (!files.length || !activeDiscussion.value) return;
     isUploadingDiscussionImage.value = true;
-    try { await discussionsStore.uploadDiscussionImage(file); } finally { isUploadingDiscussionImage.value = false; if (discussionImageInput.value) discussionImageInput.value.value = ''; }
+    try { 
+        await Promise.all(files.map(file => discussionsStore.uploadDiscussionImage(file)));
+    } finally { 
+        isUploadingDiscussionImage.value = false; 
+        if (discussionImageInput.value) discussionImageInput.value.value = ''; 
+    }
+}
+
+function toggleViewMode(zone) {
+    dataZoneViewModes.value[zone] = dataZoneViewModes.value[zone] === 'edit' ? 'view' : 'edit';
 }
 </script>
 
 <template>
     <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
         <input type="file" ref="knowledgeFileInput" @change="handleKnowledgeFileUpload" multiple class="hidden" accept=".txt,.md,.pdf,.docx,.pptx,.xlsx,.xls, .py, .js, .html, .css, .json, .xml, .c, .cpp, .java">
-        <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf">
+        <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf" multiple>
         
         <div class="flex-1 flex min-h-0">
             <!-- Main Content: Chat Area -->
@@ -359,20 +410,13 @@ async function handleDiscussionImageUpload(event) {
                         </nav>
                     </div>
                     <!-- Discussion Data Zone -->
-                    <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0" @paste="handlePasteInDataZone">
+                    <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0">
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                             <div class="flex justify-between items-center"><h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data</h3>
                                 <div class="flex items-center gap-1">
-                                    <button @click="discussionDataZone = undo(discussionHistory, discussionHistoryIndex, canUndoDiscussion)" class="btn-icon" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-5 h-5" /></button>
-                                    <button @click="discussionDataZone = redo(discussionHistory, discussionHistoryIndex, canRedoDiscussion)" class="btn-icon" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-5 h-5" /></button>
-                                    <button @click="uiStore.toggleDataZoneExpansion()" class="btn-icon" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'">
-                                        <IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" />
-                                        <IconMaximize v-else class="w-5 h-5" />
-                                    </button>
+                                    <button @click="uiStore.toggleDataZoneExpansion()" class="btn-icon" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'"><IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" /><IconMaximize v-else class="w-5 h-5" /></button>
                                     <button @click="refreshDataZones" class="btn-icon" title="Refresh Data"><IconRefresh class="w-5 h-5" /></button>
                                     <button @click="exportDataZone" class="btn-icon" title="Export to Markdown"><IconArrowUpTray class="w-5 h-5" /></button>
-                                    <button @click="triggerDiscussionImageUpload" class="btn-icon" title="Add Image or PDF" :disabled="isUploadingDiscussionImage"><IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-5 h-5" /><IconPhoto v-else class="w-5 h-5" /></button>
-                                    <button @click="triggerKnowledgeFileUpload" class="btn-icon" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-5 h-5" /><IconPlus v-else class="w-5 h-5" /></button>
                                     <button @click="discussionDataZone = ''" class="btn-icon-danger" title="Clear All Text"><IconTrash class="w-5 h-5" /></button>
                                 </div>
                             </div>
@@ -386,139 +430,81 @@ async function handleDiscussionImageUpload(event) {
                                 </div>
                             </div>
                         </div>
-                        <div v-if="discussionImages.length > 0" class="flex-shrink-0 p-2 border-b dark:border-gray-600">
-                            <div class="grid grid-cols-4 sm:grid-cols-5 gap-2">
-                                <div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="relative group/image">
-                                    <img :src="'data:image/png;base64,' + img_b64" class="w-full h-16 object-cover rounded-md transition-all duration-300" :class="{'grayscale': !isImageActive(index)}"/>
-                                    <div class="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-1">
-                                        <button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" title="View Image"><IconMaximize class="w-4 h-4" /></button>
-                                        <button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button>
-                                        <button @click="discussionsStore.deleteDiscussionImage(index)" class="p-1.5 bg-red-500/80 text-white rounded-full hover:bg-red-600" title="Delete"><IconXMark class="w-4 h-4" /></button>
+
+                        <div class="flex-grow min-h-0 flex" :onpaste="currentModelVisionSupport ? handlePasteInDataZone : null">
+                            <div class="flex-grow flex flex-col min-w-0">
+                                <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
+                                    <h4 class="font-semibold text-sm">Content</h4>
+                                    <div class="flex items-center gap-1">
+                                        <button @click="toggleViewMode('discussion')" class="btn-icon" :title="dataZoneViewModes.discussion === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.discussion === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button>
+                                        <button @click="discussionDataZone = undo(discussionHistory, discussionHistoryIndex, canUndoDiscussion)" class="btn-icon" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-5 h-5" /></button>
+                                        <button @click="discussionDataZone = redo(discussionHistory, discussionHistoryIndex, canRedoDiscussion)" class="btn-icon" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-5 h-5" /></button>
+                                    </div>
+                                </div>
+                                <div class="flex-grow min-h-0 p-2">
+                                    <CodeMirrorEditor v-if="dataZoneViewModes.discussion === 'edit'" ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" />
+                                    <div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="discussionDataZone" /></div>
+                                </div>
+                                <div class="p-4 border-t dark:border-gray-600 flex-shrink-0 space-y-3">
+                                    <div class="flex items-center gap-2">
+                                        <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2"><DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"><button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button></DropdownSubmenu><DropdownSubmenu v-if="Object.keys(promptsStore.userPromptsByCategory).length > 0" title="User" icon="user" collection="ui"><div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div><div class="max-h-60 overflow-y-auto"><div v-for="(prompts, category) in promptsStore.userPromptsByCategory" :key="category"><h3 class="category-header">{{ category }}</h3><button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button></div></div></DropdownSubmenu><DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui"><div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div><div class="max-h-60 overflow-y-auto"><div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category"><h3 class="category-header">{{ category }}</h3><button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button></div></div></DropdownSubmenu><div v-if="(lollmsPrompts.length + userPrompts.length + Object.keys(systemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div><button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button></DropdownMenu>
+                                        <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process the data zone content..." rows="2" class="input-field text-sm flex-grow"></textarea>
+                                    </div>
+                                    <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0)"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Process Content' }}</button>
+                                </div>
+                            </div>
+
+                            <div class="w-56 flex-shrink-0 border-l dark:border-gray-600 flex flex-col">
+                                <div class="flex-1 flex flex-col min-h-0">
+                                    <div v-if="currentModelVisionSupport" class="flex-1 flex flex-col min-h-0">
+                                        <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Images</h4><button @click="triggerDiscussionImageUpload" class="btn-icon" title="Add Image(s) or PDF" :disabled="isUploadingDiscussionImage"><IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-5 h-5" /><IconPhoto v-else class="w-5 h-5" /></button></div>
+                                        <div class="flex-grow overflow-y-auto p-2">
+                                            <div v-if="discussionImages.length === 0" class="text-center text-xs text-gray-500 pt-4">No images.</div>
+                                            <div v-else class="grid grid-cols-2 gap-2">
+                                                <div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="relative group/image"><img :src="'data:image/png;base64,' + img_b64" class="w-full h-16 object-cover rounded-md transition-all duration-300" :class="{'grayscale': !isImageActive(index)}"/><div class="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-1"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" title="View"><IconMaximize class="w-4 h-4" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="p-1.5 bg-red-500/80 text-white rounded-full hover:bg-red-600" title="Delete"><IconXMark class="w-4 h-4" /></button></div></div>
+                                            </div>
+                                            <div v-if="isUploadingDiscussionImage" class="grid grid-cols-2 gap-2 mt-2"><div class="relative w-full h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center animate-pulse"><IconPhoto class="w-8 h-8 text-gray-400 dark:text-gray-500" /></div></div>
+                                        </div>
+                                    </div>
+                                    <div class="flex-1 flex flex-col min-h-0">
+                                        <div class="p-2 border-t dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Documents</h4><button @click="triggerKnowledgeFileUpload" class="btn-icon" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-5 h-5" /><IconPlus v-else class="w-5 h-5" /></button></div>
+                                        <div class="flex-grow overflow-y-auto p-2 space-y-1">
+                                            <div v-if="parsedDocuments.length === 0" class="text-center text-xs text-gray-500 pt-4">No documents.</div>
+                                            <div v-for="doc in parsedDocuments" :key="doc.filename" class="flex items-center justify-between p-1.5 rounded-md bg-gray-100 dark:bg-gray-700/50 text-xs">
+                                                <span class="truncate" :title="doc.filename">{{ doc.filename }}</span>
+                                                <button @click="deleteDocument(doc.filename)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Remove Document"><IconXMark class="w-3 h-3" /></button>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                        <div v-if="isUploadingDiscussionImage" class="flex-shrink-0 p-2 border-b dark:border-gray-600">
-                            <div class="grid grid-cols-4 sm:grid-cols-5 gap-2">
-                                <div class="relative w-full h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center animate-pulse">
-                                    <IconPhoto class="w-8 h-8 text-gray-400 dark:text-gray-500" />
-                                </div>
-                            </div>
-                        </div>
-                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" /></div>
-                        <div class="p-4 border-t dark:border-gray-600 flex-shrink-0 space-y-3">
-                            <div class="flex items-center gap-2">
-                                <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2">
-                                    <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
-                                        <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button>
-                                    </DropdownSubmenu>
-                                    <DropdownSubmenu v-if="Object.keys(promptsStore.userPromptsByCategory).length > 0" title="User" icon="user" collection="ui">
-                                        <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10">
-                                            <input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm">
-                                        </div>
-                                        <div class="max-h-60 overflow-y-auto">
-                                            <div v-for="(prompts, category) in promptsStore.userPromptsByCategory" :key="category">
-                                                <h3 class="category-header">{{ category }}</h3>
-                                                <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
-                                                    <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
-                                                    <span class="truncate">{{ p.name }}</span>
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </DropdownSubmenu>
-                                    <DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui">
-                                        <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10">
-                                            <input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm">
-                                        </div>
-                                        <div class="max-h-60 overflow-y-auto">
-                                            <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category">
-                                                <h3 class="category-header">{{ category }}</h3>
-                                                <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
-                                                    <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
-                                                    <span class="truncate">{{ p.name }}</span>
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </DropdownSubmenu>
-                                    <div v-if="(lollmsPrompts.length + userPrompts.length + Object.keys(systemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                    <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
-                                </DropdownMenu>
-                                <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process the data zone content..." rows="2" class="input-field text-sm flex-grow"></textarea>
-                            </div>
-                            <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0)">
-                                <IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Process Content' }}
-                            </button>
                         </div>
                     </div>
                     <div v-show="activeDataZoneTab === 'user'" class="flex-1 flex flex-col min-h-0">
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                             <div class="flex justify-between items-center">
-                                <div>
-                                    <h3 class="font-semibold flex items-center gap-2"><IconUserCircle class="w-5 h-5" /> User Data Zone</h3>
-                                    <p class="text-xs text-gray-500 mt-1">Context for all of your discussions.</p>
-                                </div>
-                                <div class="flex items-center gap-1">
-                                    <DropdownMenu title="Insert Placeholder" icon="ticket" collection="ui" button-class="btn-icon">
-                                        <button v-for="keyword in keywords" :key="keyword.keyword" @click="insertPlaceholder(keyword.keyword)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
-                                            <div class="font-mono font-semibold">{{ keyword.keyword }}</div>
-                                            <div class="text-xs text-gray-500">{{ keyword.description }}</div>
-                                        </button>
-                                    </DropdownMenu>
-                                    <button @click="userDataZone = undo(userHistory, userHistoryIndex, canUndoUser)" class="btn-icon" title="Undo" :disabled="!canUndoUser"><IconUndo class="w-5 h-5" /></button>
-                                    <button @click="userDataZone = redo(userHistory, userHistoryIndex, canRedoUser)" class="btn-icon" title="Redo" :disabled="!canRedoUser"><IconRedo class="w-5 h-5" /></button>
-                                </div>
+                                <div><h3 class="font-semibold flex items-center gap-2"><IconUserCircle class="w-5 h-5" /> User Data Zone</h3><p class="text-xs text-gray-500 mt-1">Context for all of your discussions.</p></div>
+                                <div class="flex items-center gap-1"><button @click="toggleViewMode('user')" class="btn-icon" :title="dataZoneViewModes.user === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.user === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button><DropdownMenu title="Insert Placeholder" icon="ticket" collection="ui" button-class="btn-icon"><button v-for="keyword in keywords" :key="keyword.keyword" @click="insertPlaceholder(keyword.keyword)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><div class="font-mono font-semibold">{{ keyword.keyword }}</div><div class="text-xs text-gray-500">{{ keyword.description }}</div></button></DropdownMenu><button @click="userDataZone = undo(userHistory, userHistoryIndex, canUndoUser)" class="btn-icon" title="Undo" :disabled="!canUndoUser"><IconUndo class="w-5 h-5" /></button><button @click="userDataZone = redo(userHistory, userHistoryIndex, canRedoUser)" class="btn-icon" title="Redo" :disabled="!canRedoUser"><IconRedo class="w-5 h-5" /></button></div>
                             </div>
-                            <div class="mt-2">
-                                <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono">
-                                    <span>Tokens</span>
-                                    <span>{{ formatNumber(userDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
-                                </div>
-                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1">
-                                    <div class="h-1.5 rounded-full bg-green-500 transition-width duration-500" :style="{ width: `${getPercentage(userDataZoneTokens)}%` }"></div>
-                                </div>
-                            </div>
+                            <div class="mt-2"><div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono"><span>Tokens</span><span>{{ formatNumber(userDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span></div><div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1"><div class="h-1.5 rounded-full bg-green-500 transition-width duration-500" :style="{ width: `${getPercentage(userDataZoneTokens)}%` }"></div></div></div>
                         </div>
-                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor ref="userCodeMirrorEditor" v-model="userDataZone" class="h-full" /></div>
+                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-if="dataZoneViewModes.user === 'edit'" ref="userCodeMirrorEditor" v-model="userDataZone" class="h-full" /><div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="userDataZone" /></div></div>
                     </div>
                     <div v-show="activeDataZoneTab === 'personality'" class="flex-1 flex flex-col min-h-0">
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
-                            <h3 class="font-semibold flex items-center gap-2"><IconSparkles class="w-5 h-5" /> Personality Data Zone</h3>
-                            <p class="text-xs text-gray-500 mt-1">Read-only context from the active personality.</p>
-                            <div class="mt-2">
-                                <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono">
-                                    <span>Tokens</span>
-                                    <span>{{ formatNumber(personalityDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
-                                </div>
-                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1">
-                                    <div class="h-1.5 rounded-full bg-purple-500 transition-width duration-500" :style="{ width: `${getPercentage(personalityDataZoneTokens)}%` }"></div>
-                                </div>
-                            </div>
+                             <div class="flex justify-between items-center"><div><h3 class="font-semibold flex items-center gap-2"><IconSparkles class="w-5 h-5" /> Personality Data Zone</h3><p class="text-xs text-gray-500 mt-1">Read-only context from the active personality.</p></div><button @click="toggleViewMode('personality')" class="btn-icon" :title="dataZoneViewModes.personality === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.personality === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button></div>
+                            <div class="mt-2"><div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono"><span>Tokens</span><span>{{ formatNumber(personalityDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span></div><div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1"><div class="h-1.5 rounded-full bg-purple-500 transition-width duration-500" :style="{ width: `${getPercentage(personalityDataZoneTokens)}%` }"></div></div></div>
                         </div>
-                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor :model-value="personalityDataZone" class="h-full" :options="{ readOnly: true }" /></div>
+                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-if="dataZoneViewModes.personality === 'edit'" :model-value="personalityDataZone" class="h-full" :options="{ readOnly: true }" /><div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="personalityDataZone" /></div></div>
                     </div>
                     <div v-show="activeDataZoneTab === 'ltm'" class="flex-1 flex flex-col min-h-0">
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
-                            <div class="flex justify-between items-center">
-                                 <div><h3 class="font-semibold flex items-center gap-2"><IconThinking class="w-5 h-5" /> Long-Term Memory</h3>
-                                    <p class="text-xs text-gray-500 mt-1">Facts the AI has learned from conversations.</p>
-                                </div>
-                                <div class="flex items-center gap-1">
-                                    <button @click="memory = undo(memoryHistory, memoryHistoryIndex, canUndoMemory)" class="btn-icon" title="Undo" :disabled="!canUndoMemory"><IconUndo class="w-5 h-5" /></button>
-                                    <button @click="memory = redo(memoryHistory, memoryHistoryIndex, canRedoMemory)" class="btn-icon" title="Redo" :disabled="!canRedoMemory"><IconRedo class="w-5 h-5" /></button>
-                                    <button @click="handleMemorize" class="btn btn-secondary btn-sm" title="Analyze discussion and memorize new facts" :disabled="isMemorizing"><IconSparkles class="w-4 h-4" :class="{'animate-pulse': isMemorizing}"/></button>
-                                </div>
+                            <div class="flex justify-between items-center"><div><h3 class="font-semibold flex items-center gap-2"><IconThinking class="w-5 h-5" /> Long-Term Memory</h3><p class="text-xs text-gray-500 mt-1">Facts the AI has learned from conversations.</p></div>
+                                <div class="flex items-center gap-1"><button @click="toggleViewMode('ltm')" class="btn-icon" :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button><button @click="memory = undo(memoryHistory, memoryHistoryIndex, canUndoMemory)" class="btn-icon" title="Undo" :disabled="!canUndoMemory"><IconUndo class="w-5 h-5" /></button><button @click="memory = redo(memoryHistory, memoryHistoryIndex, canRedoMemory)" class="btn-icon" title="Redo" :disabled="!canRedoMemory"><IconRedo class="w-5 h-5" /></button><button @click="handleMemorize" class="btn btn-secondary btn-sm" title="Analyze discussion and memorize new facts" :disabled="isMemorizing"><IconSparkles class="w-4 h-4" :class="{'animate-pulse': isMemorizing}"/></button></div>
                             </div>
-                            <div class="mt-2">
-                                <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono">
-                                    <span>Tokens</span>
-                                    <span>{{ formatNumber(memoryDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
-                                </div>
-                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1">
-                                    <div class="h-1.5 rounded-full bg-yellow-500 transition-width duration-500" :style="{ width: `${getPercentage(memoryDataZoneTokens)}%` }"></div>
-                                </div>
-                            </div>
+                            <div class="mt-2"><div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono"><span>Tokens</span><span>{{ formatNumber(memoryDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span></div><div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1"><div class="h-1.5 rounded-full bg-yellow-500 transition-width duration-500" :style="{ width: `${getPercentage(memoryDataZoneTokens)}%` }"></div></div></div>
                         </div>
-                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-model="memory" class="h-full" /></div>
+                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-if="dataZoneViewModes.ltm === 'edit'" v-model="memory" class="h-full" /><div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="memory" /></div></div>
                     </div>
                 </aside>
             </transition>
@@ -534,4 +520,5 @@ async function handleDiscussionImageUpload(event) {
 .btn-icon-danger { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-600 dark:hover:text-red-400 transition-colors; }
 .category-header { @apply px-3 py-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 sticky top-0 bg-gray-50 dark:bg-gray-700 z-10; }
 .menu-item { @apply w-full text-left px-3 py-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center; }
+.rendered-prose-container { @apply overflow-y-auto p-2; }
 </style>

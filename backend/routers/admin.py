@@ -9,6 +9,7 @@ from typing import List, Dict, Optional
 
 import psutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
@@ -48,7 +49,8 @@ from backend.models import (
     PromptUpdate,
     ModelAliasUpdate,
     ModelAliasDelete,
-    BindingModel
+    BindingModel,
+    ModelNamePayload
 )
 from backend.session import (
     get_user_data_root,
@@ -56,6 +58,7 @@ from backend.session import (
     get_user_temp_uploads_path,
     user_sessions,
     get_user_lollms_client,
+    build_lollms_client_from_params
 )
 from backend.security import create_reset_token, send_generic_email
 from backend.settings import settings
@@ -348,6 +351,25 @@ async def get_binding_models(binding_id: int, current_admin: UserAuthDetails = D
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Could not fetch models from binding '{binding.alias}': {e}")
+
+@admin_router.post("/bindings/{binding_id}/context-size", response_model=Dict[str, Optional[int]])
+async def get_model_context_size(binding_id: int, payload: ModelNamePayload, current_admin: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    try:
+        # Use a temporary client to avoid affecting user session state
+        lc = build_lollms_client_from_params(
+            username=current_admin.username,
+            binding_alias=binding.alias,
+            model_name=payload.model_name
+        )
+        ctx_size = lc.get_ctx_size()
+        return {"ctx_size": ctx_size}
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Could not fetch context size from binding '{binding.alias}': {e}")
 
 @admin_router.put("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
 async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Session = Depends(get_db)):

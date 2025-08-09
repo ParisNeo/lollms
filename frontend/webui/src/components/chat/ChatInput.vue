@@ -43,7 +43,7 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
 const router = useRouter();
-const { dataZonesTokensFromContext } = storeToRefs(discussionsStore);
+const { dataZonesTokensFromContext, currentModelVisionSupport } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 
 const messageText = ref('');
@@ -407,6 +407,7 @@ async function uploadFiles(files) {
 async function handleImageSelection(event) { await uploadFiles(Array.from(event.target.files)); event.target.value = ''; }
 
 async function handlePaste(event) {
+    if (!currentModelVisionSupport.value) return;
     const items = (event.clipboardData || window.clipboardData).items;
     if (!items) return;
     const imageFiles = [];
@@ -432,7 +433,7 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
     </Transition>
 
     <Transition enter-active-class="transition ease-out duration-300" enter-from-class="transform opacity-0 scale-95 translate-y-4" enter-to-class="transform opacity-100 scale-100 translate-y-0" leave-active-class="transition ease-in duration-200" leave-from-class="transform opacity-100 scale-100 translate-y-0" leave-to-class="transform opacity-0 scale-95 translate-y-4">
-      <div v-if="!isShrunk" ref="chatbarRef" :style="chatbarStyle" @paste="handlePaste" class="fixed w-11/12 max-w-4xl bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-xl border border-gray-300 dark:border-gray-700 shadow-2xl transition-shadow z-50" :class="{'cursor-grabbing': isDragging}">
+      <div v-if="!isShrunk" ref="chatbarRef" :style="chatbarStyle" :onpaste="currentModelVisionSupport ? handlePaste : null" class="fixed w-11/12 max-w-4xl bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-xl border border-gray-300 dark:border-gray-700 shadow-2xl transition-shadow z-50" :class="{'cursor-grabbing': isDragging}">
         <div @mousedown.prevent="onMouseDown" class="flex items-center justify-between h-10 px-4 border-b border-gray-200 dark:border-gray-700 rounded-t-xl" :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'">
             <h3 class="text-sm font-semibold truncate text-gray-800 dark:text-gray-100 select-none">{{ headerTitle }}</h3>
             <button @click.stop="toggleShrink" @mousedown.stop class="p-1 rounded-full text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600" title="Shrink Chat"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M18 12H6" /></svg></button>
@@ -473,7 +474,7 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
                 <div v-else class="flex items-center gap-2">
                     <!-- Action Buttons -->
                     <div class="flex flex-shrink-0 gap-2">
-                        <button @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary chat-action-button disabled:opacity-50" title="Upload Images"><IconPhoto class="w-5 h-5"/></button>
+                        <button v-if="currentModelVisionSupport" @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary chat-action-button disabled:opacity-50" title="Upload Images"><IconPhoto class="w-5 h-5"/></button>
                         <div v-if="user.user_ui_level >= 3"><MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select MCP Tools"><IconMcp class="w-5 h-5"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshMcps" :disabled="isRefreshingMcps" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingMcps}"/><span>{{ isRefreshingMcps ? 'Refreshing...' : 'Refresh Tools' }}</span></button></div></template></MultiSelectMenu></div>
                         <div v-if="user.user_ui_level >= 1"><MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select RAG Store"><IconDatabase class="w-5 h-5" /><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshRags" :disabled="isRefreshingRags" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingRags}"/><span>{{ isRefreshingRags ? 'Refreshing...' : 'Refresh Stores' }}</span></button></div></template></MultiSelectMenu></div>
                         <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn btn-secondary chat-action-button">

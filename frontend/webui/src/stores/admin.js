@@ -168,6 +168,16 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    async function getModelCtxSize(bindingId, modelName) {
+        try {
+            const response = await apiClient.post(`/api/admin/bindings/${bindingId}/context-size`, { model_name: modelName });
+            return response.data.ctx_size;
+        } catch (error) {
+            uiStore.addNotification('Could not auto-detect context size.', 'error');
+            return null;
+        }
+    }
+
     async function saveModelAlias(bindingId, payload) {
         const response = await apiClient.put(`/api/admin/bindings/${bindingId}/alias`, payload);
         const index = bindings.value.findIndex(b => b.id === bindingId);
@@ -299,7 +309,7 @@ export const useAdminStore = defineStore('admin', () => {
         // Bindings
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
         // Model Aliases
-        fetchBindingModels, saveModelAlias, deleteModelAlias,
+        fetchBindingModels, saveModelAlias, deleteModelAlias, getModelCtxSize,
         // Global Settings
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings,
         // Import

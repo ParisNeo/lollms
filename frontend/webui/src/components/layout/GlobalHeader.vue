@@ -12,6 +12,7 @@ import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconSelectMenu from '../ui/IconSelectMenu.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
+import IconEye from '../../assets/icons/IconEye.vue';
 import logoUrl from '../../assets/logo.png';
 
 const discussionsStore = useDiscussionsStore();
@@ -66,11 +67,14 @@ function newDiscussion() {
             placeholder="Select Model"
         >
             <template #button="{ toggle, selectedItem }">
-                <button @click="toggle" class="toolbox-select truncate w-64 flex items-center justify-between">
-                    <div class="flex items-center space-x-2 truncate">
-                        <img v-if="selectedItem?.icon_base64" :src="selectedItem.icon_base64" class="h-4 w-4 rounded-full object-cover"/>
-                        <span v-else class="w-4 h-4 flex-shrink-0 text-gray-500 dark:text-gray-400"><IconCpuChip class="w-4 h-4" /></span>
-                        <span class="truncate">{{ selectedItem?.name || 'Select Model' }}</span>
+                <button @click="toggle" class="toolbox-select truncate w-80 flex items-center justify-between">
+                    <div class="flex items-center space-x-3 truncate">
+                        <img v-if="selectedItem?.icon_base64" :src="selectedItem.icon_base64" class="h-8 w-8 rounded-md object-cover"/>
+                        <span v-else class="w-8 h-8 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md"><IconCpuChip class="w-5 h-5" /></span>
+                        <div class="min-w-0 text-left">
+                            <span class="block font-semibold truncate">{{ selectedItem?.name || 'Select Model' }}</span>
+                            <span class="block text-xs text-gray-500 truncate">{{ selectedItem?.description || 'Click to choose a model' }}</span>
+                        </div>
                     </div>
                     <svg class="w-4 h-4 text-gray-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                 </button>
@@ -78,9 +82,12 @@ function newDiscussion() {
             <template #placeholder-icon><IconCpuChip class="w-5 h-5" /></template>
             <template #item-icon-default><IconCpuChip class="w-5 h-5" /></template>
              <template #item-extra="{ item }">
-                <button v-if="item.alias" @click.stop="openModelCard(item)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600" title="View model details">
-                    <IconInfo class="w-4 h-4 text-blue-500" />
-                </button>
+                <div class="flex items-center gap-2">
+                    <IconEye v-if="item.alias?.has_vision" class="w-5 h-5 text-green-500" title="Vision active" />
+                    <button v-if="item.alias" @click.stop="openModelCard(item)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600" title="View model details">
+                        <IconInfo class="w-4 h-4 text-blue-500" />
+                    </button>
+                </div>
             </template>
         </IconSelectMenu>
 
@@ -91,11 +98,14 @@ function newDiscussion() {
             placeholder="Select Personality"
         >
             <template #button="{ toggle, selectedItem }">
-                <button @click="toggle" class="toolbox-select truncate w-64 flex items-center justify-between">
-                    <div class="flex items-center space-x-2 truncate">
-                        <img v-if="selectedItem?.icon_base64" :src="selectedItem.icon_base64" class="h-4 w-4 rounded-full object-cover"/>
-                        <span v-else class="w-4 h-4 flex-shrink-0 text-gray-500 dark:text-gray-400"><IconUserCircle class="w-4 h-4" /></span>
-                        <span class="truncate">{{ selectedItem?.name || 'Select Personality' }}</span>
+                <button @click="toggle" class="toolbox-select truncate w-80 flex items-center justify-between">
+                     <div class="flex items-center space-x-3 truncate">
+                        <img v-if="selectedItem?.icon_base64" :src="selectedItem.icon_base64" class="h-8 w-8 rounded-md object-cover"/>
+                        <span v-else class="w-8 h-8 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md"><IconUserCircle class="w-5 h-5" /></span>
+                        <div class="min-w-0 text-left">
+                            <span class="block font-semibold truncate">{{ selectedItem?.name || 'Select Personality' }}</span>
+                            <span class="block text-xs text-gray-500 truncate">{{ selectedItem?.description || 'Click to choose a personality' }}</span>
+                        </div>
                     </div>
                     <svg class="w-4 h-4 text-gray-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                 </button>

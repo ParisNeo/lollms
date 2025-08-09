@@ -266,14 +266,12 @@ async function downloadCreatedFile(filename) {
 
 <template>
   <div class="code-block-container not-prose my-4" :class="themeClass">
-    <div class="code-block-header">
+    <button @click="isCollapsed = !isCollapsed" class="code-block-header" :title="isCollapsed ? 'Expand' : 'Collapse'">
       <div class="flex items-center gap-2">
-        <button @click="isCollapsed = !isCollapsed" class="p-1 rounded-full hover:bg-white/10" :title="isCollapsed ? 'Expand' : 'Collapse'">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform" :class="{'rotate-90': !isCollapsed}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4-4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
-        </button>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform flex-shrink-0" :class="{'rotate-90': !isCollapsed}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4-4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
         <span class="code-language">{{ displayLanguage }}</span>
       </div>
-      <div v-if="!isInstallUiVisible" class="flex flex-row gap-2">
+      <div v-if="!isInstallUiVisible" class="flex flex-row gap-2" @click.stop>
           <button @click="downloadCode" class="code-action-btn" title="Download file">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
               <span>Download</span>
@@ -297,7 +295,7 @@ async function downloadCreatedFile(filename) {
               <span>{{ copyStatus }}</span>
           </button>
       </div>
-       <div v-else class="flex flex-row gap-2 items-center w-full">
+       <div v-else class="flex flex-row gap-2 items-center w-full" @click.stop>
             <input 
                 v-model="packagesToInstall"
                 @keyup.enter="handleInstall"
@@ -312,7 +310,7 @@ async function downloadCreatedFile(filename) {
             </button>
             <button @click="hideInstallUi" class="code-action-btn install-cancel-btn" title="Cancel">×</button>
         </div>
-    </div>
+    </button>
     
     <div v-if="uploadedFiles.length > 0 && !isCollapsed" class="uploaded-files-list">
         <div v-for="(file, index) in uploadedFiles" :key="index" class="uploaded-file-item">
@@ -352,7 +350,7 @@ async function downloadCreatedFile(filename) {
 
 <style scoped>
 .code-block-container { overflow: hidden; font-family: 'Fira Code', 'Courier New', monospace; border-radius: 8px; }
-.code-block-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; }
+.code-block-header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; font-size: 0.8rem; width: 100%; cursor: pointer; }
 .code-language { font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
 .code-action-btn { display: flex; align-items: center; gap: 6px; border-radius: 5px; padding: 4px 10px; font-size: 0.75rem; cursor: pointer; transition: background-color 0.2s, color 0.2s; }
 .code-action-btn:disabled { cursor: not-allowed; opacity: 0.6; }

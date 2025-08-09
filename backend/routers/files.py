@@ -1,3 +1,4 @@
+# backend/routers/files.py
 import os
 import shutil
 import uuid
@@ -121,7 +122,7 @@ async def extract_text_from_files(files: List[UploadFile] = File(...), current_u
                     print(f"Skipping file with unsupported extension or non-text content: {file.filename}")
                     continue
 
-            # --- NEW: Code Wrapping Logic ---
+            # --- Code Wrapping Logic ---
             if suffix in known_code_extensions:
                 lang_identifier = known_code_extensions[suffix]
                 formatted_text = f"--- Document: {file.filename} ---\n```{lang_identifier}\n{text}\n```"
@@ -138,6 +139,70 @@ async def extract_text_from_files(files: List[UploadFile] = File(...), current_u
                 os.remove(temp_file_path)
             
     return {"text": "\n\n".join(concatenated_text)}
+
+@files_router.post("/extract-files-text-content")
+async def extract_files_text_content(files: List[UploadFile] = File(...), current_user: UserAuthDetails = Depends(get_current_active_user)):
+    """
+    Accepts multiple files, extracts text content from supported types,
+    and returns a dictionary of filenames to their text content.
+    """
+    if not all([PdfReader, docx, pptx, openpyxl]):
+        raise HTTPException(status_code=501, detail="Text extraction libraries (pypdf, python-docx, python-pptx, openpyxl) are not fully installed.")
+
+    files_text = {}
+    
+    for file in files:
+        temp_file_path = None
+        try:
+            temp_dir = get_user_temp_uploads_path(current_user.username)
+            temp_file_path = temp_dir / f"{uuid.uuid4()}_{secure_filename(file.filename)}"
+            
+            with open(temp_file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+
+            text = ""
+            suffix = temp_file_path.suffix.lower()
+
+            if suffix == '.pdf':
+                reader = PdfReader(str(temp_file_path))
+                text = "\n".join(page.extract_text() or "" for page in reader.pages)
+            elif suffix == '.docx':
+                doc = docx.Document(str(temp_file_path))
+                text = "\n".join(para.text for para in doc.paragraphs)
+            elif suffix == '.pptx':
+                prs = pptx.Presentation(str(temp_file_path))
+                slide_texts = []
+                for slide in prs.slides:
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            slide_texts.append(shape.text)
+                text = "\n".join(slide_texts)
+            elif suffix in ['.xlsx', '.xls']:
+                workbook = openpyxl.load_workbook(str(temp_file_path))
+                sheet_texts = []
+                for sheet in workbook.worksheets:
+                    for row in sheet.iter_rows():
+                        cell_texts = [str(cell.value) for cell in row if cell.value is not None]
+                        if cell_texts:
+                            sheet_texts.append(" | ".join(cell_texts))
+                text = "\n".join(sheet_texts)
+            else: # Fallback for text-based files
+                try:
+                    text = temp_file_path.read_text(encoding='utf-8', errors='ignore')
+                except Exception:
+                    print(f"Skipping file with unsupported extension or non-text content: {file.filename}")
+                    continue
+            
+            files_text[file.filename] = text
+
+        except Exception as e:
+            raise HTTPException(status_code=422, detail=f"Failed to process file {file.filename}: {str(e)}")
+        finally:
+            await file.close()
+            if temp_file_path and temp_file_path.exists():
+                os.remove(temp_file_path)
+            
+    return {"files_text": files_text}
 
 
 @upload_router.post("/chat_image", response_model=List[Dict[str,str]])

@@ -105,6 +105,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         return dataStore.getPersonalityById(personalityId);
     });
 
+    const currentModelVisionSupport = computed(() => {
+        const authStore = useAuthStore();
+        const dataStore = useDataStore();
+        const selectedModelId = authStore.user?.lollms_model_name;
+        if (!selectedModelId) return true; // Default to true if no model is selected
+        const model = dataStore.availableLollmsModels.find(m => m.id === selectedModelId);
+        // Default to true if alias info is missing, to avoid disabling features unnecessarily
+        return model?.alias?.has_vision ?? true;
+    });
+
+
     function _clearActiveAiTask(discussionId) {
         if (activeAiTasks.value[discussionId]) {
             const newActiveTasks = { ...activeAiTasks.value };
@@ -1024,6 +1035,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         activeDiscussionContextStatus, activePersonality, activeAiTasks,
         sortedDiscussions, dataZonesTokenCount, liveDataZoneTokens, 
         dataZonesTokensFromContext, // EXPORT NEW COMPUTED
+        currentModelVisionSupport,
         loadDiscussions, selectDiscussion, createNewDiscussion,
         deleteDiscussion, pruneDiscussions, generateAutoTitle, toggleStarDiscussion,
         updateDiscussionRagStore, renameDiscussion, updateDiscussionMcps,

@@ -229,6 +229,7 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
 
     db = next(get_db())
     try:
+        user_db = db.query(DBUser).filter(DBUser.username == username).first()
         binding_to_use = None
         
         target_binding_alias = binding_alias_override
@@ -259,6 +260,22 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
 
         client_init_params = session.get("llm_params", {}).copy()
         
+        # --- NEW: Context Size Override Logic ---
+        final_ctx_size = client_init_params.get("ctx_size", user_db.llm_ctx_size if user_db else None)
+        model_aliases = binding_to_use.model_aliases or {}
+        alias_info = model_aliases.get(model_name_for_binding)
+
+        if alias_info:
+            admin_ctx_size = alias_info.get('ctx_size')
+            is_locked = alias_info.get('ctx_size_locked', False)
+            is_globally_locked = settings.get("lock_all_context_sizes", False)
+
+            if admin_ctx_size is not None and (is_globally_locked or is_locked):
+                final_ctx_size = admin_ctx_size
+        
+        client_init_params["ctx_size"] = final_ctx_size
+        # --- END NEW LOGIC ---
+
         force_mode = settings.get("force_model_mode", "disabled")
         if force_mode == "force_always":
             forced_model_full = settings.get("force_model_name")

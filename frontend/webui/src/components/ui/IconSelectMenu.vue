@@ -34,7 +34,7 @@ const selectedItem = computed(() => {
 function getBoundingBox() {
     if (triggerRef.value) {
         const rect = triggerRef.value.getBoundingClientRect();
-        const menuWidth = 256; // w-64
+        const menuWidth = 384; // w-96
         let left = rect.left;
         if (rect.left + menuWidth > window.innerWidth) {
             left = rect.right - menuWidth;
@@ -102,15 +102,15 @@ const uniqueId = `menu-trigger-${Math.random().toString(36).substr(2, 9)}`;
           v-if="isOpen" 
           :id="`menu-${uniqueId}`"
           :style="menuStyle"
-          class="w-64 z-[9999] rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5"
+          class="w-96 z-[9999] rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5"
         >
-          <ul class="max-h-60 overflow-y-auto p-1">
+          <ul class="max-h-80 overflow-y-auto p-1">
             <li @click="selectOption(null)" class="menu-item" :class="{'is-selected': !modelValue}">
-              <div class="flex items-center space-x-2">
-                <div class="h-6 w-6 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center">
+              <div class="flex items-center space-x-3">
+                <div class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center">
                     <slot name="placeholder-icon"></slot>
                 </div>
-                <span class="block truncate">{{ placeholder }}</span>
+                <span class="block truncate font-semibold">{{ placeholder }}</span>
               </div>
                <span v-if="!modelValue" class="check-mark">
                 <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
@@ -122,33 +122,39 @@ const uniqueId = `menu-trigger-${Math.random().toString(36).substr(2, 9)}`;
                   <div class="px-3 py-1 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
                       {{ item.label }}
                   </div>
-                  <li v-for="subItem in item.items" :title="subItem.description" :key="subItem.id" @click="selectOption(subItem.id)" class="menu-item" :class="{'is-selected': subItem.id === modelValue}">
-                      <div class="flex items-center space-x-2 flex-grow min-w-0">
-                          <img v-if="subItem.icon_base64" :src="subItem.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0"/>
-                          <div v-else class="h-6 w-6 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
+                  <li v-for="subItem in item.items" :key="subItem.id" @click="selectOption(subItem.id)" class="menu-item" :class="{'is-selected': subItem.id === modelValue}">
+                      <div class="flex items-center space-x-3 flex-grow min-w-0">
+                          <img v-if="subItem.icon_base64" :src="subItem.icon_base64" class="h-8 w-8 rounded-md object-cover flex-shrink-0"/>
+                          <div v-else class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
                             <slot name="item-icon-default"></slot>
                           </div>
-                          <span class="font-normal block truncate">{{ subItem.name }}</span>
+                          <div class="min-w-0">
+                            <span class="font-semibold block truncate" :title="subItem.name">{{ subItem.name }}</span>
+                            <span v-if="subItem.description" class="text-xs text-gray-500 dark:text-gray-400 block truncate" :title="subItem.description">{{ subItem.description }}</span>
+                          </div>
                       </div>
-                      <div class="flex-shrink-0 flex items-center">
+                      <div class="flex-shrink-0 flex items-center pl-2">
                         <slot name="item-extra" :item="subItem"></slot>
-                        <span v-if="subItem.id === modelValue" class="check-mark">
+                        <span v-if="subItem.id === modelValue" class="check-mark ml-2">
                           <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
                         </span>
                       </div>
                   </li>
               </div>
               <li v-else @click="selectOption(item.id)" class="menu-item" :class="{'is-selected': item.id === modelValue}">
-                <div class="flex items-center space-x-2 flex-grow min-w-0">
-                  <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0"/>
-                  <div v-else class="h-6 w-6 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
+                <div class="flex items-center space-x-3 flex-grow min-w-0">
+                  <img v-if="item.icon_base64" :src="item.icon_base64" class="h-8 w-8 rounded-md object-cover flex-shrink-0"/>
+                  <div v-else class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
                      <slot name="item-icon-default"></slot>
                   </div>
-                  <span class="font-normal block truncate">{{ item.name }}</span>
+                  <div class="min-w-0">
+                      <span class="font-semibold block truncate" :title="item.name">{{ item.name }}</span>
+                      <span v-if="item.description" class="text-xs text-gray-500 dark:text-gray-400 block truncate" :title="item.description">{{ item.description }}</span>
+                  </div>
                 </div>
-                <div class="flex-shrink-0 flex items-center">
+                <div class="flex-shrink-0 flex items-center pl-2">
                     <slot name="item-extra" :item="item"></slot>
-                    <span v-if="item.id === modelValue" class="check-mark">
+                    <span v-if="item.id === modelValue" class="check-mark ml-2">
                         <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
                     </span>
                 </div>
@@ -166,7 +172,7 @@ const uniqueId = `menu-trigger-${Math.random().toString(36).substr(2, 9)}`;
 
 <style scoped>
 .menu-item {
-    @apply flex items-center justify-between text-gray-900 dark:text-gray-100 cursor-pointer select-none relative py-2 pl-3 pr-9 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700;
+    @apply flex items-center justify-between text-gray-900 dark:text-gray-100 cursor-pointer select-none relative py-2 pl-3 pr-3 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700;
 }
 .menu-item.is-selected {
     @apply bg-blue-50 dark:bg-blue-900/50;
@@ -175,6 +181,6 @@ const uniqueId = `menu-trigger-${Math.random().toString(36).substr(2, 9)}`;
     @apply font-semibold;
 }
 .check-mark {
-    @apply absolute inset-y-0 right-0 flex items-center pr-4 text-blue-600 dark:text-blue-400;
+    @apply flex items-center text-blue-600 dark:text-blue-400;
 }
 </style>
