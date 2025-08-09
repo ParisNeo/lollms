@@ -32,6 +32,7 @@ from .app_utils import (
     get_installed_app_path, start_app_task, stop_app_task, open_log_files,
     update_item_task, sync_installs_task
 )
+from ascii_colors import trace_exception
 
 apps_zoo_router = APIRouter(
     prefix="/api/apps_zoo",
@@ -263,7 +264,7 @@ def get_installed_apps(db: Session = Depends(get_db)):
             response.append(app_public)
         except Exception as e:
             print(f"CRITICAL: Failed to process installed app '{app.name}' for UI. Error: {e}")
-            traceback.print_exc()
+            trace_exception(e)
             # Skip this item instead of crashing the entire endpoint
             continue
             
