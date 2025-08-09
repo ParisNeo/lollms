@@ -22,73 +22,233 @@ const uiStore = useUiStore();
 
 cytoscape.use(dagre);
 
-function transformMermaidToCytoscape(diagram) {
-    const elements = [];
-    
-    if (!diagram || !diagram.db) {
-        throw new Error('Could not find diagram database in parsed Mermaid data. The data structure might be invalid or from an unsupported version.');
-    }
-
-    const vertices = diagram.db.getVertices();
-    const edges = diagram.db.getEdges();
-
-    for (const id in vertices) {
-        const vertex = vertices[id];
-        const labelText = (vertex.text || '')
-            .replace(/<br\s*\/?>/gi, '\n')
-            .replace(/\\n/g, '\n');
-
-        elements.push({
-            group: 'nodes',
-            data: {
-                id: vertex.id,
-                label: labelText,
-                shape: getShape(vertex.type)
-            }
-        });
-    }
-
-    edges.forEach((edge, index) => {
-        elements.push({
-            group: 'edges',
-            data: {
-                id: `e${index}`,
-                source: edge.start,
-                target: edge.end,
-                label: edge.text || ''
-            }
-        });
-    });
-
-    return elements;
-}
-
 function getShape(type) {
-    switch(type) {
+    switch (type?.toLowerCase()) {
         case 'stadium': return 'round-rectangle';
         case 'circle': return 'ellipse';
         case 'rhombus': return 'diamond';
+        case 'hexagon': return 'hexagon';
+        case 'ellipse': return 'ellipse';
+        case 'roundrect':
+        case 'round-rectangle': return 'round-rectangle';
         default: return 'rectangle';
     }
+}
+
+function parseShapeAndColor(node) {
+    let shape = getShape(node.type);
+    let color = uiStore.currentTheme === 'dark' ? '#374151' : '#F3F4F6';
+    let textColor = uiStore.currentTheme === 'dark' ? '#F9FAFB' : '#111827';
+
+    if (node.styles && node.styles.length) {
+        node.styles.forEach(styleStr => {
+            if (styleStr.includes('fill:')) {
+                const match = styleStr.match(/fill:\s*([^;]+)/);
+                if (match) color = match[1].trim();
+            }
+            if (styleStr.includes('color:')) {
+                const match = styleStr.match(/color:\s*([^;]+)/);
+                if (match) textColor = match[1].trim();
+            }
+            if (styleStr.includes('shape:')) {
+                const match = styleStr.match(/shape:\s*([^;]+)/);
+                if (match) shape = getShape(match[1].trim());
+            }
+        });
+    }
+    return { shape, color, textColor };
+}
+
+function transformMermaidToCytoscape(diagram) {
+    const elements = [];
+
+    // Flowchart / Graph (Mermaid >= 10.x)
+    if (typeof diagram.getNodes === 'function' && typeof diagram.getLinks === 'function') {
+        const nodes = diagram.getNodes();
+        const links = diagram.getLinks();
+        nodes.forEach(node => {
+            const { shape, color, textColor } = parseShapeAndColor(node);
+            elements.push({
+                group: 'nodes',
+                data: {
+                    id: node.id,
+                    label: (node.text || '').replace(/<br\s*\/?>/gi, '\n').replace(/\\n/g, '\n'),
+                    shape,
+                    backgroundColor: color,
+                    textColor
+                }
+            });
+        });
+        links.forEach((link, index) => {
+            elements.push({
+                group: 'edges',
+                data: {
+                    id: `e${index}`,
+                    source: link.source,
+                    target: link.target,
+                    label: link.text || '',
+                    color: link.style?.includes('stroke:')
+                        ? link.style.match(/stroke:\s*([^;]+)/)?.[1].trim()
+                        : '#9CA3AF'
+                }
+            });
+        });
+        return elements;
+    }
+
+    // Flowchart / Graph (Mermaid <= 9.x)
+    if (diagram.db?.getVertices && diagram.db?.getEdges) {
+        const vertices = diagram.db.getVertices();
+        const edges = diagram.db.getEdges();
+        for (const id in vertices) {
+            const vertex = vertices[id];
+            const { shape, color, textColor } = parseShapeAndColor(vertex);
+            elements.push({
+                group: 'nodes',
+                data: {
+                    id: vertex.id,
+                    label: (vertex.text || '').replace(/<br\s*\/?>/gi, '\n').replace(/\\n/g, '\n'),
+                    shape,
+                    backgroundColor: color,
+                    textColor
+                }
+            });
+        }
+        edges.forEach((edge, index) => {
+            elements.push({
+                group: 'edges',
+                data: {
+                    id: `e${index}`,
+                    source: edge.start,
+                    target: edge.end,
+                    label: edge.text || '',
+                    color: edge.style?.includes('stroke:')
+                        ? edge.style.match(/stroke:\s*([^;]+)/)?.[1].trim()
+                        : '#9CA3AF'
+                }
+            });
+        });
+        return elements;
+    }
+
+    // Class Diagram
+    if (diagram.db?.getClasses && diagram.db?.getRelations) {
+        const classes = diagram.db.getClasses();
+        const relations = diagram.db.getRelations();
+        Object.keys(classes).forEach(classId => {
+            const cls = classes[classId];
+            elements.push({
+                group: 'nodes',
+                data: {
+                    id: classId,
+                    label: cls.id || classId,
+                    shape: 'round-rectangle',
+                    backgroundColor: uiStore.currentTheme === 'dark' ? '#1E3A8A' : '#BFDBFE',
+                    textColor: uiStore.currentTheme === 'dark' ? '#F9FAFB' : '#111827'
+                }
+            });
+        });
+        relations.forEach((rel, i) => {
+            elements.push({
+                group: 'edges',
+                data: {
+                    id: `classRel${i}`,
+                    source: rel.id1,
+                    target: rel.id2,
+                    label: rel.relation?.type || '',
+                    color: '#9CA3AF'
+                }
+            });
+        });
+        return elements;
+    }
+
+    // Sequence Diagram
+    if (diagram.db?.actors && diagram.db?.messages) {
+        Object.keys(diagram.db.actors).forEach(actorId => {
+            elements.push({
+                group: 'nodes',
+                data: {
+                    id: actorId,
+                    label: diagram.db.actors[actorId].description || actorId,
+                    shape: 'rectangle',
+                    backgroundColor: uiStore.currentTheme === 'dark' ? '#047857' : '#A7F3D0',
+                    textColor: uiStore.currentTheme === 'dark' ? '#F9FAFB' : '#111827'
+                }
+            });
+        });
+        diagram.db.messages.forEach((msg, i) => {
+            elements.push({
+                group: 'edges',
+                data: {
+                    id: `seq${i}`,
+                    source: msg.from,
+                    target: msg.to,
+                    label: msg.message || '',
+                    color: '#9CA3AF'
+                }
+            });
+        });
+        return elements;
+    }
+
+    // State Diagram
+    if (diagram.db?.states && diagram.db?.transitions) {
+        Object.keys(diagram.db.states).forEach(stateId => {
+            elements.push({
+                group: 'nodes',
+                data: {
+                    id: stateId,
+                    label: stateId,
+                    shape: 'round-rectangle',
+                    backgroundColor: uiStore.currentTheme === 'dark' ? '#6B21A8' : '#E9D5FF',
+                    textColor: uiStore.currentTheme === 'dark' ? '#F9FAFB' : '#111827'
+                }
+            });
+        });
+        diagram.db.transitions.forEach((t, i) => {
+            elements.push({
+                group: 'edges',
+                data: {
+                    id: `state${i}`,
+                    source: t.from,
+                    target: t.to,
+                    label: t.label || '',
+                    color: '#9CA3AF'
+                }
+            });
+        });
+        return elements;
+    }
+
+    // Fallback: Show one node saying "Unsupported diagram type"
+    elements.push({
+        group: 'nodes',
+        data: {
+            id: 'unsupported',
+            label: 'Unsupported Mermaid diagram type',
+            shape: 'rectangle',
+            backgroundColor: '#F87171',
+            textColor: '#FFFFFF'
+        }
+    });
+    return elements;
 }
 
 async function updateGraph() {
     errorMessage.value = '';
     if (!cy) return;
-
     try {
         let diagram;
         if (typeof mermaid.getDiagramFromText === 'function') {
             diagram = await mermaid.getDiagramFromText(props.mermaidCode);
-        } else if (mermaid.mermaidAPI && typeof mermaid.mermaidAPI.getDiagramFromText === 'function') {
-            console.warn("Using fallback mermaid.mermaidAPI.getDiagramFromText. Your dependencies may be out of date. Please run 'npm install'.");
+        } else if (mermaid.mermaidAPI?.getDiagramFromText) {
+            console.warn("Using fallback mermaid.mermaidAPI.getDiagramFromText. Please update Mermaid.");
             diagram = await mermaid.mermaidAPI.getDiagramFromText(props.mermaidCode);
         } else {
-            throw new Error("Compatible Mermaid parsing function not found. Your Mermaid.js version is too old or improperly installed. Please clear node_modules and reinstall.");
+            throw new Error("No compatible Mermaid parser found.");
         }
-        
         const elements = transformMermaidToCytoscape(diagram);
-
         cy.json({ elements });
         cy.layout({
             name: 'dagre',
@@ -104,7 +264,6 @@ async function updateGraph() {
     }
 }
 
-// NEW: Export function
 function exportPNG(filename = 'diagram.png', bgColor = '#FFFFFF') {
     if (!cy) return;
     const pngContent = cy.png({ output: 'base64', bg: bgColor, full: true, scale: 2 });
@@ -117,22 +276,14 @@ function exportPNG(filename = 'diagram.png', bgColor = '#FFFFFF') {
 }
 
 onMounted(() => {
-    console.log("DEBUG: Loaded mermaid object:", mermaid);
-    if (typeof mermaid.version === 'function') {
-        console.log("DEBUG: Mermaid version found:", mermaid.version());
-    } else {
-        console.log("DEBUG: mermaid.version() function not found, indicating a very old version.");
-    }
-
     mermaid.initialize({ startOnLoad: false });
-    
     cy = cytoscape({
         container: cyRef.value,
         style: [
             {
                 selector: 'node',
                 style: {
-                    'background-color': uiStore.currentTheme === 'dark' ? '#374151' : '#F3F4F6',
+                    'background-color': 'data(backgroundColor)',
                     'border-color': uiStore.currentTheme === 'dark' ? '#9CA3AF' : '#6B7280',
                     'border-width': 1,
                     'label': 'data(label)',
@@ -140,19 +291,19 @@ onMounted(() => {
                     'text-valign': 'center',
                     'text-halign': 'center',
                     'shape': 'data(shape)',
-                    'color': uiStore.currentTheme === 'dark' ? '#F9FAFB' : '#111827',
+                    'color': 'data(textColor)',
                     'font-size': '14px',
                     'padding': '15px',
                     'width': 'label',
-                    'height': 'label',
+                    'height': 'label'
                 }
             },
             {
                 selector: 'edge',
                 style: {
                     'width': 2,
-                    'line-color': '#9CA3AF',
-                    'target-arrow-color': '#9CA3AF',
+                    'line-color': 'data(color)',
+                    'target-arrow-color': 'data(color)',
                     'target-arrow-shape': 'triangle',
                     'curve-style': 'bezier',
                     'label': 'data(label)',
@@ -161,7 +312,7 @@ onMounted(() => {
                     'text-background-color': uiStore.currentTheme === 'dark' ? '#1F2937' : '#FFFFFF',
                     'text-background-opacity': 1,
                     'text-background-padding': '3px',
-                    'text-background-shape': 'round-rectangle',
+                    'text-background-shape': 'round-rectangle'
                 }
             }
         ],
@@ -171,9 +322,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-    if (cy) {
-        cy.destroy();
-    }
+    if (cy) cy.destroy();
 });
 
 watch(() => props.mermaidCode, updateGraph);
