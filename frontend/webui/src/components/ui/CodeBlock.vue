@@ -4,7 +4,7 @@ import hljs from 'highlight.js';
 import mermaid from 'mermaid';
 import { useUiStore } from '../../stores/ui';
 import { usePyodideStore } from '../../stores/pyodide';
-import { useDiscussionsStore } from '../../stores/discussions'; // NEW: Import discussions store
+import { useDiscussionsStore } from '../../stores/discussions';
 
 const props = defineProps({
   language: {
@@ -19,7 +19,7 @@ const props = defineProps({
 
 const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
-const discussionsStore = useDiscussionsStore(); // NEW: Initialize discussions store
+const discussionsStore = useDiscussionsStore();
 
 const copyStatus = ref('Copy');
 const executionOutput = ref('');
@@ -175,42 +175,37 @@ async function executeCode() {
             uiStore.openModal('interactiveOutput', { htmlContent: props.code, title: 'HTML Output' });
             executionOutput.value = 'HTML content rendered in a modal canvas.';
         } else if (lang === 'svg') {
-            const background = uiStore.currentTheme === 'dark' ? '#1f2937' : '#f9fafb';
             const htmlContent = `
-                <body style="margin:0; display:flex; justify-content:center; align-items:center; height:100vh; background-color: ${background}; padding: 1rem;">
-                    <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
-                        ${props.code}
-                    </div>
-                </body>
+                <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 1rem;">
+                    ${props.code}
+                </div>
             `;
             uiStore.openModal('interactiveOutput', { htmlContent, title: 'SVG Preview', contentType: 'svg' });
             executionOutput.value = 'SVG rendered in a modal window.';
         } else if (lang === 'mermaid') {
             try {
-                mermaid.initialize({ 
-                    startOnLoad: false, 
-                    theme: uiStore.currentTheme,
-                    securityLevel: 'loose', 
-                });
-                const { svg } = await mermaid.render(`mermaid-graph-${canvasId}`, props.code);
-                
-                const background = uiStore.currentTheme === 'dark' ? '#1f2937' : '#f9fafb';
-
-                const htmlContent = `
-                    <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 1rem; overflow: auto;">
-                        ${svg}
-                    </div>
-                `;
+                // First, try to parse. If it succeeds, open interactive view.
+                await mermaid.parse(props.code);
                 uiStore.openModal('interactiveOutput', {
-                    htmlContent,
-                    title: 'Mermaid Diagram',
+                    title: 'Interactive Mermaid Diagram',
                     contentType: 'mermaid',
+                    interactive: true,
                     sourceCode: props.code
                 });
-                executionOutput.value = 'Mermaid diagram rendered successfully.';
-            } catch (e) {
-                isError.value = true;
-                executionOutput.value = `Mermaid render error: ${e.message}`;
+                executionOutput.value = 'Interactive Mermaid diagram opened.';
+            } catch (parseError) {
+                // If parsing fails, fall back to static rendering to show the error.
+                try {
+                    mermaid.initialize({ startOnLoad: false, theme: uiStore.currentTheme, securityLevel: 'loose' });
+                    const { svg } = await mermaid.render(`mermaid-graph-${canvasId}`, props.code);
+                    const background = uiStore.currentTheme === 'dark' ? '#1f2937' : '#f9fafb';
+                    const htmlContent = `<body style="margin:0; display:flex; justify-content:center; align-items:center; height:100vh; background-color: ${background}; padding: 1rem;"><div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">${svg}</div></body>`;
+                    uiStore.openModal('interactiveOutput', { htmlContent, title: 'Mermaid Diagram (Static)', contentType: 'mermaid', sourceCode: props.code });
+                    executionOutput.value = 'Mermaid diagram rendered successfully as a static image due to parsing issues for interactive mode.';
+                } catch (renderError) {
+                    isError.value = true;
+                    executionOutput.value = `Mermaid render error: ${renderError.message}`;
+                }
             }
         } else if (lang === 'javascript') {
             let capturedOutput = '';
@@ -236,16 +231,9 @@ async function executeCode() {
     }
 }
 
-// NEW: Function to send the error back to the AI
 function sendErrorToAI() {
-    const prompt = `The following \`${props.language}\` code block failed to execute. Please analyze the error and provide a corrected version of the code.
-
-**Original Code:**
-\`\`\`${props.language}
-${props.code}
-\`\`\`
-
-**Error Message:**
+    const prompt = `The code in your previous response failed to execute. Please fix it.
+Error message:
 \`\`\`
 ${executionOutput.value}
 \`\`\`
@@ -352,7 +340,6 @@ async function downloadCreatedFile(filename) {
                 </li>
             </ul>
         </div>
-        <!-- NEW: Send error to AI button -->
         <div v-if="isError" class="mt-4 pt-3 border-t border-red-500/30">
             <button @click="sendErrorToAI" class="btn btn-danger-outline btn-sm">
                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
