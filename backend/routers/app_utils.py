@@ -1,3 +1,4 @@
+# backend/routers/app_utils.py
 import base64
 import shutil
 import subprocess
@@ -28,6 +29,8 @@ from backend.models import TaskInfo
 from backend.config import APPS_ROOT_PATH, MCPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH, APPS_ZOO_ROOT_PATH
 from backend.task_manager import task_manager, Task
 from backend.zoo_cache import get_all_items
+from backend.settings import settings
+from backend.utils import get_accessible_host
 
 open_log_files: Dict[str, Any] = {}
 
@@ -236,15 +239,18 @@ def start_app_task(task: Task, app_id: str):
         venv_path = app_path / "venv"
         python_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "python"
         
+        main_server_host = settings.get("host", "0.0.0.0")
+        host_to_bind = "0.0.0.0" if main_server_host in ["0.0.0.0", "::"] else "127.0.0.1"
+
         command_template = (app.app_metadata or {}).get('run_command')
         if command_template:
-            command = [str(arg).replace("{python_executable}", str(python_executable)).replace("{port}", str(app.port)) for arg in command_template]
+            command = [str(arg).replace("{python_executable}", str(python_executable)).replace("{port}", str(app.port)).replace("{host}", host_to_bind) for arg in command_template]
         else:
             item_type = (app.app_metadata or {}).get('item_type', 'app')
             if item_type == 'mcp':
-                command = [str(python_executable), "server.py", "--port", str(app.port)]
+                command = [str(python_executable), "server.py", "--host", host_to_bind, "--port", str(app.port)]
             else:
-                command = [str(python_executable), "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", str(app.port)]
+                command = [str(python_executable), "-m", "uvicorn", "server:app", "--host", host_to_bind, "--port", str(app.port)]
 
         task.log(f"Executing start command: {' '.join(command)}")
         process = subprocess.Popen(command, cwd=str(app_path), stdout=log_file_handle, stderr=subprocess.STDOUT)
@@ -256,9 +262,10 @@ def start_app_task(task: Task, app_id: str):
         if process.poll() is not None:
             raise Exception(f"Application failed to start. Process exited with code {process.poll()}. Check task logs and app.log.")
 
+        app_host = get_accessible_host()
         app.pid = process.pid
         app.status = 'running'
-        app.url = f"http://localhost:{app.port}"
+        app.url = f"http://{app_host}:{app.port}"
         app.active = True
         db_session.commit()
         

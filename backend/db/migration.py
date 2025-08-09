@@ -39,6 +39,10 @@ def _bootstrap_global_settings(connection):
             "value": config.get("server", {}).get("ssl_keyfile", ""),
             "type": "string", "description": "Path to the SSL private key file (e.g., key.pem). Requires a restart.", "category": "Server"
         },
+        "public_domain_name": {
+            "value": "",
+            "type": "string", "description": "Public domain or IP to use for links when server is on 0.0.0.0. If empty, auto-detects IP.", "category": "Server"
+        },
         "allow_new_registrations": {
             "value": config.get("app_settings", {}).get("allow_new_registrations", True),
             "type": "boolean", "description": "Allow new users to register an account.", "category": "Registration"

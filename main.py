@@ -1,3 +1,4 @@
+# main.py
 import shutil
 import datetime
 from pathlib import Path
@@ -443,14 +444,11 @@ app.include_router(discussion_router)
 app.include_router(admin_router)
 app.include_router(languages_router)
 app.include_router(personalities_router)
-app.include_router(apps_router)
-app.include_router(mcp_router)
-app.include_router(discussion_tools_router)
+app.include_router(friends_router)
+app.include_router(dm_router)
 app.include_router(store_files_router)
 app.include_router(datastore_router)
 app.include_router(social_router)
-app.include_router(friends_router)
-app.include_router(dm_router)
 app.include_router(users_router)
 app.include_router(dm_ws_router)
 app.include_router(api_keys_router)
@@ -501,20 +499,22 @@ if __name__ == "__main__":
     if host_setting == "0.0.0.0":
         import psutil
         import socket
+        from backend.utils import get_accessible_host
+
+        accessible_host = get_accessible_host()
+        if accessible_host != 'localhost':
+            ASCIIColors.magenta(f"Recommended public access URL: {protocol}://{accessible_host}:{port_setting}/")
+        
         # Always include localhost
-        ASCIIColors.magenta(f"Access UI at: {protocol}://localhost:{port_setting}/")
+        ASCIIColors.magenta(f"Or access locally at: {protocol}://localhost:{port_setting}/")
 
         # Get all network interfaces and IPs
         for iface, addrs in psutil.net_if_addrs().items():
             for addr in addrs:
                 if addr.family == socket.AF_INET:
-                    ASCIIColors.magenta(f"Access UI at: {protocol}://{addr.address}:{port_setting}/")
-        # Optionally print hostnames
-        hostname = socket.gethostname()
-        fqdn = socket.getfqdn()
-        ASCIIColors.magenta(f"Access UI via hostname: {protocol}://{hostname}:{port_setting}/")
-        if fqdn != hostname:
-            ASCIIColors.magenta(f"Access UI via FQDN: {protocol}://{fqdn}:{port_setting}/")
+                    if addr.address != accessible_host and addr.address != '127.0.0.1':
+                        ASCIIColors.magenta(f"Also available at: {protocol}://{addr.address}:{port_setting}/")
+
     else:
         ASCIIColors.magenta(f"Access UI at: {protocol}://{host_setting}:{port_setting}/")
     ASCIIColors.green(f"Using {workers} Workers")

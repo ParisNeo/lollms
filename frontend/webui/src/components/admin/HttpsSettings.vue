@@ -7,6 +7,9 @@ const adminStore = useAdminStore();
 const uiStore = useUiStore();
 
 const form = ref({
+    host: '0.0.0.0',
+    port: 9642,
+    public_domain_name: '',
     https_enabled: false,
     ssl_certfile: '',
     ssl_keyfile: ''
@@ -40,7 +43,7 @@ function populateForm() {
         serverSettings.value.forEach(setting => {
             newFormState[setting.key] = setting.value;
         });
-        form.value = newFormState;
+        form.value = { ...form.value, ...newFormState };
         pristineState = JSON.stringify(form.value);
         hasChanges.value = false;
     }
@@ -50,7 +53,7 @@ async function handleSave() {
     isLoading.value = true;
     try {
         await adminStore.updateGlobalSettings({ ...form.value });
-        uiStore.addNotification('HTTPS settings saved. A server restart is required for changes to take effect.', 'warning', 8000);
+        uiStore.addNotification('Server settings saved. A server restart is required for changes to take effect.', 'warning', 8000);
     } catch (error) {
         // Error is handled globally
     } finally {
@@ -99,6 +102,14 @@ async function handleSave() {
                         <input type="number" id="port" v-model.number="form.port" class="input-field mt-1" placeholder="e.g., 9642">
                     </div>
                 </div>
+
+                <!-- Public domain -->
+                <div>
+                    <label for="public_domain_name" class="block text-sm font-medium">Public Domain Name / IP</label>
+                    <input type="text" id="public_domain_name" v-model="form.public_domain_name" class="input-field mt-1" placeholder="e.g., my-lollms.com">
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Used for links to apps when the server is bound to 0.0.0.0. If empty, it will try to auto-detect the server's public IP.</p>
+                </div>
+
 
                 <!-- HTTPS Toggle -->
                 <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
