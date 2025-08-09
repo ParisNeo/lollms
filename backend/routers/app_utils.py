@@ -230,7 +230,7 @@ def start_app_task(task: Task, app_id: str):
         if not app: raise ValueError("Installed app metadata not found.")
 
         log_file_path = app_path / "app.log"
-        if log_file_path.exists(): log_file_path.unlink(missing_ok=True)
+        # FIX: Open in "w" mode which creates the file or truncates it, preventing errors.
         log_file_handle = open(log_file_path, "w", encoding="utf-8", buffering=1)
 
         venv_path = app_path / "venv"
