@@ -1,47 +1,210 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch, nextTick } from 'vue';
 import { useUiStore } from '../../stores/ui';
+import IconMaximize from '../../assets/icons/IconMaximize.vue';
+import IconMinimize from '../../assets/icons/IconMinimize.vue';
+import IconXMark from '../../assets/icons/IconXMark.vue';
+import IconPlus from '../../assets/icons/IconPlus.vue';
+import IconMinus from '../../assets/icons/IconMinus.vue';
+import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
+import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
+import IconCode from '../../assets/icons/IconCode.vue';
 
 const uiStore = useUiStore();
+const isFullScreen = ref(false);
+
+const scale = ref(1);
+const posX = ref(0);
+const posY = ref(0);
+let isDragging = false;
+let startX = 0;
+let startY = 0;
+
+const viewerRef = ref(null);
 
 const isOpen = computed(() => uiStore.isModalOpen('interactiveOutput'));
 const data = computed(() => uiStore.modalData('interactiveOutput'));
+const isVisualContent = computed(() => data.value?.contentType === 'svg' || data.value?.contentType === 'mermaid');
+
+const contentStyle = computed(() => {
+    return {
+        transform: `translate(${posX.value}px, ${posY.value}px) scale(${scale.value})`,
+        cursor: isDragging.value ? 'grabbing' : (scale.value > 1 ? 'grab' : 'default')
+    };
+});
 
 function closeModal() {
     uiStore.closeModal('interactiveOutput');
 }
+
+function toggleFullScreen() {
+    isFullScreen.value = !isFullScreen.value;
+}
+
+function resetView() {
+    scale.value = 1;
+    posX.value = 0;
+    posY.value = 0;
+}
+
+watch(isOpen, (newVal) => {
+    if (!newVal) {
+        isFullScreen.value = false;
+        resetView();
+    }
+});
+
+const handleWheel = (event) => {
+    if (!isVisualContent.value) return;
+    event.preventDefault();
+    const scaleAmount = 0.1;
+    const rect = viewerRef.value.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+
+    const newScale = scale.value + (event.deltaY < 0 ? scaleAmount : -scaleAmount) * scale.value;
+    const clampedScale = Math.min(Math.max(0.5, newScale), 10);
+
+    const scaleChange = clampedScale - scale.value;
+    posX.value -= (x - posX.value) * (scaleChange / scale.value);
+    posY.value -= (y - posY.value) * (scaleChange / scale.value);
+    
+    scale.value = clampedScale;
+};
+
+const startDrag = (event) => {
+    if (!isVisualContent.value || scale.value <= 1) return;
+    event.preventDefault();
+    isDragging = true;
+    startX = event.clientX - posX.value;
+    startY = event.clientY - posY.value;
+    window.addEventListener('mousemove', drag);
+    window.addEventListener('mouseup', stopDrag);
+};
+
+const drag = (event) => {
+    if (isDragging) {
+        event.preventDefault();
+        posX.value = event.clientX - startX;
+        posY.value = event.clientY - startY;
+    }
+};
+
+const stopDrag = () => {
+    isDragging = false;
+    window.removeEventListener('mousemove', drag);
+    window.removeEventListener('mouseup', stopDrag);
+};
+
+const zoomIn = () => { if (isVisualContent.value) scale.value = Math.min(10, scale.value + 0.25); };
+const zoomOut = () => { if (isVisualContent.value) scale.value = Math.max(0.5, scale.value - 0.25); };
+
+function downloadFile(content, filename, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function downloadSVG() {
+    if (data.value?.htmlContent) {
+        // Extract SVG from the HTML wrapper
+        const match = /<svg[\s\S]*?<\/svg>/.exec(data.value.htmlContent);
+        if (match) {
+            downloadFile(match[0], `${data.value.title || 'diagram'}.svg`, 'image/svg+xml');
+        }
+    }
+}
+
+function downloadSource() {
+    if (data.value?.sourceCode) {
+        downloadFile(data.value.sourceCode, `${data.value.title || 'source'}.md`, 'text/markdown');
+    }
+}
+
+const modalPanelClass = computed(() => {
+    return isFullScreen.value
+        ? 'w-screen h-screen rounded-none'
+        : 'w-full max-w-4xl h-[80vh] rounded-lg shadow-2xl';
+});
+
+const modalBodyClass = computed(() => {
+    return isFullScreen.value ? 'p-0' : 'p-4';
+});
 </script>
 
 <template>
-  <div v-if="isOpen" class="modal-overlay" @click.self="closeModal">
-    <div class="modal-panel interactive-output-modal">
-      <div class="modal-header">
-        <h3>Interactive Output</h3>
-        <button @click="closeModal" class="modal-close-btn">×</button>
-      </div>
-      <div class="modal-body">
-        <!-- This modal is now ONLY for the Pygame canvas -->
-        <div v-if="data?.canvasId" class="canvas-container">
-          <canvas :id="data.canvasId" class="w-full rounded-md border border-gray-300 dark:border-gray-600 bg-black"></canvas>
-        </div>
-      </div>
-    </div>
-  </div>
+    <Teleport to="body">
+        <Transition enter-active-class="transition-opacity ease-out duration-300" enter-from-class="opacity-0"
+            enter-to-class="opacity-100" leave-active-class="transition-opacity ease-in duration-200"
+            leave-from-class="opacity-100" leave-to-class="opacity-0">
+            <div v-if="isOpen" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 flex items-center justify-center"
+                @click.self="closeModal">
+                <Transition enter-active-class="transition-all ease-out duration-300"
+                    enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100"
+                    leave-active-class="transition-all ease-in duration-200" leave-from-class="opacity-100 scale-100"
+                    leave-to-class="opacity-0 scale-95">
+                    <div :class="modalPanelClass"
+                        class="bg-white dark:bg-gray-900 flex flex-col max-h-screen transition-all duration-300 ease-in-out">
+                        <div v-if="isFullScreen"
+                            class="absolute inset-0 bg-gray-800 -z-10 bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(120,119,198,0.3),rgba(255,255,255,0))]">
+                        </div>
+
+                        <header class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                            <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ data?.title || 'Interactive Output' }}</h3>
+                            <div class="flex items-center space-x-2">
+                                <button @click="toggleFullScreen" class="modal-header-btn" :title="isFullScreen ? 'Exit Fullscreen' : 'Fullscreen'">
+                                    <IconMinimize v-if="isFullScreen" class="w-5 h-5" />
+                                    <IconMaximize v-else class="w-5 h-5" />
+                                </button>
+                                <button @click="closeModal" class="modal-header-btn" title="Close">
+                                    <IconXMark class="w-5 h-5" />
+                                </button>
+                            </div>
+                        </header>
+
+                        <main class="flex-grow min-h-0 relative" :class="modalBodyClass">
+                            <div ref="viewerRef" class="w-full h-full overflow-hidden" @wheel="handleWheel" @mousedown="startDrag">
+                                <div v-if="data?.canvasId" class="w-full h-full rounded-md border border-gray-300 dark:border-gray-600 bg-black overflow-hidden">
+                                    <canvas :id="data.canvasId" class="w-full h-full"></canvas>
+                                </div>
+                                <div v-else-if="data?.htmlContent" class="w-full h-full"
+                                     :class="isVisualContent ? '' : 'bg-white rounded-md border border-gray-300 dark:border-gray-600 overflow-hidden'">
+                                    <div v-if="isVisualContent" v-html="data.htmlContent" :style="contentStyle" class="w-full h-full transition-transform duration-75"></div>
+                                    <iframe v-else :srcdoc="data.htmlContent" class="w-full h-full" sandbox="allow-scripts allow-same-origin"></iframe>
+                                </div>
+                                <div v-else class="flex items-center justify-center h-full text-gray-500">
+                                    <p>No interactive content provided.</p>
+                                </div>
+                            </div>
+                            
+                            <!-- Toolbar for visual content -->
+                            <div v-if="isVisualContent" class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-gray-900/60 text-white p-2 rounded-lg backdrop-blur-md shadow-lg">
+                                <button @click="zoomOut" class="btn-viewer" title="Zoom Out"><IconMinus class="w-5 h-5" /></button>
+                                <button @click="resetView" class="btn-viewer px-3 text-sm font-mono" title="Reset View">{{ Math.round(scale * 100) }}%</button>
+                                <button @click="zoomIn" class="btn-viewer" title="Zoom In"><IconPlus class="w-5 h-5" /></button>
+                                <div class="w-px h-6 bg-white/20 mx-1"></div>
+                                <button @click="downloadSVG" class="btn-viewer" title="Download as SVG"><IconArrowDownTray class="w-5 h-5" /></button>
+                                <button v-if="data?.contentType === 'mermaid'" @click="downloadSource" class="btn-viewer" title="Download Mermaid Source"><IconCode class="w-5 h-5" /></button>
+                            </div>
+                        </main>
+                    </div>
+                </Transition>
+            </div>
+        </Transition>
+    </Teleport>
 </template>
 
 <style scoped>
-.interactive-output-modal {
-    max-width: 80vw;
-    width: 900px;
+.modal-header-btn {
+    @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors;
 }
-.modal-body {
-    padding: 1.5rem;
-    max-height: 85vh;
-    overflow-y: auto;
-}
-.canvas-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+.btn-viewer {
+    @apply p-2 rounded-md hover:bg-white/20 transition-colors flex items-center justify-center;
 }
 </style>

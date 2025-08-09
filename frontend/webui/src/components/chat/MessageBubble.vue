@@ -1,13 +1,12 @@
 <script setup>
-import { computed, ref, onMounted, watch, nextTick } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
-import { marked } from 'marked';
 
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
-import CodeBlock from './CodeBlock.vue';
+import MessageContentRenderer from '../ui/MessageContentRenderer.vue';
 import StepDetail from './StepDetail.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -52,7 +51,6 @@ const isEventsCollapsed = ref(true);
 const isEditing = ref(false);
 const editedContent = ref('');
 const codeMirrorView = ref(null);
-const messageContentRef = ref(null);
 const isFormattingMenuOpen = ref(false);
 const isSourcesVisible = ref(false);
 const editedImages = ref([]);
@@ -68,70 +66,7 @@ const senderPersonalityIcon = computed(() => {
     return personality ? personality.icon_base64 : null;
 });
 
-
-const mathPlaceholders = new Map();
-let mathCounter = 0;
-
-function protectMath(text) {
-    if (!text) return text;
-    mathCounter = 0;
-    mathPlaceholders.clear();
-
-    return text.replace(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g, (match) => {
-        const placeholder = `<!--MATH_PLACEHOLDER_${mathCounter}-->`;
-        mathPlaceholders.set(placeholder, match);
-        mathCounter++;
-        return placeholder;
-    });
-}
-
-function unprotectHtml(html) {
-    if (!html || mathPlaceholders.size === 0) return html;
-    let result = html;
-    for (const [placeholder, original] of mathPlaceholders.entries()) {
-        const regex = new RegExp(placeholder.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
-        result = result.replace(regex, original);
-    }
-    return result;
-}
-
-const parsedMarkdown = (content) => {
-    if (typeof content !== 'string') return '';
-    const protectedContent = protectMath(content);
-    const rawHtml = marked.parse(protectedContent, { gfm: true, breaks: true, mangle: false, smartypants: false });
-    return unprotectHtml(rawHtml);
-};
-
-function renderMath() {
-  if (messageContentRef.value && window.renderMathInElement) {
-    window.renderMathInElement(messageContentRef.value, {
-      delimiters: [
-        { left: '$$', right: '$$', display: true },
-        { left: '\\[', right: '\\]', display: true },
-        { left: '\\(', right: '\\)', display: false },
-        { left: '$', right: '$', display: false }
-      ],
-      throwOnError: false
-    });
-  }
-}
-
-watch(() => props.message.content, async () => {
-    if (isEditing.value) isEditing.value = false;
-    await nextTick();
-    renderMath();
-}, { flush: 'post' });
-
-watch(isEditing, async (newVal, oldVal) => {
-    if (oldVal === true && newVal === false) {
-        await nextTick();
-        renderMath();
-    }
-});
-
-
 onMounted(() => {
-    renderMath();
     if (props.message.sources && props.message.sources.length > 3) {
         isSourcesVisible.value = false;
     } else {
@@ -142,7 +77,6 @@ onMounted(() => {
         delete props.message.startInEditMode;
     }
 });
-
 
 const imagesToRender = computed(() => {
     if (props.message.localImageUrls?.length > 0) return props.message.localImageUrls;
@@ -165,40 +99,6 @@ const toggleImage = (index) => {
     });
 };
 
-const messageParts = computed(() => {
-    if (!props.message.content || props.message.isStreaming) return [];
-    const parts = [];
-    const content = props.message.content;
-    const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/g;
-    let lastIndex = 0, match;
-    while ((match = thinkRegex.exec(content)) !== null) {
-        if (match.index > lastIndex) parts.push({ type: 'content', content: content.substring(lastIndex, match.index) });
-        if (match[1] && match[1].trim()) parts.push({ type: 'think', content: match[1].trim() });
-        lastIndex = thinkRegex.lastIndex;
-    }
-    if (lastIndex < content.length) parts.push({ type: 'content', content: content.substring(lastIndex) });
-    return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
-});
-
-const getContentTokens = (text) => {
-    if (!text) return [];
-    const protectedText = protectMath(text);
-    const tokens = Array.from(marked.lexer(protectedText, { mangle: false, smartypants: false }));
-
-    return tokens.map(token => {
-        const unprotectedToken = { ...token };
-        if (unprotectedToken.raw) {
-            unprotectedToken.raw = unprotectHtml(unprotectedToken.raw);
-        }
-        if (unprotectedToken.text) { 
-            unprotectedToken.text = unprotectHtml(unprotectedToken.text);
-        }
-        return unprotectedToken;
-    });
-};
-
-const parsedStreamingContent = computed(() => parsedMarkdown(props.message.content));
-
 const isUser = computed(() => props.message.sender_type === 'user');
 const isAi = computed(() => props.message.sender_type === 'assistant');
 const isSystem = computed(() => props.message.sender_type === 'system');
@@ -220,7 +120,6 @@ const sortedSources = computed(() => {
     if (!hasSources.value) return [];
     return [...props.message.sources].sort((a, b) => (b.similarity_percent || 0) - (a.similarity_percent || 0));
 });
-
 
 const lastEventSummary = computed(() => {
     if (!hasEvents.value) return '';
@@ -439,25 +338,12 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                                 </div>
                             </div>
                         </div>
-                        <div :key="message.isStreaming ? 'streaming' : 'settled'" ref="messageContentRef">
-                            <div v-if="message.content || (isUser && !imagesToRender.length)" class="message-prose">
-                                <div v-if="message.isStreaming" v-html="parsedStreamingContent"></div>
-                                <template v-else>
-                                    <template v-for="(part, index) in messageParts" :key="index">
-                                        <template v-if="part.type === 'content'">
-                                            <template v-for="(token, tokenIndex) in getContentTokens(part.content)" :key="tokenIndex">
-                                                <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" />
-                                                <div v-else v-html="parsedMarkdown(token.raw)"></div>
-                                            </template>
-                                        </template>
-                                        <details v-else-if="part.type === 'think'" class="think-block my-4" open>
-                                            <summary class="think-summary"><IconThinking class="h-5 w-5 flex-shrink-0" /><span>Thinking...</span></summary>
-                                            <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
-                                        </details>
-                                    </template>
-                                </template>
-                            </div>
-                        </div>
+                        <MessageContentRenderer
+                            :content="message.content"
+                            :is-streaming="message.isStreaming"
+                            :is-user="isUser"
+                            :has-images="imagesToRender.length > 0"
+                        />
                         <div v-if="message.isStreaming && !message.content && (!imagesToRender || imagesToRender.length === 0)" class="typing-indicator">
                             <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                         </div>
@@ -552,17 +438,10 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
 .message-content-container { @apply max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex items-start space-x-4; }
 .system-bubble { @apply text-center bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs italic p-2 rounded-lg max-w-md mx-auto shadow-none; }
 .model-info { @apply text-xs leading-tight text-gray-400 dark:text-gray-500 font-mono; }
-.message-prose { @apply prose prose-base dark:prose-invert max-w-none break-words; }
 .typing-indicator .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background-color: currentColor; margin: 0 1px; animation: bounce 1.4s infinite ease-in-out both; }
 .typing-indicator .dot:nth-of-type(1) { animation-delay: -0.32s; }
 .typing-indicator .dot:nth-of-type(2) { animation-delay: -0.16s; }
 @keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
-.think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
-details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
-.think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
-.think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
-.think-summary::-webkit-details-marker { display: none; }
-.think-content { @apply p-3; }
 
 .source-item { @apply flex items-center gap-3 p-2 rounded-md transition-colors cursor-pointer bg-gray-50 hover:bg-gray-200 dark:bg-gray-700/50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200; }
 .source-item .similarity-chip { @apply w-2.5 h-2.5 rounded-full flex-shrink-0; }

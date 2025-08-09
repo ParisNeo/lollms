@@ -39,6 +39,7 @@
     "katex": "^0.16.10",
     "lowlight": "^3.3.0",
     "marked": "^13.0.0",
+    "mermaid": "^11.9.0",
     "pinia": "^2.1.7",
     "vue": "^3.4.27",
     "vue-codemirror": "^6.1.1",
