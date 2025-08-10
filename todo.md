@@ -31,9 +31,10 @@ new ui:
 - OK key generation for regular users
 - OK centralize background processes
 - OK add email sending to tasks
+- OK add applications/mcps log in with permissions via introspect
+- OK add a forgot my password button to the login modal that sends a notification to the administrator.
+- OK add the apps zoo to lollms_chat
 
-## SSO
-- add applications/mcps log in with permissions via introspect
 
 ## Discussion:
 - start/stop events must be collapsible, all that happens in between should be put inside in between
@@ -41,14 +42,13 @@ new ui:
 - support for equations with /[ /] format
 - Add the possibility to use multiple bindings at once with different configurations
 - fix the return key not sending the message
-- add a upload to discussion button that uploads documents to the discussion and shows them to the user if needed
 - fix branching
-- add add/view/remove files to the discussion with options (full file or RAG for each)
 - when cancelling the generation, refresh the discussion
 - when the generation fails, refresh the discussion
 - the remove is not updating the discussion after removing
 - share discussion with friends with permission to participate to the discussion or not (read/write or READ)
-
+- activate optional RAG for discussion datazone
+- fix deleting a message deleting the whole sub children
 
 ### emailing system
 - email users enhance with ai not working
@@ -89,7 +89,6 @@ new ui:
 
 ## mcps
 - change refresh mcps to reload mcps
-- add a forgot my password button to the login modal that sends a notification to the administrator.
 - refresh mcps must be converted to reload mcps
 - add protection for MCP output
 
@@ -110,7 +109,6 @@ new ui:
 - add a cleaning cron
 
 ## integrate lollms apps
-- add the apps zoo to lollms_chat
 
 ## Scratchpad
 - add summerize document to scratchpad ** IMPORTANT **
@@ -119,3 +117,9 @@ new ui:
 ## tasks management
 - task status is not automatically updated and reflected on all the ui
 - when a task is done, it needs to update the corresponding ui
+
+
+## installer
+- fix installation process
+- add docker option
+- build docker image

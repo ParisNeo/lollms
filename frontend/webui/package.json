@@ -33,6 +33,7 @@
     "@tiptap/vue-3": "^2.25.0",
     "@vueuse/core": "^13.5.0",
     "axios": "^1.7.2",
+    "canvg": "^4.0.3",
     "codemirror": "^6.0.2",
     "cytoscape": "^3.33.0",
     "cytoscape-dagre": "^2.5.0",

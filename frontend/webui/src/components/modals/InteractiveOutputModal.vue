@@ -8,44 +8,40 @@ import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconMinus from '../../assets/icons/IconMinus.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
+import IconArrowPath from '../../assets/icons/IconArrowPath.vue'; // Using a reset icon
 import InteractiveMermaid from './InteractiveMermaid.vue'; 
 
 const uiStore = useUiStore();
 const isFullScreen = ref(false);
+const viewerRef = ref(null);
+const mermaidInstance = ref(null); // Ref to the InteractiveMermaid child component
+const pngBgColor = ref(uiStore.currentTheme === 'dark' ? '#1F2937' : '#FFFFFF');
+
+const isOpen = computed(() => uiStore.isModalOpen('interactiveOutput'));
+const data = computed(() => uiStore.modalData('interactiveOutput'));
+const isInteractiveMermaid = computed(() => data.value?.contentType === 'mermaid');
+const isPlainSvg = computed(() => data.value?.contentType === 'svg');
+const isVisualContent = computed(() => isPlainSvg.value || isInteractiveMermaid.value);
+
+// --- State and functions for PLAIN SVG pan/zoom ---
 const scale = ref(1);
 const posX = ref(0);
 const posY = ref(0);
 let isDragging = false;
 let startX = 0;
 let startY = 0;
-const viewerRef = ref(null);
-const mermaidInstance = ref(null);
-const pngBgColor = ref(uiStore.currentTheme === 'dark' ? '#1F2937' : '#FFFFFF');
-
-const isOpen = computed(() => uiStore.isModalOpen('interactiveOutput'));
-const data = computed(() => uiStore.modalData('interactiveOutput'));
-const isVisualContent = computed(() => data.value?.contentType === 'svg' || data.value?.contentType === 'mermaid');
-const isInteractiveMermaid = computed(() => data.value?.contentType === 'mermaid');
-const isPlainSvg = computed(() => data.value?.contentType === 'svg');
 
 const contentStyle = computed(() => ({
     transform: `translate(${posX.value}px, ${posY.value}px) scale(${scale.value})`,
     cursor: isDragging.value ? 'grabbing' : (scale.value > 1 ? 'grab' : 'default')
 }));
 
-function closeModal() { uiStore.closeModal('interactiveOutput'); }
-function toggleFullScreen() { isFullScreen.value = !isFullScreen.value; }
-function resetView() { scale.value = 1; posX.value = 0; posY.value = 0; }
-
-watch(isOpen, (newVal) => { if (!newVal) { isFullScreen.value = false; resetView(); }});
-watch(() => uiStore.currentTheme, (newTheme) => { pngBgColor.value = newTheme === 'dark' ? '#1F2937' : '#FFFFFF'; });
-
+function resetPlainSvgView() { scale.value = 1; posX.value = 0; posY.value = 0; }
 const handleWheel = (event) => {
     if (!isPlainSvg.value) return;
     const scaleAmount = 0.1;
     const rect = viewerRef.value.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const x = event.clientX - rect.left; const y = event.clientY - rect.top;
     const newScale = scale.value + (event.deltaY < 0 ? scaleAmount : -scaleAmount) * scale.value;
     const clampedScale = Math.min(Math.max(0.5, newScale), 10);
     const scaleChange = clampedScale - scale.value;
@@ -53,48 +49,66 @@ const handleWheel = (event) => {
     posY.value -= (y - posY.value) * (scaleChange / scale.value);
     scale.value = clampedScale;
 };
-
 const startDrag = (event) => {
     if (!isPlainSvg.value || scale.value <= 1) return;
-    event.preventDefault();
-    isDragging = true;
-    startX = event.clientX - posX.value;
-    startY = event.clientY - posY.value;
-    window.addEventListener('mousemove', drag);
-    window.addEventListener('mouseup', stopDrag);
+    event.preventDefault(); isDragging = true;
+    startX = event.clientX - posX.value; startY = event.clientY - posY.value;
+    window.addEventListener('mousemove', drag); window.addEventListener('mouseup', stopDrag);
 };
-
 const drag = (event) => { if (isDragging) { event.preventDefault(); posX.value = event.clientX - startX; posY.value = event.clientY - startY; } };
 const stopDrag = () => { isDragging = false; window.removeEventListener('mousemove', drag); window.removeEventListener('mouseup', stopDrag); };
 const zoomIn = () => { if (isPlainSvg.value) scale.value = Math.min(10, scale.value + 0.25); };
 const zoomOut = () => { if (isPlainSvg.value) scale.value = Math.max(0.5, scale.value - 0.25); };
+// --- End of Plain SVG logic ---
 
+function closeModal() { uiStore.closeModal('interactiveOutput'); }
+function toggleFullScreen() { isFullScreen.value = !isFullScreen.value; }
+
+/**
+ * UNIFIED Reset View function.
+ * It calls the appropriate reset method based on the content type.
+ */
+function resetView() {
+    if (isInteractiveMermaid.value) {
+        mermaidInstance.value?.resetView();
+    } else if (isPlainSvg.value) {
+        resetPlainSvgView();
+    }
+}
+
+watch(isOpen, (newVal) => { if (!newVal) { isFullScreen.value = false; resetPlainSvgView(); }});
+watch(() => uiStore.currentTheme, (newTheme) => { pngBgColor.value = newTheme === 'dark' ? '#1F2937' : '#FFFFFF'; });
+
+// --- UNIFIED Download Functions ---
 function downloadFile(content, filename, mimeType) {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
 }
 
-function downloadSVG() {
-    if (isPlainSvg.value && data.value?.htmlContent) {
+function handleDownloadSVG() {
+    if (isInteractiveMermaid.value) {
+        mermaidInstance.value?.exportSVG({ filename: `${data.value.title || 'diagram'}.svg` });
+    } else if (isPlainSvg.value && data.value?.htmlContent) {
         const match = /<svg[\s\S]*?<\/svg>/.exec(data.value.htmlContent);
         if (match) downloadFile(match[0], `${data.value.title || 'diagram'}.svg`, 'image/svg+xml');
     }
 }
 
-function downloadPNG() {
-    if (mermaidInstance.value?.exportPNG) {
-        mermaidInstance.value.exportPNG(`${data.value.title || 'diagram'}.png`, pngBgColor.value);
+function handleDownloadPNG() {
+    if (isInteractiveMermaid.value) {
+        mermaidInstance.value?.exportPNG({ filename: `${data.value.title || 'diagram'}.png`, bgColor: pngBgColor.value });
     }
+    // Note: PNG export for plain SVG is not implemented here, but could be added.
 }
 
-function downloadSource() {
+function handleDownloadSource() {
     if (isInteractiveMermaid.value && data.value?.sourceCode) {
         downloadFile(data.value.sourceCode, `${data.value.title || 'source'}.md`, 'text/markdown');
     }
 }
 
-const modalPanelClass = computed(() => isFullScreen.value ? 'w-screen h-screen rounded-none' : 'w-full max-w-4xl h-[80vh] rounded-lg shadow-2xl');
+const modalPanelClass = computed(() => isFullScreen.value ? 'w-screen h-screen rounded-none' : 'w-full max-w-5xl h-[85vh] rounded-lg shadow-2xl');
 const modalBodyClass = computed(() => isFullScreen.value ? 'p-0' : 'p-4');
 </script>
 
@@ -112,29 +126,44 @@ const modalBodyClass = computed(() => isFullScreen.value ? 'p-0' : 'p-4');
                             </div>
                         </header>
                         <main class="flex-grow min-h-0 relative" :class="modalBodyClass">
-                            <div ref="viewerRef" class="absolute inset-0 overflow-hidden" @wheel.prevent="handleWheel" @mousedown="startDrag">
+                            <div ref="viewerRef" class="absolute inset-0 overflow-hidden bg-gray-100 dark:bg-gray-800/50" @wheel.prevent="handleWheel" @mousedown="startDrag">
+                                <!-- The ref="mermaidInstance" links this component to the script -->
                                 <InteractiveMermaid v-if="isInteractiveMermaid" :mermaid-code="data.sourceCode" ref="mermaidInstance" />
+                                
                                 <div v-else-if="data?.htmlContent" class="w-full h-full">
                                     <div v-if="isPlainSvg" v-html="data.htmlContent" :style="contentStyle" class="w-full h-full transition-transform duration-75"></div>
                                     <iframe v-else :srcdoc="data.htmlContent" class="w-full h-full border-0" sandbox="allow-scripts allow-same-origin"></iframe>
                                 </div>
                                 <div v-else class="flex items-center justify-center h-full text-gray-500"><p>No content provided.</p></div>
                             </div>
+
+                            <!-- UNIFIED CONTROL BAR -->
                             <div v-if="isVisualContent" class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-gray-900/60 text-white p-2 rounded-lg backdrop-blur-md shadow-lg z-10">
+                                <!-- Controls for Plain SVG -->
                                 <template v-if="isPlainSvg">
                                     <button @click="zoomOut" class="btn-viewer" title="Zoom Out"><IconMinus class="w-5 h-5" /></button>
                                     <button @click="resetView" class="btn-viewer px-3 text-sm font-mono" title="Reset View">{{ Math.round(scale * 100) }}%</button>
                                     <button @click="zoomIn" class="btn-viewer" title="Zoom In"><IconPlus class="w-5 h-5" /></button>
-                                    <div class="w-px h-6 bg-white/20 mx-1"></div>
-                                    <button @click="downloadSVG" class="btn-viewer" title="Download as SVG"><IconArrowDownTray class="w-5 h-5" /></button>
                                 </template>
+                                
+                                <!-- Controls for Interactive Mermaid -->
                                 <template v-if="isInteractiveMermaid">
+                                    <button @click="resetView" class="btn-viewer" title="Reset View"><IconArrowPath class="w-5 h-5" /></button>
+                                    <div class="w-px h-6 bg-white/20 mx-1"></div>
                                     <div class="flex items-center gap-2 pr-2">
                                         <label for="png-bg-color" class="text-xs font-medium" title="PNG Background Color">BG:</label>
                                         <input id="png-bg-color" type="color" v-model="pngBgColor" class="w-6 h-6 p-0 border-none rounded cursor-pointer bg-transparent">
                                     </div>
-                                    <button @click="downloadPNG" class="btn-viewer" title="Download as PNG"><IconArrowDownTray class="w-5 h-5" /></button>
-                                    <button @click="downloadSource" class="btn-viewer" title="Download Mermaid Source"><IconCode class="w-5 h-5" /></button>
+                                    <button @click="handleDownloadPNG" class="btn-viewer" title="Download as PNG">PNG</button>
+                                    <button @click="handleDownloadSVG" class="btn-viewer" title="Download as SVG">SVG</button>
+                                    <div class="w-px h-6 bg-white/20 mx-1"></div>
+                                    <button @click="handleDownloadSource" class="btn-viewer" title="Download Mermaid Source"><IconCode class="w-5 h-5" /></button>
+                                </template>
+
+                                <!-- Controls for Plain SVG (Download only) -->
+                                <template v-if="isPlainSvg">
+                                     <div class="w-px h-6 bg-white/20 mx-1"></div>
+                                     <button @click="handleDownloadSVG" class="btn-viewer" title="Download as SVG"><IconArrowDownTray class="w-5 h-5" /></button>
                                 </template>
                             </div>
                         </main>
