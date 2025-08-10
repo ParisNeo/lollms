@@ -123,3 +123,6 @@ new ui:
 - fix installation process
 - add docker option
 - build docker image
+
+## important
+- fix forced context size to actually force the context size when i choose another aliased model with forcing activated
