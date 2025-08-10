@@ -99,14 +99,6 @@ def _bootstrap_global_settings(connection):
             "value": config.get("safe_store_defaults", {}).get("global_default_vectorizer", "st:all-MiniLM-L6-v2"),
             "type": "string", "description": "Default vectorizer assigned to newly created users.", "category": "Defaults"
         },
-        "default_mcps": {
-            "value": config.get("default_mcps", []),
-            "type": "json", "description": "List of default Multi-Computer Protocol (MCP) tool servers.", "category": "Defaults"
-        },
-        "default_personalities": {
-            "value": config.get("default_personas", []),
-            "type": "json", "description": "List of default personalities available to all users.", "category": "Defaults"
-        },
         "force_model_mode": {
             "value": "disabled",
             "type": "string", "description": "Global model override mode: 'disabled', 'force_once' (sets user pref), 'force_always' (overrides session).", "category": "Global LLM Overrides"
@@ -165,6 +157,15 @@ def _bootstrap_global_settings(connection):
 def run_schema_migrations_and_bootstrap(connection, inspector):
     if inspector.has_table("global_configs"):
         _bootstrap_global_settings(connection)
+
+        # Remove deprecated settings from existing installations
+        keys_to_remove_str = "('default_mcps', 'default_personalities')"
+        try:
+            result = connection.execute(text(f"DELETE FROM global_configs WHERE key IN {keys_to_remove_str}"))
+            if result.rowcount > 0:
+                print(f"INFO: Removed {result.rowcount} deprecated global settings (default_mcps, default_personalities).")
+        except Exception as e:
+            print(f"WARNING: Could not remove deprecated global settings. Error: {e}")
 
     if inspector.has_table("saved_prompts"):
         columns_db = [col['name'] for col in inspector.get_columns('saved_prompts')]

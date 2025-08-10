@@ -199,6 +199,7 @@ class UserAuthDetails(UserLLMParams):
     first_login_done: bool 
     data_zone: Optional[str] = None
     memory: Optional[str] = None
+    llm_settings_overridden: bool = False
 
 class RelationshipStatus(BaseModel):
     is_following: bool

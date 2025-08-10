@@ -105,7 +105,6 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
     dm = get_user_discussion_manager(username)
     
     # Extract max_context_size from the definitive LollmsClient instance (lc).
-    
     max_context_size = lc.get_ctx_size() or 4096
     
     discussion = dm.get_discussion(

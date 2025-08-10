@@ -82,74 +82,76 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive.")
 
     username = db_user.username
-    if username not in user_sessions:
-        print(f"INFO: Re-initializing session for {username} on first request after server start.")
-        session_llm_params = {
-            "ctx_size": db_user.llm_ctx_size,
-            "temperature": db_user.llm_temperature,
-            "top_k": db_user.llm_top_k,
-            "top_p": db_user.llm_top_p,
-            "repeat_penalty": db_user.llm_repeat_penalty,
-            "repeat_last_n": db_user.llm_repeat_last_n,
-            "put_thoughts_in_context": db_user.put_thoughts_in_context
+    db = next(get_db())
+    try:
+        if username not in user_sessions:
+            print(f"INFO: Re-initializing session for {username} on first request after server start.")
+            session_llm_params = {
+                "ctx_size": db_user.llm_ctx_size, "temperature": db_user.llm_temperature,
+                "top_k": db_user.llm_top_k, "top_p": db_user.llm_top_p,
+                "repeat_penalty": db_user.llm_repeat_penalty, "repeat_last_n": db_user.llm_repeat_last_n,
+                "put_thoughts_in_context": db_user.put_thoughts_in_context
+            }
+            user_sessions[username] = {
+                "lollms_clients": {}, "safe_store_instances": {}, "discussions": {},
+                "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
+                "lollms_model_name": db_user.lollms_model_name,
+                "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
+                "active_personality_id": db_user.active_personality_id,
+            }
+
+        # --- NEW: Logic to determine if settings are overridden ---
+        user_model_full = user_sessions[username].get("lollms_model_name")
+        llm_settings_overridden = False
+        effective_llm_params = {
+            "llm_ctx_size": user_sessions[username].get("llm_params", {}).get("ctx_size", db_user.llm_ctx_size),
+            "llm_temperature": user_sessions[username].get("llm_params", {}).get("temperature", db_user.llm_temperature),
+            "llm_top_k": user_sessions[username].get("llm_params", {}).get("top_k", db_user.llm_top_k),
+            "llm_top_p": user_sessions[username].get("llm_params", {}).get("top_p", db_user.llm_top_p),
+            "llm_repeat_penalty": user_sessions[username].get("llm_params", {}).get("repeat_penalty", db_user.llm_repeat_penalty),
+            "llm_repeat_last_n": user_sessions[username].get("llm_params", {}).get("repeat_last_n", db_user.llm_repeat_last_n),
+            "put_thoughts_in_context": user_sessions[username].get("llm_params", {}).get("put_thoughts_in_context", db_user.put_thoughts_in_context)
         }
-        user_sessions[username] = {
-            "lollms_clients": {},
-            "safe_store_instances": {},
-            "discussions": {},
-            "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
-            "lollms_model_name": db_user.lollms_model_name,
-            "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
-            "active_personality_id": db_user.active_personality_id,
-        }
 
-    lc = get_user_lollms_client(username) 
-    ai_name_for_user = getattr(lc, "ai_name", "assistant")
-    current_session_llm_params = user_sessions[username].get("llm_params", {})
+        if user_model_full and '/' in user_model_full:
+            binding_alias, model_name = user_model_full.split('/', 1)
+            binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
+            if binding and binding.model_aliases:
+                alias_info = binding.model_aliases.get(model_name)
+                if alias_info and not alias_info.get('allow_parameters_override', True):
+                    llm_settings_overridden = True
+                    # Override the effective params with values from the alias
+                    param_map = {"ctx_size": "llm_ctx_size", "temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n"}
+                    for alias_key, user_key in param_map.items():
+                        if alias_key in alias_info and alias_info[alias_key] is not None:
+                            effective_llm_params[user_key] = alias_info[alias_key]
+        # --- END NEW ---
+        
+        lc = get_user_lollms_client(username)
+        ai_name_for_user = getattr(lc, "ai_name", "assistant")
+        is_api_service_enabled = settings.get("openai_api_service_enabled", False)
 
-    is_api_service_enabled = settings.get("openai_api_service_enabled", False)
-
-    return UserAuthDetails(
-        id=db_user.id,
-        username=username,
-        is_admin=db_user.is_admin,
-        is_active=db_user.is_active,
-        icon=db_user.icon,
-        first_name=db_user.first_name,
-        family_name=db_user.family_name,
-        email=db_user.email,
-        birth_date=db_user.birth_date,
-        receive_notification_emails=db_user.receive_notification_emails,
-        is_searchable=db_user.is_searchable,
-        first_login_done=db_user.first_login_done,
-        data_zone=db_user.data_zone,
-        memory=db_user.memory,
-        lollms_model_name=user_sessions[username].get("lollms_model_name"),
-        safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
-        active_personality_id=user_sessions[username].get("active_personality_id"),
-        lollms_client_ai_name=ai_name_for_user,
-        llm_ctx_size=current_session_llm_params.get("ctx_size"),
-        llm_temperature=current_session_llm_params.get("temperature"),
-        llm_top_k=current_session_llm_params.get("top_k"),
-        llm_top_p=current_session_llm_params.get("top_p"),
-        llm_repeat_penalty=current_session_llm_params.get("repeat_penalty"),
-        llm_repeat_last_n=current_session_llm_params.get("repeat_last_n"),
-        put_thoughts_in_context=current_session_llm_params.get("put_thoughts_in_context"),
-        rag_top_k=db_user.rag_top_k,
-        max_rag_len=db_user.max_rag_len,
-        rag_n_hops=db_user.rag_n_hops,
-        rag_min_sim_percent=db_user.rag_min_sim_percent,
-        rag_use_graph=db_user.rag_use_graph,
-        rag_graph_response_type=db_user.rag_graph_response_type,
-        auto_title=db_user.auto_title,
-        user_ui_level=db_user.user_ui_level,
-        chat_active=db_user.chat_active,
-        first_page=db_user.first_page,
-        ai_response_language=db_user.ai_response_language,
-        fun_mode=db_user.fun_mode,
-        show_token_counter=db_user.show_token_counter,
-        openai_api_service_enabled=is_api_service_enabled
-    )
+        return UserAuthDetails(
+            id=db_user.id, username=username, is_admin=db_user.is_admin, is_active=db_user.is_active,
+            icon=db_user.icon, first_name=db_user.first_name, family_name=db_user.family_name, email=db_user.email,
+            birth_date=db_user.birth_date, receive_notification_emails=db_user.receive_notification_emails,
+            is_searchable=db_user.is_searchable, first_login_done=db_user.first_login_done,
+            data_zone=db_user.data_zone, memory=db_user.memory,
+            lollms_model_name=user_model_full,
+            safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
+            active_personality_id=user_sessions[username].get("active_personality_id"),
+            lollms_client_ai_name=ai_name_for_user,
+            **effective_llm_params,
+            rag_top_k=db_user.rag_top_k, max_rag_len=db_user.max_rag_len, rag_n_hops=db_user.rag_n_hops,
+            rag_min_sim_percent=db_user.rag_min_sim_percent, rag_use_graph=db_user.rag_use_graph,
+            rag_graph_response_type=db_user.rag_graph_response_type, auto_title=db_user.auto_title,
+            user_ui_level=db_user.user_ui_level, chat_active=db_user.chat_active, first_page=db_user.first_page,
+            ai_response_language=db_user.ai_response_language, fun_mode=db_user.fun_mode,
+            show_token_counter=db_user.show_token_counter, openai_api_service_enabled=is_api_service_enabled,
+            llm_settings_overridden=llm_settings_overridden
+        )
+    finally:
+        db.close()
 
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
     if not current_user.is_admin:
@@ -173,7 +175,6 @@ def load_mcps(username):
 
         for mcp in all_active_mcps:
             mcp_base_url = mcp.url.rstrip('/')
-            # Ensure /mcp is present, but don't add it if it's already the suffix
             if not mcp_base_url.endswith('/mcp'):
                 mcp_full_url = f"{mcp_base_url}/mcp"
             else:
@@ -182,15 +183,9 @@ def load_mcps(username):
             server_info = {"server_url": mcp_full_url}
             
             if mcp.authentication_type == "lollms_chat_auth":
-                server_info["auth_config"] = {
-                    "type": "bearer",
-                    "token": session.get("access_token")
-                }
+                server_info["auth_config"] = { "type": "bearer", "token": session.get("access_token") }
             elif mcp.authentication_type == "bearer":
-                server_info["auth_config"] = {
-                    "type": "bearer",
-                    "token": mcp.authentication_key
-                }
+                server_info["auth_config"] = { "type": "bearer", "token": mcp.authentication_key }
 
             servers_infos[mcp.name] = server_info
                 
@@ -233,10 +228,9 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
         binding_to_use = None
         
         target_binding_alias = binding_alias_override
-        if not target_binding_alias:
-            user_model_full = session.get("lollms_model_name")
-            if user_model_full and '/' in user_model_full:
-                target_binding_alias = user_model_full.split('/', 1)[0]
+        user_model_full = session.get("lollms_model_name")
+        if not target_binding_alias and user_model_full and '/' in user_model_full:
+            target_binding_alias = user_model_full.split('/', 1)[0]
 
         if target_binding_alias:
             binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
@@ -250,32 +244,48 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
         if final_alias in session["lollms_clients"]:
             return cast(LollmsClient, session["lollms_clients"][final_alias])
         
-        user_model_full = session.get("lollms_model_name")
         selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
+        model_name_for_binding = selected_model_name if selected_binding_alias == final_alias else binding_to_use.default_model_name
 
-        if selected_binding_alias == final_alias:
-            model_name_for_binding = selected_model_name
-        else:
-            model_name_for_binding = binding_to_use.default_model_name
+        # --- REVISED PARAMETER LOGIC ---
+        # 1. Start with user's saved preferences as the base
+        client_init_params = {
+            "ctx_size": user_db.llm_ctx_size, "temperature": user_db.llm_temperature,
+            "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
+            "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
+            "put_thoughts_in_context": user_db.put_thoughts_in_context
+        }
+        # 2. Layer on session-specific overrides (e.g., from UI tweaks that aren't saved yet)
+        client_init_params.update(session.get("llm_params", {}))
 
-        client_init_params = session.get("llm_params", {}).copy()
-        
-        # --- NEW: Context Size Override Logic ---
-        final_ctx_size = client_init_params.get("ctx_size", user_db.llm_ctx_size if user_db else None)
+        # 3. Apply alias-based overrides
         model_aliases = binding_to_use.model_aliases or {}
         alias_info = model_aliases.get(model_name_for_binding)
 
         if alias_info:
-            admin_ctx_size = alias_info.get('ctx_size')
-            is_locked = alias_info.get('ctx_size_locked', False)
-            is_globally_locked = settings.get("lock_all_context_sizes", False)
+            override_allowed = alias_info.get('allow_parameters_override', True)
+            
+            alias_params = {
+                "ctx_size": alias_info.get('ctx_size'), "temperature": alias_info.get('temperature'),
+                "top_k": alias_info.get('top_k'), "top_p": alias_info.get('top_p'),
+                "repeat_penalty": alias_info.get('repeat_penalty'), "repeat_last_n": alias_info.get('repeat_last_n')
+            }
+            # Filter out None values from alias_params
+            alias_params = {k: v for k, v in alias_params.items() if v is not None}
 
-            if admin_ctx_size is not None and (is_globally_locked or is_locked):
-                final_ctx_size = admin_ctx_size
-        
-        client_init_params["ctx_size"] = final_ctx_size
-        # --- END NEW LOGIC ---
+            if override_allowed:
+                # Alias settings act as defaults, user settings take precedence
+                client_init_params = {**alias_params, **client_init_params}
+            else:
+                # Alias settings are forced, ignoring user settings
+                client_init_params.update(alias_params)
+            
+            # Special handling for locked context size
+            is_ctx_locked = alias_info.get('ctx_size_locked', False)
+            if is_ctx_locked and alias_info.get('ctx_size') is not None:
+                client_init_params["ctx_size"] = alias_info['ctx_size']
 
+        # 4. Apply global overrides (highest precedence)
         force_mode = settings.get("force_model_mode", "disabled")
         if force_mode == "force_always":
             forced_model_full = settings.get("force_model_name")
@@ -286,15 +296,13 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
             if ctx_size_override is not None:
                 client_init_params["ctx_size"] = ctx_size_override
 
+        # --- END REVISED LOGIC ---
+
         client_init_params.update({
-            "binding_name": binding_to_use.name,
-            "model_name": model_name_for_binding,
-            "host_address": binding_to_use.host_address,
-            "models_path": binding_to_use.models_path,
-            "verify_ssl_certificate": binding_to_use.verify_ssl_certificate,
-            "service_key": binding_to_use.service_key,
-            "user_name": "user",
-            "ai_name": "assistant",
+            "binding_name": binding_to_use.name, "model_name": model_name_for_binding,
+            "host_address": binding_to_use.host_address, "models_path": binding_to_use.models_path,
+            "verify_ssl_certificate": binding_to_use.verify_ssl_certificate, "service_key": binding_to_use.service_key,
+            "user_name": "user", "ai_name": "assistant",
         })
 
         servers_infos = load_mcps(username)

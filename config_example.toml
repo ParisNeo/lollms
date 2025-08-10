@@ -66,25 +66,3 @@ global_default_vectorizer = "st:all-MiniLM-L6-v2" # Example Sentence Transformer
 # For per-user encryption keys, you'd store them encrypted in the UserDB (not implemented here).
 # If set, requires 'safe_store[encryption]' -> 'cryptography' to be installed.
 encryption_key = "my_super_secret_safe_store_key_CHANGE_ME" # Or null/remove to disable encryption
-
-#[[default_mcps]]
-#name = "lollms_official_tools" # an alias fot he server
-#url = "http://lollms.org:9602" # the address of the server
-
-[[default_personas]]
-name = "Standard Assistant"
-category = "General"
-author = "System"
-description = "A helpful and general-purpose AI assistant."
-prompt_text = "You are a helpful AI assistant. Respond clearly and concisely."
-is_public = true
-icon_base64 = "<Here you can put a base64 icon>"
-
-[[default_personas]]
-name = "Think First"
-category = "General"
-author = "ParisNeo"
-description = "An assistant that pauses to think inside <think></think> before answering."
-prompt_text = "You are an AI that first reasons in <think></think> tags, then responds to the user clearly and logically."
-is_public = true
-icon_base64 = "<Here you can put a base64 icon>"

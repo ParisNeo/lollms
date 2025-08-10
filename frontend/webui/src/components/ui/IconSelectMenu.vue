@@ -13,6 +13,10 @@ const props = defineProps({
   placeholder: {
     type: String,
     default: 'Select an option'
+  },
+  isLoading: {
+      type: Boolean,
+      default: false
   }
 });
 
@@ -21,6 +25,7 @@ const emit = defineEmits(['update:modelValue']);
 const isOpen = ref(false);
 const triggerRef = ref(null);
 const menuStyle = ref({});
+const searchTerm = ref('');
 
 const allItemsFlat = computed(() => {
     return props.items.flatMap(item => (item.isGroup ? item.items : [item]));
@@ -29,6 +34,31 @@ const allItemsFlat = computed(() => {
 const selectedItem = computed(() => {
     if (!props.modelValue) return null;
     return allItemsFlat.value.find(i => i.id === props.modelValue) || null;
+});
+
+const filteredItems = computed(() => {
+    if (!searchTerm.value) {
+        return props.items;
+    }
+    const lowerSearch = searchTerm.value.toLowerCase();
+    const result = [];
+    props.items.forEach(item => {
+        if (item.isGroup) {
+            const filteredSubItems = item.items.filter(subItem => 
+                subItem.name.toLowerCase().includes(lowerSearch) ||
+                (subItem.description && subItem.description.toLowerCase().includes(lowerSearch))
+            );
+            if (filteredSubItems.length > 0) {
+                result.push({ ...item, items: filteredSubItems });
+            }
+        } else {
+            if (item.name.toLowerCase().includes(lowerSearch) || 
+                (item.description && item.description.toLowerCase().includes(lowerSearch))) {
+                result.push(item);
+            }
+        }
+    });
+    return result;
 });
 
 function getBoundingBox() {
@@ -51,6 +81,7 @@ function getBoundingBox() {
 
 watch(isOpen, async (isNowOpen) => {
     if (isNowOpen) {
+        searchTerm.value = '';
         await nextTick();
         getBoundingBox();
         window.addEventListener('resize', getBoundingBox, { passive: true });
@@ -102,63 +133,70 @@ const uniqueId = `menu-trigger-${Math.random().toString(36).substr(2, 9)}`;
           v-if="isOpen" 
           :id="`menu-${uniqueId}`"
           :style="menuStyle"
-          class="w-96 z-[9999] rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5"
+          class="w-96 z-[9999] rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 flex flex-col"
         >
-          <ul class="max-h-80 overflow-y-auto p-1">
-            <li @click="selectOption(null)" class="menu-item" :class="{'is-selected': !modelValue}">
-              <div class="flex items-center space-x-3">
-                <div class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center">
-                    <slot name="placeholder-icon"></slot>
+          <div class="p-2 border-b border-gray-200 dark:border-gray-700">
+              <input type="text" v-model="searchTerm" placeholder="Search..." @click.stop class="input-field w-full text-sm">
+          </div>
+          <ul class="flex-grow overflow-y-auto p-1 max-h-80">
+             <div v-if="isLoading" class="text-center text-sm text-gray-500 py-4">Loading...</div>
+             <li v-else-if="filteredItems.length === 0" class="px-3 py-2 text-sm text-gray-500 italic">No matching items.</li>
+             <template v-else>
+                <li @click="selectOption(null)" class="menu-item" :class="{'is-selected': !modelValue}">
+                <div class="flex items-center space-x-3">
+                    <div class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center">
+                        <slot name="placeholder-icon"></slot>
+                    </div>
+                    <span class="block truncate font-semibold">{{ placeholder }}</span>
                 </div>
-                <span class="block truncate font-semibold">{{ placeholder }}</span>
-              </div>
-               <span v-if="!modelValue" class="check-mark">
-                <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
-              </span>
-            </li>
+                <span v-if="!modelValue" class="check-mark">
+                    <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                </span>
+                </li>
 
-            <template v-for="(item, index) in items" :key="index">
-              <div v-if="item.isGroup" class="pt-2">
-                  <div class="px-3 py-1 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
-                      {{ item.label }}
-                  </div>
-                  <li v-for="subItem in item.items" :key="subItem.id" @click="selectOption(subItem.id)" class="menu-item" :class="{'is-selected': subItem.id === modelValue}">
-                      <div class="flex items-center space-x-3 flex-grow min-w-0">
-                          <img v-if="subItem.icon_base64" :src="subItem.icon_base64" class="h-8 w-8 rounded-md object-cover flex-shrink-0"/>
-                          <div v-else class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
-                            <slot name="item-icon-default"></slot>
-                          </div>
-                          <div class="min-w-0">
-                            <span class="font-semibold block truncate" :title="subItem.name">{{ subItem.name }}</span>
-                            <span v-if="subItem.description" class="text-xs text-gray-500 dark:text-gray-400 block truncate" :title="subItem.description">{{ subItem.description }}</span>
-                          </div>
-                      </div>
-                      <div class="flex-shrink-0 flex items-center pl-2">
-                        <slot name="item-extra" :item="subItem"></slot>
-                        <span v-if="subItem.id === modelValue" class="check-mark ml-2">
-                          <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                <template v-for="(item, index) in filteredItems" :key="index">
+                <div v-if="item.isGroup" class="pt-2">
+                    <div class="px-3 py-1 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+                        {{ item.label }}
+                    </div>
+                    <li v-for="subItem in item.items" :key="subItem.id" @click="selectOption(subItem.id)" class="menu-item" :class="{'is-selected': subItem.id === modelValue}">
+                        <div class="flex items-center space-x-3 flex-grow min-w-0">
+                            <img v-if="subItem.icon_base64" :src="subItem.icon_base64" class="h-8 w-8 rounded-md object-cover flex-shrink-0"/>
+                            <div v-else class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
+                                <slot name="item-icon-default"></slot>
+                            </div>
+                            <div class="min-w-0">
+                                <span class="font-semibold block truncate" :title="subItem.name">{{ subItem.name }}</span>
+                                <span v-if="subItem.description" class="text-xs text-gray-500 dark:text-gray-400 block truncate" :title="subItem.description">{{ subItem.description }}</span>
+                            </div>
+                        </div>
+                        <div class="flex-shrink-0 flex items-center pl-2">
+                            <slot name="item-extra" :item="subItem"></slot>
+                            <span v-if="subItem.id === modelValue" class="check-mark ml-2">
+                            <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
+                            </span>
+                        </div>
+                    </li>
+                </div>
+                <li v-else @click="selectOption(item.id)" class="menu-item" :class="{'is-selected': item.id === modelValue}">
+                    <div class="flex items-center space-x-3 flex-grow min-w-0">
+                    <img v-if="item.icon_base64" :src="item.icon_base64" class="h-8 w-8 rounded-md object-cover flex-shrink-0"/>
+                    <div v-else class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
+                        <slot name="item-icon-default"></slot>
+                    </div>
+                    <div class="min-w-0">
+                        <span class="font-semibold block truncate" :title="item.name">{{ item.name }}</span>
+                        <span v-if="item.description" class="text-xs text-gray-500 dark:text-gray-400 block truncate" :title="item.description">{{ item.description }}</span>
+                    </div>
+                    </div>
+                    <div class="flex-shrink-0 flex items-center pl-2">
+                        <slot name="item-extra" :item="item"></slot>
+                        <span v-if="item.id === modelValue" class="check-mark ml-2">
+                            <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
                         </span>
-                      </div>
-                  </li>
-              </div>
-              <li v-else @click="selectOption(item.id)" class="menu-item" :class="{'is-selected': item.id === modelValue}">
-                <div class="flex items-center space-x-3 flex-grow min-w-0">
-                  <img v-if="item.icon_base64" :src="item.icon_base64" class="h-8 w-8 rounded-md object-cover flex-shrink-0"/>
-                  <div v-else class="h-8 w-8 rounded-md bg-gray-200 dark:bg-gray-600 flex-shrink-0 flex items-center justify-center text-gray-400">
-                     <slot name="item-icon-default"></slot>
-                  </div>
-                  <div class="min-w-0">
-                      <span class="font-semibold block truncate" :title="item.name">{{ item.name }}</span>
-                      <span v-if="item.description" class="text-xs text-gray-500 dark:text-gray-400 block truncate" :title="item.description">{{ item.description }}</span>
-                  </div>
-                </div>
-                <div class="flex-shrink-0 flex items-center pl-2">
-                    <slot name="item-extra" :item="item"></slot>
-                    <span v-if="item.id === modelValue" class="check-mark ml-2">
-                        <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg>
-                    </span>
-                </div>
-              </li>
+                    </div>
+                </li>
+                </template>
             </template>
           </ul>
           <div v-if="$slots.footer" class="border-t border-gray-200 dark:border-gray-700">

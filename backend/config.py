@@ -83,6 +83,3 @@ PROMPTS_ZOO_ROOT_PATH.mkdir(exist_ok=True, parents=True)
 # remain configured via environment or a secure file, not a dynamic DB setting.
 ALGORITHM = "HS256"
 SECRET_KEY = APP_SETTINGS.get("secret_key", os.environ.get("LOLLMS_SECRET_KEY", "a_very_secret_key_that_should_be_changed_for_production"))
-
-DEFAULT_PERSONALITIES = config.get("default_personas", {})
-DEFAULT_MCPS = config.get("default_mcps", [])

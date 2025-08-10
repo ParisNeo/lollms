@@ -45,6 +45,13 @@ class ModelAlias(BaseModel):
     has_vision: bool = True
     ctx_size: Optional[int] = Field(None, ge=1)
     ctx_size_locked: bool = False
+    # NEW LLM settings
+    temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
+    top_k: Optional[int] = Field(None, ge=1)
+    top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
+    repeat_penalty: Optional[float] = Field(None, ge=0.0)
+    repeat_last_n: Optional[int] = Field(None, ge=0)
+    allow_parameters_override: bool = True
 
 class ModelAliasUpdate(BaseModel):
     original_model_name: str

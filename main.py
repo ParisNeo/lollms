@@ -20,7 +20,7 @@ from sqlalchemy import or_
 
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
-    INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG, DEFAULT_PERSONALITIES,
+    INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
     APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH
 )
 from backend.db import init_database, get_db, session as db_session_module
@@ -140,17 +140,7 @@ async def lifespan(app: FastAPI):
             db_for_defaults.commit()
             ASCIIColors.green(f"INFO: Initial admin user '{admin_username}' created successfully.")
         
-        # 2. Default Personalities (Kept for backward compatibility)
-        for default_pers_data in DEFAULT_PERSONALITIES:
-            if not db_for_defaults.query(DBPersonality).filter(DBPersonality.name == default_pers_data["name"], DBPersonality.is_public == True, DBPersonality.owner_user_id == None).first():
-                new_pers_data = default_pers_data.copy()
-                new_pers_data['owner_user_id'] = None
-                new_pers = DBPersonality(**new_pers_data)
-                db_for_defaults.add(new_pers)
-                db_for_defaults.commit()
-                ASCIIColors.green(f"INFO: Added default public personality: '{new_pers.name}'")
-        
-        # 3. NEW: Hardcoded Default System Prompts
+        # 2. NEW: Hardcoded Default System Prompts
         DEFAULT_PROMPTS = [
             # Writing & Communication
             {

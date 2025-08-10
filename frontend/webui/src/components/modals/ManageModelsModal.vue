@@ -54,16 +54,25 @@
                             
                             <IconUploader v-model="form.icon" />
                             
-                            <div>
-                                <label for="alias-ctx-size" class="label">Context Size (tokens)</label>
-                                <div class="flex items-center gap-2">
-                                    <input id="alias-ctx-size" v-model.number="form.ctx_size" type="number" class="input-field" placeholder="e.g., 8192">
-                                    <button type="button" @click="fetchCtxSize" class="btn btn-secondary p-2" title="Auto-detect max context size from binding" :disabled="isFetchingCtxSize">
-                                        <IconAnimateSpin v-if="isFetchingCtxSize" class="w-5 h-5" />
-                                        <IconRefresh v-else class="w-5 h-5"/>
-                                    </button>
+                            <div class="p-4 border rounded-lg dark:border-gray-700">
+                                <h4 class="font-medium mb-4">Generation Parameters</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <label for="alias-ctx-size" class="label text-xs">Context Size</label>
+                                        <div class="flex items-center gap-2">
+                                            <input id="alias-ctx-size" v-model="form.ctx_size" type="number" class="input-field" placeholder="e.g., 8192">
+                                            <button type="button" @click="fetchCtxSize" class="btn btn-secondary p-2" title="Auto-detect max context size from binding" :disabled="isFetchingCtxSize">
+                                                <IconAnimateSpin v-if="isFetchingCtxSize" class="w-5 h-5" />
+                                                <IconRefresh v-else class="w-5 h-5"/>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div><label for="alias-temp" class="label text-xs">Temperature</label><input id="alias-temp" v-model="form.temperature" type="number" step="0.01" class="input-field" placeholder="e.g., 0.7"></div>
+                                    <div><label for="alias-top-k" class="label text-xs">Top K</label><input id="alias-top-k" v-model="form.top_k" type="number" class="input-field" placeholder="e.g., 50"></div>
+                                    <div><label for="alias-top-p" class="label text-xs">Top P</label><input id="alias-top-p" v-model="form.top_p" type="number" step="0.01" class="input-field" placeholder="e.g., 0.95"></div>
+                                    <div><label for="alias-repeat-penalty" class="label text-xs">Repeat Penalty</label><input id="alias-repeat-penalty" v-model="form.repeat_penalty" type="number" step="0.01" class="input-field" placeholder="e.g., 1.1"></div>
+                                    <div><label for="alias-repeat-last-n" class="label text-xs">Repeat Last N</label><input id="alias-repeat-last-n" v-model="form.repeat_last_n" type="number" class="input-field" placeholder="e.g., 64"></div>
                                 </div>
-                                <p class="text-xs text-gray-500 mt-1">Leave blank to use user's default setting unless locked.</p>
                             </div>
 
                              <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
@@ -75,7 +84,7 @@
                                     <span :class="[form.has_vision ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
-
+                            
                              <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                                 <span class="flex-grow flex flex-col">
                                     <span class="text-sm font-medium">Lock Context Size</span>
@@ -83,6 +92,16 @@
                                 </span>
                                 <button @click="form.ctx_size_locked = !form.ctx_size_locked" type="button" :class="[form.ctx_size_locked ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.ctx_size_locked ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                </button>
+                            </div>
+                            
+                            <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                                <span class="flex-grow flex flex-col">
+                                    <span class="text-sm font-medium">Allow User Overrides</span>
+                                    <span class="text-sm text-gray-500 dark:text-gray-400">If disabled, all generation parameters above will be forced for this model.</span>
+                                </span>
+                                <button @click="form.allow_parameters_override = !form.allow_parameters_override" type="button" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                    <span :class="[form.allow_parameters_override ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
 
@@ -149,7 +168,13 @@ const getInitialFormState = () => ({
     description: '',
     has_vision: true,
     ctx_size: null,
-    ctx_size_locked: false
+    ctx_size_locked: false,
+    temperature: null,
+    top_k: null,
+    top_p: null,
+    repeat_penalty: null,
+    repeat_last_n: null,
+    allow_parameters_override: true
 });
 
 const form = ref(getInitialFormState());
@@ -205,11 +230,17 @@ async function saveAlias() {
     if (!selectedModel.value || !binding.value) return;
     isSaving.value = true;
     try {
-        // Ensure ctx_size is either a number or null, not an empty string
-        const payload = {
-            ...form.value,
-            ctx_size: form.value.ctx_size === '' || form.value.ctx_size === undefined ? null : Number(form.value.ctx_size)
-        };
+        const payload = { ...form.value };
+        // Ensure empty strings for numbers become null, and valid strings become numbers
+        ['ctx_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
+            const value = payload[key];
+            if (value === '' || value === null || value === undefined || isNaN(parseFloat(value))) {
+                payload[key] = null;
+            } else {
+                payload[key] = Number(value);
+            }
+        });
+
         await adminStore.saveModelAlias(binding.value.id, {
             original_model_name: selectedModel.value.original_model_name,
             alias: payload

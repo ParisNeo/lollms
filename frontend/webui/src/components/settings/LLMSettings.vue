@@ -25,21 +25,27 @@ const isLoading = ref(false);
 const hasChanges = ref(false);
 let pristineState = {};
 
+const areSettingsForced = computed(() => user.value?.llm_settings_overridden ?? false);
+
 const activeModelName = computed({
     get: () => form.value.lollms_model_name,
-    set: (name) => form.value.lollms_model_name = name
+    set: (name) => {
+        if (!areSettingsForced.value) {
+            form.value.lollms_model_name = name;
+        }
+    }
 });
 
 const populateForm = () => {
     if (user.value) {
         form.value = {
             lollms_model_name: user.value.lollms_model_name || '',
-            llm_ctx_size: user.value.llm_ctx_size ?? 4096,
-            llm_temperature: user.value.llm_temperature ?? 0.7,
-            llm_top_k: user.value.llm_top_k ?? 50,
-            llm_top_p: user.value.llm_top_p ?? 0.95,
-            llm_repeat_penalty: user.value.llm_repeat_penalty ?? 1.1,
-            llm_repeat_last_n: user.value.llm_repeat_last_n ?? 64,
+            llm_ctx_size: user.value.llm_ctx_size ?? null,
+            llm_temperature: user.value.llm_temperature ?? null,
+            llm_top_k: user.value.llm_top_k ?? null,
+            llm_top_p: user.value.llm_top_p ?? null,
+            llm_repeat_penalty: user.value.llm_repeat_penalty ?? null,
+            llm_repeat_last_n: user.value.llm_repeat_last_n ?? null,
             put_thoughts_in_context: user.value.put_thoughts_in_context || false
         };
         pristineState = JSON.parse(JSON.stringify(form.value));
@@ -93,9 +99,14 @@ async function handleSave() {
                         class="mt-1"
                     />
                 </div>
+                
+                 <div v-if="areSettingsForced" class="p-4 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 text-blue-800 dark:text-blue-200">
+                    <p class="font-semibold">Settings Overridden</p>
+                    <p class="text-sm">An administrator has set and locked the generation parameters for this model. Your personal settings will not apply.</p>
+                </div>
 
                 <!-- Generation Parameters -->
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <fieldset :disabled="areSettingsForced" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" :class="{'opacity-60 cursor-not-allowed': areSettingsForced}">
                     <div>
                         <label for="contextSize" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Context Size (tokens)</label>
                         <input type="number" id="contextSize" v-model.number="form.llm_ctx_size" class="input-field mt-1" placeholder="e.g., 4096">
@@ -120,12 +131,12 @@ async function handleSave() {
                         <label for="repeatLastN" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Repeat Last N</label>
                         <input type="number" id="repeatLastN" v-model.number="form.llm_repeat_last_n" class="input-field mt-1" step="1" min="0" placeholder="e.g., 64">
                     </div>
-                </div>
+                </fieldset>
 
                 <!-- Toggle for 'think' blocks -->
-                <div class="relative flex items-start">
+                <div class="relative flex items-start" :class="{'opacity-60 cursor-not-allowed': areSettingsForced}">
                     <div class="flex h-6 items-center">
-                        <input id="putThoughts" v-model="form.put_thoughts_in_context" type="checkbox" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 text-blue-600 focus:ring-blue-600 dark:focus:ring-blue-600 dark:ring-offset-gray-800">
+                        <input id="putThoughts" v-model="form.put_thoughts_in_context" type="checkbox" :disabled="areSettingsForced" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 text-blue-600 focus:ring-blue-600 dark:focus:ring-blue-600 dark:ring-offset-gray-800">
                     </div>
                     <div class="ml-3 text-sm leading-6">
                         <label for="putThoughts" class="font-medium text-gray-900 dark:text-gray-300">Include "think" blocks in context</label>
@@ -135,7 +146,7 @@ async function handleSave() {
 
                 <!-- Save Button -->
                 <div class="flex justify-end pt-4">
-                    <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">
+                    <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges || areSettingsForced">
                         <span v-if="isLoading">Saving...</span>
                         <span v-else>Save LLM Settings</span>
                     </button>
