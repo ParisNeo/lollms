@@ -232,7 +232,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         new_personality_cols_defs = {
             "active_mcps": "JSON",
             "data_source_type": "VARCHAR DEFAULT 'none' NOT NULL",
-            "data_source": "TEXT"
+            "data_source": "TEXT",
+            "version": "VARCHAR",
+            "repository": "VARCHAR",
+            "folder_name": "VARCHAR"
         }
         for col_name, col_sql_def in new_personality_cols_defs.items():
             if col_name not in personality_columns_db:
@@ -423,7 +426,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "port": "INTEGER",
             "pid": "INTEGER",
             "app_metadata": "JSON",
-            "folder_name": "VARCHAR"
+            "folder_name": "VARCHAR",
+            "allow_openai_api_access": "BOOLEAN DEFAULT 0 NOT NULL"
         }
         
         app_columns_db_after_rebuild = [col['name'] for col in inspector.get_columns('apps')]
@@ -500,6 +504,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'type' not in columns_db:
             connection.execute(text("ALTER TABLE prompt_zoo_repositories ADD COLUMN type VARCHAR DEFAULT 'git' NOT NULL"))
             print("INFO: Added 'type' column to 'prompt_zoo_repositories' table.")
+    
+    # NEW: Create personality_zoo_repositories if it doesn't exist
+    if not inspector.has_table("personality_zoo_repositories"):
+        from backend.db.models.service import PersonalityZooRepository
+        PersonalityZooRepository.__table__.create(connection)
+        print("INFO: Created 'personality_zoo_repositories' table.")
 
 
 def check_and_update_db_version(SessionLocal):

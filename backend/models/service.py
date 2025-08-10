@@ -172,6 +172,29 @@ class PromptZooRepositoryPublic(BaseModel):
     class Config:
         from_attributes = True
 
+class PersonalityZooRepositoryCreate(BaseModel):
+    name: constr(min_length=1, max_length=100)
+    url: Optional[str] = None
+    path: Optional[str] = None
+
+    @model_validator(mode='before')
+    def check_url_or_path_exclusive(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        url, path = values.get('url'), values.get('path')
+        if not (url or path) or (url and path):
+            raise ValueError('Either url or path must be provided, but not both.')
+        return values
+
+class PersonalityZooRepositoryPublic(BaseModel):
+    id: int
+    name: str
+    url: str
+    type: str
+    last_pulled_at: Optional[datetime.datetime] = None
+    created_at: datetime.datetime
+    is_deletable: bool = True
+    class Config:
+        from_attributes = True
+        
 class ZooAppInfo(BaseModel):
     name: str
     repository: str
@@ -179,6 +202,7 @@ class ZooAppInfo(BaseModel):
     icon: Optional[str] = None
     is_installed: bool = False
     is_broken: bool = False
+    is_legacy_scripted: bool = False
     has_readme: bool = False
     author: Optional[str] = None
     category: Optional[str] = None
@@ -312,6 +336,7 @@ class AppBase(BaseModel):
     is_installed: bool = False
     autostart: bool = False
     port: Optional[int] = None
+    allow_openai_api_access: bool = False
 
 class AppCreate(AppBase):
     @model_validator(mode='after')
@@ -337,6 +362,7 @@ class AppUpdate(BaseModel):
     tags: Optional[List[str]] = None
     autostart: Optional[bool] = None
     port: Optional[int] = None
+    allow_openai_api_access: Optional[bool] = None
 
 class AppPublic(AppBase):
     id: str

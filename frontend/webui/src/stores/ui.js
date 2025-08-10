@@ -30,6 +30,8 @@ export const useUiStore = defineStore('ui', () => {
         prompt: '',
         customEnhancePrompt: ''
     });
+    const pageTitle = ref('');
+    const pageTitleIcon = ref(null);
     const activeModal = computed(() => modalStack.value.length > 0 ? modalStack.value[modalStack.value.length - 1] : null);
 
     async function copyToClipboard(textToCopy, successMessage = 'Copied to clipboard!') {
@@ -231,6 +233,11 @@ export const useUiStore = defineStore('ui', () => {
         isDataZoneExpanded.value = !isDataZoneExpanded.value;
     }
 
+    function setPageTitle({ title, icon = null }) {
+        pageTitle.value = title;
+        pageTitleIcon.value = icon;
+    }
+
     return {
         mainView, activeModal, modalProps, notifications, currentTheme,
         currentLanguage, availableLanguages,
@@ -238,6 +245,7 @@ export const useUiStore = defineStore('ui', () => {
         emailModalSubject, emailModalBody, emailModalBackgroundColor, emailModalSendAsText,
         isSidebarOpen, keywords, generatePersonalityModalProps,
         isDataZoneVisible, isDataZoneExpanded,
+        pageTitle, pageTitleIcon, setPageTitle,
         initEmailModalState,
         setMainView, openModal, closeModal, addNotification, removeNotification,
         setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages, fetchKeywords,

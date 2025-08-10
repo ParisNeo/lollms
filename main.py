@@ -21,13 +21,13 @@ from sqlalchemy import or_
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
-    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH
+    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
-from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository
+from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
 from backend.security import get_password_hash as hash_password
 from backend.discussion import LegacyDiscussion
 from backend.session import (
@@ -54,9 +54,10 @@ from backend.routers.files import upload_router, assets_router, files_router
 from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
 from backend.routers.app_utils import cleanup_and_autostart_apps
-from backend.routers.apps_zoo import apps_zoo_router
-from backend.routers.mcps_zoo import mcps_zoo_router
-from backend.routers.prompts_zoo import prompts_zoo_router
+from backend.routers.zoos.apps_zoo import apps_zoo_router
+from backend.routers.zoos.mcps_zoo import mcps_zoo_router
+from backend.routers.zoos.prompts_zoo import prompts_zoo_router
+from backend.routers.zoos.personalities_zoo import personalities_zoo_router
 from backend.routers.tasks import tasks_router
 from backend.task_manager import task_manager # Import the singleton instance
 
@@ -358,6 +359,29 @@ Source Material:
     finally:
         if db_for_prompts: db_for_prompts.close()
 
+    db_for_personalities: Optional[Session] = None
+    try:
+        db_for_personalities = next(get_db())
+        personality_zoo_name = "lollms_personalities_zoo"
+        personality_zoo_url = "https://github.com/ParisNeo/lollms_personalities_zoo.git"
+        personality_zoo_repo_path = PERSONALITIES_ZOO_ROOT_PATH / personality_zoo_name
+
+        if not db_for_personalities.query(DBPersonalityZooRepository).filter(or_(DBPersonalityZooRepository.name == personality_zoo_name, DBPersonalityZooRepository.url == personality_zoo_url)).first():
+            default_personality_repo = DBPersonalityZooRepository(name=personality_zoo_name, url=personality_zoo_url, is_deletable=False)
+            db_for_personalities.add(default_personality_repo)
+            db_for_personalities.commit()
+            ASCIIColors.green(f"INFO: Default Personality Zoo repo '{personality_zoo_name}' added to DB.")
+
+        if not personality_zoo_repo_path.exists():
+            ASCIIColors.yellow(f"First setup: Cloning '{personality_zoo_name}'. This may take a moment...")
+            subprocess.run(["git", "clone", personality_zoo_url, str(personality_zoo_repo_path)], check=True)
+            ASCIIColors.green("Cloning complete.")
+    except Exception as e:
+        ASCIIColors.error(f"ERROR during Personality Zoo repository setup: {e}")
+        if db_for_personalities: db_for_personalities.rollback()
+    finally:
+        if db_for_personalities: db_for_personalities.close()
+
 
     ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
 
@@ -377,7 +401,7 @@ app = FastAPI(
     lifespan=lifespan
 )
     
-# CORS Configuration... (remains the same)
+# CORS Configuration...
 host = SERVER_CONFIG.get("host", "0.0.0.0")
 port = SERVER_CONFIG.get("port", 9642)
 https_enabled = SERVER_CONFIG.get("https_enabled", False)
@@ -404,8 +428,10 @@ db = db_session_module.SessionLocal()
 try:
     sso_apps = db.query(DBApp).filter(DBApp.active == True, DBApp.authentication_type == 'lollms_sso').all()
     sso_mcps = db.query(DBMCP).filter(DBMCP.active == True, DBMCP.authentication_type == 'lollms_sso').all()
+    # NEW: Add apps with OpenAI API access to CORS list
+    openai_apps = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.allow_openai_api_access == True).all()
     
-    sso_services = sso_apps + sso_mcps
+    sso_services = sso_apps + sso_mcps + openai_apps
     
     for service in sso_services:
         if service.url:
@@ -450,6 +476,7 @@ app.include_router(sso_router)
 app.include_router(apps_zoo_router)
 app.include_router(mcps_zoo_router)
 app.include_router(prompts_zoo_router)
+app.include_router(personalities_zoo_router)
 app.include_router(tasks_router)
 app.include_router(help_router)
 app.include_router(prompts_router)

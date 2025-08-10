@@ -112,8 +112,8 @@ onMounted(async () => {
     <div v-else-if="showMainContentOrLoading === 'main_content'" class="flex h-full w-full relative">
       <Sidebar v-if="isHomePageLayout" />
       <div class="flex-1 flex flex-col overflow-hidden">
-        <GlobalHeader v-if="isHomePageLayout" />
-        <main class="flex-1" :class="isHomePageLayout ? 'overflow-y-auto' : ''">
+        <GlobalHeader />
+        <main class="flex-1 overflow-hidden">
             <router-view />
         </main>
       </div>

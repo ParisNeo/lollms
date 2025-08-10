@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
-import { marked } from 'marked';
+import { parsedMarkdown, getContentTokensWithMathProtection } from '../../services/markdownParser';
 
 import CodeBlock from './CodeBlock.vue';
 import IconThinking from '../../assets/icons/IconThinking.vue';
@@ -13,39 +13,6 @@ const props = defineProps({
 });
 
 const messageContentRef = ref(null);
-
-const mathPlaceholders = new Map();
-let mathCounter = 0;
-
-function protectMath(text) {
-    if (!text) return text;
-    mathCounter = 0;
-    mathPlaceholders.clear();
-
-    return text.replace(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g, (match) => {
-        const placeholder = `<!--MATH_PLACEHOLDER_${mathCounter}-->`;
-        mathPlaceholders.set(placeholder, match);
-        mathCounter++;
-        return placeholder;
-    });
-}
-
-function unprotectHtml(html) {
-    if (!html || mathPlaceholders.size === 0) return html;
-    let result = html;
-    for (const [placeholder, original] of mathPlaceholders.entries()) {
-        const regex = new RegExp(placeholder.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
-        result = result.replace(regex, original);
-    }
-    return result;
-}
-
-const parsedMarkdown = (content) => {
-    if (typeof content !== 'string') return '';
-    const protectedContent = protectMath(content);
-    const rawHtml = marked.parse(protectedContent, { gfm: true, breaks: true, mangle: false, smartypants: false });
-    return unprotectHtml(rawHtml);
-};
 
 function renderMath() {
   if (messageContentRef.value && window.renderMathInElement) {
@@ -86,20 +53,7 @@ const messageParts = computed(() => {
 });
 
 const getContentTokens = (text) => {
-    if (!text) return [];
-    const protectedText = protectMath(text);
-    const tokens = Array.from(marked.lexer(protectedText, { mangle: false, smartypants: false }));
-
-    return tokens.map(token => {
-        const unprotectedToken = { ...token };
-        if (unprotectedToken.raw) {
-            unprotectedToken.raw = unprotectHtml(unprotectedToken.raw);
-        }
-        if (unprotectedToken.text) { 
-            unprotectedToken.text = unprotectHtml(unprotectedToken.text);
-        }
-        return unprotectedToken;
-    });
+    return getContentTokensWithMathProtection(text);
 };
 
 const parsedStreamingContent = computed(() => parsedMarkdown(props.content));

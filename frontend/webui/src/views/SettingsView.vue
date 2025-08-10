@@ -30,28 +30,37 @@ const router = useRouter();
 
 const user = computed(() => authStore.user);
 
-const tabs = [
-  { id: 'account', label: 'Account', component: AccountSettings, icon: IconUserCircle },
-  { id: 'general', label: 'General', component: GeneralSettings, icon: IconCog },
-  { id: 'llm', label: 'LLM', component: LLMSettings, icon: IconCpuChip },
-  { id: 'rag', label: 'RAG', component: RAGSettings, icon: IconDatabase },
-  { id: 'personalities', label: 'Personalities', component: PersonalitiesSettings, icon: IconSparkles },
-  { id: 'prompts', label: 'User Prompts', component: PromptsSettings, icon: IconTicket },
-  { id: 'mcps', label: 'MCPs', component: McpsSettings, icon: IconMcp },
-  { id: 'apps', label: 'Apps', component: AppsSettings, icon: IconSquares2x2 },
-  { id: 'api-keys', label: 'API Keys', component: ApiKeysSettings, icon: IconKey },
+const sections = [
+  { type: 'divider', label: 'User & Interface' },
+  { type: 'link', id: 'account', name: 'Account', component: AccountSettings, icon: IconUserCircle },
+  { type: 'link', id: 'general', name: 'General', component: GeneralSettings, icon: IconCog },
+  
+  { type: 'divider', label: 'AI Configuration' },
+  { type: 'link', id: 'llm', name: 'LLM', component: LLMSettings, icon: IconCpuChip },
+  { type: 'link', id: 'rag', name: 'RAG', component: RAGSettings, icon: IconDatabase },
+
+  { type: 'divider', label: 'Content Management' },
+  { type: 'link', id: 'personalities', name: 'Personalities', component: PersonalitiesSettings, icon: IconSparkles },
+  { type: 'link', id: 'prompts', name: 'User Prompts', component: PromptsSettings, icon: IconTicket },
+
+  { type: 'divider', label: 'Services & Integrations' },
+  { type: 'link', id: 'mcps', name: 'MCPs', component: McpsSettings, icon: IconMcp },
+  { type: 'link', id: 'apps', name: 'Apps', component: AppsSettings, icon: IconSquares2x2 },
+  { type: 'link', id: 'api-keys', name: 'API Keys', component: ApiKeysSettings, icon: IconKey },
 ];
 
 const activeTab = ref(route.query.tab || 'account');
 
 watch(() => route.query.tab, (newTab) => {
-  if (newTab && tabs.some(t => t.id === newTab)) {
+  const allTabs = sections.filter(s => s.type === 'link').map(s => s.id);
+  if (newTab && allTabs.includes(newTab)) {
     activeTab.value = newTab;
   }
 });
 
 const activeComponent = computed(() => {
-    return tabs.find(tab => tab.id === activeTab.value)?.component || null;
+    const linkItems = sections.filter(s => s.type === 'link');
+    return linkItems.find(tab => tab.id === activeTab.value)?.component || null;
 });
 
 function selectTab(tabId) {
@@ -63,16 +72,20 @@ function selectTab(tabId) {
 <template>
   <PageViewLayout title="Settings" :title-icon="IconCog">
     <template #sidebar>
-      <button 
-        v-for="tab in tabs" 
-        :key="tab.id"
-        @click="selectTab(tab.id)" 
-        :class="{ 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300': activeTab === tab.id }" 
-        class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-      >
-        <component :is="tab.icon" class="w-5 h-5 flex-shrink-0" />
-        <span>{{ tab.label }}</span>
-      </button>
+      <template v-for="(section, index) in sections" :key="index">
+        <div v-if="section.type === 'divider'" class="px-3 pt-4 pb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+            {{ section.label }}
+        </div>
+        <button 
+          v-else-if="section.type === 'link'"
+          @click="selectTab(section.id)" 
+          :class="{ 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300': activeTab === section.id }" 
+          class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+        >
+          <component :is="section.icon" class="w-5 h-5 flex-shrink-0" />
+          <span>{{ section.name }}</span>
+        </button>
+      </template>
     </template>
     <template #main>
       <Suspense>

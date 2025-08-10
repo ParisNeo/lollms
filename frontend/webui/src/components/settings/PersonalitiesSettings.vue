@@ -238,52 +238,15 @@ async function handleShare(personality) {
         </div>
 
         <div class="space-y-10">
-            <div>
-                <h5 class="text-md font-semibold mb-4">Your Personalities</h5>
-                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                    <div
-                        @click="handleDeselectAll"
-                        class="flex flex-col items-center justify-center h-full min-h-[160px] bg-white dark:bg-gray-800 border-2 border-dashed dark:border-gray-600 rounded-lg p-4 transition-all hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer"
-                        :class="{ '!border-solid ring-2 ring-offset-2 ring-blue-500 dark:ring-offset-gray-900 !border-blue-500': !activePersonalityId }"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                          <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                        </svg>
-                        <span class="font-semibold text-sm text-gray-700 dark:text-gray-300">No Personality</span>
-                        <span class="text-xs text-gray-500 dark:text-gray-400">(Default)</span>
-                    </div>
-
+            <!-- Starred View -->
+            <div v-if="selectedCategory === 'Starred'">
+                <h5 class="text-md font-semibold mb-4">Starred Personalities</h5>
+                <div v-if="filteredList.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     <PersonalityCard
-                        v-for="p in filteredUserPersonalities"
+                        v-for="p in filteredList"
                         :key="p.id"
                         :personality="p"
-                        :is-user-personality="true"
-                        :is-active="p.id === activePersonalityId"
-                        :is-saving="p.id === savingPersonalityId"
-                        :is-starred="starredPersonalityIds.has(p.id)"
-                        @select="handleSelectPersonality($event)"
-                        @toggle-star="handleToggleStar($event)"
-                        @edit="openEditor($event)"
-                        @delete="handleDeletePersonality($event)"
-                        @share="handleShare($event)"
-                    />
-                </div>
-                <p v-if="filteredUserPersonalities.length === 0 && userPersonalities.length === 0" class="italic text-sm text-gray-500 p-2 mt-4">
-                    You haven't created any personalities yet.
-                </p>
-                 <p v-else-if="filteredUserPersonalities.length === 0" class="italic text-sm text-gray-500 p-2 mt-4">
-                    No matches found in your personalities.
-                </p>
-            </div>
-
-            <div>
-                <h5 class="text-md font-semibold mb-4">Public & System Personalities</h5>
-                <div v-if="filteredPublicPersonalities.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                     <PersonalityCard
-                        v-for="p in filteredPublicPersonalities"
-                        :key="p.id"
-                        :personality="p"
-                        :is-user-personality="user && user.is_admin"
+                        :is-user-personality="p.owner_username === user.username || (user && user.is_admin)"
                         :is-active="p.id === activePersonalityId"
                         :is-saving="p.id === savingPersonalityId"
                         :is-starred="starredPersonalityIds.has(p.id)"
@@ -295,10 +258,75 @@ async function handleShare(personality) {
                         @share="handleShare($event)"
                     />
                 </div>
-                <p v-else class="italic text-sm text-gray-500 p-2">
-                    {{ searchQuery || selectedCategory !== 'All' ? 'No matches found in public personalities.' : "No public personalities available." }}
+                 <p v-else class="italic text-sm text-gray-500 p-2">
+                    {{ searchQuery ? 'No starred personalities match your search.' : 'You haven\'t starred any personalities yet. Click the star icon on a personality to add it here.' }}
                 </p>
             </div>
+            
+            <!-- Default View (Categorized) -->
+            <template v-else>
+                <div>
+                    <h5 class="text-md font-semibold mb-4">Your Personalities</h5>
+                    <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        <div
+                            @click="handleDeselectAll"
+                            class="flex flex-col items-center justify-center h-full min-h-[160px] bg-white dark:bg-gray-800 border-2 border-dashed dark:border-gray-600 rounded-lg p-4 transition-all hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer"
+                            :class="{ '!border-solid ring-2 ring-offset-2 ring-blue-500 dark:ring-offset-gray-900 !border-blue-500': !activePersonalityId }"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                              <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                            </svg>
+                            <span class="font-semibold text-sm text-gray-700 dark:text-gray-300">No Personality</span>
+                            <span class="text-xs text-gray-500 dark:text-gray-400">(Default)</span>
+                        </div>
+
+                        <PersonalityCard
+                            v-for="p in filteredUserPersonalities"
+                            :key="p.id"
+                            :personality="p"
+                            :is-user-personality="true"
+                            :is-active="p.id === activePersonalityId"
+                            :is-saving="p.id === savingPersonalityId"
+                            :is-starred="starredPersonalityIds.has(p.id)"
+                            @select="handleSelectPersonality($event)"
+                            @toggle-star="handleToggleStar($event)"
+                            @edit="openEditor($event)"
+                            @delete="handleDeletePersonality($event)"
+                            @share="handleShare($event)"
+                        />
+                    </div>
+                    <p v-if="filteredUserPersonalities.length === 0 && userPersonalities.length === 0 && selectedCategory === 'All' && !searchQuery" class="italic text-sm text-gray-500 p-2 mt-4">
+                        You haven't created any personalities yet.
+                    </p>
+                     <p v-else-if="filteredUserPersonalities.length === 0" class="italic text-sm text-gray-500 p-2 mt-4">
+                        No matches found in your personalities.
+                    </p>
+                </div>
+
+                <div>
+                    <h5 class="text-md font-semibold mb-4">Public & System Personalities</h5>
+                    <div v-if="filteredPublicPersonalities.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                         <PersonalityCard
+                            v-for="p in filteredPublicPersonalities"
+                            :key="p.id"
+                            :personality="p"
+                            :is-user-personality="user && user.is_admin"
+                            :is-active="p.id === activePersonalityId"
+                            :is-saving="p.id === savingPersonalityId"
+                            :is-starred="starredPersonalityIds.has(p.id)"
+                            @select="handleSelectPersonality($event)"
+                            @toggle-star="handleToggleStar($event)"
+                            @clone="openEditor($event)"
+                            @edit="openEditor($event)"
+                            @delete="handleDeletePersonality($event)"
+                            @share="handleShare($event)"
+                        />
+                    </div>
+                    <p v-else class="italic text-sm text-gray-500 p-2">
+                        {{ searchQuery || selectedCategory !== 'All' ? 'No matches found in public personalities.' : "No public personalities available." }}
+                    </p>
+                </div>
+            </template>
         </div>
     </section>
 </template>

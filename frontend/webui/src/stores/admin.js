@@ -10,29 +10,41 @@ export const useAdminStore = defineStore('admin', () => {
     // --- State ---
     const allUsers = ref([]);
     const isLoadingUsers = ref(false);
+
     const bindings = ref([]);
     const isLoadingBindings = ref(false);
     const availableBindingTypes = ref([]);
+
     const globalSettings = ref([]);
     const isLoadingSettings = ref(false);
+
     const isImporting = ref(false);
     const isEnhancingEmail = ref(false);
+    
     const adminAvailableLollmsModels = ref([]);
     const isLoadingLollmsModels = ref(false);
+
     const zooRepositories = ref([]);
     const isLoadingZooRepositories = ref(false);
     const mcpZooRepositories = ref([]);
     const isLoadingMcpZooRepositories = ref(false);
     const promptZooRepositories = ref([]);
     const isLoadingPromptZooRepositories = ref(false);
+    const personalityZooRepositories = ref([]);
+    const isLoadingPersonalityZooRepositories = ref(false);
+
     const zooApps = ref({ items: [], total: 0, pages: 1, categories: [] });
     const isLoadingZooApps = ref(false);
     const zooMcps = ref({ items: [], total: 0, pages: 1, categories: [] });
     const isLoadingZooMcps = ref(false);
     const zooPrompts = ref({ items: [], total: 0, pages: 1, categories: [] });
     const isLoadingZooPrompts = ref(false);
+    const zooPersonalities = ref({ items: [], total: 0, pages: 1, categories: [] });
+    const isLoadingZooPersonalities = ref(false);
+
     const installedApps = ref([]);
     const isLoadingInstalledApps = ref(false);
+
     const systemStatus = ref(null);
     const isLoadingSystemStatus = ref(false);
 
@@ -40,13 +52,9 @@ export const useAdminStore = defineStore('admin', () => {
     async function syncInstallations() {
         const { useTasksStore } = await import('./tasks');
         const tasksStore = useTasksStore();
-        try {
-            const response = await apiClient.post('/api/apps_zoo/sync-installs');
-            tasksStore.addTask(response.data);
-            uiStore.addNotification('Installation sync task started.', 'info');
-        } catch (error) {
-            // Error is handled by global interceptor
-        }
+        const response = await apiClient.post('/api/apps_zoo/sync-installs');
+        tasksStore.addTask(response.data);
+        uiStore.addNotification('Installation sync task started.', 'info');
     }
 
     async function fetchSystemStatus() {
@@ -157,47 +165,26 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('Binding deleted successfully.', 'success');
     }
 
-    // --- NEW: Model Alias Actions ---
     async function fetchBindingModels(bindingId) {
-        try {
-            const response = await apiClient.get(`/api/admin/bindings/${bindingId}/models`);
-            return response.data;
-        } catch (error) {
-            uiStore.addNotification(`Could not load models for binding.`, 'error');
-            return [];
-        }
+        const response = await apiClient.get(`/api/admin/bindings/${bindingId}/models`);
+        return response.data;
     }
-
     async function getModelCtxSize(bindingId, modelName) {
-        try {
-            const response = await apiClient.post(`/api/admin/bindings/${bindingId}/context-size`, { model_name: modelName });
-            return response.data.ctx_size;
-        } catch (error) {
-            uiStore.addNotification('Could not auto-detect context size.', 'error');
-            return null;
-        }
+        const response = await apiClient.post(`/api/admin/bindings/${bindingId}/context-size`, { model_name: modelName });
+        return response.data.ctx_size;
     }
-
     async function saveModelAlias(bindingId, payload) {
         const response = await apiClient.put(`/api/admin/bindings/${bindingId}/alias`, payload);
         const index = bindings.value.findIndex(b => b.id === bindingId);
-        if (index !== -1) {
-            bindings.value[index] = response.data;
-        }
+        if (index !== -1) bindings.value[index] = response.data;
         uiStore.addNotification(`Alias for '${payload.original_model_name}' saved.`, 'success');
     }
-
     async function deleteModelAlias(bindingId, modelName) {
-        const response = await apiClient.delete(`/api/admin/bindings/${bindingId}/alias`, {
-            data: { original_model_name: modelName }
-        });
+        const response = await apiClient.delete(`/api/admin/bindings/${bindingId}/alias`, { data: { original_model_name: modelName } });
         const index = bindings.value.findIndex(b => b.id === bindingId);
-        if (index !== -1) {
-            bindings.value[index] = response.data;
-        }
+        if (index !== -1) bindings.value[index] = response.data;
         uiStore.addNotification(`Alias for '${modelName}' deleted.`, 'success');
     }
-    // --- END NEW ---
 
     async function fetchGlobalSettings() {
         isLoadingSettings.value = true;
@@ -257,6 +244,15 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchZooPrompts(params = {}) { isLoadingZooPrompts.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/prompts_zoo/categories'), apiClient.get('/api/prompts_zoo/available', { params })]); zooPrompts.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooPrompts.value = false; } }
     async function installZooPrompt(payload) { const { useTasksStore } = await import('./tasks'); const tasksStore = useTasksStore(); const res = await apiClient.post('/api/prompts_zoo/install', payload); tasksStore.addTask(res.data); uiStore.addNotification(res.data.name + ' started.', 'info'); }
     async function fetchPromptReadme(repo, folder) { const res = await apiClient.get('/api/prompts_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
+
+    // --- Personality Zoo ---
+    async function fetchPersonalityZooRepositories() { isLoadingPersonalityZooRepositories.value = true; try { const res = await apiClient.get('/api/personalities_zoo/repositories'); personalityZooRepositories.value = res.data; } catch(e){ console.error(e) } finally { isLoadingPersonalityZooRepositories.value = false; } }
+    async function addPersonalityZooRepository(payload) { const res = await apiClient.post('/api/personalities_zoo/repositories', payload); personalityZooRepositories.value.push(res.data); uiStore.addNotification(`Repo '${payload.name}' added.`, 'success'); }
+    async function deletePersonalityZooRepository(repoId) { await apiClient.delete(`/api/personalities_zoo/repositories/${repoId}`); personalityZooRepositories.value = personalityZooRepositories.value.filter(r => r.id !== repoId); uiStore.addNotification('Repo deleted.', 'success'); }
+    async function pullPersonalityZooRepository(repoId) { const { useTasksStore } = await import('./tasks'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/personalities_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); uiStore.addNotification(res.data.name + ' started.', 'info'); }
+    async function fetchZooPersonalities(params = {}) { isLoadingZooPersonalities.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/personalities_zoo/categories'), apiClient.get('/api/personalities_zoo/available', { params })]); zooPersonalities.value = { ...items_res.data, categories: cat_res.data }; } catch(e){ console.error(e) } finally { isLoadingZooPersonalities.value = false; } }
+    async function installZooPersonality(payload) { const { useTasksStore } = await import('./tasks'); const tasksStore = useTasksStore(); const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); uiStore.addNotification(res.data.name + ' started.', 'info'); }
+    async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
 
     // --- System Prompt Management (Installed Prompts) ---
     async function createSystemPrompt(promptData) { const { usePromptsStore } = await import('./prompts'); await apiClient.post('/api/prompts_zoo/installed', promptData); uiStore.addNotification('System prompt created.', 'success'); await usePromptsStore().fetchPrompts(); }
@@ -326,6 +322,9 @@ export const useAdminStore = defineStore('admin', () => {
         // Prompt Zoo
         promptZooRepositories, isLoadingPromptZooRepositories, fetchPromptZooRepositories, addPromptZooRepository, deletePromptZooRepository, pullPromptZooRepository, pullAllPromptZooRepositories,
         zooPrompts, isLoadingZooPrompts, fetchZooPrompts, installZooPrompt, fetchPromptReadme,
+        // Personality Zoo
+        personalityZooRepositories, isLoadingPersonalityZooRepositories, fetchPersonalityZooRepositories, addPersonalityZooRepository, deletePersonalityZooRepository, pullPersonalityZooRepository,
+        zooPersonalities, isLoadingZooPersonalities, fetchZooPersonalities, installZooPersonality, fetchPersonalityReadme,
         // System Prompts (Installed from Zoo)
         createSystemPrompt, updateSystemPrompt, deleteSystemPrompt, generateSystemPrompt, updateSystemPromptFromZoo,
         // Installed Apps (includes Apps & MCPs)

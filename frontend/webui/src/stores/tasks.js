@@ -75,6 +75,10 @@ export const useTasksStore = defineStore('tasks', () => {
                             console.log(`Task '${taskName}' completed, refreshing prompts.`);
                             promptsStore.fetchPrompts();
                             adminStore.fetchZooPrompts();
+                        } else if (taskName.startsWith('Installing personality:')) {
+                            console.log(`Task '${taskName}' completed, refreshing personalities.`);
+                            dataStore.fetchPersonalities();
+                            adminStore.fetchZooPersonalities();
                         }
                     }
                     // --- END NEW ---

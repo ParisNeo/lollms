@@ -1,88 +1,103 @@
 <script setup>
-import { ref, defineAsyncComponent, onMounted, computed } from 'vue';
-import { useAdminStore } from '../stores/admin';
-import { useUiStore } from '../stores/ui';
-import { useTasksStore } from '../stores/tasks';
-import { storeToRefs } from 'pinia';
+import { computed, defineAsyncComponent } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 
-import IconHome from '../assets/icons/IconHome.vue';
+// Import Icons
+import IconDashboard from '../assets/icons/IconDashboard.vue';
 import IconUserGroup from '../assets/icons/IconUserGroup.vue';
-import IconCpuChip from '../assets/icons/IconCpuChip.vue';
-import IconLink from '../assets/icons/IconLink.vue';
-import IconWrenchScrewdriver from '../assets/icons/IconWrenchScrewdriver.vue';
-import IconCog from '../assets/icons/IconCog.vue';
-import IconMessage from '../assets/icons/IconMessage.vue';
-import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
-import IconSquares2x2 from '../assets/icons/IconSquares2x2.vue';
 import IconTasks from '../assets/icons/IconTasks.vue';
+import IconSquares2x2 from '../assets/icons/IconSquares2x2.vue';
 import IconMcp from '../assets/icons/IconMcp.vue';
 import IconSparkles from '../assets/icons/IconSparkles.vue';
+import IconUserCircle from '../assets/icons/IconUserCircle.vue';
+import IconCpuChip from '../assets/icons/IconCpuChip.vue';
+import IconCog from '../assets/icons/IconCog.vue';
+import IconKey from '../assets/icons/IconKey.vue';
+import IconMail from '../assets/icons/IconMail.vue';
+import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
 
-const AdminPanel = defineAsyncComponent(() => import('../components/admin/AdminPanel.vue'));
-const adminStore = useAdminStore();
-const uiStore = useUiStore();
-const tasksStore = useTasksStore();
+const route = useRoute();
+const router = useRouter();
 
-const { activeTasksCount } = storeToRefs(tasksStore);
+// Define components for dynamic loading
+const components = {
+  dashboard: defineAsyncComponent(() => import('../components/admin/Dashboard.vue')),
+  users: defineAsyncComponent(() => import('../components/admin/UserTable.vue')),
+  tasks: defineAsyncComponent(() => import('../components/admin/TaskManager.vue')),
+  bindings: defineAsyncComponent(() => import('../components/admin/BindingsSettings.vue')),
+  apps: defineAsyncComponent(() => import('../components/admin/zoos/AppsManagement.vue')),
+  mcps: defineAsyncComponent(() => import('../components/admin/zoos/McpsManagement.vue')),
+  personalities: defineAsyncComponent(() => import('../components/admin/zoos/PersonalitiesManagement.vue')),
+  prompts: defineAsyncComponent(() => import('../components/admin/zoos/PromptsManagement.vue')),
+  global_settings: defineAsyncComponent(() => import('../components/admin/GlobalSettings.vue')),
+  https: defineAsyncComponent(() => import('../components/admin/HttpsSettings.vue')),
+  email: defineAsyncComponent(() => import('../components/admin/EmailSettings.vue')),
+  import: defineAsyncComponent(() => import('../components/admin/ImportTools.vue')),
+};
 
-const activeTab = ref('dashboard');
-
-const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: IconHome },
-    { id: 'users', label: 'User Management', icon: IconUserGroup },
-    { id: 'tasks', label: 'Tasks', icon: IconTasks },
-    { id: 'https', label: 'Server/HTTPS', icon: IconCpuChip },
-    { id: 'bindings', label: 'LLM Bindings', icon: IconLink },
-    { id: 'apps', label: 'Apps', icon: IconSquares2x2 },
-    { id: 'mcps', label: 'MCPs', icon: IconMcp },
-    { id: 'prompts', label: 'Prompts', icon: IconSparkles },
-    { id: 'global_settings', label: 'Global Settings', icon: IconCog },
-    { id: 'email', label: 'Email Settings', icon: IconMessage },
-    { id: 'import', label: 'Import', icon: IconArrowDownTray }
+const sections = [
+  { type: 'link', id: 'dashboard', name: 'Dashboard', icon: IconDashboard },
+  { type: 'divider', label: 'Management' },
+  { type: 'link', id: 'users', name: 'Users', icon: IconUserGroup },
+  { type: 'link', id: 'tasks', name: 'Tasks', icon: IconTasks },
+  { type: 'divider', label: 'Zoos' },
+  { type: 'link', id: 'personalities', name: 'Personalities', icon: IconUserCircle },
+  { type: 'link', id: 'prompts', name: 'Prompts', icon: IconSparkles },
+  { type: 'link', id: 'mcps', name: 'MCPs', icon: IconMcp },
+  { type: 'link', id: 'apps', name: 'Apps', icon: IconSquares2x2 },
+  { type: 'divider', label: 'System & Tools' },
+  { type: 'link', id: 'bindings', name: 'LLM Bindings', icon: IconCpuChip },
+  { type: 'link', id: 'global_settings', name: 'Global Settings', icon: IconCog },
+  { type: 'link', id: 'https', name: 'HTTPS Settings', icon: IconKey },
+  { type: 'link', id: 'email', name: 'Email Settings', icon: IconMail },
+  { type: 'link', id: 'import', name: 'Import Tools', icon: IconArrowDownTray },
 ];
 
-onMounted(() => {
-    adminStore.fetchAllUsers();
-    adminStore.fetchGlobalSettings();
+const activeSectionId = computed({
+    get: () => route.query.section || 'dashboard',
+    set: (sectionId) => {
+        router.push({ query: { ...route.query, section: sectionId } });
+    }
 });
+
+const activeComponent = computed(() => {
+    return components[activeSectionId.value] || components.dashboard;
+});
+
 </script>
 
 <template>
-  <PageViewLayout title="Admin Panel" :title-icon="IconWrenchScrewdriver">
-    <template #header-actions>
-      <button @click="uiStore.openModal('tasksManager')" class="btn btn-secondary relative">
-        <IconTasks class="w-5 h-5" />
-        <span class="ml-2">Task Manager</span>
-        <span v-if="activeTasksCount > 0" class="absolute -top-1 -right-1 flex h-4 w-4">
-          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-          <span class="relative inline-flex rounded-full h-4 w-4 bg-blue-500 text-white text-xs items-center justify-center">{{ activeTasksCount }}</span>
-        </span>
-      </button>
-    </template>
-    <template #sidebar>
-      <button 
-        v-for="tab in tabs" 
-        :key="tab.id"
-        @click="activeTab = tab.id" 
-        :class="{ 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300': activeTab === tab.id }" 
-        class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-      >
-        <component :is="tab.icon" class="w-5 h-5 flex-shrink-0" />
-        <span>{{ tab.label }}</span>
-      </button>
-    </template>
-    <template #main>
-      <Suspense>
-        <template #default>
-            <AdminPanel :active-tab="activeTab" />
+    <PageViewLayout title="Admin Panel" :titleIcon="IconCog">
+        <template #sidebar>
+            <template v-for="(section, index) in sections" :key="index">
+                <div v-if="section.type === 'divider'" class="px-3 pt-4 pb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+                    {{ section.label }}
+                </div>
+                <a v-else-if="section.type === 'link'"
+                   href="#"
+                   @click.prevent="activeSectionId = section.id"
+                   class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors"
+                   :class="activeSectionId === section.id ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50'"
+                >
+                    <component :is="section.icon" class="w-5 h-5" />
+                    <span>{{ section.name }}</span>
+                </a>
+            </template>
         </template>
-        <template #fallback>
-            <div class="flex items-center justify-center h-full">
-                <p class="text-lg text-gray-500 dark:text-gray-400 italic">Loading admin section...</p>
+        <template #main>
+            <div class="p-4 sm:p-6">
+                <Suspense>
+                    <template #default>
+                        <component :is="activeComponent" />
+                    </template>
+                    <template #fallback>
+                        <div class="text-center py-10">
+                            <p class="text-gray-500 dark:text-gray-400">Loading component...</p>
+                        </div>
+                    </template>
+                </Suspense>
             </div>
         </template>
-      </Suspense>
-    </template>
-  </PageViewLayout>
+    </PageViewLayout>
 </template>

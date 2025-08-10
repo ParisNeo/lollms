@@ -16,9 +16,9 @@ const BindingsSettings = defineAsyncComponent(() => import('./BindingsSettings.v
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
 const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
 const HttpsSettings = defineAsyncComponent(() => import('./HttpsSettings.vue'));
-const AppsManagement = defineAsyncComponent(() => import('./AppsManagement.vue'));
-const McpsManagement = defineAsyncComponent(() => import('./McpsManagement.vue'));
-const PromptsManagement = defineAsyncComponent(() => import('./PromptsManagement.vue'));
+const AppsManagement = defineAsyncComponent(() => import('./zoos/AppsManagement.vue'));
+const McpsManagement = defineAsyncComponent(() => import('./zoos/McpsManagement.vue'));
+const PromptsManagement = defineAsyncComponent(() => import('./zoos/PromptsManagement.vue'));
 const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
 
 const tabs = [

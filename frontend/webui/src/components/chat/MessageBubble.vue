@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, watch } from 'vue';
+import { marked } from 'marked';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
@@ -42,6 +43,42 @@ const props = defineProps({
     required: true,
   },
 });
+
+// --- Markdown Parsing Logic ---
+const mathPlaceholders = new Map();
+let mathCounter = 0;
+
+function protectMath(text) {
+    if (!text) return text;
+    mathCounter = 0;
+    mathPlaceholders.clear();
+
+    return text.replace(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g, (match) => {
+        const placeholder = `<!--MATH_PLACEHOLDER_${mathCounter}-->`;
+        mathPlaceholders.set(placeholder, match);
+        mathCounter++;
+        return placeholder;
+    });
+}
+
+function unprotectHtml(html) {
+    if (!html || mathPlaceholders.size === 0) return html;
+    let result = html;
+    for (const [placeholder, original] of mathPlaceholders.entries()) {
+        const regex = new RegExp(placeholder.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'), 'g');
+        result = result.replace(regex, original);
+    }
+    return result;
+}
+
+const parsedMarkdown = (content) => {
+    if (typeof content !== 'string') return '';
+    const protectedContent = protectMath(content);
+    const rawHtml = marked.parse(protectedContent, { gfm: true, breaks: true, mangle: false, smartypants: false });
+    return unprotectHtml(rawHtml);
+};
+// --- End Markdown Parsing Logic ---
+
 
 const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
@@ -204,7 +241,7 @@ async function handleSaveEdit() {
     } else {
         const keptImagesB64 = editedImages.value
             .filter(img => !img.isNew)
-            .map(img => img.url.split(',')[1]); // Extract base64 part
+            .map(img => img.url.split(',')); // Extract base64 part
 
         await discussionsStore.saveMessageChanges({
             messageId: props.message.id,
@@ -217,7 +254,7 @@ async function handleSaveEdit() {
 }
 
 function removeEditedImage(index) {
-    const removed = editedImages.value.splice(index, 1)[0];
+    const removed = editedImages.value.splice(index, 1);
     if (removed.isNew) {
         // Also remove from the new files list
         const fileIndex = newImageFiles.value.findIndex(f => f === removed.file);

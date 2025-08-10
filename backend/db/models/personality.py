@@ -27,5 +27,11 @@ class Personality(Base):
     active_mcps = Column(JSON, nullable=True)
     data_source_type = Column(String, default="none", nullable=False)
     data_source = Column(Text, nullable=True)
+
+    # NEW Zoo fields
+    version = Column(String, nullable=True)
+    repository = Column(String, nullable=True)
+    folder_name = Column(String, nullable=True)
+    
     owner = relationship("User", foreign_keys=[owner_user_id], back_populates="owned_personalities")
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_personality_name'),)

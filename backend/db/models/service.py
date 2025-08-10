@@ -59,6 +59,16 @@ class PromptZooRepository(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_deletable = Column(Boolean, default=True, nullable=False)
 
+class PersonalityZooRepository(Base):
+    __tablename__ = "personality_zoo_repositories"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    url = Column(String, unique=True, nullable=False)
+    type = Column(String, default="git", nullable=False)
+    last_pulled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_deletable = Column(Boolean, default=True, nullable=False)
+
 class App(Base):
     __tablename__ = "apps"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
@@ -88,6 +98,7 @@ class App(Base):
     port = Column(Integer, nullable=True, unique=True)
     pid = Column(Integer, nullable=True)
     app_metadata = Column(JSON, nullable=True)
+    allow_openai_api_access = Column(Boolean, default=False, nullable=False)
 
     owner = relationship("User", back_populates="personal_apps")
     __table_args__ = (UniqueConstraint('owner_user_id', 'name', name='uq_user_app_name'),)
