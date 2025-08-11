@@ -342,6 +342,7 @@ export const useDataStore = defineStore('data', () => {
                 systemMcps.value = response.data.filter(mcp => mcp.type === 'system');
             }
         } catch (error) {
+            console.error("Failed to fetch MCPS:", error)
             userMcps.value = [];
             systemMcps.value = [];
         }
@@ -394,12 +395,16 @@ export const useDataStore = defineStore('data', () => {
 
     async function fetchMcpTools() {
         try {
+            console.log("Fetching MCP tools...");
             const response = await apiClient.get('/api/mcps/tools');
+            console.log("MCP tools fetched:", response.data);
             mcpTools.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
+            console.error("Failed to fetch MCP tools:", error);
             mcpTools.value = [];
         }
     }
+    
     async function refreshMcps() {
         const uiStore = useUiStore();
         uiStore.addNotification('Refreshing MCPs...', 'info');

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
+from ascii_colors import ASCIIColors
 
 from backend.db import get_db
 from backend.db.models.service import MCP as DBMCP, App as DBApp
@@ -70,15 +71,9 @@ def _invalidate_user_mcp_cache(username: str):
         print(f"INFO: Invalidated tools cache for user: {username}")
 
 def _format_mcp_public(mcp: DBMCP) -> MCPPublic:
-    # FIX: Dynamically generate URL for running installed MCPs
-    accessible_host = get_accessible_host()
-    url = mcp.url
-    # An MCP can be an installed App, so we check its properties
-    if hasattr(mcp, 'is_installed') and mcp.is_installed and hasattr(mcp, 'status') and mcp.status == 'running' and hasattr(mcp, 'port') and mcp.port:
-        url = f"http://{accessible_host}:{mcp.port}"
-
+    # This function is specifically for DBMCP objects
     return MCPPublic(
-        id=mcp.id, name=mcp.name, client_id=mcp.client_id, url=url, icon=mcp.icon,
+        id=mcp.id, name=mcp.name, client_id=mcp.client_id, url=mcp.url, icon=mcp.icon,
         active=mcp.active, type=mcp.type,
         authentication_type=mcp.authentication_type,
         authentication_key="********" if mcp.authentication_key else "",
@@ -93,12 +88,39 @@ def list_mcps(
     db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user),
 ):
-    query = db.query(DBMCP).options(joinedload(DBMCP.owner))
+    all_mcps = []
+    accessible_host = get_accessible_host()
+
+    # 1. Get manually registered MCPs from the DBMCP table
+    mcp_query = db.query(DBMCP).options(joinedload(DBMCP.owner))
     if not current_user.is_admin:
-        query = query.filter(or_(DBMCP.owner_user_id == current_user.id, DBMCP.type == 'system'))
+        mcp_query = mcp_query.filter(or_(DBMCP.owner_user_id == current_user.id, DBMCP.type == 'system'))
     
-    mcps_db = query.all()
-    return [_format_mcp_public(mcp) for mcp in mcps_db]
+    for mcp in mcp_query.all():
+        all_mcps.append(_format_mcp_public(mcp))
+
+    # 2. Get installed MCPs from the DBApp table
+    app_query = db.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.app_metadata['item_type'].as_string() == 'mcp')
+    if not current_user.is_admin:
+        app_query = app_query.filter(or_(DBApp.owner_user_id == current_user.id, DBApp.type == 'system'))
+
+    for app in app_query.all():
+        url = app.url
+        if app.is_installed and app.status == 'running' and app.port:
+            url = f"http://{accessible_host}:{app.port}/mcp"
+        
+        all_mcps.append(MCPPublic(
+            id=app.id, name=app.name, client_id=app.client_id, url=url, icon=app.icon,
+            active=app.active, type=app.type,
+            authentication_type=app.authentication_type,
+            authentication_key="********" if app.authentication_key else "",
+            owner_username=app.owner.username if app.owner else "System",
+            created_at=app.created_at, updated_at=app.updated_at,
+            sso_redirect_uri=app.sso_redirect_uri,
+            sso_user_infos_to_share=app.sso_user_infos_to_share or []
+        ))
+
+    return sorted(all_mcps, key=lambda m: m.name)
 
 @mcp_router.post("", response_model=MCPPublic, status_code=201)
 def create_mcp(
@@ -361,12 +383,13 @@ def list_all_available_tools(current_user: UserAuthDetails = Depends(get_current
 def get_discussion_tools(
     discussion_id: str,
     current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db) # Added db dependency for list_all_available_tools call
 ):
     discussion_obj = get_user_discussion(current_user.username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    all_available_tools = list_all_available_tools(current_user)
+    all_available_tools = list_all_available_tools(current_user, db)
     
     metadata = discussion_obj.metadata or {}
     active_tool_names = set(metadata.get('active_tools', []))
