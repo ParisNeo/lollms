@@ -79,7 +79,7 @@ export const useDataStore = defineStore('data', () => {
             acc[bindingAlias].items.push({ 
                 id: model.id, 
                 name: model.name, // The backend now provides the correct display name
-                icon_base64: model.alias?.icon,
+                icon_base_64: model.alias?.icon,
                 description: model.alias?.description,
                 alias: model.alias // Pass the whole alias object
             });
@@ -118,7 +118,6 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/api-keys');
             apiKeys.value = response.data;
         } catch (error) {
-            // This is expected if the service is disabled, so we don't show a notification unless it's another error.
             if (error.response?.status !== 403) {
                 useUiStore().addNotification('Could not fetch API keys.', 'error');
             }
@@ -128,44 +127,29 @@ export const useDataStore = defineStore('data', () => {
     }
 
     async function addApiKey(alias) {
-        try {
-            const response = await apiClient.post('/api/api-keys', { alias });
-            await fetchApiKeys();
-            return response.data;
-        } catch (error) {
-            throw error;
-        }
+        const response = await apiClient.post('/api/api-keys', { alias });
+        await fetchApiKeys();
+        return response.data;
     }
 
 
     async function deleteSingleApiKey(keyId) {
         const uiStore = useUiStore();
-        try {
-            await apiClient.delete(`/api/api-keys/${keyId}`);
-            apiKeys.value = apiKeys.value.filter(key => key.id !== keyId);
-            uiStore.addNotification('API Key deleted successfully.', 'success');
-        } catch (error) {
-            throw error;
-        }
+        await apiClient.delete(`/api/api-keys/${keyId}`);
+        apiKeys.value = apiKeys.value.filter(key => key.id !== keyId);
+        uiStore.addNotification('API Key deleted successfully.', 'success');
     }
     
     async function deleteMultipleApiKeys(keyIds) {
         const uiStore = useUiStore();
-        try {
-            const response = await apiClient.delete('/api/api-keys', { data: { key_ids: keyIds } });
-            apiKeys.value = apiKeys.value.filter(key => !keyIds.includes(key.id));
-            uiStore.addNotification(response.data.message || 'Selected keys deleted.', 'success');
-        } catch (error) {
-            throw error;
-        }
+        const response = await apiClient.delete('/api/api-keys', { data: { key_ids: keyIds } });
+        apiKeys.value = apiKeys.value.filter(key => !keyIds.includes(key.id));
+        uiStore.addNotification(response.data.message || 'Selected keys deleted.', 'success');
     }
 
     async function loadAllInitialData() {
-        // Import prompts store locally to avoid circular dependency issues
         const { usePromptsStore } = await import('./prompts');
         const promptsStore = usePromptsStore();
-
-        // Run all fetch operations, but catch individual errors so one failure doesn't stop the others.
         const promises = [
             fetchAvailableLollmsModels().catch(e => console.error("Error fetching models:", e)),
             fetchDataStores().catch(e => console.error("Error fetching data stores:", e)),
@@ -175,10 +159,8 @@ export const useDataStore = defineStore('data', () => {
             fetchApps().catch(e => console.error("Error fetching apps:", e)),
             fetchLanguages().catch(e => console.error("Error fetching languages:", e)),
             fetchApiKeys().catch(e => console.error("Error fetching API keys:", e)),
-            promptsStore.fetchPrompts().catch(e => console.error("Error fetching saved prompts:", e)) // NEW
+            promptsStore.fetchPrompts().catch(e => console.error("Error fetching saved prompts:", e))
         ];
-        
-        // Wait for all of them to settle, regardless of success or failure.
         await Promise.allSettled(promises);
     }
     
@@ -222,89 +204,54 @@ export const useDataStore = defineStore('data', () => {
     }
     async function addDataStore(storeData) {
         const uiStore = useUiStore();
-        try {
-            const response = await apiClient.post('/api/datastores', storeData);
-            ownedDataStores.value.push(response.data);
-            uiStore.addNotification('Data store created successfully.', 'success');
-        } catch(error) {
-            throw error;
-        }
+        const response = await apiClient.post('/api/datastores', storeData);
+        ownedDataStores.value.push(response.data);
+        uiStore.addNotification('Data store created successfully.', 'success');
     }
     async function updateDataStore(storeData) {
         const uiStore = useUiStore();
-        try {
-            await apiClient.put(`/api/datastores/${storeData.id}`, storeData);
-            await fetchDataStores();
-            uiStore.addNotification('Data store updated successfully.', 'success');
-        } catch(error) {
-            throw error;
-        }
+        await apiClient.put(`/api/datastores/${storeData.id}`, storeData);
+        await fetchDataStores();
+        uiStore.addNotification('Data store updated successfully.', 'success');
     }
     async function deleteDataStore(storeId) {
         const uiStore = useUiStore();
-        try {
-            await apiClient.delete(`/api/datastores/${storeId}`);
-            ownedDataStores.value = ownedDataStores.value.filter(s => s.id !== storeId);
-            uiStore.addNotification('Data store deleted.', 'success');
-        } catch(error) {
-            throw error;
-        }
+        await apiClient.delete(`/api/datastores/${storeId}`);
+        ownedDataStores.value = ownedDataStores.value.filter(s => s.id !== storeId);
+        uiStore.addNotification('Data store deleted.', 'success');
     }
     async function shareDataStore({ storeId, username, permissionLevel }) {
         const uiStore = useUiStore();
-        try {
-            await apiClient.post(`/api/datastores/${storeId}/share`, { 
-                target_username: username, 
-                permission_level: permissionLevel 
-            });
-            uiStore.addNotification(`Store shared with ${username}.`, 'success');
-        } catch(error) {
-            throw error;
-        }
+        await apiClient.post(`/api/datastores/${storeId}/share`, { target_username: username, permission_level: permissionLevel });
+        uiStore.addNotification(`Store shared with ${username}.`, 'success');
     }
 
     async function revokeShare(storeId, userId) {
         const uiStore = useUiStore();
-        try {
-            await apiClient.delete(`/api/datastores/${storeId}/share/${userId}`);
-            uiStore.addNotification('Sharing revoked successfully.', 'success');
-            return true;
-        } catch (error) {
-            throw error;
-        }
+        await apiClient.delete(`/api/datastores/${storeId}/share/${userId}`);
+        uiStore.addNotification('Sharing revoked successfully.', 'success');
+        return true;
     }
 
     async function getSharedWithList(storeId) {
-        try {
-            const response = await apiClient.get(`/api/datastores/${storeId}/shared-with`);
-            return response.data || [];
-        } catch (error) {
-            return [];
-        }
+        const response = await apiClient.get(`/api/datastores/${storeId}/shared-with`);
+        return response.data || [];
     }
 
     async function revectorizeStore({ storeId, vectorizerName }) {
         const uiStore = useUiStore();
         const tasksStore = useTasksStore();
-        try {
-            const formData = new FormData();
-            formData.append('vectorizer_name', vectorizerName);
-            const response = await apiClient.post(`/api/store/${storeId}/revectorize`, formData);
-            const task = response.data;
-            uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
-            tasksStore.fetchTasks();
-        } catch (error) {
-            throw error;
-        }
+        const formData = new FormData();
+        formData.append('vectorizer_name', vectorizerName);
+        const response = await apiClient.post(`/api/store/${storeId}/revectorize`, formData);
+        const task = response.data;
+        uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
+        tasksStore.fetchTasks();
     }
 
     async function fetchStoreFiles(storeId) {
-        try {
-            const response = await apiClient.get(`/api/store/${storeId}/files`);
-            return response.data || [];
-        } catch(error) {
-            throw error;
-        }
+        const response = await apiClient.get(`/api/store/${storeId}/files`);
+        return response.data || [];
     }
 
     async function fetchStoreVectorizers(storeId) {
@@ -319,23 +266,15 @@ export const useDataStore = defineStore('data', () => {
     async function uploadFilesToStore({ storeId, formData }) {
         const uiStore = useUiStore();
         const tasksStore = useTasksStore();
-        try {
-            const response = await apiClient.post(`/api/store/${storeId}/upload-files`, formData);
-            const task = response.data;
-            uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
-            tasksStore.fetchTasks();
-        } catch(error) {
-            throw error;
-        }
+        const response = await apiClient.post(`/api/store/${storeId}/upload-files`, formData);
+        const task = response.data;
+        uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
+        tasksStore.fetchTasks();
     }
     async function deleteFileFromStore({ storeId, filename }) {
         const uiStore = useUiStore();
-        try {
-            await apiClient.delete(`/api/store/${storeId}/files/${encodeURIComponent(filename)}`);
-            uiStore.addNotification(`File '${filename}' deleted.`, 'success');
-        } catch(error) {
-            throw error;
-        }
+        await apiClient.delete(`/api/store/${storeId}/files/${encodeURIComponent(filename)}`);
+        uiStore.addNotification(`File '${filename}' deleted.`, 'success');
     }
     async function fetchPersonalities() {
          try {
@@ -356,157 +295,73 @@ export const useDataStore = defineStore('data', () => {
             return;
         }
         
-        try {
-            const response = await apiClient.post('/api/personalities', personalityData);
-            userPersonalities.value.unshift(response.data);
-            useUiStore().addNotification('Personality created successfully.', 'success');
-        } catch (error) {
-            throw error;
-        }
+        const response = await apiClient.post('/api/personalities', personalityData);
+        userPersonalities.value.unshift(response.data);
+        useUiStore().addNotification('Personality created successfully.', 'success');
     }
     async function updatePersonality(personalityData) {
-        if (!personalityData.id) {
-            return;
-        }
-        try {
-            await apiClient.put(`/api/personalities/${personalityData.id}`, personalityData);
-            await fetchPersonalities();
-            useUiStore().addNotification('Personality updated successfully.', 'success');
-        } catch (error) {
-            throw error;
-        }
+        if (!personalityData.id) return;
+        await apiClient.put(`/api/personalities/${personalityData.id}`, personalityData);
+        await fetchPersonalities();
+        useUiStore().addNotification('Personality updated successfully.', 'success');
     }
     async function deletePersonality(personalityId) {
-        try {
-            await apiClient.delete(`/api/personalities/${personalityId}`);
-            await fetchPersonalities();
-            useUiStore().addNotification('Personality deleted.', 'success');
-        } catch (error) {
-            throw error;
-        }
+        await apiClient.delete(`/api/personalities/${personalityId}`);
+        await fetchPersonalities();
+        useUiStore().addNotification('Personality deleted.', 'success');
     }
 
     async function generatePersonalityFromPrompt(prompt) {
         const tasksStore = useTasksStore();
-        try {
-            const response = await apiClient.post('/api/personalities/generate_from_prompt', { prompt });
-            tasksStore.addTask(response.data); // Add the returned task
-            return response.data; // This returns the full task object now
-        } catch (error) {
-            throw error;
-        }
+        const response = await apiClient.post('/api/personalities/generate_from_prompt', { prompt });
+        tasksStore.addTask(response.data);
+        return response.data;
     }
 
     async function enhancePersonalityPrompt(prompt_text, modification_prompt) {
         const tasksStore = useTasksStore();
-        try {
-            const response = await apiClient.post('/api/personalities/enhance_prompt', {
-                prompt_text,
-                modification_prompt
-            });
-            // The endpoint now returns a full task object.
-            // Add it directly to the tasks store to avoid race conditions.
-            tasksStore.addTask(response.data);
-            return { task_id: response.data.id, message: 'Task started.' }; // Return the ID for the modal
-        } catch (error) {
-            // Error handled by global interceptor
-            throw error;
-        }
+        const response = await apiClient.post('/api/personalities/enhance_prompt', { prompt_text, modification_prompt });
+        tasksStore.addTask(response.data);
+        return { task_id: response.data.id, message: 'Task started.' };
     }
     async function triggerMcpReload() {
         const uiStore = useUiStore();
         const tasksStore = useTasksStore();
-        try {
-            const response = await apiClient.post('/api/mcps/reload');
-            const task = response.data;
-            uiStore.addNotification(`Task '${task.name}' started.`, 'info');
-            tasksStore.fetchTasks();
-            await fetchMcpTools();
-        } catch (error) {
-            // Handled by interceptor
-        }
+        const response = await apiClient.post('/api/mcps/reload');
+        const task = response.data;
+        uiStore.addNotification(`Task '${task.name}' started.`, 'info');
+        tasksStore.fetchTasks();
+        await fetchMcpTools();
     }
     async function fetchMcps() {
         try {
             const response = await apiClient.get('/api/mcps');
-            userMcps.value = Array.isArray(response.data) ? response.data : [];
+            const authStore = useAuthStore();
+            if (Array.isArray(response.data) && authStore.user) {
+                userMcps.value = response.data.filter(mcp => mcp.type === 'user');
+                systemMcps.value = response.data.filter(mcp => mcp.type === 'system');
+            }
         } catch (error) {
             userMcps.value = [];
+            systemMcps.value = [];
         }
     }
-    async function addMcp(mcpData) {
-        const uiStore = useUiStore();
-        try {
-            await apiClient.post('/api/mcps', mcpData);
-            uiStore.addNotification('MCP server added successfully.', 'success');
-            await fetchMcps();
-            await triggerMcpReload();
-        } catch (error) {
-            throw error;
-        }
+    async function addMcp(payload) {
+        const response = await apiClient.post('/api/mcps', payload);
+        await fetchMcps(); // Refresh the list
+        useUiStore().addNotification(`MCP '${response.data.name}' created.`, 'success');
     }
-    async function updateMcp(mcpId, mcpData) {
-        const uiStore = useUiStore();
-        try {
-            await apiClient.put(`/api/mcps/${mcpId}`, mcpData);
-            uiStore.addNotification('MCP server updated successfully.', 'success');
-            await fetchMcps();
-            await triggerMcpReload();
-        } catch (error) {
-            throw error;
-        }
+    async function updateMcp(id, payload) {
+        const response = await apiClient.put(`/api/mcps/${id}`, payload);
+        await fetchMcps(); // Refresh the list
+        useUiStore().addNotification(`MCP '${response.data.name}' updated.`, 'success');
     }
-    async function deleteMcp(mcpId) {
-        const uiStore = useUiStore();
-        try {
-            await apiClient.delete(`/api/mcps/${mcpId}`);
-            uiStore.addNotification('MCP server removed.', 'success');
-            await fetchMcps();
-            await triggerMcpReload();
-        } catch (error) {
-            throw error;
-        }
+    async function deleteMcp(id) {
+        await apiClient.delete(`/api/mcps/${id}`);
+        await fetchMcps(); // Refresh the list
+        useUiStore().addNotification('MCP deleted.', 'success');
     }
-    async function generateMcpSsoSecret(id) {
-        try {
-            const response = await apiClient.post(`/api/mcps/${id}/generate-sso-secret`);
-            await fetchMcps();
-            return response.data.sso_secret;
-        } catch (error) {
-            throw error;
-        }
-    }
-    async function fetchMcpTools() {
-        try {
-            const response = await apiClient.get('/api/mcps/tools');
-            mcpTools.value = Array.isArray(response.data) ? response.data : [];
-        } catch (error) {
-            mcpTools.value = [];
-        }
-    }
-    async function refreshMcps() {
-        const uiStore = useUiStore();
-        uiStore.addNotification('Refreshing MCPs...', 'info');
-        try {
-            await Promise.all([
-                fetchMcps(),
-                fetchMcpTools()
-            ]);
-            uiStore.addNotification('MCPs refreshed.', 'success');
-        } catch(e) {
-            uiStore.addNotification('Failed to refresh MCPs.', 'error');
-        }
-    }
-    async function refreshRags() {
-        const uiStore = useUiStore();
-        uiStore.addNotification('Refreshing RAG stores...', 'info');
-        try {
-            await fetchDataStores();
-            uiStore.addNotification('RAG stores refreshed.', 'success');
-        }  catch(e) {
-            uiStore.addNotification('Failed to refresh RAG stores.', 'error');
-        }
-    }
+    
     async function fetchApps() {
         try {
             const response = await apiClient.get('/api/apps');
@@ -520,43 +375,49 @@ export const useDataStore = defineStore('data', () => {
             systemApps.value = [];
         }
     }
-    async function addApp(appData) {
-        const uiStore = useUiStore();
-        try {
-            await apiClient.post('/api/apps', appData);
-            uiStore.addNotification('App added successfully.', 'success');
-            await fetchApps();
-        } catch (error) { throw error; }
+    async function addApp(payload) {
+        const response = await apiClient.post('/api/apps', payload);
+        await fetchApps(); // Refresh the list
+        useUiStore().addNotification(`App '${response.data.name}' created.`, 'success');
     }
-    async function updateApp(appId, appData) {
-        const uiStore = useUiStore();
-        try {
-            await apiClient.put(`/api/apps/${appId}`, appData);
-            uiStore.addNotification('App updated successfully.', 'success');
-            await fetchApps();
-        } catch (error) { throw error; }
+    async function updateApp(id, payload) {
+        const response = await apiClient.put(`/api/apps/${id}`, payload);
+        await fetchApps(); // Refresh the list
+        useUiStore().addNotification(`App '${response.data.name}' updated.`, 'success');
     }
-    async function deleteApp(appId) {
-        const uiStore = useUiStore();
-        const { useAdminStore } = await import('./admin');
-        const adminStore = useAdminStore();
-        try {
-            await apiClient.delete(`/api/apps/${appId}`);
-            uiStore.addNotification('App removed.', 'success');
-            await fetchApps();
-            // Also refresh installed apps list in case the deleted app was an installed one.
-            if (useAuthStore().isAdmin) {
-                adminStore.fetchInstalledApps();
-            }
-        } catch (error) { throw error; }
+    async function deleteApp(id) {
+        await apiClient.delete(`/api/apps/${id}`);
+        await fetchApps(); // Refresh the list
+        useUiStore().addNotification('App deleted.', 'success');
     }
-    async function generateAppSsoSecret(id) {
+
+
+    async function fetchMcpTools() {
         try {
-            const response = await apiClient.post(`/api/apps/${id}/generate-sso-secret`);
-            await fetchApps();
-            return response.data.sso_secret;
+            const response = await apiClient.get('/api/mcps/tools');
+            mcpTools.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
-            throw error;
+            mcpTools.value = [];
+        }
+    }
+    async function refreshMcps() {
+        const uiStore = useUiStore();
+        uiStore.addNotification('Refreshing MCPs...', 'info');
+        try {
+            await Promise.all([ fetchMcps(), fetchMcpTools() ]);
+            uiStore.addNotification('MCPs refreshed.', 'success');
+        }  catch(e) {
+            uiStore.addNotification('Failed to refresh MCPs.', 'error');
+        }
+    }
+    async function refreshRags() {
+        const uiStore = useUiStore();
+        uiStore.addNotification('Refreshing RAG stores...', 'info');
+        try {
+            await fetchDataStores();
+            uiStore.addNotification('RAG stores refreshed.', 'success');
+        }  catch(e) {
+            uiStore.addNotification('Failed to refresh RAG stores.', 'error');
         }
     }
     function $reset() {
@@ -566,6 +427,7 @@ export const useDataStore = defineStore('data', () => {
         userPersonalities.value = [];
         publicPersonalities.value = [];
         userMcps.value = [];
+        systemMcps.value = [];
         mcpTools.value = [];
         userApps.value = [];
         systemApps.value = [];
@@ -576,7 +438,7 @@ export const useDataStore = defineStore('data', () => {
     return {
         languages, isLoadingLanguages, fetchLanguages,
         availableLollmsModels, ownedDataStores, sharedDataStores,
-        userPersonalities, publicPersonalities, userMcps, mcpTools,
+        userPersonalities, publicPersonalities, userMcps, systemMcps, mcpTools,
         userApps, systemApps,
         isLoadingLollmsModels,
         availableRagStores, availableMcpToolsForSelector, availableLollmsModelsGrouped,
@@ -588,11 +450,10 @@ export const useDataStore = defineStore('data', () => {
         fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,
         deleteFileFromStore, fetchPersonalities, addPersonality,
         updatePersonality, deletePersonality, generatePersonalityFromPrompt, enhancePersonalityPrompt,
-        fetchMcps, addMcp,
-        updateMcp, deleteMcp, generateMcpSsoSecret,
+        fetchMcps, addMcp, updateMcp, deleteMcp,
         fetchMcpTools, triggerMcpReload,
         refreshMcps, refreshRags,
-        fetchApps, addApp, updateApp, deleteApp, generateAppSsoSecret,
+        fetchApps, addApp, updateApp, deleteApp,
         
         apiKeys,
         fetchApiKeys, 

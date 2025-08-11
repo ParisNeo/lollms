@@ -21,6 +21,7 @@ from typing import Dict, Any, List
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from ascii_colors import ASCIIColors
 
 from backend.db import get_db
 from backend.db.models.service import App as DBApp, MCP as DBMCP, AppZooRepository, MCPZooRepository
@@ -31,6 +32,7 @@ from backend.task_manager import task_manager, Task
 from backend.zoo_cache import get_all_items
 from backend.settings import settings
 from backend.utils import get_accessible_host
+from backend.session import user_sessions, reload_lollms_client_mcp
 
 open_log_files: Dict[str, Any] = {}
 
@@ -75,116 +77,217 @@ def get_all_zoo_metadata():
         all_items_dict[item['name']] = item
     return all_items_dict
 
-def sync_installs_task(task: Task):
-    task.log("Starting synchronization of installed items with the database.")
+def synchronize_filesystem_and_db(db: Session):
+    """
+    Synchronizes installed apps/MCPs on the filesystem with the database.
+    - Creates DB entries for "ghost" installations found on disk.
+    - Removes DB entries for "orphaned" records with no matching files.
+    """
+    ASCIIColors.info("Starting synchronization of installed items with the database.")
     fixed_ghosts = 0
     removed_orphans = 0
+    
+    # --- Step 1: Find ghost installations (filesystem folder exists, but no DB record) ---
+    ASCIIColors.info("Scanning for ghost installations (files without DB entry)...")
+    
+    installed_folders = {
+        'app': {f.name for f in APPS_ROOT_PATH.iterdir() if f.is_dir()},
+        'mcp': {f.name for f in MCPS_ROOT_PATH.iterdir() if f.is_dir()}
+    }
+    
+    db_folder_names = {r[0] for r in db.query(DBApp.folder_name).filter(DBApp.is_installed == True, DBApp.folder_name.isnot(None)).all()}
+    
+    ghost_folders = {
+        'app': installed_folders['app'] - db_folder_names,
+        'mcp': installed_folders['mcp'] - db_folder_names
+    }
 
-    with task.db_session_factory() as db:
-        # --- Step 1: Find ghost installations (filesystem folder exists, but no DB record) ---
-        task.log("Scanning for ghost installations (files without DB entry)...")
-        task.set_progress(10)
+    for item_type, folders in ghost_folders.items():
+        if not folders:
+            ASCIIColors.green(f"No ghost installations found for type: {item_type.upper()}")
+            continue
         
-        installed_folders = {
-            'app': {f.name for f in APPS_ROOT_PATH.iterdir() if f.is_dir()},
-            'mcp': {f.name for f in MCPS_ROOT_PATH.iterdir() if f.is_dir()}
-        }
+        ASCIIColors.yellow(f"Found {len(folders)} ghost installations for type: {item_type.upper()}. Attempting to repair...")
+        root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
         
-        db_folder_names = {r[0] for r in db.query(DBApp.folder_name).filter(DBApp.is_installed == True).all()}
-        
-        ghost_folders = {
-            'app': installed_folders['app'] - db_folder_names,
-            'mcp': installed_folders['mcp'] - db_folder_names
-        }
-
-        for item_type, folders in ghost_folders.items():
-            if not folders:
-                task.log(f"No ghost installations found for type: {item_type.upper()}")
+        for folder_name in folders:
+            item_path = root_path / folder_name
+            desc_path = item_path / "description.yaml"
+            
+            if not desc_path.exists():
+                ASCIIColors.yellow(f"  - SKIPPING '{folder_name}': No description.yaml found. Cannot automatically repair.")
                 continue
             
-            task.log(f"Found {len(folders)} ghost installations for type: {item_type.upper()}. Attempting to repair...")
-            root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
-            
-            for folder_name in folders:
-                item_path = root_path / folder_name
-                desc_path = item_path / "description.yaml"
+            try:
+                with open(desc_path, 'r', encoding='utf-8') as f:
+                    item_info = yaml.safe_load(f) or {}
                 
-                if not desc_path.exists():
-                    task.log(f"  - SKIPPING '{folder_name}': No description.yaml found. Cannot automatically repair.", "WARNING")
+                item_name = item_info.get("name", folder_name)
+                
+                if db.query(DBApp).filter(func.lower(DBApp.name) == func.lower(item_name), DBApp.is_installed == True).first():
+                    ASCIIColors.yellow(f"  - SKIPPING '{folder_name}': A different installed item with the name '{item_name}' already exists in the database.")
                     continue
+
+                ASCIIColors.cyan(f"  - REPAIRING '{folder_name}': Creating database entry for '{item_name}'.")
                 
-                try:
-                    with open(desc_path, 'r', encoding='utf-8') as f:
-                        item_info = yaml.safe_load(f) or {}
-                    
-                    item_name = item_info.get("name", folder_name)
-                    
-                    # Check if a record with the same name already exists to avoid conflicts
-                    if db.query(DBApp).filter(func.lower(DBApp.name) == func.lower(item_name), DBApp.is_installed == True).first():
-                        task.log(f"  - SKIPPING '{folder_name}': A different installed item with the name '{item_name}' already exists in the database.", "WARNING")
-                        continue
+                icon_path = next((p for p in [item_path / "assets" / "logo.png", item_path / "icon.png"] if p.exists()), None)
+                icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
+                
+                item_info['item_type'] = item_type
+                item_info['folder_name'] = folder_name
+                
+                client_id = generate_unique_client_id(db, DBApp, item_name)
+                
+                used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
+                next_port = 9601
+                while next_port in used_ports:
+                    next_port += 1
 
-                    task.log(f"  - REPAIRING '{folder_name}': Creating database entry for '{item_name}'.")
-                    
-                    icon_path = next((p for p in [item_path / "assets" / "logo.png", item_path / "icon.png"] if p.exists()), None)
-                    icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
-                    
-                    item_info['item_type'] = item_type
-                    item_info['folder_name'] = folder_name
-                    
-                    client_id = generate_unique_client_id(db, DBApp, item_name)
-                    
-                    # Create a sensible default port, assuming it might not be running
-                    used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
-                    next_port = 9601
-                    while next_port in used_ports:
-                        next_port += 1
+                new_app_record = DBApp(
+                    name=item_name, client_id=client_id, folder_name=folder_name,
+                    icon=icon_base64, is_installed=True, status='stopped', port=next_port,
+                    autostart=False, version=str(item_info.get('version', 'N/A')),
+                    author=item_info.get('author'), description=item_info.get('description'),
+                    category=item_info.get('category'), tags=item_info.get('tags'),
+                    app_metadata=item_info
+                )
+                db.add(new_app_record)
+                fixed_ghosts += 1
+            except Exception as e:
+                ASCIIColors.error(f"  - FAILED to repair '{folder_name}': {e}")
+                traceback.print_exc()
 
-                    new_app_record = DBApp(
-                        name=item_name, client_id=client_id, folder_name=folder_name,
-                        icon=icon_base64, is_installed=True, status='stopped', port=next_port,
-                        autostart=False, version=str(item_info.get('version', 'N/A')),
-                        author=item_info.get('author'), description=item_info.get('description'),
-                        category=item_info.get('category'), tags=item_info.get('tags'),
-                        app_metadata=item_info
-                    )
-                    db.add(new_app_record)
-                    fixed_ghosts += 1
-                except Exception as e:
-                    task.log(f"  - FAILED to repair '{folder_name}': {e}", "ERROR")
-                    traceback.print_exc()
+    # --- Step 2: Find orphaned DB records (DB record exists, but folder is missing) ---
+    ASCIIColors.info("Scanning for orphaned database records (DB entry without files)...")
+    
+    db_installed_items = db.query(DBApp).filter(DBApp.is_installed == True).all()
+    orphaned_items = []
+    for item in db_installed_items:
+        if not item.folder_name:
+            orphaned_items.append(item)
+            continue
+        item_type = (item.app_metadata or {}).get('item_type', 'app')
+        root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
+        if not (root_path / item.folder_name).exists():
+            orphaned_items.append(item)
 
-        task.set_progress(50)
+    if not orphaned_items:
+        ASCIIColors.green("No orphaned database records found.")
+    else:
+        ASCIIColors.yellow(f"Found {len(orphaned_items)} orphaned records. Removing from database...")
+        for item in orphaned_items:
+            ASCIIColors.cyan(f"  - REMOVING orphan record: '{item.name}' (folder: {item.folder_name or 'N/A'})")
+            db.delete(item)
+            removed_orphans += 1
+
+    db.commit()
+    ASCIIColors.info("Synchronization complete.")
+    
+    return {
+        "fixed_ghost_installations": fixed_ghosts,
+        "removed_orphaned_records": removed_orphans
+    }
+
+
+def sync_installs_task(task: Task):
+    task.log("Starting synchronization of installed items with the database.")
+    task.set_progress(5)
+    
+    with task.db_session_factory() as db:
+        results = synchronize_filesystem_and_db(db)
         
-        # --- Step 2: Find orphaned DB records (DB record exists, but folder is missing) ---
-        task.log("Scanning for orphaned database records (DB entry without files)...")
-        
-        db_installed_items = db.query(DBApp).filter(DBApp.is_installed == True).all()
-        orphaned_items = []
-        for item in db_installed_items:
-            item_type = (item.app_metadata or {}).get('item_type', 'app')
-            root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
-            if not (root_path / item.folder_name).exists():
-                orphaned_items.append(item)
+    task.set_progress(100)
+    task.log("Synchronization complete.")
+    
+    return {
+        "message": "Sync complete.",
+        **results
+    }
 
-        if not orphaned_items:
-            task.log("No orphaned database records found.")
-        else:
-            task.log(f"Found {len(orphaned_items)} orphaned records. Removing from database...")
-            for item in orphaned_items:
-                task.log(f"  - REMOVING orphan record: '{item.name}' (folder: {item.folder_name})")
-                db.delete(item)
-                removed_orphans += 1
 
-        db.commit()
+def _purge_broken_task(task: Task, item_type: str, folder_name: str):
+    task.log(f"Starting purge of broken installation: {folder_name} ({item_type})")
+    root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
+    folder_path = root_path / folder_name
+
+    if not folder_path.exists():
+        task.log(f"Folder '{folder_path}' does not exist. Nothing to purge.", "WARNING")
         task.set_progress(100)
-        task.log("Synchronization complete.")
-        
-        return {
-            "message": "Sync complete.",
-            "fixed_ghost_installations": fixed_ghosts,
-            "removed_orphaned_records": removed_orphans
-        }
+        return {"message": "Folder already gone."}
+
+    try:
+        shutil.rmtree(folder_path)
+        task.log(f"Successfully deleted folder: {folder_path}", "INFO")
+    except Exception as e:
+        task.log(f"Failed to delete folder '{folder_path}': {e}", "ERROR")
+        raise e
+    
+    with task.db_session_factory() as db:
+        try:
+            orphaned_record = db.query(DBApp).filter(DBApp.folder_name == folder_name).first()
+            if orphaned_record:
+                db.delete(orphaned_record)
+                db.commit()
+                task.log(f"Also removed an orphaned database record for '{folder_name}'.", "INFO")
+        except Exception as e:
+            task.log(f"Could not check/remove orphaned DB record for '{folder_name}': {e}", "WARNING")
+            db.rollback()
+
+    task.set_progress(100)
+    return {"message": f"Purge of '{folder_name}' complete."}
+
+def _fix_broken_task(task: Task, item_type: str, folder_name: str):
+    task.log(f"Attempting to fix broken installation: {folder_name} ({item_type})")
+    root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
+    item_path = root_path / folder_name
+    
+    desc_path = item_path / "description.yaml"
+    if not desc_path.exists():
+        raise FileNotFoundError(f"Cannot fix '{folder_name}': description.yaml is missing.")
+
+    with task.db_session_factory() as db:
+        try:
+            with open(desc_path, 'r', encoding='utf-8') as f:
+                item_info = yaml.safe_load(f) or {}
+            
+            item_name = item_info.get("name", folder_name)
+            
+            if db.query(DBApp).filter(func.lower(DBApp.name) == func.lower(item_name), DBApp.is_installed == True).first():
+                raise ValueError(f"An installed item named '{item_name}' already exists in the database.")
+
+            task.log(f"Read metadata for '{item_name}'. Creating database entry.")
+            
+            icon_path = next((p for p in [item_path / "assets" / "logo.png", item_path / "icon.png"] if p.exists()), None)
+            icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
+            
+            item_info['item_type'] = item_type
+            item_info['folder_name'] = folder_name
+            
+            client_id = generate_unique_client_id(db, DBApp, item_name)
+            
+            used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
+            next_port = 9601
+            while next_port in used_ports:
+                next_port += 1
+
+            new_app_record = DBApp(
+                name=item_name, client_id=client_id, folder_name=folder_name,
+                icon=icon_base64, is_installed=True, status='stopped', port=next_port,
+                autostart=False, version=str(item_info.get('version', 'N/A')),
+                author=item_info.get('author'), description=item_info.get('description'),
+                category=item_info.get('category'), tags=item_info.get('tags'),
+                app_metadata=item_info
+            )
+            db.add(new_app_record)
+            db.commit()
+            task.set_progress(100)
+            task.log(f"Successfully fixed installation for '{item_name}'.")
+            return {"message": "Fix successful."}
+        except Exception as e:
+            db.rollback()
+            task.log(f"Failed to fix '{folder_name}': {e}", "ERROR")
+            raise e
+
 
 def cleanup_and_autostart_apps():
     db_session = None
@@ -233,7 +336,6 @@ def start_app_task(task: Task, app_id: str):
         if not app: raise ValueError("Installed app metadata not found.")
 
         log_file_path = app_path / "app.log"
-        # FIX: Open in "w" mode which creates the file or truncates it, preventing errors.
         log_file_handle = open(log_file_path, "w", encoding="utf-8", buffering=1)
 
         venv_path = app_path / "venv"
@@ -265,13 +367,38 @@ def start_app_task(task: Task, app_id: str):
         app_host = get_accessible_host()
         app.pid = process.pid
         app.status = 'running'
-        app.url = f"http://{app_host}:{app.port}"
+        
+        item_type = (app.app_metadata or {}).get('item_type', 'app')
+        app_url = f"http://{app_host}:{app.port}"
+        if item_type == 'mcp' and not app_url.endswith('/mcp'):
+            app_url += "/mcp"
+        app.url = app_url
+        
         app.active = True
         db_session.commit()
         
+        if item_type == 'mcp':
+            task.log(f"MCP '{app.name}' has started. Reloading MCPs for all active users.")
+            active_users = list(user_sessions.keys())
+            total_users = len(active_users)
+            reloaded_count = 0
+            for i, username in enumerate(active_users):
+                try:
+                    reload_lollms_client_mcp(username)
+                    task.log(f"Reloaded MCPs for user: {username}")
+                    reloaded_count += 1
+                except Exception as e:
+                    task.log(f"Failed to reload MCPs for user {username}: {e}", level="ERROR")
+                    traceback.print_exc()
+                
+                if total_users > 0:
+                    task.set_progress(90 + int(10 * (i + 1) / total_users))
+
+            task.log(f"MCP reload triggered for {reloaded_count} of {total_users} active sessions.")
+
         task.log(f"App '{app.name}' started with PID {process.pid} on port {app.port}.")
         task.set_progress(100)
-        return {"success": True, "message": f"App '{app.name}' started successfully."}
+        return {"success": True, "message": f"App '{app.name}' started successfully.", "item_type": item_type}
     except Exception as e:
         task.log(f"Failed to start app: {e}", level="CRITICAL")
         if app:
@@ -338,7 +465,6 @@ def pull_repo_task(task: Task, repo_id: int, repo_model, root_path: Path, item_t
             task.set_progress(100)
             return {"message": "Local folder rescanned successfully."}
         
-        # Git logic below
         repo_path = root_path / repo.name
         command = ["git", "clone", repo.url, str(repo_path)] if not repo_path.exists() else ["git", "pull"]
         cwd = str(root_path) if not repo_path.exists() else str(repo_path)
@@ -437,21 +563,7 @@ app.mount("/", StaticFiles(directory=str(Path(__file__).parent / '{static_dir}')
             client_id = generate_unique_client_id(db_session, DBApp, item_name)
             new_app = DBApp(name=item_name, client_id=client_id, folder_name=folder_name, icon=icon_base64, is_installed=True, status='stopped', port=port, autostart=autostart, version=str(item_info.get('version', 'N/A')), author=item_info.get('author'), description=item_info.get('description'), category=item_info.get('category'), tags=item_info.get('tags'), app_metadata=item_info)
             db_session.add(new_app)
-            db_session.flush()
-
-            service_model, service_type_str = (DBMCP, "MCP") if is_mcp else (DBApp, "App")
-            existing_service = db_session.query(service_model).filter(service_model.name == item_name, service_model.type == 'system').first()
-            if existing_service:
-                existing_service.url = f"http://localhost:{port}"
-                existing_service.icon = icon_base64
-                existing_service.active = True
-            else:
-                service_client_id = generate_unique_client_id(db_session, service_model, item_name)
-                new_service = service_model(name=item_name, client_id=service_client_id, url=f"http://localhost:{port}", icon=icon_base64, active=True, type='system', owner_user_id=None, **({'description':item_info.get('description'),'author':item_info.get('author'),'version':str(item_info.get('version', 'N/A')),'category':item_info.get('category'),'tags':item_info.get('tags')} if not is_mcp else {}))
-                db_session.add(new_service)
-            
             db_session.commit()
-            task.set_progress(100)
             
             if autostart: start_app_task(task, new_app.id)
             return {"success": True, "message": "Installation successful."}
@@ -469,11 +581,9 @@ def update_item_task(task: Task, app_id: str):
         task.log("Starting update process...")
         if app.status == 'running':
             task.log("App is running, attempting to stop it first...")
-            # Execute stop logic directly and wait
             stop_app_task(task, app.id)
 
-            # Poll the database to confirm the app has stopped
-            for _ in range(30): # Wait up to 30 seconds
+            for _ in range(30):
                 db.refresh(app)
                 if app.status == 'stopped':
                     task.log("App confirmed stopped.")
@@ -493,7 +603,6 @@ def update_item_task(task: Task, app_id: str):
         
         task.log("Backing up configuration and logs...")
         
-        # Get source path from Zoo
         zoo_meta = (app.app_metadata or {})
         repo_name = zoo_meta.get('repository')
         folder_name = zoo_meta.get('folder_name')

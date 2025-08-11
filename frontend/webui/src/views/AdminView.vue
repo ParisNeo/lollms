@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent } from 'vue';
+import { computed, defineAsyncComponent, markRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 
@@ -37,21 +37,21 @@ const components = {
 };
 
 const sections = [
-  { type: 'link', id: 'dashboard', name: 'Dashboard', icon: IconDashboard },
+  { type: 'link', id: 'dashboard', name: 'Dashboard', icon: markRaw(IconDashboard) },
   { type: 'divider', label: 'Management' },
-  { type: 'link', id: 'users', name: 'Users', icon: IconUserGroup },
-  { type: 'link', id: 'tasks', name: 'Tasks', icon: IconTasks },
+  { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },
+  { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
   { type: 'divider', label: 'Zoos' },
-  { type: 'link', id: 'personalities', name: 'Personalities', icon: IconUserCircle },
-  { type: 'link', id: 'prompts', name: 'Prompts', icon: IconSparkles },
-  { type: 'link', id: 'mcps', name: 'MCPs', icon: IconMcp },
-  { type: 'link', id: 'apps', name: 'Apps', icon: IconSquares2x2 },
+  { type: 'link', id: 'personalities', name: 'Personalities', icon: markRaw(IconUserCircle) },
+  { type: 'link', id: 'prompts', name: 'Prompts', icon: markRaw(IconSparkles) },
+  { type: 'link', id: 'mcps', name: 'MCPs', icon: markRaw(IconMcp) },
+  { type: 'link', id: 'apps', name: 'Apps', icon: markRaw(IconSquares2x2) },
   { type: 'divider', label: 'System & Tools' },
-  { type: 'link', id: 'bindings', name: 'LLM Bindings', icon: IconCpuChip },
-  { type: 'link', id: 'global_settings', name: 'Global Settings', icon: IconCog },
-  { type: 'link', id: 'https', name: 'HTTPS Settings', icon: IconKey },
-  { type: 'link', id: 'email', name: 'Email Settings', icon: IconMail },
-  { type: 'link', id: 'import', name: 'Import Tools', icon: IconArrowDownTray },
+  { type: 'link', id: 'bindings', name: 'LLM Bindings', icon: markRaw(IconCpuChip) },
+  { type: 'link', id: 'global_settings', name: 'Global Settings', icon: markRaw(IconCog) },
+  { type: 'link', id: 'https', name: 'HTTPS Settings', icon: markRaw(IconKey) },
+  { type: 'link', id: 'email', name: 'Email Settings', icon: markRaw(IconMail) },
+  { type: 'link', id: 'import', name: 'Import Tools', icon: markRaw(IconArrowDownTray) },
 ];
 
 const activeSectionId = computed({
@@ -68,7 +68,7 @@ const activeComponent = computed(() => {
 </script>
 
 <template>
-    <PageViewLayout title="Admin Panel" :titleIcon="IconCog">
+    <PageViewLayout title="Admin Panel" :title-icon="IconCog">
         <template #sidebar>
             <template v-for="(section, index) in sections" :key="index">
                 <div v-if="section.type === 'divider'" class="px-3 pt-4 pb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">

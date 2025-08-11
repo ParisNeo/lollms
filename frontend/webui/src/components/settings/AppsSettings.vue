@@ -3,16 +3,16 @@ import { computed, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
-import { useAuthStore } from '../../stores/auth'; // Import auth store
+import { useAuthStore } from '../../stores/auth';
 import McpCard from '../ui/McpCard.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
-const authStore = useAuthStore(); // Use auth store
+const authStore = useAuthStore();
 
 const { userApps, systemApps } = storeToRefs(dataStore);
-const { isAdmin } = storeToRefs(authStore); // Get admin status
+const { isAdmin } = storeToRefs(authStore);
 
 onMounted(() => {
     dataStore.fetchApps();
@@ -22,15 +22,15 @@ const sortedUserApps = computed(() => userApps.value.filter(a => !a.is_installed
 const sortedSystemApps = computed(() => systemApps.value.filter(a => !a.is_installed).sort((a, b) => a.name.localeCompare(b.name)));
 
 function showAddForm() {
-    uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'user' });
+    uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'user', onRegistered: dataStore.fetchApps });
 }
 
 function showAddSystemForm() {
-    uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'system' });
+    uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'system', onRegistered: dataStore.fetchApps });
 }
 
 function startEditing(item) {
-    uiStore.openModal('serviceRegistration', { item, itemType: 'app' });
+    uiStore.openModal('serviceRegistration', { item, itemType: 'app', onRegistered: dataStore.fetchApps });
 }
 
 async function handleDeleteItem(item) {
@@ -54,7 +54,7 @@ async function handleDeleteItem(item) {
         <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400 text-blue-800 dark:text-blue-200">
             <div class="flex">
                 <div class="flex-shrink-0"><IconInfo class="h-5 w-5 text-blue-400" aria-hidden="true" /></div>
-                <div class="ml-3"><p class="text-sm">This section is for registering personal, external Apps by providing a URL. For locally installed services, please visit the <router-link to="/admin" class="font-medium underline hover:text-blue-600 dark:hover:text-blue-300">Admin Panel</router-link>.</p></div>
+                <div class="ml-3"><p class="text-sm">This section is for registering personal, external Apps by providing a URL. For locally installed services, please visit the <router-link to="/admin?section=apps" class="font-medium underline hover:text-blue-600 dark:hover:text-blue-300">Admin Panel</router-link>.</p></div>
             </div>
         </div>
 

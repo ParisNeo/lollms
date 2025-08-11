@@ -1,19 +1,19 @@
-# backend/routers/apps_zoo.py
+# backend/routers/zoos/apps_zoo.py
 import shutil
-import json
 import yaml
-import toml
 from pathlib import Path
 from packaging import version as packaging_version
 from typing import Dict, Any, List, Optional
 import datetime
 import signal
 import os
+import json
+import traceback
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session, joinedload
-from pydantic import ValidationError as PydanticValidationError
+from pydantic import BaseModel, ValidationError as PydanticValidationError
 from jsonschema import validate, ValidationError
 
 from backend.db import get_db
@@ -32,6 +32,7 @@ from backend.routers.app_utils import (
     get_installed_app_path, start_app_task, stop_app_task, open_log_files,
     update_item_task, sync_installs_task
 )
+from backend.utils import find_next_available_port, get_accessible_host
 from ascii_colors import trace_exception
 
 apps_zoo_router = APIRouter(
@@ -39,6 +40,31 @@ apps_zoo_router = APIRouter(
     tags=["Apps Zoo Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
+
+class BrokenItemPayload(BaseModel):
+    item_type: str
+    folder_name: str
+
+@apps_zoo_router.post("/purge-broken", response_model=TaskInfo, status_code=202)
+def purge_broken_installation(payload: BrokenItemPayload):
+    from backend.routers.app_utils import _purge_broken_task
+    task = task_manager.submit_task(
+        name=f"Purging broken item: {payload.folder_name}",
+        target=_purge_broken_task,
+        args=(payload.item_type, payload.folder_name)
+    )
+    return to_task_info(task)
+
+@apps_zoo_router.post("/fix-broken", response_model=TaskInfo, status_code=202)
+def fix_broken_installation(payload: BrokenItemPayload):
+    from backend.routers.app_utils import _fix_broken_task
+    task = task_manager.submit_task(
+        name=f"Fixing broken item: {payload.folder_name}",
+        target=_fix_broken_task,
+        args=(payload.item_type, payload.folder_name)
+    )
+    return to_task_info(task)
+
 
 @apps_zoo_router.post("/sync-installs", response_model=TaskInfo, status_code=202)
 def sync_installed_items():
@@ -111,80 +137,104 @@ def pull_app_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     return to_task_info(task)
 
 @apps_zoo_router.get("/available", response_model=ZooAppInfoResponse)
-def get_available_zoo_apps(db: Session = Depends(get_db), page: int = 1, page_size: int = 24, sort_by: str = 'last_update_date', sort_order: str = 'desc', category: Optional[str] = None, search_query: Optional[str] = None, installation_status: Optional[str] = None, repository: Optional[str] = None):
-    all_items_raw = get_all_items('app')
-    installed_apps_q = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.app_metadata['item_type'].as_string() == 'app').all()
-    installed_apps = {app.name: app for app in installed_apps_q}
+def get_available_zoo_apps(
+    db: Session = Depends(get_db),
+    page: int = 1, page_size: int = 24, sort_by: str = 'last_update_date', sort_order: str = 'desc',
+    category: Optional[str] = None, search_query: Optional[str] = None,
+    installation_status: Optional[str] = None, repository: Optional[str] = None
+):
+    all_zoo_items_raw = get_all_items('app')
+    all_db_apps = db.query(DBApp).filter((DBApp.app_metadata['item_type'] == None) | (DBApp.app_metadata['item_type'].as_string() == 'app')).all()
     installed_folders = {f.name for f in APPS_ROOT_PATH.iterdir() if f.is_dir()}
+    accessible_host = get_accessible_host()
+    
+    processed_keys = set()
+    all_items_map = {}
 
-    all_items = []
-    for info in all_items_raw:
-        try:
-            is_installed = info.get('name') in installed_apps
-            folder_exists = info.get('folder_name') in installed_folders
-            is_broken = folder_exists and not is_installed
+    for info in all_zoo_items_raw:
+        key = f"zoo::{info['repository']}/{info['folder_name']}"
+        processed_keys.add(key)
+        all_items_map[key] = info
 
-            update_available = False
-            if is_installed:
-                installed_app = installed_apps[info.get('name')]
-                try:
-                    if installed_app.version and info.get('version') and packaging_version.parse(str(info.get('version'))) > packaging_version.parse(str(installed_app.version)):
-                        update_available = True
-                except (packaging_version.InvalidVersion, TypeError):
-                    pass
-            
-            model_data = {
-                **info,
-                "is_installed": is_installed, "is_broken": is_broken, "update_available": update_available,
-                "has_readme": (APPS_ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists()
+    for app in all_db_apps:
+        repo = (app.app_metadata or {}).get('repository')
+        folder = (app.app_metadata or {}).get('folder_name')
+        key = f"zoo::{repo}/{folder}" if repo and folder else f"db::{app.id}"
+
+        item_data_from_db = {
+            'id': app.id, 'name': app.name, 'folder_name': app.folder_name or app.name,
+            'icon': app.icon, 'is_installed': app.is_installed, 'description': app.description,
+            'author': app.author, 'version': app.version, 'category': app.category,
+            'tags': app.tags or [], 'status': app.status, 'port': app.port, 'autostart': app.autostart,
+            'item_type': (app.app_metadata or {}).get('item_type', 'app')
+        }
+
+        if item_data_from_db['status'] == 'running' and item_data_from_db['port']:
+            item_data_from_db['url'] = f"http://{accessible_host}:{item_data_from_db['port']}"
+
+        if app.is_installed:
+            try:
+                item_path = get_installed_app_path(db, app.id)
+                if (item_path / 'config.schema.json').exists():
+                    item_data_from_db['has_config_schema'] = True
+            except Exception as e:
+                print(f"Could not check schema for {app.name}: {e}")
+
+        if key in all_items_map:
+            all_items_map[key].update(item_data_from_db)
+        else:
+            all_items_map[key] = {**item_data_from_db, 'repository': 'Registered'}
+        processed_keys.add(key)
+
+    db_installed_folders = {app.folder_name for app in all_db_apps if app.is_installed and app.folder_name}
+    for folder in installed_folders - db_installed_folders:
+        key = f"broken::{folder}"
+        if key not in processed_keys:
+            desc_path = APPS_ROOT_PATH / folder / "description.yaml"
+            metadata = {'name': folder}
+            if desc_path.exists():
+                with open(desc_path, 'r', encoding='utf-8') as f: metadata.update(yaml.safe_load(f) or {})
+            all_items_map[key] = {
+                'is_broken': True, 
+                'item_type': 'app',
+                'repository': 'Broken',
+                **metadata, 
+                'folder_name': folder
             }
-            all_items.append(ZooAppInfo(**model_data))
-        except (PydanticValidationError, Exception) as e:
-            print(f"ERROR: Could not process cached app data for {info.get('name')}. Error: {e}")
+
+    final_list = []
+    for item_data in all_items_map.values():
+        try:
+            final_list.append(ZooAppInfo(**item_data))
+        except PydanticValidationError as e:
+            print(f"Validation error for item {item_data.get('name')}: {e}")
 
     # --- FILTERING ---
-    filtered_items = all_items
+    filtered_items = final_list
     if installation_status:
-        if installation_status == 'Installed':
-            filtered_items = [item for item in filtered_items if item.is_installed]
-        elif installation_status == 'Uninstalled':
-            filtered_items = [item for item in filtered_items if not item.is_installed and not item.is_broken]
-        elif installation_status == 'Broken':
-            filtered_items = [item for item in filtered_items if item.is_broken]
-    if repository and repository != 'All':
-        filtered_items = [item for item in filtered_items if item.repository == repository]
-    if category and category != 'All':
-        filtered_items = [item for item in filtered_items if item.category == category]
+        if installation_status == 'Installed': filtered_items = [i for i in final_list if i.is_installed]
+        elif installation_status == 'Uninstalled': filtered_items = [i for i in final_list if not i.is_installed and not i.is_broken and i.repository != 'Registered']
+        elif installation_status == 'Broken': filtered_items = [i for i in final_list if i.is_broken]
+        elif installation_status == 'Registered': filtered_items = [i for i in final_list if not i.is_installed and i.repository == 'Registered']
+    
+    if repository and repository != 'All': filtered_items = [i for i in filtered_items if i.repository == repository]
+    if category and category != 'All': filtered_items = [i for i in filtered_items if i.category == category]
     if search_query:
         q = search_query.lower()
-        filtered_items = [item for item in filtered_items if q in item.name.lower() or (item.description and q in item.description.lower()) or (item.author and q in item.author.lower())]
+        filtered_items = [i for i in filtered_items if q in i.name.lower() or (i.description and q in i.description.lower())]
 
     # --- SORTING ---
-    def sort_key_func(item):
-        val = getattr(item, sort_by, None)
-        if 'date' in sort_by and val:
-            try: 
-                return datetime.datetime.fromisoformat(val).timestamp()
-            except (ValueError, TypeError): 
-                return 0.0
-        return str(val or '').lower()
-    
-    filtered_items.sort(key=sort_key_func, reverse=(sort_order == 'desc'))
-    
-    # Prioritize broken, then installed items if no specific sort is dominant
-    if sort_by == 'last_update_date':
-        broken_items = [item for item in filtered_items if item.is_broken]
-        installed_items_sorted = [item for item in filtered_items if item.is_installed and not item.is_broken]
-        uninstalled_items_sorted = [item for item in filtered_items if not item.is_installed and not item.is_broken]
-        filtered_items = broken_items + installed_items_sorted + uninstalled_items_sorted
+    filtered_items.sort(key=lambda item: (
+        -1 if item.is_broken else (0 if item.is_installed else 1),
+        str(getattr(item, sort_by, '') or '').lower() if sort_order == 'asc' else str(getattr(item, sort_by, '') or '').lower()
+    ), reverse=(sort_order == 'desc'))
 
     # --- PAGINATION ---
-    total_items = len(filtered_items)
+    total = len(filtered_items)
     start = (page - 1) * page_size
-    end = start + page_size
-    paginated_items = filtered_items[start:end]
+    paginated = filtered_items[start:start + page_size]
 
-    return ZooAppInfoResponse(items=paginated_items, total=total_items, page=page, pages=(total_items + page_size - 1) // page_size if page_size > 0 else 0)
+    return ZooAppInfoResponse(items=paginated, total=total, page=page, pages=(total + page_size - 1) // page_size if page_size > 0 else 0)
 
 
 @apps_zoo_router.get("/readme", response_class=PlainTextResponse)
@@ -201,212 +251,186 @@ def install_zoo_app(request: AppInstallRequest):
         args=(request.repository, request.folder_name, request.port, request.autostart, APPS_ZOO_ROOT_PATH)
     )
     return to_task_info(task)
+    
+@apps_zoo_router.get("/get-next-available-port", response_model=Dict[str, int])
+def get_next_port(port: Optional[int] = None, db: Session = Depends(get_db)):
+    start_port = port or 9601
+    used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
+    
+    port_to_check = start_port
+    while True:
+        if port_to_check in used_ports:
+            port_to_check += 1
+            continue
+        
+        try:
+            next_port = find_next_available_port(port_to_check)
+            return {"port": next_port}
+        except Exception: # If find_next_available_port fails, it means the port is likely used
+             port_to_check += 1
 
+# --- INSTALLED APP MANAGEMENT ---
+
+@apps_zoo_router.get("/installed", response_model=List[AppPublic])
+def get_installed_apps(db: Session = Depends(get_db)):
+    installed_items = db.query(DBApp).filter(DBApp.is_installed == True).options(joinedload(DBApp.owner)).order_by(DBApp.updated_at.desc()).all()
+    
+    zoo_meta = get_all_zoo_metadata()
+    accessible_host = get_accessible_host()
+    
+    response_items = []
+    for item in installed_items:
+        public_item = AppPublic.from_orm(item)
+        public_item.item_type = (item.app_metadata or {}).get('item_type')
+        
+        # Dynamically construct the URL for running apps
+        if public_item.status == 'running' and public_item.port:
+            public_item.url = f"http://{accessible_host}:{public_item.port}"
+        
+        zoo_item = zoo_meta.get(item.name)
+        if zoo_item and item.version:
+            try:
+                installed_ver = str(item.version or '0.0.0')
+                repo_ver = str(zoo_item.get('version', '0.0.0'))
+                if packaging_version.parse(repo_ver) > packaging_version.parse(installed_ver):
+                    public_item.update_available = True
+                    public_item.repo_version = repo_ver
+            except (packaging_version.InvalidVersion, TypeError):
+                pass
+        
+        item_path = get_installed_app_path(db, item.id)
+        if (item_path / 'config.schema.json').exists():
+            public_item.has_config_schema = True
+
+        response_items.append(public_item)
+
+    return response_items
+
+@apps_zoo_router.post("/installed/{app_id}/start", response_model=TaskInfo, status_code=202)
+def start_installed_app(app_id: str, db: Session = Depends(get_db)):
+    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+    if not app: raise HTTPException(404, "Installed app not found.")
+    
+    task = task_manager.submit_task(
+        name=f"Start app: {app.name} ({app.id})",
+        target=start_app_task,
+        args=(app.id,)
+    )
+    return to_task_info(task)
+
+@apps_zoo_router.post("/installed/{app_id}/stop", response_model=TaskInfo, status_code=202)
+def stop_installed_app(app_id: str, db: Session = Depends(get_db)):
+    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+    if not app: raise HTTPException(404, "Installed app not found.")
+
+    task = task_manager.submit_task(
+        name=f"Stop app: {app.name} ({app.id})",
+        target=stop_app_task,
+        args=(app.id,)
+    )
+    return to_task_info(task)
+    
 @apps_zoo_router.post("/installed/{app_id}/update", response_model=TaskInfo, status_code=202)
 def update_installed_app_from_zoo(app_id: str, db: Session = Depends(get_db)):
-    app = db.query(DBApp).filter(DBApp.id == app_id).first()
-    if not app:
-        raise HTTPException(status_code=404, detail="Installed app not found.")
+    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+    if not app: raise HTTPException(404, "Installed app not found.")
+
     task = task_manager.submit_task(
-        name=f"Updating app: {app.name}",
+        name=f"Updating app: {app.name} ({app.id})",
         target=update_item_task,
         args=(app.id,)
     )
     return to_task_info(task)
 
-@apps_zoo_router.get("/installed", response_model=list[AppPublic])
-def get_installed_apps(db: Session = Depends(get_db)):
-    installed_db_objects = db.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.is_installed == True).order_by(DBApp.name).all()
-    zoo_meta = get_all_zoo_metadata()
-    response = []
-    
-    for app in installed_db_objects:
-        try:
-            # --- DEFINITIVE FIX: Manually construct the Pydantic object, bypassing from_orm ---
-            app_public = AppPublic(
-                id=app.id,
-                name=app.name,
-                client_id=app.client_id,
-                url=app.url,
-                icon=app.icon,
-                active=app.active,
-                type=app.type,
-                authentication_type=app.authentication_type,
-                authentication_key=app.authentication_key,
-                sso_redirect_uri=app.sso_redirect_uri,
-                sso_user_infos_to_share=app.sso_user_infos_to_share or [],
-                description=app.description,
-                author=app.author,
-                version=app.version,
-                category=app.category,
-                tags=app.tags or [],
-                is_installed=app.is_installed,
-                autostart=app.autostart,
-                port=app.port,
-                owner_username=app.owner.username if app.owner else "System",
-                created_at=app.created_at,
-                updated_at=app.updated_at,
-                status=app.status,
-                pid=app.pid
-            )
-            # --- END FIX ---
-            
-            app_public.item_type = (app.app_metadata or {}).get('item_type', 'app')
-            app_public.has_config_schema = (get_installed_app_path(db, app.id) / 'schema.config.json').is_file()
-            zoo_info = zoo_meta.get(app.name)
-            if zoo_info:
-                app_public.repo_version = str(zoo_info.get('version', 'N/A'))
-                if app.version and zoo_info.get('version'):
-                    try:
-                        if packaging_version.parse(str(zoo_info.get('version'))) > packaging_version.parse(str(app.version)):
-                            app_public.update_available = True
-                    except (packaging_version.InvalidVersion, TypeError):
-                        pass
-            response.append(app_public)
-        except Exception as e:
-            print(f"CRITICAL: Failed to process installed app '{app.name}' for UI. Error: {e}")
-            trace_exception(e)
-            # Skip this item instead of crashing the entire endpoint
-            continue
-            
-    return response
-
-@apps_zoo_router.get("/installed/{app_id}/config-schema", response_model=Dict[str, Any])
-def get_app_config_schema(app_id: str, db: Session = Depends(get_db)):
-    schema_path = get_installed_app_path(db, app_id) / 'schema.config.json'
-    if not schema_path.is_file(): return {}
-    return json.loads(schema_path.read_text(encoding='utf-8'))
-
-@apps_zoo_router.get("/installed/{app_id}/config", response_model=Dict[str, Any])
-def get_app_config(app_id: str, db: Session = Depends(get_db)):
-    app_path = get_installed_app_path(db, app_id)
-    config = {}
-    if (app_path / 'config.yaml').is_file():
-        with open(app_path / 'config.yaml', 'r') as f: config = yaml.safe_load(f) or {}
-    # (Logic for schema defaults and env vars omitted for brevity)
-    return {"config": config, "metadata": {}}
-
-@apps_zoo_router.put("/installed/{app_id}/config", response_model=AppActionResponse)
-def set_app_config(app_id: str, config_data: Dict[str, Any] = Body(...), db: Session = Depends(get_db)):
-    app_path = get_installed_app_path(db, app_id)
-    # (Validation logic omitted for brevity)
-    with open(app_path / 'config.yaml', 'w') as f:
-        yaml.dump(config_data, f, sort_keys=False)
-    return AppActionResponse(success=True, message="Configuration saved.")
-
-@apps_zoo_router.post("/installed/{app_id}/start", response_model=TaskInfo, status_code=202)
-def start_app(app_id: str, db: Session = Depends(get_db)):
-    app = db.query(DBApp).filter(DBApp.id == app_id).first()
-    if not app:
-        raise HTTPException(status_code=404, detail="App to start not found in the database.")
-    task = task_manager.submit_task(name=f"Start app: {app.name}", target=start_app_task, args=(app_id,))
-    return to_task_info(task)
-
-@apps_zoo_router.post("/installed/{app_id}/stop", response_model=TaskInfo, status_code=202)
-def stop_app(app_id: str, db: Session = Depends(get_db)):
-    app = db.query(DBApp).filter(DBApp.id == app_id).first()
-    if not app:
-        raise HTTPException(status_code=404, detail="App to stop not found in the database.")
-    task = task_manager.submit_task(name=f"Stop app: {app.name}", target=stop_app_task, args=(app_id,))
-    return to_task_info(task)
-
-@apps_zoo_router.put("/installed/{app_id}", response_model=AppPublic)
-def update_installed_app(app_id: str, app_update: AppUpdate, db: Session = Depends(get_db)):
-    app = db.query(DBApp).filter(DBApp.id == app_id).first()
-    if not app:
-        raise HTTPException(status_code=404, detail="App not found.")
-
-    update_data = app_update.model_dump(exclude_unset=True)
-    
-    for key, value in update_data.items():
-        setattr(app, key, value)
-    
-    try:
-        db.commit()
-        db.refresh(app, ["owner"])
-
-        # --- DEFINITIVE FIX: Use manual construction here as well ---
-        app_public = AppPublic(
-            id=app.id, name=app.name, client_id=app.client_id, url=app.url, icon=app.icon,
-            active=app.active, type=app.type, authentication_type=app.authentication_type,
-            authentication_key=app.authentication_key, sso_redirect_uri=app.sso_redirect_uri,
-            sso_user_infos_to_share=app.sso_user_infos_to_share or [],
-            description=app.description, author=app.author, version=app.version,
-            category=app.category, tags=app.tags or [], is_installed=app.is_installed,
-            autostart=app.autostart, port=app.port, owner_username=app.owner.username if app.owner else "System",
-            created_at=app.created_at, updated_at=app.updated_at, status=app.status, pid=app.pid
-        )
-        # --- END FIX ---
-
-        app_public.item_type = (app.app_metadata or {}).get('item_type', 'app')
-        app_public.has_config_schema = (get_installed_app_path(db, app.id) / 'schema.config.json').is_file()
-        zoo_meta = get_all_zoo_metadata()
-        zoo_info = zoo_meta.get(app.name)
-        if zoo_info:
-            app_public.repo_version = str(zoo_info.get('version', 'N/A'))
-            if app.version and zoo_info.get('version'):
-                try:
-                    if packaging_version.parse(str(zoo_info['version'])) > packaging_version.parse(str(app.version)):
-                        app_public.update_available = True
-                except Exception:
-                    pass
-        
-        return app_public
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error during app update: {str(e)}")
-
-@apps_zoo_router.get("/installed/{app_id}/logs", response_model=AppLog)
-def get_app_logs(app_id: str, db: Session = Depends(get_db)):
-    log_path = get_installed_app_path(db, app_id) / "app.log"
-    return AppLog(log_content=log_path.read_text(encoding="utf-8") if log_path.exists() else "No logs.")
-
 @apps_zoo_router.delete("/installed/{app_id}", response_model=AppActionResponse)
 def uninstall_app(app_id: str, db: Session = Depends(get_db)):
-    app = db.query(DBApp).filter(DBApp.id == app_id).first()
-    if not app:
-        raise HTTPException(status_code=404, detail="Installed item record not found.")
-
-    if app.status == 'running' and app.pid:
-        try:
-            os.kill(app.pid, signal.SIGTERM)
-            print(f"INFO: Sent SIGTERM to process {app.pid} for app '{app.name}'.")
-        except ProcessLookupError:
-            print(f"WARNING: Process {app.pid} for app '{app.name}' not found.")
-        except Exception as e:
-            print(f"ERROR: Could not stop process {app.pid}: {e}")
-    
-    if app.id in open_log_files:
-        try:
-            open_log_files[app.id].close()
-            del open_log_files[app.id]
-        except Exception as e:
-            print(f"WARNING: Could not close log file for app {app.id}: {e}")
+    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+    if not app: raise HTTPException(404, "Installed app not found.")
+    if app.status == 'running': raise HTTPException(400, "Cannot uninstall a running app. Please stop it first.")
 
     try:
         app_path = get_installed_app_path(db, app.id)
-        shutil.rmtree(app_path, ignore_errors=True)
-        print(f"INFO: Removed installation folder for '{app.name}'.")
+        if app_path.exists():
+            shutil.rmtree(app_path)
+        
+        db.delete(app)
+        db.commit()
+        return AppActionResponse(success=True, message=f"'{app.name}' uninstalled successfully.")
     except Exception as e:
-        print(f"ERROR: Could not remove installation folder for '{app.name}': {e}")
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(500, f"Failed to uninstall: {e}")
 
-    item_type = (app.app_metadata or {}).get('item_type')
-    if item_type == 'mcp':
-        service_to_delete = db.query(DBMCP).filter(DBMCP.name == app.name, DBMCP.type == 'system').first()
-        if service_to_delete:
-            db.delete(service_to_delete)
-            print(f"INFO: Deleting system MCP service entry for '{app.name}'.")
+@apps_zoo_router.put("/installed/{app_id}", response_model=AppPublic)
+def update_installed_app_settings(app_id: str, payload: AppUpdate, db: Session = Depends(get_db)):
+    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+    if not app: raise HTTPException(404, "Installed app not found.")
+    if app.status == 'running': raise HTTPException(400, "Cannot change settings of a running app.")
 
-    db.delete(app)
+    update_data = payload.model_dump(exclude_unset=True)
+    for key, val in update_data.items():
+        setattr(app, key, val)
     db.commit()
+    db.refresh(app)
+    return AppPublic.from_orm(app)
     
-    return AppActionResponse(success=True, message=f"'{app.name}' has been uninstalled.")
+@apps_zoo_router.get("/installed/{app_id}/logs", response_model=AppLog)
+def get_app_logs(app_id: str, db: Session = Depends(get_db)):
+    app_path = get_installed_app_path(db, app_id)
+    log_file = app_path / "app.log"
+    if not log_file.exists():
+        return AppLog(log_content="Log file not found.")
+    return AppLog(log_content=log_file.read_text(encoding='utf-8', errors='ignore'))
+    
+@apps_zoo_router.get("/installed/{app_id}/config-schema")
+def get_app_config_schema(app_id: str, db: Session = Depends(get_db)):
+    app_path = get_installed_app_path(db, app_id)
+    schema_file = app_path / "config.schema.json"
+    if not schema_file.exists():
+        return {}
+    return json.loads(schema_file.read_text())
 
-@apps_zoo_router.get("/get-next-available-port", response_model=Dict[str, int])
-def get_next_available_port(port: Optional[int] = Query(None), db: Session = Depends(get_db)):
-    used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
-    used_ports.add(settings.get("port", 9642))
-    if port and port not in used_ports: return {"port": port}
-    current_port = 9601
-    while current_port in used_ports: current_port += 1
-    return {"port": current_port}
+@apps_zoo_router.get("/installed/{app_id}/config")
+def get_app_config(app_id: str, db: Session = Depends(get_db)):
+    app_path = get_installed_app_path(db, app_id)
+    config_file = app_path / "config.yaml"
+    
+    schema_file = app_path / "config.schema.json"
+    config_data = {}
+    env_overrides = []
+
+    if config_file.exists():
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config_data = yaml.safe_load(f) or {}
+            
+    if schema_file.exists():
+        schema = json.loads(schema_file.read_text())
+        for key, prop in schema.get('properties', {}).items():
+            env_var = prop.get('envVar')
+            if env_var and env_var in os.environ:
+                env_val = os.environ[env_var]
+                if prop.get('type') == 'integer': env_val = int(env_val)
+                elif prop.get('type') == 'number': env_val = float(env_val)
+                elif prop.get('type') == 'boolean': env_val = env_val.lower() in ['true', '1', 'yes']
+                config_data[key] = env_val
+                env_overrides.append(key)
+    
+    return {"config": config_data, "metadata": {"env_overrides": env_overrides}}
+
+@apps_zoo_router.put("/installed/{app_id}/config", response_model=AppActionResponse)
+def update_app_config(app_id: str, config: Dict[str, Any], db: Session = Depends(get_db)):
+    app_path = get_installed_app_path(db, app_id)
+    config_file = app_path / "config.yaml"
+    schema_file = app_path / "config.schema.json"
+
+    if schema_file.exists():
+        try:
+            schema = json.loads(schema_file.read_text())
+            validate(instance=config, schema=schema)
+        except (ValidationError, json.JSONDecodeError) as e:
+            raise HTTPException(400, f"Configuration is invalid: {e}")
+            
+    with open(config_file, 'w', encoding='utf-8') as f:
+        yaml.dump(config, f)
+        
+    return AppActionResponse(success=True, message="Configuration saved.")

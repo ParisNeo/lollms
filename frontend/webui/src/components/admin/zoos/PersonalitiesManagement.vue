@@ -51,17 +51,6 @@ const pageInfo = computed(() => {
     return `Showing ${start}-${end} of ${totalItems.value}`;
 });
 
-const repoCounts = computed(() => {
-    const counts = {};
-    (personalityZooRepositories.value || []).forEach(repo => counts[repo.name] = 0);
-    (zooPersonalities.value.items || []).forEach(item => {
-        if (counts.hasOwnProperty(item.repository)) {
-            counts[item.repository]++;
-        }
-    });
-    return counts;
-});
-
 async function fetchZooItems() {
     const params = {
         page: currentPage.value, page_size: pageSize.value, sort_by: sortKey.value,
@@ -85,23 +74,14 @@ const itemsWithTaskStatus = computed(() => {
             taskMap.set(itemName, task); 
         } 
     });
-
     return (zooPersonalities.value.items || []).map(item => ({ ...item, task: taskMap.get(item.folder_name) || null }));
 });
-
 
 function debouncedFetch() { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentPage.value = 1; fetchZooItems(); }, 300); }
 watch([sortKey, sortOrder, selectedCategory, installationStatusFilter, selectedRepository], () => { currentPage.value = 1; fetchZooItems(); });
 watch(searchQuery, debouncedFetch);
 watch(currentPage, fetchZooItems);
-watch(starredItems, (newStarred) => {
-    localStorage.setItem('starredPersonalities', JSON.stringify(newStarred));
-    if (selectedCategory.value === 'Starred') {
-        currentPage.value = 1;
-        fetchZooItems();
-    }
-}, { deep: true });
-watch(() => newRepo.value.type, (newType) => { if (newType === 'git') newRepo.value.path = ''; else newRepo.value.url = ''; });
+watch(starredItems, (newStarred) => { localStorage.setItem('starredPersonalities', JSON.stringify(newStarred)); if (selectedCategory.value === 'Starred') { currentPage.value = 1; fetchZooItems(); } }, { deep: true });
 
 onMounted(() => {
     dataStore.fetchPersonalities();
@@ -153,7 +133,7 @@ function handleStarToggle(itemName) { const i = starredItems.value.indexOf(itemN
         <div class="border-b border-gray-200 dark:border-gray-700">
             <nav class="-mb-px flex space-x-6">
                 <button @click="activeSubTab = 'zoo'" :class="['tab-button', activeSubTab === 'zoo' ? 'active' : 'inactive']">Zoo</button>
-                <button @click="activeSubTab = 'source'" :class="['tab-button', activeSubTab === 'source' ? 'active' : 'inactive']">Source</button>
+                <button @click="activeSubTab = 'source'" :class="['tab-button', activeSubTab === 'source' ? 'active' : 'inactive']">Repositories</button>
             </nav>
         </div>
 
@@ -165,10 +145,7 @@ function handleStarToggle(itemName) { const i = starredItems.value.indexOf(itemN
                     <div class="grid grid-cols-1 sm:grid-cols-3 lg:col-span-3 gap-4">
                         <select v-model="installationStatusFilter" class="input-field"><option value="All">All Statuses</option><option value="Installed">Installed</option><option value="Uninstalled">Uninstalled</option></select>
                         <select v-model="selectedCategory" class="input-field"><option v-for="c in categories" :key="c" :value="c">{{ c }}</option></select>
-                        <select v-model="selectedRepository" class="input-field">
-                            <option value="All">All Sources</option>
-                            <option v-for="repo in sortedRepositories" :key="repo.id" :value="repo.name">{{ repo.name }}</option>
-                        </select>
+                        <select v-model="selectedRepository" class="input-field"><option value="All">All Sources</option><option v-for="repo in sortedRepositories" :key="repo.id" :value="repo.name">{{ repo.name }}</option></select>
                     </div>
                 </div>
 
@@ -189,23 +166,10 @@ function handleStarToggle(itemName) { const i = starredItems.value.indexOf(itemN
 
         <section v-if="activeSubTab === 'source'">
              <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Personality Zoo Repositories</h3><button @click="isAddRepoFormVisible = !isAddRepoFormVisible" class="btn btn-primary">{{ isAddRepoFormVisible ? 'Cancel' : 'Add Repository' }}</button></div>
-             <div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6">
-                 <form @submit.prevent="handleAddRepository" class="space-y-4">
-                     <div class="flex items-center gap-x-4"><label><input type="radio" v-model="newRepo.type" value="git" class="radio-input"> Git</label><label><input type="radio" v-model="newRepo.type" value="local" class="radio-input"> Local</label></div>
-                     <div><label>Name</label><input v-model="newRepo.name" type="text" class="input-field" required></div>
-                     <div v-if="newRepo.type === 'git'"><label>URL</label><input v-model="newRepo.url" type="url" class="input-field" :required="newRepo.type==='git'"></div>
-                     <div v-if="newRepo.type === 'local'"><label>Path</label><input v-model="newRepo.path" type="text" class="input-field" :required="newRepo.type==='local'"></div>
-                     <div class="flex justify-end"><button type="submit" class="btn btn-primary">Add</button></div>
-                 </form>
-             </div>
+             <div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6"><form @submit.prevent="handleAddRepository" class="space-y-4"><div class="flex items-center gap-x-4"><label><input type="radio" v-model="newRepo.type" value="git" class="radio-input"> Git</label><label><input type="radio" v-model="newRepo.type" value="local" class="radio-input"> Local</label></div><div><label>Name</label><input v-model="newRepo.name" type="text" class="input-field" required></div><div v-if="newRepo.type === 'git'"><label>URL</label><input v-model="newRepo.url" type="url" class="input-field" :required="newRepo.type==='git'"></div><div v-if="newRepo.type === 'local'"><label>Path</label><input v-model="newRepo.path" type="text" class="input-field" :required="newRepo.type==='local'"></div><div class="flex justify-end"><button type="submit" class="btn btn-primary">Add</button></div></form></div>
              <div v-if="isLoadingPersonalityZooRepositories" class="text-center p-4">Loading...</div>
              <div v-else-if="sortedRepositories.length === 0" class="empty-state-card"><p>No repositories added.</p></div>
-             <div v-else class="space-y-4">
-                 <div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex items-center justify-between">
-                     <div><p class="font-semibold">{{ repo.name }} ({{ repoCounts[repo.name] || 0 }})</p><p class="text-sm text-gray-500">{{ repo.url }}</p><p class="text-xs text-gray-400">Pulled: {{ formatDateTime(repo.last_pulled_at) }}</p></div>
-                     <div class="flex items-center gap-2"><button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm"><IconRefresh class="w-4 h-4 mr-1"/>{{ repo.type === 'git' ? 'Pull' : 'Rescan' }}</button><button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm"><IconTrash class="w-4 h-4"/></button></div>
-                 </div>
-             </div>
+             <div v-else class="space-y-4"><div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex items-center justify-between"><div><p class="font-semibold">{{ repo.name }}</p><p class="text-sm text-gray-500">{{ repo.url }}</p><p class="text-xs text-gray-400">Pulled: {{ formatDateTime(repo.last_pulled_at) }}</p></div><div class="flex items-center gap-2"><button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm"><IconRefresh class="w-4 h-4 mr-1"/>{{ repo.type === 'git' ? 'Pull' : 'Rescan' }}</button><button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm"><IconTrash class="w-4 h-4"/></button></div></div></div>
         </section>
     </div>
 </template>

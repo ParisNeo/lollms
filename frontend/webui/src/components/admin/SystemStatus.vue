@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, computed } from 'vue';
+import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../stores/admin';
 import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
@@ -9,12 +9,6 @@ import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
 
 const adminStore = useAdminStore();
 const { systemStatus, isLoadingSystemStatus } = storeToRefs(adminStore);
-
-onMounted(() => {
-    if (!systemStatus.value) {
-        adminStore.fetchSystemStatus();
-    }
-});
 
 const gpus = computed(() => systemStatus.value?.gpus || []);
 const totalVramUsedGb = computed(() => gpus.value.reduce((acc, gpu) => acc + gpu.vram_used_gb, 0));

@@ -49,17 +49,6 @@ const pageInfo = computed(() => {
     return `Showing ${start}-${end} of ${totalItems.value}`;
 });
 
-const repoPromptCounts = computed(() => {
-    const counts = {};
-    (promptZooRepositories.value || []).forEach(repo => counts[repo.name] = 0);
-    (zooPrompts.value.items || []).forEach(prompt => {
-        if (counts.hasOwnProperty(prompt.repository)) {
-            counts[prompt.repository]++;
-        }
-    });
-    return counts;
-});
-
 async function fetchZooItems() {
     const params = {
         page: currentPage.value, page_size: pageSize.value, sort_by: sortKey.value,
@@ -72,21 +61,6 @@ async function fetchZooItems() {
     await adminStore.fetchZooPrompts(params);
 }
 
-function debouncedFetch() { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentPage.value = 1; fetchZooItems(); }, 300); }
-watch([sortKey, sortOrder, selectedCategory, installationStatusFilter, selectedRepository], () => { currentPage.value = 1; fetchZooItems(); });
-watch(searchQuery, debouncedFetch);
-watch(currentPage, fetchZooItems);
-watch(starredItems, (newStarred) => { localStorage.setItem('starredPrompts', JSON.stringify(newStarred)); }, { deep: true });
-watch(() => newRepo.value.type, (newType) => { if (newType === 'git') newRepo.value.path = ''; else newRepo.value.url = ''; });
-
-onMounted(() => {
-    promptsStore.fetchPrompts();
-    adminStore.fetchPromptZooRepositories();
-    fetchZooItems();
-    on('task:completed', handleTaskCompletion);
-});
-onUnmounted(() => { off('task:completed', handleTaskCompletion); });
-
 const itemsWithTaskStatus = computed(() => {
     const taskMap = new Map();
     (tasks.value || []).forEach(task => { 
@@ -97,6 +71,21 @@ const itemsWithTaskStatus = computed(() => {
     });
     return (zooPrompts.value.items || []).map(item => ({ ...item, task: taskMap.get(item.folder_name) || null }));
 });
+
+function debouncedFetch() { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentPage.value = 1; fetchZooItems(); }, 300); }
+watch([sortKey, sortOrder, selectedCategory, installationStatusFilter, selectedRepository], () => { currentPage.value = 1; fetchZooItems(); });
+watch(searchQuery, debouncedFetch);
+watch(currentPage, fetchZooItems);
+watch(starredItems, (newStarred) => { localStorage.setItem('starredPrompts', JSON.stringify(newStarred)); }, { deep: true });
+
+onMounted(() => {
+    promptsStore.fetchPrompts();
+    adminStore.fetchPromptZooRepositories();
+    fetchZooItems();
+    on('task:completed', handleTaskCompletion);
+});
+onUnmounted(() => { off('task:completed', handleTaskCompletion); });
+
 
 const sortedRepositories = computed(() => Array.isArray(promptZooRepositories.value) ? [...promptZooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || '')) : []);
 const categories = computed(() => ['All', 'Starred', ...(zooPrompts.value.categories || [])]);
@@ -130,7 +119,10 @@ async function showItemHelp(item) { const readme = await adminStore.fetchPromptR
 function handleStarToggle(itemName) { const i = starredItems.value.indexOf(itemName); if (i > -1) starredItems.value.splice(i, 1); else starredItems.value.push(itemName); }
 function handleGeneratePrompt() { uiStore.openModal('generatePrompt', { isSystemPrompt: true, onTaskSubmitted: (taskId) => { pendingGenerationTaskId.value = taskId; } }); }
 function handleTaskCompletion(task) { if (task && task.id === pendingGenerationTaskId.value) { pendingGenerationTaskId.value = null; if (uiStore.isModalOpen('tasksManager')) uiStore.closeModal('tasksManager'); if (task.status === 'completed' && task.result) { handleEditPrompt(task.result); } else { uiStore.addNotification('Prompt generation did not complete successfully.', 'warning'); } } }
-async function handleUpdatePrompt(prompt) { await adminStore.updateSystemPromptFromZoo(prompt.id); }
+async function handleUpdatePrompt(prompt) { 
+    const installed = installedPrompts.value.find(p => p.name === prompt.name);
+    if (installed) await adminStore.updateSystemPromptFromZoo(installed.id); 
+}
 function handleEditPrompt(prompt) { currentPrompt.value = { ...prompt }; uiStore.openModal('editSystemPrompt'); }
 async function handleSavePrompt() { if (!currentPrompt.value) return; const { id, ...data } = currentPrompt.value; try { if (id) await adminStore.updateSystemPrompt(id, data); else await adminStore.createSystemPrompt(data); uiStore.closeModal('editSystemPrompt'); } catch(e) {} }
 </script>
@@ -147,25 +139,19 @@ async function handleSavePrompt() { if (!currentPrompt.value) return; const { id
         <div class="border-b border-gray-200 dark:border-gray-700">
             <nav class="-mb-px flex space-x-6">
                 <button @click="activeSubTab = 'zoo'" :class="['tab-button', activeSubTab === 'zoo' ? 'active' : 'inactive']">Zoo</button>
-                <button @click="activeSubTab = 'source'" :class="['tab-button', activeSubTab === 'source' ? 'active' : 'inactive']">Source</button>
+                <button @click="activeSubTab = 'source'" :class="['tab-button', activeSubTab === 'source' ? 'active' : 'inactive']">Repositories</button>
             </nav>
         </div>
 
         <section v-if="activeSubTab === 'zoo'">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-xl font-semibold">Prompts Zoo</h3>
-                <button @click="handleGeneratePrompt" class="btn btn-secondary"><IconSparkles class="w-4 h-4 mr-2" /> Generate with AI</button>
-            </div>
+            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Prompts Zoo</h3><button @click="handleGeneratePrompt" class="btn btn-secondary"><IconSparkles class="w-4 h-4 mr-2" /> Generate with AI</button></div>
             <div class="space-y-4">
                 <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
                     <div class="relative lg:col-span-1"><input v-model="searchQuery" type="text" placeholder="Search Prompts..." class="input-field w-full pl-10" /><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div></div>
                     <div class="grid grid-cols-1 sm:grid-cols-3 lg:col-span-3 gap-4">
                         <select v-model="installationStatusFilter" class="input-field"><option value="All">All Statuses</option><option value="Installed">Installed</option><option value="Uninstalled">Uninstalled</option></select>
                         <select v-model="selectedCategory" class="input-field"><option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option></select>
-                        <select v-model="selectedRepository" class="input-field">
-                            <option value="All">All Sources</option>
-                            <option v-for="repo in sortedRepositories" :key="repo.id" :value="repo.name">{{ repo.name }}</option>
-                        </select>
+                        <select v-model="selectedRepository" class="input-field"><option value="All">All Sources</option><option v-for="repo in sortedRepositories" :key="repo.id" :value="repo.name">{{ repo.name }}</option></select>
                     </div>
                 </div>
                 
@@ -175,47 +161,17 @@ async function handleSavePrompt() { if (!currentPrompt.value) return; const { id
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         <AppCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" item-type-name="Prompt" @star="handleStarToggle(item.name)" @install="handleInstallItem" @uninstall="handleUninstallItem(item)" @help="showItemHelp" @update="handleUpdatePrompt(item)" />
                     </div>
-                    <div v-if="totalPages > 1" class="flex justify-between items-center mt-6">
-                        <button @click="currentPage--" :disabled="currentPage === 1" class="btn btn-secondary">Previous</button>
-                        <span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span>
-                        <button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button>
-                    </div>
+                    <div v-if="totalPages > 1" class="flex justify-between items-center mt-6"><button @click="currentPage--" :disabled="currentPage === 1" class="btn btn-secondary">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div>
                 </div>
             </div>
         </section>
         
         <section v-if="activeSubTab === 'source'">
             <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Prompt Zoo Repositories</h3><button @click="isAddRepoFormVisible = !isAddRepoFormVisible" class="btn btn-primary">{{ isAddRepoFormVisible ? 'Cancel' : 'Add' }}</button></div>
-            <div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6">
-                <form @submit.prevent="handleAddRepository" class="space-y-4">
-                     <div class="flex items-center gap-x-4"><label><input type="radio" v-model="newRepo.type" value="git" class="radio-input"> Git</label><label><input type="radio" v-model="newRepo.type" value="local" class="radio-input"> Local</label></div>
-                     <div><label>Name</label><input v-model="newRepo.name" type="text" class="input-field" required></div>
-                     <div v-if="newRepo.type === 'git'"><label>URL</label><input v-model="newRepo.url" type="url" class="input-field" :required="newRepo.type==='git'"></div>
-                     <div v-if="newRepo.type === 'local'"><label>Path</label><input v-model="newRepo.path" type="text" class="input-field" :required="newRepo.type==='local'"></div>
-                     <div class="flex justify-end"><button type="submit" class="btn btn-primary">Add</button></div>
-                </form>
-            </div>
+            <div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6"><form @submit.prevent="handleAddRepository" class="space-y-4"><div class="flex items-center gap-x-4"><label><input type="radio" v-model="newRepo.type" value="git" class="radio-input"> Git</label><label><input type="radio" v-model="newRepo.type" value="local" class="radio-input"> Local</label></div><div><label>Name</label><input v-model="newRepo.name" type="text" class="input-field" required></div><div v-if="newRepo.type === 'git'"><label>URL</label><input v-model="newRepo.url" type="url" class="input-field" :required="newRepo.type==='git'"></div><div v-if="newRepo.type === 'local'"><label>Path</label><input v-model="newRepo.path" type="text" class="input-field" :required="newRepo.type==='local'"></div><div class="flex justify-end"><button type="submit" class="btn btn-primary">Add</button></div></form></div>
             <div v-if="isLoadingPromptZooRepositories" class="text-center p-4">Loading...</div>
             <div v-else-if="!sortedRepositories || sortedRepositories.length === 0" class="empty-state-card"><p>No repositories added.</p></div>
-            <div v-else class="space-y-4">
-                <div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex items-center justify-between">
-                    <div><p class="font-semibold">{{ repo.name }} ({{ repoPromptCounts[repo.name] || 0 }})</p><p class="text-sm text-gray-500">{{ repo.url }}</p><p class="text-xs text-gray-400">Pulled: {{ formatDateTime(repo.last_pulled_at) }}</p></div>
-                    <div class="flex items-center gap-2"><button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm"><IconRefresh class="w-4 h-4 mr-1"/>{{ repo.type === 'git' ? 'Pull' : 'Rescan' }}</button><button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm"><IconTrash class="w-4 h-4"/></button></div>
-                </div>
-            </div>
+            <div v-else class="space-y-4"><div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex items-center justify-between"><div><p class="font-semibold">{{ repo.name }}</p><p class="text-sm text-gray-500">{{ repo.url }}</p><p class="text-xs text-gray-400">Pulled: {{ formatDateTime(repo.last_pulled_at) }}</p></div><div class="flex items-center gap-2"><button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm"><IconRefresh class="w-4 h-4 mr-1"/>{{ repo.type === 'git' ? 'Pull' : 'Rescan' }}</button><button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm"><IconTrash class="w-4 h-4"/></button></div></div></div>
         </section>
-
-        <GenericModal modalName="editSystemPrompt" :title="currentPrompt && currentPrompt.id ? 'Edit System Prompt' : 'Add System Prompt'">
-            <template #body>
-                <form v-if="currentPrompt" @submit.prevent="handleSavePrompt" class="space-y-4">
-                    <div><label for="prompt-name" class="block text-sm font-medium">Name</label><input id="prompt-name" v-model="currentPrompt.name" type="text" class="input-field mt-1" required></div>
-                    <div><label for="prompt-content" class="block text-sm font-medium">Content</label><textarea id="prompt-content" v-model="currentPrompt.content" rows="10" class="input-field mt-1"></textarea></div>
-                </form>
-            </template>
-            <template #footer>
-                <button @click="uiStore.closeModal('editSystemPrompt')" class="btn btn-secondary">Cancel</button>
-                <button @click="handleSavePrompt" class="btn btn-primary">Save</button>
-            </template>
-        </GenericModal>
     </div>
 </template>

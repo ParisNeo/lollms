@@ -1,4 +1,4 @@
-# backend/routers/mcp.py
+# backend/routers/services.py
 import traceback
 import re
 from typing import List
@@ -20,6 +20,7 @@ from backend.models import (
 )
 from backend.discussion import get_user_discussion
 from backend.task_manager import task_manager, Task
+from backend.utils import get_accessible_host
 
 mcp_router = APIRouter(prefix="/api/mcps", tags=["Services"])
 apps_router = APIRouter(prefix="/api/apps", tags=["Services"])
@@ -69,8 +70,15 @@ def _invalidate_user_mcp_cache(username: str):
         print(f"INFO: Invalidated tools cache for user: {username}")
 
 def _format_mcp_public(mcp: DBMCP) -> MCPPublic:
+    # FIX: Dynamically generate URL for running installed MCPs
+    accessible_host = get_accessible_host()
+    url = mcp.url
+    # An MCP can be an installed App, so we check its properties
+    if hasattr(mcp, 'is_installed') and mcp.is_installed and hasattr(mcp, 'status') and mcp.status == 'running' and hasattr(mcp, 'port') and mcp.port:
+        url = f"http://{accessible_host}:{mcp.port}"
+
     return MCPPublic(
-        id=mcp.id, name=mcp.name, client_id=mcp.client_id, url=mcp.url, icon=mcp.icon,
+        id=mcp.id, name=mcp.name, client_id=mcp.client_id, url=url, icon=mcp.icon,
         active=mcp.active, type=mcp.type,
         authentication_type=mcp.authentication_type,
         authentication_key="********" if mcp.authentication_key else "",
@@ -111,7 +119,15 @@ def create_mcp(
     else:
         client_id_to_set = _generate_unique_client_id(db, mcp_data.name)
 
-    new_mcp = DBMCP(**mcp_data.model_dump(exclude={"client_id"}), client_id=client_id_to_set, owner_user_id=owner_id)
+    mcp_dict = mcp_data.model_dump(exclude={"client_id"})
+    url = mcp_dict.get('url')
+    if url and not url.endswith('/mcp'):
+        if url.endswith('/'):
+            mcp_dict['url'] = url + 'mcp'
+        else:
+            mcp_dict['url'] = url + '/mcp'
+            
+    new_mcp = DBMCP(**mcp_dict, client_id=client_id_to_set, owner_user_id=owner_id)
     db.add(new_mcp)
     try:
         db.commit()
@@ -139,6 +155,14 @@ def update_mcp(
         raise HTTPException(status_code=403, detail="Not authorized to edit this MCP.")
 
     update_data = mcp_update.model_dump(exclude_unset=True)
+    if 'url' in update_data and update_data['url']:
+        url = update_data['url']
+        if not url.endswith('/mcp'):
+            if url.endswith('/'):
+                update_data['url'] = url + 'mcp'
+            else:
+                update_data['url'] = url + '/mcp'
+
     for key, value in update_data.items():
         setattr(mcp_db, key, value)
     
@@ -174,19 +198,37 @@ def delete_mcp(
 # --- APPS LOGIC (Consolidated) ---
 
 def _format_app_public(app: DBApp) -> AppPublic:
+    # FIX: Manually construct the response to ensure dynamic URL generation
+    accessible_host = get_accessible_host()
+    url_to_return = app.url
+
+    if app.is_installed and app.status == 'running' and app.port:
+        url_to_return = f"http://{accessible_host}:{app.port}"
+        item_type = (app.app_metadata or {}).get('item_type')
+        if item_type == 'mcp':
+            url_to_return += '/mcp'
+
+
     return AppPublic(
-        id=app.id, name=app.name, client_id=app.client_id, url=app.url, icon=app.icon,
-        active=app.active, type=app.type,
+        id=app.id,
+        name=app.name,
+        client_id=app.client_id,
+        url=url_to_return,
+        icon=app.icon,
+        active=app.active,
+        type=app.type,
         authentication_type=app.authentication_type,
         authentication_key="********" if app.authentication_key else "",
         owner_username=app.owner.username if app.owner else "System",
-        created_at=app.created_at, updated_at=app.updated_at,
+        created_at=app.created_at,
+        updated_at=app.updated_at,
         sso_redirect_uri=app.sso_redirect_uri,
         sso_user_infos_to_share=app.sso_user_infos_to_share or [],
         is_installed=app.is_installed,
         port=app.port,
         status=app.status,
-        autostart=app.autostart
+        autostart=app.autostart,
+        allow_openai_api_access=app.allow_openai_api_access
     )
 
 @apps_router.get("", response_model=List[AppPublic])

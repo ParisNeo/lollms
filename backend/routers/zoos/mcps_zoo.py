@@ -20,7 +20,8 @@ from backend.session import get_current_admin_user
 from backend.config import MCPS_ZOO_ROOT_PATH, MCPS_ROOT_PATH
 from backend.task_manager import task_manager
 from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
-from backend.routers.app_utils import to_task_info, pull_repo_task, install_item_task
+from backend.routers.app_utils import to_task_info, pull_repo_task, install_item_task, get_installed_app_path
+from backend.utils import get_accessible_host
 
 mcps_zoo_router = APIRouter(
     prefix="/api/mcps_zoo",
@@ -81,79 +82,101 @@ def pull_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     return to_task_info(task)
 
 @mcps_zoo_router.get("/available", response_model=ZooMCPInfoResponse)
-def get_available_zoo_mcps(db: Session = Depends(get_db), page: int = 1, page_size: int = 24, sort_by: str = 'last_update_date', sort_order: str = 'desc', category: Optional[str] = None, search_query: Optional[str] = None, installation_status: Optional[str] = None, repository: Optional[str] = None):
-    all_items_raw = get_all_items('mcp')
-    installed_mcps_q = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.app_metadata['item_type'].as_string() == 'mcp').all()
-    installed_mcps = {item.name: item for item in installed_mcps_q}
+def get_available_zoo_mcps(
+    db: Session = Depends(get_db),
+    page: int = 1, page_size: int = 24, sort_by: str = 'last_update_date', sort_order: str = 'desc',
+    category: Optional[str] = None, search_query: Optional[str] = None,
+    installation_status: Optional[str] = None, repository: Optional[str] = None
+):
+    all_zoo_items_raw = get_all_items('mcp')
+    all_db_mcps = db.query(DBApp).filter(DBApp.app_metadata['item_type'].as_string() == 'mcp').all()
     installed_folders = {f.name for f in MCPS_ROOT_PATH.iterdir() if f.is_dir()}
+    accessible_host = get_accessible_host()
 
-    all_items = []
-    for info in all_items_raw:
-        try:
-            is_installed = info.get('name') in installed_mcps
-            folder_exists = info.get('folder_name') in installed_folders
-            is_broken = folder_exists and not is_installed
+    processed_keys = set()
+    all_items_map = {}
 
-            update_available = False
-            if is_installed:
-                installed_app = installed_mcps[info.get('name')]
-                try:
-                    if installed_app.version and info.get('version') and packaging_version.parse(str(info.get('version'))) > packaging_version.parse(str(installed_app.version)):
-                        update_available = True
-                except (packaging_version.InvalidVersion, TypeError):
-                    pass
+    for info in all_zoo_items_raw:
+        key = f"zoo::{info['repository']}/{info['folder_name']}"
+        processed_keys.add(key)
+        all_items_map[key] = info
 
-            model_data = {
-                **info,
-                "is_installed": is_installed, "is_broken": is_broken, "update_available": update_available,
-                "has_readme": (MCPS_ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists()
+    for mcp in all_db_mcps:
+        repo = (mcp.app_metadata or {}).get('repository')
+        folder = (mcp.app_metadata or {}).get('folder_name')
+        key = f"zoo::{repo}/{folder}" if repo and folder else f"db::{mcp.id}"
+
+        item_data_from_db = {
+            'id': mcp.id, 'name': mcp.name, 'folder_name': mcp.folder_name or mcp.name,
+            'icon': mcp.icon, 'is_installed': mcp.is_installed, 'description': mcp.description,
+            'author': mcp.author, 'version': mcp.version, 'category': mcp.category,
+            'tags': mcp.tags or [], 'status': mcp.status, 'port': mcp.port, 'autostart': mcp.autostart,
+            'item_type': (mcp.app_metadata or {}).get('item_type', 'mcp')
+        }
+        
+        if item_data_from_db['status'] == 'running' and item_data_from_db['port']:
+            item_data_from_db['url'] = f"http://{accessible_host}:{item_data_from_db['port']}"
+
+        if mcp.is_installed:
+            try:
+                item_path = get_installed_app_path(db, mcp.id)
+                if (item_path / 'config.schema.json').exists():
+                    item_data_from_db['has_config_schema'] = True
+            except Exception as e:
+                print(f"Could not check schema for {mcp.name}: {e}")
+
+        if key in all_items_map:
+            all_items_map[key].update(item_data_from_db)
+        else:
+            all_items_map[key] = {**item_data_from_db, 'repository': 'Registered'}
+        processed_keys.add(key)
+
+    db_installed_folders = {mcp.folder_name for mcp in all_db_mcps if mcp.is_installed and mcp.folder_name}
+    for folder in installed_folders - db_installed_folders:
+        key = f"broken::{folder}"
+        if key not in processed_keys:
+            desc_path = MCPS_ROOT_PATH / folder / "description.yaml"
+            metadata = {'name': folder}
+            if desc_path.exists():
+                with open(desc_path, 'r', encoding='utf-8') as f: metadata.update(yaml.safe_load(f) or {})
+            all_items_map[key] = {
+                'is_broken': True,
+                'item_type': 'mcp',
+                'repository': 'Broken',
+                **metadata,
+                'folder_name': folder
             }
-            all_items.append(ZooMCPInfo(**model_data))
-        except (PydanticValidationError, Exception) as e:
-            print(f"ERROR: Could not process cached mcp data for {info.get('name')}. Error: {e}")
 
-    # --- FILTERING ---
-    filtered_items = all_items
+    final_list = []
+    for item_data in all_items_map.values():
+        try:
+            final_list.append(ZooMCPInfo(**item_data))
+        except PydanticValidationError as e:
+            print(f"Validation error for MCP item {item_data.get('name')}: {e}")
+
+    filtered_items = final_list
     if installation_status:
-        if installation_status == 'Installed':
-            filtered_items = [item for item in filtered_items if item.is_installed]
-        elif installation_status == 'Uninstalled':
-            filtered_items = [item for item in filtered_items if not item.is_installed and not item.is_broken]
-        elif installation_status == 'Broken':
-            filtered_items = [item for item in filtered_items if item.is_broken]
-    if repository and repository != 'All':
-        filtered_items = [item for item in filtered_items if item.repository == repository]
-    if category and category != 'All':
-        filtered_items = [item for item in filtered_items if item.category == category]
+        if installation_status == 'Installed': filtered_items = [i for i in final_list if i.is_installed]
+        elif installation_status == 'Uninstalled': filtered_items = [i for i in final_list if not i.is_installed and not i.is_broken and i.repository != 'Registered']
+        elif installation_status == 'Broken': filtered_items = [i for i in final_list if i.is_broken]
+        elif installation_status == 'Registered': filtered_items = [i for i in final_list if not i.is_installed and i.repository == 'Registered']
+    
+    if repository and repository != 'All': filtered_items = [i for i in filtered_items if i.repository == repository]
+    if category and category != 'All': filtered_items = [i for i in filtered_items if i.category == category]
     if search_query:
         q = search_query.lower()
-        filtered_items = [item for item in filtered_items if q in item.name.lower() or (item.description and q in item.description.lower()) or (item.author and q in item.author.lower())]
+        filtered_items = [i for i in filtered_items if q in i.name.lower() or (i.description and q in i.description.lower())]
     
-    # --- SORTING ---
-    def sort_key_func(item):
-        val = getattr(item, sort_by, None)
-        if 'date' in sort_by and val:
-            try: 
-                return datetime.datetime.fromisoformat(val).timestamp()
-            except (ValueError, TypeError): 
-                return 0.0
-        return str(val or '').lower()
+    filtered_items.sort(key=lambda item: (
+        -1 if item.is_broken else (0 if item.is_installed else 1),
+        str(getattr(item, sort_by, '') or '').lower() if sort_order == 'asc' else str(getattr(item, sort_by, '') or '').lower()
+    ), reverse=(sort_order == 'desc'))
 
-    filtered_items.sort(key=sort_key_func, reverse=(sort_order == 'desc'))
-
-    if sort_by == 'last_update_date':
-        broken_items = [item for item in filtered_items if item.is_broken]
-        installed_items_sorted = [item for item in filtered_items if item.is_installed and not item.is_broken]
-        uninstalled_items_sorted = [item for item in filtered_items if not item.is_installed and not item.is_broken]
-        filtered_items = broken_items + installed_items_sorted + uninstalled_items_sorted
-
-    # --- PAGINATION ---
-    total_items = len(filtered_items)
+    total = len(filtered_items)
     start = (page - 1) * page_size
-    end = start + page_size
-    paginated_items = filtered_items[start:end]
-
-    return ZooMCPInfoResponse(items=paginated_items, total=total_items, page=page, pages=(total_items + page_size - 1) // page_size if page_size > 0 else 0)
+    paginated = filtered_items[start:start + page_size]
+    
+    return ZooMCPInfoResponse(items=paginated, total=total, page=page, pages=(total + page_size - 1) // page_size if page_size > 0 else 0)
 
 @mcps_zoo_router.get("/readme", response_class=PlainTextResponse)
 def get_mcp_readme(repository: str, folder_name: str):

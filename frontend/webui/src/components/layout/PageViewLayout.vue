@@ -1,6 +1,6 @@
 <!-- frontend/webui/src/components/layout/PageViewLayout.vue -->
 <script setup>
-import { ref, onUnmounted, watch } from 'vue';
+import { ref, onUnmounted, watch, markRaw } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
@@ -20,7 +20,7 @@ const isSidebarOpen = ref(false);
 const uiStore = useUiStore();
 
 watch(() => [props.title, props.titleIcon], () => {
-    uiStore.setPageTitle({ title: props.title, icon: props.titleIcon });
+    uiStore.setPageTitle({ title: props.title, icon: props.titleIcon ? markRaw(props.titleIcon) : null });
 }, { immediate: true });
 
 onUnmounted(() => {

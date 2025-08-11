@@ -200,19 +200,23 @@ def invalidate_user_mcp_cache(username: str):
         print(f"INFO: Invalidated tools cache for user: {username}")
 
 def reload_lollms_client_mcp(username: str):
-    invalidate_user_mcp_cache(username)
-    lc = get_user_lollms_client(username)
-    if hasattr(lc, 'mcp') and lc.mcp:
-        lc.mcp = None
-    
-    servers_infos = load_mcps(username)
-    
-    if hasattr(lc, 'mcp_binding_manager'):
-        lc.mcp = lc.mcp_binding_manager.create_binding(
-            "remote_mcp",
-            servers_infos=servers_infos
-        )
-    print(f"INFO: Completed MCP reload for user: {username}")
+    """
+    Invalidates the MCP tools cache and the lollms_client instance for a user,
+    forcing a full reload and tool re-discovery on the next request.
+    """
+    if username in user_sessions:
+        session = user_sessions[username]
+        # Clear the cached list of discovered tools
+        if 'tools_cache' in session:
+            del session['tools_cache']
+            print(f"INFO: Invalidated tools cache for user: {username}")
+        
+        # Clear any cached lollms_client instances that might hold old MCP connections.
+        # This forces a full reconnection on the next get_user_lollms_client call.
+        if "lollms_clients" in session:
+            session["lollms_clients"] = {}
+            print(f"INFO: Invalidated all lollms_client instances for user: {username}")
+
 
 def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None) -> LollmsClient:
     session = user_sessions.get(username)
@@ -319,6 +323,8 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
             raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{final_alias}': {str(e)}")
     finally:
         db.close()
+
+
 
 def build_lollms_client_from_params(
     username: str, 

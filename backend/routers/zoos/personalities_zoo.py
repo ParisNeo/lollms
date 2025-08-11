@@ -1,4 +1,4 @@
-# backend/routers/personalities_zoo.py
+# backend/routers/zoos/personalities_zoo.py
 import shutil
 import yaml
 import base64
@@ -16,9 +16,9 @@ from backend.db import get_db
 from backend.db.models.service import PersonalityZooRepository as DBPersonalityZooRepository
 from backend.db.models.personality import Personality as DBPersonality
 from backend.models import (
-    ZooAppInfo as ZooPersonalityInfo, # Re-using for structure
-    ZooAppInfoResponse as ZooPersonalityInfoResponse, # Re-using for structure
-    PromptInstallRequest as PersonalityInstallRequest, # CORRECTED MODEL
+    ZooAppInfo as ZooPersonalityInfo,
+    ZooAppInfoResponse as ZooPersonalityInfoResponse,
+    PromptInstallRequest as PersonalityInstallRequest,
     TaskInfo
 )
 from backend.session import get_current_admin_user
@@ -26,7 +26,7 @@ from backend.config import PERSONALITIES_ZOO_ROOT_PATH
 from backend.task_manager import task_manager
 from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
 from backend.routers.app_utils import to_task_info, pull_repo_task
-from backend.routers.zoos.prompts_zoo import PromptZooRepositoryCreate, PromptZooRepositoryPublic # Re-using for structure
+from backend.routers.zoos.prompts_zoo import PromptZooRepositoryCreate, PromptZooRepositoryPublic
 
 personalities_zoo_router = APIRouter(
     prefix="/api/personalities_zoo",
@@ -47,7 +47,7 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
     if desc_path.exists():
         with open(desc_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f) or {}
-    else: # Legacy config.yaml
+    else:
         with open(conf_path, 'r', encoding='utf-8') as f:
             legacy_data = yaml.safe_load(f) or {}
         config = {
@@ -134,11 +134,9 @@ def get_available(
     category: Optional[str] = None, 
     search_query: Optional[str] = None, 
     installation_status: Optional[str] = None, 
-    repository: Optional[str] = None,
-    starred_names: Optional[List[str]] = Query(None)
+    repository: Optional[str] = None
 ):
     all_items_raw = get_all_items('personality')
-    
     installed_recs = db.query(DBPersonality).filter(DBPersonality.owner_user_id.is_(None)).all()
     installed_map = {p.name: p for p in installed_recs}
 
@@ -168,8 +166,6 @@ def get_available(
 
     # --- FILTERING ---
     filtered_items = all_items
-    if starred_names is not None:
-        filtered_items = [i for i in filtered_items if i.name in starred_names]
     if installation_status:
         if installation_status == 'Installed':
             filtered_items = [i for i in filtered_items if i.is_installed]
@@ -184,16 +180,9 @@ def get_available(
         filtered_items = [i for i in filtered_items if q in i.name.lower() or (i.description and q in i.description.lower())]
     
     # --- SORTING ---
-    def sort_key_func(item):
-        val = getattr(item, sort_by, None)
-        if 'date' in sort_by and val:
-            try:
-                return datetime.datetime.fromisoformat(val).timestamp()
-            except (ValueError, TypeError):
-                return 0.0
-        return str(val or '').lower()
-    
-    filtered_items.sort(key=sort_key_func, reverse=(sort_order == 'desc'))
+    filtered_items.sort(key=lambda item: (
+        str(getattr(item, sort_by, '') or '').lower()
+    ), reverse=(sort_order == 'desc'))
     
     # --- PAGINATION ---
     total = len(filtered_items)

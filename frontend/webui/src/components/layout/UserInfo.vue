@@ -15,7 +15,7 @@ import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconSignOut from '../../assets/icons/IconSignOut.vue';
 import IconChevronUp from '../../assets/icons/IconChevronUp.vue';
-import IconBookOpen from '../../assets/icons/IconBookOpen.vue'; // Included in previous update
+import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -24,13 +24,17 @@ const dataStore = useDataStore();
 const isMenuOpen = ref(false);
 const activeSubMenu = ref(null);
 const menuStyle = ref({});
-const triggerRef = ref(null); // Ref for the trigger button
-const menuDivRef = ref(null); // NEW: Ref for the actual menu panel for dynamic height calculation
+const triggerRef = ref(null);
+const menuDivRef = ref(null);
 
 const user = computed(() => authStore.user);
 const isAdmin = computed(() => authStore.isAdmin);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
-const apps = computed(() => [...dataStore.userApps, ...dataStore.systemApps].filter(app => app.active));
+
+const runningApps = computed(() => {
+    const allServices = [...dataStore.userApps, ...dataStore.systemApps, ...dataStore.userMcps, ...dataStore.systemMcps];
+    return allServices.filter(app => app.active && app.url && (!app.is_installed || app.status === 'running'));
+});
 
 
 function calculateMenuPosition() {
@@ -41,16 +45,6 @@ function calculateMenuPosition() {
     const viewportHeight = window.innerHeight;
     const viewportWidth = window.innerWidth;
 
-    // Temporarily clear dynamic styles to measure natural height
-    menuDivRef.value.style.top = '';
-    menuDivRef.value.style.bottom = '';
-    menuDivRef.value.style.left = '';
-    menuDivRef.value.style.right = '';
-    menuDivRef.value.style.maxHeight = '';
-    menuDivRef.value.style.overflowY = '';
-
-    // Allow DOM to update to get correct natural height
-    // This is often implicitly handled by Vue's reactivity cycle, but can be forced with nextTick if issues arise.
     const naturalMenuHeight = menuDivRef.value.offsetHeight;
     const naturalMenuWidth = menuDivRef.value.offsetWidth;
 
@@ -58,65 +52,54 @@ function calculateMenuPosition() {
     let newBottom = 'auto';
     let newLeft = 'auto';
     let newRight = 'auto';
-    let newWidth = `${naturalMenuWidth}px`; // Default to natural width
+    let newWidth = `${naturalMenuWidth}px`;
 
     if (isSidebarOpen.value) {
-        // When sidebar is open, position menu relative to trigger, preferably above or below.
-        // It should match the trigger button's left edge and width.
         newLeft = `${rect.left}px`;
         newWidth = `${rect.width}px`;
-
         const spaceBelow = viewportHeight - rect.bottom;
         const spaceAbove = rect.top;
 
         if (spaceBelow >= naturalMenuHeight + margin || spaceBelow > spaceAbove) {
-            // Enough space below, or more space below than above
             newTop = `${rect.bottom + margin}px`;
         } else {
-            // Not enough space below, try to position above
             newBottom = `${viewportHeight - rect.top + margin}px`;
         }
     } else {
-        // When sidebar is collapsed, position menu to the right of the trigger.
         newLeft = `${rect.right + margin}px`;
-
-        // Attempt to vertically center relative to trigger, but keep within viewport
         const desiredTop = rect.top + (rect.height / 2) - (naturalMenuHeight / 2);
         newTop = `${Math.max(margin, Math.min(desiredTop, viewportHeight - naturalMenuHeight - margin))}px`;
         
-        // If it still overflows to the right, push it to the left
-        if (newLeft !== 'auto' && parseFloat(newLeft) + naturalMenuHeight > viewportWidth - margin) {
+        if (newLeft !== 'auto' && parseFloat(newLeft) + naturalMenuWidth > viewportWidth - margin) {
             newLeft = `${rect.left - naturalMenuWidth - margin}px`;
         }
     }
     
-    // Final check to prevent horizontal overflow for collapsed sidebar
     if (newLeft !== 'auto' && parseFloat(newLeft) < margin) {
         newLeft = `${margin}px`;
     }
 
-    // Apply styles
     menuStyle.value = {
         top: newTop,
         bottom: newBottom,
         left: newLeft,
         right: newRight,
         width: newWidth,
-        maxHeight: `${viewportHeight - 2 * margin}px`, // Ensure it doesn't go off screen vertically
-        overflowY: 'auto' // Make it scrollable if it exceeds max height
+        maxHeight: `${viewportHeight - 2 * margin}px`,
+        overflowY: 'auto'
     };
 }
 
-// Watch for the menu opening/closing
 watch(isMenuOpen, (isOpen) => {
     if (isOpen) {
+        dataStore.fetchApps();
+        dataStore.fetchMcps();
         nextTick(() => {
-            // Give a small delay to ensure rendering and then calculate position
             setTimeout(() => {
                 calculateMenuPosition();
                 window.addEventListener('resize', calculateMenuPosition, { passive: true });
                 window.addEventListener('scroll', calculateMenuPosition, { passive: true });
-            }, 50); // Small delay
+            }, 50);
         });
     } else {
         window.removeEventListener('resize', calculateMenuPosition);
@@ -124,7 +107,6 @@ watch(isMenuOpen, (isOpen) => {
     }
 });
 
-// If the sidebar state changes while the menu is open, recalculate the position.
 watch(isSidebarOpen, () => {
     if (isMenuOpen.value) {
         calculateMenuPosition();
@@ -166,7 +148,6 @@ const vOnClickOutside = {
 
 <template>
   <div class="relative w-full" v-if="user">
-    <!-- The user button that triggers the menu -->
     <button 
       ref="triggerRef"
       @click="toggleMenu"
@@ -185,7 +166,6 @@ const vOnClickOutside = {
       </div>
     </button>
 
-    <!-- Teleport the menu to the body tag to escape clipping containers -->
     <Teleport to="body">
         <Transition
             enter-active-class="transition-opacity ease-out duration-200"
@@ -202,8 +182,7 @@ const vOnClickOutside = {
                 class="fixed z-30 w-56 rounded-lg border bg-white shadow-xl dark:border-gray-600 dark:bg-gray-800"
                 ref="menuDivRef"
             >
-                <!-- This inner div no longer has fixed height or overflow-hidden. It will grow with content. -->
-                <div class="relative min-h-[280px]"> <!-- Added min-h to maintain a minimum size -->
+                <div class="relative min-h-[280px]">
                     <transition
                         enter-active-class="transition ease-out duration-200"
                         enter-from-class="opacity-0 -translate-x-full"
@@ -212,8 +191,7 @@ const vOnClickOutside = {
                         leave-from-class="opacity-100 translate-x-0"
                         leave-to-class="opacity-0 -translate-x-full"
                     >
-                        <!-- Apply overflow-y-auto to the actual list containers -->
-                        <div v-if="!activeSubMenu" class="w-full py-1 h-full overflow-y-auto"> <!-- Added h-full overflow-y-auto -->
+                        <div v-if="!activeSubMenu" class="w-full py-1 h-full overflow-y-auto">
                             <router-link to="/profile/me" @click="closeMenu" class="menu-item">
                                 <UserAvatar :icon="user.icon" :username="user.username" size-class="h-5 w-5 mr-3" />
                                 <span>My Profile</span>
@@ -235,10 +213,10 @@ const vOnClickOutside = {
                                 <IconDatabase class="mr-3 h-5 w-5 text-gray-500" />
                                 <span>Data Stores</span>
                             </router-link>
-                            <button v-if="apps.length > 0" @click="activeSubMenu = 'apps'" class="menu-item justify-between">
+                            <button v-if="runningApps.length > 0" @click="activeSubMenu = 'apps'" class="menu-item justify-between">
                             <div class="flex items-center">
                                 <IconTicket class="mr-3 h-5 w-5 text-gray-500" />
-                                <span>Apps</span>
+                                <span>Running Apps</span>
                             </div>
                             <IconChevronRight class="h-5 w-5" />
                             </button>
@@ -262,14 +240,13 @@ const vOnClickOutside = {
                         leave-from-class="opacity-100 translate-x-0"
                         leave-to-class="opacity-0 translate-x-full"
                     >
-                        <!-- Apply overflow-y-auto to the actual list containers -->
-                        <div v-if="activeSubMenu === 'apps'" class="absolute inset-0 w-full bg-white py-1 dark:bg-gray-800 h-full overflow-y-auto"> <!-- Added h-full overflow-y-auto -->
+                        <div v-if="activeSubMenu === 'apps'" class="absolute inset-0 w-full bg-white py-1 dark:bg-gray-800 h-full overflow-y-auto">
                             <button @click="activeSubMenu = null" class="menu-item">
                             <IconArrowLeft class="mr-3 h-5 w-5" />
                             <span>Back</span>
                             </button>
                             <div class="my-1 border-t dark:border-gray-600"></div>
-                            <a v-for="app in apps" :key="app.id" :href="app.url" target="_blank" rel="noopener noreferrer" class="menu-item">
+                            <a v-for="app in runningApps" :key="app.id" :href="app.url" target="_blank" rel="noopener noreferrer" class="menu-item">
                                 <UserAvatar :icon="app.icon" :username="app.name" size-class="h-5 w-5 mr-3" />
                                 <span class="truncate">{{ app.name }}</span>
                             </a>

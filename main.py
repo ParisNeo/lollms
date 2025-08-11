@@ -53,7 +53,7 @@ from backend.routers.lollms_config import lollms_config_router
 from backend.routers.files import upload_router, assets_router, files_router
 from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
-from backend.routers.app_utils import cleanup_and_autostart_apps
+from backend.routers.app_utils import cleanup_and_autostart_apps, synchronize_filesystem_and_db
 from backend.routers.zoos.apps_zoo import apps_zoo_router
 from backend.routers.zoos.mcps_zoo import mcps_zoo_router
 from backend.routers.zoos.prompts_zoo import prompts_zoo_router
@@ -384,6 +384,18 @@ Source Material:
 
 
     ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
+
+    ASCIIColors.yellow("--- Synchronizing Filesystem Installations with Database ---")
+    db_for_sync: Optional[Session] = None
+    try:
+        db_for_sync = next(get_db())
+        synchronize_filesystem_and_db(db_for_sync)
+        ASCIIColors.green("--- Synchronization Complete ---")
+    except Exception as e:
+        ASCIIColors.error(f"ERROR during startup synchronization: {e}")
+        if db_for_sync: db_for_sync.rollback()
+    finally:
+        if db_for_sync: db_for_sync.close()
 
     build_full_cache()
     cleanup_and_autostart_apps()

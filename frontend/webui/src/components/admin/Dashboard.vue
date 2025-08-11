@@ -2,11 +2,13 @@
 import { ref, onMounted } from 'vue';
 import apiClient from '../../services/api';
 import { useUiStore } from '../../stores/ui';
+import { useAdminStore } from '../../stores/admin';
 import SystemStatus from './SystemStatus.vue';
 
 const stats = ref(null);
 const isLoading = ref(true);
 const uiStore = useUiStore();
+const adminStore = useAdminStore();
 
 const statItems = ref([
   { key: 'total_users', label: 'Total Users', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
@@ -16,11 +18,14 @@ const statItems = ref([
   { key: 'pending_password_resets', label: 'Password Resets', icon: 'M15 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' }
 ]);
 
-async function fetchStats() {
+async function fetchDashboardData() {
     isLoading.value = true;
     try {
-        const response = await apiClient.get('/api/admin/stats');
-        stats.value = response.data;
+        const [statsResponse] = await Promise.all([
+            apiClient.get('/api/admin/stats'),
+            adminStore.fetchSystemStatus()
+        ]);
+        stats.value = statsResponse.data;
     } catch (error) {
         uiStore.addNotification('Could not load dashboard statistics.', 'error');
     } finally {
@@ -28,7 +33,7 @@ async function fetchStats() {
     }
 }
 
-onMounted(fetchStats);
+onMounted(fetchDashboardData);
 </script>
 
 <template>
@@ -38,7 +43,7 @@ onMounted(fetchStats);
                 <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
                     Application Overview
                 </h3>
-                <button @click="fetchStats" class="btn btn-secondary btn-sm" :disabled="isLoading">
+                <button @click="fetchDashboardData" class="btn btn-secondary btn-sm" :disabled="isLoading">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" :class="{'animate-spin': isLoading}" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h5M20 20v-5h-5M4 4l16 16" />
                     </svg>

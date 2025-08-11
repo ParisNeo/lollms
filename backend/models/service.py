@@ -81,6 +81,13 @@ class MCPBase(BaseModel):
     sso_redirect_uri: Optional[str] = None
     sso_user_infos_to_share: List[str] = Field(default_factory=list)
 
+    @field_validator('sso_user_infos_to_share', mode='before')
+    @classmethod
+    def validate_sso_user_infos(cls, v: Any) -> List[str]:
+        if v is None:
+            return []
+        return v
+        
 class MCPCreate(MCPBase):
     pass
 
@@ -196,6 +203,7 @@ class PersonalityZooRepositoryPublic(BaseModel):
         from_attributes = True
         
 class ZooAppInfo(BaseModel):
+    id: Optional[str] = None
     name: str
     repository: str
     folder_name: str
@@ -217,6 +225,10 @@ class ZooAppInfo(BaseModel):
     license: Optional[str] = None
     documentation: Optional[str] = None
     update_available: bool = False
+    status: Optional[str] = None
+    port: Optional[int] = None
+    url: Optional[str] = None
+    autostart: bool = False
     
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
     def coerce_to_string(cls, v):
@@ -234,6 +246,7 @@ class ZooAppInfoResponse(BaseModel):
     pages: int
 
 class ZooMCPInfo(BaseModel):
+    id: Optional[str] = None
     name: str
     repository: str
     folder_name: str
@@ -254,7 +267,11 @@ class ZooMCPInfo(BaseModel):
     license: Optional[str] = None
     documentation: Optional[str] = None
     update_available: bool = False
-    
+    status: Optional[str] = None
+    port: Optional[int] = None
+    url: Optional[str] = None
+    autostart: bool = False
+
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
     def coerce_to_string(cls, v):
         if v is not None:
@@ -337,6 +354,13 @@ class AppBase(BaseModel):
     autostart: bool = False
     port: Optional[int] = None
     allow_openai_api_access: bool = False
+
+    @field_validator('sso_user_infos_to_share', 'tags', mode='before')
+    @classmethod
+    def validate_to_list(cls, v: Any) -> List[str]:
+        if v is None:
+            return []
+        return v
 
 class AppCreate(AppBase):
     @model_validator(mode='after')

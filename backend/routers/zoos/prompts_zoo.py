@@ -1,4 +1,4 @@
-# backend/routers/prompts_zoo.py
+# backend/routers/zoos/prompts_zoo.py
 import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -30,73 +30,6 @@ prompts_zoo_router = APIRouter(
     tags=["Prompts Zoo Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
-
-# --- Task for Prompt Generation ---
-def _generate_prompt_task(task: Task, username: str, prompt: str):
-    task.log("Starting prompt generation...")
-    task.set_progress(10)
-
-    with task.db_session_factory() as db_session:
-        lc = get_user_lollms_client(username)
-
-        prompt_schema = {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Short, descriptive name for the prompt."},
-                "content": {"type": "string", "description": "The main content of the prompt. This MUST include placeholders for user input where appropriate."},
-                "category": {"type": "string", "description": "A category for the prompt (e.g., 'Writing', 'Coding', 'Creative')."},
-                "author": {"type": "string", "description": "The author of the prompt. Default to 'AI Generated'."},
-                "description": {"type": "string", "description": "A brief explanation of what the prompt does."},
-                "icon": {"type": "string", "description": "A base64 encoded icon for the prompt. Can be null or an empty string."}
-            },
-            "required": ["name", "content"],
-        }
-
-        system_prompt = """You are an expert prompt designer for AI chatbots. Your task is to create a new prompt based on the user's instructions.
-
-**IMPORTANT INSTRUCTIONS ON PLACEHOLDERS:**
-If the prompt needs user input, you MUST define placeholders. A placeholder has two parts:
-1.  **Usage:** Use `@<placeholder_name>@` directly in the prompt content where the user's input should go.
-2.  **Definition:** Define the placeholder on a new line after its first use. The definition block starts with `@<placeholder_name>@` and ends with `@</placeholder_name>@`. Inside this block, you must specify `title`, `type`, and `help`. You can optionally add `options` for `str` type and `default` for any type.
-
-**Example of a placeholder with a default value:**
-Translate the following text to @<language>@.
-@<language>@
-title: Language
-type: str
-options: English, French, Spanish, German, Italian, Arabic, Chinese, Japanese, Russian
-default: English
-help: The language to translate the text into.
-@</language>@
-
-Now, create a JSON object for the new prompt based on the user's request.
-"""
-
-        task.log("Sending prompt to LLM for JSON generation...")
-        task.set_progress(30)
-        
-        generated_data_dict = lc.generate_structured_content(
-            prompt,
-            system_prompt=system_prompt,
-            schema=prompt_schema,
-            n_predict=settings.get("default_llm_ctx_size")
-        )
-
-        task.log("Creating new system prompt in the database...")
-        task.set_progress(90)
-
-        new_prompt = DBSavedPrompt(
-            owner_user_id=None,
-            **generated_data_dict
-        )
-        db_session.add(new_prompt)
-        db_session.commit()
-
-        task.log("Prompt created and saved successfully.")
-        task.set_progress(100)
-        
-        return {"message": f"Prompt '{new_prompt.name}' created successfully."}
-
 
 def _install_prompt_task(task: Task, repo_name: str, folder_name: str):
     prompt_path = PROMPTS_ZOO_ROOT_PATH / repo_name / folder_name
@@ -165,21 +98,6 @@ def _update_prompt_task(task: Task, prompt_id: str):
         task.log("Prompt updated successfully in the database.")
     
     return {"message": "Update successful."}
-
-
-@prompts_zoo_router.post("/generate_from_prompt", response_model=TaskInfo, status_code=202)
-async def generate_prompt_from_prompt(
-    payload: GeneratePromptRequest,
-    current_user: dict = Depends(get_current_admin_user)
-):
-    db_task = task_manager.submit_task(
-        name=f"Generate Prompt: {payload.prompt[:30]}...",
-        target=_generate_prompt_task,
-        args=(current_user.username, payload.prompt),
-        description=f"Generating a new system prompt based on the instruction: '{payload.prompt[:100]}...'",
-        owner_username=current_user.username
-    )
-    return to_task_info(db_task)
     
 @prompts_zoo_router.get("/categories", response_model=List[str])
 def get_prompt_zoo_categories():
@@ -234,7 +152,12 @@ def pull_prompt_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
     return to_task_info(task)
 
 @prompts_zoo_router.get("/available", response_model=ZooPromptInfoResponse)
-def get_available_zoo_prompts(db: Session = Depends(get_db), page: int = 1, page_size: int = 24, sort_by: str = 'last_update_date', sort_order: str = 'desc', category: Optional[str] = None, search_query: Optional[str] = None, installation_status: Optional[str] = None, repository: Optional[str] = None):
+def get_available_zoo_prompts(
+    db: Session = Depends(get_db), 
+    page: int = 1, page_size: int = 24, sort_by: str = 'last_update_date', sort_order: str = 'desc', 
+    category: Optional[str] = None, search_query: Optional[str] = None, 
+    installation_status: Optional[str] = None, repository: Optional[str] = None
+):
     all_items_raw = get_all_items('prompt')
     installed_prompts_q = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id.is_(None)).all()
     installed_prompts = {item.name: item for item in installed_prompts_q}
@@ -264,29 +187,18 @@ def get_available_zoo_prompts(db: Session = Depends(get_db), page: int = 1, page
     # --- FILTERING ---
     filtered_items = all_items
     if installation_status:
-        if installation_status == 'Installed':
-            filtered_items = [item for item in filtered_items if item.is_installed]
-        elif installation_status == 'Uninstalled':
-            filtered_items = [item for item in filtered_items if not item.is_installed]
-    if repository and repository != 'All':
-        filtered_items = [item for item in filtered_items if item.repository == repository]
-    if category and category != 'All':
-        filtered_items = [item for item in filtered_items if item.category == category]
+        if installation_status == 'Installed': filtered_items = [item for item in filtered_items if item.is_installed]
+        elif installation_status == 'Uninstalled': filtered_items = [item for item in filtered_items if not item.is_installed]
+    if repository and repository != 'All': filtered_items = [item for item in filtered_items if item.repository == repository]
+    if category and category != 'All': filtered_items = [item for item in filtered_items if item.category == category]
     if search_query:
         q = search_query.lower()
         filtered_items = [item for item in filtered_items if q in item.name.lower() or (item.description and q in item.description.lower())]
     
     # --- SORTING ---
-    def sort_key_func(item):
-        val = getattr(item, sort_by, None)
-        if 'date' in sort_by and val:
-            try:
-                return datetime.datetime.fromisoformat(val).timestamp()
-            except (ValueError, TypeError):
-                return 0.0
-        return str(val or '').lower()
-    
-    filtered_items.sort(key=sort_key_func, reverse=(sort_order == 'desc'))
+    filtered_items.sort(key=lambda item: (
+        str(getattr(item, sort_by, '') or '').lower()
+    ), reverse=(sort_order == 'desc'))
 
     # --- PAGINATION ---
     total_items = len(filtered_items)
@@ -321,28 +233,3 @@ def update_installed_prompt(prompt_id: str, db: Session = Depends(get_db)):
         args=(prompt.id,)
     )
     return to_task_info(task)
-
-@prompts_zoo_router.post("/installed", response_model=PromptPublic, status_code=status.HTTP_201_CREATED)
-def create_system_prompt(prompt_data: PromptCreate, db: Session = Depends(get_db)):
-    new_prompt = DBSavedPrompt(**prompt_data.model_dump(), owner_user_id=None)
-    db.add(new_prompt)
-    db.commit()
-    db.refresh(new_prompt)
-    return new_prompt
-
-@prompts_zoo_router.put("/installed/{prompt_id}", response_model=PromptPublic)
-def update_system_prompt(prompt_id: str, prompt_data: PromptUpdate, db: Session = Depends(get_db)):
-    prompt = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id, DBSavedPrompt.owner_user_id.is_(None)).first()
-    if not prompt: raise HTTPException(status_code=404, detail="System prompt not found.")
-    update_data = prompt_data.model_dump(exclude_unset=True)
-    for key, value in update_data.items(): setattr(prompt, key, value)
-    db.commit()
-    db.refresh(prompt)
-    return prompt
-
-@prompts_zoo_router.delete("/installed/{prompt_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_system_prompt(prompt_id: str, db: Session = Depends(get_db)):
-    prompt = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id, DBSavedPrompt.owner_user_id.is_(None)).first()
-    if not prompt: raise HTTPException(status_code=404, detail="System prompt not found.")
-    db.delete(prompt)
-    db.commit()

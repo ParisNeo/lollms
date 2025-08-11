@@ -14,6 +14,7 @@ import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 import IconWrenchScrewdriver from '../../assets/icons/IconWrenchScrewdriver.vue';
 import IconNoSymbol from '../../assets/icons/IconNoSymbol.vue';
 import IconCog from '../../assets/icons/IconCog.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
 
 const props = defineProps({
     app: { type: Object, required: true },
@@ -22,10 +23,13 @@ const props = defineProps({
     itemTypeName: { type: String, default: 'App' }
 });
 
-const emit = defineEmits(['star', 'install', 'update', 'uninstall', 'details', 'help', 'view-task', 'cancel-install', 'start', 'stop', 'fix', 'configure']);
+const emit = defineEmits([
+    'star', 'install', 'update', 'uninstall', 'details', 'help', 
+    'view-task', 'cancel-install', 'start', 'stop', 'fix', 
+    'configure', 'purge', 'logs'
+]);
 
 const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0idy02IGgtNiI+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMy4zNzUgMS41YTguMjc1IDguMjc1IDAgMCAwLTguMjc1IDguMjc1YzAgNC4xMjIgMi41NjEgNy42MyA2LjA3NyA4LjgzNWEuNzUuNzUgMCAwIDAgLjc2NC0uMTExYy4xMjUtLjA3OC4yNTgtLjE5LjM5OS0uMzE0bC4wMDQtLjAwNSNhLjQ5OC40OTggMCAwIDEgLjYxMy0uMDIzbDIuNDQyIDEuMTM4YTEuNSAxLjUgMCAwIDAgMS42OTktLjkxM2w0LjQxMy05LjU3N2E4LjI1IDE4LjI1IDAgMCAwLTkuOTU0LTkuOTU0bC05LjU3NyA0LjQxM2ExLjUgMS41IDAgMCAwLS45MTMgMS42OTlsMS4xMzggMi40NDJhLjQ5OC40OTggMCAwIDEgLS4wMjMuNjEzbC0uMDA1LjAwNC0uMzE0LjM5OWEuNzUuNzUgMCAwIDAtLjExMS43NjRBMTEuMjIgMTEuMjIgMCAwIDEtMy4zNzUgMTguNWMtNS4wNzIgMC05LjE4OC00LjExNi05LjE4OC05LjE4OGE5LjE4OCA5LjE4OCAwIDAgMSAxLjYxNy01LjE2MmMuMjQ2LS40Mi4wMzgtLjkxOC0uMzY4LTEuMTU3bC0xLjQyNS0uODM4YTEuNSAxLjUgMCAwIDAtMi4wODYuNDlMMy4zNzUgMS41em00LjQ4OCAxMy4wMjNhLjUuNSAwIDAgMS0uMzU0LS4xNDdsLTEuNTQyLTEuNTQxYS41LjUgMCAxIDEgLjcwOC0uNzA4bDEuNTQxIDEuNTQyYS41LjUgMCAwIDEgLS4zNTQuODU0em0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em0tMi45NC0yLjk0YS41LjUgMCAwIDEtLjM1My0uMTQ2bC0xLjU0Mi0xLjU0MmEuNS41IDAgMCAxIC43MDctLjcwN2wxLjU0MiAxLjU0MWEuNS41IDAgMCAxLS4zNTQuODUzem0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em00LjQ4OC0uNzU3YS41LjUgMCAwIDEtLjM1NC0uMTQ3bC0xLjU0Mi0xLjU0MWEuNS41IDAgMCAxIC43MDgtLjcwOGwxLjU0MSAxLjU0MWEuNS41IDAgMCAxLS4zNTQuODU0em0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em0tMS40NzEtNC40N2EuNS41IDAgMCAxLS4zNTQtLjE0N2wtMS41NDItMS41NDFhLjUuNSAwIDAgMSAuNzA4LS43MDhsMS41NDEgMS41NDFhLjUuNSAwIDAgMS0uMzU0Ljg1NHoiIGNsaXAtcnVsZT0iZXZlbm9kZCIgLz4KPC9zdmc+Cg==';
-
 </script>
 
 <template>
@@ -47,6 +51,7 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
                 <div class="card-tags">
                     <span v-if="app.is_broken" class="tag installed-tag-broken">Broken</span>
                     <span v-else-if="app.is_installed" class="tag" :class="{ 'installed-tag-running': app.status === 'running', 'installed-tag-stopped': app.status !== 'running' }">{{ app.status || 'Installed' }}</span>
+                    <span v-else-if="app.repository === 'Registered'" class="tag registered-tag">Registered</span>
                     <span v-if="app.author" class="tag">by {{ app.author }}</span>
                     <span v-if="app.category" class="tag">{{ app.category }}</span>
                     <span v-if="app.version" class="tag">v{{ app.version }}</span>
@@ -66,24 +71,55 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
         <div class="card-footer">
             <div class="flex-1 min-w-0">
                 <TaskProgressIndicator v-if="task" :task="task" @view="$emit('view-task', task.id)" @cancel="$emit('cancel-install')" />
-                <div v-else class="flex gap-2">
-                    <button v-if="app.is_broken" @click="$emit('fix', app)" class="btn btn-warning w-full"><IconWrenchScrewdriver class="w-4 h-4 mr-2" />Fix Installation</button>
-                    <button v-else-if="!app.is_installed" @click="$emit('install', app)" class="btn btn-primary w-full" :disabled="app.is_legacy_scripted"><IconArrowDownTray class="w-4 h-4 mr-2" />Install</button>
-                    <template v-else>
-                         <button v-if="app.update_available" @click="$emit('update', app)" class="btn btn-warning w-full"><IconArrowUpCircle class="w-4 h-4 mr-2" />Update</button>
-                         <button v-else @click="$emit('uninstall', app)" class="btn btn-danger-outline w-full"><IconTrash class="w-4 h-4 mr-2" />Uninstall</button>
-                    </template>
+                
+                <div v-else class="flex gap-2 w-full">
+                    <div v-if="app.is_broken" class="flex gap-2 w-full">
+                        <button @click="$emit('fix', app)" class="btn btn-warning w-full" title="Fix Installation"><IconWrenchScrewdriver class="w-4 h-4 mr-2" />Fix</button>
+                        <button @click="$emit('purge', app)" class="btn btn-danger w-full" title="Purge Installation"><IconTrash class="w-4 h-4 mr-2" />Purge</button>
+                    </div>
+
+                    <button v-else-if="!app.is_installed && app.repository !== 'Registered'" @click="$emit('install', app)" class="btn btn-primary w-full" :disabled="app.is_legacy_scripted">
+                        <IconArrowDownTray class="w-4 h-4 mr-2" />Install
+                    </button>
+                    
+                    <button v-else-if="app.is_installed && app.update_available" @click="$emit('update', app)" class="btn btn-warning w-full">
+                        <IconArrowUpCircle class="w-4 h-4 mr-2" />Update to {{ app.repo_version }}
+                    </button>
+
+                    <button v-else-if="app.is_installed && app.status !== 'running'" @click="$emit('start', app)" class="btn btn-success p-2" title="Start App">
+                        <IconPlayCircle class="w-5 h-5" />
+                    </button>
+
+                    <div v-else-if="app.is_installed && app.status === 'running'" class="flex items-center gap-2">
+                        <a v-if="app.url" :href="app.url" target="_blank" class="btn btn-primary p-2" title="Open App">
+                            <IconGlobeAlt class="w-5 h-5" />
+                        </a>
+                        <button @click="$emit('stop', app)" class="btn btn-warning p-2" title="Stop App">
+                            <IconStopCircle class="w-5 h-5" />
+                        </button>
+                    </div>
                 </div>
             </div>
+
             <div class="flex-shrink-0 flex gap-1">
                 <template v-if="app.is_installed && !task && !app.is_broken">
-                    <button v-if="app.item_type === 'app' || app.item_type === 'mcp'" @click="$emit('configure', app)" class="btn btn-secondary p-2" title="Configure"><IconCog class="w-4 h-4" /></button>
-                    <a v-if="(app.item_type === 'app' || app.item_type === 'mcp') && app.status === 'running' && app.url" :href="app.url" target="_blank" class="btn btn-secondary p-2" title="Open"><IconGlobeAlt class="w-4 h-4" /></a>
-                    <button v-if="(app.item_type === 'app' || app.item_type === 'mcp') && app.status !== 'running'" @click="$emit('start', app)" class="btn btn-success p-2" title="Start"><IconPlayCircle class="w-4 h-4" /></button>
-                    <button v-if="(app.item_type === 'app' || app.item_type === 'mcp') && app.status === 'running'" @click="$emit('stop', app)" class="btn btn-warning p-2" title="Stop"><IconStopCircle class="w-4 h-4" /></button>
+                    <button @click="$emit('logs', app)" class="btn btn-secondary p-2" title="View Logs">
+                        <IconFileText class="w-4 h-4" />
+                    </button>
+                    <button @click="$emit('configure', app)" class="btn btn-secondary p-2" title="Configure">
+                        <IconCog class="w-4 h-4" />
+                    </button>
                 </template>
-                <button v-if="!app.is_installed" @click="$emit('details', app)" class="btn btn-secondary p-2" title="Details"><IconInfo class="w-4 h-4" /></button>
-                <button v-if="app.has_readme" @click="$emit('help', app)" class="btn btn-secondary p-2" title="Help"><IconBookOpen class="w-4 h-4" /></button>
+
+                <button @click="$emit('details', app)" class="btn btn-secondary p-2" title="Details">
+                    <IconInfo class="w-4 h-4" />
+                </button>
+                <button v-if="app.has_readme" @click="$emit('help', app)" class="btn btn-secondary p-2" title="Help">
+                    <IconBookOpen class="w-4 h-4" />
+                </button>
+                 <button v-if="app.is_installed" @click="$emit('uninstall', app)" class="btn btn-danger-outline p-2" title="Uninstall">
+                    <IconTrash class="w-4 h-4" />
+                </button>
             </div>
         </div>
     </div>
@@ -100,6 +136,7 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
 .installed-tag-running { @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300; }
 .installed-tag-stopped { @apply bg-gray-200 text-gray-800 dark:bg-gray-700 dark:text-gray-300; }
 .installed-tag-broken { @apply bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300; }
+.registered-tag { @apply bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-300; }
 .card-description { @apply text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-4; }
 .card-footer { @apply p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between gap-2 mt-auto; }
 </style>

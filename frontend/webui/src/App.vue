@@ -40,6 +40,7 @@ import WhatsNextModal from './components/modals/WhatsNextModal.vue';
 import AppInstallModal from './components/modals/AppInstallModal.vue';
 import AppDetailsModal from './components/modals/AppDetailsModal.vue';
 import AppConfigModal from './components/modals/AppConfigModal.vue';
+import AppLogModal from './components/modals/AppLogModal.vue';
 import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue';
 import GeneratePersonalityModal from './components/modals/GeneratePersonalityModal.vue';
 import TasksManagerModal from './components/modals/TasksManagerModal.vue';
@@ -148,6 +149,7 @@ onMounted(async () => {
     <AppInstallModal v-if="activeModal === 'appInstall'" />
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
     <AppConfigModal v-if="activeModal === 'appConfig'" />
+    <AppLogModal v-if="activeModal === 'appLog'" />
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> 
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
     <TasksManagerModal v-if="activeModal === 'tasksManager'" />
