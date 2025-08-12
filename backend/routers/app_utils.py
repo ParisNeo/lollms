@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import func
 from ascii_colors import ASCIIColors
-from filelock import FileLock, Timeout
+from filelock import FileLock, Timeout # ADDED IMPORT
 
 from backend.db import get_db
 from backend.db.models.service import App as DBApp, MCP as DBMCP, AppZooRepository, MCPZooRepository
@@ -37,6 +37,11 @@ from backend.utils import get_accessible_host
 from backend.session import user_sessions, reload_lollms_client_mcp
 
 open_log_files: Dict[str, Any] = {}
+
+# ADDED: Constants for synchronization lock
+SYNC_LOCK_PATH = APP_DATA_DIR / "sync_installations.lock"
+SYNC_LOCK_TIMEOUT = 300 # 5 minutes timeout for the lock
+
 
 def get_installed_app_path(db: Session, app_id: str) -> Path:
     app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
@@ -85,139 +90,158 @@ def synchronize_filesystem_and_db(db: Session):
     - Creates DB entries for "ghost" installations found on disk.
     - Removes DB entries for "orphaned" records with no matching files.
     - Corrects `item_type` for existing records based on folder location.
+    
+    This function is protected by a FileLock to ensure singleton execution.
     """
-    ASCIIColors.info("Starting synchronization of installed items with the database.")
-    fixed_ghosts = 0
-    removed_orphans = 0
-    corrected_types = 0
+    ASCIIColors.info("Attempting to acquire synchronization lock.")
+    lock = FileLock(str(SYNC_LOCK_PATH), timeout=SYNC_LOCK_TIMEOUT)
     
-    # --- Step 1: Find ghost installations (filesystem folder exists, but no DB record) ---
-    ASCIIColors.info("Scanning for ghost installations (files without DB entry)...")
-    
-    installed_folders = {
-        'app': {f.name for f in APPS_ROOT_PATH.iterdir() if f.is_dir()},
-        'mcp': {f.name for f in MCPS_ROOT_PATH.iterdir() if f.is_dir()}
-    }
-    
-    db_folder_names = {r[0] for r in db.query(DBApp.folder_name).filter(DBApp.is_installed == True, DBApp.folder_name.isnot(None)).all()}
-    
-    ghost_folders = {
-        'app': installed_folders['app'] - db_folder_names,
-        'mcp': installed_folders['mcp'] - db_folder_names
-    }
+    try:
+        with lock:
+            ASCIIColors.info("Synchronization lock acquired. Starting synchronization of installed items with the database.")
+            fixed_ghosts = 0
+            removed_orphans = 0
+            corrected_types = 0
+            
+            # --- Step 1: Find ghost installations (filesystem folder exists, but no DB record) ---
+            ASCIIColors.info("Scanning for ghost installations (files without DB entry)...")
+            
+            installed_folders = {
+                'app': {f.name for f in APPS_ROOT_PATH.iterdir() if f.is_dir()},
+                'mcp': {f.name for f in MCPS_ROOT_PATH.iterdir() if f.is_dir()}
+            }
+            
+            db_folder_names = {r[0] for r in db.query(DBApp.folder_name).filter(DBApp.is_installed == True, DBApp.folder_name.isnot(None)).all()}
+            
+            ghost_folders = {
+                'app': installed_folders['app'] - db_folder_names,
+                'mcp': installed_folders['mcp'] - db_folder_names
+            }
 
-    for item_type, folders in ghost_folders.items():
-        if not folders:
-            ASCIIColors.green(f"No ghost installations found for type: {item_type.upper()}")
-            continue
-        
-        ASCIIColors.yellow(f"Found {len(folders)} ghost installations for type: {item_type.upper()}. Attempting to repair...")
-        root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
-        
-        for folder_name in folders:
-            item_path = root_path / folder_name
-            desc_path = item_path / "description.yaml"
-            
-            if not desc_path.exists():
-                ASCIIColors.yellow(f"  - SKIPPING '{folder_name}': No description.yaml found. Cannot automatically repair.")
-                continue
-            
-            try:
-                with open(desc_path, 'r', encoding='utf-8') as f:
-                    item_info = yaml.safe_load(f) or {}
-                
-                item_name = item_info.get("name", folder_name)
-                
-                if db.query(DBApp).filter(func.lower(DBApp.name) == func.lower(item_name), DBApp.is_installed == True).first():
-                    ASCIIColors.yellow(f"  - SKIPPING '{folder_name}': A different installed item with the name '{item_name}' already exists in the database.")
+            for item_type, folders in ghost_folders.items():
+                if not folders:
+                    ASCIIColors.green(f"No ghost installations found for type: {item_type.upper()}")
                     continue
-
-                ASCIIColors.cyan(f"  - REPAIRING '{folder_name}': Creating database entry for '{item_name}'.")
                 
-                icon_path = next((p for p in [item_path / "assets" / "logo.png", item_path / "icon.png"] if p.exists()), None)
-                icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
+                ASCIIColors.yellow(f"Found {len(folders)} ghost installations for type: {item_type.upper()}. Attempting to repair...")
+                root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
                 
-                item_info['item_type'] = item_type
-                item_info['folder_name'] = folder_name
+                for folder_name in folders:
+                    item_path = root_path / folder_name
+                    desc_path = item_path / "description.yaml"
+                    
+                    if not desc_path.exists():
+                        ASCIIColors.yellow(f"  - SKIPPING '{folder_name}': No description.yaml found. Cannot automatically repair.")
+                        continue
+                    
+                    try:
+                        with open(desc_path, 'r', encoding='utf-8') as f:
+                            item_info = yaml.safe_load(f) or {}
+                        
+                        item_name = item_info.get("name", folder_name)
+                        
+                        if db.query(DBApp).filter(func.lower(DBApp.name) == func.lower(item_name), DBApp.is_installed == True).first():
+                            ASCIIColors.yellow(f"  - SKIPPING '{folder_name}': A different installed item with the name '{item_name}' already exists in the database.")
+                            continue
+
+                        ASCIIColors.cyan(f"  - REPAIRING '{folder_name}': Creating database entry for '{item_name}'.")
+                        
+                        icon_path = next((p for p in [item_path / "assets" / "logo.png", item_path / "icon.png"] if p.exists()), None)
+                        icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
+                        
+                        item_info['item_type'] = item_type
+                        item_info['folder_name'] = folder_name
+                        
+                        client_id = generate_unique_client_id(db, DBApp, item_name)
+                        
+                        used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
+                        next_port = 9601
+                        while next_port in used_ports:
+                            next_port += 1
+
+                        new_app_record = DBApp(
+                            name=item_name, client_id=client_id, folder_name=folder_name,
+                            icon=icon_base64, is_installed=True, status='stopped', port=next_port,
+                            autostart=False, version=str(item_info.get('version', 'N/A')),
+                            author=item_info.get('author'), description=item_info.get('description'),
+                            category=item_info.get('category'), tags=item_info.get('tags'),
+                            app_metadata=item_info
+                        )
+                        db.add(new_app_record)
+                        fixed_ghosts += 1
+                    except Exception as e:
+                        ASCIIColors.error(f"  - FAILED to repair '{folder_name}': {e}")
+                        traceback.print_exc()
+
+            # --- Step 2: Find orphaned DB records (DB record exists, but folder is missing) ---
+            ASCIIColors.info("Scanning for orphaned database records (DB entry without files)...")
+            
+            db_installed_items = db.query(DBApp).filter(DBApp.is_installed == True).all()
+            orphaned_items = []
+            for item in db_installed_items:
+                if not item.folder_name:
+                    orphaned_items.append(item)
+                    continue
+                item_type = (item.app_metadata or {}).get('item_type', 'app')
+                root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
+                if not (root_path / item.folder_name).exists():
+                    orphaned_items.append(item)
+
+            if not orphaned_items:
+                ASCIIColors.green("No orphaned database records found.")
+            else:
+                ASCIIColors.yellow(f"Found {len(orphaned_items)} orphaned records. Removing from database...")
+                for item in orphaned_items:
+                    ASCIIColors.cyan(f"  - REMOVING orphan record: '{item.name}' (folder: {item.folder_name or 'N/A'})")
+                    db.delete(item)
+                    removed_orphans += 1
+
+            # --- Step 3: Verify and correct item_type for existing records ---
+            ASCIIColors.info("Verifying item types for existing database records...")
+            all_installed = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.folder_name.isnot(None)).all()
+            
+            for item in all_installed:
+                expected_type = None
+                if (APPS_ROOT_PATH / item.folder_name).exists():
+                    expected_type = 'app'
+                elif (MCPS_ROOT_PATH / item.folder_name).exists():
+                    expected_type = 'mcp'
                 
-                client_id = generate_unique_client_id(db, DBApp, item_name)
-                
-                used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
-                next_port = 9601
-                while next_port in used_ports:
-                    next_port += 1
+                if expected_type:
+                    current_metadata = item.app_metadata or {}
+                    current_type = current_metadata.get('item_type')
+                    if current_type != expected_type:
+                        ASCIIColors.yellow(f"  - CORRECTING type for '{item.name}': was '{current_type}', set to '{expected_type}'.")
+                        current_metadata['item_type'] = expected_type
+                        item.app_metadata = current_metadata
+                        flag_modified(item, "app_metadata")
+                        corrected_types += 1
+            
+            if corrected_types > 0:
+                ASCIIColors.green(f"Corrected {corrected_types} item types.")
+            else:
+                ASCIIColors.green("All existing item types are correct.")
 
-                new_app_record = DBApp(
-                    name=item_name, client_id=client_id, folder_name=folder_name,
-                    icon=icon_base64, is_installed=True, status='stopped', port=next_port,
-                    autostart=False, version=str(item_info.get('version', 'N/A')),
-                    author=item_info.get('author'), description=item_info.get('description'),
-                    category=item_info.get('category'), tags=item_info.get('tags'),
-                    app_metadata=item_info
-                )
-                db.add(new_app_record)
-                fixed_ghosts += 1
-            except Exception as e:
-                ASCIIColors.error(f"  - FAILED to repair '{folder_name}': {e}")
-                traceback.print_exc()
-
-    # --- Step 2: Find orphaned DB records (DB record exists, but folder is missing) ---
-    ASCIIColors.info("Scanning for orphaned database records (DB entry without files)...")
-    
-    db_installed_items = db.query(DBApp).filter(DBApp.is_installed == True).all()
-    orphaned_items = []
-    for item in db_installed_items:
-        if not item.folder_name:
-            orphaned_items.append(item)
-            continue
-        item_type = (item.app_metadata or {}).get('item_type', 'app')
-        root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
-        if not (root_path / item.folder_name).exists():
-            orphaned_items.append(item)
-
-    if not orphaned_items:
-        ASCIIColors.green("No orphaned database records found.")
-    else:
-        ASCIIColors.yellow(f"Found {len(orphaned_items)} orphaned records. Removing from database...")
-        for item in orphaned_items:
-            ASCIIColors.cyan(f"  - REMOVING orphan record: '{item.name}' (folder: {item.folder_name or 'N/A'})")
-            db.delete(item)
-            removed_orphans += 1
-
-    # --- Step 3: Verify and correct item_type for existing records ---
-    ASCIIColors.info("Verifying item types for existing database records...")
-    all_installed = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.folder_name.isnot(None)).all()
-    
-    for item in all_installed:
-        expected_type = None
-        if (APPS_ROOT_PATH / item.folder_name).exists():
-            expected_type = 'app'
-        elif (MCPS_ROOT_PATH / item.folder_name).exists():
-            expected_type = 'mcp'
-        
-        if expected_type:
-            current_metadata = item.app_metadata or {}
-            current_type = current_metadata.get('item_type')
-            if current_type != expected_type:
-                ASCIIColors.yellow(f"  - CORRECTING type for '{item.name}': was '{current_type}', set to '{expected_type}'.")
-                current_metadata['item_type'] = expected_type
-                item.app_metadata = current_metadata
-                flag_modified(item, "app_metadata")
-                corrected_types += 1
-    
-    if corrected_types > 0:
-        ASCIIColors.green(f"Corrected {corrected_types} item types.")
-    else:
-        ASCIIColors.green("All existing item types are correct.")
-
-    db.commit()
-    ASCIIColors.info("Synchronization complete.")
-    
-    return {
-        "fixed_ghost_installations": fixed_ghosts,
-        "removed_orphaned_records": removed_orphans,
-        "corrected_item_types": corrected_types
-    }
+            db.commit()
+            ASCIIColors.info("Synchronization complete. Releasing lock.")
+            
+            return {
+                "fixed_ghost_installations": fixed_ghosts,
+                "removed_orphaned_records": removed_orphans,
+                "corrected_item_types": corrected_types
+            }
+    except Timeout:
+        ASCIIColors.warning(f"Could not acquire synchronization lock within {SYNC_LOCK_TIMEOUT} seconds. Another process is likely performing the sync. Skipping.")
+        return {
+            "message": "Synchronization skipped: Another process is already running it.",
+            "fixed_ghost_installations": 0,
+            "removed_orphaned_records": 0,
+            "corrected_item_types": 0
+        }
+    except Exception as e:
+        ASCIIColors.error(f"Error during synchronization (lock held): {e}")
+        traceback.print_exc()
+        raise # Re-raise to ensure task status is set to failed
 
 
 def sync_installs_task(task: Task):
