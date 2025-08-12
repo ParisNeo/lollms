@@ -67,4 +67,6 @@ pynvml
 # required for uploading pdfs
 PyMuPDF
 pyyaml
+filelock
+packaging
 jsonschema

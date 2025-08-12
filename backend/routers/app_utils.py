@@ -23,12 +23,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import func
 from ascii_colors import ASCIIColors
+from filelock import FileLock, Timeout
 
 from backend.db import get_db
 from backend.db.models.service import App as DBApp, MCP as DBMCP, AppZooRepository, MCPZooRepository
 from backend.db.models.db_task import DBTask
 from backend.models import TaskInfo
-from backend.config import APPS_ROOT_PATH, MCPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH, APPS_ZOO_ROOT_PATH
+from backend.config import APPS_ROOT_PATH, MCPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH, APPS_ZOO_ROOT_PATH, APP_DATA_DIR
 from backend.task_manager import task_manager, Task
 from backend.zoo_cache import get_all_items
 from backend.settings import settings
@@ -320,34 +321,59 @@ def _fix_broken_task(task: Task, item_type: str, folder_name: str):
 
 
 def cleanup_and_autostart_apps():
+    lock_path = APP_DATA_DIR / "startup.lock"
+    lock = FileLock(str(lock_path), timeout=10)
+
     db_session = None
-    print("INFO: Performing startup app cleanup and autostart...")
     try:
-        db_session = next(get_db())
-        installed_apps = db_session.query(DBApp).filter(DBApp.is_installed == True).all()
-        updated_count = 0
-        for app in installed_apps:
-            if app.status != 'stopped' or app.pid is not None:
-                app.status = 'stopped'
-                app.pid = None
-                updated_count += 1
-        
-        if updated_count > 0:
-            db_session.commit()
-            print(f"INFO: Reset status for {updated_count} apps to 'stopped'.")
+        with lock:
+            print("INFO: Acquired startup lock. Performing app cleanup and autostart...")
+            db_session = next(get_db())
+            
+            # This logic will now run only once per server startup, by the first worker that gets the lock.
+            
+            # 1. Cleanup: Reset status of all installed apps to 'stopped'
+            installed_apps = db_session.query(DBApp).filter(DBApp.is_installed == True).all()
+            updated_count = 0
+            for app in installed_apps:
+                if app.status != 'stopped' or app.pid is not None:
+                    # Also kill the process if a PID is lingering from a crash
+                    if app.pid:
+                        try:
+                            p = psutil.Process(app.pid)
+                            p.kill()
+                            print(f"INFO: Killed lingering process with PID {app.pid} for app '{app.name}'.")
+                        except psutil.NoSuchProcess:
+                            pass # Process already gone
+                        except Exception as e:
+                            print(f"WARNING: Could not kill lingering process {app.pid} for app '{app.name}': {e}")
+                    
+                    app.status = 'stopped'
+                    app.pid = None
+                    updated_count += 1
+            
+            if updated_count > 0:
+                db_session.commit()
+                print(f"INFO: Reset status for {updated_count} apps to 'stopped'.")
 
-        apps_to_autostart = db_session.query(DBApp).filter(DBApp.is_installed == True, DBApp.autostart == True).all()
+            # 2. Autostart
+            apps_to_autostart = db_session.query(DBApp).filter(DBApp.is_installed == True, DBApp.autostart == True).all()
 
-        if apps_to_autostart:
-            print(f"INFO: Found {len(apps_to_autostart)} apps to autostart.")
-            for app in apps_to_autostart:
-                task_manager.submit_task(
-                    name=f"Start app: {app.name} ({app.id})",
-                    target=start_app_task,
-                    args=(app.id,),
-                    description=f"Automatically starting '{app.name}' on server boot.",
-                    owner_username=None
-                )
+            if apps_to_autostart:
+                print(f"INFO: Found {len(apps_to_autostart)} apps to autostart.")
+                for app in apps_to_autostart:
+                    task_manager.submit_task(
+                        name=f"Start app: {app.name} ({app.id})",
+                        target=start_app_task,
+                        args=(app.id,),
+                        description=f"Automatically starting '{app.name}' on server boot.",
+                        owner_username=None
+                    )
+            print("INFO: App cleanup and autostart complete. Releasing lock.")
+
+    except Timeout:
+        print("INFO: Could not acquire startup lock. Another worker is performing startup. Skipping.")
+        return
     except Exception as e:
         print(f"CRITICAL: Failed during app startup management. Error: {e}")
         traceback.print_exc()
