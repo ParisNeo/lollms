@@ -18,7 +18,8 @@ const initialTaskId = computed(() => props.value?.initialTaskId);
 const { tasks, isLoadingTasks, activeTasksCount } = storeToRefs(tasksStore); // Destructure activeTasksCount
 
 const selectedTask = ref(null);
-const logsContainer = ref(logsContainer);
+// FIX: Initialize logsContainer with null. It will be bound to the DOM element via template ref.
+const logsContainer = ref(null);
 
 const sortedTasks = computed(() => {
     // Sorts tasks by creation date, newest first

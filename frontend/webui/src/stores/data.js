@@ -1,6 +1,6 @@
 // frontend/webui/src/stores/data.js
 import { defineStore } from 'pinia';
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed } from 'vue'; // Remove onMounted from this import list
 import apiClient from '../services/api';
 import { useAuthStore } from './auth';
 import { useUiStore } from './ui';
@@ -9,6 +9,7 @@ import useEventBus from '../services/eventBus';
 
 export const useDataStore = defineStore('data', () => {
     const { on } = useEventBus();
+
     const availableLollmsModels = ref([]);
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
@@ -115,9 +116,9 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
-    onMounted(() => {
-        on('task:completed', handleTaskCompletion);
-    });
+    // This line registers the event listener as soon as the store is created.
+    // It is no longer tied to a component's lifecycle hook.
+    on('task:completed', handleTaskCompletion);
 
     async function fetchLanguages() {
         if (_languages.value.length > 0 || isLoadingLanguages.value) return;
