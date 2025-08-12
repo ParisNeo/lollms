@@ -32,7 +32,7 @@ const isAdmin = computed(() => authStore.isAdmin);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 
 const runningApps = computed(() => {
-    const allServices = [...dataStore.userApps, ...dataStore.systemApps, ...dataStore.userMcps, ...dataStore.systemMcps];
+    const allServices = [...dataStore.userApps, ...dataStore.systemApps];
     return allServices.filter(app => app.active && app.url && (!app.is_installed || app.status === 'running'));
 });
 
@@ -93,7 +93,6 @@ function calculateMenuPosition() {
 watch(isMenuOpen, (isOpen) => {
     if (isOpen) {
         dataStore.fetchApps();
-        dataStore.fetchMcps();
         nextTick(() => {
             setTimeout(() => {
                 calculateMenuPosition();

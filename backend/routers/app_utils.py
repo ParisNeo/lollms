@@ -82,10 +82,12 @@ def synchronize_filesystem_and_db(db: Session):
     Synchronizes installed apps/MCPs on the filesystem with the database.
     - Creates DB entries for "ghost" installations found on disk.
     - Removes DB entries for "orphaned" records with no matching files.
+    - Corrects `item_type` for existing records based on folder location.
     """
     ASCIIColors.info("Starting synchronization of installed items with the database.")
     fixed_ghosts = 0
     removed_orphans = 0
+    corrected_types = 0
     
     # --- Step 1: Find ghost installations (filesystem folder exists, but no DB record) ---
     ASCIIColors.info("Scanning for ghost installations (files without DB entry)...")
@@ -180,12 +182,39 @@ def synchronize_filesystem_and_db(db: Session):
             db.delete(item)
             removed_orphans += 1
 
+    # --- Step 3: Verify and correct item_type for existing records ---
+    ASCIIColors.info("Verifying item types for existing database records...")
+    all_installed = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.folder_name.isnot(None)).all()
+    
+    for item in all_installed:
+        expected_type = None
+        if (APPS_ROOT_PATH / item.folder_name).exists():
+            expected_type = 'app'
+        elif (MCPS_ROOT_PATH / item.folder_name).exists():
+            expected_type = 'mcp'
+        
+        if expected_type:
+            current_metadata = item.app_metadata or {}
+            current_type = current_metadata.get('item_type')
+            if current_type != expected_type:
+                ASCIIColors.yellow(f"  - CORRECTING type for '{item.name}': was '{current_type}', set to '{expected_type}'.")
+                current_metadata['item_type'] = expected_type
+                item.app_metadata = current_metadata
+                flag_modified(item, "app_metadata")
+                corrected_types += 1
+    
+    if corrected_types > 0:
+        ASCIIColors.green(f"Corrected {corrected_types} item types.")
+    else:
+        ASCIIColors.green("All existing item types are correct.")
+
     db.commit()
     ASCIIColors.info("Synchronization complete.")
     
     return {
         "fixed_ghost_installations": fixed_ghosts,
-        "removed_orphaned_records": removed_orphans
+        "removed_orphaned_records": removed_orphans,
+        "corrected_item_types": corrected_types
     }
 
 
@@ -411,6 +440,7 @@ def start_app_task(task: Task, app_id: str):
         if log_file_handle: log_file_handle.close()
         if app and app.id in open_log_files: del open_log_files[app.id]
         db_session.close()
+
 
 def stop_app_task(task: Task, app_id: str):
     db_session = next(get_db())
