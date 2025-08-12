@@ -84,6 +84,34 @@ def cancel_task(task_id: str, current_user: UserAuthDetails = Depends(get_curren
     return _db_task_to_task_info(final_task_state)
 
 
+@tasks_router.post("/cancel-all", response_model=dict)
+def cancel_all_tasks(current_user: UserAuthDetails = Depends(get_current_active_user)):
+    """
+    Cancels all running or pending tasks for the current user.
+    Admins can cancel all tasks in the system.
+    """
+    tasks_to_cancel = []
+    if current_user.is_admin:
+        tasks_to_cancel = task_manager.get_all_tasks()
+    else:
+        tasks_to_cancel = task_manager.get_tasks_for_user(current_user.username)
+
+    cancelled_count = 0
+    for task in tasks_to_cancel:
+        # Only attempt to cancel if it's still running or pending
+        if task.status in ['running', 'pending']:
+            task_manager.cancel_task(task.id)
+            cancelled_count += 1
+            
+    message = f"Successfully initiated cancellation for {cancelled_count} active tasks."
+    if current_user.is_admin and cancelled_count > 0:
+        message = f"Successfully initiated cancellation for {cancelled_count} active tasks across all users."
+    elif cancelled_count == 0:
+        message = "No active tasks found to cancel."
+
+    return {"message": message, "cancelled_count": cancelled_count}
+
+
 @tasks_router.post("/clear-completed", response_model=dict)
 def clear_completed_tasks(current_user: UserAuthDetails = Depends(get_current_active_user)):
     """

@@ -64,7 +64,10 @@ class Task:
         self.cancellation_event.set()
         if self.process and self.process.poll() is None:
             self.log("Terminating associated subprocess...", "WARNING")
-            self.process.terminate()
+            try:
+                self.process.terminate()
+            except ProcessLookupError:
+                self.log("Process already terminated or does not exist.", "INFO")
         self.log("Cancellation signal received.", level="WARNING")
 
     def run(self):

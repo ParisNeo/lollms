@@ -7,6 +7,7 @@ import GenericModal from '../ui/GenericModal.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
+import IconXMark from '../../assets/icons/IconXMark.vue'; // New import for general cancellation icon
 
 const tasksStore = useTasksStore();
 const uiStore = useUiStore();
@@ -14,10 +15,10 @@ const uiStore = useUiStore();
 const props = computed(() => uiStore.modalData('tasksManager'));
 const initialTaskId = computed(() => props.value?.initialTaskId);
 
-const { tasks, isLoadingTasks } = storeToRefs(tasksStore);
+const { tasks, isLoadingTasks, activeTasksCount } = storeToRefs(tasksStore); // Destructure activeTasksCount
 
 const selectedTask = ref(null);
-const logsContainer = ref(null);
+const logsContainer = ref(logsContainer);
 
 const sortedTasks = computed(() => {
     // Sorts tasks by creation date, newest first
@@ -87,6 +88,17 @@ function getLogLevelClass(level) {
             return 'text-gray-600 dark:text-gray-300';
     }
 }
+
+async function handleCancelAllTasks() {
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Cancel All Active Tasks',
+        message: `Are you sure you want to cancel all ${activeTasksCount.value} active background tasks?`,
+        confirmText: 'Cancel All'
+    });
+    if (confirmed) {
+        await tasksStore.cancelAllTasks();
+    }
+}
 </script>
 
 <template>
@@ -98,6 +110,9 @@ function getLogLevelClass(level) {
                     <div class="flex items-center gap-2">
                         <button @click="tasksStore.fetchTasks" class="btn btn-secondary btn-sm" :disabled="isLoadingTasks">
                             <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingTasks}" />
+                        </button>
+                        <button @click="handleCancelAllTasks" class="btn btn-warning btn-sm" :disabled="activeTasksCount === 0">
+                            <IconXMark class="w-4 h-4 mr-1" /> Cancel All ({{ activeTasksCount }})
                         </button>
                         <button @click="tasksStore.clearCompletedTasks" class="btn btn-danger btn-sm">
                             <IconTrash class="w-4 h-4 mr-1" /> Clear Completed

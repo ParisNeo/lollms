@@ -87,6 +87,16 @@ export const useTasksStore = defineStore('tasks', () => {
         }
     }
 
+    async function cancelAllTasks() {
+        try {
+            const response = await apiClient.post('/api/tasks/cancel-all');
+            uiStore.addNotification(response.data.message || 'All active tasks cancelled.', 'success');
+            await fetchTasks(); // Refresh list to show updated statuses
+        } catch (error) {
+            // Error is handled by global interceptor
+        }
+    }
+
     async function clearCompletedTasks() {
         try {
             const response = await apiClient.post('/api/tasks/clear-completed');
@@ -126,6 +136,7 @@ export const useTasksStore = defineStore('tasks', () => {
         fetchTask,
         addTask,
         cancelTask,
+        cancelAllTasks, // Export the new action
         clearCompletedTasks,
         startPolling,
         stopPolling,
