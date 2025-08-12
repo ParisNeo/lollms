@@ -220,16 +220,14 @@ def delete_mcp(
 # --- APPS LOGIC (Consolidated) ---
 
 def _format_app_public(app: DBApp) -> AppPublic:
-    # FIX: Manually construct the response to ensure dynamic URL generation
     accessible_host = get_accessible_host()
     url_to_return = app.url
+    item_type = (app.app_metadata or {}).get('item_type', 'app')
 
     if app.is_installed and app.status == 'running' and app.port:
         url_to_return = f"http://{accessible_host}:{app.port}"
-        item_type = (app.app_metadata or {}).get('item_type')
         if item_type == 'mcp':
             url_to_return += '/mcp'
-
 
     return AppPublic(
         id=app.id,
@@ -250,12 +248,15 @@ def _format_app_public(app: DBApp) -> AppPublic:
         port=app.port,
         status=app.status,
         autostart=app.autostart,
-        allow_openai_api_access=app.allow_openai_api_access
+        allow_openai_api_access=app.allow_openai_api_access,
+        item_type=item_type
     )
 
 @apps_router.get("", response_model=List[AppPublic])
 def list_apps(db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
-    query = db.query(DBApp).options(joinedload(DBApp.owner))
+    query = db.query(DBApp).options(joinedload(DBApp.owner)).filter(
+        (DBApp.app_metadata['item_type'] == None) | (DBApp.app_metadata['item_type'].as_string() == 'app')
+    )
     if not current_user.is_admin:
         query = query.filter(or_(DBApp.owner_user_id == current_user.id, DBApp.type == 'system'))
         
@@ -389,7 +390,7 @@ def get_discussion_tools(
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    all_available_tools = list_all_available_tools(current_user, db)
+    all_available_tools = list_all_available_tools(current_user)
     
     metadata = discussion_obj.metadata or {}
     active_tool_names = set(metadata.get('active_tools', []))

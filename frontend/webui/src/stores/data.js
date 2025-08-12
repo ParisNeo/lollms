@@ -1,12 +1,14 @@
 // frontend/webui/src/stores/data.js
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, onMounted } from 'vue';
 import apiClient from '../services/api';
 import { useAuthStore } from './auth';
 import { useUiStore } from './ui';
 import { useTasksStore } from './tasks'; // Import tasks store
+import useEventBus from '../services/eventBus';
 
 export const useDataStore = defineStore('data', () => {
+    const { on } = useEventBus();
     const availableLollmsModels = ref([]);
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
@@ -93,6 +95,28 @@ export const useDataStore = defineStore('data', () => {
     const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
     const getPersonalityById = computed(() => {
         return (id) => allPersonalities.value.find(p => p.id === id);
+    });
+
+    async function handleTaskCompletion(task) {
+        if (!task || !['completed', 'failed', 'cancelled'].includes(task.status)) return;
+        const taskName = task.name || '';
+        const isAppOrMcpTask = /app|mcp/i.test(taskName) && (
+            taskName.includes('Installing') ||
+            taskName.includes('Start') ||
+            taskName.includes('Stop') ||
+            taskName.includes('Updating') ||
+            taskName.includes('Fixing') ||
+            taskName.includes('Purging')
+        );
+
+        if (isAppOrMcpTask) {
+            console.log(`[Data Store] Refreshing app/mcp lists due to task: ${taskName}`);
+            await Promise.allSettled([fetchApps(), fetchMcps()]);
+        }
+    }
+
+    onMounted(() => {
+        on('task:completed', handleTaskCompletion);
     });
 
     async function fetchLanguages() {

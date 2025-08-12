@@ -120,8 +120,8 @@ export const useAdminStore = defineStore('admin', () => {
             await Promise.allSettled([fetchZooApps(), fetchZooMcps()]);
             
             // If an MCP was started, trigger a tool refresh for the user.
-            if (taskName.startsWith('Start app:') && task.status === 'completed' && task.result?.item_type === 'mcp') {
-                const { useDataStore } = await import('./data.js');
+            if (taskName.includes('Start') && task.status === 'completed' && task.result?.item_type === 'mcp') {
+                const { useDataStore } = await import('./data.js'); // Lazy import to avoid cycles
                 console.log("An MCP finished starting. Triggering tool refresh.");
                 await useDataStore().triggerMcpReload();
             }

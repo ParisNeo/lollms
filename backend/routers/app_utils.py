@@ -20,6 +20,7 @@ from typing import Dict, Any, List
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import func
 from ascii_colors import ASCIIColors
 
@@ -341,7 +342,7 @@ def cleanup_and_autostart_apps():
             print(f"INFO: Found {len(apps_to_autostart)} apps to autostart.")
             for app in apps_to_autostart:
                 task_manager.submit_task(
-                    name=f"Autostart app: {app.name}",
+                    name=f"Start app: {app.name} ({app.id})",
                     target=start_app_task,
                     args=(app.id,),
                     description=f"Automatically starting '{app.name}' on server boot.",
@@ -594,6 +595,7 @@ app.mount("/", StaticFiles(directory=str(Path(__file__).parent / '{static_dir}')
             new_app = DBApp(name=item_name, client_id=client_id, folder_name=folder_name, icon=icon_base64, is_installed=True, status='stopped', port=port, autostart=autostart, version=str(item_info.get('version', 'N/A')), author=item_info.get('author'), description=item_info.get('description'), category=item_info.get('category'), tags=item_info.get('tags'), app_metadata=item_info)
             db_session.add(new_app)
             db_session.commit()
+            db_session.refresh(new_app)
             
             if autostart: start_app_task(task, new_app.id)
             return {"success": True, "message": "Installation successful."}
