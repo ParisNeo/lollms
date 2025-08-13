@@ -14,9 +14,9 @@ python-jose[cryptography]
 python-multipart
 
 # --- LoLLMs Client Library and Common Backends ---
-lollms-client>=0.19.2
+lollms-client>=1.0.0
 ascii_colors>0.11.0
-pipmaster
+pipmaster>=1.0.0
 
 # Dependencies for specific lollms_client backends (based on your config examples):
 openai  # If using the OpenAI binding (e.g., for gpt-3.5-turbo)
