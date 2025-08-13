@@ -6,7 +6,7 @@ if not exist "venv\Scripts\activate.bat" (
     exit /b 1
 )
 
-echo welcome to simplified lollms
+echo welcome to lollms
 :: Activate virtual environment
 call .\venv\Scripts\activate.bat
 

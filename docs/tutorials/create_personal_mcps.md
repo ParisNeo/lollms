@@ -1,6 +1,6 @@
 # Tutorial: Creating Your Own Local MCP Server (The Right Way)
 
-This guide will teach you how to build a custom MCP (Model Context Protocol) server to extend the capabilities of Simplified LOLLMS. We'll start with a basic template and then create a practical "Code Utilities" MCP inspired by the example you provided.
+This guide will teach you how to build a custom MCP (Model Context Protocol) server to extend the capabilities of LOLLMS. We'll start with a basic template and then create a practical "Code Utilities" MCP inspired by the example you provided.
 
 ## What is an MCP?
 
@@ -12,7 +12,7 @@ The MCP server handles the request, executes the underlying code for the tool, a
 
 1.  **Python 3.9+** installed.
 2.  A code editor like **Visual Studio Code**.
-3.  Your **Simplified LOLLMS** application running.
+3.  Your **LOLLMS** application running.
 4.  The `lollms-mcp` library, which provides `FastMCP`. To install it, open a terminal and run:
     ```bash
     pip install lollms-mcp
@@ -99,7 +99,7 @@ async def hello_world(text: str) -> str:
 # 3. Main Entry Point to Run the Server
 if __name__ == "__main__":
     # This part allows the server to be run, but LOLLMS will handle it automatically.
-    print("MCP server is ready. It should be started via Simplified LOLLMS.")
+    print("MCP server is ready. It should be started via LOLLMS.")
 ```
 
 This boilerplate provides a fully functional, albeit simple, MCP server.
@@ -212,7 +212,7 @@ async def format_python_code(code: str) -> Dict[str, Any]:
 
 # Main Entry Point
 if __name__ == "__main__":
-    print("MCP server is ready. It should be started via Simplified LOLLMS.")
+    print("MCP server is ready. It should be started via LOLLMS.")
 ```
 
 ---

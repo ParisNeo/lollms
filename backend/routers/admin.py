@@ -246,7 +246,7 @@ async def get_system_status():
 
 # --- Bindings Management Endpoints ---
 
-@admin_router.get("/bindings/available_types", response_model=List[str])
+@admin_router.get("/bindings/available_types", response_model=List[Dict])
 async def get_available_binding_types():
     try:
         return get_available_bindings()

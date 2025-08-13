@@ -1,12 +1,12 @@
-# Simplified LoLLMs API Documentation
+# LoLLMs API Documentation
 
 **Version:** 1.6.0
 
-Welcome to the official API documentation for the Simplified LoLLMs Chat application. This document provides developers with all the information needed to interact with the powerful, multi-user, OpenAI-compatible API endpoints.
+Welcome to the official API documentation for the LoLLMs Chat application. This document provides developers with all the information needed to interact with the powerful, multi-user, OpenAI-compatible API endpoints.
 
 ## Introduction
 
-The Simplified LoLLMs API provides a robust backend service that bridges the gap between the versatile LoLLMs (Lollms-Client) ecosystem and applications built for the OpenAI API standard. It allows multiple users to interact with various language model bindings, manage personalities, and perform core LLM tasks through a familiar RESTful interface.
+The LoLLMs API provides a robust backend service that bridges the gap between the versatile LoLLMs (Lollms-Client) ecosystem and applications built for the OpenAI API standard. It allows multiple users to interact with various language model bindings, manage personalities, and perform core LLM tasks through a familiar RESTful interface.
 
 ### Key Features
 
@@ -25,7 +25,7 @@ All requests to the `/v1/` API endpoints must be authenticated using a Bearer To
 
 API keys cannot be generated via the API itself. A user must:
 
-1.  Log in to the Simplified LoLLMs web interface.
+1.  Log in to the LoLLMs web interface.
 2.  Navigate to **Settings -> API Keys**.
 3.  Click "Generate New API Key", provide an alias (a memorable name), and click "Create".
 4.  The full API key (e.g., `lollms_aBcDeF12_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx`) will be displayed **only once**. Copy and store it securely. Only the prefix (e.g., `lollms_aBcDeF12`) will be visible later.

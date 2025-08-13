@@ -253,14 +253,14 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
 
         # --- REVISED PARAMETER LOGIC ---
         # 1. Start with user's saved preferences as the base
-        client_init_params = {
+        llm_init_params = {
             "ctx_size": user_db.llm_ctx_size, "temperature": user_db.llm_temperature,
             "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
             "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
             "put_thoughts_in_context": user_db.put_thoughts_in_context
         }
         # 2. Layer on session-specific overrides (e.g., from UI tweaks that aren't saved yet)
-        client_init_params.update(session.get("llm_params", {}))
+        llm_init_params.update(session.get("llm_params", {}))
 
         # 3. Apply alias-based overrides
         model_aliases = binding_to_use.model_aliases or {}
@@ -279,15 +279,15 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
 
             if override_allowed:
                 # Alias settings act as defaults, user settings take precedence
-                client_init_params = {**alias_params, **client_init_params}
+                llm_init_params = {**alias_params, **llm_init_params}
             else:
                 # Alias settings are forced, ignoring user settings
-                client_init_params.update(alias_params)
+                llm_init_params.update(alias_params)
             
             # Special handling for locked context size
             is_ctx_locked = alias_info.get('ctx_size_locked', False)
             if is_ctx_locked and alias_info.get('ctx_size') is not None:
-                client_init_params["ctx_size"] = alias_info['ctx_size']
+                llm_init_params["ctx_size"] = alias_info['ctx_size']
 
         # 4. Apply global overrides (highest precedence)
         force_mode = settings.get("force_model_mode", "disabled")
@@ -298,17 +298,20 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
                 model_name_for_binding = forced_model_name
             ctx_size_override = settings.get("force_context_size")
             if ctx_size_override is not None:
-                client_init_params["ctx_size"] = ctx_size_override
+                llm_init_params["ctx_size"] = ctx_size_override
 
         # --- END REVISED LOGIC ---
 
-        client_init_params.update({
-            "binding_name": binding_to_use.name, "model_name": model_name_for_binding,
+        llm_init_params.update({
+            "model_name": model_name_for_binding,
             "host_address": binding_to_use.host_address, "models_path": binding_to_use.models_path,
             "verify_ssl_certificate": binding_to_use.verify_ssl_certificate, "service_key": binding_to_use.service_key,
             "user_name": "user", "ai_name": "assistant",
         })
-
+        client_init_params = {
+            "llm_binding_name": binding_to_use.name,
+            "llm_binding_config": llm_init_params
+        }    
         servers_infos = load_mcps(username)
         if servers_infos:
             client_init_params["mcp_binding_name"] = "remote_mcp"
@@ -342,11 +345,11 @@ def build_lollms_client_from_params(
         if not binding_to_use:
             raise HTTPException(status_code=404, detail=f"Active binding with alias '{binding_alias}' not found.")
 
-        client_init_params = session.get("llm_params", {}).copy()
+        llm_init_params = session.get("llm_params", {}).copy()
         if llm_params:
-            client_init_params.update(llm_params)
+            llm_init_params.update(llm_params)
         
-        client_init_params.update({
+        llm_init_params.update({
             "binding_name": binding_to_use.name,
             "model_name": model_name,
             "host_address": binding_to_use.host_address,
@@ -357,6 +360,11 @@ def build_lollms_client_from_params(
             "ai_name": "assistant",
         })
 
+        client_init_params = {
+            "llm_binding_name": binding_to_use.name,
+            "llm_binding_config": llm_init_params
+        }
+        
         servers_infos = load_mcps(username)
         if servers_infos:
             client_init_params["mcp_binding_name"] = "remote_mcp"

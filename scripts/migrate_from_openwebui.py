@@ -14,11 +14,11 @@ from PIL import Image
 # Load database URLs from .env file
 load_dotenv()
 OPENWEBUI_DB_URL = os.getenv("OPENWEBUI_DB_URL")
-SIMPLIFIED_LOLLMS_DB_URL = os.getenv("SIMPLIFIED_LOLLMS_DB_URL")
+LOLLMS_DB_URL = os.getenv("LOLLMS_DB_URL")
 
 # Check if configuration is present
-if not OPENWEBUI_DB_URL or not SIMPLIFIED_LOLLMS_DB_URL:
-    print("CRITICAL: Database URLs are not configured. Please create a .env file with OPENWEBUI_DB_URL and SIMPLIFIED_LOLLMS_DB_URL.")
+if not OPENWEBUI_DB_URL or not LOLLMS_DB_URL:
+    print("CRITICAL: Database URLs are not configured. Please create a .env file with OPENWEBUI_DB_URL and LOLLMS_DB_URL.")
     exit(1)
 
 # --- Database Connections ---
@@ -27,7 +27,7 @@ try:
     SourceSession = sessionmaker(bind=source_engine)
     source_session = SourceSession()
 
-    dest_engine = create_engine(SIMPLIFIED_LOLLMS_DB_URL)
+    dest_engine = create_engine(LOLLMS_DB_URL)
     DestSession = sessionmaker(bind=dest_engine)
     dest_session = DestSession()
     print("INFO: Successfully connected to both source and destination databases.")

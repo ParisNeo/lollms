@@ -35,7 +35,7 @@ new ui:
 - OK add a forgot my password button to the login modal that sends a notification to the administrator.
 - OK add the apps zoo to lollms_chat
 - OK fix forced context size to actually force the context size when i choose another aliased model with forcing activated
-
+- OK fix multi workers apps orphans detection to use a singleton
 
 ## Discussion:
 - start/stop events must be collapsible, all that happens in between should be put inside in between
@@ -125,5 +125,3 @@ new ui:
 - add docker option
 - build docker image
 
-## important
-- fix multi workers apps orphans detection to use a singleton

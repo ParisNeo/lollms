@@ -271,6 +271,7 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function fetchAvailableBindingTypes() {
         const response = await apiClient.get('/api/admin/bindings/available_types');
+        console.log('Available binding types:', response.data);
         availableBindingTypes.value = response.data;
     }
     async function addBinding(payload) {

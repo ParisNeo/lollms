@@ -46,7 +46,7 @@ After the very first installation, ensure these steps are completed for optimal 
 *   **Default Personalities & MCPs:**
     *   While users can add their own, consider adding frequently used or essential personalities and MCP servers as "System" types in **Admin Panel > Services**. This makes them available to all users by default.
 *   **Backups:**
-    *   Regularly back up your `data` directory (which contains the main application database `app_main.db`, user data, discussions, and SafeStore databases). A simple copy of the entire `simplified_lollms/data` folder is often sufficient.
+    *   Regularly back up your `data` directory (which contains the main application database `app_main.db`, user data, discussions, and SafeStore databases). A simple copy of the entire `lollms/data` folder is often sufficient.
 *   **Disk Space Management:**
     *   Periodically use **Admin Panel > Import Tools > Purge Unused Uploads** to clean up temporary files.
     *   Monitor the size of user's `safestores` and `discussion_assets` directories.
