@@ -735,6 +735,16 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
     user_grades = {g.message_id: g.grade for g in db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
 
+    # Fetch all messages in the discussion to build the children map
+    all_messages_in_discussion = discussion_obj.get_all_messages_flat()
+    children_map = {}
+    for msg_obj in all_messages_in_discussion:
+        if msg_obj.parent_id:
+            if msg_obj.parent_id not in children_map:
+                children_map[msg_obj.parent_id] = []
+            children_map[msg_obj.parent_id].append(msg_obj.id)
+
+
     messages_output = []
     for msg in messages_in_branch:
         # --- START FIX ---
@@ -757,14 +767,19 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
             elif isinstance(img_data, str):
                 full_image_refs.append(f"data:image/png;base64,{img_data}")
                 active_images_bools.append(True) # Legacy format is always active
-        # --- END FIX ---
-        
+
         msg_metadata_raw = msg.metadata
         if isinstance(msg_metadata_raw, str):
             try: msg_metadata = json.loads(msg_metadata_raw) if msg_metadata_raw else {}
             except json.JSONDecodeError: msg_metadata = {}
         else:
             msg_metadata = msg_metadata_raw or {}
+
+        # Populate the branches field if this message has multiple children
+        # This typically applies to user messages with multiple AI responses
+        msg_branches = None
+        if msg.id in children_map and len(children_map[msg.id]) > 1:
+            msg_branches = children_map[msg.id]
 
         messages_output.append(
             MessageOutput(
@@ -774,7 +789,7 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
                 image_references=full_image_refs,
                 active_images=active_images_bools,
                 user_grade=user_grades.get(msg.id, 0),
-                created_at=msg.created_at, branch_id=branch_tip_to_load, branches=None
+                created_at=msg.created_at, branch_id=branch_tip_to_load, branches=msg_branches
             )
         )
     return messages_output

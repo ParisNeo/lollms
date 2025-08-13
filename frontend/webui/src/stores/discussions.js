@@ -15,14 +15,21 @@ function processSingleMessage(msg) {
     const authStore = useAuthStore();
     const dataStore = useDataStore();
     const username = authStore.user?.username?.toLowerCase();
+
+    // Extract model/binding from metadata if they don't exist at the top level
+    const binding_name = msg.binding_name || msg.metadata?.binding;
+    const model_name = msg.model_name || msg.metadata?.model;
     
     // Determine if the model used supports vision
-    const modelUsedId = `${msg.binding_name}/${msg.model_name}`;
+    const modelUsedId = `${binding_name}/${model_name}`;
     const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelUsedId);
     const visionSupport = modelInfo?.alias?.has_vision ?? true; // Default to true if no alias info
 
-    return {
+    const processedMsg = {
         ...msg,
+        // Ensure binding_name and model_name are on the final object
+        binding_name,
+        model_name,
         sender_type: msg.sender_type || (msg.sender?.toLowerCase() === username ? 'user' : 'assistant'),
         events: msg.events || (msg.metadata?.events) || [],
         sources: msg.sources || (msg.metadata?.sources) || [],
@@ -30,7 +37,9 @@ function processSingleMessage(msg) {
         active_images: msg.active_images || [],
         vision_support: visionSupport, // Add vision support flag
     };
+    return processedMsg;
 }
+
 
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -368,6 +377,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         uiStore.setMainView('chat');
         try {
             const response = await apiClient.get(`/api/discussions/${id}`);
+            console.log(`[DiscussionsStore] Full message list for discussion ${id}:`, JSON.parse(JSON.stringify(response.data)));
             messages.value = processMessages(response.data);
             await Promise.all([
                 fetchContextStatus(id),
