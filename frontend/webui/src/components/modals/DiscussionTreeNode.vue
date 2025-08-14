@@ -1,4 +1,4 @@
-<!-- [CREATE] frontend/webui/src/components/modals/DiscussionTreeNode.vue -->
+<!-- [UPDATE] frontend/webui/src/components/modals/DiscussionTreeNode.vue -->
 <script setup>
 import { computed } from 'vue';
 import { useAuthStore } from '../../stores/auth';
@@ -128,7 +128,7 @@ const formatDateTime = (isoString) => {
         :node="child"
         :level="level + 1"
         :active-branch-id="activeBranchId"
-        @select-branch="handleSelectBranch"
+        @select-branch="emit('select-branch', $event)"
       />
     </div>
   </div>
