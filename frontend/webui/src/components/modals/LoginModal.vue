@@ -92,15 +92,6 @@ const openForgotPasswordModal = () => {
         <div>
           <div class="flex items-center justify-between">
             <label for="password" class="block text-sm font-medium">Password</label>
-            <div class="text-sm">
-              <button
-                type="button"
-                @click="openForgotPasswordModal"
-                class="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
-              >
-                Forgot your password?
-              </button>
-            </div>
           </div>
           <div class="relative mt-1">
             <input
@@ -113,6 +104,15 @@ const openForgotPasswordModal = () => {
               placeholder="Enter your password"
               autocomplete="current-password"
             />
+            <div class="text-sm">
+              <button
+                type="button"
+                @click="openForgotPasswordModal"
+                class="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Forgot your password?
+              </button>
+            </div>
             <button
               type="button"
               @click="togglePasswordVisibility"
