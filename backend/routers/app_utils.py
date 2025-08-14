@@ -214,6 +214,11 @@ def synchronize_filesystem_and_db(db: Session):
                 if not item.folder_name:
                     orphaned_items.append(item)
                     continue
+                if isinstance(item.app_metadata , str):
+                    try:
+                        item.app_metadata = json.loads(item.app_metadata)
+                    except:
+                        item.app_metadata = {}
                 item_type = (item.app_metadata or {}).get('item_type', 'app')
                 root_path = APPS_ROOT_PATH if item_type == 'app' else MCPS_ROOT_PATH
                 if not (root_path / item.folder_name).exists():
