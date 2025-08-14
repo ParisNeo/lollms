@@ -10,7 +10,7 @@ from sqlalchemy.ext.compiler import compiles
 from backend.config import LOLLMS_CLIENT_DEFAULTS, config
 from backend.db.base import CURRENT_DB_VERSION
 from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
-from backend.db.models.service import App
+from backend.db.models.service import App # Ensure App is imported
 from backend.db.models.prompt import SavedPrompt
 from ascii_colors import ASCIIColors, trace_exception
 
@@ -20,6 +20,27 @@ from ascii_colors import ASCIIColors, trace_exception
 @compiles(DropTable, "sqlite")
 def _drop_table(element, compiler, **kw):
     return "DROP TABLE %s;" % compiler.process(element.element)
+
+# NEW HELPER FUNCTIONS FOR PORT UNIQUENESS DURING MIGRATION
+def _get_all_existing_app_ports(connection) -> set[int]:
+    """Retrieves all non-null ports currently used by apps in the database."""
+    # Use a direct query to avoid ORM overhead during migration and ensure we get current state
+    return {r[0] for r in connection.execute(text("SELECT port FROM apps WHERE port IS NOT NULL")).fetchall()}
+
+def _find_unique_port_for_migration(connection, preferred_port: int, already_used_in_batch: set) -> int:
+    """
+    Finds a unique port during migration by checking against DB and in-batch used ports.
+    Starts searching from preferred_port upwards.
+    """
+    all_db_used_ports_at_start = _get_all_existing_app_ports(connection)
+    
+    current_port = preferred_port if preferred_port is not None and preferred_port >= 1024 else 9601 # Ensure valid start port
+    
+    while True:
+        if current_port in already_used_in_batch or current_port in all_db_used_ports_at_start:
+            current_port += 1
+        else:
+            return current_port
 
 def _bootstrap_global_settings(connection):
     """
@@ -231,11 +252,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         version_col_info = next((col for col in db_version_cols if col['name'] == 'version'), None)
         
         # Check if column exists and its type is not string-like (e.g., if it's still INTEGER)
-        # SQLite's type affinity makes it complicated to check exact type, but if it was INTEGER, it might be.
-        # This check is heuristic and relies on column type reported by inspector.
-        # A safer check might involve trying to insert a string and catching an error,
-        # but that's harder in a non-transactional pre-create_all phase.
-        # Relying on migration to re-run is acceptable for small databases.
         if version_col_info and "VARCHAR" not in str(version_col_info['type']).upper() and "TEXT" not in str(version_col_info['type']).upper():
             print("INFO: 'database_version.version' column type might be incorrect. Performing data-safe table rebuild.")
             try:
@@ -269,8 +285,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             'repeat_penalty', 'repeat_last_n'
         ]
         
-        # Also check for 'config' column type. If it's not JSON, it needs rebuild.
-        # This is a bit tricky with SQLite as it doesn't enforce types strictly for JSON.
         # A simpler check: if *any* of the deprecated columns exist, rebuild.
         needs_rebuild = any(col_name in llm_bindings_columns_db for col_name in columns_requiring_rebuild)
 
@@ -534,7 +548,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         url_col_info = next((col for col in inspector.get_columns('apps') if col['name'] == 'url'), None)
 
         if url_col_info and url_col_info.get('nullable') == 0:
-            print("WARNING: 'url' column in 'apps' table is NOT NULL. Attempting to migrate schema using data-safe reset.")
+            print("WARNING: 'url' column in 'apps' table is NOT NULL or other schema changes detected. Attempting to migrate schema using data-safe reset.")
             try:
                 # 1. Backup data in memory
                 data = connection.execute(text("SELECT * FROM apps")).mappings().all()
@@ -543,14 +557,16 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("DROP TABLE apps;"))
                 print("INFO: Dropped old 'apps' table.")
                 
-                # 3. Recreate with new schema
+                # 3. Recreate with new schema (this will apply unique=True on port)
                 App.__table__.create(connection)
                 print("INFO: Recreated 'apps' table with new schema.")
 
-                # 4. Restore data
+                # 4. Restore data, handling port uniqueness
                 if data:
                     new_cols_names = [c.name for c in App.__table__.columns]
                     restored_count = 0
+                    used_ports_during_migration_batch = set() # Track ports assigned during this migration batch
+                    
                     for row in data:
                         row_data = {k: v for k, v in row.items() if k in new_cols_names}
                         
@@ -560,14 +576,39 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                             except ValueError: row_data['created_at'] = None
                         
                         if 'updated_at' in row_data and isinstance(row_data['updated_at'], str):
-                            try: row_data['updated_at'] = datetime.fromisoformat(row['updated_at'])
+                            try: row_data['updated_at'] = datetime.fromisoformat(row_data['updated_at'])
                             except ValueError: row_data['updated_at'] = None
                         
+                        # Handle port uniqueness during re-insertion
+                        if 'port' in row_data and row_data['port'] is not None:
+                            original_port = row_data['port']
+                            new_port = _find_unique_port_for_migration(connection, original_port, used_ports_during_migration_batch)
+                            if new_port != original_port:
+                                print(f"  - WARNING: Port {original_port} conflict for app '{row_data.get('name', row_data['id'])}'. Reassigning to {new_port}.")
+                            row_data['port'] = new_port
+                            used_ports_during_migration_batch.add(new_port)
+                        
+                        # Backfill client_id if missing (ensure it's unique across apps and mcps)
+                        if 'client_id' not in row_data or row_data['client_id'] is None:
+                            base_slug = re.sub(r'[^a-z0-9_]+', '', (row_data.get('name', 'app')).lower().replace(' ', '_'))
+                            new_client_id = base_slug
+                            counter = 1
+                            while True:
+                                # Check uniqueness across both apps and mcps tables
+                                app_conflict = connection.execute(text("SELECT 1 FROM apps WHERE client_id = :cid"), {"cid": new_client_id}).first()
+                                mcp_conflict = connection.execute(text("SELECT 1 FROM mcps WHERE client_id = :cid"), {"cid": new_client_id}).first()
+                                if not app_conflict and not mcp_conflict: break
+                                new_client_id = f"{base_slug}_{counter}"
+                                counter += 1
+                            row_data['client_id'] = new_client_id
+                            print(f"  - Backfilled client_id for '{row_data.get('name', row_data['id'])}' to '{new_client_id}' during rebuild.")
+
                         connection.execute(App.__table__.insert().values(row_data))
                         restored_count += 1
                     print(f"INFO: Restored {restored_count} rows to 'apps' table.")
             except Exception as e:
                 print(f"CRITICAL: Data-safe reset for 'apps' table failed. Error: {e}")
+                trace_exception(e)
                 raise e
 
         new_app_cols_defs = {
