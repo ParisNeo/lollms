@@ -16,17 +16,14 @@ def init_database(db_url: str):
     print(f"INFO: Database tables checked/created using metadata at URL: {db_url}")
 
     with engine.connect() as connection:
-        # Create the inspector from the connection, ensuring it operates within the same transaction.
         inspector = inspect(connection)
         
-        transaction = connection.begin()
         try:
+            # Pass the standard SQLAlchemy connection. The migration script will handle its own needs.
             run_schema_migrations_and_bootstrap(connection, inspector)
-            transaction.commit()
             print("INFO: Database schema migration/check completed successfully.")
         except Exception as e_migrate:
-            transaction.rollback()
-            print(f"CRITICAL: Database migration failed: {e_migrate}. Changes rolled back.")
+            print(f"CRITICAL: Database migration failed: {e_migrate}.")
             raise
 
     # Handle DB version record outside the main migration transaction

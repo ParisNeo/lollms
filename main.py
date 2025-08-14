@@ -21,12 +21,14 @@ from sqlalchemy import or_
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
-    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH
+    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH,
+    LOLLMS_CLIENT_DEFAULTS
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
+from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
 from backend.security import get_password_hash as hash_password
 from backend.discussion import LegacyDiscussion
@@ -140,136 +142,48 @@ async def lifespan(app: FastAPI):
             db_for_defaults.add(new_admin)
             db_for_defaults.commit()
             ASCIIColors.green(f"INFO: Initial admin user '{admin_username}' created successfully.")
+
+        # 2. Initial LLM Binding
+        if not db_for_defaults.query(DBLLMBinding).first():
+            ASCIIColors.yellow("No LLM bindings found in the database. Creating one from config.toml.")
+            if LOLLMS_CLIENT_DEFAULTS:
+                binding_name = LOLLMS_CLIENT_DEFAULTS.get("binding_name")
+                if binding_name:
+                    try:
+                        config_data = LOLLMS_CLIENT_DEFAULTS.copy()
+                        name = config_data.pop("binding_name", None)
+                        default_model_name = config_data.pop("default_model_name", None)
+                        alias = name
+                        counter = 1
+                        while db_for_defaults.query(DBLLMBinding).filter(DBLLMBinding.alias == alias).first():
+                            alias = f"{name}_{counter}"
+                            counter += 1
+                        new_binding = DBLLMBinding(
+                            alias=alias, name=name, config=config_data,
+                            default_model_name=default_model_name, is_active=True
+                        )
+                        db_for_defaults.add(new_binding)
+                        db_for_defaults.commit()
+                        ASCIIColors.green(f"INFO: Successfully created initial LLM binding '{alias}' from config.toml.")
+                    except Exception as e:
+                        ASCIIColors.error(f"Failed to create initial binding: {e}")
+                        db_for_defaults.rollback()
+                else:
+                    ASCIIColors.warning("`binding_name` not found in [lollms_client_defaults] in config.toml. Cannot create initial binding.")
+            else:
+                ASCIIColors.warning("[lollms_client_defaults] section is empty in config.toml. No initial binding created.")
         
-        # 2. NEW: Hardcoded Default System Prompts
+        # 3. Hardcoded Default System Prompts
         DEFAULT_PROMPTS = [
-            # Writing & Communication
-            {
-                "name": "Enhance Email",
-                "content": """@<style>@
-title: Email Style
-type: str
-options: Formal, Friendly & Casual, Persuasive, Direct & Concise
-help: The desired tone for the email.
-@</style>@
-Enhance the following email draft to be more @<style>@. Refine the language, structure, and tone accordingly."""
-            },
-            {
-                "name": "Improve Text",
-                "content": """@<style>@
-title: Writing Style
-type: str
-options: Professional, Academic, Creative, Simple & Clear
-@</style>@
-@<goal>@
-title: Main Goal
-type: text
-help: e.g., 'convince the reader', 'explain a complex topic simply', 'inspire action'
-@</goal>@
-Revise the following text to make it more @<style>@. The main goal is to @<goal>@. Improve clarity, flow, and impact."""
-            },
-            {
-                "name": "Translate",
-                "content": """@<language>@
-title: Target Language
-type: str
-options: English, French, Spanish, German, Italian, Chinese, Japanese, Arabic, Russian
-help: The language to translate the text into.
-@</language>@
-Translate the text to @<language>@. Make sure your translation is accurate and natural.
-If you add any comments in the translated text, please also write them in @<language>@."""
-            },
-            # Coding & Development
-            {
-                "name": "Code Syntax Check",
-                "content": """@<language>@
-title: Programming Language
-type: str
-options: Python, JavaScript, C++, Java, TypeScript, HTML, CSS, SQL
-help: The programming language of the code to be checked.
-@</language>@
-You are a code syntax and style checker. Review the following @<language>@ code. Identify any syntax errors, potential bugs, style guide violations (like PEP 8 for Python), or areas for improvement. Provide your feedback as a list of suggestions."""
-            },
-            {
-                "name": "Translate Code",
-                "content": """@<source_language>@
-title: Source Language
-type: str
-options: Python, JavaScript, C++, Java, C#, Go, Rust
-@</source_language>@
-@<target_language>@
-title: Target Language
-type: str
-options: Python, JavaScript, C++, Java, C#, Go, Rust
-@</target_language>@
-@<constraints>@
-title: Constraints
-type: text
-help: e.g., 'must be object-oriented', 'avoid external libraries', 'prioritize performance'
-@</constraints>@
-Translate the following code from @<source_language>@ to @<target_language>@. Adhere to the following constraints: @<constraints>@."""
-            },
-            # Creative & Fun
-            {
-                "name": "Creative Writer",
-                "content": """@<genre>@
-title: Genre
-type: str
-options: Fantasy, Science Fiction, Mystery, Horror, Romance, Comedy
-@</genre>@
-@<topic>@
-title: Topic
-type: text
-help: What should the story be about? (e.g., a lost dragon, a space detective)
-@</topic>@
-Write a short @<genre>@ story about @<topic>@."""
-            },
-            {
-                "name": "Poem Generator",
-                "content": """@<style>@
-title: Poem Style
-type: str
-options: Haiku, Sonnet, Free Verse, Limerick, Ballad
-@</style>@
-@<topic>@
-title: Topic
-type: text
-help: What should the poem be about?
-@</topic>@
-Write a `@<style>@` poem about `@<topic>@`."""
-            },
-            # Education & Learning
-            {
-                "name": "Math Problem Solver",
-                "content": """@<problem>@
-title: Math Problem
-type: text
-help: Enter the math problem you want to solve.
-@</problem>@
-Solve the following math problem step-by-step, explaining your reasoning for each step:
-@<problem>@"""
-            },
-            {
-                "name": "Quiz Generator",
-                "content": """@<num_questions>@
-title: Number of Questions
-type: int
-help: How many questions to generate.
-@</num_questions>@
-@<question_type>@
-title: Question Type
-type: str
-options: Multiple Choice, True/False, Short Answer
-@</question_type>@
-@<source_material>@
-title: Source Material
-type: text
-help: Paste the text to base the quiz on.
-@</source_material>@
-Generate a quiz with @<num_questions>@ `@<question_type>@` questions based on the provided source material. Include a separate answer key at the end.
-Source Material:
-@<source_material>@"""
-            }
+            {"name": "Enhance Email", "content": """@<style>@\ntitle: Email Style\ntype: str\noptions: Formal, Friendly & Casual, Persuasive, Direct & Concise\nhelp: The desired tone for the email.\n@</style>@\nEnhance the following email draft to be more @<style>@. Refine the language, structure, and tone accordingly."""},
+            {"name": "Improve Text", "content": """@<style>@\ntitle: Writing Style\ntype: str\noptions: Professional, Academic, Creative, Simple & Clear\n@</style>@\n@<goal>@\ntitle: Main Goal\ntype: text\nhelp: e.g., 'convince the reader', 'explain a complex topic simply', 'inspire action'\n@</goal>@\nRevise the following text to make it more @<style>@. The main goal is to @<goal>@. Improve clarity, flow, and impact."""},
+            {"name": "Translate", "content": """@<language>@\ntitle: Target Language\ntype: str\noptions: English, French, Spanish, German, Italian, Chinese, Japanese, Arabic, Russian\nhelp: The language to translate the text into.\n@</language>@\nTranslate the text to @<language>@. Make sure your translation is accurate and natural.\nIf you add any comments in the translated text, please also write them in @<language>@."""},
+            {"name": "Code Syntax Check", "content": """@<language>@\ntitle: Programming Language\ntype: str\noptions: Python, JavaScript, C++, Java, TypeScript, HTML, CSS, SQL\nhelp: The programming language of the code to be checked.\n@</language>@\nYou are a code syntax and style checker. Review the following @<language>@ code. Identify any syntax errors, potential bugs, style guide violations (like PEP 8 for Python), or areas for improvement. Provide your feedback as a list of suggestions."""},
+            {"name": "Translate Code", "content": """@<source_language>@\ntitle: Source Language\ntype: str\noptions: Python, JavaScript, C++, Java, C#, Go, Rust\n@</source_language>@\n@<target_language>@\ntitle: Target Language\ntype: str\noptions: Python, JavaScript, C++, Java, C#, Go, Rust\n@</target_language>@\n@<constraints>@\ntitle: Constraints\ntype: text\nhelp: e.g., 'must be object-oriented', 'avoid external libraries', 'prioritize performance'\n@</constraints>@\nTranslate the following code from @<source_language>@ to @<target_language>@. Adhere to the following constraints: @<constraints>@."""},
+            {"name": "Creative Writer", "content": """@<genre>@\ntitle: Genre\ntype: str\noptions: Fantasy, Science Fiction, Mystery, Horror, Romance, Comedy\n@</genre>@\n@<topic>@\ntitle: Topic\ntype: text\nhelp: What should the story be about? (e.g., a lost dragon, a space detective)\n@</topic>@\nWrite a short @<genre>@ story about @<topic>@."""},
+            {"name": "Poem Generator", "content": """@<style>@\ntitle: Poem Style\ntype: str\noptions: Haiku, Sonnet, Free Verse, Limerick, Ballad\n@</style>@\n@<topic>@\ntitle: Topic\ntype: text\nhelp: What should the poem be about?\n@</topic>@\nWrite a `@<style>@` poem about `@<topic>@`."""},
+            {"name": "Math Problem Solver", "content": """@<problem>@\ntitle: Math Problem\ntype: text\nhelp: Enter the math problem you want to solve.\n@</problem>@\nSolve the following math problem step-by-step, explaining your reasoning for each step:\n@<problem>@"""},
+            {"name": "Quiz Generator", "content": """@<num_questions>@\ntitle: Number of Questions\ntype: int\nhelp: How many questions to generate.\n@</num_questions>@\n@<question_type>@\ntitle: Question Type\ntype: str\noptions: Multiple Choice, True/False, Short Answer\n@</question_type>@\n@<source_material>@\ntitle: Source Material\ntype: text\nhelp: Paste the text to base the quiz on.\n@</source_material>@\nGenerate a quiz with @<num_questions>@ `@<question_type>@` questions based on the provided source material. Include a separate answer key at the end.\nSource Material:\n@<source_material>@"""}
         ]
 
         for default_prompt_data in DEFAULT_PROMPTS:
@@ -504,9 +418,9 @@ add_ui_routes(app)
 if __name__ == "__main__":
     import uvicorn
     from backend.settings import settings
-    init_database(APP_DB_URL)
     settings.refresh()
     host_setting = settings.get("host", host)
+    
     port_setting = int(settings.get("port", port))
     workers = int(os.getenv("LOLLMS_WORKERS", settings.get("workers", SERVER_CONFIG.get("workers", cpu_count()))))
     

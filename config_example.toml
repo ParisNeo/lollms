@@ -19,42 +19,15 @@ database_url = "sqlite:///./data/app_main.db" # Central SQLite DB for users and 
 secret_key = "a_very_secret_key_for_flask_sessions_or_jwt" # For session/token use
 access_token_expires_minutes = 44640 # How many minutes the access token stays alive after last use (44640 = 1 month)
 
-# Initial admin user to be created in the database if it doesn't exist.
-# The password here should be the PLAIN TEXT password you want for the first admin.
-# It will be hashed and stored in the database on first startup.
-# For subsequent logins, the database's hashed password will be used.
-[initial_admin_user]
-username = "superadmin"
-password = "CHANGE_ME_TO_A_STRONG_PASSWORD" # This will be hashed on first setup
-
 # --- IMPORTANT ---
 # This section is now used ONLY for the very first startup to create an initial
 # LLM binding in the database. After the first run, all binding configurations
 # are managed exclusively through the Admin Panel in the web UI.
 # Any changes made to this section after the first run will have NO EFFECT.
+# New bindings will use the default parameters provided by their 'description.yaml'.
 [lollms_client_defaults] # Global defaults, can be overridden by user settings in DB
-# ollama
-# binding_name = "ollama" # Example: "ollama", "openai", "lollms", "transformers", "litellm", "gemini"
-# default_model_name = "phi4:latest" # Example: "phi3:latest" for ollama, "gpt-4o-mini" for openai
-# host_address = "http://localhost:11434" # e.g., "http://localhost:11434" for Ollama, "https://api.openai.com/v1" for OpenAI
-# service_key = "OPENAI_API_KEY" # Environment variable name for API key (e.g., for OpenAI)
-# ctx_size = 32000 # Default context size for LLM
-# user_name = "user" # Default name for the user in prompts
-# ai_name = "assistant" # Default name for the AI in prompts
-
-# llamacpp
 binding_name = "llamacpp" # Example: "ollama", "openai", "lollms", "transformers", "litellm", "gemini"
 default_model_name = "llava-v1.6-mistral-7b.Q3_K_XS.gguf" # Example: "phi3:latest" for ollama, "gpt-4o-mini" for openai
-models_path = "E:\\drumber" # e.g., "http://localhost:11434" for Ollama, "https://api.openai.com/v1" for OpenAI
-host_address = "http://localhost:11434" # e.g., "http://localhost:11434" for Ollama, "https://api.openai.com/v1" for OpenAI
-service_key = "OLLAMA_API_KEY" # API key (if you use a proxy like ollama_proxy_server)
-ctx_size = 32000 # Default context size for LLM
-user_name = "user" # Default name for the user in prompts
-ai_name = "assistant" # Default name for the AI in prompts
-
-# temperature = 0.7 # Optional: Default temperature
-# top_k = 50 # Optional: Default top_k
-# top_p = 0.95 # Optional: Default top_p
 
 [safe_store_defaults] # Global defaults
 cache_folder = "data/cache/safestore"

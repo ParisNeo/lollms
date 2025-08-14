@@ -5,7 +5,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.sql import func
 
-CURRENT_DB_VERSION = "1.7.0"
+# Updated version to trigger new migrations
+CURRENT_DB_VERSION = "1.7.1"
 
 Base = declarative_base()
 

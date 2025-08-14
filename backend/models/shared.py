@@ -1,3 +1,4 @@
+# backend/models/shared.py
 import datetime
 from typing import List, Optional, Any, TypeVar, Generic, Dict
 from pydantic import BaseModel

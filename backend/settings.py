@@ -32,11 +32,37 @@ class _Settings:
                 self._settings_cache = {}
             else:
                 for config in configs:
-                    try:
-                        stored_data = json.loads(config.value)
-                        self._settings_cache[config.key] = stored_data.get('value')
-                    except (json.JSONDecodeError, TypeError) as e:
-                        print(f"ERROR: Could not parse setting '{config.key}'. Stored value: {config.value}. Error: {e}")
+                    current_value = config.value
+                    
+                    # Step 1: Recursively decode if value is a JSON string of another JSON string
+                    while isinstance(current_value, str):
+                        try:
+                            current_value = json.loads(current_value)
+                        except (json.JSONDecodeError, TypeError):
+                            break  # Not a valid JSON string, so it's the final raw value
+
+                    final_value = current_value
+                    
+                    # Step 2: If we ended up with our structured dictionary, extract and cast the inner value
+                    if isinstance(final_value, dict) and 'value' in final_value and 'type' in final_value:
+                        val = final_value['value']
+                        val_type = final_value['type']
+                        try:
+                            if val_type == 'integer':
+                                final_value = int(val)
+                            elif val_type == 'float':
+                                final_value = float(val)
+                            elif val_type == 'boolean':
+                                final_value = str(val).lower() in ('true', '1', 'yes', 'on')
+                            else:  # string or any other type
+                                final_value = str(val)
+                        except (ValueError, TypeError):
+                            # Fallback to the raw value if casting fails
+                            final_value = val
+                    
+                    # Step 3: Store the final, primitive Python type in the cache
+                    self._settings_cache[config.key] = final_value
+
                 print(f"INFO: Loaded {len(self._settings_cache)} settings into cache.")
             self._is_loaded = True
         except StopIteration:

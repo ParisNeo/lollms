@@ -70,28 +70,40 @@ export const useDataStore = defineStore('data', () => {
         if (!Array.isArray(availableLollmsModels.value) || availableLollmsModels.value.length === 0) {
             return [];
         }
+        const authStore = useAuthStore();
+        const displayMode = authStore.user?.model_display_mode || 'mixed';
+
         const grouped = availableLollmsModels.value.reduce((acc, model) => {
             if (!model || typeof model.id !== 'string') {
                 console.warn("Skipping invalid model entry in availableLollmsModels:", model);
                 return acc;
             }
+            
             const [bindingAlias] = model.id.split('/');
             if (!acc[bindingAlias]) {
                 acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
             }
+
+            // Determine if we should show this model based on display mode
+            const hasAlias = !!model.alias;
+            if (displayMode === 'aliased' && !hasAlias) return acc;
+            if (displayMode === 'original' && hasAlias) return acc;
+
             acc[bindingAlias].items.push({ 
                 id: model.id, 
-                name: model.name, // The backend now provides the correct display name
+                name: model.alias?.title || model.name, // Use alias title if available
                 icon_base_64: model.alias?.icon,
                 description: model.alias?.description,
                 alias: model.alias // Pass the whole alias object
             });
             return acc;
         }, {});
+
         Object.values(grouped).forEach(group => {
             group.items.sort((a, b) => a.name.localeCompare(b.name));
         });
-        return Object.values(grouped).sort((a, b) => a.label.localeCompare(b.label));
+
+        return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
     });
     const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
     const getPersonalityById = computed(() => {

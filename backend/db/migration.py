@@ -4,6 +4,8 @@ import re
 from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, IntegrityError
+from sqlalchemy.schema import DropTable
+from sqlalchemy.ext.compiler import compiles
 
 from backend.config import LOLLMS_CLIENT_DEFAULTS, config
 from backend.db.base import CURRENT_DB_VERSION
@@ -11,6 +13,13 @@ from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
 from backend.db.models.service import App
 from backend.db.models.prompt import SavedPrompt
 from ascii_colors import ASCIIColors, trace_exception
+
+# This custom compiler allows us to drop tables with cascade in SQLite,
+# though SQLAlchemy's default DROP TABLE handles foreign keys if they are defined correctly.
+# Keeping this for robustness in case `drop table` implicitly needs CASCADE for some reason.
+@compiles(DropTable, "sqlite")
+def _drop_table(element, compiler, **kw):
+    return "DROP TABLE %s;" % compiler.process(element.element)
 
 def _bootstrap_global_settings(connection):
     """
@@ -216,16 +225,169 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print(f"CRITICAL: Data-safe reset for 'saved_prompts' failed. Error: {e}")
                 raise e
 
+    # Add migration for DatabaseVersion if its column type changed from Integer to String
+    if inspector.has_table("database_version"):
+        db_version_cols = inspector.get_columns('database_version')
+        version_col_info = next((col for col in db_version_cols if col['name'] == 'version'), None)
+        
+        # Check if column exists and its type is not string-like (e.g., if it's still INTEGER)
+        # SQLite's type affinity makes it complicated to check exact type, but if it was INTEGER, it might be.
+        # This check is heuristic and relies on column type reported by inspector.
+        # A safer check might involve trying to insert a string and catching an error,
+        # but that's harder in a non-transactional pre-create_all phase.
+        # Relying on migration to re-run is acceptable for small databases.
+        if version_col_info and "VARCHAR" not in str(version_col_info['type']).upper() and "TEXT" not in str(version_col_info['type']).upper():
+            print("INFO: 'database_version.version' column type might be incorrect. Performing data-safe table rebuild.")
+            try:
+                old_version_data = connection.execute(text("SELECT id, version FROM database_version")).mappings().first()
+                
+                connection.execute(text("DROP TABLE database_version;"))
+                print("INFO: Dropped old 'database_version' table.")
+                
+                DatabaseVersion.__table__.create(connection)
+                print("INFO: Recreated 'database_version' table with new schema.")
+
+                if old_version_data:
+                    # Attempt to convert old integer version to string if it was numeric
+                    version_val = str(old_version_data['version']) if isinstance(old_version_data['version'], (int, float)) else old_version_data['version']
+                    connection.execute(DatabaseVersion.__table__.insert().values(id=old_version_data['id'], version=version_val))
+                    print(f"INFO: Migrated and restored version '{version_val}' to 'database_version' table.")
+            except Exception as e:
+                print(f"CRITICAL: Data-safe rebuild for 'database_version' table failed. Error: {e}")
+                trace_exception(e)
+                raise # Re-raise to stop the application and indicate migration failure
+
+
     if inspector.has_table("llm_bindings"):
-        llm_bindings_columns_db = [col['name'] for col in inspector.get_columns('llm_bindings')]                        
-        new_llm_bindings_cols_defs = {
-            "verify_ssl_certificate": "BOOLEAN DEFAULT 1 NOT NULL",
-            "model_aliases": "JSON"
-        }
-        for col_name, col_sql_def in new_llm_bindings_cols_defs.items():
-            if col_name not in llm_bindings_columns_db:
-                connection.execute(text(f"ALTER TABLE llm_bindings ADD COLUMN {col_name} {col_sql_def}"))
-                print(f"INFO: Added missing column '{col_name}' to 'llm_bindings' table.")
+        llm_bindings_columns_db = [col['name'] for col in inspector.get_columns('llm_bindings')]
+        
+        # Check for deprecated columns that require a full table rebuild
+        # This list includes all historical old parameters
+        columns_requiring_rebuild = [
+            'verify_ssl_certificate', 'host_address', 'service_key', 'models_path',
+            'ctx_size', 'user_name', 'ai_name', 'temperature', 'top_k', 'top_p',
+            'repeat_penalty', 'repeat_last_n'
+        ]
+        
+        # Also check for 'config' column type. If it's not JSON, it needs rebuild.
+        # This is a bit tricky with SQLite as it doesn't enforce types strictly for JSON.
+        # A simpler check: if *any* of the deprecated columns exist, rebuild.
+        needs_rebuild = any(col_name in llm_bindings_columns_db for col_name in columns_requiring_rebuild)
+
+        if needs_rebuild:
+            print(f"INFO: Found deprecated columns in 'llm_bindings'. Performing data-safe table rebuild.")
+            
+            try:
+                # 1. Backup all data from old table
+                # Use a plain SELECT * to get all existing columns, including deprecated ones
+                data_proxy = connection.execute(text("SELECT * FROM llm_bindings"))
+                column_names = data_proxy.keys()
+                rows = data_proxy.fetchall()
+                data_to_migrate = [dict(zip(column_names, row)) for row in rows]
+                
+                # 2. Disable foreign keys for the rebuild
+                connection.execute(text("PRAGMA foreign_keys=off;"))
+                restored_count = 0
+                new_rows_data = []              
+                # 5. Restore data and migrate deprecated fields into 'config'
+                if data_to_migrate:
+                    for row in data_to_migrate:
+                        # Initialize config with existing JSON if present
+                        existing_config = row.get('config')
+                        if isinstance(existing_config, str):
+                            try: existing_config = json.loads(existing_config)
+                            except (json.JSONDecodeError, TypeError): existing_config = {}
+                        elif not isinstance(existing_config, dict):
+                            existing_config = {}
+                        
+                        # Prepare data for new 'config' JSON field from deprecated columns
+                        json_to_add = {}
+                        if 'verify_ssl_certificate' in row and row['verify_ssl_certificate'] is not None:
+                            json_to_add['verify_ssl_certificate'] = bool(row['verify_ssl_certificate'])
+                        if 'host_address' in row and row['host_address'] is not None:
+                            json_to_add['host_address'] = row['host_address']
+                        if 'service_key' in row and row['service_key'] is not None:
+                            json_to_add['service_key'] = row['service_key']
+                        if 'models_path' in row and row['models_path'] is not None:
+                            json_to_add['models_path'] = row['models_path']
+                        if 'ctx_size' in row and row['ctx_size'] is not None:
+                            json_to_add['ctx_size'] = row['ctx_size']
+                        if 'user_name' in row and row['user_name'] is not None:
+                            json_to_add['user_name'] = row['user_name']
+                        if 'ai_name' in row and row['ai_name'] is not None:
+                            json_to_add['ai_name'] = row['ai_name']
+                        if 'temperature' in row and row['temperature'] is not None:
+                            json_to_add['temperature'] = row['temperature']
+                        if 'top_k' in row and row['top_k'] is not None:
+                            json_to_add['top_k'] = row['top_k']
+                        if 'top_p' in row and row['top_p'] is not None:
+                            json_to_add['top_p'] = row['top_p']
+                        if 'repeat_penalty' in row and row['repeat_penalty'] is not None:
+                            json_to_add['repeat_penalty'] = row['repeat_penalty']
+                        if 'repeat_last_n' in row and row['repeat_last_n'] is not None:
+                            json_to_add['repeat_last_n'] = row['repeat_last_n']
+
+                        # Convert datetime strings to datetime objects for 'created_at' and 'updated_at'
+                        created_at_dt = None
+                        if 'created_at' in row and row['created_at'] is not None:
+                            if isinstance(row['created_at'], str):
+                                try: created_at_dt = datetime.fromisoformat(row['created_at'])
+                                except ValueError: pass # Keep as None if parsing fails
+                            else: created_at_dt = row['created_at'] # Assume it's already a datetime object
+
+                        updated_at_dt = None
+                        if 'updated_at' in row and row['updated_at'] is not None:
+                            if isinstance(row['updated_at'], str):
+                                try: updated_at_dt = datetime.fromisoformat(row['updated_at'])
+                                except ValueError: pass # Keep as None if parsing fails
+                            else: updated_at_dt = row['updated_at'] # Assume it's already a datetime object
+
+                        # Construct the final row data for insertion into the new table
+                        # Ensure all NOT NULL fields of the LLMBinding model get a value.
+                        # For alias and name, they are NOT NULL, so use existing value or a fallback.
+                        new_row_data = {
+                            'id': row['id'],
+                            'alias': row.get('alias') or row.get('name') or f"binding_{row['id']}",
+                            'name': row.get('name') or row.get('alias') or f"binding_{row['id']}",
+                            'config': {**existing_config, **json_to_add}, # Merged config dict
+                            'default_model_name': row.get('default_model_name'),
+                            'is_active': row.get('is_active', True), # Default to True if original was NULL/missing
+                            'created_at': created_at_dt, # Use converted datetime object
+                            'updated_at': updated_at_dt, # Use converted datetime object
+                            'model_aliases': row.get('model_aliases')
+                        }
+
+                        # Only insert if alias and name are not None (should be handled by coalesce)
+                        if new_row_data['alias'] is None or new_row_data['name'] is None:
+                             print(f"WARNING: Skipping row {row['id']} during LLMBinding migration due to missing alias/name after fallback.")
+                             continue
+                        new_rows_data.append(new_row_data)
+                else:
+                    print("INFO: No existing data in 'llm_bindings' to migrate.")
+
+                # 3. Drop the old table completely
+                connection.execute(text("DROP TABLE llm_bindings;"))
+                connection.commit()  # Commit the drop to ensure it's fully removed
+                print("INFO: Dropped old 'llm_bindings' table.")
+
+                # 4. Recreate the table from the current SQLAlchemy model definition
+                # This ensures the schema (including NOT NULLs) is exactly what the model expects.
+                LLMBinding.__table__.create(connection)
+                print("INFO: Recreated 'llm_bindings' table from model definition.")
+                for new_row_data in new_rows_data:
+                    connection.execute(LLMBinding.__table__.insert().values(new_row_data))
+                    restored_count += 1
+                
+                if restored_count > 0:
+                    print(f"INFO: Migrated and restored {restored_count} rows to 'llm_bindings' table.")
+
+            except Exception as e:
+                print(f"CRITICAL: Data-safe rebuild for 'llm_bindings' table failed. Error: {e}")
+                trace_exception(e)
+                raise e # Re-raise to stop the application and indicate migration failure
+            finally:
+                # Always re-enable foreign keys
+                connection.execute(text("PRAGMA foreign_keys=on;"))
 
     if inspector.has_table("personalities"):
         personality_columns_db = [col['name'] for col in inspector.get_columns('personalities')]
@@ -398,7 +560,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                             except ValueError: row_data['created_at'] = None
                         
                         if 'updated_at' in row_data and isinstance(row_data['updated_at'], str):
-                            try: row_data['updated_at'] = datetime.fromisoformat(row_data['updated_at'])
+                            try: row_data['updated_at'] = datetime.fromisoformat(row['updated_at'])
                             except ValueError: row_data['updated_at'] = None
                         
                         connection.execute(App.__table__.insert().values(row_data))
@@ -502,7 +664,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             connection.execute(text("ALTER TABLE prompt_zoo_repositories ADD COLUMN is_deletable BOOLEAN DEFAULT 1 NOT NULL"))
             print("INFO: Added 'is_deletable' column to 'prompt_zoo_repositories' table.")
         if 'type' not in columns_db:
-            connection.execute(text("ALTER TABLE prompt_zoo_repositories ADD COLUMN type VARCHAR DEFAULT 'git' NOT NULL"))
+            connection.execute(text(f"ALTER TABLE prompt_zoo_repositories ADD COLUMN type VARCHAR DEFAULT 'git' NOT NULL"))
             print("INFO: Added 'type' column to 'prompt_zoo_repositories' table.")
     
     # NEW: Create personality_zoo_repositories if it doesn't exist
@@ -518,12 +680,15 @@ def check_and_update_db_version(SessionLocal):
         version_record = session.query(DatabaseVersion).filter_by(id=1).first()
         if not version_record:
             print(f"INFO: No DB version record found. Setting initial version to {CURRENT_DB_VERSION}.")
-            new_version_record = DatabaseVersion(id=1, version=CURRENT_DB_VERSION)
+            # Store CURRENT_DB_VERSION as string
+            new_version_record = DatabaseVersion(id=1, version=CURRENT_DB_VERSION) 
             session.add(new_version_record)
             session.commit()
-        elif version_record.version != CURRENT_DB_VERSION:
+        # Compare as strings
+        elif version_record.version != CURRENT_DB_VERSION: 
             print(f"INFO: DB version is {version_record.version}. Code expects {CURRENT_DB_VERSION}. Updating record.")
-            version_record.version = CURRENT_DB_VERSION
+            # Update to new string version
+            version_record.version = CURRENT_DB_VERSION 
             session.commit()
     except Exception as e_ver:
         print(f"ERROR: Could not read/update DB version: {e_ver}")

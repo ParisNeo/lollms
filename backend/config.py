@@ -47,8 +47,8 @@ APP_DATA_DIR = PROJECT_ROOT / APP_SETTINGS.get("data_dir", "data")
 APP_DATA_DIR.mkdir(exist_ok=True, parents=True) # Ensure it exists
 APP_DB_URL = APP_SETTINGS.get(DATABASE_URL_CONFIG_KEY, f"sqlite:///{APP_DATA_DIR / 'app_main.db'}")
 
-
-LOLLMS_CLIENT_DEFAULTS = config.get("lollms_client_defaults", {})
+# Removed specific binding parameters from here, only keeping general defaults
+LOLLMS_CLIENT_DEFAULTS = config.get("lollms_client_defaults", {}) 
 SAFE_STORE_DEFAULTS = config.get("safe_store_defaults", {})
 INITIAL_ADMIN_USER_CONFIG = config.get("initial_admin_user", {})
 SERVER_CONFIG = config.get("server", {})

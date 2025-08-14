@@ -640,6 +640,8 @@ async def admin_get_global_settings(db: Session = Depends(get_db)):
     for config in db_configs:
         try:
             stored_data = json.loads(config.value)
+            if isinstance(stored_data,str):
+                stored_data = json.loads(stored_data)
             response_models.append(GlobalConfigPublic(
                 key=config.key,
                 value=stored_data.get('value'),
@@ -668,6 +670,8 @@ async def admin_update_global_settings(
                 if key == 'smtp_password' and not new_value:
                     continue
                 stored_data = json.loads(db_config.value)
+                if isinstance(stored_data, str):
+                    stored_data = json.loads(stored_data)
                 stored_data['value'] = new_value
                 db_config.value = json.dumps(stored_data)
                 updated_keys.append(key)

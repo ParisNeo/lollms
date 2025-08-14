@@ -219,19 +219,25 @@ def reload_lollms_client_mcp(username: str):
 
 
 def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None) -> LollmsClient:
+    return build_lollms_client_from_params(username, binding_alias_override)
+
+
+def build_lollms_client_from_params(
+    username: str, 
+    binding_alias: Optional[str] = None, 
+    model_name: Optional[str] = None,
+    llm_params: Optional[Dict[str, Any]] = None
+) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
-        raise HTTPException(status_code=500, detail="User session not found for LollmsClient.")
-    
-    if "lollms_clients" not in session:
-        session["lollms_clients"] = {}
+        raise HTTPException(status_code=500, detail="User session not found, cannot build LollmsClient.")
 
     db = next(get_db())
     try:
         user_db = db.query(DBUser).filter(DBUser.username == username).first()
         binding_to_use = None
         
-        target_binding_alias = binding_alias_override
+        target_binding_alias = binding_alias
         user_model_full = session.get("lollms_model_name")
         if not target_binding_alias and user_model_full and '/' in user_model_full:
             target_binding_alias = user_model_full.split('/', 1)[0]
@@ -245,73 +251,52 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
                 raise HTTPException(status_code=404, detail="No active LLM bindings are configured.")
 
         final_alias = binding_to_use.alias
-        if final_alias in session["lollms_clients"]:
+        if not model_name and final_alias in session.get("lollms_clients", {}):
             return cast(LollmsClient, session["lollms_clients"][final_alias])
         
-        selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
-        model_name_for_binding = selected_model_name if selected_binding_alias == final_alias else binding_to_use.default_model_name
+        model_name_for_binding = model_name
+        if not model_name_for_binding:
+            selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
+            model_name_for_binding = selected_model_name if selected_binding_alias == final_alias else binding_to_use.default_model_name
 
-        # --- REVISED PARAMETER LOGIC ---
-        # 1. Start with user's saved preferences as the base
-        llm_init_params = {
+        # Start with parameters from binding's config field
+        llm_init_params = { **binding_to_use.config }
+        
+        user_saved_params = {
             "ctx_size": user_db.llm_ctx_size, "temperature": user_db.llm_temperature,
             "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
             "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
             "put_thoughts_in_context": user_db.put_thoughts_in_context
         }
-        # 2. Layer on session-specific overrides (e.g., from UI tweaks that aren't saved yet)
-        llm_init_params.update(session.get("llm_params", {}))
+        user_session_params = session.get("llm_params", {})
+        
+        final_user_params = {**{k:v for k,v in user_saved_params.items() if v is not None}, **user_session_params}
+        if llm_params:
+            final_user_params.update(llm_params)
 
-        # 3. Apply alias-based overrides
         model_aliases = binding_to_use.model_aliases or {}
         alias_info = model_aliases.get(model_name_for_binding)
 
         if alias_info:
             override_allowed = alias_info.get('allow_parameters_override', True)
-            
-            alias_params = {
-                "ctx_size": alias_info.get('ctx_size'), "temperature": alias_info.get('temperature'),
-                "top_k": alias_info.get('top_k'), "top_p": alias_info.get('top_p'),
-                "repeat_penalty": alias_info.get('repeat_penalty'), "repeat_last_n": alias_info.get('repeat_last_n')
-            }
-            # Filter out None values from alias_params
-            alias_params = {k: v for k, v in alias_params.items() if v is not None}
+            alias_params = {k: v for k, v in alias_info.items() if v is not None}
 
             if override_allowed:
-                # Alias settings act as defaults, user settings take precedence
-                llm_init_params = {**alias_params, **llm_init_params}
+                # User/session parameters can override alias defaults
+                llm_init_params.update({**alias_params, **final_user_params})
             else:
-                # Alias settings are forced, ignoring user settings
-                llm_init_params.update(alias_params)
+                # Alias parameters override user/session
+                llm_init_params.update(final_user_params) # Apply user defaults first
+                llm_init_params.update(alias_params) # Then override with alias parameters
             
-            # Special handling for locked context size
-            is_ctx_locked = alias_info.get('ctx_size_locked', False)
-            if is_ctx_locked and alias_info.get('ctx_size') is not None:
+            if alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
                 llm_init_params["ctx_size"] = alias_info['ctx_size']
+        else:
+            llm_init_params.update(final_user_params)
 
-        # 4. Apply global overrides (highest precedence)
-        force_mode = settings.get("force_model_mode", "disabled")
-        if force_mode == "force_always":
-            forced_model_full = settings.get("force_model_name")
-            forced_binding_alias, forced_model_name = (forced_model_full.split('/', 1) + [None])[:2] if forced_model_full else (None, None)
-            if forced_binding_alias == final_alias:
-                model_name_for_binding = forced_model_name
-            ctx_size_override = settings.get("force_context_size")
-            if ctx_size_override is not None:
-                llm_init_params["ctx_size"] = ctx_size_override
-
-        # --- END REVISED LOGIC ---
-
-        llm_init_params.update({
-            "model_name": model_name_for_binding,
-            "host_address": binding_to_use.host_address, "models_path": binding_to_use.models_path,
-            "verify_ssl_certificate": binding_to_use.verify_ssl_certificate, "service_key": binding_to_use.service_key,
-            "user_name": "user", "ai_name": "assistant",
-        })
-        client_init_params = {
-            "llm_binding_name": binding_to_use.name,
-            "llm_binding_config": llm_init_params
-        }    
+        llm_init_params["model_name"] = model_name_for_binding
+        client_init_params = {"llm_binding_name": binding_to_use.name, "llm_binding_config": llm_init_params}    
+        
         servers_infos = load_mcps(username)
         if servers_infos:
             client_init_params["mcp_binding_name"] = "remote_mcp"
@@ -319,63 +304,12 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
 
         try:
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
-            session["lollms_clients"][final_alias] = lc
+            if not model_name: # Only cache the user's default client
+                session.setdefault("lollms_clients", {})[final_alias] = lc
             return lc
         except Exception as e:
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{final_alias}': {str(e)}")
-    finally:
-        db.close()
-
-
-
-def build_lollms_client_from_params(
-    username: str, 
-    binding_alias: str, 
-    model_name: str,
-    llm_params: Optional[Dict[str, Any]] = None
-) -> LollmsClient:
-    session = user_sessions.get(username)
-    if not session:
-        raise HTTPException(status_code=500, detail="User session not found, cannot build LollmsClient.")
-
-    db = next(get_db())
-    try:
-        binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias, DBLLMBinding.is_active == True).first()
-        if not binding_to_use:
-            raise HTTPException(status_code=404, detail=f"Active binding with alias '{binding_alias}' not found.")
-
-        llm_init_params = session.get("llm_params", {}).copy()
-        if llm_params:
-            llm_init_params.update(llm_params)
-        
-        llm_init_params.update({
-            "binding_name": binding_to_use.name,
-            "model_name": model_name,
-            "host_address": binding_to_use.host_address,
-            "models_path": binding_to_use.models_path,
-            "verify_ssl_certificate": binding_to_use.verify_ssl_certificate,
-            "service_key": binding_to_use.service_key,
-            "user_name": "user",
-            "ai_name": "assistant",
-        })
-
-        client_init_params = {
-            "llm_binding_name": binding_to_use.name,
-            "llm_binding_config": llm_init_params
-        }
-        
-        servers_infos = load_mcps(username)
-        if servers_infos:
-            client_init_params["mcp_binding_name"] = "remote_mcp"
-            client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
-
-        try:
-            lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
-            return lc
-        except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Could not initialize ad-hoc LLM Client for binding '{binding_alias}': {str(e)}")
     finally:
         db.close()
 

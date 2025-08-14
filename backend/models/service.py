@@ -3,29 +3,25 @@ import datetime
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field, constr, field_validator, model_validator
 
+# --- NEW: Model for dynamic LLM Binding config ---
 class LLMBindingBase(BaseModel):
     alias: constr(min_length=1, max_length=100)
-    name: constr(min_length=1, max_length=100)
-    host_address: Optional[str] = None
-    models_path: Optional[str] = None
+    name: constr(min_length=1, max_length=100) # binding_name
+    config: Dict[str, Any] = Field(default_factory=dict)
     default_model_name: Optional[str] = None
-    verify_ssl_certificate: Optional[bool] = True
     is_active: bool = True
 
 class LLMBindingCreate(LLMBindingBase):
-    service_key: Optional[str] = None
+    pass
 
 class LLMBindingUpdate(BaseModel):
     alias: Optional[constr(min_length=1, max_length=100)] = None
     name: Optional[constr(min_length=1, max_length=100)] = None
-    host_address: Optional[str] = None
-    models_path: Optional[str] = None
-    service_key: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
     default_model_name: Optional[str] = None
-    verify_ssl_certificate: Optional[bool] = True
     is_active: Optional[bool] = None
 
-class LLMBindingPublic(LLMBindingBase):
+class LLMBindingPublicAdmin(LLMBindingBase):
     id: int
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -34,10 +30,7 @@ class LLMBindingPublic(LLMBindingBase):
     class Config:
         from_attributes = True
 
-class LLMBindingPublicAdmin(LLMBindingPublic):
-    service_key: Optional[str] = None
-
-# NEW: Model Alias Management Models
+# --- NEW: Model Alias Management Models ---
 class ModelAlias(BaseModel):
     icon: Optional[str] = None
     title: Optional[str] = None
@@ -45,7 +38,6 @@ class ModelAlias(BaseModel):
     has_vision: bool = True
     ctx_size: Optional[int] = Field(None, ge=1)
     ctx_size_locked: bool = False
-    # NEW LLM settings
     temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
     top_k: Optional[int] = Field(None, ge=1)
     top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
@@ -66,8 +58,8 @@ class BindingModel(BaseModel):
 
 class ModelNamePayload(BaseModel):
     model_name: str
+# --- END NEW ---
 
-# END NEW
 
 class MCPBase(BaseModel):
     name: constr(min_length=1, max_length=100)
