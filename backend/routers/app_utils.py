@@ -16,14 +16,14 @@ import toml
 from jsonschema import validate, ValidationError
 from packaging import version as packaging_version
 import psutil
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import func
 from ascii_colors import ASCIIColors
-from filelock import FileLock, Timeout # ADDED IMPORT
+from filelock import FileLock, Timeout
 
 from backend.db import get_db
 from backend.db.models.service import App as DBApp, MCP as DBMCP, AppZooRepository, MCPZooRepository
@@ -33,16 +33,46 @@ from backend.config import APPS_ROOT_PATH, MCPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH, A
 from backend.task_manager import task_manager, Task
 from backend.zoo_cache import get_all_items
 from backend.settings import settings
-from backend.utils import get_accessible_host
+from backend.utils import get_accessible_host, find_next_available_port
 from backend.session import user_sessions, reload_lollms_client_mcp
 
 open_log_files: Dict[str, Any] = {}
 
-# ADDED: Constants for synchronization lock
+# Constants for synchronization lock
 SYNC_LOCK_PATH = APP_DATA_DIR / "sync_installations.lock"
 SYNC_LOCK_TIMEOUT = 300 # 5 minutes timeout for the lock
 
+# NEW HELPER FUNCTION for finding unique ports during dynamic operations
+def _get_next_available_app_port_for_batch(db_session: Session, ports_in_current_batch: set) -> int:
+    """
+    Finds the next available port for an app, considering ports already in the DB
+    and ports assigned within the current synchronization batch.
+    """
+    # Start checking from a common default port
+    current_candidate_port = 9601
+    
+    # Get all ports currently used by apps in the database
+    # This query runs within the ongoing session.
+    db_used_ports = {p[0] for p in db_session.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
 
+    while True:
+        # Check against DB-used ports and ports assigned in the current batch
+        if current_candidate_port in db_used_ports or current_candidate_port in ports_in_current_batch:
+            current_candidate_port += 1
+        else:
+            # Check if the port is actually free on the system (this is the most reliable check)
+            try:
+                system_free_port = find_next_available_port(current_candidate_port)
+                if system_free_port == current_candidate_port:
+                    return current_candidate_port
+                else:
+                    # If find_next_available_port found a different *higher* free port, jump to it
+                    current_candidate_port = system_free_port 
+            except Exception as e:
+                # If find_next_available_port fails (e.g., no ports available in range), log and increment
+                ASCIIColors.warning(f"Could not verify system port {current_candidate_port}: {e}. Trying next port.")
+                current_candidate_port += 1
+                
 def get_installed_app_path(db: Session, app_id: str) -> Path:
     app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
     if not app or not app.folder_name:
@@ -103,6 +133,9 @@ def synchronize_filesystem_and_db(db: Session):
             removed_orphans = 0
             corrected_types = 0
             
+            # Keep track of ports assigned during this single synchronization run
+            assigned_ports_in_batch = set() 
+
             # --- Step 1: Find ghost installations (filesystem folder exists, but no DB record) ---
             ASCIIColors.info("Scanning for ghost installations (files without DB entry)...")
             
@@ -154,10 +187,9 @@ def synchronize_filesystem_and_db(db: Session):
                         
                         client_id = generate_unique_client_id(db, DBApp, item_name)
                         
-                        used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
-                        next_port = 9601
-                        while next_port in used_ports:
-                            next_port += 1
+                        # Use the new helper to find a truly unique port within this batch
+                        next_port = _get_next_available_app_port_for_batch(db, assigned_ports_in_batch)
+                        assigned_ports_in_batch.add(next_port) # Add to the set for this batch
 
                         new_app_record = DBApp(
                             name=item_name, client_id=client_id, folder_name=folder_name,
@@ -241,6 +273,7 @@ def synchronize_filesystem_and_db(db: Session):
     except Exception as e:
         ASCIIColors.error(f"Error during synchronization (lock held): {e}")
         traceback.print_exc()
+        db.rollback() # Ensure rollback on error
         raise # Re-raise to ensure task status is set to failed
 
 
@@ -279,11 +312,16 @@ def _purge_broken_task(task: Task, item_type: str, folder_name: str):
     
     with task.db_session_factory() as db:
         try:
-            orphaned_record = db.query(DBApp).filter(DBApp.folder_name == folder_name).first()
+            # IMPORTANT: Delete by folder_name, not just app_id, as a broken app might not have a valid DBApp record ID.
+            # Also ensure it's an installed app.
+            orphaned_record = db.query(DBApp).filter(DBApp.folder_name == folder_name, DBApp.is_installed == True).first()
             if orphaned_record:
                 db.delete(orphaned_record)
                 db.commit()
                 task.log(f"Also removed an orphaned database record for '{folder_name}'.", "INFO")
+            else:
+                task.log(f"No corresponding installed DB record found for '{folder_name}'. Folder purged.", "INFO")
+
         except Exception as e:
             task.log(f"Could not check/remove orphaned DB record for '{folder_name}': {e}", "WARNING")
             db.rollback()
@@ -307,10 +345,18 @@ def _fix_broken_task(task: Task, item_type: str, folder_name: str):
             
             item_name = item_info.get("name", folder_name)
             
-            if db.query(DBApp).filter(func.lower(DBApp.name) == func.lower(item_name), DBApp.is_installed == True).first():
-                raise ValueError(f"An installed item named '{item_name}' already exists in the database.")
+            # Check for existing installed item with this name (case-insensitive)
+            existing_db_app = db.query(DBApp).filter(func.lower(DBApp.name) == func.lower(item_name), DBApp.is_installed == True).first()
+            if existing_db_app:
+                # If a record exists, update it rather than creating a new one
+                # This scenario might happen if the folder was purged but the DB record was not.
+                task.log(f"  - Found existing DB record for '{item_name}'. Updating it instead of creating new.", "INFO")
+                new_app_record = existing_db_app
+            else:
+                new_app_record = DBApp()
+                db.add(new_app_record)
 
-            task.log(f"Read metadata for '{item_name}'. Creating database entry.")
+            task.log(f"Read metadata for '{item_name}'. Updating/Creating database entry.")
             
             icon_path = next((p for p in [item_path / "assets" / "logo.png", item_path / "icon.png"] if p.exists()), None)
             icon_base64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode()}" if icon_path else None
@@ -318,22 +364,31 @@ def _fix_broken_task(task: Task, item_type: str, folder_name: str):
             item_info['item_type'] = item_type
             item_info['folder_name'] = folder_name
             
-            client_id = generate_unique_client_id(db, DBApp, item_name)
+            # Only assign a new port if it doesn't have one or it's null, and ensure it's unique
+            if new_app_record.port is None or new_app_record.port not in _get_next_available_app_port_for_batch(db, set()): # Using the batch function with empty set to just check overall uniqueness
+                next_port = find_next_available_port(9601) # Use the simpler utility for single installs
+                new_app_record.port = next_port
+                task.log(f"  - Assigned new port {next_port} to '{item_name}'.", "INFO")
             
-            used_ports = {p[0] for p in db.query(DBApp.port).filter(DBApp.port.isnot(None)).all()}
-            next_port = 9601
-            while next_port in used_ports:
-                next_port += 1
+            # Generate client_id if missing
+            if not new_app_record.client_id:
+                new_app_record.client_id = generate_unique_client_id(db, DBApp, item_name)
+                task.log(f"  - Assigned new client_id '{new_app_record.client_id}' to '{item_name}'.", "INFO")
 
-            new_app_record = DBApp(
-                name=item_name, client_id=client_id, folder_name=folder_name,
-                icon=icon_base64, is_installed=True, status='stopped', port=next_port,
-                autostart=False, version=str(item_info.get('version', 'N/A')),
-                author=item_info.get('author'), description=item_info.get('description'),
-                category=item_info.get('category'), tags=item_info.get('tags'),
-                app_metadata=item_info
-            )
-            db.add(new_app_record)
+
+            new_app_record.name = item_name
+            new_app_record.folder_name = folder_name
+            new_app_record.icon = icon_base64
+            new_app_record.is_installed = True
+            new_app_record.status = 'stopped' # Always stopped after fix/install
+            new_app_record.autostart = False # Default to False, user can enable later
+            new_app_record.version = str(item_info.get('version', 'N/A'))
+            new_app_record.author = item_info.get('author')
+            new_app_record.description = item_info.get('description')
+            new_app_record.category = item_info.get('category')
+            new_app_record.tags = item_info.get('tags')
+            new_app_record.app_metadata = item_info
+
             db.commit()
             task.set_progress(100)
             task.log(f"Successfully fixed installation for '{item_name}'.")
@@ -357,28 +412,79 @@ def cleanup_and_autostart_apps():
             # This logic will now run only once per server startup, by the first worker that gets the lock.
             
             # 1. Cleanup: Reset status of all installed apps to 'stopped'
+            # Also clear any lingering PIDs and force stop if process exists.
             installed_apps = db_session.query(DBApp).filter(DBApp.is_installed == True).all()
             updated_count = 0
+            
+            # Before cleaning, check for duplicate ports in the DB that might have survived previous migrations
+            # and fix them proactively. This handles cases where a unique constraint might have been added later.
+            ports_in_db = {} # port -> [app_id1, app_id2]
             for app in installed_apps:
-                if app.status != 'stopped' or app.pid is not None:
-                    # Also kill the process if a PID is lingering from a crash
-                    if app.pid:
-                        try:
-                            p = psutil.Process(app.pid)
-                            p.kill()
-                            print(f"INFO: Killed lingering process with PID {app.pid} for app '{app.name}'.")
-                        except psutil.NoSuchProcess:
-                            pass # Process already gone
-                        except Exception as e:
-                            print(f"WARNING: Could not kill lingering process {app.pid} for app '{app.name}': {e}")
+                if app.port is not None:
+                    ports_in_db.setdefault(app.port, []).append(app.id)
+
+            ports_to_reassign_app_ids = set() # Use a better name for clarity
+            for port, app_ids in ports_in_db.items():
+                if len(app_ids) > 1:
+                    print(f"WARNING: Detected port conflict for port {port} on startup (apps: {[db_session.query(DBApp).filter_by(id=aid).first().name for aid in app_ids if db_session.query(DBApp).filter_by(id=aid).first()]}). Reassigning additional apps.")
+                    # Keep the first app by its original port, reassign others.
+                    # Or for simplicity during cleanup, reassign all except the first one found by query order.
+                    for i in range(1, len(app_ids)): # Iterate from the second app onwards
+                        ports_to_reassign_app_ids.add(app_ids[i])
+            
+            # Track ports assigned during this cleanup batch to prevent new internal conflicts
+            reassigned_ports_current_batch = set()
+
+            # Iterate again to apply changes
+            for app in installed_apps:
+                original_status = app.status
+                original_pid = app.pid
+
+                if app.pid:
+                    try:
+                        p = psutil.Process(app.pid)
+                        # Check if process is still running and is the expected process
+                        # This avoids killing a new process that might have reused the PID
+                        if p.status() != psutil.STATUS_ZOMBIE and p.pid == original_pid:
+                            p.terminate() # or p.kill() if terminate is not enough
+                            p.wait(timeout=5)
+                            print(f"INFO: Terminated lingering process with PID {app.pid} for app '{app.name}'.")
+                    except psutil.NoSuchProcess:
+                        pass # Process already gone
+                    except Exception as e:
+                        print(f"WARNING: Could not kill lingering process {app.pid} for app '{app.name}': {e}")
+                
+                app.status = 'stopped'
+                app.pid = None
+                
+                # Reassign port if it was part of a conflict, or if it's currently None (should have one)
+                # or if its current port is already taken by another app in this same transaction.
+                if app.id in ports_to_reassign_app_ids or app.port is None:
+                    # Find a new unique port for this app.
+                    new_port = _get_next_available_app_port_for_batch(db_session, reassigned_ports_current_batch)
+                    if app.port != new_port: # Only update if different to avoid unnecessary commits
+                        print(f"INFO: Reassigned port for '{app.name}' from {app.port} to {new_port}.")
+                        app.port = new_port
+                    reassigned_ports_current_batch.add(new_port)
+                elif app.port is not None and app.port in reassigned_ports_current_batch:
+                    # This case means this app's existing port was assigned to a previous app in this batch.
+                    # This app also needs a new port.
+                    new_port = _get_next_available_app_port_for_batch(db_session, reassigned_ports_current_batch)
+                    print(f"INFO: Reassigned port for '{app.name}' from {app.port} to {new_port} due to batch conflict.")
+                    app.port = new_port
+                    reassigned_ports_current_batch.add(new_port)
+                elif app.port is not None:
+                    # If the app's port is valid and not conflicting in this batch, reserve it.
+                    reassigned_ports_current_batch.add(app.port)
                     
-                    app.status = 'stopped'
-                    app.pid = None
+                
+                # Check if an update occurred
+                if original_status != 'stopped' or original_pid is not None or app.id in ports_to_reassign_app_ids:
                     updated_count += 1
             
             if updated_count > 0:
                 db_session.commit()
-                print(f"INFO: Reset status for {updated_count} apps to 'stopped'.")
+                print(f"INFO: Cleaned up status and fixed {updated_count} app records.")
 
             # 2. Autostart
             apps_to_autostart = db_session.query(DBApp).filter(DBApp.is_installed == True, DBApp.autostart == True).all()
@@ -414,6 +520,14 @@ def start_app_task(task: Task, app_id: str):
         app_path = get_installed_app_path(db_session, app_id)
         app = db_session.query(DBApp).filter(DBApp.id == app_id).first()
         if not app: raise ValueError("Installed app metadata not found.")
+
+        # Ensure the app has a port before trying to start
+        if app.port is None:
+            new_port = _get_next_available_app_port_for_batch(db_session, set())
+            app.port = new_port
+            db_session.commit() # Commit this change so it's persisted immediately
+            task.log(f"App '{app.name}' had no port, assigned new port {new_port}.", "INFO")
+
 
         log_file_path = app_path / "app.log"
         log_file_handle = open(log_file_path, "w", encoding="utf-8", buffering=1)
