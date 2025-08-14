@@ -1,4 +1,5 @@
-// frontend/webui/src/stores/discussions.js
+// [UPDATE] frontend/webui/src/stores/discussions.js
+
 import { defineStore } from 'pinia';
 import { ref, computed, onMounted } from 'vue';
 import apiClient from '../services/api';
@@ -36,6 +37,7 @@ function processSingleMessage(msg) {
         image_references: msg.image_references || [],
         active_images: msg.active_images || [],
         vision_support: visionSupport, // Add vision support flag
+        branches: msg.branches || null, // NEW: Add branches property
     };
     return processedMsg;
 }
@@ -358,27 +360,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch (error) { console.error("Failed to load discussions:", error); }
     }
 
-    async function selectDiscussion(id) {
+    async function selectDiscussion(id, branchIdToLoad = null) { // MODIFIED: Added branchIdToLoad
         if (!id || generationInProgress.value) return;
         const uiStore = useUiStore();
         const authStore = useAuthStore();
-        if (currentDiscussionId.value === id) {
-            uiStore.setMainView('chat');
-            return; 
-        }
+        
+        // No early return based on currentDiscussionId.value === id,
+        // as we might need to refresh the messages based on branchIdToLoad
         currentDiscussionId.value = id;
-        messages.value = [];
+        messages.value = []; // Always clear messages for a fresh load of the discussion state
+        
         // NEW: Reset live token counts on discussion switch
         liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
+        
         if (!discussions.value[id]) {
             currentDiscussionId.value = null;
             return;
         }
         uiStore.setMainView('chat');
         try {
-            const response = await apiClient.get(`/api/discussions/${id}`);
+            // MODIFIED: Pass branch_id explicitly if provided
+            const params = branchIdToLoad ? { branch_id: branchIdToLoad } : {};
+            const response = await apiClient.get(`/api/discussions/${id}`, { params });
             console.log(`[DiscussionsStore] Full message list for discussion ${id}:`, JSON.parse(JSON.stringify(response.data)));
             messages.value = processMessages(response.data);
+            
             await Promise.all([
                 fetchContextStatus(id),
                 fetchDataZones(id),
@@ -497,11 +503,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const originalTitle = disc.title;
         disc.title = newTitle;
         try {
-            const response = await apiClient.put(`/api/discussions/${discussionId}/title`, { title: newTitle });
-            if (discussions.value[discussionId]) discussions.value[discussionId].title = response.data.title;
+            await apiClient.put(`/api/discussions/${discussionId}/title`, { title: newTitle });
+            // Re-fetch the whole discussion info to ensure title is updated everywhere
+            const response = await apiClient.get(`/api/discussions?id=${discussionId}`); // Fetch single discussion info
+            const updatedDisc = response.data.find(d => d.id === discussionId);
+            if (updatedDisc) {
+                discussions.value[discussionId] = { ...discussions.value[discussionId], title: updatedDisc.title };
+            }
             useUiStore().addNotification('Discussion renamed.', 'success');
         } catch (error) {
             if (discussions.value[discussionId]) disc.title = originalTitle;
+            useUiStore().addNotification('Failed to rename discussion.', 'error');
         }
     }
 
@@ -846,12 +858,18 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     async function switchBranch(newBranchMessageId) {
         if (!activeDiscussion.value || generationInProgress.value) return;
         try {
+            // Step 1: Update the active_branch_id in the database
             await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: newBranchMessageId });
-            await selectDiscussion(currentDiscussionId.value);
-            useUiStore().addNotification(`Switched branch.`, 'info');
+            
+            // Step 2: Reload the discussion messages, explicitly requesting the new branch
+            await selectDiscussion(currentDiscussionId.value, newBranchMessageId); // MODIFIED: Pass newBranchMessageId here
+            
+            uiStore.addNotification(`Switched branch.`, 'info');
         } catch (error) {
             console.error("Failed to switch branch:", error);
-            await selectDiscussion(currentDiscussionId.value);
+            uiStore.addNotification('Failed to switch branch. Please try again.', 'error');
+            // Re-select current discussion to revert UI state if API fails
+            await selectDiscussion(currentDiscussionId.value); // Revert to whatever is the active branch after failure
         }
     }
 
@@ -1028,6 +1046,18 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch(error) { /* Handled by interceptor */ }
     }
 
+    // NEW: Fetch all messages for a discussion tree
+    async function fetchDiscussionTree(discussionId) {
+        try {
+            const response = await apiClient.get(`/api/discussions/${discussionId}/full_tree`);
+            return response.data; // Return raw message list
+        } catch (error) {
+            useUiStore().addNotification('Failed to fetch discussion tree.', 'error');
+            console.error("Failed to fetch discussion tree:", error);
+            return [];
+        }
+    }
+
 
     function $reset() {
         discussions.value = {};
@@ -1062,5 +1092,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         saveManualMessage,
         toggleImageActivation,
         uploadDiscussionImage, toggleDiscussionImageActivation, deleteDiscussionImage,
+        fetchDiscussionTree // NEW EXPORT
     };
 });

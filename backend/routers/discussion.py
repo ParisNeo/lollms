@@ -1,4 +1,4 @@
-# backend/routers/discussion.py
+# [UPDATE] backend/routers/discussion.py
 
 import threading
 # Standard Library Imports
@@ -794,6 +794,93 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
         )
     return messages_output
 
+@discussion_router.get("/{discussion_id}/full_tree", response_model=List[MessageOutput])
+async def get_full_discussion_tree(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)) -> List[MessageOutput]:
+    """
+    Retrieves all messages for a given discussion, including their parent/child relationships,
+    to enable building a complete discussion tree in the frontend.
+    """
+    username = current_user.username
+    discussion_obj = get_user_discussion(username, discussion_id)
+    if not discussion_obj:
+        raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
+
+    all_messages_in_discussion = discussion_obj.get_all_messages_flat()
+    
+    # Build a map of parent_id -> [child_ids]
+    children_map: Dict[Optional[str], List[str]] = {}
+    for msg_obj in all_messages_in_discussion:
+        parent_id = msg_obj.parent_id
+        if parent_id not in children_map:
+            children_map[parent_id] = []
+        children_map[parent_id].append(msg_obj.id)
+
+    # Convert LollmsMessage objects to MessageOutput Pydantic models
+    # and populate the 'branches' field if it's a branching point.
+    messages_output = []
+    # Fetch user grades once for the entire discussion
+    db_session_for_grades = next(get_db())
+    try:
+        db_user = db_session_for_grades.query(DBUser).filter(DBUser.username == username).one()
+        user_grades = {g.message_id: g.grade for g in db_session_for_grades.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
+    finally:
+        db_session_for_grades.close()
+
+
+    for msg_obj in all_messages_in_discussion:
+        msg_branches = None
+        if msg_obj.id in children_map and len(children_map[msg_obj.id]) > 1:
+            msg_branches = children_map[msg_obj.id]
+            
+        images_list_raw = msg_obj.images or []
+        images_list = []
+        if isinstance(images_list_raw, str):
+            try: images_list = json.loads(images_list_raw)
+            except json.JSONDecodeError: images_list = []
+        elif isinstance(images_list_raw, list):
+            images_list = images_list_raw
+        
+        full_image_refs = []
+        active_images_bools = []
+        for img_data in images_list:
+            if isinstance(img_data, dict) and 'image' in img_data:
+                full_image_refs.append(f"data:image/png;base64,{img_data['image']}")
+                active_images_bools.append(img_data.get('active', True))
+            elif isinstance(img_data, str):
+                full_image_refs.append(f"data:image/png;base64,{img_data}")
+                active_images_bools.append(True) # Legacy format is always active
+                
+        msg_metadata_raw = msg_obj.metadata
+        if isinstance(msg_metadata_raw, str):
+            try: msg_metadata = json.loads(msg_metadata_raw) if msg_metadata_raw else {}
+            except json.JSONDecodeError: msg_metadata = {}
+        else:
+            msg_metadata = msg_metadata_raw or {}
+
+
+        messages_output.append(
+            MessageOutput(
+                id=msg_obj.id,
+                sender=msg_obj.sender,
+                sender_type=msg_obj.sender_type,
+                content=msg_obj.content,
+                parent_message_id=msg_obj.parent_id,
+                binding_name=msg_obj.binding_name,
+                model_name=msg_obj.model_name,
+                token_count=msg_obj.tokens,
+                sources=msg_metadata.get('sources'),
+                events=msg_metadata.get('events'),
+                image_references=full_image_refs,
+                active_images=active_images_bools,
+                user_grade=user_grades.get(msg_obj.id, 0),
+                created_at=msg_obj.created_at,
+                branch_id=discussion_obj.active_branch_id, # This is the currently active branch for the discussion
+                branches=msg_branches, # Branches *originating from this message*
+                vision_support=True # Default true, logic for model-specific vision support is handled by LollmsClient
+            )
+        )
+    return messages_output
+
 @discussion_router.get("/{discussion_id}/context_status", response_model=ContextStatusResponse)
 def get_discussion_context_status(
     discussion_id: str,
@@ -973,12 +1060,17 @@ async def chat_in_existing_discussion(
     db: Session = Depends(get_db)
 ) -> StreamingResponse:
     username = current_user.username
+    user_model_full = current_user.lollms_model_name
+    binding_alias = None
+    if user_model_full and '/' in user_model_full:
+        binding_alias, _ = user_model_full.split('/', 1)
+    
+    lc = get_user_lollms_client(current_user.username, binding_alias)
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
     
     # The LollmsClient is now correctly attached to the discussion object
-    lc = discussion_obj.lollms_client
     if not lc:
         async def error_stream():
             yield json.dumps({"type": "error", "content": "Failed to get a valid LLM Client from the discussion object."}) + "\n"

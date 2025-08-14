@@ -525,7 +525,7 @@ async def count_tokens(
             binding_alias=binding_alias,
             model_name=model_name
         )
-        count = len(lc.tokenize(request.text))
+        count = lc.count_tokens(request.text)
         return CountTokensResponse(count=count)
     except HTTPException as e:
         raise e

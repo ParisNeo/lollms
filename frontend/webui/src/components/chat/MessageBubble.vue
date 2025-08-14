@@ -186,15 +186,31 @@ function getEventIcon(type) {
 
 const branchInfo = computed(() => {
     const hasMultipleBranches = props.message.branches && props.message.branches.length > 1;
-    if (!hasMultipleBranches || props.message.sender_type !== 'user') return null;
+    if (!hasMultipleBranches || props.message.sender_type !== 'user') return null; // Only show for user messages with multiple AI children
+
+    // Find the immediate child of this user message that is currently displayed in the active messages path
     const currentMessages = discussionsStore.activeMessages;
     const currentMessageIndex = currentMessages.findIndex(m => m.id === props.message.id);
-    const nextMessage = currentMessages[currentMessageIndex + 1];
-    let activeBranchIndex = nextMessage ? props.message.branches.findIndex(id => id === nextMessage.id) : -1;
-    if (activeBranchIndex === -1) activeBranchIndex = 0;
+    const nextMessage = currentMessages[currentMessageIndex + 1]; // This should be the AI response to this user message
+
+    let activeBranchIndex = -1;
+    if (nextMessage && nextMessage.parent_message_id === props.message.id) {
+        activeBranchIndex = props.message.branches.findIndex(id => id === nextMessage.id);
+    }
+    
+    // Fallback: If no next message or it's not a direct child (e.g., initial load of a new branch tip), default to the first branch
+    // This handles cases where the current branch might have been deleted, or a fresh load of a discussion where
+    // the active_branch_id is a child that is not the first in the `branches` array.
+    if (activeBranchIndex === -1) {
+        activeBranchIndex = 0; // Default to first branch if we can't determine which one is active
+    }
+
     return {
-        isBranchPoint: true, current: activeBranchIndex + 1, total: props.message.branches.length,
-        branchIds: props.message.branches, currentIndex: activeBranchIndex,
+        isBranchPoint: true,
+        current: activeBranchIndex + 1, // 1-based index
+        total: props.message.branches.length,
+        branchIds: props.message.branches,
+        currentIndex: activeBranchIndex, // 0-based index
     };
 });
 
@@ -241,7 +257,7 @@ async function handleSaveEdit() {
     } else {
         const keptImagesB64 = editedImages.value
             .filter(img => !img.isNew)
-            .map(img => img.url.split(',')); // Extract base64 part
+            .map(img => img.url.split(',')[1]); // Extract base64 part
 
         await discussionsStore.saveMessageChanges({
             messageId: props.message.id,
@@ -446,9 +462,13 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                 <div class="message-footer">
                     <div class="flex-grow flex items-center flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
                         <div v-if="branchInfo" class="detail-badge branch-badge-nav">
-                            <button @click="navigateBranch(-1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Previous Branch"><IconChevronRight class="w-3.5 h-3.5 rotate-180" /></button>
+                            <button @click="navigateBranch(-1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Previous Branch">
+                                <IconChevronRight class="w-3.5 h-3.5 rotate-180" />
+                            </button>
                             <span class="font-mono text-xs">{{ branchInfo.current }}/{{ branchInfo.total }}</span>
-                            <button @click="navigateBranch(1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Next Branch"><IconChevronRight class="w-3.5 h-3.5" /></button>
+                            <button @click="navigateBranch(1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Next Branch">
+                                <IconChevronRight class="w-3.5 h-3.5" />
+                            </button>
                         </div>
                         <div v-if="isAi && message.token_count" class="detail-badge"><IconToken class="w-3.5 h-3.5" /><span>{{ message.token_count }}</span></div>
                     </div>

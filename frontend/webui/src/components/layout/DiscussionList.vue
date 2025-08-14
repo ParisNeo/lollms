@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/layout/DiscussionList.vue -->
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
@@ -15,6 +16,7 @@ import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconScissors from '../../assets/icons/IconScissors.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
+import IconGitBranch from '../../assets/icons/IconGitBranch.vue'; // NEW IMPORT
 
 const store = useDiscussionsStore();
 const authStore = useAuthStore();
@@ -24,6 +26,7 @@ const dataStore = useDataStore();
 const user = computed(() => authStore.user);
 const isLoading = computed(() => store.isLoadingDiscussions && store.sortedDiscussions.length === 0);
 const hasMoreDiscussions = computed(() => store.hasMoreDiscussions);
+const activeDiscussion = computed(() => store.activeDiscussion); // NEW COMPUTED
 
 const searchTerm = ref('');
 const isStarredVisible = ref(true);
@@ -49,6 +52,13 @@ function handleNewDiscussion() { store.createNewDiscussion(); }
 function handleImportClick() { uiStore.openModal('import'); }
 function handleExportClick() { uiStore.openModal('export', { allDiscussions: store.sortedDiscussions }); }
 function handlePrune() { store.pruneDiscussions(); }
+function handleShowTree() { // NEW FUNCTION
+  if (activeDiscussion.value) {
+    uiStore.openModal('discussionTree', { discussionId: activeDiscussion.value.id });
+  } else {
+    uiStore.addNotification('Please select a discussion first.', 'warning');
+  }
+}
 
 const observer = new IntersectionObserver((entries) => {
   if (entries[0].isIntersecting && hasMoreDiscussions.value && !isLoading.value) {
@@ -104,6 +114,9 @@ onUnmounted(() => {
                     <button @click="handleImportClick" class="btn-footer" title="Import"><IconArrowDownTray class="h-5 w-5" /></button>
                     <button @click="handleExportClick" class="btn-footer" title="Export"><IconArrowUpTray class="h-5 w-5" /></button>
                     <button @click="handlePrune" class="btn-footer-danger" title="Prune Empty"><IconScissors class="h-5 w-5" /></button>
+                    <button @click="handleShowTree" class="btn-footer" title="Show Discussion Tree" :disabled="!activeDiscussion"> <!-- NEW BUTTON -->
+                        <IconGitBranch class="h-5 w-5" />
+                    </button>
                 </div>
             </div>
         </div>

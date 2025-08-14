@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted } from 'vue'; // UPDATED: Added onMounted
 import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
@@ -155,6 +155,11 @@ async function deleteUser(user) {
         }
     }
 }
+
+// NEW: Fetch users when the component is mounted
+onMounted(() => {
+    adminStore.fetchAllUsers();
+});
 </script>
 
 <template>

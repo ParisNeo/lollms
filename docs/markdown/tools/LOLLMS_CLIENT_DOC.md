@@ -212,7 +212,7 @@
     # List available models for the current binding
     models = lc.listModels()
     if isinstance(models, list) and models:
-        print(f"\nAvailable models for binding '{lc.binding.get_model_info()['name']}':")
+        print(f"\nAvailable models for binding '{lc.llm.get_model_info()['name']}':")
         for model_info in models[:5]: # Print first 5
             if isinstance(model_info, dict):
                 print(f"  - {model_info.get('model_name', model_info.get('id', 'Unknown Model'))}")
@@ -226,8 +226,8 @@
 
 
     # List mounted personalities (specific to "lollms" binding)
-    if lc.binding.get_model_info()['name'] == 'lollms':
-        personalities = lc.binding.lollms_listMountedPersonalities()
+    if lc.llm.get_model_info()['name'] == 'lollms':
+        personalities = lc.llm.lollms_listMountedPersonalities()
         if isinstance(personalities, list) and personalities:
             print("\nMounted LoLLMs Personalities:")
             for p in personalities[:5]: # Print first 5

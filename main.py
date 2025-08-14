@@ -7,7 +7,7 @@ import os
 import subprocess
 from multiprocessing import cpu_count
 from urllib.parse import urlparse
-from ascii_colors import ASCIIColors
+from ascii_colors import ASCIIColors, trace_exception
 from contextlib import asynccontextmanager
 
 from multipart.multipart import FormParser
@@ -62,6 +62,7 @@ from backend.routers.zoos.prompts_zoo import prompts_zoo_router
 from backend.routers.zoos.personalities_zoo import personalities_zoo_router
 from backend.routers.tasks import tasks_router
 from backend.task_manager import task_manager # Import the singleton instance
+
 
 from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
@@ -168,6 +169,7 @@ async def lifespan(app: FastAPI):
                     except Exception as e:
                         ASCIIColors.error(f"Failed to create initial binding: {e}")
                         db_for_defaults.rollback()
+                        trace_exception(e) 
                 else:
                     ASCIIColors.warning("`binding_name` not found in [lollms_client_defaults] in config.toml. Cannot create initial binding.")
             else:
@@ -177,7 +179,7 @@ async def lifespan(app: FastAPI):
         DEFAULT_PROMPTS = [
             {"name": "Enhance Email", "content": """@<style>@\ntitle: Email Style\ntype: str\noptions: Formal, Friendly & Casual, Persuasive, Direct & Concise\nhelp: The desired tone for the email.\n@</style>@\nEnhance the following email draft to be more @<style>@. Refine the language, structure, and tone accordingly."""},
             {"name": "Improve Text", "content": """@<style>@\ntitle: Writing Style\ntype: str\noptions: Professional, Academic, Creative, Simple & Clear\n@</style>@\n@<goal>@\ntitle: Main Goal\ntype: text\nhelp: e.g., 'convince the reader', 'explain a complex topic simply', 'inspire action'\n@</goal>@\nRevise the following text to make it more @<style>@. The main goal is to @<goal>@. Improve clarity, flow, and impact."""},
-            {"name": "Translate", "content": """@<language>@\ntitle: Target Language\ntype: str\noptions: English, French, Spanish, German, Italian, Chinese, Japanese, Arabic, Russian\nhelp: The language to translate the text into.\n@</language>@\nTranslate the text to @<language>@. Make sure your translation is accurate and natural.\nIf you add any comments in the translated text, please also write them in @<language>@."""},
+            {"name": "Translate", "content": """@<language>@\ntitle: Target Language\ntype: str\noptions: English, French, Spanish, German, Italian, Chinese, Japanese, Arabic, Russian\nhelp: The language to translate the text into.\nIf you add any comments in the translated text, please also write them in @<language>@."""},
             {"name": "Code Syntax Check", "content": """@<language>@\ntitle: Programming Language\ntype: str\noptions: Python, JavaScript, C++, Java, TypeScript, HTML, CSS, SQL\nhelp: The programming language of the code to be checked.\n@</language>@\nYou are a code syntax and style checker. Review the following @<language>@ code. Identify any syntax errors, potential bugs, style guide violations (like PEP 8 for Python), or areas for improvement. Provide your feedback as a list of suggestions."""},
             {"name": "Translate Code", "content": """@<source_language>@\ntitle: Source Language\ntype: str\noptions: Python, JavaScript, C++, Java, C#, Go, Rust\n@</source_language>@\n@<target_language>@\ntitle: Target Language\ntype: str\noptions: Python, JavaScript, C++, Java, C#, Go, Rust\n@</target_language>@\n@<constraints>@\ntitle: Constraints\ntype: text\nhelp: e.g., 'must be object-oriented', 'avoid external libraries', 'prioritize performance'\n@</constraints>@\nTranslate the following code from @<source_language>@ to @<target_language>@. Adhere to the following constraints: @<constraints>@."""},
             {"name": "Creative Writer", "content": """@<genre>@\ntitle: Genre\ntype: str\noptions: Fantasy, Science Fiction, Mystery, Horror, Romance, Comedy\n@</genre>@\n@<topic>@\ntitle: Topic\ntype: text\nhelp: What should the story be about? (e.g., a lost dragon, a space detective)\n@</topic>@\nWrite a short @<genre>@ story about @<topic>@."""},
@@ -199,6 +201,7 @@ async def lifespan(app: FastAPI):
 
     except Exception as e:
         ASCIIColors.error(f"ERROR during admin/personality/prompt setup: {e}")
+        trace_exception(e)
         if db_for_defaults: db_for_defaults.rollback()
     finally:
         if db_for_defaults: db_for_defaults.close()
@@ -223,6 +226,7 @@ async def lifespan(app: FastAPI):
 
     except Exception as e:
         ASCIIColors.error(f"ERROR during App Zoo repository setup: {e}")
+        trace_exception(e)
         if db_for_repos: db_for_repos.rollback()
     finally:
         if db_for_repos: db_for_repos.close()
@@ -246,6 +250,7 @@ async def lifespan(app: FastAPI):
             ASCIIColors.green("Cloning complete.")
     except Exception as e:
         ASCIIColors.error(f"ERROR during MCP Zoo repository setup: {e}")
+        trace_exception(e)
         if db_for_mcps: db_for_mcps.rollback()
     finally:
         if db_for_mcps: db_for_mcps.close()
@@ -269,6 +274,7 @@ async def lifespan(app: FastAPI):
             ASCIIColors.green("Cloning complete.")
     except Exception as e:
         ASCIIColors.error(f"ERROR during Prompt Zoo repository setup: {e}")
+        trace_exception(e)
         if db_for_prompts: db_for_prompts.rollback()
     finally:
         if db_for_prompts: db_for_prompts.close()
@@ -292,6 +298,7 @@ async def lifespan(app: FastAPI):
             ASCIIColors.green("Cloning complete.")
     except Exception as e:
         ASCIIColors.error(f"ERROR during Personality Zoo repository setup: {e}")
+        trace_exception(e)
         if db_for_personalities: db_for_personalities.rollback()
     finally:
         if db_for_personalities: db_for_personalities.close()
@@ -307,6 +314,7 @@ async def lifespan(app: FastAPI):
         ASCIIColors.green("--- Synchronization Complete ---")
     except Exception as e:
         ASCIIColors.error(f"ERROR during startup synchronization: {e}")
+        trace_exception(e)
         if db_for_sync: db_for_sync.rollback()
     finally:
         if db_for_sync: db_for_sync.close()

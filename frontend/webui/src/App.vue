@@ -1,4 +1,4 @@
-<!-- frontend/webui/src/App.vue -->
+<!-- [UPDATE] frontend/webui/src/App.vue -->
 <script setup>
 import { computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
@@ -52,6 +52,7 @@ import ServiceRegistrationModal from './components/modals/ServiceRegistrationMod
 import GeneratePromptModal from './components/modals/GeneratePromptModal.vue';
 import ManageModelsModal from './components/modals/ManageModelsModal.vue';
 import ModelCardModal from './components/modals/ModelCardModal.vue';
+import DiscussionTreeModal from './components/modals/DiscussionTreeModal.vue'; // NEW IMPORT
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -161,6 +162,7 @@ onMounted(async () => {
     <GeneratePromptModal v-if="activeModal === 'generatePrompt'" />
     <ManageModelsModal v-if="activeModal === 'manageModels'" />
     <ModelCardModal v-if="activeModal === 'modelCard'" />
+    <DiscussionTreeModal v-if="activeModal === 'discussionTree'" /> <!-- NEW MODAL COMPONENT -->
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />
