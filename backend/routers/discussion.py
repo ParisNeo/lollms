@@ -1,4 +1,4 @@
-# [UPDATE] backend/routers/discussion.py
+# backend/routers/discussion.py
 
 import threading
 # Standard Library Imports
@@ -172,34 +172,45 @@ def _prune_empty_discussions_task(task: Task, username: str):
     discussions_to_delete = []
 
     task.log(f"Scanning {total_discussions} discussions for user '{username}'.")
-    for i, disc_info in enumerate(all_discs_infos):
-        discussion_id = disc_info['id']
-        try:
-            discussion = get_user_discussion(username, discussion_id)
-            if discussion and len(discussion.messages) <= 1:
-                discussions_to_delete.append(discussion_id)
-        except Exception as e:
-            task.log(f"Could not process discussion {discussion_id} for pruning: {e}", level="WARNING")
-        
-        progress = int(50 * (i + 1) / total_discussions) if total_discussions > 0 else 50
-        task.set_progress(progress)
+    
+    discussion_db_session = dm.get_session()
+    try:
+        for i, disc_info in enumerate(all_discs_infos):
+            if task.cancellation_event.is_set():
+                task.log("Scan for prunable discussions cancelled.", level="WARNING")
+                break
+            discussion_id = disc_info['id']
+            try:
+                message_count = discussion_db_session.query(dm.MessageModel).filter(dm.MessageModel.discussion_id == discussion_id).count()
+                if message_count <= 1:
+                    discussions_to_delete.append(discussion_id)
+            except Exception as e:
+                task.log(f"Could not process discussion {discussion_id} for pruning: {e}", level="WARNING")
+            
+            progress = int(50 * (i + 1) / total_discussions) if total_discussions > 0 else 50
+            task.set_progress(progress)
+    finally:
+        discussion_db_session.close()
+
+    if task.cancellation_event.is_set():
+        return {"message": "Pruning task cancelled during scan.", "deleted_count": 0}
 
     if not discussions_to_delete:
         task.log("No empty discussions found to prune.")
         task.set_progress(100)
         return {"message": "Pruning complete. No empty discussions found.", "deleted_count": 0}
 
-    task.log(f"Found {len(discussions_to_delete)} discussions to delete.")
-    task.set_progress(50)
+    task.log(f"Found {len(discussions_to_delete)} discussions to delete. Starting deletion process...")
+    task.set_progress(50) # Set progress before starting the heavy loop
     deleted_count = 0
+    failed_count = 0
     
     with task.db_session_factory() as db:
         try:
             db_user = db.query(DBUser).filter(DBUser.username == username).one()
             
-            for i, discussion_id in enumerate(discussions_to_delete):
+            for discussion_id in discussions_to_delete:
                 if task.cancellation_event.is_set():
-                    task.log("Pruning task cancelled.", level="WARNING")
                     break
 
                 try:
@@ -212,19 +223,28 @@ def _prune_empty_discussions_task(task: Task, username: str):
                     db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).delete(synchronize_session=False)
 
                     deleted_count += 1
-                    task.log(f"Deleted discussion: {discussion_id}")
                 except Exception as e:
-                    task.log(f"Failed to delete discussion {discussion_id} during prune: {e}", level="ERROR")
+                    print(f"ERROR: Failed to delete discussion {discussion_id} during prune: {e}")
+                    failed_count += 1
                 
-                progress = 50 + int(50 * (i + 1) / len(discussions_to_delete))
-                task.set_progress(progress)
-
+                # REMOVED progress update from here to prevent DB lock
+            
             db.commit()
-            task.log(f"Successfully pruned {deleted_count} discussions.")
-            return {"message": f"Successfully pruned {deleted_count} empty or single-message discussions.", "deleted_count": deleted_count}
+
+            # Set progress to 100% only after the loop and commit are done
+            task.set_progress(100)
+            
+            if deleted_count > 0:
+                task.log(f"Successfully pruned {deleted_count} discussions.")
+            if failed_count > 0:
+                task.log(f"Failed to prune {failed_count} discussions. Check server console for details.", level="ERROR")
+            if task.cancellation_event.is_set():
+                task.log(f"Pruning cancelled after deleting {deleted_count} discussions.", level="WARNING")
+
+            return {"message": f"Pruning complete. Deleted: {deleted_count}, Failed: {failed_count}.", "deleted_count": deleted_count, "failed_count": failed_count}
         except Exception as e:
             db.rollback()
-            task.log(f"A database error occurred during the final commit: {e}", level="CRITICAL")
+            task.log(f"A critical database error occurred during the commit phase: {e}", level="CRITICAL")
             raise e
 
 class TokenizeRequest(BaseModel):

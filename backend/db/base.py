@@ -18,9 +18,9 @@ follows_table = Table('follows', Base.metadata,
 )
 
 class PostVisibility(enum.Enum):
-    PUBLIC = "public"
-    FOLLOWERS = "followers"
-    FRIENDS = "friends"
+    public = "public"
+    followers = "followers"
+    friends = "friends"
 
 class FriendshipStatus(enum.Enum):
     PENDING = "pending"

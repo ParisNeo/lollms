@@ -104,15 +104,7 @@ const openForgotPasswordModal = () => {
               placeholder="Enter your password"
               autocomplete="current-password"
             />
-            <div class="text-sm">
-              <button
-                type="button"
-                @click="openForgotPasswordModal"
-                class="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
-              >
-                Forgot your password?
-              </button>
-            </div>
+
             <button
               type="button"
               @click="togglePasswordVisibility"
@@ -144,7 +136,16 @@ const openForgotPasswordModal = () => {
       </form>
     </template>
     
-    <template #footer>
+    <template #footer class="flex flex-col">
+        <div class="text-sm">
+          <button
+            type="button"
+            @click="openForgotPasswordModal"
+            class="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300"
+          >
+            Forgot your password?
+          </button>
+        </div>      
         <div class="text-center text-sm">
             <p>
                 Don't have an account?

@@ -6,13 +6,13 @@ from backend.db.models.social import PostVisibility as DBPostVisibility
 from .user import AuthorPublic
 
 class PostVisibility(str, Enum):
-    PUBLIC = "public"
-    FOLLOWERS = "followers"
-    FRIENDS = "friends"
+    public = "public"
+    followers = "followers"
+    friends = "friends"
 
 class PostBase(BaseModel):
     content: str = Field(..., max_length=10000)
-    visibility: PostVisibility = PostVisibility.PUBLIC
+    visibility: PostVisibility = PostVisibility.public
 
 class PostCreate(PostBase):
     media: Optional[List[Dict[str, Any]]] = None

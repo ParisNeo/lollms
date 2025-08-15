@@ -2,12 +2,13 @@
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useTasksStore } from '../../stores/tasks';
-import { useUiStore } from '../../stores/ui';
+import { useUiStore } from '../../stores/ui'; // Import useUiStore
 import GenericModal from '../ui/GenericModal.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
-import IconXMark from '../../assets/icons/IconXMark.vue'; // New import for general cancellation icon
+import IconXMark from '../../assets/icons/IconXMark.vue';
+import IconCopy from '../../assets/icons/IconCopy.vue'; // Import IconCopy
 
 const tasksStore = useTasksStore();
 const uiStore = useUiStore();
@@ -15,10 +16,9 @@ const uiStore = useUiStore();
 const props = computed(() => uiStore.modalData('tasksManager'));
 const initialTaskId = computed(() => props.value?.initialTaskId);
 
-const { tasks, isLoadingTasks, activeTasksCount } = storeToRefs(tasksStore); // Destructure activeTasksCount
+const { tasks, isLoadingTasks, activeTasksCount } = storeToRefs(tasksStore);
 
 const selectedTask = ref(null);
-// FIX: Initialize logsContainer with null. It will be bound to the DOM element via template ref.
 const logsContainer = ref(null);
 
 const sortedTasks = computed(() => {
@@ -99,6 +99,16 @@ async function handleCancelAllTasks() {
     if (confirmed) {
         await tasksStore.cancelAllTasks();
     }
+}
+
+function copyLogs() {
+    if (!selectedTask.value || !selectedTask.value.logs) return;
+    const logsContent = selectedTask.value.logs.map(log => {
+        const time = new Date(log.timestamp).toLocaleTimeString();
+        const level = log.level.toUpperCase();
+        return `[${time}] [${level}] ${log.message}`;
+    }).join('\n');
+    uiStore.copyToClipboard(logsContent, 'Logs copied to clipboard!');
 }
 </script>
 
@@ -189,7 +199,12 @@ async function handleCancelAllTasks() {
                                 </div>
                             </div>
                             <div class="flex-grow p-4 border-t dark:border-gray-700 overflow-hidden flex flex-col">
-                                 <h4 class="font-semibold mb-2 flex-shrink-0">Logs</h4>
+                                 <h4 class="font-semibold mb-2 flex-shrink-0 flex items-center justify-between">
+                                    <span>Logs</span>
+                                    <button @click="copyLogs" class="btn btn-secondary btn-sm" title="Copy Logs">
+                                        <IconCopy class="w-4 h-4" />
+                                    </button>
+                                </h4>
                                 <div ref="logsContainer" class="flex-grow bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-y-auto font-mono text-xs">
                                    <p v-for="(log, index) in selectedTask.logs" :key="index" :class="getLogLevelClass(log.level)">
                                        <span class="text-gray-400 mr-2 select-none">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>

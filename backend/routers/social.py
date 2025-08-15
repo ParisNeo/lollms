@@ -106,16 +106,16 @@ def get_post(
     if is_author:
         return post
 
-    if post.visibility == PostVisibility.PUBLIC:
+    if post.visibility == PostVisibility.public:
         return post
     
-    if post.visibility == PostVisibility.FOLLOWERS:
+    if post.visibility == PostVisibility.followers:
         is_following = db.query(exists().where(and_(follows_table.c.follower_id == current_user.id, follows_table.c.following_id == post.author_id))).scalar()
         if not is_following:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You must follow this user to see this post.")
         return post
 
-    if post.visibility == PostVisibility.FRIENDS:
+    if post.visibility == PostVisibility.friends:
         are_friends = db.query(exists().where(
             and_(
                 or_(
@@ -192,10 +192,10 @@ def get_user_posts(
     query = db.query(DBPost).options(joinedload(DBPost.author)).filter(DBPost.author_id == target_user.id)
 
     if target_user.id != current_user.id:
-        visibility_conditions = [DBPost.visibility == PostVisibility.PUBLIC]
+        visibility_conditions = [DBPost.visibility == PostVisibility.public]
         is_following = db.query(exists().where(and_(follows_table.c.follower_id == current_user.id, follows_table.c.following_id == target_user.id))).scalar()
         if is_following:
-            visibility_conditions.append(DBPost.visibility == PostVisibility.FOLLOWERS)
+            visibility_conditions.append(DBPost.visibility == PostVisibility.followers)
         
         are_friends = db.query(exists().where(
             and_(
@@ -207,7 +207,7 @@ def get_user_posts(
             )
         )).scalar()
         if are_friends:
-             visibility_conditions.append(DBPost.visibility == PostVisibility.FRIENDS)
+             visibility_conditions.append(DBPost.visibility == PostVisibility.friends)
         
         query = query.filter(or_(*visibility_conditions))
 
