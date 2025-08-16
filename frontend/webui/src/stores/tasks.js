@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia';
-import { ref, computed, watch } from 'vue';
+import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
+import { useAuthStore } from './auth';
 import useEventBus from '../services/eventBus';
 
 export const useTasksStore = defineStore('tasks', () => {
@@ -11,7 +12,6 @@ export const useTasksStore = defineStore('tasks', () => {
     // --- STATE ---
     const tasks = ref([]);
     const isLoadingTasks = ref(false);
-    let pollInterval = null;
 
     // --- COMPUTED ---
     const activeTasksCount = computed(() => {
@@ -25,57 +25,49 @@ export const useTasksStore = defineStore('tasks', () => {
         return activeTasks.length > 0 ? activeTasks[0] : null;
     });
 
-    const getTaskById = computed(() => {
-        return (taskId) => tasks.value.find(t => t.id === taskId);
-    });
-
     // --- ACTIONS ---
     async function fetchTasks() {
-        const wasLoading = isLoadingTasks.value;
-        if (!wasLoading) {
-            isLoadingTasks.value = true;
-        }
+        isLoadingTasks.value = true;
         try {
-            const oldTasks = new Map(tasks.value.map(t => [t.id, t]));
             const response = await apiClient.get('/api/tasks');
-            const newTasks = response.data;
-            tasks.value = newTasks;
-            
-            newTasks.forEach(newTask => {
-                const oldTask = oldTasks.get(newTask.id);
-                const justFinished = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending') && ['completed', 'failed', 'cancelled'].includes(newTask.status);
-
-                if (justFinished) {
-                    emit('task:completed', newTask);
-                }
-            });
-
+            tasks.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             console.error("Failed to fetch tasks:", error);
+            tasks.value = []; // Ensure it's an array on failure
         } finally {
-            if (!wasLoading) {
-                isLoadingTasks.value = false;
-            }
+            isLoadingTasks.value = false;
         }
     }
 
-    async function fetchTask(taskId) {
-        try {
-            const response = await apiClient.get(`/api/tasks/${taskId}`);
-            addTask(response.data);
-        } catch (error) {
-            console.error(`Failed to fetch task ${taskId}:`, error);
-        }
-    }
+    function addTask(taskData) {
+        const index = tasks.value.findIndex(t => t.id === taskData.id);
+        const oldTask = index !== -1 ? { ...tasks.value[index] } : null;
 
-    function addTask(task) {
-        const index = tasks.value.findIndex(t => t.id === task.id);
-        if (index === -1) {
-            tasks.value.unshift(task);
+        if (index !== -1) {
+            tasks.value[index] = taskData;
         } else {
-            tasks.value[index] = task;
+            tasks.value.unshift(taskData);
+        }
+
+        const justFinished = oldTask && 
+                             (oldTask.status === 'running' || oldTask.status === 'pending') && 
+                             ['completed', 'failed', 'cancelled'].includes(taskData.status);
+
+        if (justFinished) {
+            emit('task:completed', taskData);
         }
     }
+    
+    function handleTasksCleared(data) {
+        const authStore = useAuthStore();
+        const currentUser = authStore.user;
+        if (!currentUser) return;
+
+        if (data.username === null || data.username === currentUser.username) {
+            tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
+        }
+    }
+
 
     async function cancelTask(taskId) {
         try {
@@ -101,27 +93,13 @@ export const useTasksStore = defineStore('tasks', () => {
         try {
             const response = await apiClient.post('/api/tasks/clear-completed');
             uiStore.addNotification(response.data.message || 'Completed tasks cleared.', 'success');
-            await fetchTasks();
+            // No need to fetch, websocket event will handle it
         } catch (error) {
             // Error is handled by global interceptor
         }
     }
-
-    function startPolling() {
-        if (pollInterval) return;
-        fetchTasks();
-        pollInterval = setInterval(fetchTasks, 3000);
-    }
-
-    function stopPolling() {
-        if (pollInterval) {
-            clearInterval(pollInterval);
-            pollInterval = null;
-        }
-    }
-
+    
     function $reset() {
-        stopPolling();
         tasks.value = [];
         isLoadingTasks.value = false;
     }
@@ -131,15 +109,12 @@ export const useTasksStore = defineStore('tasks', () => {
         isLoadingTasks,
         activeTasksCount,
         mostRecentActiveTask,
-        getTaskById,
         fetchTasks,
-        fetchTask,
         addTask,
         cancelTask,
-        cancelAllTasks, // Export the new action
+        cancelAllTasks,
         clearCompletedTasks,
-        startPolling,
-        stopPolling,
+        handleTasksCleared,
         $reset
     };
 });

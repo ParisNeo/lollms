@@ -495,6 +495,17 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             except (OperationalError, IntegrityError) as e:
                 print(f"Warning: Could not create unique index on password_reset_token. Error: {e}")
 
+    # NEW: Migration for posts.visibility case issue
+    if inspector.has_table("posts"):
+        try:
+            # This query will only update rows where visibility is not already lowercase.
+            # It's safe to run multiple times.
+            result = connection.execute(text("UPDATE posts SET visibility = LOWER(visibility) WHERE visibility != LOWER(visibility)"))
+            if result.rowcount > 0:
+                print(f"INFO: Migrated {result.rowcount} post visibility values to lowercase.")
+        except Exception as e:
+            print(f"WARNING: Could not run migration for 'posts.visibility' column. Error: {e}")
+
     if inspector.has_table("mcps"):
         mcp_columns_db = [col['name'] for col in inspector.get_columns('mcps')]
         new_mcp_cols_defs = {

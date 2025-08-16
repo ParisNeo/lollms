@@ -1,4 +1,3 @@
-// frontend/webui/src/stores/auth.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -6,16 +5,116 @@ import { useUiStore } from './ui';
 
 export const useAuthStore = defineStore('auth', () => {
     const user = ref(null);
-    const token = ref(localStorage.getItem('lollms_token') || null);
-    const isAuthenticating = ref(true); // Start as true
+    const token = ref(localStorage.getItem('lollms-token') || null);
+    const isAuthenticating = ref(true);
     const loadingMessage = ref('Initializing...');
     const loadingProgress = ref(0);
     const funFact = ref('');
+    
+    // --- WebSocket State ---
+    const ws = ref(null);
+    const wsConnected = ref(false);
+    let reconnectTimeout = null;
+
+    if (token.value) {
+        apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
+    }
 
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
+    
+    // --- WebSocket Connection Management ---
+    function connectWebSocket() {
+        if (!token.value) {
+            console.log("[WebSocket] Connection skipped: no token.");
+            return;
+        }
+        if (ws.value && (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING)) {
+            console.log("[WebSocket] Connection already open or connecting.");
+            return;
+        }
 
-    // This new function centralizes the data loading process
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = import.meta.env.DEV ? 'localhost:9642' : window.location.host;
+        const wsUrl = `${protocol}//${host}/ws/dm/${token.value}`;
+        
+        console.log(`[WebSocket] Attempting to connect to ${wsUrl}...`);
+        ws.value = new WebSocket(wsUrl);
+
+        ws.value.onopen = () => {
+            wsConnected.value = true;
+            console.log("[WebSocket] Connection established successfully.");
+            clearTimeout(reconnectTimeout);
+        };
+
+        ws.value.onmessage = async (event) => {
+            console.log("[WebSocket] Message received:", event.data);
+            const data = JSON.parse(event.data);
+            // Dynamically import stores inside the handler to avoid circular dependencies
+            const { useSocialStore } = await import('./social');
+            const { useTasksStore } = await import('./tasks');
+            const { useDataStore } = await import('./data');
+            const { useDiscussionsStore } = await import('./discussions'); // Import discussions store
+            const socialStore = useSocialStore();
+            const uiStore = useUiStore();
+            const tasksStore = useTasksStore();
+            const dataStore = useDataStore();
+            const discussionsStore = useDiscussionsStore();
+
+            switch (data.type) {
+                case 'new_dm':
+                    socialStore.handleNewDm(data.data);
+                    break;
+                case 'admin_broadcast':
+                    uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender);
+                    break;
+                case 'task_update':
+                    tasksStore.addTask(data.data);
+                    break;
+                case 'data_zone_processed':
+                    discussionsStore.handleDataZoneUpdate(data.data);
+                    break;
+                case 'tasks_cleared':
+                    tasksStore.handleTasksCleared(data.data);
+                    break;
+                case 'settings_updated':
+                    uiStore.addNotification('Global settings have been updated by an admin.', 'info');
+                    break;
+                case 'bindings_updated':
+                    uiStore.addNotification('LLM bindings have been updated. Refreshing model list.', 'info');
+                    dataStore.fetchAvailableLollmsModels();
+                    break;
+            }
+        };
+
+        ws.value.onclose = (event) => {
+            wsConnected.value = false;
+            console.log(`[WebSocket] Connection closed. Code: ${event.code}, Reason: ${event.reason}`);
+            ws.value = null;
+            if (event.code !== 1000) { // Don't auto-reconnect on normal closure
+                console.log("[WebSocket] Reconnecting in 5 seconds...");
+                reconnectTimeout = setTimeout(connectWebSocket, 5000);
+            }
+        };
+
+        ws.value.onerror = (error) => {
+            wsConnected.value = false;
+            console.error("[WebSocket] Error occurred:", error);
+            ws.value?.close();
+        };
+    }
+
+    function disconnectWebSocket() {
+        console.log("[WebSocket] Disconnecting intentionally.");
+        wsConnected.value = false;
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        if (ws.value) {
+            ws.value.close(1000, "User logout"); // Normal closure
+            ws.value = null;
+        }
+    }
+
+    // --- Original Auth Flow Functions (with WebSocket hooks added) ---
     async function fetchUserAndInitialData() {
         const uiStore = useUiStore();
         try {
@@ -24,7 +123,8 @@ export const useAuthStore = defineStore('auth', () => {
             const response = await apiClient.get('/api/auth/me');
             user.value = response.data;
             
-            // Dynamically import stores to avoid circular dependencies
+            connectWebSocket(); // Connect WebSocket after getting user data
+            
             const { useDiscussionsStore } = await import('./discussions');
             const { useDataStore } = await import('./data');
             const discussionsStore = useDiscussionsStore();
@@ -32,7 +132,6 @@ export const useAuthStore = defineStore('auth', () => {
             
             loadingProgress.value = 40;
             loadingMessage.value = 'Loading user data...';
-            // Use Promise.all to fetch data in parallel for speed
             await Promise.all([
                 discussionsStore.loadDiscussions(),
                 dataStore.loadAllInitialData()
@@ -41,7 +140,6 @@ export const useAuthStore = defineStore('auth', () => {
             loadingProgress.value = 80;
             loadingMessage.value = 'Preparing the interface...';
 
-            // Navigate to the correct initial view
             if (user.value) {
                 let targetView = user.value.first_page;
                 if (user.value.user_ui_level < 2 && targetView === 'feed') {
@@ -64,19 +162,18 @@ export const useAuthStore = defineStore('auth', () => {
             return true;
         } catch (error) {
             console.error("Failed to fetch user and initial data:", error);
-            clearAuthData(); // Clear invalid auth state
+            clearAuthData();
             return false;
         }
     }
 
     async function attemptInitialAuth() {
-        // Skip auth attempt if we are on an SSO route
         if (window.location.pathname.startsWith('/app/')) {
             if(token.value){
-                // try to load user data silently if a token exists
                 try{
                     const response = await apiClient.get('/api/auth/me');
                     user.value = response.data;
+                    connectWebSocket(); // Also connect for SSO users
                 } catch(e){
                     clearAuthData();
                 }
@@ -85,7 +182,6 @@ export const useAuthStore = defineStore('auth', () => {
             return;
         }
 
-        // Skip auth for reset password view, which is a guest route
         if (window.location.pathname.startsWith('/reset-password')) {
             isAuthenticating.value = false;
             return;
@@ -111,9 +207,9 @@ export const useAuthStore = defineStore('auth', () => {
             const adminStatusResponse = await apiClient.get('/api/auth/admin_status');
             if (!adminStatusResponse.data.admin_exists) {
                 loadingMessage.value = 'First run setup...';
-                isAuthenticating.value = false; // Set to false so App.vue renders modals directly
+                isAuthenticating.value = false;
                 uiStore.openModal('firstAdminSetup'); 
-                return; // Stop further execution
+                return;
             } else if (token.value) {
                 const success = await fetchUserAndInitialData();
                 if (!success) {
@@ -126,7 +222,7 @@ export const useAuthStore = defineStore('auth', () => {
             console.error("Failed to check admin status or during initial auth:", error);
             uiStore.addNotification('Failed to connect to server. Please try again later.', 'error');
             clearAuthData();
-            uiStore.openModal('login'); // Fallback to login
+            uiStore.openModal('login');
         } finally {
             if (isAuthenticating.value) { 
                 isAuthenticating.value = false;
@@ -143,15 +239,16 @@ export const useAuthStore = defineStore('auth', () => {
             const response = await apiClient.post('/api/auth/token', formData);
             
             token.value = response.data.access_token;
-            localStorage.setItem('lollms_token', token.value);
+            localStorage.setItem('lollms-token', token.value);
+            apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
 
-            // Hide the loading screen and modals before fetching all data
-            uiStore.closeModal(); // Close any active modal (login, firstAdminSetup, etc.)
-            isAuthenticating.value = true; // Show loading screen for data fetch
+
+            uiStore.closeModal();
+            isAuthenticating.value = true;
 
             const success = await fetchUserAndInitialData();
 
-            isAuthenticating.value = false; // Hide loading screen after data fetch
+            isAuthenticating.value = false;
 
             if (success) {
                 uiStore.addNotification('Login successful!', 'success');
@@ -162,7 +259,7 @@ export const useAuthStore = defineStore('auth', () => {
                 throw new Error("Authentication succeeded but failed to fetch user data.");
             }
         } catch (error) {
-            isAuthenticating.value = false; // Hide loading screen on error
+            isAuthenticating.value = false;
             const detail = error.response?.data?.detail || "An unknown error occurred.";
             if (detail.includes("account is inactive")) {
                  uiStore.addNotification(detail, 'warning');
@@ -172,10 +269,47 @@ export const useAuthStore = defineStore('auth', () => {
             else {
                  uiStore.addNotification('Login failed: Incorrect username or password.', 'error');
             }
-            throw error; // Re-throw to inform the component
+            throw error;
         }
     }
 
+    function clearAuthData() {
+        user.value = null;
+        token.value = null;
+        localStorage.removeItem('lollms-token');
+        apiClient.defaults.headers.common['Authorization'] = null; // Clear header
+        disconnectWebSocket(); // Disconnect WebSocket on clear
+    }
+
+    async function logout() {
+        const uiStore = useUiStore();
+        if (!isAuthenticated.value) { return; }
+        const localToken = token.value;
+
+        const { useDiscussionsStore } = await import('./discussions');
+        const { useDataStore } = await import('./data');
+        const { useSocialStore } = await import('./social');
+        const { useTasksStore } = await import('./tasks');
+
+        await apiClient.post('/api/auth/logout').catch(error => {
+            console.warn("Backend logout call failed, which can be normal after token removal.", error);
+        });
+        
+        clearAuthData(); // This will disconnect WebSocket
+        
+        useDiscussionsStore().$reset();
+        useDataStore().$reset();
+        useSocialStore().$reset();
+        useTasksStore().$reset();
+        
+        uiStore.closeModal();
+        uiStore.addNotification('You have been logged out.', 'info');
+        if (!window.location.pathname.startsWith('/app/')) {
+            uiStore.openModal('login');
+        }
+    }
+    
+    // --- Other functions remain the same as your original file ---
     async function ssoLoginWithPassword(clientId, username, password) {
         await login(username, password);
         return await ssoAuthorizeApplication(clientId);
@@ -199,8 +333,6 @@ export const useAuthStore = defineStore('auth', () => {
 
             if (!isAdminExists) {
                 await apiClient.post('/api/auth/create_first_admin', registrationData);
-                // After successful creation, log the new admin in.
-                // The login function will handle closing the modal and showing "What's Next".
                 await login(registrationData.username, registrationData.password);
             } else {
                 const response = await apiClient.post('/api/auth/register', registrationData);
@@ -214,38 +346,7 @@ export const useAuthStore = defineStore('auth', () => {
                 uiStore.openModal('login');
             }
         } catch (error) {
-            // Re-throw to be handled by the component.
             throw error;
-        }
-    }
-
-    function clearAuthData() {
-        user.value = null;
-        token.value = null;
-        localStorage.removeItem('lollms_token');
-    }
-
-    async function logout() {
-        const uiStore = useUiStore();
-        if (!isAuthenticated.value) { return; }
-        const localToken = token.value;
-
-        const { useDiscussionsStore } = await import('./discussions');
-        const { useDataStore } = await import('./data');
-        clearAuthData();
-        useDiscussionsStore().$reset();
-        useDataStore().$reset();
-        
-        uiStore.closeModal();
-        uiStore.addNotification('You have been logged out.', 'info');
-        if (!window.location.pathname.startsWith('/app/')) {
-            uiStore.openModal('login');
-        }
-
-        if (localToken) {
-            apiClient.post('/api/auth/logout').catch(error => {
-                console.warn("Backend logout call failed, which can be normal after token removal.", error);
-            });
         }
     }
 
@@ -341,7 +442,6 @@ export const useAuthStore = defineStore('auth', () => {
             if (user.value) {
                 user.value.scratchpad = content;
             }
-            // No notification on success for scratchpad to avoid being noisy.
         } catch (error) {
             useUiStore().addNotification('Failed to save scratchpad.', 'error');
             throw error;
@@ -351,7 +451,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     return {
         user, token, isAuthenticating, isAuthenticated, isAdmin,
-        loadingMessage, loadingProgress, funFact,
+        loadingMessage, loadingProgress, funFact, wsConnected,
         attemptInitialAuth, login, register, logout,
         updateUserProfile, updateUserPreferences, changePassword,
         ssoLoginWithPassword, ssoAuthorizeApplication,

@@ -98,9 +98,9 @@ export const useUiStore = defineStore('ui', () => {
         }
     }
 
-    function addNotification(message, type = 'info', duration = 3000) {
+    function addNotification(message, type = 'info', duration = 3000, persistent = false, sender = null) {
         const id = Date.now() + Math.random();
-        notifications.value.push({ id, message, type, duration });
+        notifications.value.push({ id, message, type, duration, persistent, sender });
     }
 
     function removeNotification(id) {

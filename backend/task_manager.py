@@ -1,12 +1,46 @@
+# backend/task_manager.py
 import uuid
 import datetime
 import threading
 import traceback
 from typing import List, Dict, Any, Callable, Optional
 from sqlalchemy.orm import Session, joinedload
-
 from backend.db.models.db_task import DBTask
 from backend.db.base import TaskStatus
+from backend.ws_manager import manager
+from backend.models.task import TaskInfo
+from backend.db.models.user import User as DBUser
+
+def _serialize_task(db_task: DBTask) -> Optional[dict]:
+    """
+    Serializes a SQLAlchemy DBTask object into a dictionary suitable for JSON transport.
+    Ensures that the owner relationship is loaded.
+    """
+    if not db_task:
+        return None
+    
+    task_info = {
+        "id": db_task.id,
+        "name": db_task.name,
+        "description": db_task.description,
+        "status": db_task.status,
+        "progress": db_task.progress,
+        "logs": db_task.logs or [],
+        "result": db_task.result,
+        "error": db_task.error,
+        "created_at": db_task.created_at,
+        "started_at": db_task.started_at,
+        "completed_at": db_task.completed_at,
+        "file_name": db_task.file_name,
+        "total_files": db_task.total_files,
+        "owner_username": db_task.owner.username if db_task.owner else "System"
+    }
+    for key in ['created_at', 'started_at', 'completed_at']:
+        if task_info[key] and isinstance(task_info[key], datetime.datetime):
+            task_info[key] = task_info[key].isoformat()
+
+    return task_info
+
 
 class Task:
     """
@@ -23,13 +57,55 @@ class Task:
         self.owner_username = owner_username
         self.db_session_factory = db_session_factory
         self.cancellation_event = threading.Event()
-        self.process = None # To hold a potential subprocess object for cancellation
+        self.process = None
+
+    def _broadcast_update(self, db_task: DBTask):
+        """Sends a WebSocket update for the task."""
+        if not db_task:
+            return
+            
+        task_data = _serialize_task(db_task)
+        payload = {"type": "task_update", "data": task_data}
+        
+        # Always send to the specific user if they are the owner
+        if db_task.owner_user_id:
+            manager.send_personal_message_sync(payload, db_task.owner_user_id)
+        
+        # Only broadcast to all admins if there's an owner OR if any admins are actually connected.
+        # This prevents spamming logs on startup for system tasks.
+        if db_task.owner_user_id or len(manager.admin_user_ids) > 0:
+            manager.broadcast_to_admins_sync(payload)
+
+        # --- NEW: Send specific event for data zone tasks on completion ---
+        if db_task.status == TaskStatus.COMPLETED and db_task.result:
+            if isinstance(db_task.result, dict) and "zone" in db_task.result:
+                zone_info = db_task.result
+                if zone_info.get("zone") in ["discussion", "memory"]:
+                    custom_payload = {
+                        "type": "data_zone_processed",
+                        "data": {
+                            "discussion_id": zone_info.get("discussion_id"),
+                            "zone": zone_info.get("zone"),
+                            "new_content": zone_info.get("new_content")
+                        }
+                    }
+                    if db_task.owner_user_id:
+                        manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
+                    manager.broadcast_to_admins_sync(custom_payload)
 
     def _update_db(self, **kwargs):
         """Safely updates the task's record in the database."""
         with self.db_session_factory() as db:
-            db.query(DBTask).filter(DBTask.id == self.id).update(kwargs)
+            task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
+            if not task_record:
+                return
+            
+            for key, value in kwargs.items():
+                setattr(task_record, key, value)
+            
             db.commit()
+            db.refresh(task_record, ['owner'])
+            self._broadcast_update(task_record)
 
     def log(self, message: str, level: str = "INFO"):
         """Adds a log entry to the task's record."""
@@ -39,13 +115,13 @@ class Task:
             "level": level
         }
         with self.db_session_factory() as db:
-            task = db.query(DBTask).filter(DBTask.id == self.id).first()
-            if task:
-                # By creating a new list with the appended log entry, we ensure
-                # SQLAlchemy's mutation tracking detects the change and persists it.
-                # In-place appends to the existing list might not be detected.
-                task.logs = (task.logs or []) + [log_entry]
+            task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
+            if task_record:
+                task_record.logs = (task_record.logs or []) + [log_entry]
                 db.commit()
+                db.refresh(task_record, ['owner'])
+                self._broadcast_update(task_record)
+
 
     def set_progress(self, value: int):
         """Sets the task's progress percentage."""
@@ -120,8 +196,6 @@ class TaskManager:
         if not self.db_session_factory:
             raise RuntimeError("TaskManager not initialized. Call init_app first.")
             
-        from backend.db.models.user import User as DBUser
-
         with self.db_session_factory() as db:
             owner_id = None
             if owner_username:
@@ -136,9 +210,19 @@ class TaskManager:
             )
             db.add(new_db_task)
             db.commit()
-            # Eagerly load owner relationship and detach from session for thread safety
             db.refresh(new_db_task, ['owner'])
+            
+            task_data = _serialize_task(new_db_task)
+            payload = {"type": "task_update", "data": task_data}
+            
+            if new_db_task.owner_user_id:
+                manager.send_personal_message_sync(payload, new_db_task.owner_user_id)
+            
+            if new_db_task.owner_user_id or len(manager.admin_user_ids) > 0:
+                manager.broadcast_to_admins_sync(payload)
+
             db.expunge(new_db_task)
+
 
         task_instance = Task(id=new_db_task.id, name=name, description=description, target=target, args=args, kwargs=kwargs, owner_username=owner_username, db_session_factory=self.db_session_factory)
         
@@ -155,7 +239,6 @@ class TaskManager:
         Cancels a task. If the task is actively running, it signals the thread.
         If the task is a "zombie" (in DB but not running), it updates the DB directly.
         """
-        # First, check for an active, running task
         with self.lock:
             task_instance = self.active_tasks.get(task_id)
         
@@ -163,9 +246,8 @@ class TaskManager:
             task_instance.cancel()
             return True
 
-        # If not active, it might be a zombie task from a previous run
         with self.db_session_factory() as db:
-            db_task = db.query(DBTask).filter(DBTask.id == task_id).first()
+            db_task = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == task_id).first()
             if db_task and db_task.status in [TaskStatus.PENDING, TaskStatus.RUNNING]:
                 db_task.status = TaskStatus.CANCELLED
                 db_task.completed_at = datetime.datetime.now(datetime.timezone.utc)
@@ -180,6 +262,14 @@ class TaskManager:
                 db_task.logs = current_logs
                 
                 db.commit()
+                db.refresh(db_task, ['owner'])
+
+                task_data = _serialize_task(db_task)
+                payload = {"type": "task_update", "data": task_data}
+                if db_task.owner_user_id:
+                    manager.send_personal_message_sync(payload, db_task.owner_user_id)
+                manager.broadcast_to_admins_sync(payload)
+                
                 return True
 
         return False
@@ -197,7 +287,6 @@ class TaskManager:
     def get_tasks_for_user(self, username: str) -> List[DBTask]:
         """Retrieves all tasks for a specific user."""
         with self.db_session_factory() as db:
-            from backend.db.models.user import User as DBUser
             return db.query(DBTask).options(joinedload(DBTask.owner)).join(DBUser, DBTask.owner_user_id == DBUser.id).filter(DBUser.username == username).order_by(DBTask.created_at.desc()).all()
 
     def clear_completed_tasks(self, username: Optional[str] = None):
@@ -205,10 +294,17 @@ class TaskManager:
         with self.db_session_factory() as db:
             query = db.query(DBTask).filter(DBTask.status.in_([TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]))
             if username:
-                from backend.db.models.user import User as DBUser
                 query = query.join(DBUser, DBTask.owner_user_id == DBUser.id).filter(DBUser.username == username)
             
             query.delete(synchronize_session=False)
             db.commit()
+            
+            payload = {"type": "tasks_cleared", "data": {"username": username}}
+            if username:
+                 user = db.query(DBUser).filter(DBUser.username == username).first()
+                 if user:
+                    manager.send_personal_message_sync(payload, user.id)
+            else:
+                 manager.broadcast_sync(payload)
 
 task_manager = TaskManager()

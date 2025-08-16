@@ -69,10 +69,27 @@ try:
 except ImportError:
     safe_store = None
 
+try:
+    from scrapemaster import ScrapeMaster
+except ImportError:
+    try:
+        import pipmaster as pm
+        print("ScrapeMaster not installed. Installing it for you.")
+        pm.install("ScrapeMaster")
+        from scrapemaster import ScrapeMaster
+    except Exception as ex:
+        traceback.print_exc()
+        print("Couldn't install ScrapeMaster. Please install it manually (`pip install ScrapeMaster`)")
+        ScrapeMaster = None
+
+
 # Define the lock at the module level
 message_grade_lock = threading.Lock()
 
 discussion_router = APIRouter(prefix="/api/discussions", tags=["Discussions"])
+
+class UrlImportRequest(BaseModel):
+    url: str
 
 def _to_task_info(db_task: DBTask) -> TaskInfo:
     """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
@@ -88,6 +105,56 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
     )
 
 # --- Task Functions ---
+def _import_url_task(task: Task, username: str, discussion_id: str, url: str):
+    if ScrapeMaster is None:
+        raise ImportError("ScrapeMaster library is not installed and could not be installed automatically.")
+    
+    task.log("Starting URL import task...")
+    task.set_progress(5)
+    
+    try:
+        task.log(f"Scraping URL: {url}")
+        scraper = ScrapeMaster(url)
+        markdown_content = scraper.scrape_markdown()
+        task.set_progress(70)
+
+        if not markdown_content or not markdown_content.strip():
+            task.log("No main content could be extracted from the URL.", "WARNING")
+            raise ValueError("No main content found at the provided URL.")
+
+        task.log(f"Successfully scraped {len(markdown_content)} characters.")
+        discussion = get_user_discussion(username, discussion_id)
+        if not discussion:
+            raise ValueError("Discussion not found after scraping.")
+
+        current_content = discussion.discussion_data_zone or ""
+
+        # Prepare the new document block from the scraped content
+        document_block = f"--- Document: {url} ---\n{markdown_content.strip()}\n--- End Document: {url} ---\n"
+
+        # Append the new block to the existing content
+        if current_content.strip():
+            # If there's existing content, ensure there's a clear separation
+            if not current_content.endswith('\n\n'):
+                if not current_content.endswith('\n'):
+                    current_content += '\n'
+                current_content += '\n'
+            new_content = current_content + document_block
+        else:
+            # If the data zone is empty, just add the new block
+            new_content = document_block
+
+        discussion.discussion_data_zone = new_content
+        discussion.commit()
+        task.set_progress(100)
+        
+        task.log("Content appended to data zone and saved.")
+        return {"discussion_id": discussion_id, "new_content": new_content, "zone": "discussion"}
+    except Exception as e:
+        task.log(f"Failed to import from URL: {e}", "ERROR")
+        trace_exception(e)
+        raise e
+
 def _process_data_zone_task(task: Task, username: str, discussion_id: str, contextual_prompt: Optional[str]):
     task.log("Starting data zone processing task...")
     discussion = get_user_discussion(username, discussion_id)
@@ -550,6 +617,25 @@ def update_discussion_data_zone(
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to update Data Zone: {e}")
+
+@discussion_router.post("/{discussion_id}/import_url", response_model=TaskInfo, status_code=202)
+def import_from_url(
+    discussion_id: str,
+    request: UrlImportRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+
+    db_task = task_manager.submit_task(
+        name=f"Importing URL for: {discussion.metadata.get('title', 'Untitled')}",
+        target=_import_url_task,
+        args=(current_user.username, discussion_id, request.url),
+        description=f"Scraping content from: {request.url}",
+        owner_username=current_user.username
+    )
+    return _to_task_info(db_task)
 
 @discussion_router.post("/{discussion_id}/process_data_zone", response_model=TaskInfo, status_code=202)
 def summarize_discussion_data_zone(

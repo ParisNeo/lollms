@@ -1,13 +1,10 @@
-// [UPDATE] frontend/webui/src/stores/discussions.js
-
-import { defineStore } from 'pinia';
-import { ref, computed, onMounted } from 'vue';
+import { defineStore, storeToRefs } from 'pinia';
+import { ref, computed, watch, nextTick } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
 import { useDataStore } from './data';
 import { useTasksStore } from './tasks';
-import useEventBus from '../services/eventBus';
 
 let activeGenerationAbortController = null;
 
@@ -17,18 +14,15 @@ function processSingleMessage(msg) {
     const dataStore = useDataStore();
     const username = authStore.user?.username?.toLowerCase();
 
-    // Extract model/binding from metadata if they don't exist at the top level
     const binding_name = msg.binding_name || msg.metadata?.binding;
     const model_name = msg.model_name || msg.metadata?.model;
     
-    // Determine if the model used supports vision
     const modelUsedId = `${binding_name}/${model_name}`;
     const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelUsedId);
-    const visionSupport = modelInfo?.alias?.has_vision ?? true; // Default to true if no alias info
+    const visionSupport = modelInfo?.alias?.has_vision ?? true;
 
     const processedMsg = {
         ...msg,
-        // Ensure binding_name and model_name are on the final object
         binding_name,
         model_name,
         sender_type: msg.sender_type || (msg.sender?.toLowerCase() === username ? 'user' : 'assistant'),
@@ -36,12 +30,11 @@ function processSingleMessage(msg) {
         sources: msg.sources || (msg.metadata?.sources) || [],
         image_references: msg.image_references || [],
         active_images: msg.active_images || [],
-        vision_support: visionSupport, // Add vision support flag
-        branches: msg.branches || null, // NEW: Add branches property
+        vision_support: visionSupport,
+        branches: msg.branches || null,
     };
     return processedMsg;
 }
-
 
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -56,7 +49,7 @@ function fileToBase64(file) {
 export const useDiscussionsStore = defineStore('discussions', () => {
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
-    const { on, emit } = useEventBus();
+    const { tasks } = storeToRefs(tasksStore);
 
     const discussions = ref({});
     const currentDiscussionId = ref(null);
@@ -64,9 +57,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const generationInProgress = ref(false);
     const titleGenerationInProgressId = ref(null);
     const activeDiscussionContextStatus = ref(null);
-    const activeAiTasks = ref({}); // Tracks running AI tasks per discussion: { [discussionId]: { type: 'summarize' | 'memorize', taskId: '...' } }
+    const activeAiTasks = ref({});
     
-    // MODIFIED: From single value to an object for individual tracking
     const liveDataZoneTokens = ref({
         discussion: 0,
         user: 0,
@@ -74,7 +66,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         memory: 0
     });
 
-    // MODIFIED: Computed property now sums up the live tokens
     const dataZonesTokenCount = computed(() => {
         return liveDataZoneTokens.value.discussion + 
                liveDataZoneTokens.value.user + 
@@ -82,7 +73,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                liveDataZoneTokens.value.memory;
     });
 
-    // NEW: Computed property to sum data zone tokens from the official context status
     const dataZonesTokensFromContext = computed(() => {
         if (!activeDiscussionContextStatus.value?.zones?.system_context?.breakdown || typeof activeDiscussionContextStatus.value.zones.system_context.breakdown !== 'object') {
             return 0;
@@ -91,7 +81,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const zoneKeys = ['memory', 'user_data_zone', 'discussion_data_zone', 'personality_data_zone', 'pruning_summary'];
         return zoneKeys.reduce((total, key) => total + (breakdown[key]?.tokens || 0), 0);
     });
-
 
     const sortedDiscussions = computed(() => {
         return Object.values(discussions.value).sort((a, b) => {
@@ -120,11 +109,25 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const authStore = useAuthStore();
         const dataStore = useDataStore();
         const selectedModelId = authStore.user?.lollms_model_name;
-        if (!selectedModelId) return true; // Default to true if no model is selected
+        if (!selectedModelId) return true;
         const model = dataStore.availableLollmsModels.find(m => m.id === selectedModelId);
-        // Default to true if alias info is missing, to avoid disabling features unnecessarily
         return model?.alias?.has_vision ?? true;
     });
+
+    watch(tasks, (currentTasks) => {
+        const activeIds = Object.keys(activeAiTasks.value);
+        if (activeIds.length === 0) return;
+
+        for (const discussionId of activeIds) {
+            const trackedTask = activeAiTasks.value[discussionId];
+            if (trackedTask) {
+                const updatedTask = currentTasks.find(t => t.id === trackedTask.taskId);
+                if (updatedTask && ['completed', 'failed', 'cancelled'].includes(updatedTask.status)) {
+                    _clearActiveAiTask(discussionId);
+                }
+            }
+        }
+    }, { deep: true });
 
 
     function _clearActiveAiTask(discussionId) {
@@ -135,45 +138,29 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    function handleTaskCompletion(task) {
-        if (task && task.name.startsWith('Prune empty discussions')) {
-            loadDiscussions();
-            const deletedCount = task.result?.deleted_count || 0;
-            uiStore.addNotification(`Pruning complete. ${deletedCount} discussion(s) removed.`, 'success');
-            return;
+    function handleDataZoneUpdate({ discussion_id, zone, new_content }) {
+        if (zone === 'discussion') {
+            const discussion = discussions.value[discussion_id];
+            if (discussion) {
+                discussion.discussion_data_zone = new_content;
+                uiStore.addNotification('Data zone has been updated.', 'success');
+            }
+        } else if (zone === 'memory') {
+            const authStore = useAuthStore();
+            if (authStore.user) {
+                authStore.user.memory = new_content;
+            }
+            const discussion = discussions.value[discussion_id];
+            if (discussion) {
+                discussion.memory = new_content;
+            }
+            uiStore.addNotification('Long-term memory has been updated.', 'success');
         }
         
-        let discussionIdForTask = null;
-        for (const [discussionId, activeTaskInfo] of Object.entries(activeAiTasks.value)) {
-            if (activeTaskInfo && activeTaskInfo.taskId === task.id) {
-                discussionIdForTask = discussionId;
-                break;
-            }
-        }
-
-        if (!discussionIdForTask) return;
-        
-        // The component (`ChatView`) is now responsible for triggering the data refresh.
-        // This handler's only job is to show a final notification.
-        if (task.status === 'completed') {
-            const { zone } = task.result || {};
-            if (zone === 'discussion') {
-                uiStore.addNotification('Data zone processed successfully.', 'success');
-            } else if (zone === 'memory') {
-                uiStore.addNotification('Memorization complete.', 'success');
-            } else {
-                uiStore.addNotification(`Task '${task.name}' completed.`, 'success');
-            }
-        } else if (task.status === 'failed') {
-            uiStore.addNotification(`Task '${task.name}' failed.`, 'error');
-        } else if (task.status === 'cancelled') {
-            uiStore.addNotification(`Task '${task.name}' was cancelled.`, 'warning');
+        if (discussion_id === currentDiscussionId.value) {
+            fetchContextStatus(discussion_id);
         }
     }
-
-    onMounted(() => {
-        on('task:completed', handleTaskCompletion);
-    });
 
     function processMessages(rawMessages) {
         if (!Array.isArray(rawMessages)) return [];
@@ -185,16 +172,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.get(`/api/discussions/${currentDiscussionId.value}`);
             messages.value = processMessages(response.data);
-            emit('discussion:refreshed'); // Emit event for scrolling
+            const { emit } = useEventBus();
+            emit('discussion:refreshed');
             
-            // Also refresh context status
             await fetchContextStatus(currentDiscussionId.value);
         } catch (error) {
             useUiStore().addNotification('Could not refresh discussion after generation.', 'error');
         }
     }
 
-    function setUserDataZoneContent(discussionId, content) {
+    function setDiscussionDataZoneContent(discussionId, content) {
         const discussion = discussions.value[discussionId];
         if (discussion) {
             discussion.discussion_data_zone = content;
@@ -208,7 +195,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    // NEW: Action to update live token counts
     function updateLiveTokenCount(zone, count) {
         if (liveDataZoneTokens.value.hasOwnProperty(zone)) {
             liveDataZoneTokens.value[zone] = count;
@@ -245,7 +231,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const response = await apiClient.get(`/api/discussions/${discussionId}/context_status`);
             activeDiscussionContextStatus.value = response.data;
             
-            // NEW: Sync live token counts with the official backend values
             const breakdown = response.data?.zones?.system_context?.breakdown || {};
             liveDataZoneTokens.value.discussion = breakdown.discussion_data_zone?.tokens || 0;
             liveDataZoneTokens.value.user = breakdown.user_data_zone?.tokens || 0;
@@ -299,28 +284,36 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             return;
         }
         if (!discussions.value[discussionId]) return;
+
+        const formData = new FormData();
+        if (prompt) {
+            formData.append('prompt', prompt);
+        }
+
+        // Set processing state immediately
+        activeAiTasks.value[discussionId] = { type: 'summarize', taskId: null };
+        
+        // Wait for the UI to update and show the spinner
+        await nextTick();
+
         try {
-            const formData = new FormData();
-            if (prompt) {
-                formData.append('prompt', prompt);
-            }
             const response = await apiClient.post(`/api/discussions/${discussionId}/process_data_zone`, formData);
             const task = response.data;
             
             uiStore.closeModal('summaryPromptModal');
             
-            activeAiTasks.value[discussionId] = { type: 'summarize', taskId: task.id };
+            // Update the task ID for tracking
+            if (activeAiTasks.value[discussionId]) {
+                activeAiTasks.value[discussionId].taskId = task.id;
+            }
             
             tasksStore.addTask(task);
             
             uiStore.addNotification(`Content processing started. This is a long process that runs in the background. Check the Task Manager for progress.`, 'info', { duration: 10000 });
             
         } catch (error) {
-            // Handled by interceptor
-            if (activeAiTasks.value[discussionId]) {
-                const { [discussionId]: _, ...rest } = activeAiTasks.value;
-                activeAiTasks.value = rest;
-            }
+            // Handled by interceptor, clear the processing state
+             _clearActiveAiTask(discussionId);
         }
     }
 
@@ -330,14 +323,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             return;
         }
         if (!discussions.value[discussionId]) return;
+        
+        activeAiTasks.value[discussionId] = { type: 'memorize', taskId: null };
+        await nextTick();
+
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/memorize`);
             const task = response.data;
-            activeAiTasks.value[discussionId] = { type: 'memorize', taskId: task.id };
+            if (activeAiTasks.value[discussionId]) {
+                activeAiTasks.value[discussionId].taskId = task.id;
+            }
             tasksStore.addTask(task);
             uiStore.addNotification('Memorization task started.', 'info');
         } catch (error) {
-            // Handled by interceptor
+            _clearActiveAiTask(discussionId);
         }
     }
 
@@ -360,17 +359,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch (error) { console.error("Failed to load discussions:", error); }
     }
 
-    async function selectDiscussion(id, branchIdToLoad = null) { // MODIFIED: Added branchIdToLoad
+    async function selectDiscussion(id, branchIdToLoad = null) {
         if (!id || generationInProgress.value) return;
         const uiStore = useUiStore();
         const authStore = useAuthStore();
         
-        // No early return based on currentDiscussionId.value === id,
-        // as we might need to refresh the messages based on branchIdToLoad
         currentDiscussionId.value = id;
-        messages.value = []; // Always clear messages for a fresh load of the discussion state
+        messages.value = []; 
         
-        // NEW: Reset live token counts on discussion switch
         liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
         
         if (!discussions.value[id]) {
@@ -379,10 +375,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
         uiStore.setMainView('chat');
         try {
-            // MODIFIED: Pass branch_id explicitly if provided
             const params = branchIdToLoad ? { branch_id: branchIdToLoad } : {};
             const response = await apiClient.get(`/api/discussions/${id}`, { params });
-            console.log(`[DiscussionsStore] Full message list for discussion ${id}:`, JSON.parse(JSON.stringify(response.data)));
             messages.value = processMessages(response.data);
             
             await Promise.all([
@@ -504,7 +498,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         disc.title = newTitle;
         try {
             await apiClient.put(`/api/discussions/${discussionId}/title`, { title: newTitle });
-            // Re-fetch the whole discussion info to ensure title is updated everywhere
             const response = await apiClient.get(`/api/discussions?id=${discussionId}`); // Fetch single discussion info
             const updatedDisc = response.data.find(d => d.id === discussionId);
             if (updatedDisc) {
@@ -527,6 +520,19 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             useUiStore().addNotification('Tools updated.', 'success');
         } catch (error) {
             if (discussions.value[discussionId]) disc.active_tools = originalTools;
+        }
+    }
+    async function importUrlToDataZone(discussionId, url) {
+        if (!discussions.value[discussionId]) return null;
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/import_url`, { url });
+            const task = response.data;
+            tasksStore.addTask(task);
+            uiStore.addNotification(`URL import started. Check the Task Manager for progress.`, 'info', { duration: 7000 });
+            return task.id;
+        } catch (error) {
+            console.error("Failed to start URL import task:", error);
+            return null;
         }
     }
 
@@ -858,18 +864,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     async function switchBranch(newBranchMessageId) {
         if (!activeDiscussion.value || generationInProgress.value) return;
         try {
-            // Step 1: Update the active_branch_id in the database
             await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: newBranchMessageId });
-            
-            // Step 2: Reload the discussion messages, explicitly requesting the new branch
-            await selectDiscussion(currentDiscussionId.value, newBranchMessageId); // MODIFIED: Pass newBranchMessageId here
-            
+            await selectDiscussion(currentDiscussionId.value, newBranchMessageId); 
             uiStore.addNotification(`Switched branch.`, 'info');
         } catch (error) {
             console.error("Failed to switch branch:", error);
             uiStore.addNotification('Failed to switch branch. Please try again.', 'error');
-            // Re-select current discussion to revert UI state if API fails
-            await selectDiscussion(currentDiscussionId.value); // Revert to whatever is the active branch after failure
+            await selectDiscussion(currentDiscussionId.value);
         }
     }
 
@@ -995,7 +996,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch (error) { console.error("Import failed:", error); }
     }
     
-    // NEW ACTIONS for discussion-level images
     async function uploadDiscussionImage(file) {
         if (!currentDiscussionId.value) return;
         try {
@@ -1046,11 +1046,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch(error) { /* Handled by interceptor */ }
     }
 
-    // NEW: Fetch all messages for a discussion tree
     async function fetchDiscussionTree(discussionId) {
         try {
             const response = await apiClient.get(`/api/discussions/${discussionId}/full_tree`);
-            return response.data; // Return raw message list
+            return response.data;
         } catch (error) {
             useUiStore().addNotification('Failed to fetch discussion tree.', 'error');
             console.error("Failed to fetch discussion tree:", error);
@@ -1074,7 +1073,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         titleGenerationInProgressId, activeDiscussion, activeMessages, activeDiscussionContainsCode,
         activeDiscussionContextStatus, activePersonality, activeAiTasks,
         sortedDiscussions, dataZonesTokenCount, liveDataZoneTokens, 
-        dataZonesTokensFromContext, // EXPORT NEW COMPUTED
+        dataZonesTokensFromContext,
         currentModelVisionSupport,
         loadDiscussions, selectDiscussion, createNewDiscussion,
         deleteDiscussion, pruneDiscussions, generateAutoTitle, toggleStarDiscussion,
@@ -1086,12 +1085,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         summarizeDiscussionDataZone, memorizeLTM,
         updateLiveTokenCount,
         refreshDataZones,
-        setUserDataZoneContent,
+        setDiscussionDataZoneContent,
         _clearActiveAiTask,
         addManualMessage,
         saveManualMessage,
         toggleImageActivation,
         uploadDiscussionImage, toggleDiscussionImageActivation, deleteDiscussionImage,
-        fetchDiscussionTree // NEW EXPORT
+        fetchDiscussionTree,
+        handleDataZoneUpdate,
+        importUrlToDataZone
     };
 });

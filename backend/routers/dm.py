@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, desc
+from sqlalchemy import or_, desc, func
 from werkzeug.utils import secure_filename
 
 from backend.db import get_db
@@ -59,18 +59,18 @@ async def send_direct_message(
     db.commit()
     db.refresh(new_message, ['sender', 'receiver'])
 
-    response_data = DirectMessagePublic(
-        id=new_message.id,
-        content=new_message.content,
-        sender_id=new_message.sender_id,
-        receiver_id=new_message.receiver_id,
-        sent_at=new_message.sent_at,
-        read_at=new_message.read_at,
-        sender_username=new_message.sender.username,
-        receiver_username=new_message.receiver.username
-    )
+    response_data = DirectMessagePublic.from_orm(new_message)
     
-    await manager.send_personal_message(message_data=response_data.model_dump(mode="json"), user_id=receiver.id)
+    message_payload = {
+        "type": "new_dm",
+        "data": response_data.model_dump(mode="json")
+    }
+    
+    # Send to recipient
+    await manager.send_personal_message(message_payload, receiver.id)
+    # Send to sender for multi-device sync
+    await manager.send_personal_message(message_payload, current_user.id)
+
 
     return response_data
 
@@ -111,6 +111,7 @@ async def get_user_conversations(
         conversations.append({
             "partner_user_id": partner.id,
             "partner_username": partner.username,
+            "partner_icon": partner.icon,
             "last_message": msg.content,
             "last_message_at": msg.sent_at,
             "unread_count": unread_count

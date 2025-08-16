@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/App.vue -->
 <script setup>
 import { computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
@@ -52,7 +51,7 @@ import ServiceRegistrationModal from './components/modals/ServiceRegistrationMod
 import GeneratePromptModal from './components/modals/GeneratePromptModal.vue';
 import ManageModelsModal from './components/modals/ManageModelsModal.vue';
 import ModelCardModal from './components/modals/ModelCardModal.vue';
-import DiscussionTreeModal from './components/modals/DiscussionTreeModal.vue'; // NEW IMPORT
+import DiscussionTreeModal from './components/modals/DiscussionTreeModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -83,7 +82,7 @@ onMounted(async () => {
     uiStore.initializeSidebarState();
     if (authStore.isAuthenticated) {
         pyodideStore.initialize();
-        tasksStore.startPolling();
+        tasksStore.fetchTasks(); // Fetch initial tasks, WebSocket will handle updates
     }
 });
 </script>
@@ -162,7 +161,7 @@ onMounted(async () => {
     <GeneratePromptModal v-if="activeModal === 'generatePrompt'" />
     <ManageModelsModal v-if="activeModal === 'manageModels'" />
     <ModelCardModal v-if="activeModal === 'modelCard'" />
-    <DiscussionTreeModal v-if="activeModal === 'discussionTree'" /> <!-- NEW MODAL COMPONENT -->
+    <DiscussionTreeModal v-if="activeModal === 'discussionTree'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

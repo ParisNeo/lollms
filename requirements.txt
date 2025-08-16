@@ -70,3 +70,4 @@ pyyaml
 filelock
 packaging
 jsonschema
+ScrapeMaster

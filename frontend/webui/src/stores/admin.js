@@ -132,6 +132,10 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    async function broadcastMessage(message) {
+        await apiClient.post('/api/admin/broadcast', { message });
+    }
+
     async function syncInstallations() {
         const { useTasksStore } = await import('./tasks');
         const tasksStore = useTasksStore();
@@ -369,14 +373,14 @@ export const useAdminStore = defineStore('admin', () => {
     async function stopApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/stop`); tasksStore.addTask(res.data); }
     async function updateApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/update`); tasksStore.addTask(res.data); }
     async function uninstallApp(appId) { await apiClient.delete(`/api/apps_zoo/installed/${appId}`); await fetchZooApps(); await fetchZooMcps(); }
-    async function updateInstalledApp(appId, payload) { await apiClient.put(`/api/apps_zoo/installed/${appId}`, payload); await fetchZooApps(); await fetchZooMcps(); return res.data; }
+    async function updateInstalledApp(appId, payload) { await apiClient.put(`/api/apps_zoo/installed/${appId}`, payload); await fetchZooApps(); await fetchZooMcps(); }
     async function fetchAppLog(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/logs`); return res.data.log_content; }
     async function fetchAppConfigSchema(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config-schema`); return res.data; }
     async function fetchAppConfig(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config`); return res.data; }
     async function updateAppConfig(appId, configData) { await apiClient.put(`/api/apps_zoo/installed/${appId}/config`, configData); }
 
     return {
-        dashboardStats, isLoadingDashboardStats, fetchDashboardStats,
+        dashboardStats, isLoadingDashboardStats, fetchDashboardStats, broadcastMessage,
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers, batchUpdateUsers,
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
         fetchBindingModels, saveModelAlias, deleteModelAlias, getModelCtxSize,

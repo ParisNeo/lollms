@@ -20,6 +20,11 @@ export default defineConfig({
         target: 'http://localhost:9642',
         changeOrigin: true,
       },
+      '/ws': {
+        target: 'http://localhost:9642',
+        ws: true,
+        changeOrigin: true,
+      },
        '/favicon.ico': {
         target: 'http://localhost:9642',
         changeOrigin: true,

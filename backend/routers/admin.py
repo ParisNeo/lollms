@@ -6,6 +6,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Optional
+import asyncio  # Import asyncio
 
 import psutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
@@ -14,6 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
 from lollms_client.lollms_llm_binding import get_available_bindings
+from backend.ws_manager import manager
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -69,6 +71,30 @@ from fastapi import status
 
 
 admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependencies=[Depends(get_current_admin_user)])
+
+class AdminBroadcastRequest(BaseModel):
+    message: str
+
+@admin_router.post("/broadcast", status_code=202)
+async def broadcast_message_to_all_users(
+    payload: AdminBroadcastRequest,
+    current_user: UserAuthDetails = Depends(get_current_admin_user)
+):
+    """
+    Sends a persistent notification message to all currently connected users.
+    """
+    # Add a small delay to allow websocket connections to establish
+    await asyncio.sleep(0.1)
+    
+    await manager.broadcast({
+        "type": "admin_broadcast",
+        "data": {
+            "message": payload.message,
+            "sender": current_user.username
+        }
+    })
+    return {"message": "Broadcast sent to all connected users."}
+
 
 def _to_task_info(db_task: DBTask) -> TaskInfo:
     """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
@@ -268,6 +294,7 @@ async def create_binding(binding_data: LLMBindingCreate, db: Session = Depends(g
         db.add(new_binding)
         db.commit()
         db.refresh(new_binding)
+        await manager.broadcast({"type": "bindings_updated"})
         return new_binding
     except IntegrityError:
         db.rollback()
@@ -300,6 +327,7 @@ async def update_binding(binding_id: int, update_data: LLMBindingUpdate, db: Ses
         for session in user_sessions.values():
             if "lollms_clients" in session and binding_to_update.alias in session["lollms_clients"]:
                 del session["lollms_clients"][binding_to_update.alias]
+        await manager.broadcast({"type": "bindings_updated"})
         return binding_to_update
     except Exception as e:
         db.rollback()
@@ -314,6 +342,7 @@ async def delete_binding(binding_id: int, db: Session = Depends(get_db)):
     try:
         db.delete(binding_to_delete)
         db.commit()
+        await manager.broadcast({"type": "bindings_updated"})
         return {"message": "Binding deleted successfully."}
     except Exception as e:
         db.rollback()
@@ -385,6 +414,7 @@ async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Ses
     
     db.commit()
     db.refresh(binding)
+    await manager.broadcast({"type": "bindings_updated"})
     return binding
 
 @admin_router.delete("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
@@ -399,6 +429,7 @@ async def delete_model_alias(binding_id: int, payload: ModelAliasDelete, db: Ses
     
     db.commit()
     db.refresh(binding)
+    await manager.broadcast({"type": "bindings_updated"})
     return binding
 
 
@@ -681,6 +712,7 @@ async def admin_update_global_settings(
         if updated_keys:
             db.commit()
             settings.refresh()
+            await manager.broadcast({"type": "settings_updated"})
             print(f"INFO: Admin updated global settings: {', '.join(updated_keys)}")
         
         return {"message": f"Successfully updated {len(updated_keys)} settings."}
@@ -909,3 +941,18 @@ async def admin_remove_user(
         db.rollback()
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"A database or file system error occurred during user deletion: {e}")
+    
+
+@admin_router.get("/ws-status", response_model=Dict[str, bool])
+async def get_my_websocket_status(
+    current_user: UserAuthDetails = Depends(get_current_admin_user)
+):
+    """
+    Checks if the current admin user has an active WebSocket connection.
+    """
+    is_connected = current_user.id in manager.active_connections
+    is_registered_admin = current_user.id in manager.admin_user_ids
+    return {
+        "is_connected": is_connected,
+        "is_registered_as_admin": is_registered_admin
+    }

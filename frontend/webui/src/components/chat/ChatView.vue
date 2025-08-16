@@ -5,6 +5,7 @@ import { useDiscussionsStore } from '../../stores/discussions';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import { usePromptsStore } from '../../stores/prompts';
+import { useTasksStore } from '../../stores/tasks';
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 import { storeToRefs } from 'pinia';
@@ -41,16 +42,19 @@ import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconLollms from '../../assets/icons/IconLollms.vue';
+import IconWeb from '../../assets/icons/ui/IconWeb.vue';
 
 // --- Store Initialization ---
 const discussionsStore = useDiscussionsStore();
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
+const tasksStore = useTasksStore();
 const router = useRouter();
 const { on, off } = useEventBus();
 const { liveDataZoneTokens, currentModelVisionSupport } = storeToRefs(discussionsStore);
-const { lollmsPrompts, userPrompts, systemPromptsByZooCategory } = storeToRefs(promptsStore);
+const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
+const { tasks } = storeToRefs(tasksStore);
 
 // --- Component State ---
 const knowledgeFileInput = ref(null);
@@ -70,6 +74,9 @@ const dataZoneViewModes = ref({
     personality: 'view',
     ltm: 'edit'
 });
+const urlToImport = ref('');
+const importUrlTaskId = ref(null);
+const showUrlImport = ref(false);
 
 // --- Data Zone State ---
 let discussionSaveDebounceTimer = null;
@@ -96,8 +103,23 @@ const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const discussionImages = computed(() => activeDiscussion.value?.discussion_images || []);
 const discussionActiveImages = computed(() => activeDiscussion.value?.active_discussion_images || []);
 
-const isProcessing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'summarize');
+const importUrlTask = computed(() => {
+    if (!importUrlTaskId.value) return null;
+    return tasks.value.find(t => t.id === importUrlTaskId.value);
+});
+const isImportingUrl = computed(() => importUrlTask.value && ['pending', 'running'].includes(importUrlTask.value.status));
+
+const isProcessing = computed(() => {
+    if (!activeDiscussion.value) return false;
+    const task = discussionsStore.activeAiTasks[activeDiscussion.value.id];
+    return (task?.type === 'summarize') || isImportingUrl.value;
+});
+
 const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'memorize');
+
+const discussionEditorOptions = computed(() => {
+    return { readOnly: isProcessing.value };
+});
 
 const keywords = computed(() => uiStore.keywords);
 const canUndoDiscussion = computed(() => discussionHistoryIndex.value > 0);
@@ -143,7 +165,7 @@ const discussionDataZone = computed({
     get: () => activeDiscussion.value?.discussion_data_zone || '',
     set: (newVal) => {
         if (activeDiscussion.value) {
-            discussionsStore.setUserDataZoneContent(activeDiscussion.value.id, newVal);
+            discussionsStore.setDiscussionDataZoneContent(activeDiscussion.value.id, newVal);
             clearTimeout(discussionSaveDebounceTimer);
             discussionSaveDebounceTimer = setTimeout(() => {
                 if (activeDiscussion.value) discussionsStore.updateDataZone({ discussionId: activeDiscussion.value.id, content: newVal });
@@ -221,16 +243,19 @@ async function tokenizeContent(content, zone) {
 watch(discussionDataZone, (newVal) => { tokenizeContent(newVal, 'discussion'); });
 watch(userDataZone, (newVal) => { tokenizeContent(newVal, 'user'); });
 watch(memory, (newVal) => { tokenizeContent(newVal, 'memory'); });
+watch(importUrlTask, (newTask) => {
+    if (newTask && ['completed', 'failed', 'cancelled'].includes(newTask.status)) {
+        importUrlTaskId.value = null;
+    }
+});
 
 onMounted(() => {
-    on('task:completed', handleTaskCompletion);
     const savedWidth = localStorage.getItem('lollms_dataZoneWidth');
     if (savedWidth) dataZoneWidth.value = parseInt(savedWidth, 10);
     setupHistory(userHistory, userHistoryIndex, userDataZone.value);
     setupHistory(memoryHistory, memoryHistoryIndex, memory.value);
 });
 onUnmounted(() => {
-    off('task:completed', handleTaskCompletion);
     window.removeEventListener('mousemove', handleResize);
     window.removeEventListener('mouseup', stopResize);
 });
@@ -256,7 +281,6 @@ async function handlePasteInDataZone(event) {
         }
     }
 }
-function handleTaskCompletion(task) { if (activeDiscussion.value && task?.result?.discussion_id === activeDiscussion.value.id) { if (task.name.includes('Process') || task.name.includes('Memorize')) refreshDataZones(); } }
 function setupHistory(historyRef, indexRef, initialValue) { historyRef.value = [initialValue]; indexRef.value = 0; }
 function recordHistory(historyRef, indexRef, debounceTimer, content) {
     clearTimeout(debounceTimer);
@@ -285,11 +309,6 @@ watch(activeDiscussion, (newDiscussion) => {
     }
 }, { immediate: true, deep: true });
 
-watch([isProcessing, isMemorizing], ([newIsProcessing, newIsMemorizing], [oldIsProcessing, oldIsMemorizing]) => {
-    const taskFinished = (oldIsProcessing && !newIsProcessing) || (oldIsMemorizing && !newIsMemorizing);
-    if (taskFinished && activeDiscussion.value) discussionsStore.refreshDataZones(activeDiscussion.value.id);
-});
-
 let startX = 0;
 let startWidth = 0;
 function startResize(event) {
@@ -315,6 +334,15 @@ function insertPlaceholder(placeholder) {
     view.dispatch({ changes: { from, to, insert: textToInsert }, selection: { anchor: from + textToInsert.length } }); view.focus();
 }
 function triggerKnowledgeFileUpload() { knowledgeFileInput.value?.click(); }
+async function handleImportFromUrl() {
+    if (!urlToImport.value.trim() || !activeDiscussion.value) return;
+    const taskId = await discussionsStore.importUrlToDataZone(activeDiscussion.value.id, urlToImport.value);
+    if (taskId) {
+        importUrlTaskId.value = taskId;
+        urlToImport.value = '';
+        showUrlImport.value = false;
+    }
+}
 
 async function handleKnowledgeFileUpload(event) {
     const files = event.target.files; if (!files || files.length === 0) return;
@@ -410,7 +438,11 @@ function toggleViewMode(zone) {
                         </nav>
                     </div>
                     <!-- Discussion Data Zone -->
-                    <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0">
+                    <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0 relative">
+                        <div v-if="isProcessing" class="absolute inset-0 bg-gray-400/30 dark:bg-gray-900/50 z-10 flex flex-col items-center justify-center">
+                            <IconAnimateSpin class="w-10 h-10 text-gray-800 dark:text-gray-100 animate-spin" />
+                            <p class="mt-3 font-semibold text-gray-800 dark:text-gray-100">{{ isImportingUrl ? 'Importing URL...' : 'Processing...' }}</p>
+                        </div>
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                             <div class="flex justify-between items-center"><h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data</h3>
                                 <div class="flex items-center gap-1">
@@ -442,7 +474,7 @@ function toggleViewMode(zone) {
                                     </div>
                                 </div>
                                 <div class="flex-grow min-h-0 p-2">
-                                    <CodeMirrorEditor v-if="dataZoneViewModes.discussion === 'edit'" ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" />
+                                    <CodeMirrorEditor v-if="dataZoneViewModes.discussion === 'edit'" ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" :options="discussionEditorOptions" />
                                     <div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="discussionDataZone" /></div>
                                 </div>
                                 <div class="p-4 border-t dark:border-gray-600 flex-shrink-0 space-y-3">
@@ -450,11 +482,11 @@ function toggleViewMode(zone) {
                                         <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2"><DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"><button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button></DropdownSubmenu><DropdownSubmenu v-if="Object.keys(promptsStore.userPromptsByCategory).length > 0" title="User" icon="user" collection="ui"><div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div><div class="max-h-60 overflow-y-auto"><div v-for="(prompts, category) in promptsStore.userPromptsByCategory" :key="category"><h3 class="category-header">{{ category }}</h3><button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button></div></div></DropdownSubmenu><DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui"><div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div><div class="max-h-60 overflow-y-auto"><div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category"><h3 class="category-header">{{ category }}</h3><button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button></div></div></DropdownSubmenu><div v-if="(lollmsPrompts.length + userPrompts.length + Object.keys(systemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div><button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button></DropdownMenu>
                                         <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process the data zone content..." rows="2" class="input-field text-sm flex-grow"></textarea>
                                     </div>
-                                    <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0)"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Process Content' }}</button>
+                                    <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Process Content' }}</button>
                                 </div>
                             </div>
 
-                            <div class="w-56 flex-shrink-0 border-l dark:border-gray-600 flex flex-col">
+                            <div class="w-72 flex-shrink-0 border-l dark:border-gray-600 flex flex-col">
                                 <div class="flex-1 flex flex-col min-h-0">
                                     <div v-if="currentModelVisionSupport" class="flex-1 flex flex-col min-h-0">
                                         <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Images</h4><button @click="triggerDiscussionImageUpload" class="btn-icon" title="Add Image(s) or PDF" :disabled="isUploadingDiscussionImage"><IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-5 h-5" /><IconPhoto v-else class="w-5 h-5" /></button></div>
@@ -467,8 +499,23 @@ function toggleViewMode(zone) {
                                         </div>
                                     </div>
                                     <div class="flex-1 flex flex-col min-h-0">
-                                        <div class="p-2 border-t dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Documents</h4><button @click="triggerKnowledgeFileUpload" class="btn-icon" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-5 h-5" /><IconPlus v-else class="w-5 h-5" /></button></div>
+                                        <div class="p-2 border-t dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Documents</h4>
+                                            <div class="flex items-center gap-1">
+                                                <button @click="showUrlImport = !showUrlImport" class="btn-icon" title="Import from URL"><IconWeb class="w-5 h-5" /></button>
+                                                <button @click="triggerKnowledgeFileUpload" class="btn-icon" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-5 h-5" /><IconPlus v-else class="w-5 h-5" /></button>
+                                            </div>
+                                        </div>
                                         <div class="flex-grow overflow-y-auto p-2 space-y-1">
+                                            <div v-if="showUrlImport" class="p-2 bg-gray-50 dark:bg-gray-700/50 rounded-md">
+                                                <label class="text-xs font-semibold">Import from URL</label>
+                                                <div class="flex items-center gap-1 mt-1">
+                                                    <input v-model="urlToImport" type="url" placeholder="https://example.com" class="input-field-sm flex-grow">
+                                                    <button @click="handleImportFromUrl" class="btn btn-secondary btn-sm !p-2" :disabled="isImportingUrl || !urlToImport">
+                                                        <IconAnimateSpin v-if="isImportingUrl" class="w-4 h-4" />
+                                                        <span v-else>Fetch</span>
+                                                    </button>
+                                                </div>
+                                            </div>
                                             <div v-if="parsedDocuments.length === 0" class="text-center text-xs text-gray-500 pt-4">No documents.</div>
                                             <div v-for="doc in parsedDocuments" :key="doc.filename" class="flex items-center justify-between p-1.5 rounded-md bg-gray-100 dark:bg-gray-700/50 text-xs">
                                                 <span class="truncate" :title="doc.filename">{{ doc.filename }}</span>

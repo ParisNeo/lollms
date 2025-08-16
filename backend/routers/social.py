@@ -1,3 +1,4 @@
+# backend/routers/social.py
 from typing import List
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, exists, select, insert, delete
@@ -84,7 +85,7 @@ def create_post(
     new_post = DBPost(
         author_id=current_user.id,
         content=post_data.content,
-        visibility=post_data.visibility.upper(),
+        visibility=post_data.visibility,
         media=post_data.media
     )
     db.add(new_post)

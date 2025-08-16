@@ -9,6 +9,7 @@ from multiprocessing import cpu_count
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors, trace_exception
 from contextlib import asynccontextmanager
+import asyncio  # Import asyncio
 
 from multipart.multipart import FormParser
 FormParser.max_size = 50 * 1024 * 1024  # 50 MB
@@ -62,6 +63,7 @@ from backend.routers.zoos.prompts_zoo import prompts_zoo_router
 from backend.routers.zoos.personalities_zoo import personalities_zoo_router
 from backend.routers.tasks import tasks_router
 from backend.task_manager import task_manager # Import the singleton instance
+from backend.ws_manager import manager # Import the websocket manager
 
 
 from backend.routers.help import help_router
@@ -72,6 +74,7 @@ from backend.zoo_cache import build_full_cache
 async def lifespan(app: FastAPI):
     # --- Code to be executed on startup ---
     ASCIIColors.info("Application startup...")
+    manager.set_loop(asyncio.get_running_loop()) # Set the event loop for the manager
     task_manager.init_app(db_session_module.SessionLocal)
     print("Database initialized.")
 
