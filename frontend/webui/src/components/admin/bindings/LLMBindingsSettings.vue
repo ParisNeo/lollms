@@ -35,17 +35,31 @@ const selectedBindingType = computed(() => {
     return availableBindingTypes.value.find(b => b.binding_name === form.value.name);
 });
 
-// Filter out model_name from the parameters to be displayed in the form
-const filteredInputParameters = computed(() => {
-    if (!selectedBindingType.value || !selectedBindingType.value.input_parameters) {
-        return [];
-    }
-    return selectedBindingType.value.input_parameters.filter(param => param.name !== 'model_name');
+// Create a comprehensive list of parameters from both the description and the saved config
+const allFormParameters = computed(() => {
+    if (!selectedBindingType.value) return [];
+    
+    const paramsFromDesc = selectedBindingType.value.input_parameters || [];
+    const paramNamesFromDesc = new Set(paramsFromDesc.map(p => p.name));
+    
+    const paramsFromConfig = Object.keys(form.value.config || {})
+        .filter(key => !paramNamesFromDesc.has(key) && key !== 'model_name')
+        .map(key => ({
+            name: key,
+            type: typeof form.value.config[key] === 'boolean' ? 'bool' : (typeof form.value.config[key] === 'number' ? 'float' : 'str'),
+            description: `(Parameter not in binding description)`,
+            mandatory: false,
+        }));
+        
+    return [
+        ...paramsFromDesc.filter(p => p.name !== 'model_name'), 
+        ...paramsFromConfig
+    ];
 });
 
 
 watch(() => form.value.name, (newName, oldName) => {
-    if (newName !== oldName) {
+    if (newName !== oldName && !isEditMode.value) {
         const bindingDesc = availableBindingTypes.value.find(b => b.binding_name === newName);
         const newConfig = {};
         if (bindingDesc && bindingDesc.input_parameters) {
@@ -143,7 +157,7 @@ async function handleDelete(binding) {
 }
 
 function manageModels(binding) {
-    uiStore.openModal('manageModels', { binding });
+    uiStore.openModal('manageModels', { binding, bindingType: 'llm' });
 }
 
 function getBindingTitle(name) {
@@ -174,7 +188,7 @@ function getBindingTitle(name) {
 
                 <div v-if="selectedBindingType" class="space-y-6 border-t dark:border-gray-700 pt-6">
                     <p class="text-sm text-gray-600 dark:text-gray-400">{{ selectedBindingType.description }}</p>
-                    <div v-for="param in filteredInputParameters" :key="param.name" class="space-y-1">
+                    <div v-for="param in allFormParameters" :key="param.name" class="space-y-1">
                         <label :for="`param-${param.name}`" class="block text-sm font-medium capitalize">
                             {{ param.name.replace(/_/g, ' ') }}
                             <span v-if="param.mandatory" class="text-red-500">*</span>
@@ -250,8 +264,10 @@ function getBindingTitle(name) {
                             <p class="text-sm text-gray-500 dark:text-gray-400">{{ getBindingTitle(binding.name) }}</p>
                             <div class="mt-2 text-xs space-y-1 text-gray-600 dark:text-gray-300">
                                 <template v-for="(value, key) in binding.config" :key="key">
-                                     <p v-if="value && !(key.includes('key') || key.includes('token') || key === 'model_name')">
-                                        <span class="font-semibold capitalize">{{ key.replace(/_/g, ' ') }}:</span> {{ value }}
+                                     <p v-if="value && key !== 'model_name'">
+                                        <span class="font-semibold capitalize">{{ key.replace(/_/g, ' ') }}:</span> 
+                                        <span v-if="key.includes('key') || key.includes('token')">********</span>
+                                        <span v-else>{{ value }}</span>
                                      </p>
                                 </template>
                                 <p v-if="binding.default_model_name"><span class="font-semibold">Default Model:</span> {{ binding.default_model_name }}</p>

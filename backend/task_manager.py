@@ -78,20 +78,30 @@ class Task:
 
         # --- NEW: Send specific event for data zone tasks on completion ---
         if db_task.status == TaskStatus.COMPLETED and db_task.result:
-            if isinstance(db_task.result, dict) and "zone" in db_task.result:
+            if isinstance(db_task.result, dict):
+                # Handle Data Zone updates
                 zone_info = db_task.result
-                if zone_info.get("zone") in ["discussion", "memory"]:
-                    custom_payload = {
-                        "type": "data_zone_processed",
-                        "data": {
-                            "discussion_id": zone_info.get("discussion_id"),
-                            "zone": zone_info.get("zone"),
-                            "new_content": zone_info.get("new_content")
+                if "zone" in zone_info and "discussion_id" in zone_info:
+                    if zone_info.get("zone") in ["discussion", "memory"]:
+                        custom_payload = {
+                            "type": "data_zone_processed",
+                            "data": {
+                                "discussion_id": zone_info.get("discussion_id"),
+                                "zone": zone_info.get("zone"),
+                                "new_content": zone_info.get("new_content")
+                            }
                         }
-                    }
-                    if db_task.owner_user_id:
-                        manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
-                    manager.broadcast_to_admins_sync(custom_payload)
+                        if db_task.owner_user_id:
+                            manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
+                        manager.broadcast_to_admins_sync(custom_payload)
+                
+                # NEW: Handle App Status updates
+                app_data = zone_info.get("updated_app")
+                if "updated_app" in zone_info and (app_data):
+                    app_payload = {"type": "app_status_changed", "data": app_data}
+                    # Broadcast to everyone as multiple users (admins, owner) might need the update
+                    manager.broadcast_sync(app_payload)
+
 
     def _update_db(self, **kwargs):
         """Safely updates the task's record in the database."""

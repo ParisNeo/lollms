@@ -1,0 +1,259 @@
+<script setup>
+import { ref, onMounted, computed, watch } from 'vue';
+import { storeToRefs } from 'pinia';
+import { useAdminStore } from '../../../stores/admin';
+import { useUiStore } from '../../../stores/ui';
+import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
+import IconEye from '../../../assets/icons/IconEye.vue';
+import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
+
+const adminStore = useAdminStore();
+const uiStore = useUiStore();
+
+const { ttiBindings, availableTtiBindingTypes, isLoadingTtiBindings } = storeToRefs(adminStore);
+
+const isFormVisible = ref(false);
+const editingBinding = ref(null);
+const isLoadingForm = ref(false);
+const isKeyVisible = ref({});
+
+const getInitialFormState = () => ({
+    id: null,
+    alias: '',
+    name: '',
+    config: {},
+    default_model_name: '',
+    is_active: true
+});
+
+const form = ref(getInitialFormState());
+
+const isEditMode = computed(() => editingBinding.value !== null);
+
+const selectedBindingType = computed(() => {
+    if (!form.value.name) return null;
+    return availableTtiBindingTypes.value.find(b => b.binding_name === form.value.name);
+});
+
+// Create a comprehensive list of parameters from both the description and the saved config
+const allFormParameters = computed(() => {
+    if (!selectedBindingType.value) return [];
+    
+    const paramsFromDesc = selectedBindingType.value.input_parameters || [];
+    const paramNamesFromDesc = new Set(paramsFromDesc.map(p => p.name));
+    
+    const paramsFromConfig = Object.keys(form.value.config || {})
+        .filter(key => !paramNamesFromDesc.has(key) && key !== 'model_name')
+        .map(key => ({
+            name: key,
+            type: typeof form.value.config[key] === 'boolean' ? 'bool' : (typeof form.value.config[key] === 'number' ? 'float' : 'str'),
+            description: `(Parameter not in binding description)`,
+            mandatory: false,
+        }));
+        
+    return [
+        ...paramsFromDesc.filter(p => p.name !== 'model_name'), 
+        ...paramsFromConfig
+    ];
+});
+
+watch(() => form.value.name, (newName, oldName) => {
+    if (newName !== oldName && !isEditMode.value) {
+        const bindingDesc = availableTtiBindingTypes.value.find(b => b.binding_name === newName);
+        const newConfig = {};
+        if (bindingDesc && bindingDesc.input_parameters) {
+            bindingDesc.input_parameters.forEach(param => {
+                newConfig[param.name] = param.default;
+            });
+        }
+        form.value.config = newConfig;
+    }
+});
+
+onMounted(() => {
+    adminStore.fetchTtiBindings();
+    adminStore.fetchAvailableTtiBindingTypes();
+});
+
+function showAddForm() {
+    editingBinding.value = null;
+    form.value = getInitialFormState();
+    isKeyVisible.value = {};
+    isFormVisible.value = true;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function showEditForm(binding) {
+    editingBinding.value = binding;
+    form.value = JSON.parse(JSON.stringify(binding));
+    if (!form.value.config) {
+        form.value.config = {};
+    }
+    isKeyVisible.value = {};
+    isFormVisible.value = true;
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function hideForm() {
+    isFormVisible.value = false;
+    editingBinding.value = null;
+}
+
+async function handleSubmit() {
+    if (!form.value.alias.trim() || !form.value.name) {
+        uiStore.addNotification('Alias and Binding Type are required fields.', 'warning');
+        return;
+    }
+
+    isLoadingForm.value = true;
+    try {
+        const payload = {
+            alias: form.value.alias,
+            name: form.value.name,
+            config: form.value.config || {},
+            is_active: form.value.is_active,
+            default_model_name: form.value.default_model_name || null
+        };
+
+        if (isEditMode.value) {
+            await adminStore.updateTtiBinding(editingBinding.value.id, payload);
+        } else {
+            await adminStore.addTtiBinding(payload);
+        }
+        hideForm();
+    } catch (error) {
+        console.error("Submit failed:", error.message);
+    } finally {
+        isLoadingForm.value = false;
+    }
+}
+
+async function handleDelete(binding) {
+    const confirmed = await uiStore.showConfirmation({
+        title: `Delete TTI Binding '${binding.alias}'?`,
+        message: 'Are you sure? This action cannot be undone.',
+        confirmText: 'Delete'
+    });
+    if (confirmed) {
+        await adminStore.deleteTtiBinding(binding.id);
+    }
+}
+
+function manageModels(binding) {
+    uiStore.openModal('manageModels', { binding, bindingType: 'tti' });
+}
+
+function getBindingTitle(name) {
+    const bindingType = availableTtiBindingTypes.value.find(b => b.binding_name === name);
+    return bindingType ? bindingType.title : name;
+}
+</script>
+
+<template>
+    <div class="space-y-8">
+        <div v-if="isFormVisible" class="bg-white dark:bg-gray-800 shadow-md rounded-lg p-6">
+            <h3 class="text-xl font-semibold mb-4">{{ isEditMode ? 'Edit TTI Binding' : 'Add New TTI Binding' }}</h3>
+            <form @submit.prevent="handleSubmit" class="space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="alias" class="block text-sm font-medium">Alias <span class="text-red-500">*</span></label>
+                        <input type="text" id="alias" v-model="form.alias" class="input-field mt-1" required placeholder="e.g., local_sd">
+                        <p class="text-xs text-gray-500 mt-1">A unique, short name for this configuration.</p>
+                    </div>
+                    <div>
+                        <label for="name" class="block text-sm font-medium">Binding Type <span class="text-red-500">*</span></label>
+                        <select id="name" v-model="form.name" class="input-field mt-1" required :disabled="isEditMode">
+                            <option disabled value="">Select a type</option>
+                            <option v-for="type in availableTtiBindingTypes" :key="type.binding_name" :value="type.binding_name">{{ type.title }}</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div v-if="selectedBindingType" class="space-y-6 border-t dark:border-gray-700 pt-6">
+                    <p class="text-sm text-gray-600 dark:text-gray-400">{{ selectedBindingType.description }}</p>
+                    <div v-for="param in allFormParameters" :key="param.name" class="space-y-1">
+                        <label :for="`param-${param.name}`" class="block text-sm font-medium capitalize">
+                            {{ param.name.replace(/_/g, ' ') }}
+                            <span v-if="param.mandatory" class="text-red-500">*</span>
+                        </label>
+                        <div v-if="['str', 'int', 'float'].includes(param.type)">
+                             <div class="relative">
+                                <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'"
+                                    :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field"
+                                    :required="param.mandatory" :placeholder="param.description" autocomplete="off">
+                                <button v-if="param.name.includes('key') || param.name.includes('token')" type="button" @click="isKeyVisible[param.name] = !isKeyVisible[param.name]" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" :title="isKeyVisible[param.name] ? 'Hide' : 'Show'">
+                                    <IconEyeOff v-if="isKeyVisible[param.name]" class="w-5 h-5" />
+                                    <IconEye v-else class="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+                        <div v-else-if="param.type === 'bool'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                            <span class="flex-grow flex flex-col pr-4"><span class="text-sm text-gray-500 dark:text-gray-400">{{ param.description }}</span></span>
+                            <button @click="form.config[param.name] = !form.config[param.name]" type="button" :class="[form.config[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span :class="[form.config[param.name] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1">{{ param.description }}</p>
+                    </div>
+                </div>
+                
+                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                    <span class="flex-grow flex flex-col"><span class="text-sm font-medium text-gray-900 dark:text-gray-100">Active</span><span class="text-sm text-gray-500 dark:text-gray-400">If disabled, this TTI service will not be available.</span></span>
+                    <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                        <span :class="[form.is_active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                    </button>
+                </div>
+
+                <div class="flex justify-end gap-3">
+                    <button type="button" @click="hideForm" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary" :disabled="isLoadingForm">{{ isLoadingForm ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Add Binding') }}</button>
+                </div>
+            </form>
+        </div>
+
+        <div>
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-2xl font-bold">TTI Bindings</h2>
+                <button @click="showAddForm" class="btn btn-primary" v-if="!isFormVisible">+ Add New TTI Binding</button>
+            </div>
+
+            <div v-if="isLoadingTtiBindings" class="text-center p-6">Loading TTI bindings...</div>
+            <div v-else-if="ttiBindings.length === 0 && !isFormVisible" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                <p>No TTI bindings configured yet.</p>
+                <button @click="showAddForm" class="mt-2 text-blue-600 hover:underline">Add your first one</button>
+            </div>
+            <div v-else class="space-y-4">
+                <div v-for="binding in ttiBindings" :key="binding.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md flex flex-col gap-4">
+                    <div class="flex items-start gap-4">
+                        <span class="mt-1 h-3 w-3 rounded-full flex-shrink-0" :class="binding.is_active ? 'bg-green-500' : 'bg-gray-400'" :title="binding.is_active ? 'Active' : 'Inactive'"></span>
+                        <div class="flex-grow">
+                            <div class="flex justify-between items-center">
+                                <h4 class="font-bold text-lg text-gray-900 dark:text-white">{{ binding.alias }}</h4>
+                                <div class="flex gap-3">
+                                    <button @click="showEditForm(binding)" class="text-sm font-medium text-blue-600 hover:underline">Edit</button>
+                                    <button @click="handleDelete(binding)" class="text-sm font-medium text-red-600 hover:underline">Delete</button>
+                                </div>
+                            </div>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">{{ getBindingTitle(binding.name) }}</p>
+                            <div class="mt-2 text-xs space-y-1 text-gray-600 dark:text-gray-300">
+                                <template v-for="(value, key) in binding.config" :key="key">
+                                     <p v-if="value && key !== 'model_name'">
+                                        <span class="font-semibold capitalize">{{ key.replace(/_/g, ' ') }}:</span> 
+                                        <span v-if="key.includes('key') || key.includes('token')">********</span>
+                                        <span v-else>{{ value }}</span>
+                                     </p>
+                                </template>
+                                <p v-if="binding.default_model_name"><span class="font-semibold">Default Model:</span> {{ binding.default_model_name }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="border-t dark:border-gray-700 pt-3 flex justify-end">
+                        <button @click="manageModels(binding)" class="btn btn-secondary btn-sm flex items-center gap-2">
+                            <IconCpuChip class="w-4 h-4" /> Manage Models
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>

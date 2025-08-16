@@ -35,6 +35,11 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingBindings = ref(false);
     const availableBindingTypes = ref([]);
 
+    // --- NEW: TTI State ---
+    const ttiBindings = ref([]);
+    const isLoadingTtiBindings = ref(false);
+    const availableTtiBindingTypes = ref([]);
+
     const globalSettings = ref([]);
     const isLoadingSettings = ref(false);
 
@@ -120,6 +125,25 @@ export const useAdminStore = defineStore('admin', () => {
 
     on('task:completed', handleTaskCompletion);
     
+    function handleAppStatusUpdate(appData) {
+        console.log("Admin store received app status update:", appData);
+        const updateItemInList = (list) => {
+            if (Array.isArray(list)) {
+                const index = list.findIndex(item => item.id === appData.id);
+                if (index !== -1) {
+                    Object.assign(list[index], appData);
+                    console.log(`Updated item '${appData.name}' in an admin list.`);
+                }
+            }
+        };
+
+        if (appData.item_type === 'app') {
+            updateItemInList(zooApps.value.items);
+        } else if (appData.item_type === 'mcp') {
+            updateItemInList(zooMcps.value.items);
+        }
+    }
+
     async function fetchDashboardStats() {
         isLoadingDashboardStats.value = true;
         try {
@@ -271,6 +295,51 @@ export const useAdminStore = defineStore('admin', () => {
         if (index !== -1) bindings.value[index] = response.data;
     }
 
+    // --- NEW: TTI Actions ---
+    async function fetchTtiBindings() {
+        isLoadingTtiBindings.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/tti-bindings');
+            ttiBindings.value = response.data;
+        } finally {
+            isLoadingTtiBindings.value = false;
+        }
+    }
+    async function fetchAvailableTtiBindingTypes() {
+        const response = await apiClient.get('/api/admin/tti-bindings/available_types');
+        availableTtiBindingTypes.value = response.data;
+    }
+    async function addTtiBinding(payload) {
+        const response = await apiClient.post('/api/admin/tti-bindings', payload);
+        ttiBindings.value.push(response.data);
+        uiStore.addNotification(`TTI Binding '${response.data.alias}' created.`, 'success');
+    }
+    async function updateTtiBinding(id, payload) {
+        const response = await apiClient.put(`/api/admin/tti-bindings/${id}`, payload);
+        const index = ttiBindings.value.findIndex(b => b.id === id);
+        if (index !== -1) ttiBindings.value[index] = response.data;
+        uiStore.addNotification(`TTI Binding '${response.data.alias}' updated.`, 'success');
+    }
+    async function deleteTtiBinding(id) {
+        await apiClient.delete(`/api/admin/tti-bindings/${id}`);
+        ttiBindings.value = ttiBindings.value.filter(b => b.id !== id);
+        uiStore.addNotification('TTI Binding deleted successfully.', 'success');
+    }
+    async function fetchTtiBindingModels(bindingId) {
+        const response = await apiClient.get(`/api/admin/tti-bindings/${bindingId}/models`);
+        return response.data;
+    }
+    async function saveTtiModelAlias(bindingId, payload) {
+        const response = await apiClient.put(`/api/admin/tti-bindings/${bindingId}/alias`, payload);
+        const index = ttiBindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) ttiBindings.value[index] = response.data;
+    }
+    async function deleteTtiModelAlias(bindingId, modelName) {
+        const response = await apiClient.delete(`/api/admin/tti-bindings/${bindingId}/alias`, { data: { original_model_name: modelName } });
+        const index = ttiBindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) ttiBindings.value[index] = response.data;
+    }
+
     async function fetchGlobalSettings() {
         isLoadingSettings.value = true;
         try {
@@ -384,6 +453,9 @@ export const useAdminStore = defineStore('admin', () => {
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers, batchUpdateUsers,
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
         fetchBindingModels, saveModelAlias, deleteModelAlias, getModelCtxSize,
+        ttiBindings, isLoadingTtiBindings, availableTtiBindingTypes,
+        fetchTtiBindings, fetchAvailableTtiBindingTypes, addTtiBinding, updateTtiBinding, deleteTtiBinding,
+        fetchTtiBindingModels, saveTtiModelAlias, deleteTtiModelAlias,
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings,
         isImporting, importOpenWebUIData,
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
@@ -400,6 +472,7 @@ export const useAdminStore = defineStore('admin', () => {
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
         updateInstalledApp, fetchAppLog, fetchAppConfigSchema, fetchAppConfig, updateAppConfig, updateApp,
         purgeUnusedUploads, systemStatus, isLoadingSystemStatus, fetchSystemStatus,
-        syncInstallations, purgeBrokenInstallation, fixBrokenInstallation, handleTaskCompletion
+        syncInstallations, purgeBrokenInstallation, fixBrokenInstallation, handleTaskCompletion,
+        handleAppStatusUpdate
     };
 });

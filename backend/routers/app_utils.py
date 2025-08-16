@@ -28,7 +28,7 @@ from filelock import FileLock, Timeout
 from backend.db import get_db
 from backend.db.models.service import App as DBApp, MCP as DBMCP, AppZooRepository, MCPZooRepository
 from backend.db.models.db_task import DBTask
-from backend.models import TaskInfo
+from backend.models import TaskInfo, AppPublic
 from backend.config import APPS_ROOT_PATH, MCPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH, APPS_ZOO_ROOT_PATH, APP_DATA_DIR
 from backend.task_manager import task_manager, Task
 from backend.zoo_cache import get_all_items
@@ -41,6 +41,39 @@ open_log_files: Dict[str, Any] = {}
 # Constants for synchronization lock
 SYNC_LOCK_PATH = APP_DATA_DIR / "sync_installations.lock"
 SYNC_LOCK_TIMEOUT = 300 # 5 minutes timeout for the lock
+
+def serialize_app_to_public(app: DBApp, db: Session) -> dict:
+    """Serializes a DBApp object to a Pydantic model and then to a dictionary."""
+    accessible_host = get_accessible_host()
+    url_to_return = app.url
+    
+    # Ensure app_metadata is a dict to prevent errors on access
+    app_metadata = app.app_metadata if isinstance(app.app_metadata, dict) else {}
+    item_type = app_metadata.get('item_type', 'app')
+
+    if app.is_installed and app.status == 'running' and app.port:
+        url_to_return = f"http://{accessible_host}:{app.port}"
+        if item_type == 'mcp':
+            url_to_return += '/mcp'
+
+    has_config_schema = False
+    try:
+        item_path = get_installed_app_path(db, app.id)
+        has_config_schema = (item_path / 'config.schema.json').exists()
+    except Exception:
+        pass
+
+    # Use Pydantic's model_validate to convert ORM model to Pydantic model
+    public_model = AppPublic.model_validate(app, from_attributes=True)
+    
+    # Manually set fields that are not direct attributes or need computation
+    public_model.owner_username = app.owner.username if app.owner else "System"
+    public_model.url = url_to_return
+    public_model.item_type = item_type
+    public_model.has_config_schema = has_config_schema
+
+    # Return as a JSON-compatible dictionary
+    return public_model.model_dump(mode='json')
 
 # NEW HELPER FUNCTION for finding unique ports during dynamic operations
 def _get_next_available_app_port_for_batch(db_session: Session, ports_in_current_batch: set) -> int:
@@ -575,6 +608,7 @@ def start_app_task(task: Task, app_id: str):
         
         app.active = True
         db_session.commit()
+        db_session.refresh(app, ["owner"])
         
         if item_type == 'mcp':
             task.log(f"MCP '{app.name}' has started. Reloading MCPs for all active users.")
@@ -597,7 +631,9 @@ def start_app_task(task: Task, app_id: str):
 
         task.log(f"App '{app.name}' started with PID {process.pid} on port {app.port}.")
         task.set_progress(100)
-        return {"success": True, "message": f"App '{app.name}' started successfully.", "item_type": item_type}
+        
+        serialized_app = serialize_app_to_public(app, db_session)
+        return {"success": True, "message": f"App '{app.name}' started successfully.", "item_type": item_type, "updated_app": serialized_app}
     except Exception as e:
         task.log(f"Failed to start app: {e}", level="CRITICAL")
         if app:
@@ -621,7 +657,9 @@ def stop_app_task(task: Task, app_id: str):
         if not app.pid:
             app.status = 'stopped'
             db_session.commit()
-            return {"success": True, "message": "App was already stopped."}
+            db_session.refresh(app, ["owner"])
+            serialized_app = serialize_app_to_public(app, db_session)
+            return {"success": True, "message": "App was already stopped.", "updated_app": serialized_app}
 
         try:
             process = psutil.Process(app.pid)
@@ -635,13 +673,15 @@ def stop_app_task(task: Task, app_id: str):
         app.pid = None
         app.status = 'stopped'
         db_session.commit()
+        db_session.refresh(app, ["owner"])
         
         if app.id in open_log_files:
             open_log_files[app.id].close()
             del open_log_files[app.id]
 
         task.set_progress(100)
-        return {"success": True, "message": f"App '{app.name}' stopped successfully."}
+        serialized_app = serialize_app_to_public(app, db_session)
+        return {"success": True, "message": f"App '{app.name}' stopped successfully.", "updated_app": serialized_app}
     except Exception as e:
         if app:
             app.status = 'error'

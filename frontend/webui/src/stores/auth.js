@@ -71,6 +71,13 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'task_update':
                     tasksStore.addTask(data.data);
                     break;
+                case 'app_status_changed': {
+                    const { useAdminStore } = await import('./admin');
+                    const adminStore = useAdminStore();
+                    adminStore.handleAppStatusUpdate(data.data);
+                    dataStore.handleServiceStatusUpdate(data.data);
+                    break;
+                }
                 case 'data_zone_processed':
                     discussionsStore.handleDataZoneUpdate(data.data);
                     break;

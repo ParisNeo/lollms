@@ -30,6 +30,35 @@ class LLMBindingPublicAdmin(LLMBindingBase):
     class Config:
         from_attributes = True
 
+# --- NEW: TTI Binding Models ---
+class TTIBindingBase(BaseModel):
+    alias: constr(min_length=1, max_length=100)
+    name: constr(min_length=1, max_length=100) # binding_name
+    config: Dict[str, Any] = Field(default_factory=dict)
+    default_model_name: Optional[str] = None
+    is_active: bool = True
+
+class TTIBindingCreate(TTIBindingBase):
+    pass
+
+class TTIBindingUpdate(BaseModel):
+    alias: Optional[constr(min_length=1, max_length=100)] = None
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    config: Optional[Dict[str, Any]] = None
+    default_model_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class TTIBindingPublicAdmin(TTIBindingBase):
+    id: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    model_aliases: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
+# --- END TTI Binding Models ---
+
+
 # --- NEW: Model Alias Management Models ---
 class ModelAlias(BaseModel):
     icon: Optional[str] = None

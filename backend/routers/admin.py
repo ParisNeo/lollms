@@ -14,14 +14,18 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
+from lollms_client import LollmsClient
 from lollms_client.lollms_llm_binding import get_available_bindings
+from lollms_client.lollms_tti_binding import get_available_bindings as get_available_tti_bindings
 from backend.ws_manager import manager
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
-from backend.db.models.config import GlobalConfig as DBGlobalConfig, LLMBinding as DBLLMBinding
+from backend.db.models.config import GlobalConfig as DBGlobalConfig, LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.security import get_password_hash as hash_password
+
+from ascii_colors import trace_exception
 
 from backend.db.models.db_task import DBTask
 from backend.models import (
@@ -42,6 +46,9 @@ from backend.models import (
     LLMBindingCreate,
     LLMBindingUpdate,
     LLMBindingPublicAdmin,
+    TTIBindingCreate,
+    TTIBindingUpdate,
+    TTIBindingPublicAdmin,
     TaskInfo,
     SystemUsageStats,
     GPUInfo,
@@ -141,7 +148,7 @@ def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, 
         task.set_progress(100)
         return {"message": f"Email sending task completed. Emails sent to {sent_count} of {total_users} targeted users."}
     except Exception as e:
-        traceback.print_exc()
+        trace_exception(e)
         raise e
     finally:
         db_session_local.close()
@@ -277,7 +284,7 @@ async def get_available_binding_types():
     try:
         return get_available_bindings()
     except Exception as e:
-        traceback.print_exc()
+        trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to get available binding types: {e}")
 
 @admin_router.get("/bindings", response_model=List[LLMBindingPublicAdmin])
@@ -348,6 +355,144 @@ async def delete_binding(binding_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
+# --- TTI Bindings Management Endpoints ---
+
+@admin_router.get("/tti-bindings/available_types", response_model=List[Dict])
+async def get_available_tti_binding_types():
+    try:
+        return get_available_tti_bindings()
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to get available TTI binding types: {e}")
+
+@admin_router.get("/tti-bindings", response_model=List[TTIBindingPublicAdmin])
+async def get_all_tti_bindings(db: Session = Depends(get_db)):
+    return db.query(DBTTIBinding).all()
+
+@admin_router.post("/tti-bindings", response_model=TTIBindingPublicAdmin, status_code=201)
+async def create_tti_binding(binding_data: TTIBindingCreate, db: Session = Depends(get_db)):
+    if db.query(DBTTIBinding).filter(DBTTIBinding.alias == binding_data.alias).first():
+        raise HTTPException(status_code=400, detail="A TTI binding with this alias already exists.")
+    
+    new_binding = DBTTIBinding(**binding_data.model_dump())
+    try:
+        db.add(new_binding)
+        db.commit()
+        db.refresh(new_binding)
+        return new_binding
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="A TTI binding with this alias already exists.")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@admin_router.put("/tti-bindings/{binding_id}", response_model=TTIBindingPublicAdmin)
+async def update_tti_binding(binding_id: int, update_data: TTIBindingUpdate, db: Session = Depends(get_db)):
+    binding_to_update = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding_to_update:
+        raise HTTPException(status_code=404, detail="TTI Binding not found.")
+    
+    if update_data.alias and update_data.alias != binding_to_update.alias:
+        if db.query(DBTTIBinding).filter(DBTTIBinding.alias == update_data.alias).first():
+            raise HTTPException(status_code=400, detail="A TTI binding with the new alias already exists.")
+
+    update_dict = update_data.model_dump(exclude_unset=True)
+    for key, value in update_dict.items():
+        setattr(binding_to_update, key, value)
+    
+    try:
+        db.commit()
+        db.refresh(binding_to_update)
+        return binding_to_update
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@admin_router.delete("/tti-bindings/{binding_id}", response_model=Dict[str, str])
+async def delete_tti_binding(binding_id: int, db: Session = Depends(get_db)):
+    binding_to_delete = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding_to_delete:
+        raise HTTPException(status_code=404, detail="TTI Binding not found.")
+    
+    try:
+        db.delete(binding_to_delete)
+        db.commit()
+        return {"message": "TTI Binding deleted successfully."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@admin_router.get("/tti-bindings/{binding_id}/models", response_model=List[BindingModel])
+async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTI Binding not found.")
+    
+    try:
+        # Build client parameters for TTI. 
+        # LollmsClient requires an LLM binding to be set, so we use a dummy one.
+        client_params = {
+            "tti_binding_name": binding.name,
+            "tti_binding_config": {
+                **binding.config,
+                "model_name": binding.default_model_name
+            }
+        }
+
+        lc = LollmsClient(**client_params)
+        raw_models = lc.tti.listModels()
+        
+        models_list = []
+        if isinstance(raw_models, list):
+            for item in raw_models:
+                model_id = item if isinstance(item, str) else item.get("model_name")
+                if model_id:
+                    models_list.append(model_id)
+        
+        model_aliases = binding.model_aliases or {}
+        
+        result = []
+        for model_name in sorted(models_list):
+            result.append(BindingModel(
+                original_model_name=model_name,
+                alias=model_aliases.get(model_name)
+            ))
+        return result
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Could not fetch models from TTI binding '{binding.alias}': {e}")
+
+@admin_router.put("/tti-bindings/{binding_id}/alias", response_model=TTIBindingPublicAdmin)
+async def update_tti_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTI Binding not found.")
+    
+    if binding.model_aliases is None:
+        binding.model_aliases = {}
+    
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    return binding
+
+@admin_router.delete("/tti-bindings/{binding_id}/alias", response_model=TTIBindingPublicAdmin)
+async def delete_tti_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTI Binding not found.")
+        
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    return binding
+
 # --- NEW: Model Alias Endpoints ---
 
 @admin_router.get("/bindings/{binding_id}/models", response_model=List[BindingModel])
@@ -378,7 +523,7 @@ async def get_binding_models(binding_id: int, current_admin: UserAuthDetails = D
             ))
         return result
     except Exception as e:
-        traceback.print_exc()
+        trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Could not fetch models from binding '{binding.alias}': {e}")
 
 @admin_router.post("/bindings/{binding_id}/context-size", response_model=Dict[str, Optional[int]])
@@ -397,7 +542,7 @@ async def get_model_context_size(binding_id: int, payload: ModelNamePayload, cur
         ctx_size = lc.get_ctx_size()
         return {"ctx_size": ctx_size}
     except Exception as e:
-        traceback.print_exc()
+        trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Could not fetch context size from binding '{binding.alias}': {e}")
 
 @admin_router.put("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
@@ -563,11 +708,11 @@ Current Background Color:
                 background_color=enhanced_data.get("background_color", payload.background_color)
             )
         except (json.JSONDecodeError, ValueError) as e:
-            traceback.print_exc()
+            trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to parse AI response: {e}")
 
     except Exception as e:
-        traceback.print_exc()
+        trace_exception(e)
         raise HTTPException(status_code=500, detail=f"An error occurred while enhancing the email: {e}")
 
 @admin_router.get("/available-models", response_model=List[ModelInfo])
@@ -628,7 +773,7 @@ async def force_settings_once(payload: ForceSettingsPayload, db: Session = Depen
         return {"message": f"Successfully applied model '{forced_model}' and context size '{forced_ctx or 'N/A'}' to {len(users)} users."}
     except Exception as e:
         db.rollback()
-        traceback.print_exc()
+        trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Database error while forcing settings: {e}")
 
 @admin_router.post("/import-openwebui", response_model=Dict[str, str])
@@ -718,7 +863,7 @@ async def admin_update_global_settings(
         return {"message": f"Successfully updated {len(updated_keys)} settings."}
     except Exception as e:
         db.rollback()
-        traceback.print_exc()
+        trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Database error while updating settings: {e}")
 
 @admin_router.get("/users", response_model=List[UserPublic])
@@ -786,7 +931,7 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
         return user_to_update
     except Exception as e:
         db.rollback()
-        traceback.print_exc()
+        trace_exception(e)
         raise HTTPException(status_code=500, detail=f"A database error occurred: {e}")
 
 @admin_router.post("/users/batch-update-settings", response_model=Dict[str, str])
@@ -823,7 +968,7 @@ async def admin_batch_update_user_settings(
         return {"message": f"Successfully updated settings for {len(users_to_update)} users."}
     except Exception as e:
         db.rollback()
-        traceback.print_exc()
+        trace_exception(e)
         raise HTTPException(status_code=500, detail=f"A database error occurred during batch update: {e}")
 
 @admin_router.post("/users/{user_id}/activate", response_model=UserPublic)
@@ -939,7 +1084,7 @@ async def admin_remove_user(
         return {"message": f"User '{user_to_delete.username}' deleted. Data cleanup initiated."}
     except Exception as e:
         db.rollback()
-        traceback.print_exc()
+        trace_exception(e)
         raise HTTPException(status_code=500, detail=f"A database or file system error occurred during user deletion: {e}")
     
 

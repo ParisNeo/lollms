@@ -132,6 +132,20 @@ export const useDataStore = defineStore('data', () => {
     // It is no longer tied to a component's lifecycle hook.
     on('task:completed', handleTaskCompletion);
 
+    function handleServiceStatusUpdate(serviceData) {
+        const listsToUpdate = [userApps, systemApps, userMcps, systemMcps];
+        for (const listRef of listsToUpdate) {
+            const list = listRef.value;
+            if (!Array.isArray(list)) continue;
+            const index = list.findIndex(item => item.id === serviceData.id);
+            if (index !== -1) {
+                Object.assign(list[index], serviceData);
+                console.log(`Updated service '${serviceData.name}' in data store.`);
+                return;
+            }
+        }
+    }
+
     async function fetchLanguages() {
         if (_languages.value.length > 0 || isLoadingLanguages.value) return;
         isLoadingLanguages.value = true;
@@ -501,6 +515,8 @@ export const useDataStore = defineStore('data', () => {
         fetchApiKeys, 
         addApiKey,
         deleteMultipleApiKeys, deleteSingleApiKey,
+
+        handleServiceStatusUpdate,
 
         $reset
     };

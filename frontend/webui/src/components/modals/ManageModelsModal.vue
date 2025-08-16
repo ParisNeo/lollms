@@ -54,7 +54,7 @@
                             
                             <IconUploader v-model="form.icon" />
                             
-                            <div class="p-4 border rounded-lg dark:border-gray-700">
+                            <div v-if="bindingType === 'llm'" class="p-4 border rounded-lg dark:border-gray-700">
                                 <h4 class="font-medium mb-4">Generation Parameters</h4>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
@@ -75,7 +75,7 @@
                                 </div>
                             </div>
 
-                             <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                             <div v-if="bindingType === 'llm'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                                 <span class="flex-grow flex flex-col">
                                     <span class="text-sm font-medium">Vision Support</span>
                                     <span class="text-sm text-gray-500 dark:text-gray-400">Enable if this model can process images.</span>
@@ -85,7 +85,7 @@
                                 </button>
                             </div>
                             
-                             <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                             <div v-if="bindingType === 'llm'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                                 <span class="flex-grow flex flex-col">
                                     <span class="text-sm font-medium">Lock Context Size</span>
                                     <span class="text-sm text-gray-500 dark:text-gray-400">If enabled, users cannot override the context size for this model.</span>
@@ -95,7 +95,7 @@
                                 </button>
                             </div>
                             
-                            <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                            <div v-if="bindingType === 'llm'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                                 <span class="flex-grow flex flex-col">
                                     <span class="text-sm font-medium">Allow User Overrides</span>
                                     <span class="text-sm text-gray-500 dark:text-gray-400">If disabled, all generation parameters above will be forced for this model.</span>
@@ -120,7 +120,7 @@
                                     </button>
                                     <p v-if="isCurrentBindingDefault" class="text-sm text-green-600 dark:text-green-400 font-medium">✓ Current binding default</p>
                                 </div>
-                                 <div class="flex items-center gap-4">
+                                 <div v-if="bindingType === 'llm'" class="flex items-center gap-4">
                                     <button @click="setAsGlobalDefault" class="btn btn-secondary w-full" :disabled="isCurrentGlobalDefault || isSettingGlobalDefault">
                                         {{ isSettingGlobalDefault ? 'Setting...' : 'Set as Global Default' }}
                                     </button>
@@ -151,6 +151,7 @@ const { globalSettings } = storeToRefs(adminStore);
 
 const modalData = computed(() => uiStore.modalData('manageModels'));
 const binding = computed(() => modalData.value?.binding);
+const bindingType = computed(() => modalData.value?.bindingType); // 'llm' or 'tti'
 
 const isLoading = ref(true);
 const isSaving = ref(false);
@@ -202,7 +203,11 @@ async function fetchModels() {
     if (!binding.value) { isLoading.value = false; models.value = []; return; }
     isLoading.value = true;
     try {
-        models.value = await adminStore.fetchBindingModels(binding.value.id);
+        if (bindingType.value === 'tti') {
+            models.value = await adminStore.fetchTtiBindingModels(binding.value.id);
+        } else {
+            models.value = await adminStore.fetchBindingModels(binding.value.id);
+        }
     } finally {
         isLoading.value = false;
     }
@@ -214,7 +219,7 @@ function selectModel(model) {
 }
 
 async function fetchCtxSize() {
-    if (!selectedModel.value || !binding.value) return;
+    if (!selectedModel.value || !binding.value || bindingType.value !== 'llm') return;
     isFetchingCtxSize.value = true;
     try {
         const size = await adminStore.getModelCtxSize(binding.value.id, selectedModel.value.original_model_name);
@@ -231,20 +236,28 @@ async function saveAlias() {
     isSaving.value = true;
     try {
         const payload = { ...form.value };
-        // Ensure empty strings for numbers become null, and valid strings become numbers
-        ['ctx_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
-            const value = payload[key];
-            if (value === '' || value === null || value === undefined || isNaN(parseFloat(value))) {
-                payload[key] = null;
-            } else {
-                payload[key] = Number(value);
-            }
-        });
-
-        await adminStore.saveModelAlias(binding.value.id, {
+        if (bindingType.value === 'llm') {
+            ['ctx_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
+                const value = payload[key];
+                if (value === '' || value === null || value === undefined || isNaN(parseFloat(value))) {
+                    payload[key] = null;
+                } else {
+                    payload[key] = Number(value);
+                }
+            });
+        }
+        
+        const aliasPayload = {
             original_model_name: selectedModel.value.original_model_name,
             alias: payload
-        });
+        };
+
+        if (bindingType.value === 'tti') {
+            await adminStore.saveTtiModelAlias(binding.value.id, aliasPayload);
+        } else {
+            await adminStore.saveModelAlias(binding.value.id, aliasPayload);
+        }
+        
         await fetchModels();
         const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);
         if (updatedModel) selectModel(updatedModel);
@@ -263,7 +276,11 @@ async function deleteAlias() {
     if (confirmed) {
         isSaving.value = true;
         try {
-            await adminStore.deleteModelAlias(binding.value.id, selectedModel.value.original_model_name);
+            if (bindingType.value === 'tti') {
+                await adminStore.deleteTtiModelAlias(binding.value.id, selectedModel.value.original_model_name);
+            } else {
+                await adminStore.deleteModelAlias(binding.value.id, selectedModel.value.original_model_name);
+            }
             await fetchModels();
             const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);
             if (updatedModel) selectModel(updatedModel);
@@ -278,9 +295,12 @@ async function setAsBindingDefault() {
     if (!selectedModel.value || !binding.value) return;
     isSettingBindingDefault.value = true;
     try {
-        await adminStore.updateBinding(binding.value.id, {
-            default_model_name: selectedModel.value.original_model_name
-        });
+        const payload = { default_model_name: selectedModel.value.original_model_name };
+        if (bindingType.value === 'tti') {
+            await adminStore.updateTtiBinding(binding.value.id, payload);
+        } else {
+            await adminStore.updateBinding(binding.value.id, payload);
+        }
         uiStore.addNotification('Binding default model updated.', 'success');
     } finally {
         isSettingBindingDefault.value = false;
@@ -288,7 +308,7 @@ async function setAsBindingDefault() {
 }
 
 async function setAsGlobalDefault() {
-    if (!selectedModel.value || !binding.value) return;
+    if (!selectedModel.value || !binding.value || bindingType.value !== 'llm') return;
     isSettingGlobalDefault.value = true;
     try {
         const fullModelName = `${binding.value.alias}/${selectedModel.value.original_model_name}`;
