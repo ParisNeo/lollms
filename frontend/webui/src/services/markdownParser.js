@@ -33,12 +33,15 @@ export function parsedMarkdown(content) {
     return unprotectHtml(rawHtml);
 };
 
-export function getContentTokensWithMathProtection(text) {
-    if (!text) return [];
-    const protectedText = protectMath(text);
-    const tokens = Array.from(marked.lexer(protectedText, { mangle: false, smartypants: false }));
+// New helper function to tokenize non-code parts
+function tokenizeMarkdownPart(markdown) {
+    if (!markdown.trim()) {
+        return [{ type: 'space', raw: markdown }];
+    }
+    const protectedText = protectMath(markdown);
+    const markedTokens = Array.from(marked.lexer(protectedText, { mangle: false, smartypants: false }));
 
-    return tokens.map(token => {
+    return markedTokens.map(token => {
         const unprotectedToken = { ...token };
         if (unprotectedToken.raw) {
             unprotectedToken.raw = unprotectHtml(unprotectedToken.raw);
@@ -48,4 +51,44 @@ export function getContentTokensWithMathProtection(text) {
         }
         return unprotectedToken;
     });
+}
+
+
+// New custom tokenizer that robustly separates code blocks
+function customTokenizer(text) {
+    if (!text) return [];
+
+    // This regex splits the text by code blocks, capturing the blocks themselves.
+    // It now handles optional leading whitespace (^\s*) on the lines with the fences.
+    const codeBlockRegex = /(^\s*```[\s\S]*?^\s*```\s*?$)/gm;
+    const parts = text.split(codeBlockRegex);
+
+    const tokens = [];
+
+    for (let i = 0; i < parts.length; i++) {
+        const part = parts[i];
+        if (!part) continue;
+
+        if (i % 2 === 1) { // This part is a captured code block
+            const codeBlockMatch = part.match(/^\s*```(\w*)\r?\n([\s\S]*?)\r?\n?^\s*```\s*?$/m);
+            if (codeBlockMatch) {
+                tokens.push({
+                    type: 'code',
+                    lang: codeBlockMatch[1] || 'plaintext',
+                    text: codeBlockMatch[2],
+                    raw: part
+                });
+            } else {
+                // If regex fails (e.g., malformed block), treat it as plain text.
+                tokens.push(...tokenizeMarkdownPart(part));
+            }
+        } else { // This part is the text between code blocks
+            tokens.push(...tokenizeMarkdownPart(part));
+        }
+    }
+    return tokens;
+}
+
+export function getContentTokensWithMathProtection(text) {
+    return customTokenizer(text);
 }
