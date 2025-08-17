@@ -44,6 +44,7 @@ import IconServer from '../../assets/icons/IconServer.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconLollms from '../../assets/icons/IconLollms.vue';
 import IconWeb from '../../assets/icons/ui/IconWeb.vue';
+import IconCopy from '../../assets/icons/IconCopy.vue';
 
 // --- Store Initialization ---
 const discussionsStore = useDiscussionsStore();
@@ -68,7 +69,8 @@ const userCodeMirrorEditor = ref(null);
 const dataZonePromptText = ref('');
 const dataZoneWidth = ref(768); // Increased default width
 const isResizing = ref(false);
-const dataZonePromptSearchTerm = ref('');
+const userPromptSearchTerm = ref('');
+const zooPromptSearchTerm = ref('');
 const dataZoneViewModes = ref({
     discussion: 'edit',
     user: 'edit',
@@ -78,6 +80,8 @@ const dataZoneViewModes = ref({
 const urlToImport = ref('');
 const importUrlTaskId = ref(null);
 const showUrlImport = ref(false);
+const hiddenDocuments = ref([]);
+const isProgrammaticChange = ref(false);
 
 // --- Data Zone State ---
 let discussionSaveDebounceTimer = null;
@@ -132,34 +136,43 @@ const canRedoMemory = computed(() => memoryHistoryIndex.value < memoryHistory.va
 
 const filteredLollmsPrompts = computed(() => {
     if (!Array.isArray(lollmsPrompts.value)) return [];
-    if (!dataZonePromptSearchTerm.value) return lollmsPrompts.value;
-    const term = dataZonePromptSearchTerm.value.toLowerCase();
+    if (!userPromptSearchTerm.value) return lollmsPrompts.value;
+    const term = userPromptSearchTerm.value.toLowerCase();
     return lollmsPrompts.value.filter(p => p.name.toLowerCase().includes(term));
 });
 
-const filteredUserPrompts = computed(() => {
-    if (!Array.isArray(userPrompts.value)) return [];
-    if (!dataZonePromptSearchTerm.value) return userPrompts.value;
-    const term = dataZonePromptSearchTerm.value.toLowerCase();
-    return userPrompts.value.filter(p => p.name.toLowerCase().includes(term));
-});
-
-const filteredSystemPromptsByZooCategory = computed(() => {
-    const term = dataZonePromptSearchTerm.value.toLowerCase();
-    if (!systemPromptsByZooCategory.value || typeof systemPromptsByZooCategory.value !== 'object') return {};
-    if (!term) return systemPromptsByZooCategory.value;
+const filteredUserPromptsByCategory = computed(() => {
+    const term = userPromptSearchTerm.value.toLowerCase();
+    const source = userPromptsByCategory.value;
+    if (!source || typeof source !== 'object') return {};
+    
+    if (!term) return source;
+    
     const filtered = {};
-    for (const category in systemPromptsByZooCategory.value) {
-        const filteredPrompts = systemPromptsByZooCategory.value[category].filter(p => p.name.toLowerCase().includes(term));
+    for (const category in source) {
+        const filteredPrompts = source[category].filter(p => p.name.toLowerCase().includes(term));
         if (filteredPrompts.length > 0) {
             filtered[category] = filteredPrompts;
         }
     }
-    const sortedFiltered = {};
-    Object.keys(filtered).sort().forEach(key => {
-        sortedFiltered[key] = filtered[key];
-    });
-    return sortedFiltered;
+    return filtered;
+});
+
+const filteredSystemPromptsByZooCategory = computed(() => {
+    const term = zooPromptSearchTerm.value.toLowerCase();
+    const source = systemPromptsByZooCategory.value;
+    if (!source || typeof source !== 'object') return {};
+    
+    if (!term) return source;
+    
+    const filtered = {};
+    for (const category in source) {
+        const filteredPrompts = source[category].filter(p => p.name.toLowerCase().includes(term));
+        if (filteredPrompts.length > 0) {
+            filtered[category] = filteredPrompts;
+        }
+    }
+    return filtered;
 });
 
 const discussionDataZone = computed({
@@ -182,15 +195,87 @@ const parsedDocuments = computed(() => {
     const regex = /^---\s*Document:\s*(.*?)\s*---$\n([\s\S]*?)\n^---\s*End Document:\s*\1\s*---$/gm;
     let match;
     while ((match = regex.exec(content)) !== null) {
-        docs.push({ filename: match[1].trim() });
+        docs.push({ 
+            filename: match[1].trim(),
+            content: match[2].trim()
+        });
     }
     return docs;
 });
 
+
 function deleteDocument(filename) {
     const escapedFilename = filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(`^---\\s*Document:\\s*${escapedFilename}\\s*---\\n[\\s\\S]*?\\n^---\\s*End Document:\\s*${escapedFilename}\\s*---\\n*`, 'gm');
-    discussionDataZone.value = discussionDataZone.value.replace(regex, '');
+    updateDiscussionDataZoneAndRecordHistory(discussionDataZone.value.replace(regex, ''));
+}
+
+function copyDocumentContent(content) {
+    uiStore.copyToClipboard(content, 'Document content copied!');
+}
+
+function getHiddenDocsStorageKey(discussionId) {
+    if (!discussionId) return null;
+    return `lollms_hidden_docs_${discussionId}`;
+}
+
+function loadHiddenDocuments(discussionId) {
+    const key = getHiddenDocsStorageKey(discussionId);
+    if (!key) {
+        hiddenDocuments.value = [];
+        return;
+    }
+    const stored = localStorage.getItem(key);
+    hiddenDocuments.value = stored ? JSON.parse(stored) : [];
+}
+
+function saveHiddenDocuments(discussionId) {
+    const key = getHiddenDocsStorageKey(discussionId);
+    if (!key) return;
+    localStorage.setItem(key, JSON.stringify(hiddenDocuments.value));
+}
+
+function hideDocument(filename) {
+    const content = discussionDataZone.value;
+    const escapedFilename = filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`^---\\s*Document:\\s*${escapedFilename}\\s*---\\n[\\s\\S]*?\\n^---\\s*End Document:\\s*${escapedFilename}\\s*---\\n*`, 'gm');
+    
+    let match = regex.exec(content);
+    if (match) {
+        const fullContent = match[0];
+        hiddenDocuments.value.push({ filename, fullContent });
+        updateDiscussionDataZoneAndRecordHistory(content.replace(fullContent, ''));
+        if (activeDiscussion.value) {
+            saveHiddenDocuments(activeDiscussion.value.id);
+        }
+    }
+}
+
+function showDocument(filename) {
+    const docIndex = hiddenDocuments.value.findIndex(doc => doc.filename === filename);
+    if (docIndex > -1) {
+        const docToShow = hiddenDocuments.value[docIndex];
+        let newContent = discussionDataZone.value;
+        if (newContent && !newContent.trim().endsWith('\n')) {
+            newContent += '\n\n';
+        }
+        updateDiscussionDataZoneAndRecordHistory(newContent + docToShow.fullContent);
+        hiddenDocuments.value.splice(docIndex, 1);
+        if (activeDiscussion.value) {
+            saveHiddenDocuments(activeDiscussion.value.id);
+        }
+    }
+}
+
+function deleteHiddenDocument(filename) {
+    const docIndex = hiddenDocuments.value.findIndex(doc => doc.filename === filename);
+    if (docIndex > -1) {
+        hiddenDocuments.value.splice(docIndex, 1);
+        if (activeDiscussion.value) {
+            saveHiddenDocuments(activeDiscussion.value.id);
+        }
+        uiStore.addNotification(`Permanently removed hidden document '${filename}'.`, 'info');
+    }
 }
 
 const userDataZone = computed({
@@ -241,9 +326,28 @@ async function tokenizeContent(content, zone) {
     }, 750);
 }
 
-watch(discussionDataZone, (newVal) => { tokenizeContent(newVal, 'discussion'); });
-watch(userDataZone, (newVal) => { tokenizeContent(newVal, 'user'); });
-watch(memory, (newVal) => { tokenizeContent(newVal, 'memory'); });
+watch(discussionDataZone, (newVal) => { 
+    tokenizeContent(newVal, 'discussion');
+    if (!isProgrammaticChange.value) {
+        discussionHistoryDebounceTimer = recordHistory(discussionHistory, discussionHistoryIndex, discussionHistoryDebounceTimer, newVal);
+    }
+    reconcileHiddenDocuments();
+});
+
+watch(userDataZone, (newVal) => { 
+    tokenizeContent(newVal, 'user');
+    if (!isProgrammaticChange.value) {
+        userHistoryDebounceTimer = recordHistory(userHistory, userHistoryIndex, userHistoryDebounceTimer, newVal);
+    }
+});
+
+watch(memory, (newVal) => { 
+    tokenizeContent(newVal, 'memory');
+    if (!isProgrammaticChange.value) {
+        memoryHistoryDebounceTimer = recordHistory(memoryHistory, memoryHistoryIndex, memoryHistoryDebounceTimer, newVal);
+    }
+});
+
 watch(importUrlTask, (newTask) => {
     if (newTask && ['completed', 'failed', 'cancelled'].includes(newTask.status)) {
         importUrlTaskId.value = null;
@@ -255,11 +359,19 @@ onMounted(() => {
     if (savedWidth) dataZoneWidth.value = parseInt(savedWidth, 10);
     setupHistory(userHistory, userHistoryIndex, userDataZone.value);
     setupHistory(memoryHistory, memoryHistoryIndex, memory.value);
+    on('discussion:dataZoneUpdated', onDataZoneUpdatedFromStore);
 });
 onUnmounted(() => {
     window.removeEventListener('mousemove', handleResize);
     window.removeEventListener('mouseup', stopResize);
+    off('discussion:dataZoneUpdated', onDataZoneUpdatedFromStore);
 });
+
+function onDataZoneUpdatedFromStore({ discussionId, newContent }) {
+    if (activeDiscussion.value && activeDiscussion.value.id === discussionId) {
+        updateDiscussionDataZoneAndRecordHistory(newContent);
+    }
+}
 
 async function handlePasteInDataZone(event) {
     if (!currentModelVisionSupport.value) return;
@@ -283,26 +395,106 @@ async function handlePasteInDataZone(event) {
     }
 }
 function setupHistory(historyRef, indexRef, initialValue) { historyRef.value = [initialValue]; indexRef.value = 0; }
+
 function recordHistory(historyRef, indexRef, debounceTimer, content) {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
         if (historyRef.value[indexRef.value] === content) return;
-        if (indexRef.value < historyRef.value.length - 1) historyRef.value.splice(indexRef.value + 1);
+        if (indexRef.value < historyRef.value.length - 1) {
+            historyRef.value.splice(indexRef.value + 1);
+        }
         historyRef.value.push(content);
         indexRef.value++;
-    }, 500);
+    }, 750);
     return debounceTimer;
 }
-function undo(historyRef, indexRef, canUndo) { if (canUndo.value) { indexRef.value--; return historyRef.value[indexRef.value]; } }
-function redo(historyRef, indexRef, canRedo) { if (canRedo.value) { indexRef.value++; return historyRef.value[indexRef.value]; } }
 
-watch(discussionDataZone, (newVal) => { discussionHistoryDebounceTimer = recordHistory(discussionHistory, discussionHistoryIndex, discussionHistoryDebounceTimer, newVal); });
-watch(userDataZone, (newVal) => { userHistoryDebounceTimer = recordHistory(userHistory, userHistoryIndex, userHistoryDebounceTimer, newVal); });
-watch(memory, (newVal) => { memoryHistoryDebounceTimer = recordHistory(memoryHistory, memoryHistoryIndex, memoryHistoryDebounceTimer, newVal); });
+function updateDiscussionDataZoneAndRecordHistory(newContent) {
+    if (discussionDataZone.value === newContent) return;
+    clearTimeout(discussionHistoryDebounceTimer);
+    if (discussionHistoryIndex.value < discussionHistory.value.length - 1) {
+        discussionHistory.value.splice(discussionHistoryIndex.value + 1);
+    }
+    discussionHistory.value.push(newContent);
+    discussionHistoryIndex.value++;
+    
+    isProgrammaticChange.value = true;
+    discussionDataZone.value = newContent;
+    nextTick(() => { isProgrammaticChange.value = false; });
+}
 
-watch(activeDiscussion, (newDiscussion) => {
+async function handleUndoDiscussion() {
+    if (!canUndoDiscussion.value) return;
+    isProgrammaticChange.value = true;
+    discussionHistoryIndex.value--;
+    discussionDataZone.value = discussionHistory.value[discussionHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+async function handleRedoDiscussion() {
+    if (!canRedoDiscussion.value) return;
+    isProgrammaticChange.value = true;
+    discussionHistoryIndex.value++;
+    discussionDataZone.value = discussionHistory.value[discussionHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+async function handleUndoUser() {
+    if (!canUndoUser.value) return;
+    isProgrammaticChange.value = true;
+    userHistoryIndex.value--;
+    userDataZone.value = userHistory.value[userHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+async function handleRedoUser() {
+    if (!canRedoUser.value) return;
+    isProgrammaticChange.value = true;
+    userHistoryIndex.value++;
+    userDataZone.value = userHistory.value[userHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+async function handleUndoMemory() {
+    if (!canUndoMemory.value) return;
+    isProgrammaticChange.value = true;
+    memoryHistoryIndex.value--;
+    memory.value = memoryHistory.value[memoryHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+async function handleRedoMemory() {
+    if (!canRedoMemory.value) return;
+    isProgrammaticChange.value = true;
+    memoryHistoryIndex.value++;
+    memory.value = memoryHistory.value[memoryHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+
+function reconcileHiddenDocuments() {
+    if (!activeDiscussion.value) return;
+    const currentVisibleDocs = new Set(parsedDocuments.value.map(d => d.filename));
+    const updatedHiddenDocs = hiddenDocuments.value.filter(doc => !currentVisibleDocs.has(doc.filename));
+    
+    if (updatedHiddenDocs.length !== hiddenDocuments.value.length) {
+        hiddenDocuments.value = updatedHiddenDocs;
+        saveHiddenDocuments(activeDiscussion.value.id);
+    }
+}
+
+watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
     if (newDiscussion) {
-        setupHistory(discussionHistory, discussionHistoryIndex, newDiscussion.discussion_data_zone || '');
+        loadHiddenDocuments(newDiscussion.id);
+        if (!oldDiscussion || newDiscussion.id !== oldDiscussion.id) {
+            setupHistory(discussionHistory, discussionHistoryIndex, newDiscussion.discussion_data_zone || '');
+        }
         tokenizeContent(discussionDataZone.value, 'discussion');
         tokenizeContent(userDataZone.value, 'user');
         tokenizeContent(personalityDataZone.value, 'personality');
@@ -363,15 +555,22 @@ async function handleKnowledgeFileUpload(event) {
             });
         }
 
-        discussionDataZone.value = newContent;
+        updateDiscussionDataZoneAndRecordHistory(newContent);
         uiStore.addNotification(`Extracted text from ${files.length} file(s) and added to discussion data zone.`, 'success');
     } finally { isExtractingText.value = false; if (knowledgeFileInput.value) knowledgeFileInput.value.value = ''; }
 }
 
 function handleProcessContent() {
-    if (!activeDiscussion.value) return; const finalPrompt = dataZonePromptText.value.replace('{{data_zone}}', discussionDataZone.value);
+    if (!activeDiscussion.value) return;
+
+    for (const doc of parsedDocuments.value) {
+        hideDocument(doc.filename);
+    }
+
+    const finalPrompt = dataZonePromptText.value.replace('{{data_zone}}', discussionDataZone.value);
     discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, finalPrompt);
 }
+
 function openPromptLibrary() {
     router.push({ path: '/settings', query: { tab: 'prompts' } });
 }
@@ -482,8 +681,8 @@ function toggleViewMode(zone) {
                                     <h4 class="font-semibold text-sm">Content</h4>
                                     <div class="flex items-center gap-1">
                                         <button @click="toggleViewMode('discussion')" class="btn-icon" :title="dataZoneViewModes.discussion === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.discussion === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button>
-                                        <button @click="discussionDataZone = undo(discussionHistory, discussionHistoryIndex, canUndoDiscussion)" class="btn-icon" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-5 h-5" /></button>
-                                        <button @click="discussionDataZone = redo(discussionHistory, discussionHistoryIndex, canRedoDiscussion)" class="btn-icon" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-5 h-5" /></button>
+                                        <button @click="handleUndoDiscussion" class="btn-icon" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-5 h-5" /></button>
+                                        <button @click="handleRedoDiscussion" class="btn-icon" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-5 h-5" /></button>
                                     </div>
                                 </div>
                                 <div class="flex-grow min-h-0 p-2">
@@ -492,7 +691,31 @@ function toggleViewMode(zone) {
                                 </div>
                                 <div class="p-4 border-t dark:border-gray-600 flex-shrink-0 space-y-3">
                                     <div class="flex items-center gap-2">
-                                        <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2"><DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"><button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button></DropdownSubmenu><DropdownSubmenu v-if="Object.keys(promptsStore.userPromptsByCategory).length > 0" title="User" icon="user" collection="ui"><div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div><div class="max-h-60 overflow-y-auto"><div v-for="(prompts, category) in promptsStore.userPromptsByCategory" :key="category"><h3 class="category-header">{{ category }}</h3><button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button></div></div></DropdownSubmenu><DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui"><div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div><div class="max-h-60 overflow-y-auto"><div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category"><h3 class="category-header">{{ category }}</h3><button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button></div></div></DropdownSubmenu><div v-if="(lollmsPrompts.length + userPrompts.length + Object.keys(systemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div><button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button></DropdownMenu>
+                                        <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2">
+                                            <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
+                                                <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button>
+                                            </DropdownSubmenu>
+                                            <DropdownSubmenu v-if="Object.keys(userPromptsByCategory).length > 0" title="User" icon="user" collection="ui">
+                                                <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div>
+                                                <div class="max-h-60 overflow-y-auto">
+                                                    <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category">
+                                                        <h3 class="category-header">{{ category }}</h3>
+                                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button>
+                                                    </div>
+                                                </div>
+                                            </DropdownSubmenu>
+                                            <DropdownSubmenu v-if="Object.keys(systemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui">
+                                                <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="zooPromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div>
+                                                <div class="max-h-60 overflow-y-auto">
+                                                    <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category">
+                                                        <h3 class="category-header">{{ category }}</h3>
+                                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button>
+                                                    </div>
+                                                </div>
+                                            </DropdownSubmenu>
+                                            <div v-if="(lollmsPrompts.length + Object.keys(userPromptsByCategory).length + Object.keys(systemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div>
+                                            <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
+                                        </DropdownMenu>
                                         <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process the data zone content..." rows="2" class="input-field text-sm flex-grow"></textarea>
                                     </div>
                                     <div class="flex items-center gap-2">
@@ -532,10 +755,36 @@ function toggleViewMode(zone) {
                                                     </button>
                                                 </div>
                                             </div>
-                                            <div v-if="parsedDocuments.length === 0" class="text-center text-xs text-gray-500 pt-4">No documents.</div>
+                                            <div v-if="parsedDocuments.length === 0 && hiddenDocuments.length === 0" class="text-center text-xs text-gray-500 pt-4">No documents.</div>
+                                            <!-- Visible Documents -->
                                             <div v-for="doc in parsedDocuments" :key="doc.filename" class="flex items-center justify-between p-1.5 rounded-md bg-gray-100 dark:bg-gray-700/50 text-xs">
                                                 <span class="truncate" :title="doc.filename">{{ doc.filename }}</span>
-                                                <button @click="deleteDocument(doc.filename)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Remove Document"><IconXMark class="w-3 h-3" /></button>
+                                                <div class="flex items-center gap-1">
+                                                    <button @click="hideDocument(doc.filename)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="Hide document">
+                                                        <IconEyeOff class="w-3 h-3" />
+                                                    </button>
+                                                    <button @click="copyDocumentContent(doc.content)" class="p-1 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500" title="Copy document content">
+                                                        <IconCopy class="w-3 h-3" />
+                                                    </button>
+                                                    <button @click="deleteDocument(doc.filename)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Remove Document">
+                                                        <IconXMark class="w-3 h-3" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                            <!-- Hidden Documents Section -->
+                                            <div v-if="hiddenDocuments.length > 0" class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+                                                <h5 class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Hidden Documents ({{ hiddenDocuments.length }})</h5>
+                                                <div v-for="doc in hiddenDocuments" :key="doc.filename" class="flex items-center justify-between p-1.5 rounded-md bg-gray-100 dark:bg-gray-700/50 text-xs opacity-60">
+                                                    <span class="truncate" :title="doc.filename">{{ doc.filename }}</span>
+                                                    <div class="flex items-center gap-1">
+                                                        <button @click="showDocument(doc.filename)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="Show document">
+                                                            <IconEye class="w-3 h-3" />
+                                                        </button>
+                                                        <button @click="deleteHiddenDocument(doc.filename)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Delete permanently">
+                                                            <IconTrash class="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -547,7 +796,7 @@ function toggleViewMode(zone) {
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                             <div class="flex justify-between items-center">
                                 <div><h3 class="font-semibold flex items-center gap-2"><IconUserCircle class="w-5 h-5" /> User Data Zone</h3><p class="text-xs text-gray-500 mt-1">Context for all of your discussions.</p></div>
-                                <div class="flex items-center gap-1"><button @click="toggleViewMode('user')" class="btn-icon" :title="dataZoneViewModes.user === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.user === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button><DropdownMenu title="Insert Placeholder" icon="ticket" collection="ui" button-class="btn-icon"><button v-for="keyword in keywords" :key="keyword.keyword" @click="insertPlaceholder(keyword.keyword)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><div class="font-mono font-semibold">{{ keyword.keyword }}</div><div class="text-xs text-gray-500">{{ keyword.description }}</div></button></DropdownMenu><button @click="userDataZone = undo(userHistory, userHistoryIndex, canUndoUser)" class="btn-icon" title="Undo" :disabled="!canUndoUser"><IconUndo class="w-5 h-5" /></button><button @click="userDataZone = redo(userHistory, userHistoryIndex, canRedoUser)" class="btn-icon" title="Redo" :disabled="!canRedoUser"><IconRedo class="w-5 h-5" /></button></div>
+                                <div class="flex items-center gap-1"><button @click="toggleViewMode('user')" class="btn-icon" :title="dataZoneViewModes.user === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.user === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button><DropdownMenu title="Insert Placeholder" icon="ticket" collection="ui" button-class="btn-icon"><button v-for="keyword in keywords" :key="keyword.keyword" @click="insertPlaceholder(keyword.keyword)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><div class="font-mono font-semibold">{{ keyword.keyword }}</div><div class="text-xs text-gray-500">{{ keyword.description }}</div></button></DropdownMenu><button @click="handleUndoUser" class="btn-icon" title="Undo" :disabled="!canUndoUser"><IconUndo class="w-5 h-5" /></button><button @click="handleRedoUser" class="btn-icon" title="Redo" :disabled="!canRedoUser"><IconRedo class="w-5 h-5" /></button></div>
                             </div>
                             <div class="mt-2"><div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono"><span>Tokens</span><span>{{ formatNumber(userDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span></div><div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1"><div class="h-1.5 rounded-full bg-green-500 transition-width duration-500" :style="{ width: `${getPercentage(userDataZoneTokens)}%` }"></div></div></div>
                         </div>
@@ -563,7 +812,7 @@ function toggleViewMode(zone) {
                     <div v-show="activeDataZoneTab === 'ltm'" class="flex-1 flex flex-col min-h-0">
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                             <div class="flex justify-between items-center"><div><h3 class="font-semibold flex items-center gap-2"><IconThinking class="w-5 h-5" /> Long-Term Memory</h3><p class="text-xs text-gray-500 mt-1">Facts the AI has learned from conversations.</p></div>
-                                <div class="flex items-center gap-1"><button @click="toggleViewMode('ltm')" class="btn-icon" :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button><button @click="memory = undo(memoryHistory, memoryHistoryIndex, canUndoMemory)" class="btn-icon" title="Undo" :disabled="!canUndoMemory"><IconUndo class="w-5 h-5" /></button><button @click="memory = redo(memoryHistory, memoryHistoryIndex, canRedoMemory)" class="btn-icon" title="Redo" :disabled="!canRedoMemory"><IconRedo class="w-5 h-5" /></button><button @click="handleMemorize" class="btn btn-secondary btn-sm" title="Analyze discussion and memorize new facts" :disabled="isMemorizing"><IconSparkles class="w-4 h-4" :class="{'animate-pulse': isMemorizing}"/></button></div>
+                                <div class="flex items-center gap-1"><button @click="toggleViewMode('ltm')" class="btn-icon" :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button><button @click="handleUndoMemory" class="btn-icon" title="Undo" :disabled="!canUndoMemory"><IconUndo class="w-5 h-5" /></button><button @click="handleRedoMemory" class="btn-icon" title="Redo" :disabled="!canRedoMemory"><IconRedo class="w-5 h-5" /></button><button @click="handleMemorize" class="btn btn-secondary btn-sm" title="Analyze discussion and memorize new facts" :disabled="isMemorizing"><IconSparkles class="w-4 h-4" :class="{'animate-pulse': isMemorizing}"/></button></div>
                             </div>
                             <div class="mt-2"><div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono"><span>Tokens</span><span>{{ formatNumber(memoryDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span></div><div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1"><div class="h-1.5 rounded-full bg-yellow-500 transition-width duration-500" :style="{ width: `${getPercentage(memoryDataZoneTokens)}%` }"></div></div></div>
                         </div>

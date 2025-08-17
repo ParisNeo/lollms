@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, Form
 from sqlalchemy.orm import Session
 from typing import List
+from lollms_client import LollmsClient
+from ascii_colors import trace_exception
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
-from backend.db.models.config import LLMBinding as DBLLMBinding
+from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
 from backend.session import get_current_active_user, get_user_lollms_client, user_sessions
 from backend.models import UserLLMParams, ModelInfo, UserAuthDetails
 from backend.settings import settings
@@ -63,6 +65,57 @@ async def get_lollms_models(
     if not all_models:
         raise HTTPException(status_code=404, detail="No models found from any active bindings. Please contact an administrator.")
 
+    return sorted(all_models, key=lambda x: x['name'])
+
+@lollms_config_router.get("/tti-models", response_model=List[ModelInfo])
+async def get_lollms_tti_models(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Lists all available Text-to-Image models from all active TTI bindings.
+    """
+    all_models = []
+    active_tti_bindings = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).all()
+
+    for binding in active_tti_bindings:
+        try:
+            lc = LollmsClient(
+                tti_binding_name=binding.name,
+                tti_binding_config={**binding.config, "model_name": binding.default_model_name}
+            )
+            if not lc.tti:
+                print(f"WARNING: Could not build TTI instance for binding '{binding.alias}'. Skipping.")
+                continue
+
+            models_from_binding = lc.tti.listModels()
+            
+            raw_model_names = []
+            if isinstance(models_from_binding, list):
+                for item in models_from_binding:
+                    model_id = item if isinstance(item, str) else item.get("model_name")
+                    if model_id: raw_model_names.append(model_id)
+            
+            model_aliases = binding.model_aliases or {}
+
+            for model_name in raw_model_names:
+                alias_data = model_aliases.get(model_name)
+                
+                model_info = {
+                    "id": f"{binding.alias}/{model_name}",
+                    "name": alias_data.get('title') if alias_data else f"{binding.alias}/{model_name}",
+                    "alias": alias_data
+                }
+                all_models.append(model_info)
+
+        except Exception as e:
+            print(f"WARNING: Could not fetch TTI models from binding '{binding.alias}': {e}")
+            trace_exception(e)
+            continue
+
+    if not all_models:
+        raise HTTPException(status_code=404, detail="No TTI models found from any active bindings.")
+    
     return sorted(all_models, key=lambda x: x['name'])
 
 

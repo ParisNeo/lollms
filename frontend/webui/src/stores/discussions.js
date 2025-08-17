@@ -6,6 +6,7 @@ import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
 import { useDataStore } from './data';
 import { useTasksStore } from './tasks';
+import useEventBus from '../services/eventBus';
 
 let activeGenerationAbortController = null;
 
@@ -51,6 +52,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
     const { tasks } = storeToRefs(tasksStore);
+    const { emit } = useEventBus();
 
     const discussions = ref({});
     const currentDiscussionId = ref(null);
@@ -155,8 +157,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (zone === 'discussion') {
             const discussion = discussions.value[discussion_id];
             if (discussion) {
-                discussion.discussion_data_zone = new_content;
-                uiStore.addNotification('Data zone has been updated.', 'success');
+                // Emit event for component to handle history, instead of direct mutation
+                emit('discussion:dataZoneUpdated', { discussionId: discussion_id, newContent: new_content });
+                uiStore.addNotification('Data zone has been updated by AI.', 'success');
             }
         } else if (zone === 'memory') {
             const authStore = useAuthStore();
@@ -282,9 +285,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     async function updateDataZone({ discussionId, content }) {
         if (!discussions.value[discussionId]) return;
+        // Defensive check to prevent sending null/undefined to backend
+        if (content === null || content === undefined) {
+            console.warn("Attempted to save null/undefined content to data_zone. Coercing to empty string.");
+            content = ''; 
+        }
         try {
             await apiClient.put(`/api/discussions/${discussionId}/data_zone`, { content });
-            discussions.value[discussionId].discussion_data_zone = content;
+            if (discussions.value[discussionId]) {
+                discussions.value[discussionId].discussion_data_zone = content;
+            }
         } catch (error) {
             useUiStore().addNotification('Failed to save discussion data zone.', 'error');
             throw error;

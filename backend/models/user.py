@@ -38,6 +38,7 @@ class UserCreateAdmin(UserLLMParams):
     birth_date: Optional[datetime.date] = None
     receive_notification_emails: bool = True
     lollms_model_name: Optional[str] = None
+    tti_binding_model_name: Optional[str] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     rag_top_k: Optional[int] = Field(None, ge=1)
@@ -56,6 +57,7 @@ class UserUpdate(BaseModel):
     birth_date: Optional[datetime.date] = None
     receive_notification_emails: Optional[bool] = None
     lollms_model_name: Optional[str] = None
+    tti_binding_model_name: Optional[str] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     llm_ctx_size: Optional[int] = Field(None, ge=0)
@@ -152,6 +154,7 @@ class UserPublic(UserLLMParams):
     password_reset_token: Optional[str] = None
     reset_token_expiry: Optional[datetime.datetime] = None
     lollms_model_name: Optional[str] = None
+    tti_binding_model_name: Optional[str] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     rag_top_k: Optional[int] = None
@@ -179,6 +182,7 @@ class UserAuthDetails(UserLLMParams):
     receive_notification_emails: bool
     is_searchable: bool
     lollms_model_name: Optional[str] = None
+    tti_binding_model_name: Optional[str] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     rag_top_k: Optional[int] = Field(None, ge=1)

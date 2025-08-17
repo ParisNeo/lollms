@@ -449,7 +449,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "show_token_counter": "BOOLEAN DEFAULT 1 NOT NULL",
             "is_searchable": "BOOLEAN DEFAULT 1 NOT NULL",
             "first_login_done": "BOOLEAN DEFAULT 0 NOT NULL",
-            "data_zone": "TEXT", "memory": "TEXT"
+            "data_zone": "TEXT", "memory": "TEXT",
+            "tti_binding_model_name": "VARCHAR"
         }
         
         added_cols = []
@@ -459,6 +460,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                     connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))
                     print(f"INFO: Added missing column '{col_name}' to 'users' table.")
                     added_cols.append(col_name)
+                    connection.commit()
                 except Exception as ex:
                     trace_exception(ex)
 

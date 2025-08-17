@@ -49,7 +49,7 @@ export const useAuthStore = defineStore('auth', () => {
         };
 
         ws.value.onmessage = async (event) => {
-            console.log("[WebSocket] Message received:", event.data);
+            // console.log("[WebSocket] Message received:", event.data);
             const data = JSON.parse(event.data);
             // Dynamically import stores inside the handler to avoid circular dependencies
             const { useSocialStore } = await import('./social');

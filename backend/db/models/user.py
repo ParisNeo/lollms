@@ -46,6 +46,7 @@ class User(Base):
     api_keys = relationship("OpenAIAPIKey", back_populates="user", cascade="all, delete-orphan")
 
     lollms_model_name = Column(String, nullable=True)
+    tti_binding_model_name = Column(String, nullable=True) # NEW
     safe_store_vectorizer = Column(String, nullable=True)
     active_personality_id = Column(String, ForeignKey("personalities.id", name="fk_user_active_personality", ondelete="SET NULL"), nullable=True)
     llm_ctx_size = Column(Integer, nullable=True)
