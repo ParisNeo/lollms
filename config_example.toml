@@ -39,3 +39,12 @@ global_default_vectorizer = "st:all-MiniLM-L6-v2" # Example Sentence Transformer
 # For per-user encryption keys, you'd store them encrypted in the UserDB (not implemented here).
 # If set, requires 'safe_store[encryption]' -> 'cryptography' to be installed.
 encryption_key = "my_super_secret_safe_store_key_CHANGE_ME" # Or null/remove to disable encryption
+
+[tti_settings]
+# Default TTI (Text-to-Image) binding to use for the "Generate Image" feature.
+# Make sure you have configured this binding in your global lollms settings
+# or provided necessary API keys as environment variables (e.g., OPENAI_API_KEY).
+binding_name = "dalle" 
+# You can add binding-specific configurations here if needed.
+# For DALL-E, you can specify the model.
+binding_config = { model_name = "dall-e-3" }

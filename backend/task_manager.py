@@ -94,6 +94,18 @@ class Task:
                         if db_task.owner_user_id:
                             manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
                         manager.broadcast_to_admins_sync(custom_payload)
+                    elif zone_info.get("zone") == "discussion_images":
+                        custom_payload = {
+                            "type": "discussion_images_updated",
+                            "data": {
+                                "discussion_id": zone_info.get("discussion_id"),
+                                "discussion_images": zone_info.get("new_images", []),
+                                "active_discussion_images": zone_info.get("new_active_images", [])
+                            }
+                        }
+                        if db_task.owner_user_id:
+                            manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
+                        manager.broadcast_to_admins_sync(custom_payload)
                 
                 # NEW: Handle App Status updates
                 app_data = zone_info.get("updated_app")

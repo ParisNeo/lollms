@@ -25,7 +25,7 @@ from backend.db.models.config import GlobalConfig as DBGlobalConfig, LLMBinding 
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.security import get_password_hash as hash_password
 
-from ascii_colors import trace_exception
+from ascii_colors import trace_exception, ASCIIColors
 
 from backend.db.models.db_task import DBTask
 from backend.models import (
@@ -441,6 +441,9 @@ async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db))
         }
 
         lc = LollmsClient(**client_params)
+        if not lc.tti:
+            ASCIIColors.error("Could not build a tti instance from the configuration. make sure you have set all configuration parameters correctly")
+            raise Exception("Could not build a tti instance from the configuration. make sure you have set all configuration parameters correctly")
         raw_models = lc.tti.listModels()
         
         models_list = []

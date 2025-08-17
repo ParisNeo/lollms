@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/chat/ChatView.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
@@ -112,7 +113,7 @@ const isImportingUrl = computed(() => importUrlTask.value && ['pending', 'runnin
 const isProcessing = computed(() => {
     if (!activeDiscussion.value) return false;
     const task = discussionsStore.activeAiTasks[activeDiscussion.value.id];
-    return (task?.type === 'summarize') || isImportingUrl.value;
+    return task?.type === 'summarize' || task?.type === 'generate_image' || isImportingUrl.value;
 });
 
 const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'memorize');
@@ -405,6 +406,18 @@ async function handleDiscussionImageUpload(event) {
         if (discussionImageInput.value) discussionImageInput.value.value = ''; 
     }
 }
+function handleGenerateImage() {
+    if (!activeDiscussion.value) return;
+    let prompt = discussionDataZone.value.trim();
+    if (!prompt) {
+        prompt = dataZonePromptText.value.trim();
+    }
+    if (!prompt) {
+        uiStore.addNotification('Please provide a prompt in the Discussion Data Zone or the prompt text area to generate an image.', 'warning');
+        return;
+    }
+    discussionsStore.generateImageFromDataZone(activeDiscussion.value.id, prompt);
+}
 
 function toggleViewMode(zone) {
     dataZoneViewModes.value[zone] = dataZoneViewModes.value[zone] === 'edit' ? 'view' : 'edit';
@@ -482,7 +495,10 @@ function toggleViewMode(zone) {
                                         <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2"><DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"><button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button></DropdownSubmenu><DropdownSubmenu v-if="Object.keys(promptsStore.userPromptsByCategory).length > 0" title="User" icon="user" collection="ui"><div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div><div class="max-h-60 overflow-y-auto"><div v-for="(prompts, category) in promptsStore.userPromptsByCategory" :key="category"><h3 class="category-header">{{ category }}</h3><button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button></div></div></DropdownSubmenu><DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui"><div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="dataZonePromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div><div class="max-h-60 overflow-y-auto"><div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category"><h3 class="category-header">{{ category }}</h3><button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button></div></div></DropdownSubmenu><div v-if="(lollmsPrompts.length + userPrompts.length + Object.keys(systemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div><button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button></DropdownMenu>
                                         <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process the data zone content..." rows="2" class="input-field text-sm flex-grow"></textarea>
                                     </div>
-                                    <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Process Content' }}</button>
+                                    <div class="flex items-center gap-2">
+                                        <button @click="handleGenerateImage" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && !dataZonePromptText.trim())"><IconPhoto class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Generate Image' }}</button>
+                                        <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Process Content' }}</button>
+                                    </div>
                                 </div>
                             </div>
 

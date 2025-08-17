@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/auth.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -80,6 +81,9 @@ export const useAuthStore = defineStore('auth', () => {
                 }
                 case 'data_zone_processed':
                     discussionsStore.handleDataZoneUpdate(data.data);
+                    break;
+                case 'discussion_images_updated':
+                    discussionsStore.handleDiscussionImagesUpdated(data.data);
                     break;
                 case 'tasks_cleared':
                     tasksStore.handleTasksCleared(data.data);

@@ -46,6 +46,7 @@ from backend.db import get_db
 from backend.db.models.user import User as DBUser, UserStarredDiscussion, UserMessageGrade
 from backend.db.models.db_task import DBTask
 from backend.db.models.personality import Personality as DBPersonality
+from backend.db.models.config import TTIBinding as DBTTIBinding
 from backend.models import (
     UserAuthDetails, DiscussionInfo, DiscussionTitleUpdate,
     DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,
@@ -105,6 +106,57 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
     )
 
 # --- Task Functions ---
+def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: str):
+    task.log("Starting image generation task...")
+    task.set_progress(5)
+
+    with task.db_session_factory() as db:
+        active_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).first()
+        if not active_tti_binding:
+            raise Exception("No active TTI (Text-to-Image) binding found in system settings.")
+        task.log(f"Using TTI binding: {active_tti_binding.alias}")
+        task.set_progress(10)
+    
+    try:
+        lc = LollmsClient(
+            tti_binding_name=active_tti_binding.name,
+            tti_binding_config=active_tti_binding.config
+        )
+        task.log("LollmsClient initialized for TTI.")
+        task.set_progress(20)
+
+        image_bytes = lc.tti.generate_image(prompt=prompt)
+        task.log("Image data received from binding.")
+        task.set_progress(80)
+
+        if not image_bytes:
+            raise Exception("TTI binding returned empty image data.")
+
+        b64_image = base64.b64encode(image_bytes).decode('utf-8')
+        
+        discussion = get_user_discussion(username, discussion_id)
+        if not discussion:
+            raise Exception("Discussion not found after image generation.")
+        
+        discussion.add_discussion_image(b64_image)
+        discussion.commit()
+        task.log("Image added to discussion and saved.")
+        task.set_progress(100)
+        
+        all_images_info = discussion.get_discussion_images()
+        
+        return {
+            "discussion_id": discussion_id,
+            "zone": "discussion_images",
+            "new_images": [img_info['data'] for img_info in all_images_info],
+            "new_active_images": [img_info['active'] for img_info in all_images_info]
+        }
+    except Exception as e:
+        task.log(f"Image generation failed: {e}", "ERROR")
+        trace_exception(e)
+        raise e
+
+
 def _import_url_task(task: Task, username: str, discussion_id: str, url: str):
     if ScrapeMaster is None:
         raise ImportError("ScrapeMaster library is not installed and could not be installed automatically.")
@@ -617,6 +669,26 @@ def update_discussion_data_zone(
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to update Data Zone: {e}")
+
+@discussion_router.post("/{discussion_id}/generate_image", response_model=TaskInfo, status_code=202)
+def generate_image_from_data_zone(
+    discussion_id: str,
+    prompt: str = Form(...),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+
+    db_task = task_manager.submit_task(
+        name=f"Generating image for: {discussion.metadata.get('title', 'Untitled')}",
+        target=_generate_image_task,
+        args=(current_user.username, discussion_id, prompt),
+        description=f"Generating image with prompt: '{prompt[:50]}...'",
+        owner_username=current_user.username
+    )
+    return _to_task_info(db_task)
+
 
 @discussion_router.post("/{discussion_id}/import_url", response_model=TaskInfo, status_code=202)
 def import_from_url(

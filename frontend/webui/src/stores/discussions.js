@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/discussions.js
 import { defineStore, storeToRefs } from 'pinia';
 import { ref, computed, watch, nextTick } from 'vue';
 import apiClient from '../services/api';
@@ -138,6 +139,18 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
+    function handleDiscussionImagesUpdated({ discussion_id, discussion_images, active_discussion_images }) {
+        const discussion = discussions.value[discussion_id];
+        if (discussion) {
+            discussion.discussion_images = discussion_images;
+            discussion.active_discussion_images = active_discussion_images;
+            uiStore.addNotification('A new image has been generated for your discussion.', 'success');
+            if(discussion_id === currentDiscussionId.value) {
+                fetchContextStatus(discussion_id);
+            }
+        }
+    }
+
     function handleDataZoneUpdate({ discussion_id, zone, new_content }) {
         if (zone === 'discussion') {
             const discussion = discussions.value[discussion_id];
@@ -188,7 +201,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     
         const taskInfo = activeAiTasks.value[discussionId];
-        if (taskInfo?.type === 'summarize') {
+        if (taskInfo?.type === 'summarize' || taskInfo?.type === 'generate_image') {
             _clearActiveAiTask(discussionId);
             tasksStore.cancelTask(taskInfo.taskId);
             uiStore.addNotification('Processing cancelled due to manual edit.', 'info');
@@ -314,6 +327,35 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch (error) {
             // Handled by interceptor, clear the processing state
              _clearActiveAiTask(discussionId);
+        }
+    }
+
+    async function generateImageFromDataZone(discussionId, prompt) {
+        if (activeAiTasks.value[discussionId]) {
+            uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId].type}) is already running for this discussion.`, 'warning');
+            return;
+        }
+        if (!discussions.value[discussionId]) return;
+
+        const formData = new FormData();
+        formData.append('prompt', prompt);
+
+        activeAiTasks.value[discussionId] = { type: 'generate_image', taskId: null };
+        await nextTick();
+
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/generate_image`, formData);
+            const task = response.data;
+
+            if (activeAiTasks.value[discussionId]) {
+                activeAiTasks.value[discussionId].taskId = task.id;
+            }
+
+            tasksStore.addTask(task);
+            uiStore.addNotification(`Image generation started. Check the Task Manager for progress.`, 'info', { duration: 7000 });
+
+        } catch (error) {
+            _clearActiveAiTask(discussionId);
         }
     }
 
@@ -1082,7 +1124,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         deleteMessage, initiateBranch, switchBranch, exportDiscussions, importDiscussions,
         exportCodeToZip, exportMessageCodeToZip, sendDiscussion, $reset, fetchContextStatus,
         fetchDataZones, updateDataZone,
-        summarizeDiscussionDataZone, memorizeLTM,
+        summarizeDiscussionDataZone, memorizeLTM, generateImageFromDataZone,
         updateLiveTokenCount,
         refreshDataZones,
         setDiscussionDataZoneContent,
@@ -1093,6 +1135,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         uploadDiscussionImage, toggleDiscussionImageActivation, deleteDiscussionImage,
         fetchDiscussionTree,
         handleDataZoneUpdate,
+        handleDiscussionImagesUpdated,
         importUrlToDataZone
     };
 });
