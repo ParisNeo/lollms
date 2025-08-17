@@ -59,6 +59,7 @@ argon2-cffi
 pypdf
 python-docx
 python-pptx
+docx2python
 openpyxl
 
 psutil

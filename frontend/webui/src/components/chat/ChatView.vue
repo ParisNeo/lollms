@@ -538,26 +538,20 @@ async function handleImportFromUrl() {
 }
 
 async function handleKnowledgeFileUpload(event) {
-    const files = event.target.files; if (!files || files.length === 0) return;
-    isExtractingText.value = true; const formData = new FormData();
-    for (const file of files) { formData.append('files', file); }
+    const files = Array.from(event.target.files);
+    if (!files || files.length === 0 || !activeDiscussion.value) return;
+    isExtractingText.value = true;
     try {
-        const response = await apiClient.post('/api/files/extract-files-text-content', formData);
-        let newContent = discussionDataZone.value;
-        if (newContent && !newContent.endsWith('\n\n')) {
-            newContent += '\n\n';
+        await discussionsStore.uploadAndEmbedFileToDataZone({
+            discussionId: activeDiscussion.value.id,
+            files: files
+        });
+    } finally {
+        isExtractingText.value = false;
+        if (knowledgeFileInput.value) {
+            knowledgeFileInput.value.value = '';
         }
-        
-        const filesWithText = response.data.files_text;
-        if (filesWithText && typeof filesWithText === 'object') {
-            Object.entries(filesWithText).forEach(([filename, text]) => {
-                newContent += `--- Document: ${filename} ---\n${text}\n--- End Document: ${filename} ---\n\n`;
-            });
-        }
-
-        updateDiscussionDataZoneAndRecordHistory(newContent);
-        uiStore.addNotification(`Extracted text from ${files.length} file(s) and added to discussion data zone.`, 'success');
-    } finally { isExtractingText.value = false; if (knowledgeFileInput.value) knowledgeFileInput.value.value = ''; }
+    }
 }
 
 function handleProcessContent() {

@@ -1072,6 +1072,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
+    async function uploadAndEmbedFileToDataZone({ discussionId, files }) {
+        if (!discussionId || !files || files.length === 0) return;
+        const uiStore = useUiStore();
+        try {
+            const formData = new FormData();
+            files.forEach(file => formData.append('files', file));
+            
+            const response = await apiClient.post(`/api/files/extract_and_embed/${discussionId}`, formData);
+            
+            const discussion = discussions.value[discussionId];
+            if (discussion) {
+                discussion.discussion_data_zone = response.data.text_content;
+                discussion.discussion_images = response.data.discussion_images;
+                discussion.active_discussion_images = response.data.active_discussion_images;
+            }
+
+            uiStore.addNotification(`Processed ${files.length} document(s) and added content to data zone.`, 'success');
+            
+            emit('discussion:dataZoneUpdated', { discussionId: discussionId, newContent: response.data.text_content });
+            await fetchContextStatus(discussionId);
+
+        } catch (error) {
+            console.error("Failed to upload and embed file:", error);
+        }
+    }
     async function toggleDiscussionImageActivation(imageIndex) {
         if (!currentDiscussionId.value) return;
         try {
@@ -1143,6 +1168,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         saveManualMessage,
         toggleImageActivation,
         uploadDiscussionImage, toggleDiscussionImageActivation, deleteDiscussionImage,
+        uploadAndEmbedFileToDataZone,
         fetchDiscussionTree,
         handleDataZoneUpdate,
         handleDiscussionImagesUpdated,
