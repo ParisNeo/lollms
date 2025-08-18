@@ -52,6 +52,7 @@ import GeneratePromptModal from './components/modals/GeneratePromptModal.vue';
 import ManageModelsModal from './components/modals/ManageModelsModal.vue';
 import ModelCardModal from './components/modals/ModelCardModal.vue';
 import DiscussionTreeModal from './components/modals/DiscussionTreeModal.vue';
+import EditPromptModal from './components/modals/EditPromptModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -162,6 +163,7 @@ onMounted(async () => {
     <ManageModelsModal v-if="activeModal === 'manageModels'" />
     <ModelCardModal v-if="activeModal === 'modelCard'" />
     <DiscussionTreeModal v-if="activeModal === 'discussionTree'" />
+    <EditPromptModal v-if="activeModal === 'editSystemPrompt'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

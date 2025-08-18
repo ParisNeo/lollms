@@ -98,6 +98,58 @@ def _update_prompt_task(task: Task, prompt_id: str):
         task.log("Prompt updated successfully in the database.")
     
     return {"message": "Update successful."}
+
+def _generate_prompt_task(task: Task, user_prompt: str, current_admin_user: dict):
+    from lollms_client import LollmsClient
+    task.log("Starting prompt generation task...")
+    
+    lc = get_user_lollms_client(current_admin_user.username)
+    task.set_progress(10)
+    
+    generation_prompt = f"""
+Create a detailed and effective prompt for an AI assistant based on the user's request.
+The output must be a single, valid JSON object containing the following keys: "name", "author", "category", "description", and "content".
+- `name`: A concise, descriptive title for the prompt.
+- `author`: The author, which should be set to "AI Generated".
+- `category`: A relevant category (e.g., "Coding", "Writing", "General", "Productivity").
+- `description`: A brief, one-sentence explanation of what the prompt does.
+- `content`: The full prompt text. This content should be well-structured, clear, and designed to guide the AI effectively. It can include placeholders like `@<variable>@` for user input.
+
+User's Request:
+---
+{user_prompt}
+---
+
+Return ONLY the JSON object. Do not add any extra text or explanations.
+"""
+    
+    response = lc.generate_text(generation_prompt, stream=False)
+    task.set_progress(80)
+
+    try:
+        json_start = response.find('{')
+        json_end = response.rfind('}') + 1
+        json_string = response[json_start:json_end]
+        prompt_data = yaml.safe_load(json_string)
+
+        with task.db_session_factory() as db:
+            new_prompt = DBSavedPrompt(
+                name=prompt_data.get('name', 'Untitled AI Prompt'),
+                author=prompt_data.get('author', 'AI Generated'),
+                description=prompt_data.get('description', ''),
+                content=prompt_data.get('content', ''),
+                category=prompt_data.get('category', 'AI Generated'),
+                owner_user_id=None
+            )
+            db.add(new_prompt)
+            db.commit()
+            db.refresh(new_prompt)
+            task.set_progress(100)
+            task.log("Prompt generated and saved successfully.")
+            return PromptPublic.from_orm(new_prompt).model_dump()
+    except Exception as e:
+        task.log(f"Failed to parse AI response or save prompt. Error: {e}\nRaw Response: {response}", "ERROR")
+        raise
     
 @prompts_zoo_router.get("/categories", response_model=List[str])
 def get_prompt_zoo_categories():
@@ -160,15 +212,15 @@ def get_available_zoo_prompts(
 ):
     all_items_raw = get_all_items('prompt')
     installed_prompts_q = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id.is_(None)).all()
-    installed_prompts = {item.name: item for item in installed_prompts_q}
+    installed_prompts = {item.name.lower(): item for item in installed_prompts_q}
     
     all_items = []
     for info in all_items_raw:
         try:
-            is_installed = info.get('name') in installed_prompts
+            is_installed = info.get('name', '').lower() in installed_prompts
             update_available = False
             if is_installed:
-                installed_prompt = installed_prompts[info.get('name')]
+                installed_prompt = installed_prompts[info.get('name').lower()]
                 try:
                     if installed_prompt.version and info.get('version') and packaging_version.parse(str(info.get('version'))) > packaging_version.parse(str(installed_prompt.version)):
                         update_available = True
@@ -231,5 +283,49 @@ def update_installed_prompt(prompt_id: str, db: Session = Depends(get_db)):
         name=f"Updating prompt: {prompt.name}",
         target=_update_prompt_task,
         args=(prompt.id,)
+    )
+    return to_task_info(task)
+
+@prompts_zoo_router.post("/installed", response_model=PromptPublic, status_code=status.HTTP_201_CREATED)
+def create_system_prompt(prompt_data: PromptCreate, db: Session = Depends(get_db)):
+    new_prompt = DBSavedPrompt(**prompt_data.model_dump(), owner_user_id=None)
+    db.add(new_prompt)
+    db.commit()
+    db.refresh(new_prompt)
+    return new_prompt
+
+@prompts_zoo_router.put("/installed/{prompt_id}", response_model=PromptPublic)
+def update_system_prompt(prompt_id: str, prompt_data: PromptUpdate, db: Session = Depends(get_db)):
+    prompt = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id, DBSavedPrompt.owner_user_id.is_(None)).first()
+    if not prompt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System prompt not found.")
+    
+    update_data = prompt_data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(prompt, key, value)
+    
+    db.commit()
+    db.refresh(prompt)
+    return prompt
+
+@prompts_zoo_router.delete("/installed/{prompt_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_system_prompt(prompt_id: str, db: Session = Depends(get_db)):
+    prompt = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id, DBSavedPrompt.owner_user_id.is_(None)).first()
+    if not prompt:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System prompt not found.")
+    db.delete(prompt)
+    db.commit()
+
+@prompts_zoo_router.post("/generate_from_prompt", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+def generate_prompt_from_ai(
+    request: GeneratePromptRequest, 
+    current_admin_user: dict = Depends(get_current_admin_user)
+):
+    task = task_manager.submit_task(
+        name="Generate prompt from description",
+        target=_generate_prompt_task,
+        args=(request.prompt, current_admin_user),
+        description=f"AI is creating a prompt based on: '{request.prompt[:50]}...'",
+        owner_username=current_admin_user.username
     )
     return to_task_info(task)

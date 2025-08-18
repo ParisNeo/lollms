@@ -95,6 +95,8 @@ export const useAdminStore = defineStore('admin', () => {
         pageSize: 24
     }));
 
+    const promptToEdit = ref(null);
+
     watch(appFilters, (newFilters) => {
         localStorage.setItem('lollms-app-filters', JSON.stringify(newFilters));
     }, { deep: true });
@@ -112,7 +114,7 @@ export const useAdminStore = defineStore('admin', () => {
                 const { useDataStore } = await import('./data.js');
                 await useDataStore().triggerMcpReload();
             }
-        } else if (taskName.startsWith('Installing prompt:')) {
+        } else if (taskName.startsWith('Installing prompt:') || taskName.startsWith('Updating prompt:') || taskName.startsWith('Generate prompt from description')) {
             const { usePromptsStore } = await import('./prompts.js');
             await usePromptsStore().fetchPrompts();
             await fetchZooPrompts();
@@ -418,7 +420,11 @@ export const useAdminStore = defineStore('admin', () => {
     async function installZooPersonality(payload) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
 
-    async function createSystemPrompt(promptData) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.post('/api/prompts_zoo/installed', promptData); await usePromptsStore().fetchPrompts(); }
+    function setPromptToEdit(prompt) {
+        promptToEdit.value = prompt;
+    }
+
+    async function createSystemPrompt(promptData) { const { usePromptsStore } = await import('./prompts.js'); const response = await apiClient.post('/api/prompts_zoo/installed', promptData); await usePromptsStore().fetchPrompts(); return response.data; }
     async function updateSystemPrompt(promptId, promptData) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); await usePromptsStore().fetchPrompts(); }
     async function deleteSystemPrompt(promptId) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.delete(`/api/prompts_zoo/installed/${promptId}`); await usePromptsStore().fetchPrompts(); await fetchZooPrompts(); }
     async function updateSystemPromptFromZoo(promptId) {
@@ -468,6 +474,7 @@ export const useAdminStore = defineStore('admin', () => {
         zooPrompts, isLoadingZooPrompts, fetchZooPrompts, installZooPrompt, fetchPromptReadme,
         personalityZooRepositories, isLoadingPersonalityZooRepositories, fetchPersonalityZooRepositories, addPersonalityZooRepository, deletePersonalityZooRepository, pullPersonalityZooRepository,
         zooPersonalities, isLoadingZooPersonalities, fetchZooPersonalities, installZooPersonality, fetchPersonalityReadme,
+        promptToEdit, setPromptToEdit,
         createSystemPrompt, updateSystemPrompt, deleteSystemPrompt, generateSystemPrompt, updateSystemPromptFromZoo,
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
         updateInstalledApp, fetchAppLog, fetchAppConfigSchema, fetchAppConfig, updateAppConfig, updateApp,

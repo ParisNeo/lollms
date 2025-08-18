@@ -11,6 +11,7 @@ from backend.db.models.prompt import SavedPrompt
 from backend.db.models.personality import Personality
 from backend.config import APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH, APP_DATA_DIR
 import datetime
+from ascii_colors import ASCIIColors
 
 ITEM_TYPES = Literal['app', 'mcp', 'prompt', 'personality']
 CACHE_FILE = APP_DATA_DIR / "zoo_cache.json"
@@ -144,7 +145,7 @@ def _build_cache_for_type(db: Session, item_type: ITEM_TYPES) -> List[Dict[str, 
 
 def build_full_cache():
     global _cache
-    print("INFO: Building full Zoo cache...")
+    ASCIIColors.info("INFO: Building full Zoo cache...")
     db = next(get_db())
     try:
         _cache["data"] = {

@@ -111,20 +111,59 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
     task.set_progress(5)
 
     with task.db_session_factory() as db:
-        active_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).first()
-        if not active_tti_binding:
+        # Get the user to determine their preferred TTI model
+        user = db.query(DBUser).filter(DBUser.username == username).first()
+        if not user:
+            raise Exception(f"User '{username}' not found.")
+
+        user_tti_model_full = user.tti_binding_model_name
+        
+        selected_binding = None
+        selected_model_name = None
+
+        if user_tti_model_full and '/' in user_tti_model_full:
+            binding_alias, model_name = user_tti_model_full.split('/', 1)
+            selected_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == binding_alias, DBTTIBinding.is_active == True).first()
+            selected_model_name = model_name
+        
+        # Fallback to the first active binding if user's preference is not set or invalid
+        if not selected_binding:
+            task.log("User's preferred TTI model not found or not set. Falling back to the first available active TTI binding.", "WARNING")
+            selected_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
+            if selected_binding:
+                selected_model_name = selected_binding.default_model_name
+        
+        if not selected_binding:
             raise Exception("No active TTI (Text-to-Image) binding found in system settings.")
-        task.log(f"Using TTI binding: {active_tti_binding.alias}")
+        
+        task.log(f"Using TTI binding: {selected_binding.alias}")
+        if selected_model_name:
+            task.log(f"Using TTI model: {selected_model_name}")
         task.set_progress(10)
-    
+        
+        # Prepare config for LollmsClient, including the selected model and any alias settings
+        binding_config = selected_binding.config.copy() if selected_binding.config else {}
+        if selected_model_name:
+            binding_config['model_name'] = selected_model_name
+            
+        model_aliases = selected_binding.model_aliases or {}
+        alias_info = model_aliases.get(selected_model_name)
+        if alias_info:
+            task.log(f"Applying settings from model alias '{alias_info.get('title', selected_model_name)}'.")
+            # Merge alias parameters into the binding config. This allows aliases to set things like image size, quality, etc.
+            for key, value in alias_info.items():
+                if key not in ['title', 'description', 'icon'] and value is not None:
+                    binding_config[key] = value
+
     try:
         lc = LollmsClient(
-            tti_binding_name=active_tti_binding.name,
-            tti_binding_config=active_tti_binding.config
+            tti_binding_name=selected_binding.name,
+            tti_binding_config=binding_config
         )
         task.log("LollmsClient initialized for TTI.")
         task.set_progress(20)
 
+        # The model name is now in the config, which is what lollms-client TTI bindings expect.
         image_bytes = lc.tti.generate_image(prompt=prompt)
         task.log("Image data received from binding.")
         task.set_progress(80)

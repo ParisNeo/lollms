@@ -8,9 +8,8 @@ import { usePromptsStore } from '../../../stores/prompts';
 import useEventBus from '../../../services/eventBus';
 import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
-import AppCard from '../../ui/AppCard.vue';
+import PromptCard from '../../ui/PromptCard.vue';
 import AppCardSkeleton from '../../ui/AppCardSkeleton.vue';
-import GenericModal from '../../ui/GenericModal.vue';
 import IconSparkles from '../../../assets/icons/IconSparkles.vue';
 
 const adminStore = useAdminStore();
@@ -38,7 +37,6 @@ const currentPage = ref(1);
 const pageSize = ref(24);
 let debounceTimer = null;
 const pendingGenerationTaskId = ref(null);
-const currentPrompt = ref(null);
 
 const totalItems = computed(() => zooPrompts.value.total || 0);
 const totalPages = computed(() => zooPrompts.value.pages || 1);
@@ -123,8 +121,10 @@ async function handleUpdatePrompt(prompt) {
     const installed = installedPrompts.value.find(p => p.name === prompt.name);
     if (installed) await adminStore.updateSystemPromptFromZoo(installed.id); 
 }
-function handleEditPrompt(prompt) { currentPrompt.value = { ...prompt }; uiStore.openModal('editSystemPrompt'); }
-async function handleSavePrompt() { if (!currentPrompt.value) return; const { id, ...data } = currentPrompt.value; try { if (id) await adminStore.updateSystemPrompt(id, data); else await adminStore.createSystemPrompt(data); uiStore.closeModal('editSystemPrompt'); } catch(e) {} }
+function handleEditPrompt(prompt) {
+    adminStore.setPromptToEdit({ ...prompt });
+    uiStore.openModal('editSystemPrompt');
+}
 </script>
 
 <style scoped>
@@ -139,12 +139,13 @@ async function handleSavePrompt() { if (!currentPrompt.value) return; const { id
         <div class="border-b border-gray-200 dark:border-gray-700">
             <nav class="-mb-px flex space-x-6">
                 <button @click="activeSubTab = 'zoo'" :class="['tab-button', activeSubTab === 'zoo' ? 'active' : 'inactive']">Zoo</button>
+                <button @click="activeSubTab = 'installed'" :class="['tab-button', activeSubTab === 'installed' ? 'active' : 'inactive']">Installed</button>
                 <button @click="activeSubTab = 'source'" :class="['tab-button', activeSubTab === 'source' ? 'active' : 'inactive']">Repositories</button>
             </nav>
         </div>
 
         <section v-if="activeSubTab === 'zoo'">
-            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Prompts Zoo</h3><button @click="handleGeneratePrompt" class="btn btn-secondary"><IconSparkles class="w-4 h-4 mr-2" /> Generate with AI</button></div>
+            <h3 class="text-xl font-semibold mb-4">Prompts Zoo</h3>
             <div class="space-y-4">
                 <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
                     <div class="relative lg:col-span-1"><input v-model="searchQuery" type="text" placeholder="Search Prompts..." class="input-field w-full pl-10" /><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div></div>
@@ -159,19 +160,33 @@ async function handleSavePrompt() { if (!currentPrompt.value) return; const { id
                 <div v-else-if="itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Prompts Found</h4></div>
                 <div v-else>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                        <AppCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" item-type-name="Prompt" @star="handleStarToggle(item.name)" @install="handleInstallItem" @uninstall="handleUninstallItem(item)" @help="showItemHelp" @update="handleUpdatePrompt(item)" />
+                        <PromptCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :prompt="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem" @uninstall="handleUninstallItem" @help="showItemHelp" @update="handleUpdatePrompt(item)" />
                     </div>
                     <div v-if="totalPages > 1" class="flex justify-between items-center mt-6"><button @click="currentPage--" :disabled="currentPage === 1" class="btn btn-secondary">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div>
                 </div>
             </div>
         </section>
+
+        <section v-if="activeSubTab === 'installed'">
+            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Installed Prompts</h3>
+                <div class="flex gap-2">
+                    <button @click="handleGeneratePrompt" class="btn btn-secondary"><IconSparkles class="w-4 h-4 mr-2" /> Generate with AI</button>
+                    <button @click="handleEditPrompt({})" class="btn btn-primary">Create New Prompt</button>
+                </div>
+            </div>
+            <div v-if="isLoadingInstalled" class="text-center p-4">Loading...</div>
+            <div v-else-if="installedPrompts.length === 0" class="empty-state-card"><p>No system prompts installed.</p></div>
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                <PromptCard v-for="prompt in installedPrompts" :key="prompt.id" :prompt="{...prompt, is_installed: true}" @edit="handleEditPrompt(prompt)" @uninstall="handleUninstallItem(prompt)" />
+            </div>
+        </section>
         
         <section v-if="activeSubTab === 'source'">
-            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Prompt Zoo Repositories</h3><button @click="isAddRepoFormVisible = !isAddRepoFormVisible" class="btn btn-primary">{{ isAddRepoFormVisible ? 'Cancel' : 'Add' }}</button></div>
-            <div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6"><form @submit.prevent="handleAddRepository" class="space-y-4"><div class="flex items-center gap-x-4"><label><input type="radio" v-model="newRepo.type" value="git" class="radio-input"> Git</label><label><input type="radio" v-model="newRepo.type" value="local" class="radio-input"> Local</label></div><div><label>Name</label><input v-model="newRepo.name" type="text" class="input-field" required></div><div v-if="newRepo.type === 'git'"><label>URL</label><input v-model="newRepo.url" type="url" class="input-field" :required="newRepo.type==='git'"></div><div v-if="newRepo.type === 'local'"><label>Path</label><input v-model="newRepo.path" type="text" class="input-field" :required="newRepo.type==='local'"></div><div class="flex justify-end"><button type="submit" class="btn btn-primary">Add</button></div></form></div>
-            <div v-if="isLoadingPromptZooRepositories" class="text-center p-4">Loading...</div>
-            <div v-else-if="!sortedRepositories || sortedRepositories.length === 0" class="empty-state-card"><p>No repositories added.</p></div>
-            <div v-else class="space-y-4"><div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex items-center justify-between"><div><p class="font-semibold">{{ repo.name }}</p><p class="text-sm text-gray-500">{{ repo.url }}</p><p class="text-xs text-gray-400">Pulled: {{ formatDateTime(repo.last_pulled_at) }}</p></div><div class="flex items-center gap-2"><button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm"><IconRefresh class="w-4 h-4 mr-1"/>{{ repo.type === 'git' ? 'Pull' : 'Rescan' }}</button><button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm"><IconTrash class="w-4 h-4"/></button></div></div></div>
+             <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Prompt Zoo Repositories</h3><button @click="isAddRepoFormVisible = !isAddRepoFormVisible" class="btn btn-primary">{{ isAddRepoFormVisible ? 'Cancel' : 'Add' }}</button></div>
+             <div v-if="isAddRepoFormVisible" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm mb-6"><form @submit.prevent="handleAddRepository" class="space-y-4"><div class="flex items-center gap-x-4"><label><input type="radio" v-model="newRepo.type" value="git" class="radio-input"> Git</label><label><input type="radio" v-model="newRepo.type" value="local" class="radio-input"> Local</label></div><div><label>Name</label><input v-model="newRepo.name" type="text" class="input-field" required></div><div v-if="newRepo.type === 'git'"><label>URL</label><input v-model="newRepo.url" type="url" class="input-field" :required="newRepo.type==='git'"></div><div v-if="newRepo.type === 'local'"><label>Path</label><input v-model="newRepo.path" type="text" class="input-field" :required="newRepo.type==='local'"></div><div class="flex justify-end"><button type="submit" class="btn btn-primary">Add</button></div></form></div>
+             <div v-if="isLoadingPromptZooRepositories" class="text-center p-4">Loading...</div>
+             <div v-else-if="!sortedRepositories || sortedRepositories.length === 0" class="empty-state-card"><p>No repositories added.</p></div>
+             <div v-else class="space-y-4"><div v-for="repo in sortedRepositories" :key="repo.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex items-center justify-between"><div><p class="font-semibold">{{ repo.name }}</p><p class="text-sm text-gray-500">{{ repo.url }}</p><p class="text-xs text-gray-400">Pulled: {{ formatDateTime(repo.last_pulled_at) }}</p></div><div class="flex items-center gap-2"><button @click="handlePullRepository(repo)" class="btn btn-secondary btn-sm"><IconRefresh class="w-4 h-4 mr-1"/>{{ repo.type === 'git' ? 'Pull' : 'Rescan' }}</button><button v-if="repo.is_deletable" @click="handleDeleteRepository(repo)" class="btn btn-danger btn-sm"><IconTrash class="w-4 h-4"/></button></div></div></div>
         </section>
     </div>
 </template>
