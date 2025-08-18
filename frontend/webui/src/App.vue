@@ -163,7 +163,7 @@ onMounted(async () => {
     <ManageModelsModal v-if="activeModal === 'manageModels'" />
     <ModelCardModal v-if="activeModal === 'modelCard'" />
     <DiscussionTreeModal v-if="activeModal === 'discussionTree'" />
-    <EditPromptModal v-if="activeModal === 'editSystemPrompt'" />
+    <EditPromptModal v-if="activeModal === 'editPrompt'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />

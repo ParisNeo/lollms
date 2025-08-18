@@ -19,7 +19,7 @@ const personality = computed(() => modalProps.value?.personality);
 
 const getInitialFormState = () => ({
     id: null, name: '', category: '', author: '', description: '',
-    prompt_text: '', disclaimer: '', script_code: '', icon_base_64: null,
+    prompt_text: '', disclaimer: '', script_code: '', icon_base64: null,
     is_public: false, data_source_type: 'none', data_source: null, active_mcps: [],
     owner_type: 'user'
 });
@@ -30,7 +30,7 @@ const staticTextInputRef = ref(null);
 const isLoading = ref(false);
 const formIconLoadFailed = ref(false);
 
-watch(() => form.value.icon_base_64, () => {
+watch(() => form.value.icon_base64, () => {
     formIconLoadFailed.value = false;
 });
 
@@ -104,7 +104,7 @@ function handleFileSelect(event) {
             const canvas = document.createElement('canvas');
             canvas.width = width; canvas.height = height;
             canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-            form.value.icon_base_64 = canvas.toDataURL('image/png');
+            form.value.icon_base64 = canvas.toDataURL('image/png');
         };
         img.src = e.target.result;
     };
@@ -141,7 +141,7 @@ function handleStaticTextFileSelect(event) {
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div class="md:col-span-1 flex flex-col items-center">
             <div class="w-24 h-24 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden mb-2">
-              <img v-if="form.icon_base_64 && !formIconLoadFailed" :src="form.icon_base_64" @error="formIconLoadFailed = true" alt="Icon Preview" class="h-full w-full object-cover">
+              <img v-if="form.icon_base64 && !formIconLoadFailed" :src="form.icon_base64" @error="formIconLoadFailed = true" alt="Icon Preview" class="h-full w-full object-cover">
               <svg v-else class="w-16 h-16 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
             </div>
             <button @click="triggerFileInput" type="button" class="btn btn-secondary text-sm">Upload Icon</button>

@@ -41,6 +41,14 @@ def _install_prompt_task(task: Task, repo_name: str, folder_name: str):
     with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
+    prompt_content_path = prompt_path / "prompt.txt"
+    prompt_content = ""
+    if prompt_content_path.exists():
+        prompt_content = prompt_content_path.read_text(encoding='utf-8')
+    else:
+        # Fallback to content in description.yaml if prompt.txt is missing
+        prompt_content = config.get('content', '')
+
     with task.db_session_factory() as db:
         if db.query(DBSavedPrompt).filter(DBSavedPrompt.name == config['name'], DBSavedPrompt.owner_user_id.is_(None)).first():
             task.log(f"Prompt '{config['name']}' is already installed.", "WARNING")
@@ -50,7 +58,7 @@ def _install_prompt_task(task: Task, repo_name: str, folder_name: str):
             name=config.get('name'),
             author=config.get('author'),
             description=config.get('description'),
-            content=config.get('content', ''),
+            content=prompt_content,
             category=config.get('category'),
             owner_user_id=None,
             version=str(config.get('version', 'N/A')),
@@ -83,13 +91,21 @@ def _update_prompt_task(task: Task, prompt_id: str):
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
+        prompt_content_path = source_path / "prompt.txt"
+        prompt_content = ""
+        if prompt_content_path.exists():
+            prompt_content = prompt_content_path.read_text(encoding='utf-8')
+        else:
+            # Fallback to content in description.yaml if prompt.txt is missing, or keep existing
+            prompt_content = config.get('content', prompt.content)
+
         task.log(f"Updating prompt '{prompt.name}' from version {prompt.version} to {config.get('version')}")
         task.set_progress(50)
 
         prompt.name = config.get('name', prompt.name)
         prompt.author = config.get('author', prompt.author)
         prompt.description = config.get('description', prompt.description)
-        prompt.content = config.get('content', prompt.content)
+        prompt.content = prompt_content
         prompt.category = config.get('category', prompt.category)
         prompt.version = str(config.get('version', prompt.version))
         
@@ -218,20 +234,38 @@ def get_available_zoo_prompts(
     for info in all_items_raw:
         try:
             is_installed = info.get('name', '').lower() in installed_prompts
+            
             update_available = False
-            if is_installed:
-                installed_prompt = installed_prompts[info.get('name').lower()]
-                try:
-                    if installed_prompt.version and info.get('version') and packaging_version.parse(str(info.get('version'))) > packaging_version.parse(str(installed_prompt.version)):
-                        update_available = True
-                except (packaging_version.InvalidVersion, TypeError):
-                    pass
+            repo_version = None
 
             model_data = {
                 **info,
-                "is_installed": is_installed, "update_available": update_available,
+                "is_installed": is_installed,
                 "has_readme": (PROMPTS_ZOO_ROOT_PATH / info['repository'] / info['folder_name'] / "README.md").exists()
             }
+            if is_installed:
+                installed_prompt = installed_prompts[info.get('name').lower()]
+                model_data['id'] = installed_prompt.id
+                model_data['content'] = installed_prompt.content
+                model_data['name'] = installed_prompt.name
+                model_data['author'] = installed_prompt.author
+                model_data['description'] = installed_prompt.description
+                model_data['category'] = installed_prompt.category
+                model_data['version'] = str(installed_prompt.version)
+                model_data['icon'] = installed_prompt.icon
+                
+                try:
+                    installed_ver = str(installed_prompt.version or '0.0.0')
+                    repo_ver_str = str(info.get('version', '0.0.0'))
+                    if packaging_version.parse(repo_ver_str) > packaging_version.parse(installed_ver):
+                        update_available = True
+                        repo_version = repo_ver_str
+                except (packaging_version.InvalidVersion, TypeError):
+                    pass
+
+            model_data['update_available'] = update_available
+            model_data['repo_version'] = repo_version
+            
             all_items.append(ZooPromptInfo(**model_data))
         except (PydanticValidationError, Exception) as e:
             print(f"ERROR: Could not process cached prompt data for {info.get('name')}. Error: {e}")
@@ -298,7 +332,7 @@ def create_system_prompt(prompt_data: PromptCreate, db: Session = Depends(get_db
 def update_system_prompt(prompt_id: str, prompt_data: PromptUpdate, db: Session = Depends(get_db)):
     prompt = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id, DBSavedPrompt.owner_user_id.is_(None)).first()
     if not prompt:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System prompt not found.")
+        raise HTTPException(status_code=404, detail="System prompt not found.")
     
     update_data = prompt_data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
@@ -312,7 +346,7 @@ def update_system_prompt(prompt_id: str, prompt_data: PromptUpdate, db: Session 
 def delete_system_prompt(prompt_id: str, db: Session = Depends(get_db)):
     prompt = db.query(DBSavedPrompt).filter(DBSavedPrompt.id == prompt_id, DBSavedPrompt.owner_user_id.is_(None)).first()
     if not prompt:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System prompt not found.")
+        raise HTTPException(status_code=404, detail="System prompt not found.")
     db.delete(prompt)
     db.commit()
 

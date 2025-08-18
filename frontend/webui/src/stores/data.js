@@ -68,12 +68,10 @@ export const useDataStore = defineStore('data', () => {
         }, {});
         return Object.entries(grouped).map(([mcpName, tools]) => ({ isGroup: true, label: mcpName, items: tools.sort((a, b) => a.name.localeCompare(b.name))})).sort((a,b) => a.label.localeCompare(b.label));
     });
-    const availableLollmsModelsGrouped = computed(() => {
+    const availableLLMModelsGrouped = computed(() => {
         if (!Array.isArray(availableLollmsModels.value) || availableLollmsModels.value.length === 0) {
             return [];
         }
-        const authStore = useAuthStore();
-        const displayMode = authStore.user?.model_display_mode || 'mixed';
 
         const grouped = availableLollmsModels.value.reduce((acc, model) => {
             if (!model || typeof model.id !== 'string') {
@@ -86,17 +84,14 @@ export const useDataStore = defineStore('data', () => {
                 acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
             }
 
-            // Determine if we should show this model based on display mode
-            const hasAlias = !!model.alias;
-            if (displayMode === 'aliased' && !hasAlias) return acc;
-            if (displayMode === 'original' && hasAlias) return acc;
-
+            // The backend now handles the display name based on the mode.
+            // We just need to map the icon.
             acc[bindingAlias].items.push({ 
                 id: model.id, 
-                name: model.alias?.title || model.name, // Use alias title if available
-                icon_base_64: model.alias?.icon,
+                name: model.name, // Use the name from the API directly
+                icon_base64: model.alias?.icon,
                 description: model.alias?.description,
-                alias: model.alias // Pass the whole alias object
+                alias: model.alias
             });
             return acc;
         }, {});
@@ -126,8 +121,8 @@ export const useDataStore = defineStore('data', () => {
 
             acc[bindingAlias].items.push({ 
                 id: model.id, 
-                name: model.alias?.title || model.name,
-                icon_base_64: model.alias?.icon,
+                name: model.name, // Use name from API directly
+                icon_base64: model.alias?.icon,
                 description: model.alias?.description,
                 alias: model.alias
             });
@@ -546,7 +541,7 @@ export const useDataStore = defineStore('data', () => {
         userPersonalities, publicPersonalities, userMcps, systemMcps, mcpTools,
         userApps, systemApps,
         isLoadingLollmsModels,
-        availableRagStores, availableMcpToolsForSelector, availableLollmsModelsGrouped,
+        availableRagStores, availableMcpToolsForSelector, availableLLMModelsGrouped,
         allPersonalities, getPersonalityById,
         
         availableTtiModels, isLoadingTtiModels, availableTtiModelsGrouped, // NEW

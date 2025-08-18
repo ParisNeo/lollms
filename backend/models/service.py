@@ -311,6 +311,7 @@ class ZooMCPInfoResponse(BaseModel):
     pages: int
 
 class ZooPromptInfo(BaseModel):
+    id: Optional[str] = None
     name: str
     repository: str
     folder_name: str
@@ -326,6 +327,8 @@ class ZooPromptInfo(BaseModel):
     version: Optional[str] = None
     tags: Optional[List[str]] = None
     update_available: bool = False
+    content: Optional[str] = None
+    repo_version: Optional[str] = None
     
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
     def coerce_to_string(cls, v):

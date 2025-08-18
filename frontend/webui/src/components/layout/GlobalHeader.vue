@@ -46,7 +46,7 @@ const availablePersonalities = computed(() => {
     ].filter(group => group.items.length > 0);
 });
 
-const formattedAvailableModels = computed(() => dataStore.availableLollmsModelsGrouped);
+const formattedAvailableModels = computed(() => dataStore.availableLLMModelsGrouped);
 
 function openModelCard(model) {
     uiStore.openModal('modelCard', { model });

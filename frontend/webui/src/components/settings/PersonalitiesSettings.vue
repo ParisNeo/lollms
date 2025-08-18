@@ -167,7 +167,7 @@ function openEditor(personality = null) {
         // This is a brand new, blank personality
         personalityData = { 
             id: null, name: '', category: '', description: '', 
-            prompt_text: '', is_public: false, icon_base_64: null 
+            prompt_text: '', is_public: false, icon_base64: null 
         };
     }
     uiStore.openModal('personalityEditor', { personality: personalityData });

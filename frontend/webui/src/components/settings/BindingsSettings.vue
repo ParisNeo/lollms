@@ -21,7 +21,7 @@ const activeTtiModel = computed({
   set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name })
 });
 
-const llmModels = computed(() => dataStore.availableLollmsModelsGrouped);
+const llmModels = computed(() => dataStore.availableLLMModelsGrouped);
 const ttiModels = computed(() => dataStore.availableTtiModelsGrouped);
 
 function openModelCard(model) {
@@ -53,7 +53,7 @@ function openModelCard(model) {
                     <template #button="{ toggle, selectedItem }">
                         <button @click="toggle" class="toolbox-select truncate w-full flex items-center justify-between">
                             <div class="flex items-center space-x-3 truncate">
-                                <img v-if="selectedItem?.icon_base_64" :src="selectedItem.icon_base_64" class="h-8 w-8 rounded-md object-cover"/>
+                                <img v-if="selectedItem?.icon_base64" :src="selectedItem.icon_base64" class="h-8 w-8 rounded-md object-cover"/>
                                 <span v-else class="w-8 h-8 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md"><IconCpuChip class="w-5 h-5" /></span>
                                 <div class="min-w-0 text-left">
                                     <span class="block font-semibold truncate">{{ selectedItem?.name || 'Select a Text Model' }}</span>
@@ -79,7 +79,7 @@ function openModelCard(model) {
                     <template #button="{ toggle, selectedItem }">
                         <button @click="toggle" class="toolbox-select truncate w-full flex items-center justify-between">
                             <div class="flex items-center space-x-3 truncate">
-                                <img v-if="selectedItem?.icon_base_64" :src="selectedItem.icon_base_64" class="h-8 w-8 rounded-md object-cover"/>
+                                <img v-if="selectedItem?.icon_base64" :src="selectedItem.icon_base64" class="h-8 w-8 rounded-md object-cover"/>
                                 <span v-else class="w-8 h-8 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md"><IconPhoto class="w-5 h-5" /></span>
                                 <div class="min-w-0 text-left">
                                     <span class="block font-semibold truncate">{{ selectedItem?.name || 'Select an Image Model' }}</span>

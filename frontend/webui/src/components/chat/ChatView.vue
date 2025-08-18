@@ -7,6 +7,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import { usePromptsStore } from '../../stores/prompts';
 import { useTasksStore } from '../../stores/tasks';
+import { useDataStore } from '../../stores/data';
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 import { storeToRefs } from 'pinia';
@@ -52,11 +53,13 @@ const authStore = useAuthStore();
 const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
 const tasksStore = useTasksStore();
+const dataStore = useDataStore();
 const router = useRouter();
 const { on, off } = useEventBus();
 const { liveDataZoneTokens, currentModelVisionSupport } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { tasks } = storeToRefs(tasksStore);
+const { availableTtiModels } = storeToRefs(dataStore);
 
 // --- Component State ---
 const knowledgeFileInput = ref(null);
@@ -101,6 +104,7 @@ const memoryHistoryIndex = ref(-1);
 let memoryHistoryDebounceTimer = null;
 
 // --- Computed Properties ---
+const isTtiConfigured = computed(() => availableTtiModels.value.length > 0);
 const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
 const isDataZoneExpanded = computed(() => uiStore.isDataZoneExpanded);
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
@@ -713,7 +717,7 @@ function toggleViewMode(zone) {
                                         <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process the data zone content..." rows="2" class="input-field text-sm flex-grow"></textarea>
                                     </div>
                                     <div class="flex items-center gap-2">
-                                        <button @click="handleGenerateImage" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && !dataZonePromptText.trim())"><IconPhoto class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Generate Image' }}</button>
+                                        <button v-if="isTtiConfigured" @click="handleGenerateImage" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && !dataZonePromptText.trim())"><IconPhoto class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Generate Image' }}</button>
                                         <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Process Content' }}</button>
                                     </div>
                                 </div>

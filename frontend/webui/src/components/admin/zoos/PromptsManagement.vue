@@ -11,6 +11,8 @@ import IconTrash from '../../../assets/icons/IconTrash.vue';
 import PromptCard from '../../ui/PromptCard.vue';
 import AppCardSkeleton from '../../ui/AppCardSkeleton.vue';
 import IconSparkles from '../../../assets/icons/IconSparkles.vue';
+import IconArrowDown from '../../../assets/icons/IconArrowDown.vue';
+import IconArrowUp from '../../../assets/icons/IconArrowUp.vue';
 
 const adminStore = useAdminStore();
 const tasksStore = useTasksStore();
@@ -18,6 +20,7 @@ const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
 const { on, off } = useEventBus();
 
+const { promptFilters } = adminStore;
 const { promptZooRepositories, isLoadingPromptZooRepositories, zooPrompts, isLoadingZooPrompts } = storeToRefs(adminStore);
 const { systemPrompts: installedPrompts, isLoading: isLoadingInstalled } = storeToRefs(promptsStore);
 const { tasks } = storeToRefs(tasksStore);
@@ -26,15 +29,7 @@ const activeSubTab = ref('zoo');
 const newRepo = ref({ type: 'git', name: '', url: '', path: '' });
 const isAddRepoFormVisible = ref(false);
 const isLoadingAction = ref(null);
-const searchQuery = ref('');
-const selectedCategory = ref('All');
-const installationStatusFilter = ref('All');
-const selectedRepository = ref('All');
-const sortKey = ref('name');
-const sortOrder = ref('asc');
 const starredItems = ref(JSON.parse(localStorage.getItem('starredPrompts') || '[]'));
-const currentPage = ref(1);
-const pageSize = ref(24);
 let debounceTimer = null;
 const pendingGenerationTaskId = ref(null);
 
@@ -42,19 +37,19 @@ const totalItems = computed(() => zooPrompts.value.total || 0);
 const totalPages = computed(() => zooPrompts.value.pages || 1);
 const pageInfo = computed(() => {
     if (totalItems.value === 0) return 'Showing 0-0 of 0';
-    const start = (currentPage.value - 1) * pageSize.value + 1;
-    const end = Math.min(currentPage.value * pageSize.value, totalItems.value);
+    const start = (promptFilters.currentPage - 1) * promptFilters.pageSize + 1;
+    const end = Math.min(promptFilters.currentPage * promptFilters.pageSize, totalItems.value);
     return `Showing ${start}-${end} of ${totalItems.value}`;
 });
 
 async function fetchZooItems() {
     const params = {
-        page: currentPage.value, page_size: pageSize.value, sort_by: sortKey.value,
-        sort_order: sortOrder.value, 
-        category: selectedCategory.value !== 'All' ? selectedCategory.value : undefined,
-        repository: selectedRepository.value !== 'All' ? selectedRepository.value : undefined,
-        search_query: searchQuery.value || undefined, 
-        installation_status: installationStatusFilter.value !== 'All' ? installationStatusFilter.value : undefined,
+        page: promptFilters.currentPage, page_size: promptFilters.pageSize, sort_by: promptFilters.sortKey,
+        sort_order: promptFilters.sortOrder, 
+        category: promptFilters.selectedCategory !== 'All' ? promptFilters.selectedCategory : undefined,
+        repository: promptFilters.selectedRepository !== 'All' ? promptFilters.selectedRepository : undefined,
+        search_query: promptFilters.searchQuery || undefined, 
+        installation_status: promptFilters.installationStatusFilter !== 'All' ? promptFilters.installationStatusFilter : undefined,
     };
     await adminStore.fetchZooPrompts(params);
 }
@@ -70,10 +65,10 @@ const itemsWithTaskStatus = computed(() => {
     return (zooPrompts.value.items || []).map(item => ({ ...item, task: taskMap.get(item.folder_name) || null }));
 });
 
-function debouncedFetch() { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { currentPage.value = 1; fetchZooItems(); }, 300); }
-watch([sortKey, sortOrder, selectedCategory, installationStatusFilter, selectedRepository], () => { currentPage.value = 1; fetchZooItems(); });
-watch(searchQuery, debouncedFetch);
-watch(currentPage, fetchZooItems);
+function debouncedFetch() { clearTimeout(debounceTimer); debounceTimer = setTimeout(() => { if (promptFilters.currentPage !== 1) promptFilters.currentPage = 1; else fetchZooItems(); }, 300); }
+watch(() => [promptFilters.sortKey, promptFilters.sortOrder, promptFilters.selectedCategory, promptFilters.installationStatusFilter, promptFilters.selectedRepository], () => { if (promptFilters.currentPage !== 1) promptFilters.currentPage = 1; else fetchZooItems(); });
+watch(() => promptFilters.searchQuery, debouncedFetch);
+watch(() => promptFilters.currentPage, fetchZooItems);
 watch(starredItems, (newStarred) => { localStorage.setItem('starredPrompts', JSON.stringify(newStarred)); }, { deep: true });
 
 onMounted(() => {
@@ -82,11 +77,19 @@ onMounted(() => {
     fetchZooItems();
     on('task:completed', handleTaskCompletion);
 });
-onUnmounted(() => { off('task:completed', handleTaskCompletion); });
+
+onUnmounted(() => {
+    off('task:completed', handleTaskCompletion);
+});
 
 
 const sortedRepositories = computed(() => Array.isArray(promptZooRepositories.value) ? [...promptZooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || '')) : []);
 const categories = computed(() => ['All', 'Starred', ...(zooPrompts.value.categories || [])]);
+
+const sortOptions = [
+    { value: 'name', label: 'Name' }, { value: 'author', label: 'Author' },
+    { value: 'last_update_date', label: 'Last Updated' }, { value: 'creation_date', label: 'Creation Date' },
+];
 
 function formatDateTime(isoString) { if (!isoString) return 'Never'; return new Date(isoString).toLocaleString(); }
 async function handleAddRepository() {
@@ -121,9 +124,9 @@ async function handleUpdatePrompt(prompt) {
     const installed = installedPrompts.value.find(p => p.name === prompt.name);
     if (installed) await adminStore.updateSystemPromptFromZoo(installed.id); 
 }
+
 function handleEditPrompt(prompt) {
-    adminStore.setPromptToEdit({ ...prompt });
-    uiStore.openModal('editSystemPrompt');
+    uiStore.openModal('editPrompt', { prompt: { ...prompt }, isSystemPrompt: true });
 }
 </script>
 
@@ -139,45 +142,47 @@ function handleEditPrompt(prompt) {
         <div class="border-b border-gray-200 dark:border-gray-700">
             <nav class="-mb-px flex space-x-6">
                 <button @click="activeSubTab = 'zoo'" :class="['tab-button', activeSubTab === 'zoo' ? 'active' : 'inactive']">Zoo</button>
-                <button @click="activeSubTab = 'installed'" :class="['tab-button', activeSubTab === 'installed' ? 'active' : 'inactive']">Installed</button>
                 <button @click="activeSubTab = 'source'" :class="['tab-button', activeSubTab === 'source' ? 'active' : 'inactive']">Repositories</button>
             </nav>
         </div>
 
         <section v-if="activeSubTab === 'zoo'">
-            <h3 class="text-xl font-semibold mb-4">Prompts Zoo</h3>
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold">Prompts Zoo</h3>
+                <div class="flex gap-2">
+                    <button @click="handleGeneratePrompt" class="btn btn-secondary">
+                        <IconSparkles class="w-4 h-4 mr-2" /> Generate with AI
+                    </button>
+                    <button @click="handleEditPrompt({})" class="btn btn-primary">Create New Prompt</button>
+                </div>
+            </div>
             <div class="space-y-4">
                 <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
-                    <div class="relative lg:col-span-1"><input v-model="searchQuery" type="text" placeholder="Search Prompts..." class="input-field w-full pl-10" /><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div></div>
+                    <div class="relative lg:col-span-1"><input v-model="promptFilters.searchQuery" type="text" placeholder="Search Prompts..." class="input-field w-full pl-10" /><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div></div>
                     <div class="grid grid-cols-1 sm:grid-cols-3 lg:col-span-3 gap-4">
-                        <select v-model="installationStatusFilter" class="input-field"><option value="All">All Statuses</option><option value="Installed">Installed</option><option value="Uninstalled">Uninstalled</option></select>
-                        <select v-model="selectedCategory" class="input-field"><option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option></select>
-                        <select v-model="selectedRepository" class="input-field"><option value="All">All Sources</option><option v-for="repo in sortedRepositories" :key="repo.id" :value="repo.name">{{ repo.name }}</option></select>
+                        <select v-model="promptFilters.installationStatusFilter" class="input-field"><option value="All">All Statuses</option><option value="Installed">Installed</option><option value="Uninstalled">Uninstalled</option></select>
+                        <select v-model="promptFilters.selectedCategory" class="input-field"><option v-for="cat in categories" :key="cat" :value="cat">{{ cat }}</option></select>
+                        <select v-model="promptFilters.selectedRepository" class="input-field"><option value="All">All Sources</option><option v-for="repo in sortedRepositories" :key="repo.id" :value="repo.name">{{ repo.name }}</option></select>
                     </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <select v-model="promptFilters.sortKey" class="input-field w-48">
+                        <option v-for="opt in sortOptions" :key="opt.value" :value="opt.value">Sort by {{ opt.label }}</option>
+                    </select>
+                    <button @click="promptFilters.sortOrder = promptFilters.sortOrder === 'asc' ? 'desc' : 'asc'" class="btn btn-secondary p-2">
+                        <IconArrowUp v-if="promptFilters.sortOrder === 'asc'" class="w-5 h-5" />
+                        <IconArrowDown v-else class="w-5 h-5" />
+                    </button>
                 </div>
                 
                 <div v-if="isLoadingZooPrompts || isLoadingInstalled" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6"><AppCardSkeleton v-for="i in 6" :key="i" /></div>
                 <div v-else-if="itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No Prompts Found</h4></div>
                 <div v-else>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                        <PromptCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :prompt="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem" @uninstall="handleUninstallItem" @help="showItemHelp" @update="handleUpdatePrompt(item)" />
+                        <PromptCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :prompt="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem" @uninstall="handleUninstallItem" @help="showItemHelp" @update="handleUpdatePrompt(item)" @edit="handleEditPrompt(item)" />
                     </div>
-                    <div v-if="totalPages > 1" class="flex justify-between items-center mt-6"><button @click="currentPage--" :disabled="currentPage === 1" class="btn btn-secondary">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div>
+                    <div v-if="totalPages > 1" class="flex justify-between items-center mt-6"><button @click="promptFilters.currentPage--" :disabled="promptFilters.currentPage === 1" class="btn btn-secondary">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span><button @click="promptFilters.currentPage++" :disabled="promptFilters.currentPage >= totalPages" class="btn btn-secondary">Next</button></div>
                 </div>
-            </div>
-        </section>
-
-        <section v-if="activeSubTab === 'installed'">
-            <div class="flex justify-between items-center mb-4"><h3 class="text-xl font-semibold">Installed Prompts</h3>
-                <div class="flex gap-2">
-                    <button @click="handleGeneratePrompt" class="btn btn-secondary"><IconSparkles class="w-4 h-4 mr-2" /> Generate with AI</button>
-                    <button @click="handleEditPrompt({})" class="btn btn-primary">Create New Prompt</button>
-                </div>
-            </div>
-            <div v-if="isLoadingInstalled" class="text-center p-4">Loading...</div>
-            <div v-else-if="installedPrompts.length === 0" class="empty-state-card"><p>No system prompts installed.</p></div>
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                <PromptCard v-for="prompt in installedPrompts" :key="prompt.id" :prompt="{...prompt, is_installed: true}" @edit="handleEditPrompt(prompt)" @uninstall="handleUninstallItem(prompt)" />
             </div>
         </section>
         

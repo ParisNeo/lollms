@@ -95,7 +95,17 @@ export const useAdminStore = defineStore('admin', () => {
         pageSize: 24
     }));
 
-    const promptToEdit = ref(null);
+    const promptFilters = reactive(getStoredFilters('lollms-prompt-filters', {
+        searchQuery: '',
+        selectedCategory: 'All',
+        installationStatusFilter: 'All',
+        selectedRepository: 'All',
+        sortKey: 'name',
+        sortOrder: 'asc',
+        currentPage: 1,
+        pageSize: 24
+    }));
+
 
     watch(appFilters, (newFilters) => {
         localStorage.setItem('lollms-app-filters', JSON.stringify(newFilters));
@@ -105,23 +115,46 @@ export const useAdminStore = defineStore('admin', () => {
         localStorage.setItem('lollms-mcp-filters', JSON.stringify(newFilters));
     }, { deep: true });
 
+    watch(promptFilters, (newFilters) => {
+        localStorage.setItem('lollms-prompt-filters', JSON.stringify(newFilters));
+    }, { deep: true });
+
     async function handleTaskCompletion(task) {
         if (!task || !['completed', 'failed', 'cancelled'].includes(task.status)) return;
-        const taskName = task.name || '';
-        if (/app|mcp/i.test(taskName) && (taskName.includes('Installing') || taskName.includes('Start') || taskName.includes('Stop') || taskName.includes('Updating') || taskName.includes('Fixing') || taskName.includes('Purging'))) {
-            await Promise.allSettled([fetchZooApps(), fetchZooMcps()]);
-            if (taskName.includes('Start') && task.status === 'completed' && task.result?.item_type === 'mcp') {
+
+        const taskName = (task.name || '').toLowerCase();
+        
+        const isAppOrMcpTask = (taskName.includes('app') || taskName.includes('mcp')) && (taskName.includes('installing') || taskName.includes('start') || taskName.includes('stop') || taskName.includes('updating') || taskName.includes('fixing') || taskName.includes('purging'));
+        const isPromptTask = taskName.includes('prompt');
+        const isPersonalityTask = taskName.includes('personality');
+
+        const promises = [];
+
+        if (isAppOrMcpTask) {
+            console.log(`[Admin Store] Refreshing Apps/MCPs due to task: ${task.name}`);
+            promises.push(fetchZooApps(), fetchZooMcps());
+            
+            if (taskName.includes('start') && task.status === 'completed' && task.result?.item_type === 'mcp') {
                 const { useDataStore } = await import('./data.js');
-                await useDataStore().triggerMcpReload();
+                promises.push(useDataStore().triggerMcpReload());
             }
-        } else if (taskName.startsWith('Installing prompt:') || taskName.startsWith('Updating prompt:') || taskName.startsWith('Generate prompt from description')) {
+        }
+        
+        if (isPromptTask) {
+            console.log(`[Admin Store] Refreshing Prompts due to task: ${task.name}`);
             const { usePromptsStore } = await import('./prompts.js');
-            await usePromptsStore().fetchPrompts();
-            await fetchZooPrompts();
-        } else if (taskName.startsWith('Installing personality:')) {
+            promises.push(usePromptsStore().fetchPrompts(), fetchZooPrompts());
+        }
+        
+        if (isPersonalityTask) {
+            console.log(`[Admin Store] Refreshing Personalities due to task: ${task.name}`);
             const { useDataStore } = await import('./data.js');
-            await useDataStore().fetchPersonalities();
-            await fetchZooPersonalities();
+            promises.push(useDataStore().fetchPersonalities(), fetchZooPersonalities());
+        }
+
+        if (promises.length > 0) {
+            await Promise.allSettled(promises);
+            console.log(`[Admin Store] UI data refreshed for task: ${task.name}`);
         }
     }
 
@@ -420,10 +453,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function installZooPersonality(payload) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
 
-    function setPromptToEdit(prompt) {
-        promptToEdit.value = prompt;
-    }
-
     async function createSystemPrompt(promptData) { const { usePromptsStore } = await import('./prompts.js'); const response = await apiClient.post('/api/prompts_zoo/installed', promptData); await usePromptsStore().fetchPrompts(); return response.data; }
     async function updateSystemPrompt(promptId, promptData) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); await usePromptsStore().fetchPrompts(); }
     async function deleteSystemPrompt(promptId) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.delete(`/api/prompts_zoo/installed/${promptId}`); await usePromptsStore().fetchPrompts(); await fetchZooPrompts(); }
@@ -471,10 +500,9 @@ export const useAdminStore = defineStore('admin', () => {
         mcpZooRepositories, isLoadingMcpZooRepositories, fetchMcpZooRepositories, addMcpZooRepository, deleteMcpZooRepository, pullMcpZooRepository, pullAllMcpZooRepositories,
         zooMcps, isLoadingZooMcps, fetchZooMcps, fetchMcpReadme, installZooMcp, mcpFilters,
         promptZooRepositories, isLoadingPromptZooRepositories, fetchPromptZooRepositories, addPromptZooRepository, deletePromptZooRepository, pullPromptZooRepository, pullAllPromptZooRepositories,
-        zooPrompts, isLoadingZooPrompts, fetchZooPrompts, installZooPrompt, fetchPromptReadme,
+        zooPrompts, isLoadingZooPrompts, fetchZooPrompts, installZooPrompt, fetchPromptReadme, promptFilters,
         personalityZooRepositories, isLoadingPersonalityZooRepositories, fetchPersonalityZooRepositories, addPersonalityZooRepository, deletePersonalityZooRepository, pullPersonalityZooRepository,
         zooPersonalities, isLoadingZooPersonalities, fetchZooPersonalities, installZooPersonality, fetchPersonalityReadme,
-        promptToEdit, setPromptToEdit,
         createSystemPrompt, updateSystemPrompt, deleteSystemPrompt, generateSystemPrompt, updateSystemPromptFromZoo,
         installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
         updateInstalledApp, fetchAppLog, fetchAppConfigSchema, fetchAppConfig, updateAppConfig, updateApp,

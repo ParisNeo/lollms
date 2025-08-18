@@ -9,7 +9,7 @@ const authStore = useAuthStore();
 const dataStore = useDataStore();
 
 const { user } = storeToRefs(authStore);
-const { availableLollmsModelsGrouped, isLoadingLollmsModels } = storeToRefs(dataStore);
+const { availableLLMModelsGrouped, isLoadingLollmsModels } = storeToRefs(dataStore);
 
 const form = ref({
     lollms_model_name: '',
@@ -93,7 +93,7 @@ async function handleSave() {
                     <label for="lollmsModelSelect" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Default LLM Model</label>
                      <IconSelectMenu 
                         v-model="activeModelName" 
-                        :items="availableLollmsModelsGrouped"
+                        :items="availableLLMModelsGrouped"
                         :is-loading="isLoadingLollmsModels"
                         placeholder="Select a model"
                         class="mt-1"
