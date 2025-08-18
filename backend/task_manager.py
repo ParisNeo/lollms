@@ -172,22 +172,29 @@ class Task:
         """The main execution method for the task thread."""
         self._update_db(status=TaskStatus.RUNNING, started_at=datetime.datetime.now(datetime.timezone.utc))
         self.log(f"Task '{self.name}' started.")
+        
+        final_updates = {}
+
         try:
             result = self.target(self, *self.args, **self.kwargs)
             
             if self.cancellation_event.is_set():
-                self._update_db(status=TaskStatus.CANCELLED)
+                final_updates["status"] = TaskStatus.CANCELLED
                 self.log(f"Task '{self.name}' was cancelled.", level="WARNING")
             else:
-                self._update_db(status=TaskStatus.COMPLETED, progress=100, result=result)
+                final_updates["status"] = TaskStatus.COMPLETED
+                final_updates["progress"] = 100
+                final_updates["result"] = result
                 self.log(f"Task '{self.name}' completed successfully.")
 
         except Exception as e:
             tb_str = traceback.format_exc()
-            self._update_db(status=TaskStatus.FAILED, error=str(e))
+            final_updates["status"] = TaskStatus.FAILED
+            final_updates["error"] = str(e)
             self.log(f"Task '{self.name}' failed: {e}\n{tb_str}", level="CRITICAL")
         finally:
-            self._update_db(completed_at=datetime.datetime.now(datetime.timezone.utc))
+            final_updates["completed_at"] = datetime.datetime.now(datetime.timezone.utc)
+            self._update_db(**final_updates)
 
 class TaskManager:
     """

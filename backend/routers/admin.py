@@ -5,8 +5,9 @@ import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import asyncio  # Import asyncio
+
 
 import psutil
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
@@ -81,6 +82,47 @@ admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependenc
 
 class AdminBroadcastRequest(BaseModel):
     message: str
+
+def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
+    """Casts config values to their correct types based on binding description."""
+    if binding_type == "llm":
+        available_bindings = get_available_bindings()
+    else: # tti
+        available_bindings = get_available_tti_bindings()
+        
+    binding_desc = next((b for b in available_bindings if b.get("binding_name") == binding_name), None)
+    if not binding_desc or "input_parameters" not in binding_desc:
+        return config
+
+    param_types = {p["name"]: p["type"] for p in binding_desc["input_parameters"]}
+    
+    processed_config = {}
+    for key, value in config.items():
+        if value is None or value == '': # Don't process empty/null values, just keep them.
+            processed_config[key] = value
+            continue
+
+        target_type = param_types.get(key)
+        if not target_type:
+            processed_config[key] = value # Keep as is if param not in description
+            continue
+
+        try:
+            if target_type == 'int':
+                processed_config[key] = int(value)
+            elif target_type == 'float':
+                processed_config[key] = float(value)
+            elif target_type == 'bool':
+                # Handle various string representations of booleans
+                processed_config[key] = str(value).lower() in ('true', '1', 'yes', 'on')
+            else: # str or any other type
+                processed_config[key] = value
+        except (ValueError, TypeError):
+            ASCIIColors.warning(f"Could not cast config value '{value}' for key '{key}' to type '{target_type}'. Keeping original value.")
+            processed_config[key] = value # Keep original on casting error
+
+    return processed_config
+
 
 @admin_router.post("/broadcast", status_code=202)
 async def broadcast_message_to_all_users(
@@ -296,6 +338,9 @@ async def create_binding(binding_data: LLMBindingCreate, db: Session = Depends(g
     if db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_data.alias).first():
         raise HTTPException(status_code=400, detail="A binding with this alias already exists.")
     
+    if binding_data.config:
+        binding_data.config = _process_binding_config(binding_data.name, binding_data.config, "llm")
+
     new_binding = DBLLMBinding(**binding_data.model_dump())
     try:
         db.add(new_binding)
@@ -323,6 +368,10 @@ async def update_binding(binding_id: int, update_data: LLMBindingUpdate, db: Ses
     update_dict = update_data.model_dump(exclude_unset=True)
     if 'service_key' in update_dict and not update_dict['service_key']:
         del update_dict['service_key']
+
+    if 'config' in update_dict and update_dict['config'] is not None:
+        binding_name = update_dict.get('name', binding_to_update.name)
+        update_dict['config'] = _process_binding_config(binding_name, update_dict['config'], "llm")
 
     for key, value in update_dict.items():
         setattr(binding_to_update, key, value)
@@ -374,6 +423,9 @@ async def create_tti_binding(binding_data: TTIBindingCreate, db: Session = Depen
     if db.query(DBTTIBinding).filter(DBTTIBinding.alias == binding_data.alias).first():
         raise HTTPException(status_code=400, detail="A TTI binding with this alias already exists.")
     
+    if binding_data.config:
+        binding_data.config = _process_binding_config(binding_data.name, binding_data.config, "tti")
+
     new_binding = DBTTIBinding(**binding_data.model_dump())
     try:
         db.add(new_binding)
@@ -398,6 +450,11 @@ async def update_tti_binding(binding_id: int, update_data: TTIBindingUpdate, db:
             raise HTTPException(status_code=400, detail="A TTI binding with the new alias already exists.")
 
     update_dict = update_data.model_dump(exclude_unset=True)
+
+    if 'config' in update_dict and update_dict['config'] is not None:
+        binding_name = update_dict.get('name', binding_to_update.name)
+        update_dict['config'] = _process_binding_config(binding_name, update_dict['config'], "tti")
+
     for key, value in update_dict.items():
         setattr(binding_to_update, key, value)
     

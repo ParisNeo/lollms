@@ -99,6 +99,16 @@ function hideForm() {
     editingBinding.value = null;
 }
 
+function parseOptions(options) {
+    if (typeof options === 'string') {
+        return options.split(',').map(o => o.trim()).filter(o => o);
+    }
+    if (Array.isArray(options)) {
+        return options.filter(o => o);
+    }
+    return [];
+}
+
 async function handleSubmit() {
     if (!form.value.alias.trim() || !form.value.name) {
         uiStore.addNotification('Alias and Binding Type are required fields.', 'warning');
@@ -157,7 +167,7 @@ function getBindingTitle(name) {
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
                         <label for="alias" class="block text-sm font-medium">Alias <span class="text-red-500">*</span></label>
-                        <input type="text" id="alias" v-model="form.alias" class="input-field mt-1" required placeholder="e.g., local_sd">
+                        <input type="text" id="alias" v-model="form.alias" class="input-field mt-1" required placeholder="e.g., local_sd" autocomplete="off">
                         <p class="text-xs text-gray-500 mt-1">A unique, short name for this configuration.</p>
                     </div>
                     <div>
@@ -176,7 +186,12 @@ function getBindingTitle(name) {
                             {{ param.name.replace(/_/g, ' ') }}
                             <span v-if="param.mandatory" class="text-red-500">*</span>
                         </label>
-                        <div v-if="['str', 'int', 'float'].includes(param.type)">
+
+                        <select v-if="param.options && param.options.length > 0" :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field">
+                            <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
+                        </select>
+                        
+                        <div v-else-if="['str', 'int', 'float'].includes(param.type)">
                              <div class="relative">
                                 <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'"
                                     :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field"
