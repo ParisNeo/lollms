@@ -331,7 +331,10 @@ async def get_available_binding_types():
 
 @admin_router.get("/bindings", response_model=List[LLMBindingPublicAdmin])
 async def get_all_bindings(db: Session = Depends(get_db)):
-    return db.query(DBLLMBinding).all()
+    bindings = db.query(DBLLMBinding).all()
+    if isinstance(bindings, str):
+        bindings = json.loads(bindings)
+    return bindings
 
 @admin_router.post("/bindings", response_model=LLMBindingPublicAdmin, status_code=201)
 async def create_binding(binding_data: LLMBindingCreate, db: Session = Depends(get_db)):
