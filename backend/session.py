@@ -9,6 +9,7 @@ from fastapi import HTTPException, Depends, status
 from sqlalchemy.orm import Session, joinedload
 from werkzeug.utils import secure_filename
 from jose import jwt, JWTError
+from ascii_colors import trace_exception, ASCIIColors
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -275,6 +276,7 @@ def build_lollms_client_from_params(
             final_user_params.update(llm_params)
 
         model_aliases = binding_to_use.model_aliases or {}
+        ASCIIColors.info(f"model_aliases:{model_aliases}")
         alias_info = model_aliases.get(model_name_for_binding)
 
         if alias_info:
