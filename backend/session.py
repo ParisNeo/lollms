@@ -277,6 +277,12 @@ def build_lollms_client_from_params(
 
         model_aliases = binding_to_use.model_aliases or {}
         ASCIIColors.info(f"model_aliases:{model_aliases}")
+        if isinstance(model_aliases,str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except Exception as e:
+                trace_exception(e)
+                model_aliases= {}
         alias_info = model_aliases.get(model_name_for_binding)
 
         if alias_info:
