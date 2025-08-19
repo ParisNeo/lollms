@@ -131,3 +131,5 @@ new ui:
 - add docker option
 - build docker image
 
+
+- add clear models 
