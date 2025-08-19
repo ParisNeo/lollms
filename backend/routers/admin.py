@@ -333,7 +333,9 @@ async def get_available_binding_types():
 async def get_all_bindings(db: Session = Depends(get_db)):
     bindings = db.query(DBLLMBinding).all()
     if isinstance(bindings, str):
+        ASCIIColors.info("Fixing the bindings content")
         bindings = json.loads(bindings)
+
     return bindings
 
 @admin_router.post("/bindings", response_model=LLMBindingPublicAdmin, status_code=201)
