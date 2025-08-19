@@ -122,6 +122,9 @@ new ui:
 
 ## data zones
 - handle the case where the datazone is tempy
+- add :
+-   convert to document
+-   save document to md (in docs list)
 
 ## installer
 - fix installation process
