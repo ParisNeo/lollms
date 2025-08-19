@@ -329,7 +329,7 @@ async def get_available_binding_types():
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to get available binding types: {e}")
 
-@admin_router.get("/bindings", response_model=List[LLMBindingPublicAdmin])
+@admin_router.get("/bindings")#, response_model=List[LLMBindingPublicAdmin])
 async def get_all_bindings(db: Session = Depends(get_db)):
     bindings = db.query(DBLLMBinding).all()
     if isinstance(bindings, str):
