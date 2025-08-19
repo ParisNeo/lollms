@@ -282,7 +282,6 @@ def build_lollms_client_from_params(
             final_user_params.update(llm_params)
 
         model_aliases = binding_to_use.model_aliases or {}
-        ASCIIColors.info(f"model_aliases:{model_aliases}")
         if isinstance(model_aliases,str):
             try:
                 model_aliases = json.loads(model_aliases)
