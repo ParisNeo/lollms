@@ -117,13 +117,13 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         if user_model_full and '/' in user_model_full:
             binding_alias, model_name = user_model_full.split('/', 1)
             binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
-            if isinstance(binding.model_aliases,str):
-                try:
-                    binding.model_aliases = json.loads(binding.model_aliases)
-                except Exception as e:
-                    trace_exception(e)
-                    binding.model_aliases= {}
             if binding and binding.model_aliases:
+                if isinstance(binding.model_aliases,str):
+                    try:
+                        binding.model_aliases = json.loads(binding.model_aliases)
+                    except Exception as e:
+                        trace_exception(e)
+                        binding.model_aliases= {}
                 alias_info = binding.model_aliases.get(model_name)
                 if alias_info and not alias_info.get('allow_parameters_override', True):
                     llm_settings_overridden = True
