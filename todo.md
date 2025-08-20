@@ -36,6 +36,8 @@ new ui:
 - OK add the apps zoo to lollms_chat
 - OK fix forced context size to actually force the context size when i choose another aliased model with forcing activated
 - OK fix multi workers apps orphans detection to use a singleton
+- OK task status is not automatically updated and reflected on all the ui
+- OK when a task is done, it needs to update the corresponding ui
 
 ## Discussion:
 - start/stop events must be collapsible, all that happens in between should be put inside in between
@@ -116,12 +118,18 @@ new ui:
 - fix the scratchpad loop ** IMPORTANT **
 
 ## tasks management
-- task status is not automatically updated and reflected on all the ui
-- when a task is done, it needs to update the corresponding ui
+- verify task update on remote machines
 
+## data zones
+- handle the case where the datazone is tempy
+- add :
+-   convert to document
+-   save document to md (in docs list)
 
 ## installer
 - fix installation process
 - add docker option
 - build docker image
 
+
+- add clear models 

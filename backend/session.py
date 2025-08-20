@@ -9,6 +9,7 @@ from fastapi import HTTPException, Depends, status
 from sqlalchemy.orm import Session, joinedload
 from werkzeug.utils import secure_filename
 from jose import jwt, JWTError
+from ascii_colors import trace_exception, ASCIIColors
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -117,6 +118,12 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             binding_alias, model_name = user_model_full.split('/', 1)
             binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
             if binding and binding.model_aliases:
+                if isinstance(binding.model_aliases,str):
+                    try:
+                        binding.model_aliases = json.loads(binding.model_aliases)
+                    except Exception as e:
+                        trace_exception(e)
+                        binding.model_aliases= {}
                 alias_info = binding.model_aliases.get(model_name)
                 if alias_info and not alias_info.get('allow_parameters_override', True):
                     llm_settings_overridden = True
@@ -275,6 +282,12 @@ def build_lollms_client_from_params(
             final_user_params.update(llm_params)
 
         model_aliases = binding_to_use.model_aliases or {}
+        if isinstance(model_aliases,str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except Exception as e:
+                trace_exception(e)
+                model_aliases= {}
         alias_info = model_aliases.get(model_name_for_binding)
 
         if alias_info:

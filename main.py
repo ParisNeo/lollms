@@ -431,28 +431,31 @@ if __name__ == "__main__":
     from backend.settings import settings
     settings.refresh()
     host_setting = settings.get("host", host)
-    
+
     port_setting = int(settings.get("port", port))
     workers = int(os.getenv("LOLLMS_WORKERS", settings.get("workers", SERVER_CONFIG.get("workers", cpu_count()))))
-    
+
     ssl_params = {}
     if settings.get("https_enabled"):
         certfile = settings.get("ssl_certfile")
         keyfile = settings.get("ssl_keyfile")
-        
-        if certfile and keyfile and Path(certfile).is_file() and Path(keyfile).is_file():
-            ssl_params["ssl_certfile"] = certfile
-            ssl_params["ssl_keyfile"] = keyfile
-        else:
-            print("WARNING: HTTPS is enabled in settings, but the certificate or key file is missing, not found, or invalid.")
-            print(f"         Certfile path: '{certfile}' (Exists: {Path(certfile).is_file()})")
-            print(f"         Keyfile path: '{keyfile}' (Exists: {Path(keyfile).is_file()})")
+
+        try:
+            if certfile and keyfile and Path(certfile).is_file() and Path(keyfile).is_file():
+                ssl_params["ssl_certfile"] = certfile
+                ssl_params["ssl_keyfile"] = keyfile
+            else:
+                raise FileNotFoundError("Certificate or key file is missing, not found, or invalid.")
+        except Exception as e:
+            print(f"WARNING: HTTPS is enabled in settings, but the certificate or key file is missing, not found, or invalid. Error: {e}")
+            print(f"         Certfile path: '{certfile}'")
+            print(f"         Keyfile path: '{keyfile}'")
             print("         Server will start without HTTPS to avoid crashing.")
 
     print("")
     ASCIIColors.cyan(f"--- LoLLMs Plateform (v{APP_VERSION}) ---")
     protocol = "https" if ssl_params else "http"
-    
+
     if host_setting == "0.0.0.0":
         import psutil
         import socket
@@ -461,7 +464,7 @@ if __name__ == "__main__":
         accessible_host = get_accessible_host()
         if accessible_host != 'localhost':
             ASCIIColors.magenta(f"Recommended public access URL: {protocol}://{accessible_host}:{port_setting}/")
-        
+
         # Always include localhost
         ASCIIColors.magenta(f"Or access locally at: {protocol}://localhost:{port_setting}/")
 
@@ -476,5 +479,5 @@ if __name__ == "__main__":
         ASCIIColors.magenta(f"Access UI at: {protocol}://{host_setting}:{port_setting}/")
     ASCIIColors.green(f"Using {workers} Workers")
     print("----------------------")
-            
+
     uvicorn.run("main:app", host=host_setting, port=port_setting, reload=False, workers=workers, **ssl_params)

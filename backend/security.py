@@ -19,6 +19,7 @@ from passlib.context import CryptContext
 from backend.config import SECRET_KEY, ALGORITHM
 from backend.settings import settings
 
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -173,46 +174,88 @@ def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], t
         print(f"CRITICAL: Failed to send SMTP email. Error: {e}")
         raise
 
+
 def _send_email_system_mail_html(to_email: str, subject: str, html_content: str, text_content: str):
-    """Sends a multipart/alternative email using the system's `mailx` command."""
+    """Sends a multipart/alternative email using the system's `mailx` command with proper headers inline."""
+
     if not shutil.which("mailx"):
         raise FileNotFoundError("The 'mailx' command not found. Please install mailx.")
 
     boundary = f"----=_NextPart_{secrets.token_hex(16)}"
+
+    headers = (
+        f"To: {to_email}\n"
+        f"Subject: {subject.replace(chr(10), ' ').replace(chr(13), ' ')}\n"
+        f"MIME-Version: 1.0\n"
+        f"Content-Type: multipart/alternative; boundary=\"{boundary}\"\n"
+        f"\n"
+    )
+
     multipart_body = (
+        f"{headers}"
         f"This is a multi-part message in MIME format.\n"
         f"--{boundary}\n"
-        f"Content-Type: text/plain; charset=utf-8\n\n"
+        f"Content-Type: text/plain; charset=utf-8\n"
+        f"Content-Transfer-Encoding: 8bit\n\n"
         f"{text_content}\n\n"
         f"--{boundary}\n"
-        f"Content-Type: text/html; charset=utf-8\n\n"
+        f"Content-Type: text/html; charset=utf-8\n"
+        f"Content-Transfer-Encoding: 8bit\n\n"
         f"{html_content}\n\n"
         f"--{boundary}--\n"
     )
-    command = [
-        'mailx', '-s', subject.replace('\n', ' ').replace('\r', ' '),
-        '-a', f'Content-Type: multipart/alternative; boundary="{boundary}"',
-        to_email
-    ]
+
+    command = ["mailx", "-v", to_email]
+
     try:
-        process = subprocess.run(command, input=multipart_body, capture_output=True, text=True, check=True, encoding='utf-8')
+        process = subprocess.run(
+            command,
+            input=multipart_body,
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding="utf-8"
+        )
         print(f"INFO: Email (HTML system mail) sent to {to_email}.")
+        if process.stdout.strip():
+            print(f"MAILX STDOUT:\n{process.stdout}")
+        if process.stderr.strip():
+            print(f"MAILX STDERR:\n{process.stderr}")
     except subprocess.CalledProcessError as e:
-        print(f"ERROR: System 'mailx' command failed. Stderr: {e.stderr}")
+        print(f"ERROR: System 'mailx' command failed.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         raise
 
+
+import shutil
+import subprocess
+
 def _send_email_system_mail_text(to_email: str, subject: str, text_content: str):
-    """Sends a simple plain text email using the system's `mail` command."""
+    """Sends a simple plain text email using the system's `mail` command with verbose logging."""
+
     if not shutil.which("mail"):
         raise FileNotFoundError("The 'mail' command not found. Please install mailutils.")
 
-    command = ['mail', '-s', subject.replace('\n', ' ').replace('\r', ' '), to_email]
+    safe_subject = subject.replace("\n", " ").replace("\r", " ")
+    command = ["mail", "-v", "-s", safe_subject, to_email]
+
     try:
-        process = subprocess.run(command, input=text_content, capture_output=True, text=True, check=True, encoding='utf-8')
+        process = subprocess.run(
+            command,
+            input=text_content,
+            capture_output=True,
+            text=True,
+            check=True,
+            encoding="utf-8"
+        )
         print(f"INFO: Email (Text system mail) sent to {to_email}.")
+        if process.stdout.strip():
+            print(f"MAIL STDOUT:\n{process.stdout}")
+        if process.stderr.strip():
+            print(f"MAIL STDERR:\n{process.stderr}")
     except subprocess.CalledProcessError as e:
-        print(f"ERROR: System 'mail' command failed. Stderr: {e.stderr}")
+        print(f"ERROR: System 'mail' command failed.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         raise
+
 
 def _send_email_outlook(to_email: str, subject: str, body: str):
     """Sends an email using Outlook."""

@@ -331,7 +331,7 @@ async def chat_completions(
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"
             created_ts = int(time.time())
 
-            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role='assistant'), finish_reason=None)]).model_dump_json()}\n\n"
+            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role='assistant'), finish_reason=None)]).model_dump_json()}\n\n".encode("utf-8")
 
             def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None):
                 if stop_event.is_set():
@@ -366,10 +366,10 @@ async def chat_completions(
                 item = await stream_queue.get()
                 if item is None:
                     break
-                yield f"data: {item}\n\n"
+                yield f"data: {item}\n\n".encode("utf-8")
 
-            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(), finish_reason='stop')]).model_dump_json()}\n\n"
-            yield "data: [DONE]\n\n"
+            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(), finish_reason='stop')]).model_dump_json()}\n\n".encode("utf-8")
+            yield "data: [DONE]\n\n".encode("utf-8")
 
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
 
