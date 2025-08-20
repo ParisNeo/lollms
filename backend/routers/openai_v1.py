@@ -343,7 +343,7 @@ async def chat_completions(
                     "finish_reason": None
                 }]
             }
-            yield f"data: {json.dumps(first_chunk)}\n\n"
+            yield f"data: {json.dumps(first_chunk)}\n\n".encode('utf-8')
 
             def llm_callback(chunk: str, msg_type, params=None):
                 if stop_event.is_set():
@@ -385,7 +385,7 @@ async def chat_completions(
                 item = await stream_queue.get()
                 if item is None:
                     break
-                yield f"data: {item}\n\n"
+                yield f"data: {item}\n\n".encode('utf-8')
 
             # Dernier chunk = stop
             last_chunk = {
@@ -399,8 +399,8 @@ async def chat_completions(
                     "finish_reason": "stop"
                 }]
             }
-            yield f"data: {json.dumps(last_chunk)}\n\n"
-            yield "data: [DONE]\n\n"
+            yield f"data: {json.dumps(last_chunk)}\n\n".encode('utf-8')
+            yield "data: [DONE]\n\n".encode('utf-8')
 
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
 
