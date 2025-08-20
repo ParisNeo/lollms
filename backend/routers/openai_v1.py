@@ -323,7 +323,7 @@ async def chat_completions(
 
     # Streaming or regular completion
     if request.stream:
-        async def stream_generator():
+        async def stream_generator(lc, openai_messages, images, request):
             main_loop = asyncio.get_event_loop()
             stream_queue = asyncio.Queue()
             stop_event = threading.Event()
@@ -331,19 +331,38 @@ async def chat_completions(
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"
             created_ts = int(time.time())
 
-            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role='assistant'), finish_reason=None)]).model_dump_json()}\n\n"
+            # Premier chunk = rôle assistant
+            first_chunk = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": request.model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"role": "assistant"},
+                    "finish_reason": None
+                }]
+            }
+            yield f"data: {json.dumps(first_chunk)}\n\n"
 
-            def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None):
+            def llm_callback(chunk: str, msg_type, params=None):
                 if stop_event.is_set():
                     return False
                 if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
-                    response_chunk = ChatCompletionStreamResponse(
-                        id=completion_id,
-                        model=request.model,
-                        created=created_ts,
-                        choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(content=chunk))]
+                    response_chunk = {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_ts,
+                        "model": request.model,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"content": chunk},
+                            "finish_reason": None
+                        }]
+                    }
+                    main_loop.call_soon_threadsafe(
+                        stream_queue.put_nowait, json.dumps(response_chunk)
                     )
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, response_chunk.model_dump_json())
                 return True
 
             def blocking_call():
@@ -368,7 +387,19 @@ async def chat_completions(
                     break
                 yield f"data: {item}\n\n"
 
-            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(), finish_reason='stop')]).model_dump_json()}\n\n"
+            # Dernier chunk = stop
+            last_chunk = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": request.model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            }
+            yield f"data: {json.dumps(last_chunk)}\n\n"
             yield "data: [DONE]\n\n"
 
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
