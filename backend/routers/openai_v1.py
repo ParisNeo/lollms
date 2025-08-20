@@ -323,7 +323,7 @@ async def chat_completions(
 
     # Streaming or regular completion
     if request.stream:
-        async def stream_generator(lc, openai_messages, images, request):
+        async def stream_generator():
             main_loop = asyncio.get_event_loop()
             stream_queue = asyncio.Queue()
             stop_event = threading.Event()
