@@ -5,6 +5,7 @@ import threading
 import traceback
 from typing import List, Dict, Any, Callable, Optional
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm.attributes import flag_modified
 from backend.db.models.db_task import DBTask
 from backend.db.base import TaskStatus
 from backend.ws_manager import manager
@@ -58,6 +59,7 @@ class Task:
         self.db_session_factory = db_session_factory
         self.cancellation_event = threading.Event()
         self.process = None
+        self.db_lock = threading.Lock()
 
     def _broadcast_update(self, db_task: DBTask):
         """Sends a WebSocket update for the task."""
@@ -117,17 +119,18 @@ class Task:
 
     def _update_db(self, **kwargs):
         """Safely updates the task's record in the database."""
-        with self.db_session_factory() as db:
-            task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
-            if not task_record:
-                return
-            
-            for key, value in kwargs.items():
-                setattr(task_record, key, value)
-            
-            db.commit()
-            db.refresh(task_record, ['owner'])
-            self._broadcast_update(task_record)
+        with self.db_lock:
+            with self.db_session_factory() as db:
+                task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
+                if not task_record:
+                    return
+                
+                for key, value in kwargs.items():
+                    setattr(task_record, key, value)
+                
+                db.commit()
+                db.refresh(task_record, ['owner'])
+                self._broadcast_update(task_record)
 
     def log(self, message: str, level: str = "INFO"):
         """Adds a log entry to the task's record."""
@@ -136,13 +139,17 @@ class Task:
             "message": message,
             "level": level
         }
-        with self.db_session_factory() as db:
-            task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
-            if task_record:
-                task_record.logs = (task_record.logs or []) + [log_entry]
-                db.commit()
-                db.refresh(task_record, ['owner'])
-                self._broadcast_update(task_record)
+        with self.db_lock:
+            with self.db_session_factory() as db:
+                task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
+                if task_record:
+                    if task_record.logs is None:
+                        task_record.logs = []
+                    task_record.logs.append(log_entry)
+                    flag_modified(task_record, "logs")
+                    db.commit()
+                    db.refresh(task_record, ['owner'])
+                    self._broadcast_update(task_record)
 
 
     def set_progress(self, value: int):
