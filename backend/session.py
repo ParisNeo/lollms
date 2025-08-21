@@ -137,6 +137,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         lc = get_user_lollms_client(username)
         ai_name_for_user = getattr(lc, "ai_name", "assistant")
         is_api_service_enabled = settings.get("openai_api_service_enabled", False)
+        is_api_require_key = settings.get("openai_api_require_key", True)
+        is_ollama_service_enabled = settings.get("ollama_service_enabled", False)
+        is_ollama_require_key = settings.get("ollama_require_key", True)
 
         return UserAuthDetails(
             id=db_user.id, username=username, is_admin=db_user.is_admin, is_active=db_user.is_active,
@@ -154,7 +157,11 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             rag_graph_response_type=db_user.rag_graph_response_type, auto_title=db_user.auto_title,
             user_ui_level=db_user.user_ui_level, chat_active=db_user.chat_active, first_page=db_user.first_page,
             ai_response_language=db_user.ai_response_language, fun_mode=db_user.fun_mode,
-            show_token_counter=db_user.show_token_counter, openai_api_service_enabled=is_api_service_enabled,
+            show_token_counter=db_user.show_token_counter, 
+            openai_api_service_enabled=is_api_service_enabled,
+            openai_api_require_key=is_api_require_key,
+            ollama_service_enabled=is_ollama_service_enabled,
+            ollama_require_key=is_ollama_require_key,
             llm_settings_overridden=llm_settings_overridden
         )
     finally:

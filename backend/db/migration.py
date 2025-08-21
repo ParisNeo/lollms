@@ -21,7 +21,7 @@ from ascii_colors import ASCIIColors, trace_exception
 def _drop_table(element, compiler, **kw):
     return "DROP TABLE %s;" % compiler.process(element.element)
 
-# NEW HELPER FUNCTIONS FOR PORT UNIQUENESS DURING MIGRATION
+# NEW HELPER FUNCTIONS FOR PORT UNIQUESS DURING MIGRATION
 def _get_all_existing_app_ports(connection) -> set[int]:
     """Retrieves all non-null ports currently used by apps in the database."""
     # Use a direct query to avoid ORM overhead during migration and ensure we get current state
@@ -143,11 +143,27 @@ def _bootstrap_global_settings(connection):
         },
         "openai_api_service_enabled": {
             "value": False,
-            "type": "boolean", "description": "Enable the OpenAI-compatible API endpoint for users.", "category": "Services"
+            "type": "boolean", "description": "Enable the OpenAI-compatible v1 API endpoint for users.", "category": "Services"
+        },
+        "openai_api_require_key": {
+            "value": True,
+            "type": "boolean", "description": "Require an API key for the OpenAI-compatible v1 API endpoint. If disabled, requests without a key will be handled by the primary admin account.", "category": "Services"
+        },
+        "ollama_service_enabled": {
+            "value": False,
+            "type": "boolean", "description": "Enable the Ollama service endpoint for users (OpenAI compatible).", "category": "Services"
+        },
+        "ollama_require_key": {
+            "value": True,
+            "type": "boolean", "description": "Require an API key for the Ollama service endpoint. If disabled, requests without a key will be handled by the primary admin account.", "category": "Services"
         },
         "model_display_mode": {
             "value": "mixed",
             "type": "string", "description": "How models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
+        },
+        "tti_model_display_mode": {
+            "value": "mixed",
+            "type": "string", "description": "How TTI models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
         },
         "lock_all_context_sizes": {
             "value": False,
@@ -182,6 +198,7 @@ def _bootstrap_global_settings(connection):
 
     if configs_to_insert:
         connection.execute(insert_stmt, configs_to_insert)
+        connection.commit()
         print(f"INFO: Successfully bootstrapped {len(configs_to_insert)} new global settings.")
 
 def run_schema_migrations_and_bootstrap(connection, inspector):
@@ -450,7 +467,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "is_searchable": "BOOLEAN DEFAULT 1 NOT NULL",
             "first_login_done": "BOOLEAN DEFAULT 0 NOT NULL",
             "data_zone": "TEXT", "memory": "TEXT",
-            "tti_binding_model_name": "VARCHAR"
+            "tti_binding_model_name": "VARCHAR",
+            "tti_models_config": "JSON"
         }
         
         added_cols = []
@@ -726,6 +744,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         from backend.db.models.service import PersonalityZooRepository
         PersonalityZooRepository.__table__.create(connection)
         print("INFO: Created 'personality_zoo_repositories' table.")
+
+    # NEW: Create broadcast_messages if it doesn't exist
+    if not inspector.has_table("broadcast_messages"):
+        from backend.db.models.broadcast import BroadcastMessage
+        BroadcastMessage.__table__.create(connection)
+        print("INFO: Created 'broadcast_messages' table for multi-worker communication.")
 
 
 def check_and_update_db_version(SessionLocal):

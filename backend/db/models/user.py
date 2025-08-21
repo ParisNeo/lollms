@@ -1,7 +1,7 @@
 from sqlalchemy import (
     Column, Integer, String, Boolean,
     ForeignKey, UniqueConstraint, CheckConstraint,
-    DateTime, Float, Date, Text
+    DateTime, Float, Date, Text, JSON
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -47,6 +47,7 @@ class User(Base):
 
     lollms_model_name = Column(String, nullable=True)
     tti_binding_model_name = Column(String, nullable=True) # NEW
+    tti_models_config = Column(JSON, nullable=True) # NEW
     safe_store_vectorizer = Column(String, nullable=True)
     active_personality_id = Column(String, ForeignKey("personalities.id", name="fk_user_active_personality", ondelete="SET NULL"), nullable=True)
     llm_ctx_size = Column(Integer, nullable=True)

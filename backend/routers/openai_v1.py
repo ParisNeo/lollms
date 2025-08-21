@@ -27,7 +27,7 @@ from ascii_colors import ASCIIColors
 
 
 openai_v1_router = APIRouter(prefix="/v1")
-bearer_scheme = HTTPBearer()
+bearer_scheme = HTTPBearer(auto_error=False) # Set auto_error to False to handle optional auth
 
 # --- Pydantic Models for OpenAI Compatibility ---
 
@@ -150,21 +150,50 @@ class PersonalityListResponse(BaseModel):
 # --- Dependencies ---
 
 async def get_user_from_api_key(
-    authorization: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    authorization: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db)
 ) -> DBUser:
     """
-    Authenticates a user based on a given API key and ensures a session exists.
+    Authenticates a user based on a given API key or, if disabled, falls back to an admin user.
     """
     if not settings.get("openai_api_service_enabled", False):
         raise HTTPException(status_code=403, detail="OpenAI API service is not enabled by the administrator.")
+
+    require_key = settings.get("openai_api_require_key", True)
+
+    # --- CORRECTED LOGIC ---
+    if not require_key:
+        # Key requirement is OFF. Immediately fall back to the admin user, ignoring any 'authorization' header.
+        admin_user = db.query(DBUser).filter(DBUser.is_admin == True).order_by(DBUser.id).first()
+        if not admin_user:
+            raise HTTPException(status_code=503, detail="OpenAI API is enabled without a key, but no admin user is configured to handle requests.")
+        
+        # Ensure a session exists for this admin user to build clients correctly
+        if admin_user.username not in user_sessions:
+            session_llm_params = {
+                "ctx_size": admin_user.llm_ctx_size, "temperature": admin_user.llm_temperature,
+                "top_k": admin_user.llm_top_k, "top_p": admin_user.llm_top_p,
+                "repeat_penalty": admin_user.llm_repeat_penalty, "repeat_last_n": admin_user.llm_repeat_last_n
+            }
+            user_sessions[admin_user.username] = {
+                "lollms_clients": {}, "safe_store_instances": {}, "discussions": {},
+                "active_vectorizer": admin_user.safe_store_vectorizer,
+                "lollms_model_name": admin_user.lollms_model_name,
+                "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
+                "active_personality_id": admin_user.active_personality_id,
+            }
+        return admin_user
+
+    # --- If we reach here, 'require_key' is TRUE ---
+    if not authorization:
+        raise HTTPException(status_code=401, detail="API Key is required.", headers={"WWW-Authenticate": "Bearer"})
 
     api_key = authorization.credentials
     if '_' not in api_key:
         raise HTTPException(status_code=401, detail="Invalid API Key format.")
     
     parts = api_key.split('_')
-    key_prefix = parts[0]+"_"+parts[1]
+    key_prefix = parts[0] + "_" + parts[1]
 
     db_key = db.query(DBAPIKey).filter(DBAPIKey.key_prefix == key_prefix).first()
 

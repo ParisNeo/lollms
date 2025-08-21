@@ -4,6 +4,10 @@ from fastapi import WebSocket
 import json
 import logging
 
+# NEW IMPORTS
+from backend.db import get_db
+from backend.db.models.broadcast import BroadcastMessage
+
 logger = logging.getLogger("uvicorn.info")
 
 class ConnectionManager:
@@ -38,7 +42,6 @@ class ConnectionManager:
             websocket = self.active_connections[user_id]
             try:
                 await websocket.send_json(message_data)
-                logger.debug(f"Sent WebSocket message to user {user_id}")
             except Exception as e:
                 logger.error(f"Failed to send WebSocket message to user {user_id}: {e}")
                 self.disconnect(user_id)
@@ -54,31 +57,43 @@ class ConnectionManager:
         
         for user_id in disconnected_users:
             self.disconnect(user_id)
-        logger.info(f"Broadcasted message to {len(self.active_connections)} client(s).")
 
 
     async def broadcast_to_admins(self, message_data: dict):
         connected_admins = [uid for uid in self.admin_user_ids if uid in self.active_connections]
         if not connected_admins:
-            logger.info("Broadcast to admins requested, but no admins are currently connected.")
             return
 
-        logger.info(f"Broadcasting message to {len(connected_admins)} connected admins.")
         for user_id in connected_admins:
             await self.send_personal_message(message_data, user_id)
 
     # --- Sync wrappers for calling async methods from sync threads (e.g., TaskManager) ---
+    def _write_to_db_queue(self, payload: dict):
+        db_session = None
+        try:
+            db_session = next(get_db())
+            db_message = BroadcastMessage(payload=payload)
+            db_session.add(db_message)
+            db_session.commit()
+        except Exception as e:
+            logger.error(f"Failed to write broadcast message to database queue: {e}")
+            if db_session:
+                db_session.rollback()
+        finally:
+            if db_session:
+                db_session.close()
+
     def broadcast_sync(self, message_data: dict):
-        if self._loop:
-            asyncio.run_coroutine_threadsafe(self.broadcast(message_data), self._loop)
+        payload = {"type": "broadcast", "data": message_data}
+        self._write_to_db_queue(payload)
 
     def send_personal_message_sync(self, message_data: dict, user_id: int):
-        if self._loop:
-            asyncio.run_coroutine_threadsafe(self.send_personal_message(message_data, user_id), self._loop)
+        payload = {"type": "personal", "user_id": user_id, "data": message_data}
+        self._write_to_db_queue(payload)
 
     def broadcast_to_admins_sync(self, message_data: dict):
-        if self._loop:
-            asyncio.run_coroutine_threadsafe(self.broadcast_to_admins(message_data), self._loop)
+        payload = {"type": "admins", "data": message_data}
+        self._write_to_db_queue(payload)
 
 
 manager = ConnectionManager()

@@ -1,60 +1,202 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
-import SimpleSelectMenu from '../ui/SimpleSelectMenu.vue';
+import { storeToRefs } from 'pinia';
+import IconSelectMenu from '../ui/IconSelectMenu.vue';
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconInfo from '../../assets/icons/IconInfo.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore();
 const uiStore = useUiStore();
 
-const selectedTtiBindingId = ref(authStore.user?.active_tti_id || null);
+const { user } = storeToRefs(authStore);
+const { availableTtiModels, availableTtiModelsGrouped } = storeToRefs(dataStore);
 
-const availableTtiBindings = computed(() => {
-    return dataStore.availableTtiBindings.map(binding => ({
-        id: binding.id,
-        name: binding.alias,
-        description: binding.name
-    }));
+const form = ref({});
+const isLoading = ref(false);
+const hasChanges = ref(false);
+let pristineState = '{}';
+
+const activeTtiModel = computed({
+  get: () => user.value?.tti_binding_model_name,
+  set: (name) => {
+    authStore.updateUserPreferences({ tti_binding_model_name: name });
+  }
 });
 
-onMounted(() => {
-    dataStore.fetchAvailableTtiBindings();
+const selectedModelDetails = computed(() => {
+    if (!activeTtiModel.value || availableTtiModels.value.length === 0) return null;
+    return availableTtiModels.value.find(m => m.id === activeTtiModel.value) || null;
 });
+
+const modelConfigurableParameters = computed(() => {
+    if (!selectedModelDetails.value?.alias) return [];
+    const metadataKeys = ['icon', 'title', 'description', 'allow_parameters_override'];
+    return Object.entries(selectedModelDetails.value.alias)
+        .filter(([key]) => !metadataKeys.includes(key))
+        .map(([key, defaultValue]) => ({
+            name: key,
+            type: typeof defaultValue === 'boolean' ? 'bool' : (typeof defaultValue === 'number' ? 'float' : 'str'),
+            default: defaultValue
+        }));
+});
+
+const userOverrides = computed(() => {
+    if (!user.value || !activeTtiModel.value || !user.value.tti_models_config) return {};
+    return user.value.tti_models_config[activeTtiModel.value] || {};
+});
+
+const allowOverrides = computed(() => {
+    if (!selectedModelDetails.value?.alias) return true;
+    return selectedModelDetails.value.alias.allow_parameters_override !== false;
+})
+
+watch(selectedModelDetails, (newModel) => {
+    if (newModel) {
+        const newFormState = {};
+        modelConfigurableParameters.value.forEach(param => {
+            newFormState[param.name] = userOverrides.value[param.name] ?? newModel.alias[param.name] ?? param.default;
+        });
+        form.value = newFormState;
+        pristineState = JSON.stringify(newFormState);
+        hasChanges.value = false;
+    } else {
+        form.value = {};
+        pristineState = '{}';
+        hasChanges.value = false;
+    }
+}, { immediate: true, deep: true });
+
+watch(form, (newValue) => {
+    hasChanges.value = JSON.stringify(newValue) !== pristineState;
+}, { deep: true });
 
 async function handleSave() {
-    await authStore.updateUserPreferences({ active_tti_id: selectedTtiBindingId.value });
+    if (!activeTtiModel.value) return;
+    isLoading.value = true;
+    try {
+        const currentConfig = user.value.tti_models_config || {};
+        const newConfigForModel = { ...(currentConfig[activeTtiModel.value] || {}), ...form.value };
+
+        if (selectedModelDetails.value?.alias) {
+            Object.keys(newConfigForModel).forEach(key => {
+                if (newConfigForModel[key] === selectedModelDetails.value.alias[key] || newConfigForModel[key] === '' || newConfigForModel[key] === null) {
+                    delete newConfigForModel[key];
+                }
+            });
+        }
+        
+        const updatedUserConfigs = {
+            ...currentConfig,
+            [activeTtiModel.value]: newConfigForModel
+        };
+        
+        if (Object.keys(updatedUserConfigs[activeTtiModel.value]).length === 0) {
+            delete updatedUserConfigs[activeTtiModel.value];
+        }
+
+        await authStore.updateUserPreferences({ tti_models_config: updatedUserConfigs });
+        pristineState = JSON.stringify(form.value);
+        hasChanges.value = false;
+    } finally {
+        isLoading.value = false;
+    }
 }
+
+function handleResetToDefaults() {
+    const newFormState = {};
+    if (selectedModelDetails.value?.alias) {
+        modelConfigurableParameters.value.forEach(param => {
+            newFormState[param.name] = selectedModelDetails.value.alias[param.name] ?? param.default;
+        });
+    }
+    form.value = newFormState;
+}
+
+onMounted(() => {
+    if (dataStore.availableTtiModels.length === 0) {
+        dataStore.fetchAvailableTtiModels();
+    }
+});
 </script>
 
 <template>
-    <div class="space-y-6">
+    <div class="space-y-8">
         <div>
-            <h3 class="text-lg font-medium leading-6 text-gray-900 dark:text-white">Text-to-Image (TTI) Settings</h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure your preferred model for generating images.</p>
+            <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
+                Image Generation (TTI) Parameters
+            </h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                Configure default parameters for your selected Text-to-Image model. These settings can be overridden by model aliases set by an administrator if overrides are disabled.
+            </p>
         </div>
 
-        <div v-if="dataStore.isLoadingTtiModels" class="text-center">
-            Loading TTI models...
-        </div>
-        <div v-else-if="availableTtiBindings.length === 0" class="p-4 bg-yellow-50 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-200 rounded-lg">
-            No active Text-to-Image bindings are available. An administrator needs to configure one in the Admin Panel.
-        </div>
-        <div v-else class="space-y-4">
+        <div class="space-y-6">
             <div>
-                <label for="tti-model-select" class="block text-sm font-medium">Active TTI Binding</label>
-                <SimpleSelectMenu 
-                    v-model="selectedTtiBindingId" 
-                    :items="availableTtiBindings" 
-                    placeholder="Select a TTI Binding" 
-                />
-                <p class="mt-2 text-xs text-gray-500">This will be your default binding for image generation tasks.</p>
+                <label class="block text-base font-medium mb-2">Active Image Generation Model</label>
+                <IconSelectMenu 
+                    v-model="activeTtiModel" 
+                    :items="availableTtiModelsGrouped"
+                    :is-loading="dataStore.isLoadingTtiModels"
+                    placeholder="Select an Image Model"
+                >
+                    <template #button="{ toggle, selectedItem }">
+                        <button @click="toggle" class="toolbox-select truncate w-full flex items-center justify-between">
+                            <div class="flex items-center space-x-3 truncate">
+                                <img v-if="selectedItem?.icon_base64" :src="selectedItem.icon_base64" class="h-8 w-8 rounded-md object-cover"/>
+                                <span v-else class="w-8 h-8 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md"><IconPhoto class="w-5 h-5" /></span>
+                                <div class="min-w-0 text-left">
+                                    <span class="block font-semibold truncate">{{ selectedItem?.name || 'Select an Image Model' }}</span>
+                                </div>
+                            </div>
+                            <svg class="w-4 h-4 text-gray-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                        </button>
+                    </template>
+                </IconSelectMenu>
             </div>
 
-            <div class="flex justify-end pt-4 border-t dark:border-gray-700">
-                <button @click="handleSave" class="btn btn-primary">Save TTI Settings</button>
+            <div v-if="activeTtiModel && selectedModelDetails && allowOverrides" class="p-4 border rounded-lg dark:border-gray-700 space-y-4">
+                <h4 class="font-medium">Configuration for: <span class="font-mono text-blue-600 dark:text-blue-400">{{ selectedModelDetails.name }}</span></h4>
+                <div v-if="modelConfigurableParameters.length === 0" class="text-sm text-gray-500">
+                    This model has no parameters exposed for user configuration.
+                </div>
+                <form v-else @submit.prevent="handleSave" class="space-y-4">
+                    <div v-for="param in modelConfigurableParameters" :key="param.name">
+                        <label :for="`tti-param-${param.name}`" class="block text-sm font-medium capitalize">{{ param.name.replace(/_/g, ' ') }}</label>
+                        <input 
+                            v-if="['str', 'int', 'float'].includes(param.type)"
+                            :type="param.type === 'str' ? 'text' : 'number'"
+                            :step="param.type === 'float' ? '0.01' : '1'"
+                            :id="`tti-param-${param.name}`"
+                            v-model="form[param.name]"
+                            class="input-field mt-1"
+                            :placeholder="`Default: ${selectedModelDetails.alias[param.name]}`"
+                        />
+                         <div v-else-if="param.type === 'bool'" class="mt-1">
+                            <button @click="form[param.name] = !form[param.name]" type="button" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span :class="[form[param.name] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+                    </div>
+                     <div class="flex justify-end gap-3 pt-4 border-t dark:border-gray-600">
+                        <button type="button" @click="handleResetToDefaults" class="btn btn-secondary" :disabled="isLoading">Reset to Defaults</button>
+                        <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">{{ isLoading ? 'Saving...' : 'Save Changes' }}</button>
+                    </div>
+                </form>
+            </div>
+            <div v-else-if="activeTtiModel && selectedModelDetails && !allowOverrides" class="p-4 border border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 flex items-center gap-3">
+                <IconInfo class="w-5 h-5 flex-shrink-0" />
+                <span>An administrator has locked the parameters for this model alias. Your personal settings will be ignored.</span>
             </div>
         </div>
     </div>
 </template>
+
+<style scoped>
+.toolbox-select {
+    @apply w-full text-left text-sm px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500;
+}
+</style>

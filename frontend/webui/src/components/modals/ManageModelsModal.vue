@@ -55,7 +55,7 @@
                             <IconUploader v-model="form.icon" />
                             
                             <div v-if="bindingType === 'llm'" class="p-4 border rounded-lg dark:border-gray-700">
-                                <h4 class="font-medium mb-4">Generation Parameters</h4>
+                                <h4 class="font-medium mb-4">LLM Generation Parameters</h4>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label for="alias-ctx-size" class="label text-xs">Context Size</label>
@@ -74,6 +74,31 @@
                                     <div><label for="alias-repeat-last-n" class="label text-xs">Repeat Last N</label><input id="alias-repeat-last-n" v-model="form.repeat_last_n" type="number" class="input-field" placeholder="e.g., 64"></div>
                                 </div>
                             </div>
+                            
+                            <!-- TTI Model Parameters -->
+                            <div v-if="bindingType === 'tti' && modelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700">
+                                <h4 class="font-medium mb-4">TTI Generation Parameters</h4>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div v-for="param in modelParameters" :key="param.name">
+                                        <label :for="`param-${param.name}`" class="label text-xs">{{ param.title || param.name.replace(/_/g, ' ') }}</label>
+                                        <input 
+                                            v-if="['str', 'int', 'float'].includes(param.type)"
+                                            :type="param.type === 'str' ? 'text' : 'number'"
+                                            :step="param.type === 'float' ? '0.1' : '1'"
+                                            :id="`param-${param.name}`"
+                                            v-model="form[param.name]"
+                                            class="input-field mt-1"
+                                            :placeholder="param.help || ''"
+                                        />
+                                        <div v-else-if="param.type === 'bool'" class="mt-1">
+                                            <button @click="form[param.name] = !form[param.name]" type="button" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                                <span :class="[form[param.name] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
 
                              <div v-if="bindingType === 'llm'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                                 <span class="flex-grow flex flex-col">
@@ -85,13 +110,22 @@
                                 </button>
                             </div>
                             
-                             <div v-if="bindingType === 'llm'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                             <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                                 <span class="flex-grow flex flex-col">
-                                    <span class="text-sm font-medium">Lock Context Size</span>
-                                    <span class="text-sm text-gray-500 dark:text-gray-400">If enabled, users cannot override the context size for this model.</span>
+                                    <span class="text-sm font-medium">
+                                        <template v-if="bindingType === 'llm'">Lock Context Size</template>
+                                        <template v-else>Allow User Overrides</template>
+                                    </span>
+                                    <span class="text-sm text-gray-500 dark:text-gray-400">
+                                        <template v-if="bindingType === 'llm'">If enabled, users cannot override the context size for this model.</template>
+                                        <template v-else>If enabled, users can change these generation parameters for their own use.</template>
+                                    </span>
                                 </span>
-                                <button @click="form.ctx_size_locked = !form.ctx_size_locked" type="button" :class="[form.ctx_size_locked ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <button v-if="bindingType === 'llm'" @click="form.ctx_size_locked = !form.ctx_size_locked" type="button" :class="[form.ctx_size_locked ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.ctx_size_locked ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                </button>
+                                <button v-else @click="form.allow_parameters_override = !form.allow_parameters_override" type="button" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                    <span :class="[form.allow_parameters_override ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
                             
@@ -147,11 +181,11 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
-const { globalSettings } = storeToRefs(adminStore);
+const { globalSettings, availableBindingTypes, availableTtiBindingTypes } = storeToRefs(adminStore);
 
 const modalData = computed(() => uiStore.modalData('manageModels'));
 const binding = computed(() => modalData.value?.binding);
-const bindingType = computed(() => modalData.value?.bindingType); // 'llm' or 'tti'
+const bindingType = computed(() => modalData.value?.bindingType);
 
 const isLoading = ref(true);
 const isSaving = ref(false);
@@ -162,6 +196,7 @@ const isFetchingCtxSize = ref(false);
 const models = ref([]);
 const selectedModel = ref(null);
 const searchTerm = ref('');
+const modelParameters = ref([]);
 
 const getInitialFormState = () => ({
     icon: '',
@@ -215,7 +250,24 @@ async function fetchModels() {
 
 function selectModel(model) {
     selectedModel.value = model;
-    form.value = { ...getInitialFormState(), ...(model.alias || {}) };
+    
+    // Start with a clean slate
+    const newForm = { ...getInitialFormState(), ...(model.alias || {}) };
+    
+    const bindingTypes = bindingType.value === 'tti' ? availableTtiBindingTypes.value : availableBindingTypes.value;
+    const bindingDesc = bindingTypes.find(b => b.binding_name === binding.value.name);
+    
+    const params = bindingDesc?.model_parameters || [];
+    modelParameters.value = params;
+
+    // Populate form with default values from schema if not present in alias
+    params.forEach(param => {
+        if (!(param.name in newForm)) {
+            newForm[param.name] = param.default;
+        }
+    });
+
+    form.value = newForm;
 }
 
 async function fetchCtxSize() {
@@ -236,6 +288,8 @@ async function saveAlias() {
     isSaving.value = true;
     try {
         const payload = { ...form.value };
+        
+        // Sanitize numeric fields for LLM
         if (bindingType.value === 'llm') {
             ['ctx_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
                 const value = payload[key];
@@ -243,6 +297,20 @@ async function saveAlias() {
                     payload[key] = null;
                 } else {
                     payload[key] = Number(value);
+                }
+            });
+        }
+        
+        // Sanitize numeric fields for TTI from schema
+        if (bindingType.value === 'tti' && modelParameters.value.length > 0) {
+            modelParameters.value.forEach(param => {
+                if (['int', 'float'].includes(param.type)) {
+                    const value = payload[param.name];
+                    if (value === '' || value === null || value === undefined || isNaN(parseFloat(value))) {
+                         payload[param.name] = null;
+                    } else {
+                         payload[param.name] = Number(value);
+                    }
                 }
             });
         }
@@ -321,6 +389,11 @@ async function setAsGlobalDefault() {
 
 onMounted(() => {
     adminStore.fetchGlobalSettings();
+    if (bindingType.value === 'tti') {
+        adminStore.fetchAvailableTtiBindingTypes();
+    } else {
+        adminStore.fetchAvailableBindingTypes();
+    }
 });
 
 watch(binding, (newBinding) => {

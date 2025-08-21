@@ -16,7 +16,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
 class ModelInfo(BaseModel):
     name: str
     id: Optional[str] = None
-    alias: Optional[ModelAlias] = None # NEW: Rich alias information
+    alias: Optional[Dict[str, Any]] = None # FIX: Changed from ModelAlias to support flexible TTI/LLM params
 
 
 class AdminDashboardStats(BaseModel):

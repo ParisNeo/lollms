@@ -78,12 +78,17 @@ class ModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: ModelAlias
 
+# --- NEW: Flexible TTI Alias Update Model ---
+class TtiModelAliasUpdate(BaseModel):
+    original_model_name: str
+    alias: Dict[str, Any]
+
 class ModelAliasDelete(BaseModel):
     original_model_name: str
 
 class BindingModel(BaseModel):
     original_model_name: str
-    alias: Optional[ModelAlias] = None
+    alias: Optional[Dict[str, Any]] = None # FIX: Changed from ModelAlias to support flexible TTI params
 
 class ModelNamePayload(BaseModel):
     model_name: str

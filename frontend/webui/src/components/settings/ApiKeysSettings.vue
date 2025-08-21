@@ -17,8 +17,8 @@ const newKeyAlias = ref('');
 const isLoading = ref(false);
 const selectedKeys = ref(new Set());
 
-const isServiceEnabled = computed(() => {
-    return user.value ? user.value.openai_api_service_enabled : false;
+const isAnyServiceEnabled = computed(() => {
+    return user.value ? (user.value.openai_api_service_enabled || user.value.ollama_service_enabled) : false;
 });
 
 const hasKeys = computed(() => apiKeys.value.length > 0);
@@ -35,12 +35,12 @@ const allKeysSelected = computed({
 });
 
 onMounted(() => {
-    if (isServiceEnabled.value && dataStore.apiKeys.length === 0) {
+    if (isAnyServiceEnabled.value && dataStore.apiKeys.length === 0) {
         dataStore.fetchApiKeys();
     }
 });
 
-watch(isServiceEnabled, (newValue) => {
+watch(isAnyServiceEnabled, (newValue) => {
     if (newValue && dataStore.apiKeys.length === 0) {
         dataStore.fetchApiKeys();
     }
@@ -116,17 +116,46 @@ function toggleSelectAll() {
                 </p>
             </div>
             
-            <div v-if="!isServiceEnabled" class="p-6 text-center">
-                 <div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/50 rounded-lg">
-                    <p class="text-sm text-yellow-800 dark:text-yellow-200">
-                        The OpenAI-compatible API service is currently disabled by the administrator.
-                    </p>
+            <div class="p-4 sm:p-6">
+                <div class="space-y-4 mb-6">
+                    <div class="p-4 border rounded-lg dark:border-gray-700">
+                        <h3 class="font-semibold text-lg mb-2">API Service Status</h3>
+                        <div v-if="user" class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                            <!-- OpenAI Status -->
+                            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-md">
+                                <p class="font-medium text-gray-800 dark:text-gray-200">OpenAI-Compatible API</p>
+                                <p :class="user.openai_api_service_enabled ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+                                    Status: {{ user.openai_api_service_enabled ? 'Enabled' : 'Disabled' }}
+                                </p>
+                                <p class="text-gray-500 dark:text-gray-400">
+                                    Key Required: {{ user.openai_api_require_key ? 'Yes' : 'No' }}
+                                </p>
+                            </div>
+                            <!-- Ollama Status -->
+                            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-md">
+                                <p class="font-medium text-gray-800 dark:text-gray-200">Ollama-Compatible API</p>
+                                <p :class="user.ollama_service_enabled ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+                                    Status: {{ user.ollama_service_enabled ? 'Enabled' : 'Disabled' }}
+                                </p>
+                                <p class="text-gray-500 dark:text-gray-400">
+                                    Key Required: {{ user.ollama_require_key ? 'Yes' : 'No' }}
+                                </p>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">API keys below can be used for any enabled service that requires a key.</p>
+                    </div>
                 </div>
-            </div>
 
-            <div v-else>
-                <!-- Create Key Form -->
-                <div class="p-4 sm:p-6">
+                <div v-if="!isAnyServiceEnabled" class="text-center">
+                    <div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/50 rounded-lg">
+                        <p class="text-sm text-yellow-800 dark:text-yellow-200">
+                            All API services are currently disabled by the administrator.
+                        </p>
+                    </div>
+                </div>
+
+                <div v-else>
+                    <!-- Create Key Form -->
                     <form @submit.prevent="handleCreateKey" class="flex flex-col sm:flex-row items-start sm:items-end gap-4">
                         <div class="flex-grow w-full">
                             <label for="keyAlias" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Key Alias</label>
@@ -144,14 +173,16 @@ function toggleSelectAll() {
                         </button>
                     </form>
                 </div>
-                
+            </div>
+            
+            <div v-if="isAnyServiceEnabled">
                 <!-- Keys List -->
                 <div class="border-t border-gray-200 dark:border-gray-700">
                     <div v-if="!hasKeys" class="p-6 text-center text-gray-500 dark:text-gray-400">
                         You have not created any API keys yet.
                     </div>
                     <div v-else>
-                        <!-- Contextual Actions Header - Shows only when items are selected -->
+                        <!-- Contextual Actions Header -->
                         <div v-if="selectedKeys.size > 0" class="px-4 sm:px-6 py-2 bg-blue-50 dark:bg-blue-900/20 flex items-center justify-between transition-all">
                             <div class="flex items-center gap-4">
                                 <span class="text-sm font-semibold text-blue-800 dark:text-blue-200">{{ selectedKeys.size }} selected</span>
@@ -174,6 +205,7 @@ function toggleSelectAll() {
                                     type="checkbox" 
                                     :value="key.id" 
                                     v-model="selectedKeys" 
+                                    @click.stop
                                     class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
                                 >
                                 <div class="flex-grow ml-2">

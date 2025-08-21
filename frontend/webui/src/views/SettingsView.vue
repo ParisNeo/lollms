@@ -14,6 +14,7 @@ import IconSquares2x2 from '../assets/icons/IconSquares2x2.vue';
 import IconMcp from '../assets/icons/IconMcp.vue';
 import IconKey from '../assets/icons/IconKey.vue';
 import IconLink from '../assets/icons/IconLink.vue';
+import IconPhoto from '../assets/icons/IconPhoto.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -21,6 +22,8 @@ const router = useRouter();
 const components = {
   general: defineAsyncComponent(() => import('../components/settings/GeneralSettings.vue')),
   bindings: defineAsyncComponent(() => import('../components/settings/BindingsSettings.vue')),
+  llm: defineAsyncComponent(() => import('../components/settings/LLMSettings.vue')),
+  tti: defineAsyncComponent(() => import('../components/settings/TTISettings.vue')),
   rag: defineAsyncComponent(() => import('../components/settings/RAGSettings.vue')),
   personalities: defineAsyncComponent(() => import('../components/settings/PersonalitiesSettings.vue')),
   prompts: defineAsyncComponent(() => import('../components/settings/PromptsSettings.vue')),
@@ -31,9 +34,11 @@ const components = {
 };
 
 const sections = [
+  { id: 'account', name: 'Account', icon: markRaw(IconUserCircle) },
   { id: 'general', name: 'General', icon: markRaw(IconCog) },
   { id: 'bindings', name: 'Model Bindings', icon: markRaw(IconLink) },
   { id: 'llm', name: 'LLM Parameters', icon: markRaw(IconCpuChip) },
+  { id: 'tti', name: 'TTI Parameters', icon: markRaw(IconPhoto) },
   { id: 'rag', name: 'RAG Parameters', icon: markRaw(IconDatabase) },
   { type: 'divider', label: 'Customization' },
   { id: 'personalities', name: 'Personalities', icon: markRaw(IconUserCircle) },
@@ -42,11 +47,10 @@ const sections = [
   { id: 'mcps', name: 'MCPs', icon: markRaw(IconMcp) },
   { type: 'divider', label: 'Security' },
   { id: 'api_keys', name: 'API Keys', icon: markRaw(IconKey) },
-  { id: 'account', name: 'Account', icon: markRaw(IconUserCircle) }
 ];
 
 const activeTab = computed({
-    get: () => route.query.tab || 'general',
+    get: () => route.query.tab || 'account',
     set: (tab) => {
         router.push({ query: { ...route.query, tab: tab } });
     }

@@ -58,6 +58,7 @@ from backend.models import (
     PromptPublic,
     PromptUpdate,
     ModelAliasUpdate,
+    TtiModelAliasUpdate,
     ModelAliasDelete,
     BindingModel,
     ModelNamePayload
@@ -91,10 +92,16 @@ def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_t
         available_bindings = get_available_tti_bindings()
         
     binding_desc = next((b for b in available_bindings if b.get("binding_name") == binding_name), None)
-    if not binding_desc or "input_parameters" not in binding_desc:
+    
+    # Use model_parameters for TTI if they exist, otherwise fallback to input_parameters
+    parameters_key = "input_parameters"
+    if binding_type == "tti" and binding_desc and "model_parameters" in binding_desc:
+        parameters_key = "model_parameters"
+
+    if not binding_desc or parameters_key not in binding_desc:
         return config
 
-    param_types = {p["name"]: p["type"] for p in binding_desc["input_parameters"]}
+    param_types = {p["name"]: p["type"] for p in binding_desc[parameters_key]}
     
     processed_config = {}
     for key, value in config.items():
@@ -529,7 +536,7 @@ async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=500, detail=f"Could not fetch models from TTI binding '{binding.alias}': {e}")
 
 @admin_router.put("/tti-bindings/{binding_id}/alias", response_model=TTIBindingPublicAdmin)
-async def update_tti_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Session = Depends(get_db)):
+async def update_tti_model_alias(binding_id: int, payload: TtiModelAliasUpdate, db: Session = Depends(get_db)):
     binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
     if not binding:
         raise HTTPException(status_code=404, detail="TTI Binding not found.")
@@ -537,7 +544,8 @@ async def update_tti_model_alias(binding_id: int, payload: ModelAliasUpdate, db:
     if binding.model_aliases is None:
         binding.model_aliases = {}
     
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    # Directly assign the dictionary from the payload.
+    binding.model_aliases[payload.original_model_name] = payload.alias
     flag_modified(binding, "model_aliases")
     
     db.commit()
@@ -910,9 +918,23 @@ async def admin_update_global_settings(
             if db_config:
                 if key == 'smtp_password' and not new_value:
                     continue
-                stored_data = json.loads(db_config.value)
-                if isinstance(stored_data, str):
-                    stored_data = json.loads(stored_data)
+                
+                stored_data = {}
+                try:
+                    # Attempt to parse what's in the DB. It should be a JSON string of a dict.
+                    parsed_value = json.loads(db_config.value)
+                    if isinstance(parsed_value, dict) and 'type' in parsed_value:
+                        stored_data = parsed_value
+                    else:
+                        # Fallback for corrupted/old format data
+                        stored_data['value'] = parsed_value
+                        stored_data['type'] = 'string' # Assume string if type is missing
+                except (json.JSONDecodeError, TypeError):
+                    # Value is not JSON, e.g., just "mixed". Treat it as the value.
+                    stored_data['value'] = db_config.value
+                    stored_data['type'] = 'string' # Assume string
+                
+                # Update the value and serialize back to string for DB storage.
                 stored_data['value'] = new_value
                 db_config.value = json.dumps(stored_data)
                 updated_keys.append(key)

@@ -9,7 +9,8 @@ from multiprocessing import cpu_count
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors, trace_exception
 from contextlib import asynccontextmanager
-import asyncio  # Import asyncio
+import asyncio
+import time
 
 from multipart.multipart import FormParser
 FormParser.max_size = 50 * 1024 * 1024  # 50 MB
@@ -31,6 +32,7 @@ from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
+from backend.db.models.broadcast import BroadcastMessage
 from backend.security import get_password_hash as hash_password
 from backend.discussion import LegacyDiscussion
 from backend.session import (
@@ -52,6 +54,7 @@ from backend.routers.users import users_router
 from backend.routers.dm_ws import dm_ws_router
 from backend.routers.api_keys import api_keys_router
 from backend.routers.openai_v1 import openai_v1_router
+from backend.routers.ollama_v1 import ollama_v1_router
 from backend.routers.lollms_config import lollms_config_router
 from backend.routers.files import upload_router, assets_router, files_router
 from backend.routers.ui import add_ui_routes, ui_router
@@ -70,11 +73,83 @@ from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.zoo_cache import build_full_cache
 
+POLLING_INTERVAL = 0.1  # seconds
+CLEANUP_INTERVAL = 3600  # 1 hour in seconds
+MAX_MESSAGE_AGE = 24 * 3600 # 24 hours in seconds
+
+async def start_broadcast_polling():
+    """
+    A background task that polls the database for new broadcast messages and sends them
+    to clients connected to this specific worker process.
+    """
+    last_processed_id = 0
+    last_cleanup_time = time.time()
+    
+    # Initialize last_processed_id to the latest message id to avoid sending old messages on startup
+    db = next(get_db())
+    try:
+        latest_message = db.query(BroadcastMessage).order_by(BroadcastMessage.id.desc()).first()
+        if latest_message:
+            last_processed_id = latest_message.id
+        ASCIIColors.green(f"Broadcast poller initialized. Starting after message ID {last_processed_id}.")
+    finally:
+        db.close()
+        
+    while True:
+        try:
+            await asyncio.sleep(POLLING_INTERVAL)
+            db = next(get_db())
+            
+            # Fetch new messages
+            new_messages = db.query(BroadcastMessage).filter(BroadcastMessage.id > last_processed_id).order_by(BroadcastMessage.id.asc()).all()
+
+            if new_messages:
+                for msg in new_messages:
+                    payload = msg.payload
+                    broadcast_type = payload.get("type")
+                    data = payload.get("data")
+                    
+                    if broadcast_type == "broadcast":
+                        await manager.broadcast(data)
+                    elif broadcast_type == "admins":
+                        await manager.broadcast_to_admins(data)
+                    elif broadcast_type == "personal":
+                        user_id = payload.get("user_id")
+                        if user_id:
+                            await manager.send_personal_message(data, user_id)
+                    
+                    last_processed_id = msg.id
+
+            # Periodic cleanup
+            current_time = time.time()
+            if current_time - last_cleanup_time > CLEANUP_INTERVAL:
+                try:
+                    cutoff_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=MAX_MESSAGE_AGE)
+                    deleted_count = db.query(BroadcastMessage).filter(BroadcastMessage.created_at < cutoff_time).delete()
+                    db.commit()
+                    if deleted_count > 0:
+                        ASCIIColors.info(f"Cleaned up {deleted_count} old broadcast messages.")
+                    last_cleanup_time = current_time
+                except Exception as e:
+                    ASCIIColors.error(f"Error during broadcast message cleanup: {e}")
+                    db.rollback()
+
+        except Exception as e:
+            ASCIIColors.error(f"Error in broadcast polling loop: {e}")
+            trace_exception(e)
+        finally:
+            if db:
+                db.close()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Code to be executed on startup ---
     ASCIIColors.info("Application startup...")
     manager.set_loop(asyncio.get_running_loop()) # Set the event loop for the manager
+    
+    # NEW: Start the broadcast polling task
+    polling_task = asyncio.create_task(start_broadcast_polling())
+    
     task_manager.init_app(db_session_module.SessionLocal)
     print("Database initialized.")
 
@@ -329,6 +404,13 @@ async def lifespan(app: FastAPI):
     yield
     # --- Code to be executed on shutdown ---
     ASCIIColors.info("--- Application shutting down. ---")
+    
+    # NEW: Cancel the polling task on shutdown
+    polling_task.cancel()
+    try:
+        await polling_task
+    except asyncio.CancelledError:
+        ASCIIColors.info("Broadcast polling task cancelled successfully.")
 
 
 app = FastAPI(
@@ -409,6 +491,7 @@ app.include_router(users_router)
 app.include_router(dm_ws_router)
 app.include_router(api_keys_router)
 app.include_router(openai_v1_router)
+app.include_router(ollama_v1_router)
 app.include_router(lollms_config_router)
 app.include_router(files_router)
 app.include_router(ui_router)

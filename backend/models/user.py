@@ -39,6 +39,7 @@ class UserCreateAdmin(UserLLMParams):
     receive_notification_emails: bool = True
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
+    tti_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     rag_top_k: Optional[int] = Field(None, ge=1)
@@ -58,6 +59,7 @@ class UserUpdate(BaseModel):
     receive_notification_emails: Optional[bool] = None
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
+    tti_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     llm_ctx_size: Optional[int] = Field(None, ge=0)
@@ -155,6 +157,7 @@ class UserPublic(UserLLMParams):
     reset_token_expiry: Optional[datetime.datetime] = None
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
+    tti_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     rag_top_k: Optional[int] = None
@@ -183,6 +186,7 @@ class UserAuthDetails(UserLLMParams):
     is_searchable: bool
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
+    tti_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     rag_top_k: Optional[int] = Field(None, ge=1)
@@ -200,6 +204,9 @@ class UserAuthDetails(UserLLMParams):
     fun_mode: Optional[bool] = False
     show_token_counter: Optional[bool] = True
     openai_api_service_enabled: bool = False
+    openai_api_require_key: bool = True
+    ollama_service_enabled: bool = False
+    ollama_require_key: bool = True
     first_login_done: bool 
     data_zone: Optional[str] = None
     memory: Optional[str] = None

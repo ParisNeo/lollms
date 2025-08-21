@@ -111,7 +111,6 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
     task.set_progress(5)
 
     with task.db_session_factory() as db:
-        # Get the user to determine their preferred TTI model
         user = db.query(DBUser).filter(DBUser.username == username).first()
         if not user:
             raise Exception(f"User '{username}' not found.")
@@ -120,13 +119,13 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         
         selected_binding = None
         selected_model_name = None
+        binding_config = {}
 
         if user_tti_model_full and '/' in user_tti_model_full:
             binding_alias, model_name = user_tti_model_full.split('/', 1)
             selected_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == binding_alias, DBTTIBinding.is_active == True).first()
             selected_model_name = model_name
         
-        # Fallback to the first active binding if user's preference is not set or invalid
         if not selected_binding:
             task.log("User's preferred TTI model not found or not set. Falling back to the first available active TTI binding.", "WARNING")
             selected_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
@@ -139,21 +138,39 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         task.log(f"Using TTI binding: {selected_binding.alias}")
         if selected_model_name:
             task.log(f"Using TTI model: {selected_model_name}")
-        task.set_progress(10)
         
-        # Prepare config for LollmsClient, including the selected model and any alias settings
+        # --- NEW: Configuration Hierarchy ---
+        # 1. Start with the base config from the binding itself
         binding_config = selected_binding.config.copy() if selected_binding.config else {}
-        if selected_model_name:
-            binding_config['model_name'] = selected_model_name
-            
+        
+        # 2. Layer admin-defined alias settings
         model_aliases = selected_binding.model_aliases or {}
         alias_info = model_aliases.get(selected_model_name)
+        
         if alias_info:
             task.log(f"Applying settings from model alias '{alias_info.get('title', selected_model_name)}'.")
-            # Merge alias parameters into the binding config. This allows aliases to set things like image size, quality, etc.
             for key, value in alias_info.items():
                 if key not in ['title', 'description', 'icon'] and value is not None:
                     binding_config[key] = value
+        
+        # 3. Layer user-specific settings if overrides are allowed
+        allow_override = (alias_info or {}).get('allow_parameters_override', True)
+        if allow_override:
+            user_configs = user.tti_models_config or {}
+            model_user_config = user_configs.get(user_tti_model_full)
+            if model_user_config:
+                task.log("Applying user-specific settings for this model.")
+                for key, value in model_user_config.items():
+                    if value is not None:
+                        binding_config[key] = value
+        else:
+            task.log("User overrides are disabled by admin for this model alias.")
+        # --- END NEW ---
+
+        if selected_model_name:
+            binding_config['model_name'] = selected_model_name
+            
+        task.set_progress(10)
 
     try:
         lc = LollmsClient(
@@ -163,7 +180,6 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         task.log("LollmsClient initialized for TTI.")
         task.set_progress(20)
 
-        # The model name is now in the config, which is what lollms-client TTI bindings expect.
         image_bytes = lc.tti.generate_image(prompt=prompt)
         task.log("Image data received from binding.")
         task.set_progress(80)

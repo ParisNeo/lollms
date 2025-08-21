@@ -24,6 +24,16 @@ export const useAuthStore = defineStore('auth', () => {
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
     
+    async function refreshUser() {
+        if (!token.value) return;
+        try {
+            const response = await apiClient.get('/api/auth/me');
+            user.value = response.data;
+            console.log("[AuthStore] User details refreshed.");
+        } catch (error) {
+            console.error("Failed to refresh user details:", error);
+        }
+    }
     // --- WebSocket Connection Management ---
     function connectWebSocket() {
         if (!token.value) {
@@ -89,7 +99,8 @@ export const useAuthStore = defineStore('auth', () => {
                     tasksStore.handleTasksCleared(data.data);
                     break;
                 case 'settings_updated':
-                    uiStore.addNotification('Global settings have been updated by an admin.', 'info');
+                    uiStore.addNotification('Global settings have been updated by an admin. Refreshing your session...', 'info');
+                    await refreshUser();
                     break;
                 case 'bindings_updated':
                     uiStore.addNotification('LLM bindings have been updated. Refreshing model list.', 'info');
@@ -469,6 +480,7 @@ export const useAuthStore = defineStore('auth', () => {
         fetchScratchpad, updateScratchpad,
         fetchDataZone,
         updateDataZone,
-        updateMemoryZone
+        updateMemoryZone,
+        refreshUser
     };
 });

@@ -77,6 +77,7 @@ async def get_lollms_tti_models(
     """
     all_models = []
     active_tti_bindings = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).all()
+    model_display_mode = settings.get("tti_model_display_mode", "mixed")
 
     for binding in active_tti_bindings:
         try:
@@ -101,11 +102,22 @@ async def get_lollms_tti_models(
             for model_name in raw_model_names:
                 alias_data = model_aliases.get(model_name)
                 
+                if model_display_mode == 'aliased' and not alias_data:
+                    continue
+
                 model_info = {
                     "id": f"{binding.alias}/{model_name}",
-                    "name": alias_data.get('title') if alias_data else f"{binding.alias}/{model_name}",
+                    "name": model_name,
                     "alias": alias_data
                 }
+
+                if model_display_mode == 'original':
+                    model_info["name"] = f"{binding.alias}/{model_name}"
+                elif alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
+                    model_info["name"] = alias_data.get('title', model_name)
+                else: # mixed mode, no alias
+                    model_info["name"] = f"{binding.alias}/{model_name}"
+
                 all_models.append(model_info)
 
         except Exception as e:

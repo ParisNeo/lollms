@@ -387,6 +387,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateGlobalSettings(configs) {
         await apiClient.put('/api/admin/settings', { configs });
         await fetchGlobalSettings();
+        uiStore.addNotification('Global settings updated.', 'success');
     }
 
     async function importOpenWebUIData(file) {

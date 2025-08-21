@@ -10,12 +10,13 @@ import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
 
-const { ttiBindings, availableTtiBindingTypes, isLoadingTtiBindings } = storeToRefs(adminStore);
+const { ttiBindings, availableTtiBindingTypes, isLoadingTtiBindings, globalSettings } = storeToRefs(adminStore);
 
 const isFormVisible = ref(false);
 const editingBinding = ref(null);
 const isLoadingForm = ref(false);
 const isKeyVisible = ref({});
+const localTtiModelDisplayMode = ref('mixed');
 
 const getInitialFormState = () => ({
     id: null,
@@ -57,6 +58,21 @@ const allFormParameters = computed(() => {
     ];
 });
 
+watch(globalSettings, (newSettings) => {
+    if (Array.isArray(newSettings)) {
+        const setting = newSettings.find(s => s.key === 'tti_model_display_mode');
+        if (setting) {
+            localTtiModelDisplayMode.value = setting.value;
+        }
+    }
+}, { deep: true, immediate: true });
+
+function handleDisplayModeChange(event) {
+    const newValue = event.target.value;
+    localTtiModelDisplayMode.value = newValue; // Update local state for UI reactivity
+    adminStore.updateGlobalSettings({ 'tti_model_display_mode': newValue });
+}
+
 watch(() => form.value.name, (newName, oldName) => {
     if (newName !== oldName && !isEditMode.value) {
         const bindingDesc = availableTtiBindingTypes.value.find(b => b.binding_name === newName);
@@ -73,6 +89,7 @@ watch(() => form.value.name, (newName, oldName) => {
 onMounted(() => {
     adminStore.fetchTtiBindings();
     adminStore.fetchAvailableTtiBindingTypes();
+    adminStore.fetchGlobalSettings();
 });
 
 function showAddForm() {
@@ -227,9 +244,19 @@ function getBindingTitle(name) {
         </div>
 
         <div>
-            <div class="flex justify-between items-center mb-4">
+            <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
                 <h2 class="text-2xl font-bold">TTI Bindings</h2>
-                <button @click="showAddForm" class="btn btn-primary" v-if="!isFormVisible">+ Add New TTI Binding</button>
+                <div class="flex items-center gap-4">
+                    <div>
+                        <label for="tti-model-display-mode" class="block text-xs font-medium text-gray-500 dark:text-gray-400">Model Display Mode</label>
+                        <select id="tti-model-display-mode" :value="localTtiModelDisplayMode" @change="handleDisplayModeChange" class="input-field mt-1">
+                            <option value="mixed">Mixed (Alias or Original)</option>
+                            <option value="aliased">Aliased Only</option>
+                            <option value="original">Original Names Only</option>
+                        </select>
+                    </div>
+                    <button @click="showAddForm" class="btn btn-primary self-end" v-if="!isFormVisible">+ Add New TTI Binding</button>
+                </div>
             </div>
 
             <div v-if="isLoadingTtiBindings" class="text-center p-6">Loading TTI bindings...</div>
