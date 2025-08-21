@@ -132,4 +132,5 @@ new ui:
 - build docker image
 
 
-- add clear models 
+- add clear models button to admin interface
+- if the model does not support image input, do not remove the image list in discussion zone, just make sure you deactivate any image in that list
