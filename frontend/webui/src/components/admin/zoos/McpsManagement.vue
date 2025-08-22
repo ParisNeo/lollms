@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/admin/zoos/McpsManagement.vue -->
 <script setup>
 import { onMounted, computed, watch, ref } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -146,7 +147,23 @@ function handleInstallItem(item) { uiStore.openModal('appInstall', { app: item, 
 async function handleUpdateApp(app) { if (await uiStore.showConfirmation({ title: `Update '${app.name}'?`, confirmText: 'Update' })) { await adminStore.updateApp(app.id); }}
 async function handleAppAction(appId, action) { isLoadingAction.value = `${action}-${appId}`; try { if (action === 'start') await adminStore.startApp(appId); if (action === 'stop') await adminStore.stopApp(appId); } finally { isLoadingAction.value = null; } }
 async function handleUninstallApp(app) { if (await uiStore.showConfirmation({ title: `Uninstall '${app.name}'?`, confirmText: 'Uninstall' })) { isLoadingAction.value = `uninstall-${app.id}`; try { await adminStore.uninstallApp(app.id); } finally { isLoadingAction.value = null; } } }
-function handleConfigureApp(app) { uiStore.openModal('appConfig', { app }); }
+function handleConfigureApp(mcp) {
+    if (mcp.is_installed) {
+        uiStore.openModal('appConfig', { app: mcp });
+    } else if (mcp.repository === 'Registered') {
+        uiStore.openModal('serviceRegistration', { 
+            item: mcp, 
+            itemType: 'mcp', 
+            ownerType: mcp.type || 'system',
+            onRegistered: adminStore.fetchZooMcps
+        });
+    }
+}
+async function handleDeleteRegisteredItem(mcp) {
+    if (await uiStore.showConfirmation({ title: `Delete Registration for '${mcp.name}'?`, message: 'This will remove the manually registered entry but will not affect the service itself.', confirmText: 'Delete' })) {
+        await adminStore.deleteRegisteredMcp(mcp.id);
+    }
+}
 function handleViewLogs(app) { uiStore.openModal('appLog', { app }); }
 async function showItemHelp(item) { const readme = await adminStore.fetchMcpReadme(item.repository, item.folder_name); uiStore.openModal('sourceViewer', { title: `README: ${item.name}`, content: readme, language: 'markdown' }); }
 async function handleCancelTask(taskId) { await tasksStore.cancelTask(taskId); }
@@ -197,7 +214,7 @@ function handleRegisterMcp() { uiStore.openModal('serviceRegistration', { itemTy
                 <div v-else-if="!itemsWithTaskStatus || itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No MCPs Found</h4></div>
                 <div v-else>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-                        <AppCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" item-type-name="MCP" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @uninstall="handleUninstallApp(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" @start="handleAppAction(item.id, 'start')" @stop="handleAppAction(item.id, 'stop')" @configure="handleConfigureApp(item)" @fix="handleFixItem(item)" @purge="handlePurgeItem(item)" @details="handleShowDetails" @logs="handleViewLogs(item)" />
+                        <AppCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" item-type-name="MCP" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @uninstall="handleUninstallApp(item)" @delete="handleDeleteRegisteredItem(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" @start="handleAppAction(item.id, 'start')" @stop="handleAppAction(item.id, 'stop')" @configure="handleConfigureApp(item)" @fix="handleFixItem(item)" @purge="handlePurgeItem(item)" @details="handleShowDetails" @logs="handleViewLogs(item)" />
                     </div>
                     <div v-if="totalPages > 1" class="flex justify-between items-center mt-6"><button @click="currentPage--" :disabled="currentPage === 1" class="btn btn-secondary">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div>
                 </div>

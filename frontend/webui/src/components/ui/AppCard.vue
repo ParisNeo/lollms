@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/ui/AppCard.vue -->
 <script setup>
 import IconStar from '../../assets/icons/IconStar.vue';
 import IconStarFilled from '../../assets/icons/IconStarFilled.vue';
@@ -26,7 +27,7 @@ const props = defineProps({
 const emit = defineEmits([
     'star', 'install', 'update', 'uninstall', 'details', 'help', 
     'view-task', 'cancel-install', 'start', 'stop', 'fix', 
-    'configure', 'purge', 'logs'
+    'configure', 'purge', 'logs', 'delete'
 ]);
 
 const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iY3VycmVudENvbG9yIiBjbGFzcz0idy02IGgtNiI+CiAgPHBhdGggZmlsbC1ydWxlPSJldmVub2RkIiBkPSJNMy4zNzUgMS41YTguMjc1IDguMjc1IDAgMCAwLTguMjc1IDguMjc1YzAgNC4xMjIgMi41NjEgNy42MyA2LjA3NyA4LjgzNWEuNzUuNzUgMCAwIDAgLjc2NC0uMTExYy4xMjUtLjA3OC4yNTgtLjE5LjM5OS0uMzE0bC4wMDQtLjAwNSNhLjQ5OC40OTggMCAwIDEgLjYxMy0uMDIzbDIuNDQyIDEuMTM4YTEuNSAxLjUgMCAwIDAgMS42OTktLjkxM2w0LjQxMy05LjU3N2E4LjI1IDE4LjI1IDAgMCAwLTkuOTU0LTkuOTU0bC05LjU3NyA0LjQxM2ExLjUgMS41IDAgMCAwLS45MTMgMS42OTlsMS4xMzggMi40NDJhLjQ5OC40OTggMCAwIDEgLS4wMjMuNjEzbC0uMDA1LjAwNC0uMzE0LjM5OWEuNzUuNzUgMCAwIDAtLjExMS43NjRBMTEuMjIgMTEuMjIgMCAwIDEtMy4zNzUgMTguNWMtNS4wNzIgMC05LjE4OC00LjExNi05LjE4OC05LjE4OGE5LjE4OCA5LjE4OCAwIDAgMSAxLjYxNy01LjE2MmMuMjQ2LS40Mi4wMzgtLjkxOC0uMzY4LTEuMTU3bC0xLjQyNS0uODM4YTEuNSAxLjUgMCAwIDAtMi4wODYuNDlMMy4zNzUgMS41em00LjQ4OCAxMy4wMjNhLjUuNSAwIDAgMS0uMzU0LS4xNDdsLTEuNTQyLTEuNTQxYS41LjUgMCAxIDEgLjcwOC0uNzA4bDEuNTQxIDEuNTQyYS41LjUgMCAwIDEgLS4zNTQuODU0em0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em0tMi45NC0yLjk0YS41LjUgMCAwIDEtLjM1My0uMTQ2bC0xLjU0Mi0xLjU0MmEuNS41IDAgMCAxIC43MDctLjcwN2wxLjU0MiAxLjU0MWEuNS41IDAgMCAxLS4zNTQuODUzem0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em00LjQ4OC0uNzU3YS41LjUgMCAwIDEtLjM1NC0uMTQ3bC0xLjU0Mi0xLjU0MWEuNS41IDAgMCAxIC43MDgtLjcwOGwxLjU0MSAxLjU0MWEuNS41IDAgMCAxLS4zNTQuODU0em0yLjk0LTIuOTRhLjUuNSAwIDAgMS0uMzU0LS4xNDZsLTEuNTQxLTEuNTQyYS41LjUgMCAwIDEgLjcwNy0uNzA4bDEuNTQyIDEuNTQxYS41LjUgMCAwIDEgLS4zNTQuODU0em0tMS40NzEtNC40N2EuNS41IDAgMCAxLS4zNTQtLjE0N2wtMS41NDItMS41NDFhLjUuNSAwIDAgMSAuNzA4LS43MDhsMS41NDEgMS41NDFhLjUuNSAwIDAgMS0uMzU0Ljg1NHoiIGNsaXAtcnVsZT0iZXZlbm9kZCIgLz4KPC9zdmc+Cg==';
@@ -102,11 +103,11 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
             </div>
 
             <div class="flex-shrink-0 flex gap-1">
-                <template v-if="app.is_installed && !task && !app.is_broken">
-                    <button @click="$emit('logs', app)" class="btn btn-secondary p-2" title="View Logs">
+                <template v-if="!task && !app.is_broken">
+                    <button v-if="app.is_installed" @click="$emit('logs', app)" class="btn btn-secondary p-2" title="View Logs">
                         <IconFileText class="w-4 h-4" />
                     </button>
-                    <button @click="$emit('configure', app)" class="btn btn-secondary p-2" title="Configure">
+                    <button v-if="app.is_installed || app.repository === 'Registered'" @click="$emit('configure', app)" class="btn btn-secondary p-2" title="Configure">
                         <IconCog class="w-4 h-4" />
                     </button>
                 </template>
@@ -118,6 +119,9 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
                     <IconBookOpen class="w-4 h-4" />
                 </button>
                  <button v-if="app.is_installed" @click="$emit('uninstall', app)" class="btn btn-danger-outline p-2" title="Uninstall">
+                    <IconTrash class="w-4 h-4" />
+                </button>
+                 <button v-if="app.repository === 'Registered'" @click="$emit('delete', app)" class="btn btn-danger-outline p-2" title="Delete Registration">
                     <IconTrash class="w-4 h-4" />
                 </button>
             </div>

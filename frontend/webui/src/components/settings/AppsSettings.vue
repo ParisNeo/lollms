@@ -1,81 +1,102 @@
+<!-- [REWRITE] frontend/webui/src/components/settings/AppsSettings.vue -->
 <script setup>
-import { computed, onMounted } from 'vue';
-import { storeToRefs } from 'pinia';
+import { onMounted, computed } from 'vue';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
-import { useAuthStore } from '../../stores/auth';
-import McpCard from '../ui/McpCard.vue';
-import IconInfo from '../../assets/icons/IconInfo.vue';
+import { storeToRefs } from 'pinia';
+import McpCard from '../ui/McpCard.vue'; // Reusing for consistent look
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
-const authStore = useAuthStore();
 
 const { userApps, systemApps } = storeToRefs(dataStore);
-const { isAdmin } = storeToRefs(authStore);
 
 onMounted(() => {
     dataStore.fetchApps();
 });
 
-const sortedUserApps = computed(() => userApps.value.filter(a => !a.is_installed).sort((a, b) => a.name.localeCompare(b.name)));
-const sortedSystemApps = computed(() => systemApps.value.filter(a => !a.is_installed).sort((a, b) => a.name.localeCompare(b.name)));
-
-function showAddForm() {
-    uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'user', onRegistered: dataStore.fetchApps });
+function handleAddApp() {
+    uiStore.openModal('serviceRegistration', { 
+        itemType: 'app', 
+        ownerType: 'user',
+        onRegistered: dataStore.fetchApps 
+    });
 }
 
-function showAddSystemForm() {
-    uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'system', onRegistered: dataStore.fetchApps });
+function handleEditApp(app) {
+    uiStore.openModal('serviceRegistration', { 
+        item: app, 
+        itemType: 'app', 
+        ownerType: 'user',
+        onRegistered: dataStore.fetchApps 
+    });
 }
 
-function startEditing(item) {
-    uiStore.openModal('serviceRegistration', { item, itemType: 'app', onRegistered: dataStore.fetchApps });
-}
-
-async function handleDeleteItem(item) {
+async function handleDeleteApp(app) {
     const confirmed = await uiStore.showConfirmation({
-        title: `Delete '${item.name}'?`,
-        message: 'Are you sure you want to remove this registered Application?',
+        title: `Delete App '${app.name}'?`,
+        message: 'This will permanently remove your registered app. This action cannot be undone.',
         confirmText: 'Delete'
     });
     if (confirmed) {
-        await dataStore.deleteApp(item.id);
+        await dataStore.deleteApp(app.id);
     }
 }
 </script>
 
-<style scoped>
-.empty-state-card { @apply text-center py-10 px-4 rounded-lg bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400; }
-</style>
-
 <template>
     <div class="space-y-10">
-        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400 text-blue-800 dark:text-blue-200">
-            <div class="flex">
-                <div class="flex-shrink-0"><IconInfo class="h-5 w-5 text-blue-400" aria-hidden="true" /></div>
-                <div class="ml-3"><p class="text-sm">This section is for registering personal, external Apps by providing a URL. For locally installed services, please visit the <router-link to="/admin?section=apps" class="font-medium underline hover:text-blue-600 dark:hover:text-blue-300">Admin Panel</router-link>.</p></div>
+        <!-- Personal Apps Section -->
+        <div>
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
+                        My Personal Apps
+                    </h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        Apps you have personally registered. They are only visible and usable by you.
+                    </p>
+                </div>
+                <button @click="handleAddApp" class="btn btn-primary">Register New App</button>
+            </div>
+            
+            <div v-if="userApps.length === 0" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                <p class="text-gray-500">You have no personal apps registered.</p>
+            </div>
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <McpCard 
+                    v-for="app in userApps" 
+                    :key="app.id" 
+                    :mcp="app" 
+                    is-editable 
+                    @edit="handleEditApp" 
+                    @delete="handleDeleteApp" 
+                />
             </div>
         </div>
 
-        <section>
-            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <h3 class="text-xl font-bold">Your Personal Apps</h3>
-                <div class="flex items-center gap-x-2">
-                    <button @click="showAddForm" class="btn btn-primary text-sm">+ Add Personal App</button>
-                    <button v-if="isAdmin" @click="showAddSystemForm" class="btn btn-secondary text-sm">+ Add System App</button>
-                </div>
+        <!-- System Apps Section -->
+        <div>
+            <div class="mb-4">
+                <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
+                    Available System Apps
+                </h3>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    Apps provided by the administrator for everyone to use.
+                </p>
             </div>
-            <div v-if="sortedUserApps.length === 0" class="empty-state-card"><p>You haven't added any personal Apps.</p></div>
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"><McpCard v-for="app in sortedUserApps" :key="app.id" :mcp="app" is-editable @edit="startEditing(app)" @delete="handleDeleteItem(app)" /></div>
-        </section>
-        
-        <section>
-            <h3 class="text-xl font-bold my-4">System Apps</h3>
-            <div v-if="sortedSystemApps.length === 0" class="empty-state-card"><p>No system-wide Apps available.</p></div>
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                <McpCard v-for="app in sortedSystemApps" :key="app.id" :mcp="app" :is-editable="isAdmin" @edit="startEditing(app)" @delete="handleDeleteItem(app)" />
+            
+            <div v-if="systemApps.length === 0" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                <p class="text-gray-500">No system-wide apps are currently available.</p>
             </div>
-        </section>
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <McpCard 
+                    v-for="app in systemApps" 
+                    :key="app.id" 
+                    :mcp="app" 
+                    :is-editable="false" 
+                />
+            </div>
+        </div>
     </div>
 </template>

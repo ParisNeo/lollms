@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/modals/ServiceRegistrationModal.vue -->
 <script setup>
 import { ref, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
@@ -14,8 +15,13 @@ const itemType = computed(() => props.value?.itemType || 'app');
 const ownerType = computed(() => props.value?.ownerType || 'user');
 const onRegistered = computed(() => props.value?.onRegistered);
 
-const isEditMode = computed(() => !!item.value);
-const title = computed(() => `${isEditMode.value ? 'Edit' : 'Register'} ${ownerType.value === 'system' ? 'System' : 'Personal'} ${itemType.value.toUpperCase()}`);
+const isEditMode = computed(() => !!item.value?.id);
+const title = computed(() => {
+    const action = isEditMode.value ? 'Edit' : 'Register';
+    const owner = ownerType.value === 'system' ? 'System' : 'Personal';
+    const type = itemType.value.toUpperCase();
+    return `${action} ${owner} ${type}`;
+});
 
 const form = ref({});
 const isLoading = ref(false);

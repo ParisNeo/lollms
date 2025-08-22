@@ -1,81 +1,102 @@
+<!-- [REWRITE] frontend/webui/src/components/settings/McpsSettings.vue -->
 <script setup>
-import { computed, onMounted } from 'vue';
-import { storeToRefs } from 'pinia';
+import { onMounted, computed } from 'vue';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
-import { useAuthStore } from '../../stores/auth';
+import { storeToRefs } from 'pinia';
 import McpCard from '../ui/McpCard.vue';
-import IconInfo from '../../assets/icons/IconInfo.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
-const authStore = useAuthStore();
 
 const { userMcps, systemMcps } = storeToRefs(dataStore);
-const { isAdmin } = storeToRefs(authStore);
 
 onMounted(() => {
     dataStore.fetchMcps();
 });
 
-const sortedUserMcps = computed(() => userMcps.value.sort((a, b) => a.name.localeCompare(b.name)));
-const sortedSystemMcps = computed(() => systemMcps.value.sort((a, b) => a.name.localeCompare(b.name)));
-
-function showAddForm() {
-    uiStore.openModal('serviceRegistration', { itemType: 'mcp', ownerType: 'user', onRegistered: dataStore.fetchMcps });
+function handleAddMcp() {
+    uiStore.openModal('serviceRegistration', { 
+        itemType: 'mcp', 
+        ownerType: 'user',
+        onRegistered: dataStore.fetchMcps 
+    });
 }
 
-function showAddSystemForm() {
-    uiStore.openModal('serviceRegistration', { itemType: 'mcp', ownerType: 'system', onRegistered: dataStore.fetchMcps });
+function handleEditMcp(mcp) {
+    uiStore.openModal('serviceRegistration', { 
+        item: mcp, 
+        itemType: 'mcp', 
+        ownerType: 'user',
+        onRegistered: dataStore.fetchMcps 
+    });
 }
 
-function startEditing(item) {
-    uiStore.openModal('serviceRegistration', { item, itemType: 'mcp', onRegistered: dataStore.fetchMcps });
-}
-
-async function handleDeleteItem(item) {
+async function handleDeleteMcp(mcp) {
     const confirmed = await uiStore.showConfirmation({
-        title: `Delete '${item.name}'?`,
-        message: 'Are you sure you want to remove this registered MCP?',
+        title: `Delete MCP '${mcp.name}'?`,
+        message: 'This will permanently remove your registered MCP. This action cannot be undone.',
         confirmText: 'Delete'
     });
     if (confirmed) {
-        await dataStore.deleteMcp(item.id);
+        await dataStore.deleteMcp(mcp.id);
     }
 }
 </script>
 
-<style scoped>
-.empty-state-card { @apply text-center py-10 px-4 rounded-lg bg-gray-50 dark:bg-gray-800/50 text-gray-500 dark:text-gray-400; }
-</style>
-
 <template>
     <div class="space-y-10">
-        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400 text-blue-800 dark:text-blue-200">
-            <div class="flex">
-                <div class="flex-shrink-0"><IconInfo class="h-5 w-5 text-blue-400" aria-hidden="true" /></div>
-                <div class="ml-3"><p class="text-sm">This section is for registering personal, external MCPs by providing a URL. For locally installed services, please visit the <router-link to="/admin?section=mcps" class="font-medium underline hover:text-blue-600 dark:hover:text-blue-300">Admin Panel</router-link>.</p></div>
+        <!-- Personal MCPs Section -->
+        <div>
+            <div class="flex justify-between items-center mb-4">
+                <div>
+                    <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
+                        My Personal MCPs
+                    </h3>
+                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                        MCPs you have personally registered. They are only visible and usable by you.
+                    </p>
+                </div>
+                <button @click="handleAddMcp" class="btn btn-primary">Register New MCP</button>
+            </div>
+            
+            <div v-if="userMcps.length === 0" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                <p class="text-gray-500">You have no personal MCPs registered.</p>
+            </div>
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <McpCard 
+                    v-for="mcp in userMcps" 
+                    :key="mcp.id" 
+                    :mcp="mcp" 
+                    is-editable 
+                    @edit="handleEditMcp" 
+                    @delete="handleDeleteMcp" 
+                />
             </div>
         </div>
 
-        <section>
-            <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <h3 class="text-xl font-bold">Your Personal MCPs</h3>
-                 <div class="flex items-center gap-x-2">
-                    <button @click="showAddForm" class="btn btn-primary text-sm">+ Add Personal MCP</button>
-                    <button v-if="isAdmin" @click="showAddSystemForm" class="btn btn-secondary text-sm">+ Add System MCP</button>
-                </div>
+        <!-- System MCPs Section -->
+        <div>
+            <div class="mb-4">
+                <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
+                    Available System MCPs
+                </h3>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                    MCPs provided by the administrator for everyone to use.
+                </p>
             </div>
-            <div v-if="sortedUserMcps.length === 0" class="empty-state-card"><p>You haven't added any personal MCPs.</p></div>
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"><McpCard v-for="mcp in sortedUserMcps" :key="mcp.id" :mcp="mcp" is-editable @edit="startEditing(mcp)" @delete="handleDeleteItem(mcp)" /></div>
-        </section>
-        
-        <section>
-            <h3 class="text-xl font-bold my-4">System MCPs</h3>
-            <div v-if="sortedSystemMcps.length === 0" class="empty-state-card"><p>No system-wide MCPs available.</p></div>
-            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                <McpCard v-for="mcp in sortedSystemMcps" :key="mcp.id" :mcp="mcp" :is-editable="isAdmin" @edit="startEditing(mcp)" @delete="handleDeleteItem(mcp)" />
+            
+            <div v-if="systemMcps.length === 0" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                <p class="text-gray-500">No system-wide MCPs are currently available.</p>
             </div>
-        </section>
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <McpCard 
+                    v-for="mcp in systemMcps" 
+                    :key="mcp.id" 
+                    :mcp="mcp" 
+                    :is-editable="false" 
+                />
+            </div>
+        </div>
     </div>
 </template>

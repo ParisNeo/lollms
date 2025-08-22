@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/ui/McpCard.vue -->
 <script setup>
 import { ref } from 'vue';
 

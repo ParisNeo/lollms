@@ -5,6 +5,8 @@ from pathlib import Path
 import base64
 from typing import List, Dict, Any, Literal
 from sqlalchemy.orm import Session
+from filelock import FileLock, Timeout
+
 from backend.db import get_db
 from backend.db.models.service import AppZooRepository, MCPZooRepository, PromptZooRepository, PersonalityZooRepository
 from backend.db.models.prompt import SavedPrompt
@@ -15,7 +17,10 @@ from ascii_colors import ASCIIColors
 
 ITEM_TYPES = Literal['app', 'mcp', 'prompt', 'personality']
 CACHE_FILE = APP_DATA_DIR / "zoo_cache.json"
+CACHE_LOCK_FILE = APP_DATA_DIR / "zoo_cache.lock"
 CACHE_EXPIRY = 3600  # 1 hour
+CACHE_LOCK_TIMEOUT = 300 # 5 minutes
+
 
 _cache: Dict[str, Any] = {"timestamp": 0, "data": {}}
 
@@ -66,14 +71,11 @@ def parse_item_metadata(item_path: Path, item_type: ITEM_TYPES) -> Dict[str, Any
                 legacy_data = yaml.safe_load(f) or {}
             # Map legacy format to new format
             metadata = {
-                'name': legacy_data.get('name'),
-                'version': str(legacy_data.get('version', 'N/A')),
-                'author': legacy_data.get('author'),
-                'category': legacy_data.get('category'),
+                'name': legacy_data.get('name'), 'version': str(legacy_data.get('version', 'N/A')),
+                'author': legacy_data.get('author'), 'category': legacy_data.get('category'),
                 'description': legacy_data.get('personality_description'),
                 'prompt_text': legacy_data.get('personality_conditioning'),
-                'disclaimer': legacy_data.get('disclaimer'),
-                'active_mcps': legacy_data.get('dependencies', [])
+                'disclaimer': legacy_data.get('disclaimer'), 'active_mcps': legacy_data.get('dependencies', [])
             }
     else: # app, mcp, prompt
         config_path = item_path / "description.yaml"
@@ -145,75 +147,80 @@ def _build_cache_for_type(db: Session, item_type: ITEM_TYPES) -> List[Dict[str, 
 
 def build_full_cache():
     global _cache
-    ASCIIColors.info("INFO: Building full Zoo cache...")
-    db = next(get_db())
+    lock = FileLock(str(CACHE_LOCK_FILE), timeout=CACHE_LOCK_TIMEOUT)
     try:
-        _cache["data"] = {
-            'app': _build_cache_for_type(db, 'app'),
-            'mcp': _build_cache_for_type(db, 'mcp'),
-            'prompt': _build_cache_for_type(db, 'prompt'),
-            'personality': _build_cache_for_type(db, 'personality'),
-        }
-        _cache["timestamp"] = time.time()
-        with open(CACHE_FILE, 'w') as f:
-            json.dump(_cache, f)
-        print("INFO: Zoo cache rebuild complete.")
-    finally:
-        db.close()
+        with lock:
+            if CACHE_FILE.exists():
+                try:
+                    with open(CACHE_FILE, 'r') as f:
+                        cached_timestamp = json.load(f).get("timestamp", 0)
+                    if time.time() - cached_timestamp < CACHE_EXPIRY:
+                        ASCIIColors.info("INFO: Zoo cache is already fresh. Skipping build.")
+                        if not _cache or _cache.get("timestamp", 0) < cached_timestamp:
+                            load_cache()
+                        return
+                except (json.JSONDecodeError, TypeError):
+                    ASCIIColors.warning("Could not read cache timestamp, rebuilding.")
+
+            ASCIIColors.info("INFO: Building full Zoo cache (this process has the lock)...")
+            db = next(get_db())
+            try:
+                _cache["data"] = {
+                    'app': _build_cache_for_type(db, 'app'),
+                    'mcp': _build_cache_for_type(db, 'mcp'),
+                    'prompt': _build_cache_for_type(db, 'prompt'),
+                    'personality': _build_cache_for_type(db, 'personality'),
+                }
+                _cache["timestamp"] = time.time()
+                with open(CACHE_FILE, 'w') as f:
+                    json.dump(_cache, f)
+                ASCIIColors.green("INFO: Zoo cache rebuild complete.")
+            finally:
+                db.close()
+    except Timeout:
+        ASCIIColors.info("INFO: Zoo cache build is locked by another process. This worker will skip.")
 
 def refresh_repo_cache(repo_name: str, item_type: ITEM_TYPES):
     global _cache
-    if not _cache.get("data"):
-        load_cache()
-    
-    if item_type not in _cache.get("data", {}):
-        _cache["data"][item_type] = []
-        
-    _cache["data"][item_type] = [item for item in _cache["data"].get(item_type, []) if item.get('repository') != repo_name]
-    
-    db = next(get_db())
+    lock = FileLock(str(CACHE_LOCK_FILE), timeout=60)
     try:
-        repo = db.query(get_db_repo_model(item_type)).filter_by(name=repo_name).first()
-        if repo:
-            repo_path = None
-            if repo.type == 'git': repo_path = get_zoo_root_path(item_type) / repo.name
-            elif repo.type == 'local': repo_path = Path(repo.url)
+        with lock:
+            if not _cache.get("data"):
+                load_cache()
             
-            if repo_path and repo_path.is_dir():
-                config_files = list(repo_path.glob('**/description.yaml'))
-                if item_type == 'personality': config_files.extend(list(repo_path.glob('**/config.yaml')))
+            _cache["data"][item_type] = [item for item in _cache.get("data", {}).get(item_type, []) if item.get('repository') != repo_name]
+            
+            db = next(get_db())
+            try:
+                repo = db.query(get_db_repo_model(item_type)).filter_by(name=repo_name).first()
+                if repo:
+                    repo_path = Path(repo.url) if repo.type == 'local' else get_zoo_root_path(item_type) / repo.name
+                    if repo_path.is_dir():
+                        config_files = list(repo_path.glob('**/description.yaml'))
+                        if item_type == 'personality': config_files.extend(list(repo_path.glob('**/config.yaml')))
 
-                for config_file in config_files:
-                    item_folder = config_file.parent
-                    try:
-                        metadata = parse_item_metadata(item_folder, item_type)
-                        if not metadata.get('name'): metadata['name'] = item_folder.name
+                        for config_file in config_files:
+                            item_folder = config_file.parent
+                            try:
+                                metadata = parse_item_metadata(item_folder, item_type)
+                                if not metadata.get('name'): metadata['name'] = item_folder.name
+                                if 'category' in metadata and isinstance(metadata['category'], list):
+                                    metadata['category'] = metadata['category'][0] if metadata['category'] else 'Uncategorized'
+                                if item_type == 'personality' and (item_folder / "scripts" / "processor.py").exists():
+                                    metadata['is_legacy_scripted'] = True
+                                icon_path = next((p for p in [item_folder / "icon.png", item_folder / "assets" / "logo.png"] if p.exists()), None)
+                                icon_b64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode('utf-8')}" if icon_path else None
+                                folder_name_rel = item_folder.relative_to(repo_path).as_posix()
+                                _cache["data"][item_type].append(_sanitize_for_json({**metadata, 'item_type': item_type, 'repository': repo.name, 'folder_name': folder_name_rel, 'icon': icon_b64}))
+                            except Exception as e:
+                                print(f"Warning: Could not process item '{item_folder}' on refresh: {e}")
 
-                        # --- FIX: Handle category being a list (also needed for refresh) ---
-                        if 'category' in metadata and isinstance(metadata['category'], list):
-                            metadata['category'] = metadata['category'][0] if metadata['category'] else 'Uncategorized'
-                        # --- END FIX ---
-                        
-                        # --- NEW: Detect legacy scripted personalities on refresh ---
-                        if item_type == 'personality' and (item_folder / "scripts" / "processor.py").exists():
-                            metadata['is_legacy_scripted'] = True
-                        # --- END NEW ---
-
-                        icon_path = next((p for p in [item_folder / "icon.png", item_folder / "assets" / "logo.png"] if p.exists()), None)
-                        icon_b64 = None
-                        if icon_path:
-                            with open(icon_path, 'rb') as f: icon_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
-                        
-                        folder_name_rel = item_folder.relative_to(repo_path).as_posix()
-                        
-                        _cache["data"][item_type].append(_sanitize_for_json({**metadata, 'item_type': item_type, 'repository': repo.name, 'folder_name': folder_name_rel, 'icon': icon_b64}))
-                    except Exception as e:
-                        print(f"Warning: Could not process item '{item_folder}' on refresh: {e}")
-
-        _cache["timestamp"] = time.time()
-        with open(CACHE_FILE, 'w') as f: json.dump(_cache, f)
-    finally:
-        db.close()
+                _cache["timestamp"] = time.time()
+                with open(CACHE_FILE, 'w') as f: json.dump(_cache, f)
+            finally:
+                db.close()
+    except Timeout:
+        ASCIIColors.warning(f"Could not acquire lock to refresh repo '{repo_name}'. Cache may be slightly stale.")
 
 
 def load_cache():
@@ -223,7 +230,6 @@ def load_cache():
             with open(CACHE_FILE, 'r') as f:
                 _cache = json.load(f)
         except (json.JSONDecodeError, TypeError):
-            print("Warning: Could not load cache file. Rebuilding.")
             _cache = {"timestamp": 0, "data": {}}
     if time.time() - _cache.get("timestamp", 0) > CACHE_EXPIRY:
         build_full_cache()

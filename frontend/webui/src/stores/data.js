@@ -453,7 +453,7 @@ export const useDataStore = defineStore('data', () => {
     }
     async function deleteMcp(id) {
         await apiClient.delete(`/api/mcps/${id}`);
-        await fetchMcps(); // Refresh the list
+        await fetchMcps();
         useUiStore().addNotification('MCP deleted.', 'success');
     }
     

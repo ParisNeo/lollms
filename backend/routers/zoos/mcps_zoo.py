@@ -1,3 +1,4 @@
+# backend/routers/zoos/mcps_zoo.py
 import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 from pydantic import ValidationError as PydanticValidationError
 
 from backend.db import get_db
-from backend.db.models.service import MCPZooRepository as DBMCPZooRepository, App as DBApp
+from backend.db.models.service import MCPZooRepository as DBMCPZooRepository, App as DBApp, MCP as DBMCP
 from backend.models import (
     MCPZooRepositoryCreate, MCPZooRepositoryPublic, ZooMCPInfo, ZooMCPInfoResponse,
     AppInstallRequest, TaskInfo
@@ -89,7 +90,8 @@ def get_available_zoo_mcps(
     installation_status: Optional[str] = None, repository: Optional[str] = None
 ):
     all_zoo_items_raw = get_all_items('mcp')
-    all_db_mcps = db.query(DBApp).filter(DBApp.app_metadata['item_type'].as_string() == 'mcp').all()
+    installed_db_mcps_from_apps = db.query(DBApp).filter(DBApp.app_metadata['item_type'].as_string() == 'mcp').all()
+    registered_manual_mcps = db.query(DBMCP).all()
     installed_folders = {f.name for f in MCPS_ROOT_PATH.iterdir() if f.is_dir()}
     accessible_host = get_accessible_host()
 
@@ -101,10 +103,26 @@ def get_available_zoo_mcps(
         processed_keys.add(key)
         all_items_map[key] = info
 
-    for mcp in all_db_mcps:
+    # Process manually registered MCPs from the dedicated MCP table
+    for mcp in registered_manual_mcps:
+        key = f"db_mcp::{mcp.id}"
+        if key not in processed_keys:
+            item_data_from_db = {
+                'id': mcp.id, 'name': mcp.name, 'url': mcp.url, 'folder_name': mcp.name,
+                'icon': mcp.icon, 'is_installed': False,
+                'description': f"Manually registered MCP at {mcp.url}",
+                'author': mcp.owner.username if mcp.owner else "System", 'version': 'N/A',
+                'category': 'Registered', 'tags': [], 'status': 'stopped',
+                'port': None, 'autostart': False, 'item_type': 'mcp', 'repository': 'Registered'
+            }
+            all_items_map[key] = item_data_from_db
+            processed_keys.add(key)
+
+    # Process installed MCPs from the Apps table
+    for mcp in installed_db_mcps_from_apps:
         repo = (mcp.app_metadata or {}).get('repository')
         folder = (mcp.app_metadata or {}).get('folder_name')
-        key = f"zoo::{repo}/{folder}" if repo and folder else f"db::{mcp.id}"
+        key = f"zoo::{repo}/{folder}" if repo and folder else f"db_app::{mcp.id}"
 
         item_data_from_db = {
             'id': mcp.id, 'name': mcp.name, 'folder_name': mcp.folder_name or mcp.name,
@@ -128,10 +146,11 @@ def get_available_zoo_mcps(
         if key in all_items_map:
             all_items_map[key].update(item_data_from_db)
         else:
-            all_items_map[key] = {**item_data_from_db, 'repository': 'Registered'}
+            # This case might not be hit often for MCPs if they are either from Zoo or DBMCP
+            all_items_map[key] = {**item_data_from_db, 'repository': 'Installed'}
         processed_keys.add(key)
 
-    db_installed_folders = {mcp.folder_name for mcp in all_db_mcps if mcp.is_installed and mcp.folder_name}
+    db_installed_folders = {mcp.folder_name for mcp in installed_db_mcps_from_apps if mcp.is_installed and mcp.folder_name}
     for folder in installed_folders - db_installed_folders:
         key = f"broken::{folder}"
         if key not in processed_keys:
@@ -140,11 +159,7 @@ def get_available_zoo_mcps(
             if desc_path.exists():
                 with open(desc_path, 'r', encoding='utf-8') as f: metadata.update(yaml.safe_load(f) or {})
             all_items_map[key] = {
-                'is_broken': True,
-                'item_type': 'mcp',
-                'repository': 'Broken',
-                **metadata,
-                'folder_name': folder
+                'is_broken': True, 'item_type': 'mcp', 'repository': 'Broken', **metadata, 'folder_name': folder
             }
 
     final_list = []

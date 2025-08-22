@@ -255,7 +255,7 @@ def _format_app_public(app: DBApp) -> AppPublic:
 @apps_router.get("", response_model=List[AppPublic])
 def list_apps(db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
     query = db.query(DBApp).options(joinedload(DBApp.owner)).filter(
-        (DBApp.app_metadata['item_type'] == None) | (DBApp.app_metadata['item_type'].as_string() == 'app')
+        or_(DBApp.app_metadata.is_(None), DBApp.app_metadata['item_type'].as_string() == 'app')
     )
     if not current_user.is_admin:
         query = query.filter(or_(DBApp.owner_user_id == current_user.id, DBApp.type == 'system'))

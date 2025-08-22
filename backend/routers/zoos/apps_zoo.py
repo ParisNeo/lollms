@@ -13,6 +13,7 @@ import traceback
 from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from pydantic import BaseModel, ValidationError as PydanticValidationError
 from jsonschema import validate, ValidationError
 
@@ -144,7 +145,7 @@ def get_available_zoo_apps(
     installation_status: Optional[str] = None, repository: Optional[str] = None
 ):
     all_zoo_items_raw = get_all_items('app')
-    all_db_apps = db.query(DBApp).filter((DBApp.app_metadata['item_type'] == None) | (DBApp.app_metadata['item_type'].as_string() == 'app')).all()
+    all_db_apps = db.query(DBApp).filter(or_(DBApp.app_metadata.is_(None), DBApp.app_metadata['item_type'].as_string() == 'app')).all()
     installed_folders = {f.name for f in APPS_ROOT_PATH.iterdir() if f.is_dir()}
     accessible_host = get_accessible_host()
     

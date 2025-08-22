@@ -11,6 +11,7 @@ from ascii_colors import ASCIIColors, trace_exception
 from contextlib import asynccontextmanager
 import asyncio
 import time
+from filelock import FileLock, Timeout
 
 from multipart.multipart import FormParser
 FormParser.max_size = 50 * 1024 * 1024  # 50 MB
@@ -24,7 +25,7 @@ from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
     APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH,
-    LOLLMS_CLIENT_DEFAULTS
+    LOLLMS_CLIENT_DEFAULTS, APP_DATA_DIR
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
@@ -76,6 +77,8 @@ from backend.zoo_cache import build_full_cache
 POLLING_INTERVAL = 0.1  # seconds
 CLEANUP_INTERVAL = 3600  # 1 hour in seconds
 MAX_MESSAGE_AGE = 24 * 3600 # 24 hours in seconds
+CLEANUP_LOCK_PATH = APP_DATA_DIR / "broadcast_cleanup.lock"
+
 
 async def start_broadcast_polling():
     """
@@ -120,19 +123,25 @@ async def start_broadcast_polling():
                     
                     last_processed_id = msg.id
 
-            # Periodic cleanup
+            # Periodic cleanup, protected by a file lock
             current_time = time.time()
             if current_time - last_cleanup_time > CLEANUP_INTERVAL:
+                lock = FileLock(str(CLEANUP_LOCK_PATH), timeout=1)
                 try:
-                    cutoff_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=MAX_MESSAGE_AGE)
-                    deleted_count = db.query(BroadcastMessage).filter(BroadcastMessage.created_at < cutoff_time).delete()
-                    db.commit()
-                    if deleted_count > 0:
-                        ASCIIColors.info(f"Cleaned up {deleted_count} old broadcast messages.")
-                    last_cleanup_time = current_time
-                except Exception as e:
-                    ASCIIColors.error(f"Error during broadcast message cleanup: {e}")
-                    db.rollback()
+                    with lock:
+                        if time.time() - last_cleanup_time > CLEANUP_INTERVAL:
+                            try:
+                                cutoff_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=MAX_MESSAGE_AGE)
+                                deleted_count = db.query(BroadcastMessage).filter(BroadcastMessage.created_at < cutoff_time).delete()
+                                db.commit()
+                                if deleted_count > 0:
+                                    ASCIIColors.info(f"Cleaned up {deleted_count} old broadcast messages.")
+                                last_cleanup_time = time.time()
+                            except Exception as e:
+                                ASCIIColors.error(f"Error during broadcast message cleanup: {e}")
+                                db.rollback()
+                except Timeout:
+                    pass # Another worker is handling cleanup.
 
         except Exception as e:
             ASCIIColors.error(f"Error in broadcast polling loop: {e}")

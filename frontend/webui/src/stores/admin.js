@@ -483,6 +483,8 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchAppConfigSchema(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config-schema`); return res.data; }
     async function fetchAppConfig(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config`); return res.data; }
     async function updateAppConfig(appId, configData) { await apiClient.put(`/api/apps_zoo/installed/${appId}/config`, configData); }
+    async function deleteRegisteredApp(appId) { await apiClient.delete(`/api/apps/${appId}`); await fetchZooApps(); }
+    async function deleteRegisteredMcp(mcpId) { await apiClient.delete(`/api/mcps/${mcpId}`); await fetchZooMcps(); }
 
     return {
         dashboardStats, isLoadingDashboardStats, fetchDashboardStats, broadcastMessage,
@@ -509,6 +511,6 @@ export const useAdminStore = defineStore('admin', () => {
         updateInstalledApp, fetchAppLog, fetchAppConfigSchema, fetchAppConfig, updateAppConfig, updateApp,
         purgeUnusedUploads, systemStatus, isLoadingSystemStatus, fetchSystemStatus,
         syncInstallations, purgeBrokenInstallation, fixBrokenInstallation, handleTaskCompletion,
-        handleAppStatusUpdate
+        handleAppStatusUpdate, deleteRegisteredApp, deleteRegisteredMcp
     };
 });
