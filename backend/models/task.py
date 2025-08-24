@@ -19,6 +19,7 @@ class TaskInfo(BaseModel):
     error: Optional[str] = None
     created_at: datetime.datetime
     started_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
     completed_at: Optional[datetime.datetime] = None
     file_name: Optional[str] = None
     total_files: Optional[int] = None

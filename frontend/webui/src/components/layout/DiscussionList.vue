@@ -16,7 +16,8 @@ import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconScissors from '../../assets/icons/IconScissors.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
-import IconGitBranch from '../../assets/icons/IconGitBranch.vue'; // NEW IMPORT
+import IconGitBranch from '../../assets/icons/IconGitBranch.vue'; 
+import IconCopy from '../../assets/icons/IconCopy.vue';
 
 const store = useDiscussionsStore();
 const authStore = useAuthStore();
@@ -52,11 +53,18 @@ function handleNewDiscussion() { store.createNewDiscussion(); }
 function handleImportClick() { uiStore.openModal('import'); }
 function handleExportClick() { uiStore.openModal('export', { allDiscussions: store.sortedDiscussions }); }
 function handlePrune() { store.pruneDiscussions(); }
-function handleShowTree() { // NEW FUNCTION
+function handleShowTree() { 
   if (activeDiscussion.value) {
     uiStore.openModal('discussionTree', { discussionId: activeDiscussion.value.id });
   } else {
     uiStore.addNotification('Please select a discussion first.', 'warning');
+  }
+}
+function handleClone() {
+  if (activeDiscussion.value) {
+    store.cloneDiscussion(activeDiscussion.value.id);
+  } else {
+    uiStore.addNotification('Please select a discussion to clone.', 'warning');
   }
 }
 
@@ -113,10 +121,11 @@ onUnmounted(() => {
                 <div class="flex items-center justify-around border-t dark:border-gray-700/50 pt-2 mt-2">
                     <button @click="handleImportClick" class="btn-footer" title="Import"><IconArrowDownTray class="h-5 w-5" /></button>
                     <button @click="handleExportClick" class="btn-footer" title="Export"><IconArrowUpTray class="h-5 w-5" /></button>
-                    <button @click="handlePrune" class="btn-footer-danger" title="Prune Empty"><IconScissors class="h-5 w-5" /></button>
-                    <button @click="handleShowTree" class="btn-footer" title="Show Discussion Tree" :disabled="!activeDiscussion"> <!-- NEW BUTTON -->
+                    <button @click="handleClone" class="btn-footer" title="Clone Discussion Data" :disabled="!activeDiscussion"><IconCopy class="h-5 w-5" /></button>
+                    <button @click="handleShowTree" class="btn-footer" title="Show Discussion Tree" :disabled="!activeDiscussion">
                         <IconGitBranch class="h-5 w-5" />
                     </button>
+                    <button @click="handlePrune" class="btn-footer-danger" title="Prune Empty"><IconScissors class="h-5 w-5" /></button>
                 </div>
             </div>
         </div>
@@ -161,7 +170,7 @@ onUnmounted(() => {
 
 <style scoped>
 .btn-icon { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors; }
-.btn-footer { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors; }
+.btn-footer { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
 .btn-footer-danger { @apply p-2 rounded-full text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors; }
 .toolbox-select { @apply w-full text-left text-xs px-2 py-1.5 bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500; }
 .collapsible-header { @apply w-full flex items-center justify-between text-left p-1 text-xs font-bold uppercase text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded; }

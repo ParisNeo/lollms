@@ -1,69 +1,65 @@
 # backend/routers/discussion.py
-
-import threading
 # Standard Library Imports
-import os
+import base64
+import io
+import json
+import re
 import shutil
 import uuid
-import json
-from pathlib import Path
-from typing import List, Dict, Optional, Any, AsyncGenerator
-import datetime
-import asyncio
-import threading
-import traceback
-import base64
+from datetime import datetime
 from functools import partial
-from ascii_colors import trace_exception
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import PlainTextResponse
+from pathlib import Path
+from typing import Any, AsyncGenerator, Dict, List, Optional
+import traceback
+import threading
+import asyncio
 import zipfile
-import io
-import re
-# Third-Party Imports
-from fastapi import (
-    HTTPException, Depends, Form, File, UploadFile,
-    APIRouter, Query, BackgroundTasks, status)
-from pydantic import BaseModel
-from backend.models import DiscussionRagDatastoreUpdate # Make sure it's the updated one
-from fastapi.responses import (
-    HTMLResponse,
-    StreamingResponse,
-    JSONResponse,
-    FileResponse,
-)
-from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
-from lollms_client import (
-    LollmsClient, MSG_TYPE, LollmsPersonality
-)
-from lollms_client import LollmsDiscussion, LollmsMessage
-import fitz  # PyMuPDF
 
+# Third-Party Imports
+import fitz  # PyMuPDF
+from docx import Document as DocxDocument
+from fastapi import (
+    APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query,
+    UploadFile, status)
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
+                               PlainTextResponse, StreamingResponse)
+from lollms_client import (LollmsClient, LollmsDiscussion, LollmsMessage,
+                           LollmsPersonality, MSG_TYPE)
+from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 from ascii_colors import ASCIIColors, trace_exception
+
 # Local Application Imports
+from backend.config import APP_VERSION, SERVER_CONFIG
 from backend.db import get_db
-from backend.db.models.user import User as DBUser, UserStarredDiscussion, UserMessageGrade
+from backend.db.models.config import TTIBinding as DBTTIBinding
 from backend.db.models.db_task import DBTask
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.config import TTIBinding as DBTTIBinding
-from backend.models import (
-    UserAuthDetails, DiscussionInfo, DiscussionTitleUpdate,
-    DiscussionRagDatastoreUpdate, MessageOutput, MessageContentUpdate,
-    MessageGradeUpdate, DiscussionBranchSwitchRequest, DiscussionSendRequest,
-    DiscussionExportRequest, ExportData, DiscussionImportRequest, ContextStatusResponse,
-    DiscussionDataZoneUpdate, DataZones, TaskInfo, ManualMessageCreate, MessageUpdateWithImages,
-    MessageCodeExportRequest
-)
-from backend.session import (
-    get_current_active_user, get_user_lollms_client,
-    get_user_temp_uploads_path, get_user_discussion_assets_path,
-    user_sessions, get_safe_store_instance
-)
-from backend.discussion import get_user_discussion_manager, get_user_discussion
-from backend.config import APP_VERSION, SERVER_CONFIG
+from backend.db.models.user import (User as DBUser, UserMessageGrade,
+                                     UserStarredDiscussion)
+from backend.discussion import get_user_discussion, get_user_discussion_manager
+from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse,
+                            DataZones, DiscussionBranchSwitchRequest,
+                            DiscussionDataZoneUpdate, DiscussionExportRequest,
+                            DiscussionImageUpdateResponse,
+                            DiscussionInfo, DiscussionImportRequest,
+                            DiscussionRagDatastoreUpdate, DiscussionSendRequest,
+                            DiscussionTitleUpdate, ExportContextRequest,
+                            ExportData, LoadArtefactRequest, ManualMessageCreate,
+                            MessageCodeExportRequest, MessageContentUpdate,
+                            MessageGradeUpdate, MessageOutput,
+                            MessageUpdateWithImages, TaskInfo,
+                            UnloadArtefactRequest)
+from backend.session import (get_current_active_user,
+                             get_current_db_user_from_token,
+                             get_safe_store_instance,
+                             get_user_discussion_assets_path,
+                             get_user_lollms_client,
+                             get_user_temp_uploads_path, user_sessions)
 from backend.task_manager import task_manager, Task
-from backend.session import get_current_db_user_from_token
+
 # safe_store is needed for RAG callbacks
 try:
     import safe_store
@@ -100,7 +96,7 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
         id=db_task.id, name=db_task.name, description=db_task.description,
         status=db_task.status, progress=db_task.progress,
         logs=[log for log in (db_task.logs or [])], result=db_task.result, error=db_task.error,
-        created_at=db_task.created_at, started_at=db_task.started_at, completed_at=db_task.completed_at,
+        created_at=db_task.created_at, started_at=db_task.started_at, updated_at=db_task.updated_at, completed_at=db_task.completed_at,
         file_name=db_task.file_name, total_files=db_task.total_files,
         owner_username=db_task.owner.username if db_task.owner else "System"
     )
@@ -139,11 +135,8 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         if selected_model_name:
             task.log(f"Using TTI model: {selected_model_name}")
         
-        # --- NEW: Configuration Hierarchy ---
-        # 1. Start with the base config from the binding itself
         binding_config = selected_binding.config.copy() if selected_binding.config else {}
         
-        # 2. Layer admin-defined alias settings
         model_aliases = selected_binding.model_aliases or {}
         alias_info = model_aliases.get(selected_model_name)
         
@@ -153,7 +146,6 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
                 if key not in ['title', 'description', 'icon'] and value is not None:
                     binding_config[key] = value
         
-        # 3. Layer user-specific settings if overrides are allowed
         allow_override = (alias_info or {}).get('allow_parameters_override', True)
         if allow_override:
             user_configs = user.tti_models_config or {}
@@ -165,7 +157,6 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
                         binding_config[key] = value
         else:
             task.log("User overrides are disabled by admin for this model alias.")
-        # --- END NEW ---
 
         if selected_model_name:
             binding_config['model_name'] = selected_model_name
@@ -179,6 +170,7 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         )
         task.log("LollmsClient initialized for TTI.")
         task.set_progress(20)
+        task.log(f"prompt:\n```\n{prompt}\n```")
 
         image_bytes = lc.tti.generate_image(prompt=prompt)
         task.log("Image data received from binding.")
@@ -193,7 +185,7 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         if not discussion:
             raise Exception("Discussion not found after image generation.")
         
-        discussion.add_discussion_image(b64_image)
+        discussion.add_discussion_image(b64_image, source="generation")
         discussion.commit()
         task.log("Image added to discussion and saved.")
         task.set_progress(100)
@@ -203,20 +195,19 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         return {
             "discussion_id": discussion_id,
             "zone": "discussion_images",
-            "new_images": [img_info['data'] for img_info in all_images_info],
-            "new_active_images": [img_info['active'] for img_info in all_images_info]
+            "discussion_images": [img_info['data'] for img_info in all_images_info],
+            "active_discussion_images": [img_info['active'] for img_info in all_images_info]
         }
     except Exception as e:
         task.log(f"Image generation failed: {e}", "ERROR")
         trace_exception(e)
         raise e
 
-
-def _import_url_task(task: Task, username: str, discussion_id: str, url: str):
+def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str, url: str):
     if ScrapeMaster is None:
         raise ImportError("ScrapeMaster library is not installed and could not be installed automatically.")
     
-    task.log("Starting URL import task...")
+    task.log("Starting URL import task for artefact...")
     task.set_progress(5)
     
     try:
@@ -234,29 +225,21 @@ def _import_url_task(task: Task, username: str, discussion_id: str, url: str):
         if not discussion:
             raise ValueError("Discussion not found after scraping.")
 
-        current_content = discussion.discussion_data_zone or ""
-
-        # Prepare the new document block from the scraped content
-        document_block = f"--- Document: {url} ---\n{markdown_content.strip()}\n--- End Document: {url} ---\n"
-
-        # Append the new block to the existing content
-        if current_content.strip():
-            # If there's existing content, ensure there's a clear separation
-            if not current_content.endswith('\n\n'):
-                if not current_content.endswith('\n'):
-                    current_content += '\n'
-                current_content += '\n'
-            new_content = current_content + document_block
-        else:
-            # If the data zone is empty, just add the new block
-            new_content = document_block
-
-        discussion.discussion_data_zone = new_content
+        artefact_info = discussion.add_artefact(
+            title=url,
+            content=markdown_content.strip(),
+            author=username
+        )
         discussion.commit()
         task.set_progress(100)
         
-        task.log("Content appended to data zone and saved.")
-        return {"discussion_id": discussion_id, "new_content": new_content, "zone": "discussion"}
+        task.log(f"Artefact '{url}' imported from URL and saved.")
+        if isinstance(artefact_info.get('created_at'), datetime):
+            artefact_info['created_at'] = artefact_info['created_at'].isoformat()
+        if isinstance(artefact_info.get('updated_at'), datetime):
+            artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
+        
+        return artefact_info
     except Exception as e:
         task.log(f"Failed to import from URL: {e}", "ERROR")
         trace_exception(e)
@@ -267,6 +250,23 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
     discussion = get_user_discussion(username, discussion_id)
     if not discussion:
         raise ValueError("Discussion not found.")
+    
+    with task.db_session_factory() as db:
+        db_user = db.query(DBUser).filter(DBUser.username == username).first()
+        if not db_user:
+            raise Exception(f"User '{username}' not found.")
+        
+        user_data_zone = db_user.data_zone or ""
+        now = datetime.now()
+        replacements = {
+            "{{date}}": now.strftime("%Y-%m-%d"),
+            "{{time}}": now.strftime("%H:%M:%S"),
+            "{{datetime}}": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "{{user_name}}": username,
+        }
+        processed_user_data_zone = user_data_zone
+        for placeholder, value in replacements.items():
+            processed_user_data_zone = processed_user_data_zone.replace(placeholder, value)
     
     all_images_info = discussion.get_discussion_images()
     
@@ -292,6 +292,7 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
         discussion.discussion_data_zone,
         images=discussion_images_b64,
         contextual_prompt=prompt_to_use,
+        system_prompt=processed_user_data_zone,
         streaming_callback=summary_callback
     )
     
@@ -375,7 +376,7 @@ def _prune_empty_discussions_task(task: Task, username: str):
         return {"message": "Pruning complete. No empty discussions found.", "deleted_count": 0}
 
     task.log(f"Found {len(discussions_to_delete)} discussions to delete. Starting deletion process...")
-    task.set_progress(50) # Set progress before starting the heavy loop
+    task.set_progress(50)
     deleted_count = 0
     failed_count = 0
     
@@ -400,12 +401,9 @@ def _prune_empty_discussions_task(task: Task, username: str):
                 except Exception as e:
                     print(f"ERROR: Failed to delete discussion {discussion_id} during prune: {e}")
                     failed_count += 1
-                
-                # REMOVED progress update from here to prevent DB lock
             
             db.commit()
 
-            # Set progress to 100% only after the loop and commit are done
             task.set_progress(100)
             
             if deleted_count > 0:
@@ -450,39 +448,42 @@ async def list_all_discussions(current_user: UserAuthDetails = Depends(get_curre
 
     infos = []
     for disc_data in discussions_from_db:
-        disc_id = disc_data['id']
-        metadata = disc_data.get('discussion_metadata', {})
-        
-        image_data = metadata.get("discussion_images", {})
-        discussion_images_b64 = []
-        active_discussion_images = []
+        try:
+            disc_id = disc_data['id']
+            metadata = disc_data.get('discussion_metadata', {})
+            
+            image_data = metadata.get("discussion_images", [])
+            discussion_images_b64 = []
+            active_discussion_images = []
 
-        if isinstance(image_data, dict) and 'data' in image_data:
-            discussion_images_b64 = image_data.get('data', [])
-            active_discussion_images = image_data.get('active', [])
-        elif isinstance(image_data, list):
-             # handle legacy format if migration hasn't run for some reason
-            for item in image_data:
-                if isinstance(item, dict) and 'image' in item:
-                    discussion_images_b64.append(item['image'])
-                    active_discussion_images.append(item.get('active', True))
-                elif isinstance(item, str):
-                    discussion_images_b64.append(item)
-                    active_discussion_images.append(True)
+            if isinstance(image_data, dict) and 'data' in image_data:
+                discussion_images_b64 = image_data.get('data', [])
+                active_discussion_images = image_data.get('active', [])
+            elif isinstance(image_data, list):
+                for item in image_data:
+                    if isinstance(item, dict) and 'data' in item:
+                        discussion_images_b64.append(item['data'])
+                        active_discussion_images.append(item.get('active', True))
+                    elif isinstance(item, str):
+                        discussion_images_b64.append(item)
+                        active_discussion_images.append(True)
 
-        infos.append(DiscussionInfo(
-            id=disc_id,
-            title=metadata.get('title', f"Discussion {disc_id[:8]}"),
-            is_starred=(disc_id in starred_ids),
-            rag_datastore_ids=metadata.get('rag_datastore_ids'),
-            active_tools=metadata.get('active_tools', []),
-            active_branch_id=disc_data.get('active_branch_id'),
-            created_at=disc_data.get('created_at'),
-            last_activity_at=disc_data.get('updated_at'),
-            discussion_images=discussion_images_b64,
-            active_discussion_images=active_discussion_images
-        ))
-    return sorted(infos, key=lambda d: d.last_activity_at or datetime.datetime.min, reverse=True)
+            info = DiscussionInfo(
+                id=disc_id,
+                title=metadata.get('title', f"Discussion {disc_id[:8]}"),
+                is_starred=(disc_id in starred_ids),
+                rag_datastore_ids=metadata.get('rag_datastore_ids'),
+                active_tools=metadata.get('active_tools', []),
+                active_branch_id=disc_data.get('active_branch_id'),
+                created_at=disc_data.get('created_at'),
+                last_activity_at=disc_data.get('updated_at'),
+                discussion_images=discussion_images_b64,
+                active_discussion_images=active_discussion_images
+            )
+            infos.append(info)
+        except Exception as e:
+            trace_exception(e)
+    return sorted(infos, key=lambda d: d.last_activity_at or datetime.min, reverse=True)
 
 @discussion_router.post("", response_model=DiscussionInfo, status_code=201)
 async def create_new_discussion(current_user: UserAuthDetails = Depends(get_current_active_user)) -> DiscussionInfo:
@@ -504,14 +505,45 @@ async def create_new_discussion(current_user: UserAuthDetails = Depends(get_curr
         last_activity_at=discussion_obj.updated_at
     )
 
+@discussion_router.post("/{discussion_id}/clone", response_model=DiscussionInfo, status_code=201)
+async def clone_discussion(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> DiscussionInfo:
+    username = current_user.username
+    original_discussion = get_user_discussion(username, discussion_id)
+    if not original_discussion:
+        raise HTTPException(status_code=404, detail="Original discussion not found.")
+
+    try:
+        cloned_discussion = original_discussion.clone_without_messages()
+        
+        original_title = original_discussion.metadata.get('title', f"Discussion {discussion_id[:8]}")
+        cloned_discussion.set_metadata_item('title', f"Clone of {original_title}")
+        cloned_discussion.commit()
+
+        return DiscussionInfo(
+            id=cloned_discussion.id,
+            title=cloned_discussion.metadata.get('title'),
+            is_starred=False,
+            rag_datastore_ids=cloned_discussion.metadata.get('rag_datastore_ids'),
+            active_tools=cloned_discussion.metadata.get('active_tools', []),
+            active_branch_id=cloned_discussion.active_branch_id,
+            created_at=cloned_discussion.created_at,
+            last_activity_at=cloned_discussion.updated_at,
+            discussion_images=cloned_discussion.images or [],
+            active_discussion_images=cloned_discussion.active_images or []
+        )
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to clone discussion: {e}")
+
 @discussion_router.get("/{discussion_id}/export-code", response_class=StreamingResponse)
 async def export_discussion_code(
     discussion_id: str,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    """
-    Exports all code blocks from a discussion into a single ZIP file.
-    """
     username = current_user.username
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
@@ -598,9 +630,6 @@ async def export_message_code(
     payload: MessageCodeExportRequest,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    """
-    Exports all code blocks from a single message content string into a ZIP file.
-    """
     code_files = []
     code_block_counter = 1
     
@@ -638,16 +667,15 @@ async def export_message_code(
 
         lines_before = preceding_text.strip().split('\n')
         if lines_before:
-            for line in reversed(lines_before[-5:]): # Check last 5 lines before code block for filename
+            for line in reversed(lines_before[-5:]):
                 match = filename_pattern.match(line.strip())
                 if match:
                     filename = match.group(1)
                     break
         
         if filename:
-            # Sanitize filename
             if ".." in filename or Path(filename).is_absolute():
-                filename = "" # Discard unsafe path
+                filename = ""
             else:
                 filename = filename.replace("\\", "/")
 
@@ -687,13 +715,16 @@ def get_all_data_zones(
     db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     discussion.memory = db_user.memory
     
+    # Use get_discussion_images to ensure data is in the correct format
+    images_info = discussion.get_discussion_images()
+    
     return DataZones(
         user_data_zone=db_user.data_zone if db_user else "",
         discussion_data_zone=discussion.discussion_data_zone,
         personality_data_zone=discussion.personality_data_zone,
         memory=discussion.memory,
-        discussion_images=discussion.images or [],
-        active_discussion_images=discussion.active_images or []
+        discussion_images=[img['data'] for img in images_info],
+        active_discussion_images=[img['active'] for img in images_info]
     )
 
 
@@ -745,8 +776,8 @@ def generate_image_from_data_zone(
     return _to_task_info(db_task)
 
 
-@discussion_router.post("/{discussion_id}/import_url", response_model=TaskInfo, status_code=202)
-def import_from_url(
+@discussion_router.post("/{discussion_id}/artefacts/import_url", response_model=TaskInfo, status_code=202)
+async def import_artefact_from_url(
     discussion_id: str,
     request: UrlImportRequest,
     current_user: UserAuthDetails = Depends(get_current_active_user)
@@ -754,15 +785,16 @@ def import_from_url(
     discussion = get_user_discussion(current_user.username, discussion_id)
     if not discussion:
         raise HTTPException(status_code=404, detail="Discussion not found")
-
-    db_task = task_manager.submit_task(
-        name=f"Importing URL for: {discussion.metadata.get('title', 'Untitled')}",
-        target=_import_url_task,
+    
+    task = task_manager.submit_task(
+        name=f"Importing artefact from URL: {request.url}",
+        target=_import_artefact_from_url_task,
         args=(current_user.username, discussion_id, request.url),
-        description=f"Scraping content from: {request.url}",
+        description=f"Scraping content from URL and saving as artefact: {request.url}",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
+    return _to_task_info(task)
+
 
 @discussion_router.post("/{discussion_id}/process_data_zone", response_model=TaskInfo, status_code=202)
 def summarize_discussion_data_zone(
@@ -805,7 +837,7 @@ def memorize_ltm(
     return _to_task_info(db_task)
 
 
-@discussion_router.post("/{discussion_id}/images", response_model=Dict[str, List[Any]])
+@discussion_router.post("/{discussion_id}/images", response_model=DiscussionImageUpdateResponse)
 async def add_discussion_image(
     discussion_id: str,
     file: UploadFile = File(...),
@@ -821,13 +853,34 @@ async def add_discussion_image(
 
         if content_type.startswith("image/"):
             image_bytes = await file.read()
-            images_b64.append(base64.b64encode(image_bytes).decode('utf-8'))
+            try:
+                img = Image.open(io.BytesIO(image_bytes))
+                
+                # If it's a GIF, seek to the first frame
+                if img.format == 'GIF':
+                    img.seek(0)
+
+                # Convert to RGBA to handle various modes like P, LA, etc.
+                if img.mode not in ('RGB', 'RGBA'):
+                    img = img.convert('RGBA')
+
+                # Save to a buffer as PNG
+                with io.BytesIO() as buffer:
+                    img.save(buffer, format="PNG")
+                    png_image_bytes = buffer.getvalue()
+                
+                images_b64.append(base64.b64encode(png_image_bytes).decode('utf-8'))
+            except Exception as e:
+                # Fallback for formats PIL might not handle, or if conversion fails
+                ASCIIColors.warning(f"Pillow conversion failed: {e}. Falling back to original bytes for content type {content_type}")
+                images_b64.append(base64.b64encode(image_bytes).decode('utf-8'))
+
         elif content_type == "application/pdf":
             pdf_bytes = await file.read()
             pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
             for page_num in range(len(pdf_doc)):
                 page = pdf_doc.load_page(page_num)
-                pix = page.get_pixmap(dpi=150)  # Render at 150 DPI
+                pix = page.get_pixmap(dpi=150)
                 img_bytes = pix.tobytes("png")
                 images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
             pdf_doc.close()
@@ -835,17 +888,17 @@ async def add_discussion_image(
             raise HTTPException(status_code=400, detail="Unsupported file type. Please upload an image or a PDF.")
 
         for b64_data in images_b64:
-            discussion.add_discussion_image(b64_data)
+            discussion.add_discussion_image(b64_data, source="user")
         
         discussion.commit()
         
         all_images_info = discussion.get_discussion_images()
-        discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
-        active_discussion_images = [img_info['active'] for img_info in all_images_info]
         
         return {
-            "discussion_images": discussion_images_b64,
-            "active_discussion_images": active_discussion_images
+            "discussion_id": discussion_id,
+            "zone": "discussion_images",
+            "discussion_images": [img_info['data'] for img_info in all_images_info],
+            "active_discussion_images": [img_info['active'] for img_info in all_images_info]
         }
     except Exception as e:
         trace_exception(e)
@@ -908,12 +961,220 @@ async def delete_discussion_image_from_discussion(
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to delete image from discussion: {str(e)}")
 
+# --- Artefact Endpoints ---
+@discussion_router.get("/{discussion_id}/artefacts", response_model=List[ArtefactInfo])
+async def list_discussion_artefacts(
+    discussion_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    artefacts = discussion.list_artefacts()
+    for artefact in artefacts:
+        if isinstance(artefact.get('created_at'), datetime):
+            artefact['created_at'] = artefact['created_at'].isoformat()
+        if isinstance(artefact.get('updated_at'), datetime):
+            artefact['updated_at'] = artefact['updated_at'].isoformat()
+    return artefacts
+
+@discussion_router.post("/{discussion_id}/artefacts", response_model=ArtefactInfo)
+async def add_discussion_artefact(
+    discussion_id: str,
+    file: UploadFile = File(...),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    try:
+        content_bytes = await file.read()
+        title = file.filename
+        extension = Path(title).suffix.lower()
+        
+        content = ""
+        images = []
+        
+        image_mimetypes = ["image/jpeg", "image/png", "image/gif", "image/webp"]
+        if file.content_type in image_mimetypes:
+            images.append(base64.b64encode(content_bytes).decode('utf-8'))
+            content = ""
+        else:
+            CODE_EXTENSIONS = {
+                ".py": "python", ".js": "javascript", ".ts": "typescript", ".html": "html", ".css": "css",
+                ".c": "c", ".cpp": "cpp", ".h": "cpp", ".hpp": "cpp", ".cs": "csharp", ".java": "java",
+                ".json": "json", ".xml": "xml", ".sh": "bash", ".md": "markdown", ".vhd": "vhdl", ".v": "verilog",
+                ".rb": "ruby", ".php": "php", ".go": "go", ".rs": "rust", ".swift": "swift", ".kt": "kotlin"
+            }
+
+            if extension == ".pdf":
+                pdf_doc = fitz.open(stream=content_bytes, filetype="pdf")
+                text_parts = []
+                for page in pdf_doc:
+                    text_parts.append(page.get_text())
+                    img_list = page.get_images(full=True)
+                    for img_info in img_list:
+                        xref = img_info[0]
+                        base_image = pdf_doc.extract_image(xref)
+                        image_bytes = base_image["image"]
+                        images.append(base64.b64encode(image_bytes).decode('utf-8'))
+                content = "\n".join(text_parts)
+                pdf_doc.close()
+            elif extension == ".docx":
+                with io.BytesIO(content_bytes) as docx_io:
+                    doc = DocxDocument(docx_io)
+                    content = "\n".join([p.text for p in doc.paragraphs])
+            elif extension in CODE_EXTENSIONS:
+                lang = CODE_EXTENSIONS[extension]
+                text_content = content_bytes.decode('utf-8', errors='replace')
+                content = f"```{lang}\n{text_content}\n```"
+            else:
+                try:
+                    content = content_bytes.decode('utf-8')
+                except UnicodeDecodeError:
+                    content = content_bytes.decode('latin-1', errors='replace')
+
+        artefact_info = discussion.add_artefact(
+            title=title,
+            content=content,
+            images=images,
+            author=current_user.username
+        )
+        discussion.commit()
+        if isinstance(artefact_info.get('created_at'), datetime):
+            artefact_info['created_at'] = artefact_info['created_at'].isoformat()
+        if isinstance(artefact_info.get('updated_at'), datetime):
+            artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
+        return artefact_info
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to add artefact: {e}")
+
+@discussion_router.post("/{discussion_id}/artefacts/export-context", response_model=ArtefactInfo)
+async def export_context_as_artefact(
+    discussion_id: str,
+    request: ExportContextRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+
+    content = discussion.discussion_data_zone
+    if not content or not content.strip():
+        raise HTTPException(status_code=400, detail="Data zone is empty, cannot create an artefact from it.")
+
+    try:
+        if discussion.get_artefact(title=request.title):
+            artefact_info = discussion.update_artefact(
+                title=request.title,
+                new_content=content,
+                author=current_user.username
+            )
+        else:
+            artefact_info = discussion.add_artefact(
+                title=request.title,
+                content=content,
+                author=current_user.username
+            )
+        
+        discussion.commit()
+
+        if isinstance(artefact_info.get('created_at'), datetime):
+            artefact_info['created_at'] = artefact_info['created_at'].isoformat()
+        if isinstance(artefact_info.get('updated_at'), datetime):
+            artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
+
+        return artefact_info
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to create artefact from context: {e}")
+
+@discussion_router.get("/{discussion_id}/artefacts/{artefact_title}", response_model=ArtefactInfo)
+async def get_discussion_artefact_content(
+    discussion_id: str,
+    artefact_title: str,
+    version: Optional[int] = Query(None),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    artefact = discussion.get_artefact(title=artefact_title, version=version)
+    if not artefact:
+        raise HTTPException(status_code=404, detail="Artefact not found")
+    
+    if isinstance(artefact.get('created_at'), datetime):
+        artefact['created_at'] = artefact['created_at'].isoformat()
+    if isinstance(artefact.get('updated_at'), datetime):
+        artefact['updated_at'] = artefact['updated_at'].isoformat()
+    return artefact
+
+@discussion_router.delete("/{discussion_id}/artefacts/{artefact_title}", status_code=204)
+async def delete_discussion_artefact(
+    discussion_id: str,
+    artefact_title: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    try:
+        discussion.remove_artefact(title=artefact_title)
+        discussion.commit()
+        return
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to delete artefact: {e}")
+
+@discussion_router.post("/{discussion_id}/artefacts/load-to-context", response_model=Dict[str, str])
+async def load_artefact_to_data_zone(
+    discussion_id: str,
+    request: LoadArtefactRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    try:
+        discussion.load_artefact_into_data_zone(title=request.title, version=request.version)
+        discussion.commit()
+        return {"content": discussion.discussion_data_zone}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to load artefact to data zone: {e}")
+
+@discussion_router.post("/{discussion_id}/artefacts/unload-from-context", response_model=Dict[str, str])
+async def unload_artefact_from_data_zone(
+    discussion_id: str,
+    request: UnloadArtefactRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    try:
+        if hasattr(request, 'version'):
+            discussion.unload_artefact_from_data_zone(title=request.title, version=request.version)
+        else:
+            discussion.unload_artefact_from_data_zone(title=request.title)
+        discussion.commit()
+        return {"content": discussion.discussion_data_zone}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to unload artefact from data zone: {e}")
+
 @discussion_router.post("/prune", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_current_active_user)):
-    """
-    Triggers a background task to delete all discussions for the current user 
-    that are empty or contain only one message.
-    """
     db_task = task_manager.submit_task(
         name=f"Prune empty discussions for {current_user.username}",
         target=_prune_empty_discussions_task,
@@ -926,9 +1187,6 @@ async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_cu
 
 @discussion_router.post("/{discussion_id}/auto-title", response_model=DiscussionInfo)
 async def generate_discussion_auto_title(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    """
-    Generates and sets a new title for a discussion automatically based on its content.
-    """
     username = current_user.username
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
@@ -968,7 +1226,6 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
     user_grades = {g.message_id: g.grade for g in db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
 
-    # Fetch all messages in the discussion to build the children map
     all_messages_in_discussion = discussion_obj.get_all_messages_flat()
     children_map = {}
     for msg_obj in all_messages_in_discussion:
@@ -980,9 +1237,6 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
 
     messages_output = []
     for msg in messages_in_branch:
-        # --- START FIX ---
-        # Robustly handle message image data which could be a JSON string, a list of strings (legacy),
-        # or a list of dictionaries (current).
         images_list_raw = msg.images or []
         images_list = []
         if isinstance(images_list_raw, str):
@@ -999,7 +1253,7 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
                 active_images_bools.append(img_data.get('active', True))
             elif isinstance(img_data, str):
                 full_image_refs.append(f"data:image/png;base64,{img_data}")
-                active_images_bools.append(True) # Legacy format is always active
+                active_images_bools.append(True)
 
         msg_metadata_raw = msg.metadata
         if isinstance(msg_metadata_raw, str):
@@ -1008,8 +1262,6 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
         else:
             msg_metadata = msg_metadata_raw or {}
 
-        # Populate the branches field if this message has multiple children
-        # This typically applies to user messages with multiple AI responses
         msg_branches = None
         if msg.id in children_map and len(children_map[msg.id]) > 1:
             msg_branches = children_map[msg.id]
@@ -1029,10 +1281,6 @@ async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[st
 
 @discussion_router.get("/{discussion_id}/full_tree", response_model=List[MessageOutput])
 async def get_full_discussion_tree(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)) -> List[MessageOutput]:
-    """
-    Retrieves all messages for a given discussion, including their parent/child relationships,
-    to enable building a complete discussion tree in the frontend.
-    """
     username = current_user.username
     discussion_obj = get_user_discussion(username, discussion_id)
     if not discussion_obj:
@@ -1040,7 +1288,6 @@ async def get_full_discussion_tree(discussion_id: str, current_user: UserAuthDet
 
     all_messages_in_discussion = discussion_obj.get_all_messages_flat()
     
-    # Build a map of parent_id -> [child_ids]
     children_map: Dict[Optional[str], List[str]] = {}
     for msg_obj in all_messages_in_discussion:
         parent_id = msg_obj.parent_id
@@ -1048,10 +1295,7 @@ async def get_full_discussion_tree(discussion_id: str, current_user: UserAuthDet
             children_map[parent_id] = []
         children_map[parent_id].append(msg_obj.id)
 
-    # Convert LollmsMessage objects to MessageOutput Pydantic models
-    # and populate the 'branches' field if it's a branching point.
     messages_output = []
-    # Fetch user grades once for the entire discussion
     db_session_for_grades = next(get_db())
     try:
         db_user = db_session_for_grades.query(DBUser).filter(DBUser.username == username).one()
@@ -1081,7 +1325,7 @@ async def get_full_discussion_tree(discussion_id: str, current_user: UserAuthDet
                 active_images_bools.append(img_data.get('active', True))
             elif isinstance(img_data, str):
                 full_image_refs.append(f"data:image/png;base64,{img_data}")
-                active_images_bools.append(True) # Legacy format is always active
+                active_images_bools.append(True)
                 
         msg_metadata_raw = msg_obj.metadata
         if isinstance(msg_metadata_raw, str):
@@ -1107,9 +1351,9 @@ async def get_full_discussion_tree(discussion_id: str, current_user: UserAuthDet
                 active_images=active_images_bools,
                 user_grade=user_grades.get(msg_obj.id, 0),
                 created_at=msg_obj.created_at,
-                branch_id=discussion_obj.active_branch_id, # This is the currently active branch for the discussion
-                branches=msg_branches, # Branches *originating from this message*
-                vision_support=True # Default true, logic for model-specific vision support is handled by LollmsClient
+                branch_id=discussion_obj.active_branch_id,
+                branches=msg_branches,
+                vision_support=True
             )
         )
     return messages_output
@@ -1303,7 +1547,6 @@ async def chat_in_existing_discussion(
     if not discussion_obj:
         raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
     
-    # The LollmsClient is now correctly attached to the discussion object
     if not lc:
         async def error_stream():
             yield json.dumps({"type": "error", "content": "Failed to get a valid LLM Client from the discussion object."}) + "\n"
@@ -1341,34 +1584,29 @@ async def chat_in_existing_discussion(
 
     db_pers = db.query(DBPersonality).filter(DBPersonality.id == db_user.active_personality_id).first() if db_user.active_personality_id else None
     
-    # --- REFINED: Placeholder replacement and data zone combination ---
     user_data_zone = db_user.data_zone or ""
-    now = datetime.datetime.now()
+    now = datetime.now()
     replacements = {
         "{{date}}": now.strftime("%Y-%m-%d"),
         "{{time}}": now.strftime("%H:%M:%S"),
         "{{datetime}}": now.strftime("%Y-%m-%d %H:%M:%S"),
         "{{user_name}}": current_user.username,
     }
-    # Apply replacements to a copy
     processed_user_data_zone = user_data_zone
     for placeholder, value in replacements.items():
         processed_user_data_zone = processed_user_data_zone.replace(placeholder, value)
         
     discussion_obj.user_data_zone = processed_user_data_zone
 
-    # Combine MCPs from discussion metadata and personality
     use_mcps_from_discussion = (discussion_obj.metadata or {}).get('active_tools', [])
     use_mcps_from_personality = db_pers.active_mcps if db_pers and db_pers.active_mcps else []
     combined_mcps = list(set(use_mcps_from_discussion + use_mcps_from_personality))
 
-    # --- Build LollmsPersonality with data_source ---
     data_source_runtime = None
     if db_pers:
         if db_pers.data_source_type == "raw_text":
             data_source_runtime = db_pers.data_source
         elif db_pers.data_source_type == "datastore" and db_pers.data_source:
-            # Create a callable for the dynamic data source
             def query_personality_datastore(query: str) -> str:
                 ds_id = db_pers.data_source
                 ds = get_safe_store_instance(username, ds_id, db)
@@ -1575,7 +1813,7 @@ async def update_discussion_message(
             _, encoded = b64_data_uri.split(",", 1)
             final_images_b64.append(encoded)
         except ValueError:
-            final_images_b64.append(b64_data_uri) # Assume raw base64
+            final_images_b64.append(b64_data_uri)
     
     target_message.images = final_images_b64
     discussion_obj.commit()
@@ -1584,7 +1822,7 @@ async def update_discussion_message(
     grade = db.query(UserMessageGrade.grade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).scalar() or 0
     
     full_image_refs = [f"data:image/png;base64,{img}" for img in target_message.images or []]
-    active_images = [True] * len(full_image_refs) # Edited images are always active
+    active_images = [True] * len(full_image_refs)
 
     msg_metadata = target_message.metadata or {}
     return MessageOutput(
@@ -1629,7 +1867,6 @@ async def add_manual_message(
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to add message to discussion: {e}")
 
-    # Build the response
     return MessageOutput(
         id=new_message.id,
         sender=new_message.sender,
@@ -1664,9 +1901,6 @@ async def export_discussion_context(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Exports the full discussion context as a single string, exactly as it would be presented to the LLM.
-    """
     user_model_full = current_user.lollms_model_name
     binding_alias = None
     if user_model_full and '/' in user_model_full:

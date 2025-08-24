@@ -37,6 +37,40 @@ set /p port=Enter port [9642]:
 if "!port!"=="" set port=9642
 call :update_config_raw port !port!
 
+:: --- NEW: Firewall Rule Creation with Confirmation ---
+echo.
+echo Checking for Administrator privileges to manage firewall...
+net session >nul 2>&1
+if %errorlevel% == 0 (
+    echo Administrator privileges detected.
+    set /p create_rule=Do you want to create a firewall rule to allow network access? (Y/n): 
+    if /I "!create_rule!" NEQ "n" (
+        echo Attempting to create firewall rule...
+        
+        netsh advfirewall firewall show rule name="LoLLMs Web UI" >nul
+        if !errorlevel! == 0 (
+            echo Firewall rule "LoLLMs Web UI" already exists. Deleting it to ensure the port is correct.
+            netsh advfirewall firewall delete rule name="LoLLMs Web UI" >nul
+        )
+        
+        netsh advfirewall firewall add rule name="LoLLMs Web UI" dir=in action=allow protocol=TCP localport=!port! >nul
+        
+        if !errorlevel! == 0 (
+            echo Successfully created firewall rule for port !port!.
+        ) else (
+            echo ERROR: Failed to create firewall rule. You may need to do it manually.
+        )
+    ) else (
+        echo Skipping firewall rule creation. The app may not be accessible from other devices.
+    )
+) else (
+    echo WARNING: Administrator privileges not detected.
+    echo Please re-run this script as an Administrator if you want to automatically create a firewall rule.
+)
+echo.
+:: --- END: Firewall Rule Creation ---
+
+
 set /p data_dir=Enter data_dir [data]: 
 if "!data_dir!"=="" set data_dir=data
 call :update_config data_dir "!data_dir!"

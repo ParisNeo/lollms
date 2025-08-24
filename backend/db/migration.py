@@ -214,6 +214,20 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         except Exception as e:
             print(f"WARNING: Could not remove deprecated global settings. Error: {e}")
 
+    if inspector.has_table("tasks"):
+        task_columns_db = [col['name'] for col in inspector.get_columns('tasks')]
+        if 'updated_at' not in task_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE tasks ADD COLUMN updated_at DATETIME"))
+                print("INFO: Added 'updated_at' column to 'tasks' table.")
+                # Backfill new column with existing created_at data
+                connection.execute(text("UPDATE tasks SET updated_at = created_at WHERE updated_at IS NULL"))
+                print("INFO: Backfilled 'updated_at' values from 'created_at' in 'tasks' table.")
+                connection.commit()
+            except Exception as e:
+                print(f"ERROR: Could not add and backfill 'updated_at' column in 'tasks' table: {e}")
+                connection.rollback()
+                
     if inspector.has_table("saved_prompts"):
         columns_db = [col['name'] for col in inspector.get_columns('saved_prompts')]
         

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 import os
 import subprocess
+import sys
 from multiprocessing import cpu_count
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors, trace_exception
@@ -35,7 +36,7 @@ from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
 from backend.db.models.broadcast import BroadcastMessage
 from backend.security import get_password_hash as hash_password
-from backend.discussion import LegacyDiscussion
+from backend.migration_utils import LegacyDiscussion
 from backend.session import (
     get_user_data_root, get_user_discussion_path, user_sessions
 )
@@ -88,7 +89,6 @@ async def start_broadcast_polling():
     last_processed_id = 0
     last_cleanup_time = time.time()
     
-    # Initialize last_processed_id to the latest message id to avoid sending old messages on startup
     db = next(get_db())
     try:
         latest_message = db.query(BroadcastMessage).order_by(BroadcastMessage.id.desc()).first()
@@ -103,7 +103,6 @@ async def start_broadcast_polling():
             await asyncio.sleep(POLLING_INTERVAL)
             db = next(get_db())
             
-            # Fetch new messages
             new_messages = db.query(BroadcastMessage).filter(BroadcastMessage.id > last_processed_id).order_by(BroadcastMessage.id.asc()).all()
 
             if new_messages:
@@ -123,7 +122,6 @@ async def start_broadcast_polling():
                     
                     last_processed_id = msg.id
 
-            # Periodic cleanup, protected by a file lock
             current_time = time.time()
             if current_time - last_cleanup_time > CLEANUP_INTERVAL:
                 lock = FileLock(str(CLEANUP_LOCK_PATH), timeout=1)
@@ -141,7 +139,7 @@ async def start_broadcast_polling():
                                 ASCIIColors.error(f"Error during broadcast message cleanup: {e}")
                                 db.rollback()
                 except Timeout:
-                    pass # Another worker is handling cleanup.
+                    pass
 
         except Exception as e:
             ASCIIColors.error(f"Error in broadcast polling loop: {e}")
@@ -152,11 +150,9 @@ async def start_broadcast_polling():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- Code to be executed on startup ---
     ASCIIColors.info("Application startup...")
-    manager.set_loop(asyncio.get_running_loop()) # Set the event loop for the manager
+    manager.set_loop(asyncio.get_running_loop())
     
-    # NEW: Start the broadcast polling task
     polling_task = asyncio.create_task(start_broadcast_polling())
     
     task_manager.init_app(db_session_module.SessionLocal)
@@ -216,13 +212,11 @@ async def lifespan(app: FastAPI):
             if db_session: db_session.close()
         print("--- Migration Finished ---\n")
 
-    # --- Setup Defaults (Admin, Personalities, Repositories) ---
     ASCIIColors.yellow("--- Verifying Default Database Entries & Repositories ---")
     db_for_defaults: Optional[Session] = None
     try:
         db_for_defaults = next(get_db())
         
-        # 1. Initial Admin User
         admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
         admin_password = INITIAL_ADMIN_USER_CONFIG.get("password")
         if admin_username and admin_password and not db_for_defaults.query(DBUser).filter(DBUser.username == admin_username).first():
@@ -231,7 +225,6 @@ async def lifespan(app: FastAPI):
             db_for_defaults.commit()
             ASCIIColors.green(f"INFO: Initial admin user '{admin_username}' created successfully.")
 
-        # 2. Initial LLM Binding
         if not db_for_defaults.query(DBLLMBinding).first():
             ASCIIColors.yellow("No LLM bindings found in the database. Creating one from config.toml.")
             if LOLLMS_CLIENT_DEFAULTS:
@@ -262,7 +255,6 @@ async def lifespan(app: FastAPI):
             else:
                 ASCIIColors.warning("[lollms_client_defaults] section is empty in config.toml. No initial binding created.")
         
-        # 3. Hardcoded Default System Prompts
         DEFAULT_PROMPTS = [
             {"name": "Enhance Email", "content": """@<style>@\ntitle: Email Style\ntype: str\noptions: Formal, Friendly & Casual, Persuasive, Direct & Concise\nhelp: The desired tone for the email.\n@</style>@\nEnhance the following email draft to be more @<style>@. Refine the language, structure, and tone accordingly."""},
             {"name": "Improve Text", "content": """@<style>@\ntitle: Writing Style\ntype: str\noptions: Professional, Academic, Creative, Simple & Clear\n@</style>@\n@<goal>@\ntitle: Main Goal\ntype: text\nhelp: e.g., 'convince the reader', 'explain a complex topic simply', 'inspire action'\n@</goal>@\nRevise the following text to make it more @<style>@. The main goal is to @<goal>@. Improve clarity, flow, and impact."""},
@@ -411,10 +403,8 @@ async def lifespan(app: FastAPI):
     
     ASCIIColors.info("--- Startup complete. Application is ready. ---")
     yield
-    # --- Code to be executed on shutdown ---
     ASCIIColors.info("--- Application shutting down. ---")
     
-    # NEW: Cancel the polling task on shutdown
     polling_task.cancel()
     try:
         await polling_task
@@ -429,7 +419,6 @@ app = FastAPI(
     lifespan=lifespan
 )
     
-# CORS Configuration...
 host = SERVER_CONFIG.get("host", "0.0.0.0")
 port = SERVER_CONFIG.get("port", 9642)
 https_enabled = SERVER_CONFIG.get("https_enabled", False)
@@ -450,13 +439,11 @@ else:
     if https_enabled:
         allowed_origins.append(f"https://{host}:{port}")
 
-# Add authenticated app origins
 init_database(APP_DB_URL)
 db = db_session_module.SessionLocal()
 try:
     sso_apps = db.query(DBApp).filter(DBApp.active == True, DBApp.authentication_type == 'lollms_sso').all()
     sso_mcps = db.query(DBMCP).filter(DBMCP.active == True, DBMCP.authentication_type == 'lollms_sso').all()
-    # NEW: Add apps with OpenAI API access to CORS list
     openai_apps = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.allow_openai_api_access == True).all()
     
     sso_services = sso_apps + sso_mcps + openai_apps
@@ -482,7 +469,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Routers
 app.include_router(auth_router)
 app.include_router(discussion_router)
 app.include_router(admin_router)
@@ -513,7 +499,6 @@ app.include_router(tasks_router)
 app.include_router(help_router)
 app.include_router(prompts_router)
 
-# UI and Assets routers
 app.include_router(upload_router)
 app.include_router(assets_router)
 add_ui_routes(app)
@@ -549,6 +534,15 @@ if __name__ == "__main__":
     protocol = "https" if ssl_params else "http"
 
     if host_setting == "0.0.0.0":
+        if sys.platform == "win32":
+            ASCIIColors.yellow("\n--- IMPORTANT WINDOWS FIREWALL NOTICE ---")
+            ASCIIColors.yellow(f"You are running on Windows with host '0.0.0.0', making the app accessible on your network.")
+            ASCIIColors.yellow("However, Windows Defender Firewall will likely block incoming connections by default.")
+            ASCIIColors.yellow(f"If you cannot access the UI from another device, you may need to create an")
+            ASCIIColors.yellow(f"inbound firewall rule to allow connections on TCP port {port_setting}.")
+            ASCIIColors.yellow("The 'install.bat' and 'install.ps1' scripts now attempt to do this automatically for new installations.")
+            ASCIIColors.yellow("-------------------------------------------\n")
+            
         import psutil
         import socket
         from backend.utils import get_accessible_host
@@ -557,10 +551,8 @@ if __name__ == "__main__":
         if accessible_host != 'localhost':
             ASCIIColors.magenta(f"Recommended public access URL: {protocol}://{accessible_host}:{port_setting}/")
 
-        # Always include localhost
         ASCIIColors.magenta(f"Or access locally at: {protocol}://localhost:{port_setting}/")
 
-        # Get all network interfaces and IPs
         for iface, addrs in psutil.net_if_addrs().items():
             for addr in addrs:
                 if addr.family == socket.AF_INET:

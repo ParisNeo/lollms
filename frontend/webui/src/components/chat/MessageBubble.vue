@@ -173,8 +173,8 @@ const lastEventSummary = computed(() => {
 const eventIconMap = {
   'thought': IconThinking, 'tool_call': IconTool, 'observation': IconObservation,
   'info': IconInfo, 'exception': IconError, 'error': IconError,
-  'scratchpad': IconScratchpad, 'step_start': IconStepStart, 'step_end': IconStepEnd,
-  'default': IconEventDefault
+  'scratchpad': IconScratchpad, 'default': IconEventDefault,
+  'step_start': IconStepStart, 'step_end': IconStepEnd,
 };
 
 function getEventIcon(type) {
@@ -257,7 +257,7 @@ async function handleSaveEdit() {
     } else {
         const keptImagesB64 = editedImages.value
             .filter(img => !img.isNew)
-            .map(img => img.url.split(',')[1]); // Extract base64 part
+            .map(img => img.url.split(',')); // Extract base64 part
 
         await discussionsStore.saveMessageChanges({
             messageId: props.message.id,
@@ -331,7 +331,9 @@ function handleBranchOrRegenerate() {
     else uiStore.addNotification('Could not find a valid user prompt to regenerate from.', 'error');
 }
 
-function showSourceDetails(source) { uiStore.openModal('sourceViewer', source); }
+function showSourceDetails(source) {
+    uiStore.openModal('artefactViewer', { ...source });
+}
 
 function getSimilarityColor(score) {
   if (score === undefined || score === null) return 'bg-gray-400 dark:bg-gray-600';

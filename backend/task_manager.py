@@ -101,8 +101,8 @@ class Task:
                             "type": "discussion_images_updated",
                             "data": {
                                 "discussion_id": zone_info.get("discussion_id"),
-                                "discussion_images": zone_info.get("new_images", []),
-                                "active_discussion_images": zone_info.get("new_active_images", [])
+                                "discussion_images": zone_info.get("discussion_images", []),
+                                "active_discussion_images": zone_info.get("active_discussion_images", [])
                             }
                         }
                         if db_task.owner_user_id:

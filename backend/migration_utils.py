@@ -4,10 +4,13 @@ import base64
 import io
 import json
 import time
+import yaml
+import uuid
 from pathlib import Path
 from datetime import datetime
 from ascii_colors import trace_exception
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+from dataclasses import dataclass, field as dataclass_field
 
 import requests
 from sqlalchemy import create_engine, text
@@ -23,6 +26,80 @@ from backend.session import get_user_data_root
 from lollms_client import LollmsDiscussion
 from backend.session import get_user_discussion_path, get_user_lollms_client
 from backend.discussion import get_user_discussion_manager, get_user_discussion
+
+# --- LEGACY DISCUSSION CLASSES FOR MIGRATION ---
+@dataclass
+class _LegacyMessage:
+    sender: str
+    sender_type: str
+    content: str
+    id: str = dataclass_field(default_factory=lambda: str(uuid.uuid4()))
+    parent_id: Optional[str] = None
+    created_at: datetime = dataclass_field(default_factory=lambda: datetime.now(datetime.timezone.utc))
+    binding_name: Optional[str] = None
+    model_name: Optional[str] = None
+    token_count: Optional[int] = None
+    sources: Optional[List[Any]] = None
+    steps: Optional[List[Any]] = None
+    image_references: Optional[List[str]] = dataclass_field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "_LegacyMessage":
+        created_at_val = data.get("created_at")
+        if isinstance(created_at_val, str):
+            try: created_at = datetime.fromisoformat(created_at_val)
+            except ValueError: created_at = datetime.now(datetime.timezone.utc)
+        else: created_at = datetime.now(datetime.timezone.utc)
+        
+        sender = data.get("sender", "unknown")
+        sender_type = data.get("sender_type", "user" if sender not in ["lollms", "assistant"] else "assistant")
+
+        return cls(
+            id=data.get("id", str(uuid.uuid4())),
+            sender=sender,
+            sender_type=sender_type,
+            content=data.get("content", ""),
+            parent_id=data.get("parent_message_id"), 
+            created_at=created_at,
+            binding_name=data.get("binding_name"),
+            model_name=data.get("model_name"),
+            token_count=data.get("token_count"),
+            sources=data.get("sources",[]),
+            steps=data.get("steps",[]),
+            image_references=data.get("image_references", [])
+        )
+
+class LegacyDiscussion:
+    def __init__(self, discussion_id: Optional[str] = None, title: Optional[str] = None):
+        self.messages: List[_LegacyMessage] = []
+        self.discussion_id: str = discussion_id or str(uuid.uuid4())
+        self.title: str = title or f"Imported {self.discussion_id[:8]}"
+        self.rag_datastore_ids: Optional[list] = None
+        self.active_branch_id: Optional[str] = None
+
+    @staticmethod
+    def load_from_yaml(file_path: Path) -> Optional["LegacyDiscussion"]:
+        if not file_path.exists(): return None
+        try:
+            with open(file_path, "r", encoding="utf-8") as file: data = yaml.safe_load(file)
+        except Exception: return None
+
+        if not isinstance(data, dict):
+            discussion = LegacyDiscussion(discussion_id=file_path.stem)
+            if isinstance(data, list):
+                for msg_data in data:
+                    if isinstance(msg_data, dict): discussion.messages.append(_LegacyMessage.from_dict(msg_data))
+            return discussion
+
+        discussion = LegacyDiscussion(discussion_id=data.get("discussion_id", file_path.stem), title=data.get("title"))
+        discussion.rag_datastore_ids = data.get("rag_datastore_ids")
+        discussion.active_branch_id = data.get("active_branch_id")
+        
+        for msg_data in data.get("messages", []):
+            if isinstance(msg_data, dict): discussion.messages.append(_LegacyMessage.from_dict(msg_data))
+        return discussion
+# --- END LEGACY ---
+
 
 def _fetch_and_process_icon(image_url: str) -> str | None:
     if not image_url or not image_url.startswith(('http', '/')):

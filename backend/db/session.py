@@ -9,7 +9,11 @@ SessionLocal = None
 
 def init_database(db_url: str):
     global engine, SessionLocal
-    engine = create_engine(db_url, connect_args={"check_same_thread": False}, echo=False)
+    engine = create_engine(
+        db_url, 
+        connect_args={"check_same_thread": False, "timeout": 15}, 
+        echo=False
+    )
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
     Base.metadata.create_all(bind=engine)

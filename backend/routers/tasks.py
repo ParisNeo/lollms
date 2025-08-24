@@ -26,6 +26,7 @@ def _db_task_to_task_info(db_task: DBTask) -> TaskInfo:
         error=db_task.error,
         created_at=db_task.created_at,
         started_at=db_task.started_at,
+        updated_at=db_task.updated_at,
         completed_at=db_task.completed_at,
         file_name=db_task.file_name,
         total_files=db_task.total_files,

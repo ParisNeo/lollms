@@ -22,7 +22,7 @@ import AdminUserEditModal from './components/modals/AdminUserEditModal.vue';
 import ForceSettingsModal from './components/modals/ForceSettingsModal.vue';
 import ConfirmationModal from './components/ui/ConfirmationModal.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
-import SourceModal from './components/modals/SourceModal.vue';
+import ArtefactViewerModal from './components/modals/ArtefactViewerModal.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ShareDataStoreModal from './components/modals/ShareDataStoreModal.vue';
 import ExportModal from './components/modals/ExportModal.vue';
@@ -44,6 +44,7 @@ import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue
 import GeneratePersonalityModal from './components/modals/GeneratePersonalityModal.vue';
 import TasksManagerModal from './components/modals/TasksManagerModal.vue';
 import EnhancePersonalityPromptModal from './components/modals/EnhancePersonalityPromptModal.vue';
+import ContextToArtefactModal from './components/modals/ContextToArtefactModal.vue';
 import ContextViewModal from './components/modals/ContextViewModal.vue';
 import DataZonePromptManagementModal from './components/modals/DataZonePromptManagementModal.vue';
 import FillPlaceholdersModal from './components/modals/FillPlaceholdersModal.vue';
@@ -133,7 +134,7 @@ onMounted(async () => {
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <ConfirmationModal v-if="activeModal === 'confirmation'" />
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
-    <SourceModal v-if="activeModal === 'sourceViewer'" />
+    <ArtefactViewerModal v-if="activeModal === 'artefactViewer'" />
     <NotificationPanel />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
     <ExportModal v-if="activeModal === 'export'" />
@@ -155,6 +156,7 @@ onMounted(async () => {
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
     <TasksManagerModal v-if="activeModal === 'tasksManager'" />
     <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
+    <ContextToArtefactModal v-if="activeModal === 'contextToArtefact'" />
     <ContextViewModal v-if="activeModal === 'contextViewer'" />
     <DataZonePromptManagementModal v-if="activeModal === 'dataZonePromptManagement'" />
     <FillPlaceholdersModal v-if="activeModal === 'fillPlaceholders'" />

@@ -4,6 +4,27 @@ from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, constr, field_validator
 from .shared import PaginatedResponse
 
+class ArtefactInfo(BaseModel):
+    title: str
+    version: int
+    is_loaded: bool = False
+    author: Optional[str] = None
+    created_at: str
+    updated_at: str
+    content: Optional[str] = None # Will be populated only on single-artefact fetch
+    images: Optional[List[str]] = None
+
+class LoadArtefactRequest(BaseModel):
+    title: str
+    version: Optional[int] = None
+
+class UnloadArtefactRequest(BaseModel):
+    title: str
+    version: Optional[int] = None
+
+class ExportContextRequest(BaseModel):
+    title: constr(min_length=1)
+
 class DiscussionInfo(BaseModel):
     id: str
     title: str
@@ -14,7 +35,7 @@ class DiscussionInfo(BaseModel):
     last_activity_at: Optional[datetime.datetime] = None
     active_branch_id: Optional[str] = None
     data_zone: Optional[str] = None
-    discussion_images: List[str] = Field(default_factory=list)
+    discussion_images: List[dict|str] = Field(default_factory=list)
     active_discussion_images: List[bool] = Field(default_factory=list)
 
 class DataZones(BaseModel):
@@ -89,6 +110,12 @@ class MessageUpdateWithImages(BaseModel):
 
 class DiscussionImageAddRequest(BaseModel):
     image_b64: str
+
+class DiscussionImageUpdateResponse(BaseModel):
+    discussion_id: str
+    zone: str
+    discussion_images: List[str]
+    active_discussion_images: List[bool]
 
 class ManualMessageCreate(BaseModel):
     content: str

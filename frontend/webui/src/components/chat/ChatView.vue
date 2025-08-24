@@ -3,11 +3,11 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useDiscussionsStore } from '../../stores/discussions';
-import { useAuthStore } from '../../stores/auth';
+import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
+import { useAuthStore } from '../../stores/auth';
 import { usePromptsStore } from '../../stores/prompts';
 import { useTasksStore } from '../../stores/tasks';
-import { useDataStore } from '../../stores/data';
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 import { storeToRefs } from 'pinia';
@@ -32,6 +32,7 @@ import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconTicket from '../../assets/icons/IconTicket.vue';
+import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconMinimize from '../../assets/icons/IconMinimize.vue';
 import IconUndo from '../../assets/icons/IconUndo.vue';
@@ -46,6 +47,8 @@ import IconUser from '../../assets/icons/IconUser.vue';
 import IconLollms from '../../assets/icons/IconLollms.vue';
 import IconWeb from '../../assets/icons/ui/IconWeb.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
+import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 
 // --- Store Initialization ---
 const discussionsStore = useDiscussionsStore();
@@ -56,21 +59,21 @@ const tasksStore = useTasksStore();
 const dataStore = useDataStore();
 const router = useRouter();
 const { on, off } = useEventBus();
-const { liveDataZoneTokens, currentModelVisionSupport } = storeToRefs(discussionsStore);
+const { liveDataZoneTokens, currentModelVisionSupport, activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { tasks } = storeToRefs(tasksStore);
 const { availableTtiModels } = storeToRefs(dataStore);
 
 // --- Component State ---
-const knowledgeFileInput = ref(null);
+const artefactFileInput = ref(null);
 const discussionImageInput = ref(null);
 const isUploadingDiscussionImage = ref(false);
-const isExtractingText = ref(false);
+const isUploadingArtefact = ref(false);
 const activeDataZoneTab = ref('discussion');
 const discussionCodeMirrorEditor = ref(null);
 const userCodeMirrorEditor = ref(null);
 const dataZonePromptText = ref('');
-const dataZoneWidth = ref(768); // Increased default width
+const dataZoneWidth = ref(768);
 const isResizing = ref(false);
 const userPromptSearchTerm = ref('');
 const zooPromptSearchTerm = ref('');
@@ -81,10 +84,9 @@ const dataZoneViewModes = ref({
     ltm: 'edit'
 });
 const urlToImport = ref('');
-const importUrlTaskId = ref(null);
 const showUrlImport = ref(false);
-const hiddenDocuments = ref([]);
 const isProgrammaticChange = ref(false);
+const selectedArtefactVersions = ref({});
 
 // --- Data Zone State ---
 let discussionSaveDebounceTimer = null;
@@ -112,16 +114,10 @@ const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const discussionImages = computed(() => activeDiscussion.value?.discussion_images || []);
 const discussionActiveImages = computed(() => activeDiscussion.value?.active_discussion_images || []);
 
-const importUrlTask = computed(() => {
-    if (!importUrlTaskId.value) return null;
-    return tasks.value.find(t => t.id === importUrlTaskId.value);
-});
-const isImportingUrl = computed(() => importUrlTask.value && ['pending', 'running'].includes(importUrlTask.value.status));
-
 const isProcessing = computed(() => {
     if (!activeDiscussion.value) return false;
     const task = discussionsStore.activeAiTasks[activeDiscussion.value.id];
-    return task?.type === 'summarize' || task?.type === 'generate_image' || isImportingUrl.value;
+    return task?.type === 'summarize' || task?.type === 'generate_image' || task?.type === 'import_url';
 });
 
 const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'memorize');
@@ -137,6 +133,31 @@ const canUndoUser = computed(() => userHistoryIndex.value > 0);
 const canRedoUser = computed(() => userHistoryIndex.value < userHistory.value.length - 1);
 const canUndoMemory = computed(() => memoryHistoryIndex.value > 0);
 const canRedoMemory = computed(() => memoryHistoryIndex.value < memoryHistory.value.length - 1);
+
+const groupedArtefacts = computed(() => {
+    if (!activeDiscussionArtefacts.value || !Array.isArray(activeDiscussionArtefacts.value)) return [];
+    
+    const groups = activeDiscussionArtefacts.value.reduce((acc, artefact) => {
+        if (!acc[artefact.title]) {
+            acc[artefact.title] = {
+                title: artefact.title,
+                versions: [],
+                isAnyVersionLoaded: false
+            };
+        }
+        acc[artefact.title].versions.push(artefact);
+        if (artefact.is_loaded) {
+            acc[artefact.title].isAnyVersionLoaded = true;
+        }
+        return acc;
+    }, {});
+
+    Object.values(groups).forEach(group => {
+        group.versions.sort((a, b) => b.version - a.version);
+    });
+
+    return Object.values(groups);
+});
 
 const filteredLollmsPrompts = computed(() => {
     if (!Array.isArray(lollmsPrompts.value)) return [];
@@ -192,96 +213,6 @@ const discussionDataZone = computed({
     }
 });
 
-const parsedDocuments = computed(() => {
-    const content = discussionDataZone.value;
-    if (!content) return [];
-    const docs = [];
-    const regex = /^---\s*Document:\s*(.*?)\s*---$\n([\s\S]*?)\n^---\s*End Document:\s*\1\s*---$/gm;
-    let match;
-    while ((match = regex.exec(content)) !== null) {
-        docs.push({ 
-            filename: match[1].trim(),
-            content: match[2].trim()
-        });
-    }
-    return docs;
-});
-
-
-function deleteDocument(filename) {
-    const escapedFilename = filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`^---\\s*Document:\\s*${escapedFilename}\\s*---\\n[\\s\\S]*?\\n^---\\s*End Document:\\s*${escapedFilename}\\s*---\\n*`, 'gm');
-    updateDiscussionDataZoneAndRecordHistory(discussionDataZone.value.replace(regex, ''));
-}
-
-function copyDocumentContent(content) {
-    uiStore.copyToClipboard(content, 'Document content copied!');
-}
-
-function getHiddenDocsStorageKey(discussionId) {
-    if (!discussionId) return null;
-    return `lollms_hidden_docs_${discussionId}`;
-}
-
-function loadHiddenDocuments(discussionId) {
-    const key = getHiddenDocsStorageKey(discussionId);
-    if (!key) {
-        hiddenDocuments.value = [];
-        return;
-    }
-    const stored = localStorage.getItem(key);
-    hiddenDocuments.value = stored ? JSON.parse(stored) : [];
-}
-
-function saveHiddenDocuments(discussionId) {
-    const key = getHiddenDocsStorageKey(discussionId);
-    if (!key) return;
-    localStorage.setItem(key, JSON.stringify(hiddenDocuments.value));
-}
-
-function hideDocument(filename) {
-    const content = discussionDataZone.value;
-    const escapedFilename = filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(`^---\\s*Document:\\s*${escapedFilename}\\s*---\\n[\\s\\S]*?\\n^---\\s*End Document:\\s*${escapedFilename}\\s*---\\n*`, 'gm');
-    
-    let match = regex.exec(content);
-    if (match) {
-        const fullContent = match[0];
-        hiddenDocuments.value.push({ filename, fullContent });
-        updateDiscussionDataZoneAndRecordHistory(content.replace(fullContent, ''));
-        if (activeDiscussion.value) {
-            saveHiddenDocuments(activeDiscussion.value.id);
-        }
-    }
-}
-
-function showDocument(filename) {
-    const docIndex = hiddenDocuments.value.findIndex(doc => doc.filename === filename);
-    if (docIndex > -1) {
-        const docToShow = hiddenDocuments.value[docIndex];
-        let newContent = discussionDataZone.value;
-        if (newContent && !newContent.trim().endsWith('\n')) {
-            newContent += '\n\n';
-        }
-        updateDiscussionDataZoneAndRecordHistory(newContent + docToShow.fullContent);
-        hiddenDocuments.value.splice(docIndex, 1);
-        if (activeDiscussion.value) {
-            saveHiddenDocuments(activeDiscussion.value.id);
-        }
-    }
-}
-
-function deleteHiddenDocument(filename) {
-    const docIndex = hiddenDocuments.value.findIndex(doc => doc.filename === filename);
-    if (docIndex > -1) {
-        hiddenDocuments.value.splice(docIndex, 1);
-        if (activeDiscussion.value) {
-            saveHiddenDocuments(activeDiscussion.value.id);
-        }
-        uiStore.addNotification(`Permanently removed hidden document '${filename}'.`, 'info');
-    }
-}
-
 const userDataZone = computed({
     get: () => authStore.user?.data_zone || '',
     set: (newVal) => {
@@ -335,7 +266,6 @@ watch(discussionDataZone, (newVal) => {
     if (!isProgrammaticChange.value) {
         discussionHistoryDebounceTimer = recordHistory(discussionHistory, discussionHistoryIndex, discussionHistoryDebounceTimer, newVal);
     }
-    reconcileHiddenDocuments();
 });
 
 watch(userDataZone, (newVal) => { 
@@ -352,11 +282,21 @@ watch(memory, (newVal) => {
     }
 });
 
-watch(importUrlTask, (newTask) => {
-    if (newTask && ['completed', 'failed', 'cancelled'].includes(newTask.status)) {
-        importUrlTaskId.value = null;
+watch(groupedArtefacts, (newGroups) => {
+    const newSelections = { ...selectedArtefactVersions.value };
+    for (const group of newGroups) {
+        if (!newSelections[group.title]) {
+            const loadedVersion = group.versions.find(v => v.is_loaded);
+            if (loadedVersion) {
+                newSelections[group.title] = loadedVersion.version;
+            } else if (group.versions.length > 0) {
+                newSelections[group.title] = group.versions[0].version;
+            }
+        }
     }
-});
+    selectedArtefactVersions.value = newSelections;
+}, { deep: true, immediate: true });
+
 
 onMounted(() => {
     const savedWidth = localStorage.getItem('lollms_dataZoneWidth');
@@ -378,7 +318,6 @@ function onDataZoneUpdatedFromStore({ discussionId, newContent }) {
 }
 
 async function handlePasteInDataZone(event) {
-    if (!currentModelVisionSupport.value) return;
     const items = (event.clipboardData || window.clipboardData).items;
     if (!items) return;
     const filesToUpload = [];
@@ -481,21 +420,8 @@ async function handleRedoMemory() {
     isProgrammaticChange.value = false;
 }
 
-
-function reconcileHiddenDocuments() {
-    if (!activeDiscussion.value) return;
-    const currentVisibleDocs = new Set(parsedDocuments.value.map(d => d.filename));
-    const updatedHiddenDocs = hiddenDocuments.value.filter(doc => !currentVisibleDocs.has(doc.filename));
-    
-    if (updatedHiddenDocs.length !== hiddenDocuments.value.length) {
-        hiddenDocuments.value = updatedHiddenDocs;
-        saveHiddenDocuments(activeDiscussion.value.id);
-    }
-}
-
 watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
     if (newDiscussion) {
-        loadHiddenDocuments(newDiscussion.id);
         if (!oldDiscussion || newDiscussion.id !== oldDiscussion.id) {
             setupHistory(discussionHistory, discussionHistoryIndex, newDiscussion.discussion_data_zone || '');
         }
@@ -530,41 +456,37 @@ function insertPlaceholder(placeholder) {
     const { from, to } = view.state.selection.main; const textToInsert = placeholder;
     view.dispatch({ changes: { from, to, insert: textToInsert }, selection: { anchor: from + textToInsert.length } }); view.focus();
 }
-function triggerKnowledgeFileUpload() { knowledgeFileInput.value?.click(); }
-async function handleImportFromUrl() {
-    if (!urlToImport.value.trim() || !activeDiscussion.value) return;
-    const taskId = await discussionsStore.importUrlToDataZone(activeDiscussion.value.id, urlToImport.value);
-    if (taskId) {
-        importUrlTaskId.value = taskId;
-        urlToImport.value = '';
-        showUrlImport.value = false;
-    }
-}
+function triggerArtefactFileUpload() { artefactFileInput.value?.click(); }
 
-async function handleKnowledgeFileUpload(event) {
+async function handleArtefactFileUpload(event) {
     const files = Array.from(event.target.files);
     if (!files || files.length === 0 || !activeDiscussion.value) return;
-    isExtractingText.value = true;
+    isUploadingArtefact.value = true;
     try {
-        await discussionsStore.uploadAndEmbedFileToDataZone({
+        await Promise.all(files.map(file => discussionsStore.addArtefact({
             discussionId: activeDiscussion.value.id,
-            files: files
-        });
+            file: file,
+        })));
     } finally {
-        isExtractingText.value = false;
-        if (knowledgeFileInput.value) {
-            knowledgeFileInput.value.value = '';
+        isUploadingArtefact.value = false;
+        if (artefactFileInput.value) {
+            artefactFileInput.value.value = '';
         }
     }
 }
 
+async function handleImportArtefactFromUrl() {
+    if (!urlToImport.value.trim() || !activeDiscussion.value) return;
+    await discussionsStore.importArtefactFromUrl({
+        discussionId: activeDiscussion.value.id,
+        url: urlToImport.value
+    });
+    urlToImport.value = '';
+    showUrlImport.value = false;
+}
+
 function handleProcessContent() {
     if (!activeDiscussion.value) return;
-
-    for (const doc of parsedDocuments.value) {
-        hideDocument(doc.filename);
-    }
-
     const finalPrompt = dataZonePromptText.value.replace('{{data_zone}}', discussionDataZone.value);
     discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, finalPrompt);
 }
@@ -605,9 +527,9 @@ async function handleDiscussionImageUpload(event) {
 }
 function handleGenerateImage() {
     if (!activeDiscussion.value) return;
-    let prompt = discussionDataZone.value.trim();
+    let prompt = dataZonePromptText.value.trim();
     if (!prompt) {
-        prompt = dataZonePromptText.value.trim();
+        prompt = discussionDataZone.value.trim();
     }
     if (!prompt) {
         uiStore.addNotification('Please provide a prompt in the Discussion Data Zone or the prompt text area to generate an image.', 'warning');
@@ -615,15 +537,60 @@ function handleGenerateImage() {
     }
     discussionsStore.generateImageFromDataZone(activeDiscussion.value.id, prompt);
 }
-
 function toggleViewMode(zone) {
     dataZoneViewModes.value[zone] = dataZoneViewModes.value[zone] === 'edit' ? 'view' : 'edit';
+}
+function handleCloneDiscussionContext() {
+    if (activeDiscussion.value) {
+        discussionsStore.cloneDiscussion(activeDiscussion.value.id);
+    }
+}
+async function handleLoadArtefact(title) {
+    if (activeDiscussion.value) {
+        const version = selectedArtefactVersions.value[title];
+        await discussionsStore.loadArtefactToContext({ discussionId: activeDiscussion.value.id, artefactTitle: title, version: version });
+    }
+}
+async function handleUnloadArtefact(title, version) {
+    if (activeDiscussion.value) {
+        await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: title, version: version });
+    }
+}
+async function handleViewArtefact(title) {
+    if (activeDiscussion.value) {
+        const version = selectedArtefactVersions.value[title];
+        const artefact = await discussionsStore.fetchArtefactContent({ discussionId: activeDiscussion.value.id, artefactTitle: title, version: version });
+        if (artefact !== null) {
+            uiStore.openModal('artefactViewer', { artefact });
+        }
+    }
+}
+async function handleDeleteArtefact(title) {
+    if (activeDiscussion.value) {
+        const confirmed = await uiStore.showConfirmation({ title: `Delete Artefact '${title}'?`, message: 'This will permanently delete the artefact and all its versions.', confirmText: 'Delete' });
+        if (confirmed) {
+            await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: title });
+        }
+    }
+}
+
+function openContextToArtefactModal() {
+    if (!activeDiscussion.value) return;
+    uiStore.openModal('contextToArtefact', {
+        discussionId: activeDiscussion.value.id,
+        artefacts: Object.values(activeDiscussionArtefacts.value.reduce((acc, art) => {
+            if (!acc[art.title]) {
+                acc[art.title] = { title: art.title };
+            }
+            return acc;
+        }, {}))
+    });
 }
 </script>
 
 <template>
     <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
-        <input type="file" ref="knowledgeFileInput" @change="handleKnowledgeFileUpload" multiple class="hidden" accept=".txt,.md,.pdf,.docx,.pptx,.xlsx,.xls, .py, .js, .html, .css, .json, .xml, .c, .cpp, .java">
+        <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
         <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf" multiple>
         
         <div class="flex-1 flex min-h-0">
@@ -651,11 +618,13 @@ function toggleViewMode(zone) {
                     <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0 relative">
                         <div v-if="isProcessing" class="absolute inset-0 bg-gray-400/30 dark:bg-gray-900/50 z-10 flex flex-col items-center justify-center">
                             <IconAnimateSpin class="w-10 h-10 text-gray-800 dark:text-gray-100 animate-spin" />
-                            <p class="mt-3 font-semibold text-gray-800 dark:text-gray-100">{{ isImportingUrl ? 'Importing URL...' : 'Processing...' }}</p>
+                            <p class="mt-3 font-semibold text-gray-800 dark:text-gray-100">Processing...</p>
                         </div>
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                             <div class="flex justify-between items-center"><h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data</h3>
                                 <div class="flex items-center gap-1">
+                                    <button @click="openContextToArtefactModal" class="btn-icon" title="Save Context as Artefact"><IconArrowDownTray class="w-5 h-5" /></button>
+                                    <button @click="handleCloneDiscussionContext" class="btn-icon" title="Clone Discussion Context"><IconCopy class="w-5 h-5" /></button>
                                     <button @click="uiStore.toggleDataZoneExpansion()" class="btn-icon" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'"><IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" /><IconMaximize v-else class="w-5 h-5" /></button>
                                     <button @click="refreshDataZones" class="btn-icon" title="Refresh Data"><IconRefresh class="w-5 h-5" /></button>
                                     <button @click="exportDataZone" class="btn-icon" title="Export to Markdown"><IconArrowUpTray class="w-5 h-5" /></button>
@@ -673,7 +642,7 @@ function toggleViewMode(zone) {
                             </div>
                         </div>
 
-                        <div class="flex-grow min-h-0 flex" :onpaste="currentModelVisionSupport ? handlePasteInDataZone : null">
+                        <div class="flex-grow min-h-0 flex" :onpaste="handlePasteInDataZone">
                             <div class="flex-grow flex flex-col min-w-0">
                                 <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
                                     <h4 class="font-semibold text-sm">Content</h4>
@@ -725,64 +694,64 @@ function toggleViewMode(zone) {
 
                             <div class="w-72 flex-shrink-0 border-l dark:border-gray-600 flex flex-col">
                                 <div class="flex-1 flex flex-col min-h-0">
-                                    <div v-if="currentModelVisionSupport" class="flex-1 flex flex-col min-h-0">
-                                        <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Images</h4><button @click="triggerDiscussionImageUpload" class="btn-icon" title="Add Image(s) or PDF" :disabled="isUploadingDiscussionImage"><IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-5 h-5" /><IconPhoto v-else class="w-5 h-5" /></button></div>
-                                        <div class="flex-grow overflow-y-auto p-2">
-                                            <div v-if="discussionImages.length === 0" class="text-center text-xs text-gray-500 pt-4">No images.</div>
-                                            <div v-else class="grid grid-cols-2 gap-2">
-                                                <div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="relative group/image"><img :src="'data:image/png;base64,' + img_b64" class="w-full h-16 object-cover rounded-md transition-all duration-300" :class="{'grayscale': !isImageActive(index)}"/><div class="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-1"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" title="View"><IconMaximize class="w-4 h-4" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="p-1.5 bg-red-500/80 text-white rounded-full hover:bg-red-600" title="Delete"><IconXMark class="w-4 h-4" /></button></div></div>
-                                            </div>
-                                            <div v-if="isUploadingDiscussionImage" class="grid grid-cols-2 gap-2 mt-2"><div class="relative w-full h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center animate-pulse"><IconPhoto class="w-8 h-8 text-gray-400 dark:text-gray-500" /></div></div>
+                                    <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Images</h4><button @click="triggerDiscussionImageUpload" class="btn-icon" title="Add Image(s) or PDF" :disabled="isUploadingDiscussionImage"><IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-5 h-5" /><IconPhoto v-else class="w-5 h-5" /></button></div>
+                                    <div class="flex-grow overflow-y-auto p-2">
+                                        <div v-if="discussionImages.length === 0" class="text-center text-xs text-gray-500 pt-4">No images.</div>
+                                        <div v-else class="grid grid-cols-2 gap-2">
+                                            <div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="relative group/image"><img :src="'data:image/png;base64,' + img_b64" class="w-full h-16 object-cover rounded-md transition-all duration-300" :class="{'grayscale': !isImageActive(index)}"/><div class="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-1"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" title="View"><IconMaximize class="w-4 h-4" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="p-1.5 bg-red-500/80 text-white rounded-full hover:bg-red-600" title="Delete"><IconXMark class="w-4 h-4" /></button></div></div>
+                                        </div>
+                                        <div v-if="isUploadingDiscussionImage" class="grid grid-cols-2 gap-2 mt-2"><div class="relative w-full h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center animate-pulse"><IconPhoto class="w-8 h-8 text-gray-400 dark:text-gray-500" /></div></div>
+                                    </div>
+                                </div>
+                                <div class="flex-1 flex flex-col min-h-0">
+                                    <div class="p-2 border-t dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Artefacts</h4>
+                                        <div class="flex items-center gap-1">
+                                            <button @click="showUrlImport = !showUrlImport" class="btn-icon" title="Import from URL"><IconWeb class="w-5 h-5" /></button>
+                                            <button @click="triggerArtefactFileUpload" class="btn-icon" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-5 h-5" /><IconPlus v-else class="w-5 h-5" /></button>
                                         </div>
                                     </div>
-                                    <div class="flex-1 flex flex-col min-h-0">
-                                        <div class="p-2 border-t dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Documents</h4>
-                                            <div class="flex items-center gap-1">
-                                                <button @click="showUrlImport = !showUrlImport" class="btn-icon" title="Import from URL"><IconWeb class="w-5 h-5" /></button>
-                                                <button @click="triggerKnowledgeFileUpload" class="btn-icon" title="Add text from files" :disabled="isExtractingText"><IconAnimateSpin v-if="isExtractingText" class="w-5 h-5" /><IconPlus v-else class="w-5 h-5" /></button>
+                                    <div class="flex-grow overflow-y-auto p-2 space-y-2">
+                                        <div v-if="showUrlImport" class="p-2 bg-gray-50 dark:bg-gray-700/50 rounded-md">
+                                            <label class="text-xs font-semibold">Import from URL</label>
+                                            <div class="flex items-center gap-1 mt-1">
+                                                <input v-model="urlToImport" type="url" placeholder="https://example.com" class="input-field-sm flex-grow">
+                                                <button @click="handleImportArtefactFromUrl" class="btn btn-secondary btn-sm !p-2" :disabled="isProcessing || !urlToImport">
+                                                    <IconAnimateSpin v-if="isProcessing" class="w-4 h-4" />
+                                                    <span v-else>Fetch</span>
+                                                </button>
                                             </div>
                                         </div>
-                                        <div class="flex-grow overflow-y-auto p-2 space-y-1">
-                                            <div v-if="showUrlImport" class="p-2 bg-gray-50 dark:bg-gray-700/50 rounded-md">
-                                                <label class="text-xs font-semibold">Import from URL</label>
-                                                <div class="flex items-center gap-1 mt-1">
-                                                    <input v-model="urlToImport" type="url" placeholder="https://example.com" class="input-field-sm flex-grow">
-                                                    <button @click="handleImportFromUrl" class="btn btn-secondary btn-sm !p-2" :disabled="isImportingUrl || !urlToImport">
-                                                        <IconAnimateSpin v-if="isImportingUrl" class="w-4 h-4" />
-                                                        <span v-else>Fetch</span>
-                                                    </button>
+                                        <div v-if="isLoadingArtefacts" class="text-center text-xs text-gray-500 pt-4">Loading...</div>
+                                        <div v-else-if="groupedArtefacts.length === 0" class="text-center text-xs text-gray-500 pt-4">No artefacts.</div>
+                                        
+                                        <div v-else v-for="group in groupedArtefacts" :key="group.title" class="flex flex-col p-1.5 rounded-md" :class="group.isAnyVersionLoaded ? 'bg-green-100 dark:bg-green-900/40' : 'bg-gray-100 dark:bg-gray-700/50'">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center gap-2 min-w-0">
+                                                    <IconFileText class="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                                    <span class="truncate text-xs font-semibold" :title="group.title">{{ group.title }}</span>
+                                                </div>
+                                                <div class="flex items-center gap-1 flex-shrink-0">
+                                                    <button @click="handleViewArtefact(group.title)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="View Content"><IconEye class="w-3.5 h-3.5" /></button>
+                                                    <button @click="handleDeleteArtefact(group.title)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Delete Artefact (all versions)"><IconTrash class="w-3.5 h-3.5" /></button>
                                                 </div>
                                             </div>
-                                            <div v-if="parsedDocuments.length === 0 && hiddenDocuments.length === 0" class="text-center text-xs text-gray-500 pt-4">No documents.</div>
-                                            <!-- Visible Documents -->
-                                            <div v-for="doc in parsedDocuments" :key="doc.filename" class="flex items-center justify-between p-1.5 rounded-md bg-gray-100 dark:bg-gray-700/50 text-xs">
-                                                <span class="truncate" :title="doc.filename">{{ doc.filename }}</span>
-                                                <div class="flex items-center gap-1">
-                                                    <button @click="hideDocument(doc.filename)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="Hide document">
-                                                        <IconEyeOff class="w-3 h-3" />
+                                            <div class="flex items-center gap-2 mt-1.5">
+                                                <select v-model="selectedArtefactVersions[group.title]" class="input-field-sm text-xs flex-grow min-w-0">
+                                                    <option v-for="artefact in group.versions" :key="artefact.version" :value="artefact.version">
+                                                        Version {{ artefact.version }} {{ artefact.is_loaded ? ' (Loaded)' : '' }}
+                                                    </option>
+                                                </select>
+                                                
+                                                <template v-if="group.versions.find(v => v.version == selectedArtefactVersions[group.title])?.is_loaded">
+                                                    <button @click="handleUnloadArtefact(group.title, selectedArtefactVersions[group.title])" class="btn btn-secondary btn-sm !p-2" title="Unload from Context">
+                                                        <IconCheckCircle class="w-4 h-4 text-green-600 dark:text-green-400" />
                                                     </button>
-                                                    <button @click="copyDocumentContent(doc.content)" class="p-1 rounded-full hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500" title="Copy document content">
-                                                        <IconCopy class="w-3 h-3" />
+                                                </template>
+                                                <template v-else>
+                                                     <button @click="handleLoadArtefact(group.title)" class="btn btn-secondary btn-sm !p-2" title="Load to Context">
+                                                        <IconArrowDownTray class="w-4 h-4" />
                                                     </button>
-                                                    <button @click="deleteDocument(doc.filename)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Remove Document">
-                                                        <IconXMark class="w-3 h-3" />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <!-- Hidden Documents Section -->
-                                            <div v-if="hiddenDocuments.length > 0" class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                                                <h5 class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1">Hidden Documents ({{ hiddenDocuments.length }})</h5>
-                                                <div v-for="doc in hiddenDocuments" :key="doc.filename" class="flex items-center justify-between p-1.5 rounded-md bg-gray-100 dark:bg-gray-700/50 text-xs opacity-60">
-                                                    <span class="truncate" :title="doc.filename">{{ doc.filename }}</span>
-                                                    <div class="flex items-center gap-1">
-                                                        <button @click="showDocument(doc.filename)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="Show document">
-                                                            <IconEye class="w-3 h-3" />
-                                                        </button>
-                                                        <button @click="deleteHiddenDocument(doc.filename)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Delete permanently">
-                                                            <IconTrash class="w-3 h-3" />
-                                                        </button>
-                                                    </div>
-                                                </div>
+                                                </template>
                                             </div>
                                         </div>
                                     </div>
