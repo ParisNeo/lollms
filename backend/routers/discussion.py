@@ -287,6 +287,11 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
 
     discussion_images_b64 = [img_info['data'] for img_info in all_images_info if img_info.get('active', True)]
     lc = get_user_lollms_client(username)
+    task.log(f"Processing:")
+    task.log(f"content: {discussion.discussion_data_zone[:1000]}")
+    task.log(f"prompt: {prompt_to_use}")
+    task.log(f"Nb images: {len(discussion_images_b64) if discussion_images_b64 else 0}")
+    
     summary = lc.long_context_processing(
         discussion.discussion_data_zone,
         images=discussion_images_b64,

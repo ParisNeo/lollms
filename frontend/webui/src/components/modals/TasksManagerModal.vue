@@ -62,6 +62,16 @@ watch(() => selectedTask.value?.logs, () => {
     });
 }, { deep: true });
 
+watch(() => tasksStore.tasks, (newTasks) => {
+    if (selectedTask.value) {
+        const updatedTask = newTasks.find(t => t.id === selectedTask.value.id);
+        if (updatedTask) {
+            selectedTask.value = { ...selectedTask.value, ...updatedTask };
+        }
+    }
+}, { deep: true });
+
+
 function formatDateTime(isoString) {
     if (!isoString) return 'N/A';
     return new Date(isoString).toLocaleString();

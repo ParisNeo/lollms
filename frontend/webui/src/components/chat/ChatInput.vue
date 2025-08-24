@@ -67,6 +67,7 @@ const isPositionModified = ref(false);
 const startDragPos = ref({ x: 0, y: 0 });
 const startChatboxPos = ref({ x: 0, y: 0 });
 const currentChatboxPos = ref(null);
+let nonReactivePosition = { x: 0, y: 0 };
 
 const userPromptSearchTerm = ref('');
 const zooPromptSearchTerm = ref('');
@@ -217,9 +218,11 @@ function onMouseDown(event) {
     const rect = el.getBoundingClientRect();
     if (!isPositionModified.value) {
         isPositionModified.value = true;
-        currentChatboxPos.value = { x: rect.left, y: rect.top };
+        nonReactivePosition = { x: rect.left, y: rect.top };
+    } else {
+        nonReactivePosition = { x: currentChatboxPos.value.x, y: currentChatboxPos.value.y };
     }
-    startChatboxPos.value = { ...currentChatboxPos.value };
+    startChatboxPos.value = { ...nonReactivePosition };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
 }
@@ -229,16 +232,28 @@ function onMouseMove(event) {
     event.preventDefault();
     const dx = event.clientX - startDragPos.value.x;
     const dy = event.clientY - startDragPos.value.y;
-    currentChatboxPos.value = clampPosition(startChatboxPos.value.x + dx, startChatboxPos.value.y + dy);
+    nonReactivePosition = clampPosition(startChatboxPos.value.x + dx, startChatboxPos.value.y + dy);
+    if (chatbarRef.value) {
+        chatbarRef.value.style.transform = `translate(${nonReactivePosition.x}px, ${nonReactivePosition.y}px)`;
+        chatbarRef.value.style.left = '0px';
+        chatbarRef.value.style.top = '0px';
+        chatbarRef.value.style.bottom = 'auto';
+    }
 }
 
 function onMouseUp() {
+    if (!isDragging.value) return;
     isDragging.value = false;
     document.body.style.userSelect = '';
     window.removeEventListener('mousemove', onMouseMove);
     window.removeEventListener('mouseup', onMouseUp);
+    
+    currentChatboxPos.value = { ...nonReactivePosition };
+    if (chatbarRef.value) {
+        chatbarRef.value.style.transform = '';
+    }
+    
     if (isPositionModified.value && currentChatboxPos.value) {
-        currentChatboxPos.value = clampPosition(currentChatboxPos.value.x, currentChatboxPos.value.y);
         localStorage.setItem('lollms_chatbarPosition', JSON.stringify(currentChatboxPos.value));
         localStorage.setItem('lollms_chatbarPositionModified', 'true');
     }
