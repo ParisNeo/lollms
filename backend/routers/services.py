@@ -22,6 +22,7 @@ from backend.models import (
 from backend.discussion import get_user_discussion
 from backend.task_manager import task_manager, Task
 from backend.utils import get_accessible_host
+from ascii_colors import trace_exception
 
 mcp_router = APIRouter(prefix="/api/mcps", tags=["Services"])
 apps_router = APIRouter(prefix="/api/apps", tags=["Services"])
@@ -105,21 +106,24 @@ def list_mcps(
         app_query = app_query.filter(or_(DBApp.owner_user_id == current_user.id, DBApp.type == 'system'))
 
     for app in app_query.all():
-        url = app.url
-        if app.is_installed and app.status == 'running' and app.port:
-            url = f"http://{accessible_host}:{app.port}/mcp"
-        
-        all_mcps.append(MCPPublic(
-            id=app.id, name=app.name, client_id=app.client_id, url=url, icon=app.icon,
-            active=app.active, type=app.type,
-            authentication_type=app.authentication_type,
-            authentication_key="********" if app.authentication_key else "",
-            owner_username=app.owner.username if app.owner else "System",
-            created_at=app.created_at, updated_at=app.updated_at,
-            sso_redirect_uri=app.sso_redirect_uri,
-            sso_user_infos_to_share=app.sso_user_infos_to_share or []
-        ))
-
+        try:
+            url = app.url
+            if app.is_installed and app.status == 'running' and app.port:
+                url = f"http://{accessible_host}:{app.port}/mcp"
+            
+            all_mcps.append(MCPPublic(
+                id=app.id, name=app.name, client_id=app.client_id, url=url, icon=app.icon,
+                active=app.active, type=app.type,
+                authentication_type=app.authentication_type,
+                authentication_key="********" if app.authentication_key else "",
+                owner_username=app.owner.username if app.owner else "System",
+                created_at=app.created_at, updated_at=app.updated_at,
+                sso_redirect_uri=app.sso_redirect_uri,
+                sso_user_infos_to_share=app.sso_user_infos_to_share or []
+            ))
+        except Exception as e:
+            trace_exception(e)
+            continue
     return sorted(all_mcps, key=lambda m: m.name)
 
 @mcp_router.post("", response_model=MCPPublic, status_code=201)

@@ -51,7 +51,7 @@ from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse
                             MessageCodeExportRequest, MessageContentUpdate,
                             MessageGradeUpdate, MessageOutput,
                             MessageUpdateWithImages, TaskInfo,
-                            UnloadArtefactRequest)
+                            UnloadArtefactRequest, ArtefactCreateManual, ArtefactUpdate)
 from backend.session import (get_current_active_user,
                              get_current_db_user_from_token,
                              get_safe_store_instance,
@@ -170,7 +170,6 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         )
         task.log("LollmsClient initialized for TTI.")
         task.set_progress(20)
-        task.log(f"prompt:\n```\n{prompt}\n```")
 
         image_bytes = lc.tti.generate_image(prompt=prompt)
         task.log("Image data received from binding.")
@@ -270,8 +269,8 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
     
     all_images_info = discussion.get_discussion_images()
     
-    if (not discussion.discussion_data_zone or not discussion.discussion_data_zone.strip()) and not all_images_info:
-        task.log("Data zone is empty (no text or images), nothing to process.", "WARNING")
+    if (not discussion.discussion_data_zone or not discussion.discussion_data_zone.strip()) and not all_images_info and (not contextual_prompt or not contextual_prompt.strip()):
+        task.log("Data zone and prompt are empty, nothing to process.", "WARNING")
         return {"discussion_id": discussion_id, "new_content": ""}
     
     def summary_callback(message: str, msg_type: Any, params: Optional[Dict] = None):
@@ -977,6 +976,69 @@ async def list_discussion_artefacts(
         if isinstance(artefact.get('updated_at'), datetime):
             artefact['updated_at'] = artefact['updated_at'].isoformat()
     return artefacts
+
+@discussion_router.post("/{discussion_id}/artefacts/manual", response_model=ArtefactInfo, status_code=201)
+async def create_manual_artefact(
+    discussion_id: str,
+    payload: ArtefactCreateManual,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    if discussion.get_artefact(title=payload.title):
+        raise HTTPException(status_code=409, detail="An artefact with this title already exists.")
+
+    try:
+        artefact_info = discussion.add_artefact(
+            title=payload.title,
+            content=payload.content,
+            images=payload.images_b64,
+            author=current_user.username
+        )
+        discussion.commit()
+        if isinstance(artefact_info.get('created_at'), datetime):
+            artefact_info['created_at'] = artefact_info['created_at'].isoformat()
+        if isinstance(artefact_info.get('updated_at'), datetime):
+            artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
+        return artefact_info
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to create artefact: {e}")
+
+@discussion_router.put("/{discussion_id}/artefacts/{artefact_title}", response_model=ArtefactInfo)
+async def update_manual_artefact(
+    discussion_id: str,
+    artefact_title: str,
+    payload: ArtefactUpdate,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    discussion = get_user_discussion(current_user.username, discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found")
+    
+    if not discussion.get_artefact(title=artefact_title):
+        raise HTTPException(status_code=404, detail="Artefact not found to update.")
+
+    try:
+        combined_images = payload.kept_images_b64 + payload.new_images_b64
+        
+        artefact_info = discussion.update_artefact(
+            title=artefact_title,
+            new_content=payload.new_content,
+            new_images=combined_images
+        )
+        discussion.commit()
+
+        if isinstance(artefact_info.get('created_at'), datetime):
+            artefact_info['created_at'] = artefact_info['created_at'].isoformat()
+        if isinstance(artefact_info.get('updated_at'), datetime):
+            artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
+        return artefact_info
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to update artefact: {e}")
 
 @discussion_router.post("/{discussion_id}/artefacts", response_model=ArtefactInfo)
 async def add_discussion_artefact(

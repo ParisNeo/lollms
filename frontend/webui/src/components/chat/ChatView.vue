@@ -556,12 +556,12 @@ async function handleUnloadArtefact(title, version) {
         await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: title, version: version });
     }
 }
-async function handleViewArtefact(title) {
+async function handleEditArtefact(title) {
     if (activeDiscussion.value) {
         const version = selectedArtefactVersions.value[title];
         const artefact = await discussionsStore.fetchArtefactContent({ discussionId: activeDiscussion.value.id, artefactTitle: title, version: version });
         if (artefact !== null) {
-            uiStore.openModal('artefactViewer', { artefact });
+            uiStore.openModal('artefactEditor', { artefact, discussionId: activeDiscussion.value.id });
         }
     }
 }
@@ -572,6 +572,11 @@ async function handleDeleteArtefact(title) {
             await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: title });
         }
     }
+}
+
+function handleCreateArtefact() {
+    if (!activeDiscussion.value) return;
+    uiStore.openModal('artefactEditor', { discussionId: activeDiscussion.value.id });
 }
 
 function openContextToArtefactModal() {
@@ -706,8 +711,9 @@ function openContextToArtefactModal() {
                                 <div class="flex-1 flex flex-col min-h-0">
                                     <div class="p-2 border-t dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Artefacts</h4>
                                         <div class="flex items-center gap-1">
+                                            <button @click="handleCreateArtefact" class="btn-icon" title="Create Artefact"><IconPlus class="w-5 h-5" /></button>
                                             <button @click="showUrlImport = !showUrlImport" class="btn-icon" title="Import from URL"><IconWeb class="w-5 h-5" /></button>
-                                            <button @click="triggerArtefactFileUpload" class="btn-icon" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-5 h-5" /><IconPlus v-else class="w-5 h-5" /></button>
+                                            <button @click="triggerArtefactFileUpload" class="btn-icon" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-5 h-5" /><IconArrowUpTray v-else class="w-5 h-5" /></button>
                                         </div>
                                     </div>
                                     <div class="flex-grow overflow-y-auto p-2 space-y-2">
@@ -731,7 +737,7 @@ function openContextToArtefactModal() {
                                                     <span class="truncate text-xs font-semibold" :title="group.title">{{ group.title }}</span>
                                                 </div>
                                                 <div class="flex items-center gap-1 flex-shrink-0">
-                                                    <button @click="handleViewArtefact(group.title)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="View Content"><IconEye class="w-3.5 h-3.5" /></button>
+                                                    <button @click="handleEditArtefact(group.title)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="View & Edit Content"><IconPencil class="w-3.5 h-3.5" /></button>
                                                     <button @click="handleDeleteArtefact(group.title)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Delete Artefact (all versions)"><IconTrash class="w-3.5 h-3.5" /></button>
                                                 </div>
                                             </div>

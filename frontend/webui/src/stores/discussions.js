@@ -1232,6 +1232,33 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch (error) {}
     }
 
+    async function createManualArtefact({ discussionId, title, content, imagesB64 }) {
+        const uiStore = useUiStore();
+        try {
+            const payload = { title, content, images_b64: imagesB64 };
+            await apiClient.post(`/api/discussions/${discussionId}/artefacts/manual`, payload);
+            await fetchArtefacts(discussionId);
+            uiStore.addNotification('Artefact created successfully.', 'success');
+        } catch (error) {
+            console.error("Failed to create manual artefact:", error);
+        }
+    }
+
+    async function updateArtefact({ discussionId, artefactTitle, newContent, newImagesB64, keptImagesB64 }) {
+        const uiStore = useUiStore();
+        try {
+            const payload = {
+                new_content: newContent,
+                new_images_b64: newImagesB64,
+                kept_images_b64: keptImagesB64,
+            };
+            await apiClient.put(`/api/discussions/${discussionId}/artefacts/${artefactTitle}`, payload);
+            await fetchArtefacts(discussionId);
+            uiStore.addNotification(`Artefact '${artefactTitle}' updated.`, 'success');
+        } catch (error) {
+            console.error("Failed to update artefact:", error);
+        }
+    }
 
     function $reset() {
         discussions.value = {};
@@ -1274,6 +1301,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         fetchArtefacts, addArtefact, deleteArtefact, fetchArtefactContent, loadArtefactToContext,
         unloadArtefactFromContext,
         importArtefactFromUrl,
-        exportContextAsArtefact
+        exportContextAsArtefact,
+        createManualArtefact,
+        updateArtefact
     };
 });

@@ -130,7 +130,7 @@ class MCPUpdate(BaseModel):
 
 class MCPPublic(MCPBase):
     id: str
-    owner_username: Optional[str] = None
+    owner_username: Optional[str|None] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
     class Config:

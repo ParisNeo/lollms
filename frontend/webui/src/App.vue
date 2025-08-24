@@ -22,7 +22,7 @@ import AdminUserEditModal from './components/modals/AdminUserEditModal.vue';
 import ForceSettingsModal from './components/modals/ForceSettingsModal.vue';
 import ConfirmationModal from './components/ui/ConfirmationModal.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
-import ArtefactViewerModal from './components/modals/ArtefactViewerModal.vue';
+import ArtefactEditorModal from './components/modals/ArtefactEditorModal.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ShareDataStoreModal from './components/modals/ShareDataStoreModal.vue';
 import ExportModal from './components/modals/ExportModal.vue';
@@ -134,7 +134,7 @@ onMounted(async () => {
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <ConfirmationModal v-if="activeModal === 'confirmation'" />
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
-    <ArtefactViewerModal v-if="activeModal === 'artefactViewer'" />
+    <ArtefactEditorModal v-if="activeModal === 'artefactEditor'" />
     <NotificationPanel />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
     <ExportModal v-if="activeModal === 'export'" />

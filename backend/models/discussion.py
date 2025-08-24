@@ -158,3 +158,13 @@ class PaginatedDiscussionInfo(PaginatedResponse[DiscussionInfo]):
 
 class PaginatedMessageOutput(PaginatedResponse[MessageOutput]):
     pass
+
+class ArtefactCreateManual(BaseModel):
+    title: constr(min_length=1)
+    content: str = ""
+    images_b64: List[str] = Field(default_factory=list)
+
+class ArtefactUpdate(BaseModel):
+    new_content: str
+    new_images_b64: List[str] = Field(default_factory=list)
+    kept_images_b64: List[str] = Field(default_factory=list)

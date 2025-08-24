@@ -1,1 +1,0 @@
-import{am as m}from"./index-0fYRG1mg.js";function l(e,c){var i,t,o;e.accDescr&&((i=c.setAccDescription)==null||i.call(c,e.accDescr)),e.accTitle&&((t=c.setAccTitle)==null||t.call(c,e.accTitle)),e.title&&((o=c.setDiagramTitle)==null||o.call(c,e.title))}m(l,"populateCommonDb");export{l as p};
