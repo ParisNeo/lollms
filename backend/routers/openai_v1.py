@@ -285,31 +285,6 @@ async def list_personalities(
     return PersonalityListResponse(data=response_data)
 
 
-# --- Helper to Extract Images and Convert Messages ---
-def preprocess_messages(messages: List[ChatMessage], image_list: List[str]) -> List[Dict]:
-    processed = []
-
-    for msg in messages:
-        content = msg.content
-        if isinstance(content, str):
-            processed.append({"role": msg.role, "content": content})
-        elif isinstance(content, list):
-            text_parts = []
-            for item in content:
-                if item.get("type") == "image_url":
-                    base64_img = item["image_url"].get("base64")
-                    if base64_img:
-                        image_list.append(base64_img)
-                elif item.get("type") == "text":
-                    text_parts.append(item.get("text", ""))
-                else:
-                    text_parts.append(str(item))
-            processed.append({"role": msg.role, "content": "\n".join(text_parts)})
-        else:
-            processed.append({"role": msg.role, "content": str(content)})
-
-    return processed
-
 
 # --- Main Route ---
 @openai_v1_router.post("/chat/completions")
@@ -347,9 +322,7 @@ async def chat_completions(
         messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
     # Preprocess messages and extract images
-    images: List[str] = []
-    openai_messages = preprocess_messages(messages, images)
-
+    
     # Streaming or regular completion
     if request.stream:
         async def stream_generator():
@@ -405,12 +378,11 @@ async def chat_completions(
     else:
         try:
             result = lc.generate_from_messages(
-                openai_messages,
-                images=images,
+                messages,
                 temperature=request.temperature,
                 n_predict=request.max_tokens
             )
-            prompt_tokens = lc.count_tokens(str(openai_messages))
+            prompt_tokens = lc.count_tokens(str(messages))
             completion_tokens = lc.count_tokens(result)
             return ChatCompletionResponse(
                 model=request.model,
