@@ -191,21 +191,23 @@ def load_mcps(username):
         all_active_mcps = app_mcps + system_mcps + personal_mcps
 
         for mcp in all_active_mcps:
-            mcp_base_url = mcp.url.rstrip('/')
-            if not mcp_base_url.endswith('/mcp'):
-                mcp_full_url = f"{mcp_base_url}/mcp"
-            else:
-                mcp_full_url = mcp_base_url
-            
-            server_info = {"server_url": mcp_full_url}
-            
-            if mcp.authentication_type == "lollms_chat_auth":
-                server_info["auth_config"] = { "type": "bearer", "token": session.get("access_token") }
-            elif mcp.authentication_type == "bearer":
-                server_info["auth_config"] = { "type": "bearer", "token": mcp.authentication_key }
-
-            servers_infos[mcp.name] = server_info
+            try:
+                mcp_base_url = mcp.url.rstrip('/')
+                if not mcp_base_url.endswith('/mcp'):
+                    mcp_full_url = f"{mcp_base_url}/mcp"
+                else:
+                    mcp_full_url = mcp_base_url
                 
+                server_info = {"server_url": mcp_full_url}
+                
+                if mcp.authentication_type == "lollms_chat_auth":
+                    server_info["auth_config"] = { "type": "bearer", "token": session.get("access_token") }
+                elif mcp.authentication_type == "bearer":
+                    server_info["auth_config"] = { "type": "bearer", "token": mcp.authentication_key }
+
+                servers_infos[mcp.name] = server_info
+            except Exception as e:
+                trace_exception(e)
     finally:
         db_for_mcp.close()
     return servers_infos
