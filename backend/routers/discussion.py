@@ -537,7 +537,7 @@ async def clone_discussion(
             created_at=cloned_discussion.created_at,
             last_activity_at=cloned_discussion.updated_at,
             discussion_images=cloned_discussion.images or [],
-            active_discussion_images=cloned_discussion.active_images or []
+            active_discussion_images= [img_info['active'] for img_info in cloned_discussion.images] if cloned_discussion.images else []
         )
     except Exception as e:
         trace_exception(e)
