@@ -374,6 +374,7 @@ async def chat_completions(
     # Preprocess messages and extract images
     openai_messages, images = preprocess_openai_messages(messages)
     ASCIIColors.info(f"Received images: {len(images)}")
+    ASCIIColors.info(f"Received openai_messages: {openai_messages}")
     
     # Streaming or regular completion
     if request.stream:
