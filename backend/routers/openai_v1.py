@@ -311,6 +311,30 @@ def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
 
     return processed, image_list
 
+def preprocess_openai_messages(messages: List["ChatMessage"]) -> Tuple[List[Dict], List[str]]:
+    processed = []
+    image_list = []
+
+    for msg in messages:
+        msg_dict = {
+            "role": msg.role,
+            "content": msg.content
+        }
+
+        if isinstance(msg.content, list):
+            for item in msg.content:
+                if item.get("type") == "image_url":
+                    base64_img = item["image_url"].get("base64")
+                    url = item["image_url"].get("url")
+                    if base64_img:
+                        image_list.append(base64_img)
+                    elif url:
+                        image_list.append(url)
+
+        processed.append(msg_dict)
+
+    return processed, image_list
+
 
 # --- Main Route ---
 @openai_v1_router.post("/chat/completions")
@@ -348,7 +372,7 @@ async def chat_completions(
         messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
     # Preprocess messages and extract images
-    openai_messages, images = preprocess_messages(messages)
+    openai_messages, images = preprocess_openai_messages(messages)
     ASCIIColors.info(f"Received images: {len(images)}")
     
     # Streaming or regular completion
@@ -379,8 +403,9 @@ async def chat_completions(
             def blocking_call():
                 try:
                     lc.generate_from_messages(
-                        messages,
+                        openai_messages,
                         streaming_callback=llm_callback,
+                        images=images,
                         temperature=request.temperature,
                         n_predict=request.max_tokens
                     )
@@ -405,7 +430,7 @@ async def chat_completions(
     else:
         try:
             result = lc.generate_from_messages(
-                messages,
+                openai_messages,
                 temperature=request.temperature,
                 n_predict=request.max_tokens
             )
