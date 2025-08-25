@@ -12,6 +12,7 @@ from jose import jwt, JWTError
 from ascii_colors import trace_exception, ASCIIColors
 
 from backend.db import get_db
+from backend.db.models.service import MCP as DBMCP, App as DBApp
 from backend.db.models.user import User as DBUser
 from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
 from backend.db.models.service import MCP as DBMCP
@@ -177,6 +178,8 @@ def load_mcps(username):
     servers_infos = {}
     db_for_mcp = next(get_db())
     try:
+        
+        app_mcps = db_for_mcp.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.app_metadata['item_type'].as_string() == 'mcp').all()
         system_mcps = db_for_mcp.query(DBMCP).filter(DBMCP.type == 'system', DBMCP.active == True).all()
         user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
         
@@ -185,7 +188,7 @@ def load_mcps(username):
             session["access_token"] = create_access_token(data={"sub": user_db.username})
             personal_mcps = [mcp for mcp in user_db.personal_mcps if mcp.active]
 
-        all_active_mcps = system_mcps + personal_mcps
+        all_active_mcps = app_mcps + system_mcps + personal_mcps
 
         for mcp in all_active_mcps:
             mcp_base_url = mcp.url.rstrip('/')
