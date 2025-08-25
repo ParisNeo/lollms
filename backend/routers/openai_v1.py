@@ -379,9 +379,8 @@ async def chat_completions(
             def blocking_call():
                 try:
                     lc.generate_from_messages(
-                        openai_messages,
+                        messages,
                         streaming_callback=llm_callback,
-                        images=images,
                         temperature=request.temperature,
                         n_predict=request.max_tokens
                     )
