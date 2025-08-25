@@ -1620,9 +1620,13 @@ async def chat_in_existing_discussion(
         return StreamingResponse(error_stream(), media_type="application/x-ndjson")
 
 
-    def query_rag_callback(query: str, ss, rag_top_k, rag_min_similarity_percent) -> List[Dict]:
+    def query_rag_callback(query: str, ss, rag_top_k=None, rag_min_similarity_percent=None) -> List[Dict]:
         if not ss: return []
         try:
+            if rag_top_k is None:
+                rag_top_k = current_user.rag_top_k if current_user.rag_top_k is not None else 5
+            if rag_min_similarity_percent is None:
+                rag_min_similarity_percent = current_user.rag_min_sim_percent if current_user.rag_min_sim_percent is not None else 50
             retrieved_chunks = ss.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
             revamped_chunks=[]
             for entry in retrieved_chunks:
