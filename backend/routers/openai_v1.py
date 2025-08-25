@@ -348,6 +348,8 @@ async def chat_completions(
         messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
     # Preprocess messages and extract images
+    openai_messages, images = preprocess_messages(messages)
+    ASCIIColors.info(f"Received images: {len(images)}")
     
     # Streaming or regular completion
     if request.stream:
@@ -408,7 +410,7 @@ async def chat_completions(
                 temperature=request.temperature,
                 n_predict=request.max_tokens
             )
-            prompt_tokens = lc.count_tokens(str(messages))
+            prompt_tokens = lc.count_tokens(str(openai_messages))
             completion_tokens = lc.count_tokens(result)
             return ChatCompletionResponse(
                 model=request.model,
