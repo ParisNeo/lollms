@@ -285,6 +285,32 @@ async def list_personalities(
     return PersonalityListResponse(data=response_data)
 
 
+# --- Helper to Extract Images and Convert Messages ---
+def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
+    processed = []
+    image_list = []
+
+    for msg in messages:
+        content = msg.content
+        if isinstance(content, str):
+            processed.append({"role": msg.role, "content": content})
+        elif isinstance(content, list):
+            text_parts = []
+            for item in content:
+                if item.get("type") == "image_url":
+                    base64_img = item["image_url"].get("base64")
+                    if base64_img:
+                        image_list.append(base64_img)
+                elif item.get("type") == "text":
+                    text_parts.append(item.get("text", ""))
+                else:
+                    text_parts.append(str(item))
+            processed.append({"role": msg.role, "content": "\n".join(text_parts)})
+        else:
+            processed.append({"role": msg.role, "content": str(content)})
+
+    return processed, image_list
+
 
 # --- Main Route ---
 @openai_v1_router.post("/chat/completions")
