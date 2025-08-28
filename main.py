@@ -507,6 +507,11 @@ if __name__ == "__main__":
     import uvicorn
     from backend.settings import settings
     settings.refresh()
+    data_dir = Path(settings.get("data_dir","data"))
+    mcp_dir = data_dir / "mcps"
+    apps_dir = data_dir / "apps"
+    mcp_dir.mkdir(parents=True, exist_ok=True)
+    apps_dir.mkdir(parents=True, exist_ok=True)
     host_setting = settings.get("host", host)
 
     port_setting = int(settings.get("port", port))
