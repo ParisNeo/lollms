@@ -5,7 +5,7 @@ import json
 import asyncio
 import threading
 import uuid
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Tuple, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -286,8 +286,9 @@ async def list_personalities(
 
 
 # --- Helper to Extract Images and Convert Messages ---
-def preprocess_messages(messages: List[ChatMessage], image_list: List[str]) -> List[Dict]:
+def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
     processed = []
+    image_list = []
 
     for msg in messages:
         content = msg.content
@@ -308,7 +309,31 @@ def preprocess_messages(messages: List[ChatMessage], image_list: List[str]) -> L
         else:
             processed.append({"role": msg.role, "content": str(content)})
 
-    return processed
+    return processed, image_list
+
+def preprocess_openai_messages(messages: List["ChatMessage"]) -> Tuple[List[Dict], List[str]]:
+    processed = []
+    image_list = []
+
+    for msg in messages:
+        msg_dict = {
+            "role": msg.role,
+            "content": msg.content
+        }
+
+        if isinstance(msg.content, list):
+            for item in msg.content:
+                if item.get("type") == "image_url":
+                    base64_img = item["image_url"].get("base64")
+                    url = item["image_url"].get("url")
+                    if base64_img:
+                        image_list.append(base64_img)
+                    elif url:
+                        image_list.append(url)
+
+        processed.append(msg_dict)
+
+    return processed, image_list
 
 
 # --- Main Route ---
@@ -347,9 +372,9 @@ async def chat_completions(
         messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
     # Preprocess messages and extract images
-    images: List[str] = []
-    openai_messages = preprocess_messages(messages, images)
-
+    openai_messages, images = preprocess_openai_messages(messages)
+    ASCIIColors.info(f"Received images: {len(images)}")
+    
     # Streaming or regular completion
     if request.stream:
         async def stream_generator():
@@ -406,7 +431,6 @@ async def chat_completions(
         try:
             result = lc.generate_from_messages(
                 openai_messages,
-                images=images,
                 temperature=request.temperature,
                 n_predict=request.max_tokens
             )

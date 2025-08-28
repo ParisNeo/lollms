@@ -1091,7 +1091,15 @@ async def add_discussion_artefact(
             elif extension == ".docx":
                 with io.BytesIO(content_bytes) as docx_io:
                     doc = DocxDocument(docx_io)
+                    # Extract text
                     content = "\n".join([p.text for p in doc.paragraphs])
+            
+                    # Extract images
+                    for rel in doc.part._rels.values():
+                        if "image" in rel.target_ref:  # detect images
+                            image_part = rel.target_part
+                            image_bytes = image_part.blob
+                            images.append(base64.b64encode(image_bytes).decode("utf-8"))
             elif extension in CODE_EXTENSIONS:
                 lang = CODE_EXTENSIONS[extension]
                 text_content = content_bytes.decode('utf-8', errors='replace')

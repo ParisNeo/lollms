@@ -6,9 +6,9 @@ class PersonalityBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     category: Optional[str] = Field(None, max_length=100)
     author: Optional[str] = Field(None, max_length=100)
-    description: Optional[str] = Field(None, max_length=2000)
+    description: Optional[str] = Field(None)
     prompt_text: str
-    disclaimer: Optional[str] = Field(None, max_length=1000)
+    disclaimer: Optional[str] = Field(None)
     script_code: Optional[str] = None
     icon_base64: Optional[str] = None
     active_mcps: Optional[List[str]] = Field(default_factory=list)
