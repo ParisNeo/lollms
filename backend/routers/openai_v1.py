@@ -371,44 +371,67 @@ async def chat_completions(
             raise HTTPException(status_code=403, detail="You cannot use this personality.")
         messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
-    # Preprocess messages and extract images
     openai_messages, images = preprocess_openai_messages(messages)
     ASCIIColors.info(f"Received images: {len(images)}")
-    
-    # Streaming or regular completion
+
+    # --- Streaming ---
     if request.stream:
         async def stream_generator():
-            main_loop = asyncio.get_event_loop()
+            main_loop = asyncio.get_running_loop()
             stream_queue = asyncio.Queue()
             stop_event = threading.Event()
 
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"
             created_ts = int(time.time())
 
-            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role='assistant'), finish_reason=None)]).model_dump_json()}\n\n".encode("utf-8")
+            # First event: role assistant
+            first_chunk = ChatCompletionStreamResponse(
+                id=completion_id,
+                model=request.model,
+                created=created_ts,
+                choices=[ChatCompletionResponseStreamChoice(
+                    index=0,
+                    delta=DeltaMessage(role="assistant"),
+                    finish_reason=None
+                )]
+            )
+            yield f"data: {first_chunk.model_dump_json()}\n\n".encode('utf-8')
 
-            def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None):
+            def llm_callback(chunk: str, msg_type: MSG_TYPE, **kwargs) -> bool:
                 if stop_event.is_set():
                     return False
-                if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
+                if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk:  # Ensure chunk is not empty
                     response_chunk = ChatCompletionStreamResponse(
                         id=completion_id,
                         model=request.model,
                         created=created_ts,
-                        choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(content=chunk))]
+                        choices=[ChatCompletionResponseStreamChoice(
+                            index=0,
+                            delta=DeltaMessage(content=chunk)
+                        )]
                     )
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, response_chunk.model_dump_json())
+                    try:
+                        json_data = response_chunk.model_dump_json()
+                        main_loop.call_soon_threadsafe(
+                            stream_queue.put_nowait,
+                            f"data: {json_data}\n\n".encode('utf-8')
+                        )
+                    except Exception as e:
+                        print(f"Error serializing chunk: {e}")
                 return True
 
             def blocking_call():
                 try:
+                    print("Starting generate_from_messages")  # Debug log
                     lc.generate_from_messages(
                         openai_messages,
                         streaming_callback=llm_callback,
                         images=images,
                         temperature=request.temperature,
-                        n_predict=request.max_tokens
+                        n_predict=request.max_tokens,
+                        stream=True
                     )
+                    print("Finished generate_from_messages")  # Debug log
                 except Exception as e:
                     print(f"Streaming error: {e}")
                 finally:
@@ -420,13 +443,26 @@ async def chat_completions(
                 item = await stream_queue.get()
                 if item is None:
                     break
-                yield f"data: {item}\n\n".encode("utf-8")
+                if item.strip():  # Ensure item is not empty
+                    yield item
 
-            yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(), finish_reason='stop')]).model_dump_json()}\n\n".encode("utf-8")
-            yield "data: [DONE]\n\n".encode("utf-8")
+            # Final chunk
+            end_chunk = ChatCompletionStreamResponse(
+                id=completion_id,
+                model=request.model,
+                created=created_ts,
+                choices=[ChatCompletionResponseStreamChoice(
+                    index=0,
+                    delta=DeltaMessage(),
+                    finish_reason="stop"
+                )]
+            )
+            yield f"data: {end_chunk.model_dump_json()}\n\n".encode('utf-8')
+            yield "data: [DONE]\n\n".encode('utf-8')
 
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
 
+    # --- Non-streaming ---
     else:
         try:
             result = lc.generate_from_messages(
@@ -451,6 +487,8 @@ async def chat_completions(
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Generation error: {e}")
+        
+        
 
 @openai_v1_router.post("/embeddings", response_model=EmbeddingResponse)
 async def create_embeddings(
