@@ -628,8 +628,6 @@ function openContextToArtefactModal() {
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                             <div class="flex justify-between items-center"><h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data</h3>
                                 <div class="flex items-center gap-1">
-                                    <button @click="openContextToArtefactModal" class="btn-icon" title="Save Context as Artefact"><IconArrowDownTray class="w-5 h-5" /></button>
-                                    <button @click="handleCloneDiscussionContext" class="btn-icon" title="Clone Discussion Context"><IconCopy class="w-5 h-5" /></button>
                                     <button @click="uiStore.toggleDataZoneExpansion()" class="btn-icon" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'"><IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" /><IconMaximize v-else class="w-5 h-5" /></button>
                                     <button @click="refreshDataZones" class="btn-icon" title="Refresh Data"><IconRefresh class="w-5 h-5" /></button>
                                     <button @click="exportDataZone" class="btn-icon" title="Export to Markdown"><IconArrowUpTray class="w-5 h-5" /></button>
@@ -652,6 +650,8 @@ function openContextToArtefactModal() {
                                 <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
                                     <h4 class="font-semibold text-sm">Content</h4>
                                     <div class="flex items-center gap-1">
+                                        <button @click="handleCloneDiscussionContext" class="btn-icon" title="Clone Discussion Context"><IconCopy class="w-5 h-5" /></button>
+                                        <button @click="openContextToArtefactModal" class="btn-icon" title="Save Context as Artefact"><IconArrowDownTray class="w-5 h-5" /></button>
                                         <button @click="toggleViewMode('discussion')" class="btn-icon" :title="dataZoneViewModes.discussion === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.discussion === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button>
                                         <button @click="handleUndoDiscussion" class="btn-icon" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-5 h-5" /></button>
                                         <button @click="handleRedoDiscussion" class="btn-icon" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-5 h-5" /></button>

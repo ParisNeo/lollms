@@ -91,7 +91,7 @@
                 </DropdownMenu>
             </div>
         </div>
-        <div class="editor-content flex-1 overflow-auto">
+        <div class="editor-content flex-1 overflow-hidden p-1">
         <div ref="editorRef" class="editor-wrapper h-full w-full"></div>
         </div>
     </div>
@@ -365,13 +365,17 @@ onBeforeUnmount(() => {
 
 <style>
 .cm-editor {
-    min-height: 150px;
-    max-height: 70vh;
-    height: auto;
-    outline: none !important;
-    font-size: 0.9rem;
+  min-height: 150px;
+  max-height: 70vh;
+  height: 100%;          /* let it stretch to container */
+  outline: none !important;
+  font-size: 0.9rem;
 }
+
 .cm-scroller {
-    overflow: auto;
+  overflow: auto;
+  padding-right: 4px;    /* add breathing space for scrollbar */
+  box-sizing: content-box;
 }
+
 </style>
