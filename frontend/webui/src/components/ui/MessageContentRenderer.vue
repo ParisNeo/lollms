@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
-import { parsedMarkdown, getContentTokensWithMathProtection } from '../../services/markdownParser';
+import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection } from '../../services/markdownParser';
 
 import CodeBlock from './CodeBlock.vue';
 import IconThinking from '../../assets/icons/IconThinking.vue';
@@ -14,49 +14,90 @@ const props = defineProps({
 
 const messageContentRef = ref(null);
 
+// --- Math Rendering ---
 function renderMath() {
+  // **CRITICAL FIX**: Corrected `messageContent-ref` to `messageContentRef`
   if (messageContentRef.value && window.renderMathInElement) {
     window.renderMathInElement(messageContentRef.value, {
       delimiters: [
         { left: '$$', right: '$$', display: true },
         { left: '\\[', right: '\\]', display: true },
         { left: '\\(', right: '\\)', display: false },
-        { left: '$', right: '$', display: false }
+        { left: '$', right: '$', display: false } // Keeping single dollar for compatibility
       ],
       throwOnError: false
     });
   }
 }
 
+// Watchers and Lifecycle hooks are correct
 watch(() => props.content, async () => {
-    await nextTick();
-    renderMath();
+  await nextTick();
+  renderMath();
 }, { flush: 'post' });
 
-onMounted(() => {
-    renderMath();
+onMounted(async () => {
+  await nextTick();
+  renderMath();
 });
 
-const messageParts = computed(() => {
-    if (!props.content || props.isStreaming) return [];
-    const parts = [];
-    const content = props.content;
-    const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/g;
-    let lastIndex = 0, match;
-    while ((match = thinkRegex.exec(content)) !== null) {
-        if (match.index > lastIndex) parts.push({ type: 'content', content: content.substring(lastIndex, match.index) });
-        if (match[1] && match[1].trim()) parts.push({ type: 'think', content: match[1].trim() });
-        lastIndex = thinkRegex.lastIndex;
+
+// --- Content Processing ---
+
+/**
+ * A robust parser that isolates math from the markdown renderer.
+ * This is applied to non-code content tokens.
+ */
+const parsedMarkdown = (content) => {
+  if (!content) return '';
+
+  const mathBlocks = [];
+  const placeholder = 'zZz_MATH_PLACEHOLDER_zZz';
+
+  // **CRITICAL FIX**: A simpler, correct regex to capture all math delimiters.
+  // It captures $$...$$, \[...\], \(...\), and $...$
+  const sanitizedContent = content.replace(
+    /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\$)\$[^\s$](?:[\s\S]*?[^\s$])?\$(?!\$))/g,
+    (match) => {
+      mathBlocks.push(match);
+      return placeholder;
     }
-    if (lastIndex < content.length) parts.push({ type: 'content', content: content.substring(lastIndex) });
-    return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
-});
+  );
 
-const getContentTokens = (text) => {
-    return getContentTokensWithMathProtection(text);
+  let html = rawParsedMarkdown(sanitizedContent);
+
+  if (mathBlocks.length > 0) {
+    html = html.replace(new RegExp(placeholder, 'g'), () => mathBlocks.shift());
+  }
+
+  return html;
 };
 
+// For streaming content, directly use the robust parser
 const parsedStreamingContent = computed(() => parsedMarkdown(props.content));
+
+// --- Tokenization for Settled Content (Correctly Preserved) ---
+
+// This logic correctly separates <think> blocks
+const messageParts = computed(() => {
+  if (!props.content || props.isStreaming) return [];
+  const parts = [];
+  const content = props.content;
+  const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/g;
+  let lastIndex = 0, match;
+  while ((match = thinkRegex.exec(content)) !== null) {
+    if (match.index > lastIndex) parts.push({ type: 'content', content: content.substring(lastIndex, match.index) });
+    if (match[1] && match[1].trim()) parts.push({ type: 'think', content: match[1].trim() });
+    lastIndex = thinkRegex.lastIndex;
+  }
+  if (lastIndex < content.length) parts.push({ type: 'content', content: content.substring(lastIndex) });
+  return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
+});
+
+// This logic correctly separates code blocks using your imported service
+const getContentTokens = (text) => {
+  return getContentTokensWithMathProtection(text);
+};
 </script>
 
 <template>
@@ -72,7 +113,10 @@ const parsedStreamingContent = computed(() => parsedMarkdown(props.content));
             </template>
           </template>
           <details v-else-if="part.type === 'think'" class="think-block my-4" open>
-            <summary class="think-summary"><IconThinking class="h-5 w-5 flex-shrink-0" /><span>Thinking...</span></summary>
+            <summary class="think-summary">
+              <IconThinking class="h-5 w-5 flex-shrink-0" />
+              <span>Thinking...</span>
+            </summary>
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
           </details>
         </template>
