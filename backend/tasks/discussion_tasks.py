@@ -274,6 +274,7 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
         task.set_description(message)
         if params and 'progress' in params:
             task.set_progress(int(params['progress']))
+        return True
 
     prompt_to_use = contextual_prompt
     if (not discussion.discussion_data_zone or not discussion.discussion_data_zone.strip()) and not prompt_to_use and all_images_info:

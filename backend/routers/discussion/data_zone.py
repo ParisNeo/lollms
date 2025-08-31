@@ -46,7 +46,6 @@ def build_datazone_router(router: APIRouter):
             active_discussion_images=[img['active'] for img in images_info]
         )
 
-
     @router.get("/{discussion_id}/data_zone", response_model=Dict[str, str])
     def get_discussion_data_zone(
         discussion_id: str,
@@ -74,23 +73,6 @@ def build_datazone_router(router: APIRouter):
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to update Data Zone: {e}")
-
-    @router.post("/{discussion_id}/generate_image", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
-    async def generate_image_from_data_zone(
-        discussion_id: str,
-        prompt: str = Form(...),
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        db_task = task_manager.submit_task(
-            name=f"Generating image for: {discussion.metadata.get('title', 'Untitled')}",
-            target=_generate_image_task,
-            args=(owner_username, discussion_id, prompt),
-            description=f"Generating image with prompt: '{prompt[:50]}...'",
-            owner_username=current_user.username
-        )
-        return _to_task_info(db_task)
 
     @router.post("/{discussion_id}/process_data_zone", response_model=TaskInfo, status_code=202)
     def summarize_discussion_data_zone(
