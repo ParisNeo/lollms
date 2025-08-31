@@ -92,35 +92,41 @@ def build_datazone_router(router: APIRouter):
         )
         return _to_task_info(db_task)
 
-    @router.post("/{discussion_id}/process_data_zone", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
-    async def summarize_discussion_data_zone(
+    @router.post("/{discussion_id}/process_data_zone", response_model=TaskInfo, status_code=202)
+    def summarize_discussion_data_zone(
         discussion_id: str,
         prompt: Optional[str] = Form(None),
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
+        current_user: UserAuthDetails = Depends(get_current_active_user)
     ):
-        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        discussion = get_user_discussion(current_user.username, discussion_id)
+        if not discussion:
+            raise HTTPException(status_code=404, detail="Discussion not found")
+        
         db_task = task_manager.submit_task(
             name=f"Processing Data Zone for: {discussion.metadata.get('title', 'Untitled')}",
             target=_process_data_zone_task,
-            args=(owner_username, discussion_id, prompt),
-            description="AI is processing the discussion data zone content.",
+            args=(current_user.username, discussion_id, prompt),
+            description=f"AI is processing the discussion data zone content.",
             owner_username=current_user.username
         )
         return _to_task_info(db_task)
 
-    @router.post("/{discussion_id}/memorize", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
-    async def memorize_ltm(
+    @router.post("/{discussion_id}/memorize", response_model=TaskInfo, status_code=202)
+    def memorize_ltm(
         discussion_id: str,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
+        db: Session = Depends(get_db),
+        current_user: UserAuthDetails = Depends(get_current_active_user)    
     ):
-        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        discussion = get_user_discussion(current_user.username, discussion_id)
+        if not discussion:
+            raise HTTPException(status_code=404, detail="Discussion not found")
+
         db_task = task_manager.submit_task(
             name=f"Memorize LTM for: {discussion.metadata.get('title', 'Untitled')}",
             target=_memorize_ltm_task,
-            args=(owner_username, discussion_id, db),
-            description="AI is analyzing the conversation for long-term memory.",
+            args=(current_user.username, discussion_id, db),
+            description="AI is analyzing the conversation to extract key facts for long-term memory.",
             owner_username=current_user.username
         )
         return _to_task_info(db_task)
@@ -129,90 +135,122 @@ def build_datazone_router(router: APIRouter):
     async def add_discussion_image(
         discussion_id: str,
         file: UploadFile = File(...),
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
+        current_user: UserAuthDetails = Depends(get_current_active_user)
     ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        discussion = get_user_discussion(current_user.username, discussion_id)
+        if not discussion:
+            raise HTTPException(status_code=404, detail="Discussion not found")
+
         try:
             content_type = file.content_type
             images_b64 = []
-            content_bytes = await file.read()
 
             if content_type.startswith("image/"):
+                image_bytes = await file.read()
                 try:
-                    img = Image.open(io.BytesIO(content_bytes))
-                    if img.format == 'GIF': img.seek(0)
-                    if img.mode not in ('RGB', 'RGBA'): img = img.convert('RGBA')
+                    img = Image.open(io.BytesIO(image_bytes))
+                    
+                    # If it's a GIF, seek to the first frame
+                    if img.format == 'GIF':
+                        img.seek(0)
+
+                    # Convert to RGBA to handle various modes like P, LA, etc.
+                    if img.mode not in ('RGB', 'RGBA'):
+                        img = img.convert('RGBA')
+
+                    # Save to a buffer as PNG
                     with io.BytesIO() as buffer:
                         img.save(buffer, format="PNG")
-                        images_b64.append(base64.b64encode(buffer.getvalue()).decode('utf-8'))
-                except Exception:
-                    images_b64.append(base64.b64encode(content_bytes).decode('utf-8'))
+                        png_image_bytes = buffer.getvalue()
+                    
+                    images_b64.append(base64.b64encode(png_image_bytes).decode('utf-8'))
+                except Exception as e:
+                    # Fallback for formats PIL might not handle, or if conversion fails
+                    ASCIIColors.warning(f"Pillow conversion failed: {e}. Falling back to original bytes for content type {content_type}")
+                    images_b64.append(base64.b64encode(image_bytes).decode('utf-8'))
+
             elif content_type == "application/pdf":
-                pdf_doc = fitz.open(stream=content_bytes, filetype="pdf")
-                for page in pdf_doc:
+                pdf_bytes = await file.read()
+                pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                for page_num in range(len(pdf_doc)):
+                    page = pdf_doc.load_page(page_num)
                     pix = page.get_pixmap(dpi=150)
-                    images_b64.append(base64.b64encode(pix.tobytes("png")).decode('utf-8'))
+                    img_bytes = pix.tobytes("png")
+                    images_b64.append(base64.b64encode(img_bytes).decode('utf-8'))
                 pdf_doc.close()
             else:
-                raise HTTPException(status_code=400, detail="Unsupported file type.")
+                raise HTTPException(status_code=400, detail="Unsupported file type. Please upload an image or a PDF.")
 
             for b64_data in images_b64:
                 discussion.add_discussion_image(b64_data, source="user")
+            
             discussion.commit()
             
             all_images_info = discussion.get_discussion_images()
+            
             return {
-                "discussion_id": discussion_id, "zone": "discussion_images",
+                "discussion_id": discussion_id,
+                "zone": "discussion_images",
                 "discussion_images": [img_info['data'] for img_info in all_images_info],
                 "active_discussion_images": [img_info['active'] for img_info in all_images_info]
             }
         except Exception as e:
             trace_exception(e)
-            raise HTTPException(status_code=500, detail=f"Failed to add file: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Failed to add file to discussion: {str(e)}")
         finally:
             await file.close()
+
 
     @router.put("/{discussion_id}/images/{image_index}/toggle", response_model=Dict[str, List[Any]])
     async def toggle_discussion_image(
         discussion_id: str,
         image_index: int,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
+        current_user: UserAuthDetails = Depends(get_current_active_user)
     ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        discussion = get_user_discussion(current_user.username, discussion_id)
+        if not discussion:
+            raise HTTPException(status_code=404, detail="Discussion not found")
         try:
             discussion.toggle_discussion_image_activation(image_index)
             discussion.commit()
+
             all_images_info = discussion.get_discussion_images()
+            discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
+            active_discussion_images = [img_info['active'] for img_info in all_images_info]
+            
             return {
-                "discussion_images": [img['data'] for img in all_images_info],
-                "active_discussion_images": [img['active'] for img in all_images_info]
+                "discussion_images": discussion_images_b64,
+                "active_discussion_images": active_discussion_images
             }
         except IndexError:
             raise HTTPException(status_code=404, detail="Image index out of bounds.")
         except Exception as e:
             trace_exception(e)
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=f"Failed to toggle image activation: {str(e)}")
 
     @router.delete("/{discussion_id}/images/{image_index}", response_model=Dict[str, List[Any]])
     async def delete_discussion_image_from_discussion(
         discussion_id: str,
         image_index: int,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
+        current_user: UserAuthDetails = Depends(get_current_active_user)
     ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        discussion = get_user_discussion(current_user.username, discussion_id)
+        if not discussion:
+            raise HTTPException(status_code=404, detail="Discussion not found")
         try:
             discussion.remove_discussion_image(image_index)
             discussion.commit()
+
             all_images_info = discussion.get_discussion_images()
+            discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
+            active_discussion_images = [img_info['active'] for img_info in all_images_info]
+            
             return {
-                "discussion_images": [img['data'] for img in all_images_info],
-                "active_discussion_images": [img['active'] for img in all_images_info]
+                "discussion_images": discussion_images_b64,
+                "active_discussion_images": active_discussion_images
             }
         except IndexError:
             raise HTTPException(status_code=404, detail="Image index out of bounds.")
         except Exception as e:
             trace_exception(e)
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=f"Failed to delete image from discussion: {str(e)}")
