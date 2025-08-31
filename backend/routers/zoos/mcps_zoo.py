@@ -21,7 +21,7 @@ from backend.session import get_current_admin_user
 from backend.config import MCPS_ZOO_ROOT_PATH, MCPS_ROOT_PATH
 from backend.task_manager import task_manager
 from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
-from backend.routers.app_utils import to_task_info, pull_repo_task, install_item_task, get_installed_app_path
+from backend.routers.extensions.app_utils import to_task_info, pull_repo_task, install_item_task, get_installed_app_path
 from backend.utils import get_accessible_host
 
 mcps_zoo_router = APIRouter(

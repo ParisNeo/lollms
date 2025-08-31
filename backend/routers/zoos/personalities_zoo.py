@@ -25,7 +25,7 @@ from backend.session import get_current_admin_user
 from backend.config import PERSONALITIES_ZOO_ROOT_PATH
 from backend.task_manager import task_manager
 from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
-from backend.routers.app_utils import to_task_info, pull_repo_task
+from backend.routers.extensions.app_utils import to_task_info, pull_repo_task
 from backend.routers.zoos.prompts_zoo import PromptZooRepositoryCreate, PromptZooRepositoryPublic
 
 personalities_zoo_router = APIRouter(

@@ -28,7 +28,7 @@ from backend.config import APPS_ZOO_ROOT_PATH, APPS_ROOT_PATH
 from backend.task_manager import task_manager
 from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
 from backend.settings import settings
-from backend.routers.app_utils import (
+from backend.routers.extensions.app_utils import (
     to_task_info, pull_repo_task, install_item_task, get_all_zoo_metadata, 
     get_installed_app_path, start_app_task, stop_app_task, open_log_files,
     update_item_task, sync_installs_task
@@ -48,7 +48,7 @@ class BrokenItemPayload(BaseModel):
 
 @apps_zoo_router.post("/purge-broken", response_model=TaskInfo, status_code=202)
 def purge_broken_installation(payload: BrokenItemPayload):
-    from backend.routers.app_utils import _purge_broken_task
+    from backend.routers.extensions.app_utils import _purge_broken_task
     task = task_manager.submit_task(
         name=f"Purging broken item: {payload.folder_name}",
         target=_purge_broken_task,
@@ -58,7 +58,7 @@ def purge_broken_installation(payload: BrokenItemPayload):
 
 @apps_zoo_router.post("/fix-broken", response_model=TaskInfo, status_code=202)
 def fix_broken_installation(payload: BrokenItemPayload):
-    from backend.routers.app_utils import _fix_broken_task
+    from backend.routers.extensions.app_utils import _fix_broken_task
     task = task_manager.submit_task(
         name=f"Fixing broken item: {payload.folder_name}",
         target=_fix_broken_task,

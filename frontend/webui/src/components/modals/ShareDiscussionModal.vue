@@ -32,9 +32,10 @@ async function handleSend() {
   }
   
   isSending.value = true;
-  await discussionsStore.sendDiscussion({
+  await discussionsStore.shareDiscussion({
     discussionId: discussionId.value,
-    targetUsername: selectedFriendUsername.value
+    targetUsername: selectedFriendUsername.value,
+    permissionLevel: permissionLevel.value // Pass permission level
   });
   isSending.value = false;
 }
@@ -76,6 +77,13 @@ async function handleSend() {
             <UserAvatar :icon="friend.icon" :username="friend.username" size-class="h-8 w-8 ml-3" />
             <span class="ml-3 text-sm font-medium text-gray-900 dark:text-gray-100">{{ friend.username }}</span>
           </label>
+          <div class="space-y-2">
+            <label for="permission-level" class="font-medium text-gray-700 dark:text-gray-300">Permission Level:</label>
+            <select id="permission-level" v-model="permissionLevel" class="input-field">
+                <option value="view">Can View</option>
+                <option value="interact">Can View & Interact</option>
+            </select>
+          </div>
         </div>
       </div>
     </div>

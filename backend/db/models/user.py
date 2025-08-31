@@ -1,3 +1,4 @@
+# backend/db/models/user.py
 from sqlalchemy import (
     Column, Integer, String, Boolean,
     ForeignKey, UniqueConstraint, CheckConstraint,
@@ -9,6 +10,7 @@ from sqlalchemy import Enum as SQLAlchemyEnum
 
 from backend.security import pwd_context
 from backend.db.base import Base, FriendshipStatus, follows_table
+from backend.db.models.discussion import SharedDiscussionLink
 
 class User(Base):
     __tablename__ = "users"
@@ -46,8 +48,8 @@ class User(Base):
     api_keys = relationship("OpenAIAPIKey", back_populates="user", cascade="all, delete-orphan")
 
     lollms_model_name = Column(String, nullable=True)
-    tti_binding_model_name = Column(String, nullable=True) # NEW
-    tti_models_config = Column(JSON, nullable=True) # NEW
+    tti_binding_model_name = Column(String, nullable=True)
+    tti_models_config = Column(JSON, nullable=True)
     safe_store_vectorizer = Column(String, nullable=True)
     active_personality_id = Column(String, ForeignKey("personalities.id", name="fk_user_active_personality", ondelete="SET NULL"), nullable=True)
     llm_ctx_size = Column(Integer, nullable=True)
@@ -65,9 +67,9 @@ class User(Base):
     rag_graph_response_type = Column(String, default="chunks_summary", nullable=True)
     auto_title = Column(Boolean, default=False, nullable=False)
     user_ui_level = Column(Integer, default=0, nullable=True)
-    chat_active = Column(Integer, default=False, nullable=False)
+    chat_active = Column(Boolean, default=False, nullable=False)
     first_page = Column(String, default="feed", nullable=False)
-    ai_response_language = Column(String, default=0, nullable=True)
+    ai_response_language = Column(String, default="auto", nullable=True)
     fun_mode = Column(Boolean, default=False, nullable=True)
     show_token_counter = Column(Boolean, default=True, nullable=False)
     
@@ -80,6 +82,10 @@ class User(Base):
     personal_mcps = relationship("MCP", back_populates="owner", cascade="all, delete-orphan")
     personal_apps = relationship("App", back_populates="owner", cascade="all, delete-orphan")
     
+    owned_shared_discussions = relationship("SharedDiscussionLink", foreign_keys=[SharedDiscussionLink.owner_user_id], back_populates="owner", cascade="all, delete-orphan")
+    # --- THIS IS THE CORRECTED LINE ---
+    received_shared_discussions = relationship("SharedDiscussionLink", foreign_keys=[SharedDiscussionLink.shared_with_user_id], back_populates="shared_with_user", cascade="all, delete-orphan")
+
     __table_args__ = (CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'), UniqueConstraint('email', name='uq_user_email'),)
     
     def verify_password(self, plain_password):

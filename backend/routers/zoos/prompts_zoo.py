@@ -23,7 +23,7 @@ from backend.config import PROMPTS_ZOO_ROOT_PATH
 from backend.task_manager import task_manager, Task
 from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
 from backend.settings import settings
-from backend.routers.app_utils import to_task_info, pull_repo_task
+from backend.routers.extensions.app_utils import to_task_info, pull_repo_task
 
 prompts_zoo_router = APIRouter(
     prefix="/api/prompts_zoo",

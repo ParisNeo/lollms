@@ -4,7 +4,6 @@ import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
-import { useDataStore } from '../../stores/data';
 import DiscussionItem from './DiscussionItem.vue';
 
 import IconHome from '../../assets/icons/IconHome.vue';
@@ -22,15 +21,15 @@ import IconCopy from '../../assets/icons/IconCopy.vue';
 const store = useDiscussionsStore();
 const authStore = useAuthStore();
 const uiStore = useUiStore();
-const dataStore = useDataStore();
 
 const user = computed(() => authStore.user);
 const isLoading = computed(() => store.isLoadingDiscussions && store.sortedDiscussions.length === 0);
 const hasMoreDiscussions = computed(() => store.hasMoreDiscussions);
-const activeDiscussion = computed(() => store.activeDiscussion); // NEW COMPUTED
+const activeDiscussion = computed(() => store.activeDiscussion);
 
 const searchTerm = ref('');
 const isStarredVisible = ref(true);
+const isSharedVisible = ref(true); // THIS LINE WAS MISSING
 const isRecentsVisible = ref(true);
 const showToolbox = ref(false);
 const scrollComponent = ref(null);
@@ -48,6 +47,15 @@ const filteredAndSortedDiscussions = computed(() => {
 
 const starredDiscussions = computed(() => filteredAndSortedDiscussions.value.filter(d => d.is_starred));
 const unstarredDiscussions = computed(() => filteredAndSortedDiscussions.value.filter(d => !d.is_starred));
+const sharedDiscussions = computed(() => {
+    if (!searchTerm.value) {
+        return store.sharedWithMe;
+    }
+    const lowerCaseSearch = searchTerm.value.toLowerCase();
+    return store.sharedWithMe.filter(d => 
+        d.title.toLowerCase().includes(lowerCaseSearch)
+    );
+});
 
 function handleNewDiscussion() { store.createNewDiscussion(); }
 function handleImportClick() { uiStore.openModal('import'); }
@@ -145,9 +153,24 @@ onUnmounted(() => {
                         <DiscussionItem v-for="discussion in starredDiscussions" :key="discussion.id" :discussion="discussion" />
                     </div>
                 </div>
+
+                <div v-if="sharedDiscussions.length > 0" class="mb-2">
+                    <button @click="isSharedVisible = !isSharedVisible" class="collapsible-header">
+                        <span>Shared With Me</span>
+                        <IconChevronRight class="w-4 h-4 transition-transform" :class="{'rotate-90': isSharedVisible}" />
+                    </button>
+                    <div v-if="isSharedVisible" class="mt-1 space-y-1">
+                        <DiscussionItem 
+                            v-for="discussion in sharedDiscussions" 
+                            :key="discussion.share_id" 
+                            :discussion="discussion" 
+                        />
+                    </div>
+                </div>
+
                 <div class="mb-2">
-                    <button v-if="starredDiscussions.length > 0 && !searchTerm" @click="isRecentsVisible = !isRecentsVisible" class="collapsible-header">
-                        <span>Recent</span>
+                    <button v-if="(starredDiscussions.length > 0 || sharedDiscussions.length > 0) && !searchTerm" @click="isRecentsVisible = !isRecentsVisible" class="collapsible-header">
+                        <span>My Discussions</span>
                         <IconChevronRight class="w-4 h-4 transition-transform" :class="{'rotate-90': isRecentsVisible}" />
                     </button>
                     <div v-if="isRecentsVisible || searchTerm" class="mt-1 space-y-1">
@@ -159,7 +182,7 @@ onUnmounted(() => {
                     <svg class="animate-spin h-6 w-6 text-gray-400 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
                 </div>
                 
-                <div v-if="filteredAndSortedDiscussions.length === 0 && !isLoading" class="text-center py-10 px-4">
+                <div v-if="filteredAndSortedDiscussions.length === 0 && sharedDiscussions.length === 0 && !isLoading" class="text-center py-10 px-4">
                     <p class="text-sm text-gray-500 dark:text-gray-400">{{ searchTerm ? 'No matching discussions.' : 'No discussions yet.' }}</p>
                     <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ searchTerm ? 'Try a different search term.' : 'Start a new conversation to begin.' }}</p>
                 </div>
@@ -172,6 +195,5 @@ onUnmounted(() => {
 .btn-icon { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors; }
 .btn-footer { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
 .btn-footer-danger { @apply p-2 rounded-full text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors; }
-.toolbox-select { @apply w-full text-left text-xs px-2 py-1.5 bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500; }
 .collapsible-header { @apply w-full flex items-center justify-between text-left p-1 text-xs font-bold uppercase text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded; }
 </style>

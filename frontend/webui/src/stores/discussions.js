@@ -23,7 +23,7 @@ function processSingleMessage(msg) {
     const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelUsedId);
     const visionSupport = modelInfo?.alias?.has_vision ?? true;
 
-    const processedMsg = {
+    return {
         ...msg,
         binding_name,
         model_name,
@@ -35,7 +35,6 @@ function processSingleMessage(msg) {
         vision_support: visionSupport,
         branches: msg.branches || null,
     };
-    return processedMsg;
 }
 
 function fileToBase64(file) {
@@ -46,7 +45,6 @@ function fileToBase64(file) {
         reader.onerror = error => reject(error);
     });
 }
-
 
 export const useDiscussionsStore = defineStore('discussions', () => {
     const uiStore = useUiStore();
@@ -72,6 +70,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const activeDiscussionArtefacts = ref([]);
     const isLoadingArtefacts = ref(false);
 
+    const sharedWithMe = ref([]);
+    
+
     const dataZonesTokenCount = computed(() => {
         return liveDataZoneTokens.value.discussion + 
                liveDataZoneTokens.value.user + 
@@ -95,7 +96,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             return dateB - dateA;
         });
     });
-    const activeDiscussion = computed(() => currentDiscussionId.value ? discussions.value[currentDiscussionId.value] : null);
+    const activeDiscussion = computed(() => {
+        if (!currentDiscussionId.value) return null;
+        // Check owned discussions first
+        if (discussions.value[currentDiscussionId.value]) {
+            return discussions.value[currentDiscussionId.value];
+        }
+        // If not found, check shared discussions
+        return sharedWithMe.value.find(d => d.id === currentDiscussionId.value) || null;
+    });
     const activeMessages = computed(() => messages.value);
 
     const activeDiscussionContainsCode = computed(() => {
@@ -270,6 +279,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const discussion = discussions.value[discussionId];
         if (!discussion) return;
         try {
+            console.log("Fetching datazones for discussion:", discussionId);
             const response = await apiClient.get(`/api/discussions/${discussionId}/data_zones`);
             const data = response.data;
 
@@ -393,8 +403,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
+    async function fetchSharedWithMe() {
+        try {
+            const response = await apiClient.get('/api/discussions/shared');
+            sharedWithMe.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch shared discussions:", error);
+            sharedWithMe.value = [];
+        }
+    }
+
+    // UPDATE loadDiscussions to also fetch shared
     async function loadDiscussions() {
         try {
+            // Fetch owned discussions
             const response = await apiClient.get('/api/discussions');
             const discussionData = response.data;
             if (!Array.isArray(discussionData)) return;
@@ -409,10 +431,30 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 };
             });
             discussions.value = newDiscussions;
+            
+            // Fetch shared discussions
+            await fetchSharedWithMe();
+
         } catch (error) { console.error("Failed to load discussions:", error); }
     }
 
+    async function shareDiscussion({ discussionId, targetUsername, permissionLevel }) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/share`, {
+                target_username: targetUsername,
+                permission_level: permissionLevel,
+            });
+            uiStore.addNotification(response.data.message || `Discussion shared with ${targetUsername}!`, 'success');
+            uiStore.closeModal();
+        } catch (error) {
+            console.error("Failed to share discussion:", error);
+            // The global error handler in api.js will show a notification
+        }
+    }
+    
     async function selectDiscussion(id, branchIdToLoad = null) {
+        console.log("Selecting discussion p0:", id, branchIdToLoad);
         if (!id || generationInProgress.value) return;
         const uiStore = useUiStore();
         const authStore = useAuthStore();
@@ -422,7 +464,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         activeDiscussionArtefacts.value = [];
         
         liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
-        
+        console.log("Selecting discussion:", id);
         if (!discussions.value[id]) {
             currentDiscussionId.value = null;
             return;
@@ -432,6 +474,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             const params = branchIdToLoad ? { branch_id: branchIdToLoad } : {};
             const response = await apiClient.get(`/api/discussions/${id}`, { params });
             messages.value = processMessages(response.data);
+            console.log("Loaded messages:", messages.value);
             
             await Promise.all([
                 fetchContextStatus(id),
@@ -1106,7 +1149,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             await apiClient.post(`/api/discussions/${discussionId}/artefacts`, formData);
             await fetchArtefacts(discussionId);
             uiStore.addNotification(`Artefact '${file.name}' added.`, 'success');
-        } catch (error) {}
+        } catch (error) {
+            console.logr("Failed to add artefact:", error);
+            uiStore.addNotification(`Failed to add artefact '${file.name}'.`, 'error');
+        }
     }
     async function importArtefactFromUrl({ discussionId, url }) {
         if (!discussionId || !url) return;
@@ -1269,6 +1315,114 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         activeDiscussionContextStatus.value = null;
         activeAiTasks.value = {};
     }
+    async function refreshUser() {
+        if (!token.value) return;
+        try {
+            const response = await apiClient.get('/api/auth/me');
+            user.value = response.data;
+        } catch (error) {
+            console.error("Failed to refresh user details:", error);
+        }
+    }
+
+    
+    function connectWebSocket() {
+        if (!token.value || (ws.value && (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING))) {
+            return;
+        }
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = import.meta.env.DEV ? 'localhost:9642' : window.location.host;
+        const wsUrl = `${protocol}//${host}/ws/dm/${token.value}`;
+        
+        ws.value = new WebSocket(wsUrl);
+
+        ws.value.onopen = () => { wsConnected.value = true; clearTimeout(reconnectTimeout); };
+
+        ws.value.onmessage = async (event) => {
+            const data = JSON.parse(event.data);
+            const { useSocialStore } = await import('./social');
+            const { useTasksStore } = await import('./tasks');
+            const { useDataStore } = await import('./data');
+            const { useDiscussionsStore } = await import('./discussions');
+            const socialStore = useSocialStore();
+            const uiStore = useUiStore();
+            const tasksStore = useTasksStore();
+            const dataStore = useDataStore();
+            const discussionsStore = useDiscussionsStore();
+
+            switch (data.type) {
+                case 'new_dm':
+                    socialStore.handleNewDm(data.data);
+                    break;
+                case 'new_shared_discussion':
+                    discussionsStore.loadDiscussions();
+                    uiStore.addNotification(`'${data.data.discussion_title}' was shared with you by ${data.data.from_user}.`, 'info');
+                    break;
+                case 'discussion_updated':
+                    if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
+                        uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
+                        discussionsStore.refreshActiveDiscussionMessages();
+                    } else {
+                        uiStore.addNotification(`A shared discussion was updated by ${data.data.sender_username}.`, 'info');
+                    }
+                    discussionsStore.loadDiscussions();
+                    break;
+                case 'discussion_unshared':
+                    if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
+                        discussionsStore.selectDiscussion(null); // Deselect if active
+                        uiStore.setMainView('feed');
+                    }
+                    discussionsStore.loadDiscussions();
+                    uiStore.addNotification(`Access to a shared discussion was revoked by ${data.data.from_user}.`, 'warning');
+                    break;
+                case 'admin_broadcast':
+                    uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender);
+                    break;
+                case 'task_update':
+                    tasksStore.addTask(data.data);
+                    break;
+                case 'app_status_changed': {
+                    const { useAdminStore } = await import('./admin');
+                    useAdminStore().handleAppStatusUpdate(data.data);
+                    dataStore.handleServiceStatusUpdate(data.data);
+                    break;
+                }
+                case 'data_zone_processed':
+                    discussionsStore.handleDataZoneUpdate(data.data);
+                    break;
+                case 'discussion_images_updated':
+                    discussionsStore.handleDiscussionImagesUpdated(data.data);
+                    break;
+                case 'tasks_cleared':
+                    tasksStore.handleTasksCleared(data.data);
+                    break;
+                case 'settings_updated':
+                    uiStore.addNotification('Global settings updated by admin. Refreshing session...', 'info');
+                    await refreshUser();
+                    break;
+                case 'bindings_updated':
+                    uiStore.addNotification('LLM bindings updated. Refreshing model list.', 'info');
+                    dataStore.fetchAvailableLollmsModels();
+                    break;
+            }
+        };
+
+        ws.value.onclose = (event) => {
+            wsConnected.value = false;
+            ws.value = null;
+            if (event.code !== 1000) {
+                reconnectTimeout = setTimeout(connectWebSocket, 5000);
+            }
+        };
+        ws.value.onerror = (error) => { wsConnected.value = false; ws.value?.close(); };
+    }
+
+    function disconnectWebSocket() {
+        wsConnected.value = false;
+        if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        if (ws.value) { ws.value.close(1000, "User logout"); ws.value = null; }
+    }
 
     return {
         discussions, currentDiscussionId, messages, generationInProgress,
@@ -1303,6 +1457,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         importArtefactFromUrl,
         exportContextAsArtefact,
         createManualArtefact,
-        updateArtefact
+        updateArtefact,
+
+        sharedWithMe,
+        fetchSharedWithMe,
+        shareDiscussion,
     };
 });

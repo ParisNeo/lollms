@@ -106,6 +106,18 @@ export const useAuthStore = defineStore('auth', () => {
                     uiStore.addNotification('LLM bindings have been updated. Refreshing model list.', 'info');
                     dataStore.fetchAvailableLollmsModels();
                     break;
+                case 'discussion_updated':
+                    if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
+                        console.log(`[WebSocket] Received update for active discussion ${data.data.discussion_id}. Refreshing messages.`);
+                        uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
+                        discussionsStore.refreshActiveDiscussionMessages();
+                    } else {
+                        // Optional: show a more subtle notification for non-active discussions
+                         uiStore.addNotification(`A shared discussion was updated by ${data.data.sender_username}.`, 'info');
+                    }
+                    // Also refresh the main list in case of title changes etc.
+                    discussionsStore.loadDiscussions();
+                    break;                    
             }
         };
 

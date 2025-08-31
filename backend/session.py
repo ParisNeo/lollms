@@ -236,9 +236,14 @@ def reload_lollms_client_mcp(username: str):
             session["lollms_clients"] = {}
             print(f"INFO: Invalidated all lollms_client instances for user: {username}")
 
+Loaded_registry={
+
+}
 
 def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None) -> LollmsClient:
-    return build_lollms_client_from_params(username, binding_alias_override)
+    if not (username, binding_alias_override) in Loaded_registry:
+        Loaded_registry[(username, binding_alias_override)] = build_lollms_client_from_params(username, binding_alias_override)
+    return Loaded_registry[(username, binding_alias_override)]
 
 
 def build_lollms_client_from_params(

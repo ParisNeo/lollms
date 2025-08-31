@@ -37,6 +37,10 @@ class DiscussionInfo(BaseModel):
     data_zone: Optional[str] = None
     discussion_images: List[dict|str] = Field(default_factory=list)
     active_discussion_images: List[bool] = Field(default_factory=list)
+    # New fields for shared discussions
+    owner_username: Optional[str] = None
+    permission_level: Optional[str] = None
+    share_id: Optional[int] = None
 
 class DataZones(BaseModel):
     user_data_zone: Optional[str] = None
@@ -94,7 +98,7 @@ class MessageOutput(BaseModel):
     created_at: Optional[datetime.datetime] = None
     branch_id: Optional[str] = None
     branches: Optional[List[str]] = None
-    vision_support: bool = True  # NEW: Flag for vision support
+    vision_support: bool = True
     
     @field_validator('user_grade', mode='before')
     def provide_default_grade(cls, value):
@@ -153,7 +157,30 @@ class MessageCodeExportRequest(BaseModel):
     content: str
     discussion_title: Optional[str] = "discussion"
 
+class DiscussionShareRequest(BaseModel):
+    target_username: constr(min_length=3, max_length=50)
+    permission_level: str = "view"
+
+    @field_validator('permission_level')
+    def permission_level_must_be_valid(cls, value):
+        if value not in ["view", "interact"]:
+            raise ValueError("Invalid permission level")
+        return value
+
+class SharedDiscussionInfo(BaseModel):
+    share_id: int
+    discussion_id: str
+    discussion_title: str
+    permission_level: str
+    shared_at: datetime.datetime
+    owner_id: int
+    owner_username: str
+    owner_icon: Optional[str] = None
+
 class PaginatedDiscussionInfo(PaginatedResponse[DiscussionInfo]):
+    pass
+
+class PaginatedSharedDiscussionInfo(PaginatedResponse[SharedDiscussionInfo]):
     pass
 
 class PaginatedMessageOutput(PaginatedResponse[MessageOutput]):
@@ -168,3 +195,7 @@ class ArtefactUpdate(BaseModel):
     new_content: str
     new_images_b64: List[str] = Field(default_factory=list)
     kept_images_b64: List[str] = Field(default_factory=list)
+
+# --- ADDED THIS CLASS ---
+class UrlImportRequest(BaseModel):
+    url: str

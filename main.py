@@ -43,25 +43,30 @@ from backend.session import (
 from lollms_client import LollmsDataManager
 
 from backend.routers.auth import auth_router
-from backend.routers.discussion import discussion_router
+# backend/routers/discussion.py
+from fastapi import APIRouter
+
+from backend.routers.discussion import build_discussions_router
+
+
 from backend.routers.admin import admin_router
 from backend.routers.languages import languages_router
 from backend.routers.personalities import personalities_router
 from backend.routers.friends import friends_router
-from backend.routers.dm import dm_router
+from backend.routers.social.dm import dm_router
 from backend.routers.stores import store_files_router, datastore_router
-from backend.routers.services import apps_router, mcp_router, discussion_tools_router
+from backend.routers.extensions import apps_router, mcp_router, discussion_tools_router
 from backend.routers.social import social_router
 from backend.routers.users import users_router
-from backend.routers.dm_ws import dm_ws_router
+from backend.routers.social.dm_ws import dm_ws_router
 from backend.routers.api_keys import api_keys_router
-from backend.routers.openai_v1 import openai_v1_router
-from backend.routers.ollama_v1 import ollama_v1_router
+from backend.routers.services.openai_v1 import openai_v1_router
+from backend.routers.services.ollama_v1 import ollama_v1_router
 from backend.routers.lollms_config import lollms_config_router
 from backend.routers.files import upload_router, assets_router, files_router
 from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
-from backend.routers.app_utils import cleanup_and_autostart_apps, synchronize_filesystem_and_db
+from backend.routers.extensions.app_utils import cleanup_and_autostart_apps, synchronize_filesystem_and_db
 from backend.routers.zoos.apps_zoo import apps_zoo_router
 from backend.routers.zoos.mcps_zoo import mcps_zoo_router
 from backend.routers.zoos.prompts_zoo import prompts_zoo_router
@@ -74,6 +79,10 @@ from backend.ws_manager import manager # Import the websocket manager
 from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.zoo_cache import build_full_cache
+
+
+
+
 
 POLLING_INTERVAL = 0.1  # seconds
 CLEANUP_INTERVAL = 3600  # 1 hour in seconds
@@ -418,6 +427,10 @@ app = FastAPI(
     version=APP_VERSION,
     lifespan=lifespan
 )
+
+
+
+
     
 host = SERVER_CONFIG.get("host", "0.0.0.0")
 port = SERVER_CONFIG.get("port", 9642)
@@ -470,7 +483,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
-app.include_router(discussion_router)
+
 app.include_router(admin_router)
 app.include_router(languages_router)
 app.include_router(personalities_router)
@@ -501,6 +514,10 @@ app.include_router(prompts_router)
 
 app.include_router(upload_router)
 app.include_router(assets_router)
+
+
+app.include_router(build_discussions_router())
+
 add_ui_routes(app)
 
 if __name__ == "__main__":

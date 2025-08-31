@@ -29,9 +29,10 @@ const isSelected = computed(() => store.currentDiscussionId === props.discussion
 const isActive = computed(() => store.generationInProgress && isSelected.value);
 const isTitleGenerating = computed(() => store.titleGenerationInProgressId === props.discussion.id);
 
-function handleSelect() {
+async function handleSelect() {
   if (!isSelected.value) {
-    store.selectDiscussion(props.discussion.id);
+    console.log("selecting discussion p1:", props.discussion.id);
+    await store.selectDiscussion(props.discussion.id);
   }
 }
 
@@ -85,6 +86,9 @@ function handleAutoTitle(event) {
       <p v-else class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate" :title="discussion.title">
         {{ discussion.title }}
       </p>
+      <p v-if="discussion.owner_username" class="text-xs text-gray-500 dark:text-gray-400 truncate">
+        from {{ discussion.owner_username }}
+      </p>      
     </div>
     
     <!-- Action Buttons container animates its width -->

@@ -765,6 +765,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         BroadcastMessage.__table__.create(connection)
         print("INFO: Created 'broadcast_messages' table for multi-worker communication.")
 
+    # NEW: Create shared_discussion_links if it doesn't exist
+    if not inspector.has_table("shared_discussion_links"):
+        from backend.db.models.discussion import SharedDiscussionLink
+        SharedDiscussionLink.__table__.create(connection)
+        print("INFO: Created 'shared_discussion_links' table for discussion sharing.")
+
 
 def check_and_update_db_version(SessionLocal):
     session = SessionLocal()
