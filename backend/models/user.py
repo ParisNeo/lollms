@@ -32,6 +32,7 @@ class UserCreateAdmin(UserLLMParams):
     username: constr(min_length=3, max_length=50)
     password: constr(min_length=8)
     is_admin: bool = False
+    is_moderator: bool = False
     first_name: Optional[str] = Field(None, max_length=100)
     family_name: Optional[str] = Field(None, max_length=100)
     email: Optional[EmailStr] = Field(None, max_length=255)
@@ -87,6 +88,7 @@ class UserUpdate(BaseModel):
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
+    is_moderator: Optional[bool] = None
     lollms_model_name: Optional[str] = None
     llm_ctx_size: Optional[int] = Field(None, ge=0)
     safe_store_vectorizer: Optional[str] = None
@@ -143,16 +145,17 @@ class AuthorPublic(BaseModel):
 class UserPublic(UserLLMParams):
     id: int
     username: str
-    is_admin: bool
-    is_active: bool
+    is_admin: Optional[bool] = False
+    is_moderator: Optional[bool] = False
+    is_active: Optional[bool] = True
     last_activity_at: Optional[datetime.datetime] = None
     icon: Optional[str] = None
     first_name: Optional[str] = None
     family_name: Optional[str] = None
     email: Optional[EmailStr] = None
     birth_date: Optional[datetime.date] = None
-    receive_notification_emails: bool
-    is_searchable: bool
+    receive_notification_emails: Optional[bool] = True
+    is_searchable: Optional[bool] = True
     password_reset_token: Optional[str] = None
     reset_token_expiry: Optional[datetime.datetime] = None
     lollms_model_name: Optional[str] = None
@@ -164,9 +167,9 @@ class UserPublic(UserLLMParams):
     max_rag_len: Optional[int] = None
     rag_n_hops: Optional[int] = None
     rag_min_sim_percent: Optional[float] = None
-    rag_use_graph: bool
+    rag_use_graph: Optional[bool] = False
     rag_graph_response_type: Optional[str] = None
-    first_login_done: bool 
+    first_login_done: Optional[bool] = False
     data_zone: Optional[str] = None
     memory: Optional[str] = None
     class Config:
@@ -176,6 +179,7 @@ class UserAuthDetails(UserLLMParams):
     id: int
     username: str
     is_admin: bool
+    is_moderator: bool
     is_active: bool
     icon: Optional[str] = None
     first_name: Optional[str] = None

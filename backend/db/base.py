@@ -17,7 +17,7 @@ follows_table = Table('follows', Base.metadata,
     Column('created_at', DateTime(timezone=True), server_default=func.now())
 )
 
-class PostVisibility(enum.Enum):
+class PostVisibility(str, enum.Enum):
     public = "public"
     followers = "followers"
     friends = "friends"

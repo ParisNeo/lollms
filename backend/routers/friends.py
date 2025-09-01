@@ -34,6 +34,7 @@ def get_friend_public_from_friendship(friendship: Friendship, current_user_id: i
     return FriendPublic(
         id=friend_user_obj.id,
         username=friend_user_obj.username,
+        icon=friend_user_obj.icon,
         friendship_id=friendship.id,
         status_with_current_user=friendship.status
     )

@@ -40,6 +40,7 @@ from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
 from backend.discussion import get_user_discussion, get_user_discussion_manager
+from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse,
                             DataZones, DiscussionBranchSwitchRequest,
                             DiscussionDataZoneUpdate, DiscussionExportRequest,
@@ -72,7 +73,7 @@ def build_message_router(router: APIRouter):
     async def grade_discussion_message(discussion_id: str, message_id: str, grade_update: MessageGradeUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
         username = current_user.username
         db_user = db.query(DBUser).filter(DBUser.username == username).one()
-        discussion_obj = get_user_discussion(username, discussion_id)
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         if not discussion_obj: raise HTTPException(status_code=404, detail="Discussion not found.")
         with message_grade_lock:
             grade = db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).first()
@@ -106,7 +107,7 @@ def build_message_router(router: APIRouter):
         db: Session = Depends(get_db)
     ):
         username = current_user.username
-        discussion_obj = get_user_discussion(username, discussion_id)
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         if not discussion_obj:
             raise HTTPException(status_code=404, detail="Discussion not found.")
         
@@ -154,7 +155,7 @@ def build_message_router(router: APIRouter):
         db: Session = Depends(get_db)
     ):
         username = current_user.username
-        discussion_obj = get_user_discussion(username, discussion_id)
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, "interact")
         if not discussion_obj:
             raise HTTPException(status_code=404, detail="Discussion not found.")
 
@@ -198,7 +199,7 @@ def build_message_router(router: APIRouter):
     @router.delete("/{discussion_id}/messages/{message_id}", status_code=200)
     async def delete_discussion_message(discussion_id: str, message_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
         username = current_user.username
-        discussion_obj = get_user_discussion(username, discussion_id)
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         if not discussion_obj: raise HTTPException(status_code=404, detail="Discussion not found.")
         try: discussion_obj.delete_branch(message_id)
         except ValueError as e: raise HTTPException(status_code=404, detail=str(e))

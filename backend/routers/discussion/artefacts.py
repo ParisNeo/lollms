@@ -19,16 +19,19 @@ from backend.discussion import get_user_discussion
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.task_manager import task_manager
 from ...tasks.discussion_tasks import _import_artefact_from_url_task, _to_task_info
+from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 
+from backend.db import get_db
 
 def build_artefacts_router(router: APIRouter):
      # safe_store is needed for RAG callbacks
     @router.get("/{discussion_id}/artefacts", response_model=List[ArtefactInfo])
     async def list_discussion_artefacts(
         discussion_id: str,
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)  
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
         artefacts = discussion.list_artefacts()
@@ -43,9 +46,10 @@ def build_artefacts_router(router: APIRouter):
     async def add_discussion_artefact(
         discussion_id: str,
         file: UploadFile = File(...),
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)  
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
         

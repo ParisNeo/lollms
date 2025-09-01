@@ -28,8 +28,8 @@ const hasMoreDiscussions = computed(() => store.hasMoreDiscussions);
 const activeDiscussion = computed(() => store.activeDiscussion);
 
 const searchTerm = ref('');
-const isStarredVisible = ref(true);
-const isSharedVisible = ref(true); // THIS LINE WAS MISSING
+const isStarredVisible = ref(false);
+const isSharedVisible = ref(true);
 const isRecentsVisible = ref(true);
 const showToolbox = ref(false);
 const scrollComponent = ref(null);

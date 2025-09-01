@@ -168,7 +168,24 @@ def _bootstrap_global_settings(connection):
         "lock_all_context_sizes": {
             "value": False,
             "type": "boolean", "description": "Lock context size for all aliased models, preventing users from changing it.", "category": "Models"
-        }
+        },
+        # --- NEW AI BOT SETTINGS ---
+        "ai_bot_enabled": {
+            "value": False,
+            "type": "boolean", "description": "Enable the @lollms AI bot to respond to mentions in the social feed.", "category": "AI Bot"
+        },
+        "ai_bot_binding_model": {
+            "value": "",
+            "type": "string", "description": "The full binding/model name for the AI bot (e.g., 'ollama/llama3').", "category": "AI Bot"
+        },
+        "ai_bot_personality_id": {
+            "value": "",
+            "type": "string", "description": "The ID of the personality to use for the bot. Overrides the system prompt if set.", "category": "AI Bot"
+        },
+        "ai_bot_system_prompt": {
+            "value": "You are lollms, a helpful AI assistant integrated into this social platform. When a user mentions you using '@lollms', you should respond to their post helpfully and concisely. Your goal is to be a friendly and informative presence in the community.",
+            "type": "text", "description": "The system prompt to use for the bot if no personality is selected.", "category": "AI Bot"
+        }        
     }
 
     select_keys_query = text("SELECT key FROM global_configs")
@@ -201,6 +218,59 @@ def _bootstrap_global_settings(connection):
         connection.commit()
         print(f"INFO: Successfully bootstrapped {len(configs_to_insert)} new global settings.")
 
+def _bootstrap_lollms_user(connection):
+    """
+    Ensures the special @lollms user exists in the database.
+    """
+    # Moved imports here to prevent circular dependency during startup
+    from backend.security import get_password_hash
+    import secrets
+
+    lollms_user_exists = connection.execute(text("SELECT 1 FROM users WHERE username = 'lollms'")).first()
+    if not lollms_user_exists:
+        print("INFO: Creating special AI user '@lollms'.")
+        # Generate a secure, unusable password hash
+        dummy_password = secrets.token_hex(32)
+        hashed_password = get_password_hash(dummy_password)
+        
+        # This is a raw insert, avoiding the ORM User model to prevent potential import issues in migration scripts
+        connection.execute(
+            text("""
+                INSERT INTO users (
+                    username, hashed_password, is_admin, is_active, is_searchable, 
+                    first_login_done, receive_notification_emails, is_moderator,
+                    put_thoughts_in_context, auto_title, chat_active, first_page,
+                    show_token_counter, rag_use_graph
+                )
+                VALUES (
+                    :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
+                    :first_login_done, :receive_notification_emails, :is_moderator,
+                    :put_thoughts_in_context, :auto_title, :chat_active, :first_page,
+                    :show_token_counter, :rag_use_graph
+                )
+            """),
+            {
+                "username": "lollms",
+                "hashed_password": hashed_password,
+                "is_admin": False,
+                "is_active": True,
+                "is_searchable": True,
+                "first_login_done": True,
+                "receive_notification_emails": False,
+                "is_moderator": False,
+                "put_thoughts_in_context": False,
+                "auto_title": False,
+                "chat_active": False,
+                "first_page": "feed",
+                "show_token_counter": True,
+                "rag_use_graph": False
+            }
+        )
+        connection.commit()
+        print("INFO: AI user '@lollms' created successfully.")
+    else:
+        print("INFO: AI user '@lollms' already exists.")
+
 def run_schema_migrations_and_bootstrap(connection, inspector):
     if inspector.has_table("global_configs"):
         _bootstrap_global_settings(connection)
@@ -211,8 +281,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             result = connection.execute(text(f"DELETE FROM global_configs WHERE key IN {keys_to_remove_str}"))
             if result.rowcount > 0:
                 print(f"INFO: Removed {result.rowcount} deprecated global settings (default_mcps, default_personalities).")
+                connection.commit()
         except Exception as e:
             print(f"WARNING: Could not remove deprecated global settings. Error: {e}")
+            connection.rollback()
 
     if inspector.has_table("tasks"):
         task_columns_db = [col['name'] for col in inspector.get_columns('tasks')]
@@ -244,6 +316,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             if col_name not in columns_db:
                 connection.execute(text(f"ALTER TABLE saved_prompts ADD COLUMN {col_name} {col_sql_def}"))
                 print(f"INFO: Added missing column '{col_name}' to 'saved_prompts' table.")
+        connection.commit()
 
         full_columns_info = inspector.get_columns('saved_prompts')
         owner_user_id_col_info_full = next((col for col in full_columns_info if col['name'] == 'owner_user_id'), None)
@@ -273,8 +346,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                         connection.execute(SavedPrompt.__table__.insert().values(row_data))
                         restored_count += 1
                     print(f"INFO: Restored {restored_count} rows to 'saved_prompts' table.")
+                connection.commit()
             except Exception as e:
                 print(f"CRITICAL: Data-safe reset for 'saved_prompts' failed. Error: {e}")
+                connection.rollback()
                 raise e
 
     # Add migration for DatabaseVersion if its column type changed from Integer to String
@@ -299,8 +374,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                     version_val = str(old_version_data['version']) if isinstance(old_version_data['version'], (int, float)) else old_version_data['version']
                     connection.execute(DatabaseVersion.__table__.insert().values(id=old_version_data['id'], version=version_val))
                     print(f"INFO: Migrated and restored version '{version_val}' to 'database_version' table.")
+                connection.commit()
             except Exception as e:
                 print(f"CRITICAL: Data-safe rebuild for 'database_version' table failed. Error: {e}")
+                connection.rollback()
                 trace_exception(e)
                 raise # Re-raise to stop the application and indicate migration failure
 
@@ -425,9 +502,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 
                 if restored_count > 0:
                     print(f"INFO: Migrated and restored {restored_count} rows to 'llm_bindings' table.")
-
+                connection.commit()
             except Exception as e:
                 print(f"CRITICAL: Data-safe rebuild for 'llm_bindings' table failed. Error: {e}")
+                connection.rollback()
                 trace_exception(e)
                 raise e # Re-raise to stop the application and indicate migration failure
             finally:
@@ -448,6 +526,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             if col_name not in personality_columns_db:
                 connection.execute(text(f"ALTER TABLE personalities ADD COLUMN {col_name} {col_sql_def}"))
                 print(f"INFO: Added missing column '{col_name}' to 'personalities' table.")
+        connection.commit()
 
     if inspector.has_table("users"):
         user_columns_db = [col['name'] for col in inspector.get_columns('users')]
@@ -457,8 +536,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("ALTER TABLE users RENAME COLUMN scratchpad TO data_zone"))
                 print("INFO: Migrated column 'users.scratchpad' to 'users.data_zone'.")
                 user_columns_db = [col['name'] for col in inspector.get_columns('users')]
+                connection.commit()
             except Exception as e:
                 print(f"ERROR: Could not rename 'scratchpad' to 'data_zone': {e}")
+                connection.rollback()
         
         new_user_cols_defs = {
             "is_active": "BOOLEAN DEFAULT 1 NOT NULL", "created_at": "DATETIME", 
@@ -481,8 +562,9 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "is_searchable": "BOOLEAN DEFAULT 1 NOT NULL",
             "first_login_done": "BOOLEAN DEFAULT 0 NOT NULL",
             "data_zone": "TEXT", "memory": "TEXT",
+            "is_moderator": "BOOLEAN DEFAULT 0 NOT NULL",
             "tti_binding_model_name": "VARCHAR",
-            "tti_models_config": "JSON"
+            "tti_models_config": "JSON",
         }
         
         added_cols = []
@@ -495,39 +577,52 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                     connection.commit()
                 except Exception as ex:
                     trace_exception(ex)
+                    connection.rollback()
 
         if 'is_active' in added_cols:
             connection.execute(text("UPDATE users SET is_active = 1 WHERE is_active IS NULL"))
             print("INFO: Set 'is_active' to True for all existing users to ensure access after upgrade.")
+            connection.commit()
 
         if 'put_thoughts_in_context' not in user_columns_db:
             try:
                 connection.execute(text("UPDATE users SET put_thoughts_in_context = 0 WHERE put_thoughts_in_context IS NULL"))
                 print("INFO: Set 'put_thoughts_in_context' to False for all users where it was NULL.")
+                connection.commit()
             except Exception as e:
                 print(f"WARNING: Could not update 'put_thoughts_in_context' to default False: {e}")
+                connection.rollback()
 
         if 'first_login_done' in added_cols:
             try:
                 connection.execute(text("UPDATE users SET first_login_done = 1 WHERE first_login_done IS NULL"))
                 print("INFO: Set 'first_login_done' to True for all existing users. New users will default to False.")
+                connection.commit()
             except Exception as e:
                 print(f"WARNING: Could not update 'first_login_done' to default True for existing users: {e}")
+                connection.rollback()
 
         user_constraints = inspector.get_unique_constraints('users')
         if 'email' in new_user_cols_defs and not any(c['name'] == 'uq_user_email' for c in user_constraints):
             try:
                 connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_user_email ON users (email) WHERE email IS NOT NULL"))
                 print("INFO: Created unique index 'uq_user_email' on 'users.email'.")
+                connection.commit()
             except (OperationalError, IntegrityError) as e:
                 print(f"Warning: Could not create unique index on email. Error: {e}")
+                connection.rollback()
         
         if 'password_reset_token' in new_user_cols_defs and not any(c['name'] == 'uq_password_reset_token' for c in user_constraints):
             try:
                 connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_password_reset_token ON users (password_reset_token) WHERE password_reset_token IS NOT NULL"))
                 print("INFO: Created unique index 'uq_password_reset_token' on 'users.password_reset_token'.")
+                connection.commit()
             except (OperationalError, IntegrityError) as e:
                 print(f"Warning: Could not create unique index on password_reset_token. Error: {e}")
+                connection.rollback()
+        
+        # CORRECTED: Move the bootstrap call to AFTER the column additions
+        _bootstrap_lollms_user(connection)
 
     # NEW: Migration for posts.visibility case issue
     if inspector.has_table("posts"):
@@ -537,8 +632,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             result = connection.execute(text("UPDATE posts SET visibility = LOWER(visibility) WHERE visibility != LOWER(visibility)"))
             if result.rowcount > 0:
                 print(f"INFO: Migrated {result.rowcount} post visibility values to lowercase.")
+                connection.commit()
         except Exception as e:
             print(f"WARNING: Could not run migration for 'posts.visibility' column. Error: {e}")
+            connection.rollback()
 
     if inspector.has_table("mcps"):
         mcp_columns_db = [col['name'] for col in inspector.get_columns('mcps')]
@@ -554,7 +651,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             if col_name not in mcp_columns_db:
                 connection.execute(text(f"ALTER TABLE mcps ADD COLUMN {col_name} {col_sql_def}"))
                 print(f"INFO: Added missing column '{col_name}' to 'mcps' table.")
-
+        connection.commit()
+        
         if 'client_id' in new_mcp_cols_defs:
             mcps_to_update = connection.execute(text("SELECT id, name FROM mcps WHERE client_id IS NULL")).fetchall()
             if mcps_to_update:
@@ -579,14 +677,17 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                         counter += 1
                     connection.execute(text("UPDATE mcps SET client_id = :cid WHERE id = :mid"), {"cid": new_client_id, "mid": mcp_id})
                     print(f"  - Set client_id for '{mcp_name}' to '{new_client_id}'")
+                connection.commit()
 
         mcp_constraints = inspector.get_unique_constraints('mcps')
         if 'client_id' in new_mcp_cols_defs and not any(c['name'] == 'uq_mcp_client_id' for c in mcp_constraints):
             try:
                 connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_mcp_client_id ON mcps (client_id) WHERE client_id IS NOT NULL"))
                 print("INFO: Created unique index 'uq_mcp_client_id' on 'mcps.client_id'.")
+                connection.commit()
             except (OperationalError, IntegrityError) as e:
                 print(f"Warning: Could not create unique index on mcp client_id. Error: {e}")
+                connection.rollback()
 
     if inspector.has_table("apps"):
         app_columns_db = [col['name'] for col in inspector.get_columns('apps')]
@@ -651,8 +752,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                         connection.execute(App.__table__.insert().values(row_data))
                         restored_count += 1
                     print(f"INFO: Restored {restored_count} rows to 'apps' table.")
+                connection.commit()
             except Exception as e:
                 print(f"CRITICAL: Data-safe reset for 'apps' table failed. Error: {e}")
+                connection.rollback()
                 trace_exception(e)
                 raise e
 
@@ -683,6 +786,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             if col_name not in app_columns_db_after_rebuild:
                 connection.execute(text(f"ALTER TABLE apps ADD COLUMN {col_name} {col_sql_def}"))
                 print(f"INFO: Added missing column '{col_name}' to 'apps' table.")
+        connection.commit()
 
         if 'client_id' in new_app_cols_defs:
             apps_to_update = connection.execute(text("SELECT id, name FROM apps WHERE client_id IS NULL")).fetchall()
@@ -700,21 +804,26 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                         counter += 1
                     connection.execute(text("UPDATE apps SET client_id = :cid WHERE id = :aid"), {"cid": new_client_id, "aid": app_id})
                     print(f"  - Set client_id for '{app_name}' to '{new_client_id}'")
+                connection.commit()
         
         app_constraints = inspector.get_unique_constraints('apps')
         if 'port' in new_app_cols_defs and not any(c['name'] == 'uq_app_port' for c in app_constraints):
             try:
                 connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_app_port ON apps (port) WHERE port IS NOT NULL"))
                 print("INFO: Created unique index 'uq_app_port' on 'apps.port'.")
+                connection.commit()
             except (OperationalError, IntegrityError) as e:
                 print(f"Warning: Could not create unique index on app port. Error: {e}")
+                connection.rollback()
         
         if 'client_id' in new_app_cols_defs and not any(c['name'] == 'uq_app_client_id' for c in app_constraints):
             try:
                 connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_app_client_id ON apps (client_id) WHERE client_id IS NOT NULL"))
                 print("INFO: Created unique index 'uq_app_client_id' on 'apps.client_id'.")
+                connection.commit()
             except (OperationalError, IntegrityError) as e:
                 print(f"Warning: Could not create unique index on app client_id. Error: {e}")
+                connection.rollback()
 
     if inspector.has_table("system_apps"):
         system_app_columns_db = [col['name'] for col in inspector.get_columns('system_apps')]
@@ -725,6 +834,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             if col_name not in system_app_columns_db:
                 connection.execute(text(f"ALTER TABLE system_apps ADD COLUMN {col_name} {col_sql_def}"))
                 print(f"INFO: Added missing column '{col_name}' to 'system_apps' table.")
+        connection.commit()
 
     if inspector.has_table("app_zoo_repositories"):
         columns_db = [col['name'] for col in inspector.get_columns('app_zoo_repositories')]
@@ -734,6 +844,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'type' not in columns_db:
             connection.execute(text("ALTER TABLE app_zoo_repositories ADD COLUMN type VARCHAR DEFAULT 'git' NOT NULL"))
             print("INFO: Added 'type' column to 'app_zoo_repositories' table.")
+        connection.commit()
 
     if inspector.has_table("mcp_zoo_repositories"):
         columns_db = [col['name'] for col in inspector.get_columns('mcp_zoo_repositories')]
@@ -743,6 +854,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'type' not in columns_db:
             connection.execute(text("ALTER TABLE mcp_zoo_repositories ADD COLUMN type VARCHAR DEFAULT 'git' NOT NULL"))
             print("INFO: Added 'type' column to 'mcp_zoo_repositories' table.")
+        connection.commit()
 
     if inspector.has_table("prompt_zoo_repositories"):
         columns_db = [col['name'] for col in inspector.get_columns('prompt_zoo_repositories')]
@@ -752,24 +864,28 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'type' not in columns_db:
             connection.execute(text(f"ALTER TABLE prompt_zoo_repositories ADD COLUMN type VARCHAR DEFAULT 'git' NOT NULL"))
             print("INFO: Added 'type' column to 'prompt_zoo_repositories' table.")
+        connection.commit()
     
     # NEW: Create personality_zoo_repositories if it doesn't exist
     if not inspector.has_table("personality_zoo_repositories"):
         from backend.db.models.service import PersonalityZooRepository
         PersonalityZooRepository.__table__.create(connection)
         print("INFO: Created 'personality_zoo_repositories' table.")
+        connection.commit()
 
     # NEW: Create broadcast_messages if it doesn't exist
     if not inspector.has_table("broadcast_messages"):
         from backend.db.models.broadcast import BroadcastMessage
         BroadcastMessage.__table__.create(connection)
         print("INFO: Created 'broadcast_messages' table for multi-worker communication.")
+        connection.commit()
 
     # NEW: Create shared_discussion_links if it doesn't exist
     if not inspector.has_table("shared_discussion_links"):
         from backend.db.models.discussion import SharedDiscussionLink
         SharedDiscussionLink.__table__.create(connection)
         print("INFO: Created 'shared_discussion_links' table for discussion sharing.")
+        connection.commit()
 
 
 def check_and_update_db_version(SessionLocal):

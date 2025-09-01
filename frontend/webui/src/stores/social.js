@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/social.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -6,19 +7,17 @@ import { useAuthStore } from './auth';
 
 export const useSocialStore = defineStore('social', () => {
     // --- STATE ---
-    const feedPosts = ref([]);
-    const profiles = ref({});
-    const userPosts = ref({});
     const friends = ref([]);
     const pendingFriendRequests = ref([]);
     const blockedUsers = ref([]);
-
+    const isLoadingFriends = ref(false);
+    const feedPosts = ref([]);
+    const profiles = ref({});
+    const userPosts = ref({});
     const isLoadingFeed = ref(false);
     const isLoadingProfile = ref(false);
-    const isLoadingFriends = ref(false);
     const isLoadingRequests = ref(false);
     const isLoadingBlocked = ref(false);
-
     const comments = ref({});
     const isLoadingComments = ref({});
     const conversations = ref([]);
@@ -36,14 +35,29 @@ export const useSocialStore = defineStore('social', () => {
 
     // --- ACTIONS ---
 
+    // NEW ACTION
+    async function searchForMentions(query) {
+        if (!query) return [];
+        try {
+            const response = await apiClient.get('/api/social/mentions/search', { params: { q: query } });
+            return response.data;
+        } catch (error) {
+            console.error("Failed to search for mentions:", error);
+            return [];
+        }
+    }
+
+
     // -- Friendship, Requests & Blocks --
     async function fetchFriends() {
         isLoadingFriends.value = true;
         try {
             const response = await apiClient.get('/api/friends');
-            friends.value = response.data;
+            // Use splice to mutate the array in place, preserving reactivity
+            friends.value.splice(0, friends.value.length, ...(response.data || []));
         } catch (error) {
             console.error("Failed to fetch friends:", error);
+            friends.value.splice(0, friends.value.length); // Clear on error
         } finally {
             isLoadingFriends.value = false;
         }
@@ -463,6 +477,7 @@ export const useSocialStore = defineStore('social', () => {
         getActiveConversation,
         getCommentsForPost,
         friendRequestCount,
+        searchForMentions,
         fetchFriends,
         fetchPendingRequests,
         fetchBlockedUsers,

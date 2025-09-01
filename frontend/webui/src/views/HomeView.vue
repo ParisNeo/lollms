@@ -1,45 +1,35 @@
 <script setup>
-import { computed } from 'vue';
-import ChatView from '../components/chat/ChatView.vue';
-import FeedComponent from '../components/social/FeedComponent.vue';
-import DmWindow from '../components/dm/DmWindow.vue';
+import { computed, watch } from 'vue';
 import { useUiStore } from '../stores/ui';
-import { useDiscussionsStore } from '../stores/discussions';
+import FeedComponent from '../components/social/FeedComponent.vue';
+import ChatView from '../components/chat/ChatView.vue';
+import DmWindow from '../components/dm/DmWindow.vue';
 import { useSocialStore } from '../stores/social';
 
 const uiStore = useUiStore();
-const discussionsStore = useDiscussionsStore();
 const socialStore = useSocialStore();
 
 const mainView = computed(() => uiStore.mainView);
-const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
-const activeConversations = computed(() => Object.values(socialStore.activeConversations));
+const activeDmWindows = computed(() => socialStore.activeConversations);
 
-// This computed property determines if the chat view should be displayed.
-const showChatView = computed(() => {
-    return mainView.value === 'chat' && activeDiscussion.value !== null;
-});
-
+watch(activeDmWindows, (newVal) => {
+  console.log("Active DM Windows changed:", Object.keys(newVal));
+}, { deep: true });
 </script>
 
 <template>
   <div class="h-full w-full relative">
-    <div class="flex-grow flex flex-col min-h-0 h-full">
-      <!-- Render ChatView only when it's explicitly the correct state -->
-      <ChatView v-if="showChatView" class="flex-grow" />
-      
-      <!-- Render FeedComponent for all other cases (feed view, or chat view with no active discussion) -->
-      <FeedComponent v-else class="flex-grow" />
+    <div class="h-full w-full">
+        <FeedComponent v-if="mainView === 'feed'" />
+        <ChatView v-else />
     </div>
-
-    <!-- Floating DM Windows Container -->
-    <div class="fixed bottom-0 right-0 flex items-end space-x-4 pr-4 z-30 pointer-events-none">
+    
+    <!-- DM Windows will float over the main view -->
+    <div class="absolute bottom-0 right-0 z-30 flex items-end space-x-4 pr-4">
       <DmWindow 
-        v-for="(convo, index) in activeConversations"
+        v-for="convo in activeDmWindows"
         :key="convo.partner.id"
         :conversation="convo"
-        :style="{ right: `${(index * 336) + 16}px` }"
-        class="pointer-events-auto"
       />
     </div>
   </div>

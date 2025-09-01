@@ -143,7 +143,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         is_ollama_require_key = settings.get("ollama_require_key", True)
 
         return UserAuthDetails(
-            id=db_user.id, username=username, is_admin=db_user.is_admin, is_active=db_user.is_active,
+            id=db_user.id, username=username, is_admin=db_user.is_admin, is_moderator=(db_user.is_admin or db_user.is_moderator), is_active=db_user.is_active,
             icon=db_user.icon, first_name=db_user.first_name, family_name=db_user.family_name, email=db_user.email,
             birth_date=db_user.birth_date, receive_notification_emails=db_user.receive_notification_emails,
             is_searchable=db_user.is_searchable, first_login_done=db_user.first_login_done,

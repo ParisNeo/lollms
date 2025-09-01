@@ -1,6 +1,7 @@
 import datetime
 from pydantic import BaseModel, constr
 from backend.db.base import FriendshipStatus
+from typing import Optional
 
 class FriendshipBase(BaseModel):
     pass
@@ -14,6 +15,7 @@ class FriendshipAction(BaseModel):
 class FriendPublic(BaseModel):
     id: int
     username: str
+    icon: Optional[str] = None
     friendship_id: int
     status_with_current_user: FriendshipStatus
     class Config:

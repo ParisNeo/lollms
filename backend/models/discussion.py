@@ -158,7 +158,7 @@ class MessageCodeExportRequest(BaseModel):
     discussion_title: Optional[str] = "discussion"
 
 class DiscussionShareRequest(BaseModel):
-    target_username: constr(min_length=3, max_length=50)
+    target_user_id: int
     permission_level: str = "view"
 
     @field_validator('permission_level')

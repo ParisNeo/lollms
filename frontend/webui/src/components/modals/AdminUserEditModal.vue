@@ -17,6 +17,7 @@ const onUserUpdated = computed(() => modalProps.value?.onUserUpdated);
 
 const form = ref({
     is_admin: false,
+    is_moderator: false,
     is_active: false,
     lollms_model_name: '',
     llm_ctx_size: null,
@@ -32,6 +33,7 @@ watch(
         if (newUser) {
             form.value = {
                 is_admin: newUser.is_admin,
+                is_moderator: newUser.is_moderator,
                 is_active: newUser.is_active,
                 lollms_model_name: newUser.lollms_model_name || '',
                 llm_ctx_size: newUser.llm_ctx_size,
@@ -42,12 +44,19 @@ watch(
     { immediate: true }
 );
 
+watch(() => form.value.is_admin, (isAdmin) => {
+    if (isAdmin) {
+        form.value.is_moderator = true;
+    }
+});
+
 async function handleSubmit() {
     if (!user.value || !user.value.id) return;
     isLoading.value = true;
     try {
         const payload = {
             is_admin: form.value.is_admin,
+            is_moderator: form.value.is_moderator,
             is_active: form.value.is_active,
             lollms_model_name: form.value.lollms_model_name || null,
             llm_ctx_size: form.value.llm_ctx_size ? Number(form.value.llm_ctx_size) : null,
@@ -113,7 +122,15 @@ onMounted(() => {
                             <span :class="[form.is_admin ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>
-
+                    <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <span class="flex-grow flex flex-col">
+                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Moderator</span>
+                            <span class="text-sm text-gray-500 dark:text-gray-400">Can delete user content.</span>
+                        </span>
+                        <button @click="form.is_moderator = !form.is_moderator" type="button" :disabled="form.is_admin" :class="[form.is_moderator ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800', {'opacity-50 cursor-not-allowed': form.is_admin}]">
+                            <span :class="[form.is_moderator ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                        </button>
+                    </div>
                     <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                         <span class="flex-grow flex flex-col">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Account Active</span>

@@ -23,13 +23,12 @@ const isCommentsVisible = ref(false);
 
 const user = computed(() => authStore.user);
 const isAuthor = computed(() => user.value?.id === props.post.author.id);
-const isAdmin = computed(() => user.value?.is_admin === true);
-const canDelete = computed(() => isAuthor.value || isAdmin.value);
+const canDelete = computed(() => isAuthor.value || user.value?.is_admin || user.value?.is_moderator);
 
 // --- NEW: Computed property for comment count ---
 const commentCount = computed(() => {
   const comments = socialStore.getCommentsForPost(props.post.id);
-  return comments ? comments.length : 0;
+  return comments ? comments.length : (props.post.comments?.length || 0);
 });
 
 const formattedContent = computed(() => {
@@ -135,7 +134,7 @@ function toggleComments() {
           </div>
           
           <!-- Options Menu -->
-          <div v-if="isAuthor || isAdmin" class="relative options-menu-container">
+          <div v-if="canDelete" class="relative options-menu-container">
             <button @click.stop="toggleOptionsMenu"  class="p-1 rounded-full text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
             </button>
@@ -164,9 +163,10 @@ function toggleComments() {
 
         <!-- Action Buttons -->
         <div class="mt-4 flex justify-between text-gray-500">
-          <button @click="handleLikeClick" class="flex items-center space-x-2 hover:text-blue-500 transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0016.556 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" /></svg>
-            <span>Like</span>
+          <button @click="handleLikeClick" class="flex items-center space-x-2 hover:text-blue-500 transition-colors" :class="{'text-blue-600 dark:text-blue-400 font-semibold': post.has_liked}">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" :fill="post.has_liked ? 'currentColor' : 'none'" :stroke="post.has_liked ? 'none' : 'currentColor'" stroke-width="1.5"><path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0016.556 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" /></svg>
+            <span>{{ post.has_liked ? 'Liked' : 'Like' }}</span>
+            <span v-if="post.like_count > 0" class="text-xs font-bold">{{ post.like_count }}</span>
           </button>
           
           <!-- MODIFIED: Comment button now includes the count -->

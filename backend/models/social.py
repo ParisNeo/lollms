@@ -1,14 +1,8 @@
 import datetime
 from typing import List, Optional, Dict, Any
-from enum import Enum
 from pydantic import BaseModel, Field
-from backend.db.models.social import PostVisibility as DBPostVisibility
+from backend.db.base import PostVisibility
 from .user import AuthorPublic
-
-class PostVisibility(str, Enum):
-    public = "public"
-    followers = "followers"
-    friends = "friends"
 
 class PostBase(BaseModel):
     content: str = Field(..., max_length=10000)
@@ -38,7 +32,7 @@ class PostPublic(PostBase):
     id: int
     author: AuthorPublic
     media: Optional[List[Dict[str, Any]]] = None
-    visibility: DBPostVisibility
+    visibility: PostVisibility
     created_at: datetime.datetime
     updated_at: datetime.datetime
     comments: List[CommentPublic] = []

@@ -76,6 +76,30 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'new_dm':
                     socialStore.handleNewDm(data.data);
                     break;
+                case 'new_shared_discussion':
+                    discussionsStore.loadDiscussions(); // This will fetch both owned and shared
+                    uiStore.addNotification(`'${data.data.discussion_title}' was shared with you by ${data.data.from_user}.`, 'info');
+                    break;
+                case 'discussion_updated':
+                    if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
+                        console.log(`[WebSocket] Received update for active discussion ${data.data.discussion_id}. Refreshing messages.`);
+                        uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
+                        discussionsStore.refreshActiveDiscussionMessages();
+                    } else {
+                        // Optional: show a more subtle notification for non-active discussions
+                         uiStore.addNotification(`A shared discussion was updated by ${data.data.sender_username}.`, 'info');
+                    }
+                    // Also refresh the main list in case of title changes etc.
+                    discussionsStore.loadDiscussions();
+                    break;
+                case 'discussion_unshared':
+                    if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
+                        discussionsStore.selectDiscussion(null); // Deselect if it was the active one
+                        uiStore.setMainView('feed'); // Go to a safe page
+                    }
+                    discussionsStore.loadDiscussions(); // Refresh list to remove it
+                    uiStore.addNotification(`Access to a shared discussion was revoked by ${data.data.from_user}.`, 'warning');
+                    break;
                 case 'admin_broadcast':
                     uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender);
                     break;
@@ -105,19 +129,7 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'bindings_updated':
                     uiStore.addNotification('LLM bindings have been updated. Refreshing model list.', 'info');
                     dataStore.fetchAvailableLollmsModels();
-                    break;
-                case 'discussion_updated':
-                    if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
-                        console.log(`[WebSocket] Received update for active discussion ${data.data.discussion_id}. Refreshing messages.`);
-                        uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
-                        discussionsStore.refreshActiveDiscussionMessages();
-                    } else {
-                        // Optional: show a more subtle notification for non-active discussions
-                         uiStore.addNotification(`A shared discussion was updated by ${data.data.sender_username}.`, 'info');
-                    }
-                    // Also refresh the main list in case of title changes etc.
-                    discussionsStore.loadDiscussions();
-                    break;                    
+                    break;               
             }
         };
 

@@ -1,4 +1,4 @@
-# backend/routers/discussion.py
+# backend/routers/discussion/generation/llm.py
 # Standard Library Imports
 import base64
 import io
@@ -37,6 +37,7 @@ from backend.db import get_db
 from backend.db.models.config import TTIBinding as DBTTIBinding
 from backend.db.models.db_task import DBTask
 from backend.db.models.personality import Personality as DBPersonality
+from backend.db.models.discussion import SharedDiscussionLink as DBSharedDiscussionLink
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
 from backend.discussion import get_user_discussion, get_user_discussion_manager
@@ -59,6 +60,8 @@ from backend.session import (get_current_active_user,
                              get_user_lollms_client,
                              get_user_temp_uploads_path, user_sessions)
 from backend.task_manager import task_manager, Task
+from backend.ws_manager import manager
+from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 
 
 
@@ -72,16 +75,17 @@ def build_llm_generation_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ) -> StreamingResponse:
-        username = current_user.username
+        discussion_obj, owner_username, permission, owner_db_user = await get_discussion_and_owner_for_request(
+            discussion_id, current_user, db, 'interact'
+        )
+
         user_model_full = current_user.lollms_model_name
         binding_alias = None
         if user_model_full and '/' in user_model_full:
             binding_alias, _ = user_model_full.split('/', 1)
         
-        lc = get_user_lollms_client(current_user.username, binding_alias)
-        discussion_obj = get_user_discussion(username, discussion_id)
-        if not discussion_obj:
-            raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
+        lc = get_user_lollms_client(owner_username, binding_alias)
+        discussion_obj.lollms_client = lc
         
         if not lc:
             async def error_stream():
@@ -96,7 +100,7 @@ def build_llm_generation_router(router: APIRouter):
                     rag_top_k = current_user.rag_top_k if current_user.rag_top_k is not None else 5
                 if rag_min_similarity_percent is None:
                     rag_min_similarity_percent = current_user.rag_min_sim_percent if current_user.rag_min_sim_percent is not None else 50
-                retrieved_chunks = ss.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
+                retrieved_chunks = ss.query(query, vectorizer_name=owner_db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
                 revamped_chunks=[]
                 for entry in retrieved_chunks:
                     revamped_entry = {}
@@ -112,19 +116,18 @@ def build_llm_generation_router(router: APIRouter):
                 trace_exception(e)
                 return [{"error": f"Error during RAG query on datastore {ss.name}: {e}"}]
 
-        db_user = db.query(DBUser).filter(DBUser.username == username).one()
-        discussion_obj.memory = db_user.memory
+        discussion_obj.memory = owner_db_user.memory
         rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
         
         use_rag = {}
         for ds_id in rag_datastore_ids:
-            ss = get_safe_store_instance(username, ds_id, db)
+            ss = get_safe_store_instance(owner_username, ds_id, db)
             if ss:
                 use_rag[ss.name] = {"name": ss.name, "description": ss.description, "callable": partial(query_rag_callback, ss=ss)}
 
-        db_pers = db.query(DBPersonality).filter(DBPersonality.id == db_user.active_personality_id).first() if db_user.active_personality_id else None
+        db_pers = db.query(DBPersonality).filter(DBPersonality.id == owner_db_user.active_personality_id).first() if owner_db_user.active_personality_id else None
         
-        user_data_zone = db_user.data_zone or ""
+        user_data_zone = owner_db_user.data_zone or ""
         now = datetime.now()
         replacements = {
             "{{date}}": now.strftime("%Y-%m-%d"),
@@ -149,10 +152,10 @@ def build_llm_generation_router(router: APIRouter):
             elif db_pers.data_source_type == "datastore" and db_pers.data_source:
                 def query_personality_datastore(query: str) -> str:
                     ds_id = db_pers.data_source
-                    ds = get_safe_store_instance(username, ds_id, db)
+                    ds = get_safe_store_instance(owner_username, ds_id, db)
                     if not ds: return f"Error: Personality datastore '{ds_id}' not found or inaccessible."
                     try:
-                        results = ds.query(query, vectorizer_name=db_user.safe_store_vectorizer, top_k=db_user.rag_top_k)
+                        results = ds.query(query, vectorizer_name=owner_db_user.safe_store_vectorizer, top_k=owner_db_user.rag_top_k)
                         return "\n".join([chunk.get("chunk_text", "") for chunk in results])
                     except Exception as e:
                         return f"Error querying personality datastore: {e}"
@@ -173,7 +176,7 @@ def build_llm_generation_router(router: APIRouter):
         main_loop = asyncio.get_event_loop()
         stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
         stop_event = threading.Event()
-        user_sessions.setdefault(username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event
+        user_sessions.setdefault(current_user.username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event
 
         async def stream_generator() -> AsyncGenerator[str, None]:
             all_events = []
@@ -208,8 +211,8 @@ def build_llm_generation_router(router: APIRouter):
                     images_for_message = []
                     image_server_paths = json.loads(image_server_paths_json)
                     if image_server_paths and not is_resend:
-                        temp_path = get_user_temp_uploads_path(username)
-                        assets_path = get_user_discussion_assets_path(username) / discussion_id
+                        temp_path = get_user_temp_uploads_path(current_user.username)
+                        assets_path = get_user_discussion_assets_path(owner_username) / discussion_id
                         assets_path.mkdir(parents=True, exist_ok=True)
                         for temp_rel_path in image_server_paths:
                             filename = Path(temp_rel_path).name
@@ -225,8 +228,8 @@ def build_llm_generation_router(router: APIRouter):
                         result = discussion_obj.chat(
                             user_message=prompt, personality=active_personality, use_mcps=combined_mcps,
                             use_data_store=use_rag, images=images_for_message,
-                            streaming_callback=llm_callback, max_reasoning_steps=db_user.rag_n_hops,
-                            rag_top_k=db_user.rag_top_k, rag_min_similarity_percent=db_user.rag_min_sim_percent,
+                            streaming_callback=llm_callback, max_reasoning_steps=owner_db_user.rag_n_hops,
+                            rag_top_k=owner_db_user.rag_top_k, rag_min_similarity_percent=owner_db_user.rag_min_sim_percent,
                             debug=SERVER_CONFIG.get("debug", False)
                         )
                     
@@ -268,14 +271,29 @@ def build_llm_generation_router(router: APIRouter):
                         finalize_payload["new_title"] = new_title
                     json_compatible_event = jsonable_encoder(finalize_payload)
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_event) + "\n")
+                    
+                    db_for_broadcast = next(get_db())
+                    try:
+                        shared_links = db_for_broadcast.query(DBSharedDiscussionLink).filter(DBSharedDiscussionLink.discussion_id == discussion_id).all()
+                        if shared_links:
+                            participant_ids = {link.owner_user_id for link in shared_links}
+                            participant_ids.update({link.shared_with_user_id for link in shared_links})
+                            
+                            payload = {"type": "discussion_updated", "data": {"discussion_id": discussion_id, "sender_username": current_user.username}}
+                            for user_id in participant_ids:
+                                if user_id != current_user.id:
+                                    manager.send_personal_message_sync(payload, user_id)
+                    finally:
+                        db_for_broadcast.close()
+
                 except Exception as e:
                     trace_exception(e)
                     err_msg = f"LLM generation failed: {e}"
                     if main_loop.is_running():
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
                 finally:
-                    if username in user_sessions and "active_generation_control" in user_sessions[username]:
-                        user_sessions[username]["active_generation_control"].pop(discussion_id, None)
+                    if current_user.username in user_sessions and "active_generation_control" in user_sessions[current_user.username]:
+                        user_sessions[current_user.username]["active_generation_control"].pop(discussion_id, None)
                     if main_loop.is_running():
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
             
@@ -296,5 +314,3 @@ def build_llm_generation_router(router: APIRouter):
             return {"message": "Stop signal sent."}
         else:
             raise HTTPException(status_code=404, detail="No active generation found for this discussion.")
-
-

@@ -31,7 +31,6 @@ const isTitleGenerating = computed(() => store.titleGenerationInProgressId === p
 
 async function handleSelect() {
   if (!isSelected.value) {
-    console.log("selecting discussion p1:", props.discussion.id);
     await store.selectDiscussion(props.discussion.id);
   }
 }
@@ -67,6 +66,11 @@ function handleAutoTitle(event) {
     store.generateAutoTitle(props.discussion.id);
 }
 
+function handleUnsubscribe(event) {
+    event.stopPropagation();
+    store.unsubscribeFromSharedDiscussion(props.discussion.share_id);
+}
+
 </script>
 
 <template>
@@ -93,26 +97,33 @@ function handleAutoTitle(event) {
     
     <!-- Action Buttons container animates its width -->
     <div class="action-buttons-container">
-        <button @click.stop.prevent="handleStar" class="action-btn" :title="discussion.is_starred ? 'Unstar' : 'Star'">
-            <IconStarFilled v-if="discussion.is_starred" class="h-4 w-4 text-yellow-400" />
-            <IconStar v-else class="h-4 w-4" />
-        </button>
+        <template v-if="!discussion.owner_username">
+            <button @click.stop.prevent="handleStar" class="action-btn" :title="discussion.is_starred ? 'Unstar' : 'Star'">
+                <IconStarFilled v-if="discussion.is_starred" class="h-4 w-4 text-yellow-400" />
+                <IconStar v-else class="h-4 w-4" />
+            </button>
 
-        <button v-if="user && user.user_ui_level >= 4" @click.stop.prevent="handleAutoTitle" class="action-btn" title="Auto Title">
-            <IconSparkles class="h-4 w-4" />
-        </button>
+            <button v-if="user && user.user_ui_level >= 4" @click.stop.prevent="handleAutoTitle" class="action-btn" title="Auto Title">
+                <IconSparkles class="h-4 w-4" />
+            </button>
 
-        <button v-if="user && user.user_ui_level >= 4" @click.stop.prevent="handleSend" class="action-btn" title="Send Discussion">
-            <IconSend class="h-4 w-4" />
-        </button>
-        
-        <button @click.stop.prevent="handleRename" class="action-btn" title="Rename">
-            <IconPencil class="h-4 w-4" />
-        </button>
+            <button v-if="user && user.user_ui_level >= 4" @click.stop.prevent="handleSend" class="action-btn" title="Send Discussion">
+                <IconSend class="h-4 w-4" />
+            </button>
+            
+            <button @click.stop.prevent="handleRename" class="action-btn" title="Rename">
+                <IconPencil class="h-4 w-4" />
+            </button>
 
-        <button @click.stop.prevent="handleDelete" class="action-btn-danger" title="Delete">
-            <IconTrash class="h-4 w-4" />
-        </button>
+            <button @click.stop.prevent="handleDelete" class="action-btn-danger" title="Delete">
+                <IconTrash class="h-4 w-4" />
+            </button>
+        </template>
+        <template v-else>
+            <button @click.stop.prevent="handleUnsubscribe" class="action-btn-danger" title="Unsubscribe">
+                <IconTrash class="h-4 w-4" />
+            </button>
+        </template>
     </div>
   </div>
 </template>

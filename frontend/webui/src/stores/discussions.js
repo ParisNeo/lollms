@@ -438,23 +438,43 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         } catch (error) { console.error("Failed to load discussions:", error); }
     }
 
-    async function shareDiscussion({ discussionId, targetUsername, permissionLevel }) {
+    async function shareDiscussion({ discussionId, targetUserId, permissionLevel }) {
         const uiStore = useUiStore();
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/share`, {
-                target_username: targetUsername,
+                target_user_id: targetUserId,
                 permission_level: permissionLevel,
             });
-            uiStore.addNotification(response.data.message || `Discussion shared with ${targetUsername}!`, 'success');
+            uiStore.addNotification(response.data.message || `Discussion shared successfully!`, 'success');
             uiStore.closeModal();
         } catch (error) {
             console.error("Failed to share discussion:", error);
-            // The global error handler in api.js will show a notification
         }
     }
     
+    async function unsubscribeFromSharedDiscussion(shareId) {
+        const uiStore = useUiStore();
+        const confirmed = await uiStore.showConfirmation({
+            title: 'Unsubscribe from Discussion',
+            message: 'Are you sure you want to remove this shared discussion from your list?',
+            confirmText: 'Unsubscribe'
+        });
+        if (!confirmed) return;
+
+        try {
+            await apiClient.delete(`/api/discussions/unsubscribe/${shareId}`);
+            sharedWithMe.value = sharedWithMe.value.filter(d => d.share_id !== shareId);
+            if (currentDiscussionId.value && !discussions.value[currentDiscussionId.value] && !sharedWithMe.value.some(d => d.id === currentDiscussionId.value)) {
+                currentDiscussionId.value = null;
+                messages.value = [];
+            }
+            uiStore.addNotification('Successfully unsubscribed from the discussion.', 'success');
+        } catch (error) {
+            console.error("Failed to unsubscribe:", error);
+        }
+    }
+
     async function selectDiscussion(id, branchIdToLoad = null) {
-        console.log("Selecting discussion p0:", id, branchIdToLoad);
         if (!id || generationInProgress.value) return;
         const uiStore = useUiStore();
         const authStore = useAuthStore();
@@ -464,17 +484,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         activeDiscussionArtefacts.value = [];
         
         liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
-        console.log("Selecting discussion:", id);
-        if (!discussions.value[id]) {
+        
+        const discussionExists = discussions.value[id] || sharedWithMe.value.find(d => d.id === id);
+        if (!discussionExists) {
+            console.error(`Discussion with ID ${id} not found in owned or shared lists.`);
             currentDiscussionId.value = null;
+            uiStore.setMainView('feed'); 
             return;
         }
+
         uiStore.setMainView('chat');
         try {
             const params = branchIdToLoad ? { branch_id: branchIdToLoad } : {};
             const response = await apiClient.get(`/api/discussions/${id}`, { params });
             messages.value = processMessages(response.data);
-            console.log("Loaded messages:", messages.value);
             
             await Promise.all([
                 fetchContextStatus(id),
@@ -483,8 +506,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 fetchArtefacts(id)
             ]);
         } catch (error) {
-            useUiStore().addNotification('Failed to load messages.', 'error');
+            useUiStore().addNotification('Failed to load discussion.', 'error');
             currentDiscussionId.value = null;
+            uiStore.setMainView('feed');
         }
     }
 
@@ -1462,5 +1486,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         sharedWithMe,
         fetchSharedWithMe,
         shareDiscussion,
+        unsubscribeFromSharedDiscussion,
     };
 });

@@ -18,12 +18,14 @@ from backend.models import (
     CommentPublic
 )
 from backend.session import get_current_active_user
+from backend.routers.social.mentions import mentions_router
 
 social_router = APIRouter(
     prefix="/api/social",
     tags=["Social"],
     dependencies=[Depends(get_current_active_user)]
 )
+social_router.include_router(mentions_router, prefix="/mentions")
 
 # --- Follow/Unfollow Endpoints ---
 

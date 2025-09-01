@@ -1,4 +1,4 @@
-# backend/routers/discussion.py
+# backend/routers/discussion/__init__.py
 # Standard Library Imports
 import base64
 import io
@@ -14,7 +14,7 @@ import threading
 import fitz  # PyMuPDF
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, HTTPException, Query)
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from ascii_colors import ASCIIColors, trace_exception
 
 # Local Application Imports
@@ -37,6 +37,8 @@ from backend.routers.discussion.generation.llm import build_llm_generation_route
 from backend.routers.discussion.generation.tti import build_tti_generation_router
 from backend.routers.discussion.sharing import build_discussion_sharing_router
 from backend.routers.discussion.utils import build_utils_router
+from backend.db.models.discussion import SharedDiscussionLink
+from .helpers import get_discussion_and_owner_for_request
 
 def build_discussions_router():
     # safe_store is needed for RAG callbacks
@@ -105,15 +107,12 @@ def build_discussions_router():
 
     @router.get("/{discussion_id}", response_model=List[MessageOutput])
     async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[str] = Query(None), current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[MessageOutput]:
-        username = current_user.username
-        discussion_obj = get_user_discussion(username, discussion_id)
-        if not discussion_obj:
-            raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
 
         branch_tip_to_load = branch_id or discussion_obj.active_branch_id
         messages_in_branch = discussion_obj.get_branch(branch_tip_to_load)
 
-        db_user = db.query(DBUser).filter(DBUser.username == username).one()
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         user_grades = {g.message_id: g.grade for g in db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
 
         all_messages_in_discussion = discussion_obj.get_all_messages_flat()
@@ -195,10 +194,10 @@ def build_discussions_router():
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ) -> DiscussionInfo:
-        username = current_user.username
-        original_discussion = get_user_discussion(username, discussion_id)
-        if not original_discussion:
-            raise HTTPException(status_code=404, detail="Original discussion not found.")
+        original_discussion, _, permission_level, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        
+        if permission_level not in ['owner', 'interact']:
+             raise HTTPException(status_code=403, detail="You need at least 'interact' permission to clone a discussion.")
 
         try:
             cloned_discussion = original_discussion.clone_without_messages()
@@ -225,10 +224,7 @@ def build_discussions_router():
 
     @router.post("/{discussion_id}/auto-title", response_model=DiscussionInfo)
     async def generate_discussion_auto_title(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
-        username = current_user.username
-        discussion_obj = get_user_discussion(username, discussion_id)
-        if not discussion_obj:
-            raise HTTPException(status_code=404, detail="Discussion not found.")
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
 
         try:
             new_title = discussion_obj.auto_title()
@@ -236,7 +232,7 @@ def build_discussions_router():
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to generate title: {e}")
 
-        db_user = db.query(DBUser).filter(DBUser.username == username).one()
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
         metadata = discussion_obj.metadata or {}
         
@@ -253,12 +249,8 @@ def build_discussions_router():
 
 
     @router.get("/{discussion_id}/full_tree", response_model=List[MessageOutput])
-    async def get_full_discussion_tree(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)) -> List[MessageOutput]:
-        username = current_user.username
-        discussion_obj = get_user_discussion(username, discussion_id)
-        if not discussion_obj:
-            raise HTTPException(status_code=404, detail=f"Discussion '{discussion_id}' not found.")
-
+    async def get_full_discussion_tree(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[MessageOutput]:
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         all_messages_in_discussion = discussion_obj.get_all_messages_flat()
         
         children_map: Dict[Optional[str], List[str]] = {}
@@ -271,7 +263,7 @@ def build_discussions_router():
         messages_output = []
         db_session_for_grades = next(get_db())
         try:
-            db_user = db_session_for_grades.query(DBUser).filter(DBUser.username == username).one()
+            db_user = db_session_for_grades.query(DBUser).filter(DBUser.username == current_user.username).one()
             user_grades = {g.message_id: g.grade for g in db_session_for_grades.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
         finally:
             db_session_for_grades.close()
@@ -333,10 +325,7 @@ def build_discussions_router():
 
     @router.put("/{discussion_id}/active_branch", response_model=DiscussionInfo)
     async def update_discussion_active_branch(discussion_id: str, branch_request: DiscussionBranchSwitchRequest, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
-        username = current_user.username
-        discussion_obj = get_user_discussion(username, discussion_id)
-        if not discussion_obj:
-            raise HTTPException(status_code=404, detail="Discussion not found.")
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
 
         try:
             discussion_obj.switch_to_branch(branch_request.active_branch_id)
@@ -344,7 +333,7 @@ def build_discussions_router():
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
 
-        db_user = db.query(DBUser).filter(DBUser.username == username).one()
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
         metadata = discussion_obj.metadata or {}
         return DiscussionInfo(
@@ -360,14 +349,10 @@ def build_discussions_router():
 
     @router.put("/{discussion_id}/title", response_model=DiscussionInfo)
     async def update_discussion_title(discussion_id: str, title_update: DiscussionTitleUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
-        username = current_user.username
-        discussion_obj = get_user_discussion(username, discussion_id)
-        if not discussion_obj:
-            raise HTTPException(status_code=404, detail="Discussion not found.")
-
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         discussion_obj.set_metadata_item('title',title_update.title)
 
-        db_user = db.query(DBUser).filter(DBUser.username == username).one()
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
         return DiscussionInfo(
             id=discussion_id,
@@ -384,6 +369,10 @@ def build_discussions_router():
     async def delete_specific_discussion(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db), background_tasks: BackgroundTasks = BackgroundTasks()):
         username = current_user.username
         dm = get_user_discussion_manager(username)
+        
+        if not dm.discussion_exists(discussion_id):
+            raise HTTPException(status_code=404, detail="Discussion not found or you are not the owner.")
+            
         dm.delete_discussion(discussion_id)
 
         assets_path = get_user_discussion_assets_path(username) / discussion_id
@@ -394,6 +383,7 @@ def build_discussions_router():
             db_user = db.query(DBUser).filter(DBUser.username == username).one()
             db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).delete(synchronize_session=False)
             db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).delete(synchronize_session=False)
+            db.query(SharedDiscussionLink).filter_by(discussion_id=discussion_id, owner_user_id=db_user.id).delete(synchronize_session=False)
             db.commit()
         except Exception as e:
             db.rollback()
@@ -403,12 +393,9 @@ def build_discussions_router():
 
     @router.post("/{discussion_id}/star", status_code=201, response_model=DiscussionInfo)
     async def star_discussion(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
-        username = current_user.username
-        db_user = db.query(DBUser).filter(DBUser.username == username).one()
-        discussion_obj = get_user_discussion(username, discussion_id)
-        if not discussion_obj:
-            raise HTTPException(status_code=404, detail="Discussion not found.")
-
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
+        
         if not db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first():
             db.add(UserStarredDiscussion(user_id=db_user.id, discussion_id=discussion_id))
             db.commit()
@@ -427,11 +414,8 @@ def build_discussions_router():
 
     @router.delete("/{discussion_id}/star", status_code=200, response_model=DiscussionInfo)
     async def unstar_discussion(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DiscussionInfo:
-        username = current_user.username
-        db_user = db.query(DBUser).filter(DBUser.username == username).one()
-        discussion_obj = get_user_discussion(username, discussion_id)
-        if not discussion_obj:
-            raise HTTPException(status_code=404, detail="Discussion not found.")
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
 
         star = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first()
         if star:

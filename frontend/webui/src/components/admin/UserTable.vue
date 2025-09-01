@@ -264,8 +264,10 @@ onMounted(() => {
                                     </span>
                                 </div>
                             </td>
-                            <td class="table-cell text-sm text-gray-500 dark:text-gray-400">
-                                {{ user.is_admin ? 'Admin' : 'User' }}
+                            <td class="table-cell text-sm">
+                                <div v-if="user.is_admin" class="font-semibold text-red-500 dark:text-red-400">Admin</div>
+                                <div v-else-if="user.is_moderator" class="font-semibold text-blue-500 dark:text-blue-400">Moderator</div>
+                                <div v-else class="text-gray-500 dark:text-gray-400">User</div>
                             </td>
                             <td class="table-cell text-right text-sm font-medium">
                                 <div class="flex items-center justify-end space-x-3">

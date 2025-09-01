@@ -972,6 +972,7 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         username=user_data.username,
         hashed_password=hash_password(user_data.password),
         is_admin=user_data.is_admin,
+        is_moderator=(user_data.is_admin or user_data.is_moderator),
         email=user_data.email,
         lollms_model_name=user_data.lollms_model_name,
         safe_store_vectorizer=user_data.safe_store_vectorizer or settings.get("default_safe_store_vectorizer"),
@@ -1005,6 +1006,11 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
         raise HTTPException(status_code=403, detail="The initial superadmin account cannot have its admin status revoked.")
     
     update_dict = update_data.model_dump(exclude_unset=True)
+    
+    # If user is being made an admin, also make them a moderator
+    if 'is_admin' in update_dict and update_dict['is_admin']:
+        update_dict['is_moderator'] = True
+
     for key, value in update_dict.items():
         setattr(user_to_update, key, value)
     

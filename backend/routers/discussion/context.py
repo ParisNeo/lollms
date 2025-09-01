@@ -28,15 +28,20 @@ from backend.config import SERVER_CONFIG
 from backend.ws_manager import manager
 from .helpers import get_discussion_and_owner_for_request
 from lollms_client import MSG_TYPE, LollmsPersonality
+from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
+
+from backend.db import get_db
+
 
 
 def build_context_router(router: APIRouter):
     @router.get("/{discussion_id}/context_status", response_model=ContextStatusResponse)
-    def get_discussion_context_status(
+    async def get_discussion_context_status(
         discussion_id: str,
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)  
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
         
