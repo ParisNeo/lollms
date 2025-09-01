@@ -20,6 +20,13 @@ from backend.models import (
 from backend.session import get_current_active_user
 from backend.routers.social.mentions import mentions_router
 
+
+from sqlalchemy.orm import Session
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.social import Comment as DBComment, Post as DBPost
+from backend.session import get_current_db_user_from_token
+
 social_router = APIRouter(
     prefix="/api/social",
     tags=["Social"],
@@ -315,20 +322,24 @@ def create_comment_for_post(
     
     return new_comment
 
-
 @social_router.delete("/comments/{comment_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_comment(
     comment_id: int,
     db: Session = Depends(get_db),
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    current_user: DBUser = Depends(get_current_db_user_from_token)
 ):
     comment = db.query(DBComment).filter(DBComment.id == comment_id).first()
     if not comment:
-        return
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
 
-    if not (comment.author_id == current_user.id or current_user.is_admin):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to delete this comment.")
-        
+    post = db.query(DBPost).filter(DBPost.id == comment.post_id).first()
+    is_post_author = post.author_id == current_user.id if post else False
+    is_comment_author = comment.author_id == current_user.id
+    is_admin_or_moderator = current_user.is_admin or current_user.is_moderator
+
+    if not (is_comment_author or is_admin_or_moderator or is_post_author):
+        raise HTTPException(status_code=403, detail="Not authorized to delete this comment")
+
     db.delete(comment)
     db.commit()
     return

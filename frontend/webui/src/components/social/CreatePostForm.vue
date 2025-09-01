@@ -3,7 +3,6 @@ import { ref, computed } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useSocialStore } from '../../stores/social';
 import UserAvatar from '../ui/UserAvatar.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 
 const emit = defineEmits(['posted', 'close']);
 
@@ -52,10 +51,17 @@ function handleCancel() {
       </div>
 
       <div class="flex-1 min-w-0">
-        <CodeMirrorEditor v-model="content" />
+        <!-- REPLACED CodeMirrorEditor with a standard textarea -->
+        <textarea
+          v-model="content"
+          placeholder="What's on your mind?"
+          class="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 focus:ring-blue-500 focus:border-blue-500 transition text-sm"
+          rows="4"
+        ></textarea>
         
         <div class="mt-3 flex justify-between items-center">
           <div class="flex items-center space-x-2">
+            <!-- Placeholder for future tools like image upload -->
           </div>
 
           <div class="flex items-center space-x-3">

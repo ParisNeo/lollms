@@ -1,3 +1,4 @@
+# backend/routers/users.py
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, exists
@@ -74,3 +75,21 @@ def get_user_profile(
             "friendship_status": friendship_status
         }
     )
+
+@users_router.get("/mention_search", response_model=List[UserPublic])
+def search_for_mentions(
+    q: str = Query(..., min_length=1, max_length=50),
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Searches for users to mention.
+    Returns users whose username starts with the query.
+    Excludes the current user.
+    """
+    search_term = f"{q}%"
+    users = db.query(DBUser).filter(
+        DBUser.id != current_user.id,
+        DBUser.username.ilike(search_term)
+    ).limit(5).all()
+    return users

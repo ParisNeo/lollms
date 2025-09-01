@@ -21,6 +21,7 @@ import IconSend from '../assets/icons/IconSend.vue';
 import IconServer from '../assets/icons/IconServer.vue'; 
 import IconPhoto from '../assets/icons/IconPhoto.vue';
 import IconChevronRight from '../assets/icons/IconChevronRight.vue';
+import IconLollms from '../assets/icons/IconLollms.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -37,6 +38,7 @@ const components = {
   broadcast: defineAsyncComponent(() => import('../components/admin/BroadcastMessage.vue')),
   llm_bindings: defineAsyncComponent(() => import('../components/admin/bindings/LLMBindingsSettings.vue')),
   tti_bindings: defineAsyncComponent(() => import('../components/admin/bindings/TTIBindingsSettings.vue')),
+  ai_bot: defineAsyncComponent(() => import('../components/admin/AiBotSettings.vue')),
   services: defineAsyncComponent(() => import('../components/settings/ServicesSettings.vue')),
   apps: defineAsyncComponent(() => import('../components/admin/zoos/AppsManagement.vue')),
   mcps: defineAsyncComponent(() => import('../components/admin/zoos/McpsManagement.vue')),
@@ -62,6 +64,7 @@ const sections = [
   { type: 'divider', label: 'Bindings & Services' },
   { type: 'link', id: 'llm_bindings', name: 'LLM Bindings', icon: markRaw(IconCpuChip) },
   { type: 'link', id: 'tti_bindings', name: 'TTI Bindings', icon: markRaw(IconPhoto) },
+  { type: 'link', id: 'ai_bot', name: 'AI Bot', icon: markRaw(IconLollms) },
   { type: 'link', id: 'services', name: 'API Services', icon: markRaw(IconServer) },
   { type: 'divider', label: 'System & Tools' },
   { type: 'link', id: 'global_settings', name: 'Global Settings', icon: markRaw(IconCog) },

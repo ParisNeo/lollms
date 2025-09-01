@@ -3,6 +3,7 @@ import { computed } from 'vue';
 import { marked } from 'marked';
 import { useAuthStore } from '../../stores/auth';
 import { useSocialStore } from '../../stores/social';
+import { useUiStore } from '../../stores/ui';
 import UserAvatar from '../ui/UserAvatar.vue';
 
 const props = defineProps({
@@ -10,10 +11,15 @@ const props = defineProps({
     type: Object,
     required: true,
   },
+  postId: {
+    type: Number,
+    required: true,
+  },
 });
 
 const authStore = useAuthStore();
 const socialStore = useSocialStore();
+const uiStore = useUiStore();
 
 const user = computed(() => authStore.user);
 const isAuthor = computed(() => user.value?.id === props.comment.author.id);
@@ -40,11 +46,14 @@ function formatTimestamp(dateString) {
 }
 
 async function handleDelete() {
-  if (confirm('Are you sure you want to delete this comment?')) {
-    // Assuming the store will be updated with a deleteComment action
-    // await socialStore.deleteComment(props.comment.id);
-    console.log("Deleting comment:", props.comment.id)
-  }
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Delete Comment',
+        message: 'Are you sure you want to delete this comment?',
+        confirmText: 'Delete'
+    });
+    if (confirmed) {
+        await socialStore.deleteComment({ commentId: props.comment.id, postId: props.postId });
+    }
 }
 </script>
 

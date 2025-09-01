@@ -5,6 +5,7 @@ import { useAuthStore } from '../../stores/auth';
 import CreatePostForm from './CreatePostForm.vue';
 import PostCard from './PostCard.vue';
 import DmFooter from '../layout/DmFooter.vue';
+import UserAvatar from '../ui/UserAvatar.vue';
 
 const socialStore = useSocialStore();
 const authStore = useAuthStore();
@@ -33,16 +34,14 @@ onMounted(() => {
         </h1>
 
         <div v-if="canPost" class="mb-6">
-          <button 
-            v-if="!showCreateForm" 
-            @click="showCreateForm = true" 
-            class="w-full flex items-center justify-center p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300 font-semibold"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
-            Create New Post
-          </button>
+          <!-- Placeholder that reveals the form on click -->
+          <div v-if="!showCreateForm" @click="showCreateForm = true" class="w-full flex items-center p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors cursor-pointer">
+            <UserAvatar v-if="user" :icon="user.icon" :username="user.username" size-class="h-10 w-10" />
+            <div class="ml-4 text-gray-500 dark:text-gray-400">What's on your mind, {{ user.username }}?</div>
+          </div>
+          <!-- The actual form, shown when the placeholder is clicked -->
           <CreatePostForm 
-            v-else 
+            v-else
             @posted="showCreateForm = false"
             @close="showCreateForm = false"
           />

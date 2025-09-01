@@ -39,7 +39,7 @@ export const useSocialStore = defineStore('social', () => {
     async function searchForMentions(query) {
         if (!query) return [];
         try {
-            const response = await apiClient.get('/api/social/mentions/search', { params: { q: query } });
+            const response = await apiClient.get('/api/users/mention_search', { params: { q: query } });
             return response.data;
         } catch (error) {
             console.error("Failed to search for mentions:", error);
@@ -290,14 +290,13 @@ export const useSocialStore = defineStore('social', () => {
         }
     }
     
-    async function deleteComment(commentId) {
+    async function deleteComment({ commentId, postId }) {
         try {
             await apiClient.delete(`/api/social/comments/${commentId}`);
-            for (const postId in comments.value) {
+            if (comments.value[postId]) {
                 const index = comments.value[postId].findIndex(c => c.id === commentId);
                 if (index > -1) {
                     comments.value[postId].splice(index, 1);
-                    break;
                 }
             }
             useUiStore().addNotification('Comment deleted.', 'success');
