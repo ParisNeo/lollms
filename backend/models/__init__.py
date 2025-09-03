@@ -13,3 +13,4 @@ from .social import *
 from .friends import *
 from .dm import *
 from .prompt import *
+from .fun_fact import *

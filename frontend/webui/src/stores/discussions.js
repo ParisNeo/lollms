@@ -70,6 +70,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const activeDiscussionArtefacts = ref([]);
     const isLoadingArtefacts = ref(false);
 
+    const activeDiscussionMemories = ref([]);
+    const isLoadingMemories = ref(false);
+
     const sharedWithMe = ref([]);
     
 
@@ -93,7 +96,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         return Object.values(discussions.value).sort((a, b) => {
             const dateA = new Date(a.last_activity_at || a.created_at);
             const dateB = new Date(b.last_activity_at || b.created_at);
-            return dateB - dateA;
+            return dateB - a;
         });
     });
     const activeDiscussion = computed(() => {
@@ -238,6 +241,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             await fetchDataZones(discussionId);
             await fetchContextStatus(discussionId);
             await fetchArtefacts(discussionId);
+            await fetchMemories(discussionId);
         } catch(error) {
             uiStore.addNotification('Failed to refresh data zones.', 'error');
         }
@@ -482,6 +486,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         currentDiscussionId.value = id;
         messages.value = []; 
         activeDiscussionArtefacts.value = [];
+        activeDiscussionMemories.value = [];
         
         liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
         
@@ -503,7 +508,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 fetchContextStatus(id),
                 fetchDataZones(id),
                 authStore.fetchDataZone(),
-                fetchArtefacts(id)
+                fetchArtefacts(id),
+                fetchMemories(id)
             ]);
         } catch (error) {
             useUiStore().addNotification('Failed to load discussion.', 'error');
@@ -1329,6 +1335,69 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             console.error("Failed to update artefact:", error);
         }
     }
+    
+    // --- NEW: Memory Actions ---
+    async function fetchMemories(discussionId) {
+        if (!discussionId) {
+            activeDiscussionMemories.value = [];
+            return;
+        }
+        isLoadingMemories.value = true;
+        try {
+            const response = await apiClient.get(`/api/discussions/${discussionId}/memories`);
+            activeDiscussionMemories.value = response.data.sort((a,b) => a.title.localeCompare(b.title));
+        } catch (error) {
+            console.error("Failed to fetch memories:", error);
+            activeDiscussionMemories.value = [];
+        } finally {
+            isLoadingMemories.value = false;
+        }
+    }
+
+    async function createOrUpdateMemory({ discussionId, title, content }) {
+        const uiStore = useUiStore();
+        try {
+            const payload = { title, content };
+            await apiClient.post(`/api/discussions/${discussionId}/memories`, payload);
+            await fetchMemories(discussionId);
+            uiStore.addNotification('Memory saved successfully.', 'success');
+        } catch (error) {
+            console.error("Failed to save memory:", error);
+        }
+    }
+
+    async function deleteMemory({ discussionId, memoryTitle }) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.delete(`/api/discussions/${discussionId}/memories/${memoryTitle}`);
+            await fetchMemories(discussionId);
+            uiStore.addNotification(`Memory '${memoryTitle}' deleted.`, 'success');
+        } catch (error) {
+            console.error("Failed to delete memory:", error);
+        }
+    }
+
+    async function loadMemoryToContext({ discussionId, memoryTitle }) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.post(`/api/discussions/${discussionId}/memories/load-to-context`, { title: memoryTitle });
+            await refreshDataZones(discussionId);
+            uiStore.addNotification(`Memory '${memoryTitle}' loaded into context.`, 'success');
+        } catch (error) {
+            console.error("Failed to load memory:", error);
+        }
+    }
+
+    async function unloadMemoryFromContext({ discussionId, memoryTitle }) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.post(`/api/discussions/${discussionId}/memories/unload-from-context`, { title: memoryTitle });
+            await refreshDataZones(discussionId);
+            uiStore.addNotification(`Memory '${memoryTitle}' unloaded from context.`, 'success');
+        } catch (error) {
+            console.error("Failed to unload memory:", error);
+        }
+    }
 
     function $reset() {
         discussions.value = {};
@@ -1338,6 +1407,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         titleGenerationInProgressId.value = null;
         activeDiscussionContextStatus.value = null;
         activeAiTasks.value = {};
+        activeDiscussionMemories.value = [];
     }
     async function refreshUser() {
         if (!token.value) return;
@@ -1482,6 +1552,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         exportContextAsArtefact,
         createManualArtefact,
         updateArtefact,
+
+        activeDiscussionMemories, isLoadingMemories,
+        fetchMemories, createOrUpdateMemory, deleteMemory,
+        loadMemoryToContext, unloadMemoryFromContext,
 
         sharedWithMe,
         fetchSharedWithMe,

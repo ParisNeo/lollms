@@ -11,7 +11,12 @@ export const useAuthStore = defineStore('auth', () => {
     const loadingMessage = ref('Initializing...');
     const loadingProgress = ref(0);
     const funFact = ref('');
-    
+    const welcomeText = ref('lollms');
+    const welcomeSlogan = ref('One tool to rule them all');
+    const welcome_logo_url = ref(null);
+    const welcome_fun_fact_color = ref('#3B82F6');
+    const welcome_fun_fact_category = ref(null);
+
     // --- WebSocket State ---
     const ws = ref(null);
     const wsConnected = ref(false);
@@ -23,6 +28,26 @@ export const useAuthStore = defineStore('auth', () => {
 
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
+
+    async function fetchWelcomeInfo() {
+        try {
+            const welcomeInfoResponse = await apiClient.get('/api/welcome-info');
+            funFact.value = welcomeInfoResponse.data.fun_fact;
+            welcomeText.value = welcomeInfoResponse.data.welcome_text;
+            welcomeSlogan.value = welcomeInfoResponse.data.welcome_slogan;
+            welcome_logo_url.value = welcomeInfoResponse.data.welcome_logo_url;
+            welcome_fun_fact_color.value = welcomeInfoResponse.data.fun_fact_color;
+            welcome_fun_fact_category.value = welcomeInfoResponse.data.fun_fact_category;
+        } catch (e) {
+            console.warn("Could not fetch welcome info. Using defaults.");
+            funFact.value = 'The LoLLMs project is open source and seeks to democratize AI.';
+            welcomeText.value = 'lollms';
+            welcomeSlogan.value = 'One tool to rule them all';
+            welcome_logo_url.value = null;
+            welcome_fun_fact_color.value = '#3B82F6';
+            welcome_fun_fact_category.value = 'General';
+        }
+    }
     
     async function refreshUser() {
         if (!token.value) return;
@@ -59,13 +84,11 @@ export const useAuthStore = defineStore('auth', () => {
         };
 
         ws.value.onmessage = async (event) => {
-            // console.log("[WebSocket] Message received:", event.data);
             const data = JSON.parse(event.data);
-            // Dynamically import stores inside the handler to avoid circular dependencies
             const { useSocialStore } = await import('./social');
             const { useTasksStore } = await import('./tasks');
             const { useDataStore } = await import('./data');
-            const { useDiscussionsStore } = await import('./discussions'); // Import discussions store
+            const { useDiscussionsStore } = await import('./discussions');
             const socialStore = useSocialStore();
             const uiStore = useUiStore();
             const tasksStore = useTasksStore();
@@ -77,7 +100,7 @@ export const useAuthStore = defineStore('auth', () => {
                     socialStore.handleNewDm(data.data);
                     break;
                 case 'new_shared_discussion':
-                    discussionsStore.loadDiscussions(); // This will fetch both owned and shared
+                    discussionsStore.loadDiscussions();
                     uiStore.addNotification(`'${data.data.discussion_title}' was shared with you by ${data.data.from_user}.`, 'info');
                     break;
                 case 'discussion_updated':
@@ -86,18 +109,16 @@ export const useAuthStore = defineStore('auth', () => {
                         uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
                         discussionsStore.refreshActiveDiscussionMessages();
                     } else {
-                        // Optional: show a more subtle notification for non-active discussions
                          uiStore.addNotification(`A shared discussion was updated by ${data.data.sender_username}.`, 'info');
                     }
-                    // Also refresh the main list in case of title changes etc.
                     discussionsStore.loadDiscussions();
                     break;
                 case 'discussion_unshared':
                     if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
-                        discussionsStore.selectDiscussion(null); // Deselect if it was the active one
-                        uiStore.setMainView('feed'); // Go to a safe page
+                        discussionsStore.selectDiscussion(null);
+                        uiStore.setMainView('feed');
                     }
-                    discussionsStore.loadDiscussions(); // Refresh list to remove it
+                    discussionsStore.loadDiscussions();
                     uiStore.addNotification(`Access to a shared discussion was revoked by ${data.data.from_user}.`, 'warning');
                     break;
                 case 'admin_broadcast':
@@ -108,8 +129,7 @@ export const useAuthStore = defineStore('auth', () => {
                     break;
                 case 'app_status_changed': {
                     const { useAdminStore } = await import('./admin');
-                    const adminStore = useAdminStore();
-                    adminStore.handleAppStatusUpdate(data.data);
+                    useAdminStore().handleAppStatusUpdate(data.data);
                     dataStore.handleServiceStatusUpdate(data.data);
                     break;
                 }
@@ -123,11 +143,12 @@ export const useAuthStore = defineStore('auth', () => {
                     tasksStore.handleTasksCleared(data.data);
                     break;
                 case 'settings_updated':
-                    uiStore.addNotification('Global settings have been updated by an admin. Refreshing your session...', 'info');
+                    uiStore.addNotification('Global settings updated by admin. Refreshing session...', 'info');
                     await refreshUser();
+                    await fetchWelcomeInfo();
                     break;
                 case 'bindings_updated':
-                    uiStore.addNotification('LLM bindings have been updated. Refreshing model list.', 'info');
+                    uiStore.addNotification('LLM bindings updated. Refreshing model list.', 'info');
                     dataStore.fetchAvailableLollmsModels();
                     break;               
             }
@@ -135,32 +156,20 @@ export const useAuthStore = defineStore('auth', () => {
 
         ws.value.onclose = (event) => {
             wsConnected.value = false;
-            console.log(`[WebSocket] Connection closed. Code: ${event.code}, Reason: ${event.reason}`);
             ws.value = null;
-            if (event.code !== 1000) { // Don't auto-reconnect on normal closure
-                console.log("[WebSocket] Reconnecting in 5 seconds...");
+            if (event.code !== 1000) {
                 reconnectTimeout = setTimeout(connectWebSocket, 5000);
             }
         };
-
-        ws.value.onerror = (error) => {
-            wsConnected.value = false;
-            console.error("[WebSocket] Error occurred:", error);
-            ws.value?.close();
-        };
+        ws.value.onerror = (error) => { wsConnected.value = false; ws.value?.close(); };
     }
 
     function disconnectWebSocket() {
-        console.log("[WebSocket] Disconnecting intentionally.");
         wsConnected.value = false;
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        if (ws.value) {
-            ws.value.close(1000, "User logout"); // Normal closure
-            ws.value = null;
-        }
+        if (ws.value) { ws.value.close(1000, "User logout"); ws.value = null; }
     }
 
-    // --- Original Auth Flow Functions (with WebSocket hooks added) ---
     async function fetchUserAndInitialData() {
         const uiStore = useUiStore();
         try {
@@ -169,7 +178,7 @@ export const useAuthStore = defineStore('auth', () => {
             const response = await apiClient.get('/api/auth/me');
             user.value = response.data;
             
-            connectWebSocket(); // Connect WebSocket after getting user data
+            connectWebSocket();
             
             const { useDiscussionsStore } = await import('./discussions');
             const { useDataStore } = await import('./data');
@@ -219,7 +228,7 @@ export const useAuthStore = defineStore('auth', () => {
                 try{
                     const response = await apiClient.get('/api/auth/me');
                     user.value = response.data;
-                    connectWebSocket(); // Also connect for SSO users
+                    connectWebSocket();
                 } catch(e){
                     clearAuthData();
                 }
@@ -237,12 +246,8 @@ export const useAuthStore = defineStore('auth', () => {
         loadingProgress.value = 0;
         loadingMessage.value = 'Waking up the hamsters...';
 
-        try {
-            const funFactResponse = await apiClient.get('/api/fun-fact');
-            funFact.value = funFactResponse.data.fun_fact;
-        } catch (e) {
-            funFact.value = 'The LoLLMs project is open source and seeks to democratize AI.';
-        }
+        await fetchWelcomeInfo();
+        
         await new Promise(resolve => setTimeout(resolve, 500));
         loadingProgress.value = 10;
         loadingMessage.value = 'Checking credentials...';
@@ -257,22 +262,14 @@ export const useAuthStore = defineStore('auth', () => {
                 uiStore.openModal('firstAdminSetup'); 
                 return;
             } else if (token.value) {
-                const success = await fetchUserAndInitialData();
-                if (!success) {
-                    uiStore.openModal('login');
-                }
-            } else {
-                uiStore.openModal('login');
+                await fetchUserAndInitialData();
             }
         } catch (error) {
             console.error("Failed to check admin status or during initial auth:", error);
             uiStore.addNotification('Failed to connect to server. Please try again later.', 'error');
             clearAuthData();
-            uiStore.openModal('login');
         } finally {
-            if (isAuthenticating.value) { 
-                isAuthenticating.value = false;
-            }
+            isAuthenticating.value = false;
         }
     }
 
@@ -323,14 +320,13 @@ export const useAuthStore = defineStore('auth', () => {
         user.value = null;
         token.value = null;
         localStorage.removeItem('lollms-token');
-        apiClient.defaults.headers.common['Authorization'] = null; // Clear header
-        disconnectWebSocket(); // Disconnect WebSocket on clear
+        apiClient.defaults.headers.common['Authorization'] = null;
+        disconnectWebSocket();
     }
 
     async function logout() {
         const uiStore = useUiStore();
         if (!isAuthenticated.value) { return; }
-        const localToken = token.value;
 
         const { useDiscussionsStore } = await import('./discussions');
         const { useDataStore } = await import('./data');
@@ -341,7 +337,7 @@ export const useAuthStore = defineStore('auth', () => {
             console.warn("Backend logout call failed, which can be normal after token removal.", error);
         });
         
-        clearAuthData(); // This will disconnect WebSocket
+        clearAuthData();
         
         useDiscussionsStore().$reset();
         useDataStore().$reset();
@@ -350,12 +346,8 @@ export const useAuthStore = defineStore('auth', () => {
         
         uiStore.closeModal();
         uiStore.addNotification('You have been logged out.', 'info');
-        if (!window.location.pathname.startsWith('/app/')) {
-            uiStore.openModal('login');
-        }
     }
     
-    // --- Other functions remain the same as your original file ---
     async function ssoLoginWithPassword(clientId, username, password) {
         await login(username, password);
         return await ssoAuthorizeApplication(clientId);
@@ -427,8 +419,6 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-
-
     async function fetchDataZone() {
         if (!isAuthenticated.value) return;
         try {
@@ -497,8 +487,8 @@ export const useAuthStore = defineStore('auth', () => {
 
     return {
         user, token, isAuthenticating, isAuthenticated, isAdmin,
-        loadingMessage, loadingProgress, funFact, wsConnected,
-        attemptInitialAuth, login, register, logout,
+        loadingMessage, loadingProgress, funFact, welcomeText, welcomeSlogan, welcome_logo_url, welcome_fun_fact_color, welcome_fun_fact_category, wsConnected,
+        attemptInitialAuth, login, register, logout, fetchWelcomeInfo,
         updateUserProfile, updateUserPreferences, changePassword,
         ssoLoginWithPassword, ssoAuthorizeApplication,
         fetchScratchpad, updateScratchpad,

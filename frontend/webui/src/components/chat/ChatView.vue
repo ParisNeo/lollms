@@ -49,6 +49,7 @@ import IconWeb from '../../assets/icons/ui/IconWeb.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import IconSave from '../../assets/icons/IconSave.vue';
 
 // --- Store Initialization ---
 const discussionsStore = useDiscussionsStore();
@@ -59,7 +60,7 @@ const tasksStore = useTasksStore();
 const dataStore = useDataStore();
 const router = useRouter();
 const { on, off } = useEventBus();
-const { liveDataZoneTokens, currentModelVisionSupport, activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussionsStore);
+const { liveDataZoneTokens, currentModelVisionSupport, activeDiscussionArtefacts, isLoadingArtefacts, activeDiscussionMemories, isLoadingMemories } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { tasks } = storeToRefs(tasksStore);
 const { availableTtiModels } = storeToRefs(dataStore);
@@ -87,6 +88,7 @@ const urlToImport = ref('');
 const showUrlImport = ref(false);
 const isProgrammaticChange = ref(false);
 const selectedArtefactVersions = ref({});
+const isDraggingFile = ref(false);
 
 // --- Data Zone State ---
 let discussionSaveDebounceTimer = null;
@@ -223,11 +225,15 @@ const userDataZone = computed({
 });
 const personalityDataZone = computed(() => activeDiscussion.value?.personality_data_zone || '');
 const memory = computed({
-    get: () => authStore.user?.memory || '',
+    get: () => activeDiscussion.value?.memory || '',
     set: (newVal) => {
-        if (authStore.user) { authStore.user.memory = newVal; }
+        if (activeDiscussion.value) { 
+            discussionsStore.activeDiscussion.memory = newVal;
+        }
         clearTimeout(memorySaveDebounceTimer);
-        memorySaveDebounceTimer = setTimeout(() => { authStore.updateMemoryZone(newVal); }, 750);
+        memorySaveDebounceTimer = setTimeout(() => { 
+            if (activeDiscussion.value) discussionsStore.updateMemoryZone({discussionId: activeDiscussion.value.id, content:newVal}); 
+        }, 750);
     }
 });
 
@@ -314,6 +320,22 @@ onUnmounted(() => {
 function onDataZoneUpdatedFromStore({ discussionId, newContent }) {
     if (activeDiscussion.value && activeDiscussion.value.id === discussionId) {
         updateDiscussionDataZoneAndRecordHistory(newContent);
+    }
+}
+
+async function handleDrop(event, target) {
+    event.preventDefault();
+    isDraggingFile.value = false;
+    const files = Array.from(event.dataTransfer.files);
+    if (!files.length) return;
+
+    if (target === 'artefact') {
+        handleArtefactFileUpload({ target: { files } });
+    } else if (target === 'memory') {
+        // For memory, we treat it as adding an artefact. The user can then create a memory from it.
+        // This avoids needing a separate backend endpoint just for text extraction to memory.
+        handleArtefactFileUpload({ target: { files } });
+        uiStore.addNotification('File added as an artefact. You can now create a memory from its content.', 'info', 6000);
     }
 }
 
@@ -591,6 +613,40 @@ function openContextToArtefactModal() {
         }, {}))
     });
 }
+// --- NEW Memory Functions ---
+function handleCreateMemory() {
+    if (!activeDiscussion.value) return;
+    uiStore.openModal('memoryEditor', { discussionId: activeDiscussion.value.id });
+}
+
+function handleEditMemory(memory) {
+    if (!activeDiscussion.value) return;
+    uiStore.openModal('memoryEditor', { discussionId: activeDiscussion.value.id, memory });
+}
+
+async function handleDeleteMemory(memoryTitle) {
+    if (!activeDiscussion.value) return;
+    const confirmed = await uiStore.showConfirmation({
+        title: `Delete Memory '${memoryTitle}'?`,
+        message: 'This will permanently delete this memory.',
+        confirmText: 'Delete'
+    });
+    if (confirmed) {
+        await discussionsStore.deleteMemory({ discussionId: activeDiscussion.value.id, memoryTitle });
+    }
+}
+
+async function handleLoadMemory(memoryTitle) {
+    if (activeDiscussion.value) {
+        await discussionsStore.loadMemoryToContext({ discussionId: activeDiscussion.value.id, memoryTitle });
+    }
+}
+
+async function handleUnloadMemory(memoryTitle) {
+    if (activeDiscussion.value) {
+        await discussionsStore.unloadMemoryFromContext({ discussionId: activeDiscussion.value.id, memoryTitle });
+    }
+}
 </script>
 
 <template>
@@ -716,7 +772,7 @@ function openContextToArtefactModal() {
                                             <button @click="triggerArtefactFileUpload" class="btn-icon" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-5 h-5" /><IconArrowUpTray v-else class="w-5 h-5" /></button>
                                         </div>
                                     </div>
-                                    <div class="flex-grow overflow-y-auto p-2 space-y-2">
+                                    <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="isDraggingFile = false" @drop="handleDrop($event, 'artefact')" class="flex-grow overflow-y-auto p-2 space-y-2" :class="{'bg-blue-100 dark:bg-blue-900/20 border-2 border-dashed border-blue-400': isDraggingFile}">
                                         <div v-if="showUrlImport" class="p-2 bg-gray-50 dark:bg-gray-700/50 rounded-md">
                                             <label class="text-xs font-semibold">Import from URL</label>
                                             <div class="flex items-center gap-1 mt-1">
@@ -728,7 +784,7 @@ function openContextToArtefactModal() {
                                             </div>
                                         </div>
                                         <div v-if="isLoadingArtefacts" class="text-center text-xs text-gray-500 pt-4">Loading...</div>
-                                        <div v-else-if="groupedArtefacts.length === 0" class="text-center text-xs text-gray-500 pt-4">No artefacts.</div>
+                                        <div v-else-if="groupedArtefacts.length === 0" class="text-center text-xs text-gray-500 pt-4">No artefacts. Drag files here to add.</div>
                                         
                                         <div v-else v-for="group in groupedArtefacts" :key="group.title" class="flex flex-col p-1.5 rounded-md" :class="group.isAnyVersionLoaded ? 'bg-green-100 dark:bg-green-900/40' : 'bg-gray-100 dark:bg-gray-700/50'">
                                             <div class="flex items-center justify-between">
@@ -782,14 +838,71 @@ function openContextToArtefactModal() {
                         </div>
                         <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-if="dataZoneViewModes.personality === 'edit'" :model-value="personalityDataZone" class="h-full" :options="{ readOnly: true }" /><div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="personalityDataZone" /></div></div>
                     </div>
-                    <div v-show="activeDataZoneTab === 'ltm'" class="flex-1 flex flex-col min-h-0">
+                    <div v-show="activeDataZoneTab === 'ltm'" class="flex-1 flex flex-col min-h-0 relative">
+                        <div v-if="isMemorizing" class="absolute inset-0 bg-gray-400/30 dark:bg-gray-900/50 z-10 flex flex-col items-center justify-center">
+                            <IconAnimateSpin class="w-10 h-10 text-gray-800 dark:text-gray-100 animate-spin" />
+                            <p class="mt-3 font-semibold text-gray-800 dark:text-gray-100">Memorizing...</p>
+                        </div>
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
-                            <div class="flex justify-between items-center"><div><h3 class="font-semibold flex items-center gap-2"><IconThinking class="w-5 h-5" /> Long-Term Memory</h3><p class="text-xs text-gray-500 mt-1">Facts the AI has learned from conversations.</p></div>
-                                <div class="flex items-center gap-1"><button @click="toggleViewMode('ltm')" class="btn-icon" :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button><button @click="handleUndoMemory" class="btn-icon" title="Undo" :disabled="!canUndoMemory"><IconUndo class="w-5 h-5" /></button><button @click="handleRedoMemory" class="btn-icon" title="Redo" :disabled="!canRedoMemory"><IconRedo class="w-5 h-5" /></button><button @click="handleMemorize" class="btn btn-secondary btn-sm" title="Analyze discussion and memorize new facts" :disabled="isMemorizing"><IconSparkles class="w-4 h-4" :class="{'animate-pulse': isMemorizing}"/></button></div>
+                            <div class="flex justify-between items-center">
+                                <div><h3 class="font-semibold flex items-center gap-2"><IconThinking class="w-5 h-5" /> Long-Term Memory (LTM)</h3></div>
+                                <div class="flex items-center gap-1">
+                                    <button @click="handleMemorize" class="btn-icon" title="Memorize Current Discussion"><IconSparkles class="w-5 h-5" :class="{'animate-pulse': isMemorizing}"/></button>
+                                </div>
                             </div>
                             <div class="mt-2"><div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono"><span>Tokens</span><span>{{ formatNumber(memoryDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span></div><div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1"><div class="h-1.5 rounded-full bg-yellow-500 transition-width duration-500" :style="{ width: `${getPercentage(memoryDataZoneTokens)}%` }"></div></div></div>
                         </div>
-                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-if="dataZoneViewModes.ltm === 'edit'" v-model="memory" class="h-full" /><div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="memory" /></div></div>
+                        <div class="flex-grow min-h-0 flex">
+                             <div class="flex-grow flex flex-col min-w-0">
+                                <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
+                                    <h4 class="font-semibold text-sm">Loaded Memory</h4>
+                                    <div class="flex items-center gap-1">
+                                        <button @click="toggleViewMode('ltm')" class="btn-icon" :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button>
+                                        <button @click="handleUndoMemory" class="btn-icon" title="Undo" :disabled="!canUndoMemory"><IconUndo class="w-5 h-5" /></button>
+                                        <button @click="handleRedoMemory" class="btn-icon" title="Redo" :disabled="!canRedoMemory"><IconRedo class="w-5 h-5" /></button>
+                                    </div>
+                                </div>
+                                <div class="flex-grow min-h-0 p-2">
+                                    <CodeMirrorEditor v-if="dataZoneViewModes.ltm === 'edit'" v-model="memory" class="h-full" />
+                                    <div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="memory" /></div>
+                                </div>
+                            </div>
+
+                            <div class="w-72 flex-shrink-0 border-l dark:border-gray-600 flex flex-col">
+                                <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
+                                    <h4 class="font-semibold text-sm">Memory Bank</h4>
+                                    <button @click="handleCreateMemory" class="btn-icon" title="Create New Memory"><IconPlus class="w-5 h-5" /></button>
+                                </div>
+                                <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="isDraggingFile = false" @drop="handleDrop($event, 'memory')" class="flex-grow overflow-y-auto p-2 space-y-2" :class="{'bg-blue-100 dark:bg-blue-900/20 border-2 border-dashed border-blue-400': isDraggingFile}">
+                                    <div v-if="isLoadingMemories" class="text-center text-xs text-gray-500 pt-4">Loading...</div>
+                                    <div v-else-if="activeDiscussionMemories.length === 0" class="text-center text-xs text-gray-500 pt-4">No memories.</div>
+                                    <div v-else v-for="mem in activeDiscussionMemories" :key="mem.title" class="p-1.5 rounded-md" :class="mem.is_loaded ? 'bg-green-100 dark:bg-green-900/40' : 'bg-gray-100 dark:bg-gray-700/50'">
+                                        <div class="flex items-center justify-between">
+                                            <div class="flex items-center gap-2 min-w-0">
+                                                <IconFileText class="w-4 h-4 text-gray-500 flex-shrink-0" />
+                                                <span class="truncate text-xs font-semibold" :title="mem.title">{{ mem.title }}</span>
+                                            </div>
+                                            <div class="flex items-center gap-1 flex-shrink-0">
+                                                <button @click="handleEditMemory(mem)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="View & Edit Memory"><IconPencil class="w-3.5 h-3.5" /></button>
+                                                <button @click="handleDeleteMemory(mem.title)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Delete Memory"><IconTrash class="w-3.5 h-3.5" /></button>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2 mt-1.5">
+                                            <template v-if="mem.is_loaded">
+                                                <button @click="handleUnloadMemory(mem.title)" class="btn btn-secondary btn-sm !p-2 flex-grow justify-center" title="Unload from Context">
+                                                    <IconCheckCircle class="w-4 h-4 text-green-600 dark:text-green-400" />
+                                                </button>
+                                            </template>
+                                            <template v-else>
+                                                <button @click="handleLoadMemory(mem.title)" class="btn btn-secondary btn-sm !p-2 flex-grow justify-center" title="Load to Context">
+                                                    <IconArrowDownTray class="w-4 h-4" />
+                                                </button>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </aside>
             </transition>

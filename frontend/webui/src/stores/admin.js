@@ -72,6 +72,13 @@ export const useAdminStore = defineStore('admin', () => {
 
     const systemStatus = ref(null);
     const isLoadingSystemStatus = ref(false);
+    
+    // NEW Fun Facts State
+    const funFacts = ref([]);
+    const isLoadingFunFacts = ref(false);
+    const funFactCategories = ref([]);
+    const isLoadingFunFactCategories = ref(false);
+
 
     const appFilters = reactive(getStoredFilters('lollms-app-filters', {
         searchQuery: '',
@@ -390,6 +397,21 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('Global settings updated.', 'success');
     }
 
+    async function uploadWelcomeLogo(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        const response = await apiClient.post('/api/admin/upload-logo', formData);
+        await fetchGlobalSettings(); // Refresh settings to get new logo URL
+        uiStore.addNotification(response.data.message, 'success');
+    }
+
+    async function removeWelcomeLogo() {
+        await apiClient.delete('/api/admin/remove-logo');
+        await fetchGlobalSettings();
+        uiStore.addNotification('Custom logo removed.', 'success');
+    }
+
+
     async function importOpenWebUIData(file) {
         isImporting.value = true;
         const formData = new FormData();
@@ -486,6 +508,20 @@ export const useAdminStore = defineStore('admin', () => {
     async function deleteRegisteredApp(appId) { await apiClient.delete(`/api/apps/${appId}`); await fetchZooApps(); }
     async function deleteRegisteredMcp(mcpId) { await apiClient.delete(`/api/mcps/${mcpId}`); await fetchZooMcps(); }
 
+    // --- Fun Fact Actions ---
+    async function fetchFunFacts() { isLoadingFunFacts.value = true; try { const res = await apiClient.get('/api/admin/fun-facts'); funFacts.value = res.data; } finally { isLoadingFunFacts.value = false; } }
+    async function fetchFunFactCategories() { isLoadingFunFactCategories.value = true; try { const res = await apiClient.get('/api/admin/fun-facts/categories'); funFactCategories.value = res.data; } finally { isLoadingFunFactCategories.value = false; } }
+    async function createFunFact(payload) { await apiClient.post('/api/admin/fun-facts', payload); await fetchFunFacts(); }
+    async function updateFunFact(id, payload) { await apiClient.put(`/api/admin/fun-facts/${id}`, payload); await fetchFunFacts(); }
+    async function deleteFunFact(id) { await apiClient.delete(`/api/admin/fun-facts/${id}`); funFacts.value = funFacts.value.filter(f => f.id !== id); }
+    async function createFunFactCategory(payload) { await apiClient.post('/api/admin/fun-facts/categories', payload); await fetchFunFactCategories(); }
+    async function updateFunFactCategory(id, payload) { await apiClient.put(`/api/admin/fun-facts/categories/${id}`, payload); await fetchFunFactCategories(); }
+    async function deleteFunFactCategory(id) { await apiClient.delete(`/api/admin/fun-facts/categories/${id}`); await Promise.all([fetchFunFactCategories(), fetchFunFacts()]); }
+    async function exportFunFacts() { const response = await apiClient.get('/api/admin/fun-facts/export', { responseType: 'blob' }); const url = URL.createObjectURL(new Blob([response.data])); const a = document.createElement('a'); a.href = url; a.download = 'fun_facts_export.json'; a.click(); URL.revokeObjectURL(url); }
+    async function exportCategory(categoryId, categoryName) { const response = await apiClient.get(`/api/admin/fun-facts/categories/${categoryId}/export`, { responseType: 'blob' }); const url = URL.createObjectURL(new Blob([response.data])); const a = document.createElement('a'); a.href = url; a.download = `fun_facts_${categoryName}.json`; a.click(); URL.revokeObjectURL(url); }
+    async function importFunFacts(data) { const payload = { fun_facts: data }; const response = await apiClient.post('/api/admin/fun-facts/import', payload); await Promise.all([fetchFunFacts(), fetchFunFactCategories()]); uiStore.addNotification(`Imported ${response.data.facts_created} facts and ${response.data.categories_created} new categories.`, 'success'); }
+    async function importCategoryFromFile(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/fun-facts/categories/import', formData); await Promise.all([fetchFunFacts(), fetchFunFactCategories()]); uiStore.addNotification(`Imported ${response.data.facts_created} facts for category.`, 'success'); }
+
     return {
         dashboardStats, isLoadingDashboardStats, fetchDashboardStats, broadcastMessage,
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers, batchUpdateUsers,
@@ -494,7 +530,7 @@ export const useAdminStore = defineStore('admin', () => {
         ttiBindings, isLoadingTtiBindings, availableTtiBindingTypes,
         fetchTtiBindings, fetchAvailableTtiBindingTypes, addTtiBinding, updateTtiBinding, deleteTtiBinding,
         fetchTtiBindingModels, saveTtiModelAlias, deleteTtiModelAlias,
-        globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings,
+        globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings, uploadWelcomeLogo, removeWelcomeLogo,
         isImporting, importOpenWebUIData,
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
         isEnhancingEmail, enhanceEmail,
@@ -511,6 +547,10 @@ export const useAdminStore = defineStore('admin', () => {
         updateInstalledApp, fetchAppLog, fetchAppConfigSchema, fetchAppConfig, updateAppConfig, updateApp,
         purgeUnusedUploads, systemStatus, isLoadingSystemStatus, fetchSystemStatus,
         syncInstallations, purgeBrokenInstallation, fixBrokenInstallation, handleTaskCompletion,
-        handleAppStatusUpdate, deleteRegisteredApp, deleteRegisteredMcp
+        handleAppStatusUpdate, deleteRegisteredApp, deleteRegisteredMcp,
+        funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories,
+        fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact,
+        createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, importFunFacts,
+        exportCategory, importCategoryFromFile
     };
 });

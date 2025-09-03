@@ -14,6 +14,22 @@ class ArtefactInfo(BaseModel):
     content: Optional[str] = None # Will be populated only on single-artefact fetch
     images: Optional[List[str]] = None
 
+class MemoryInfo(BaseModel):
+    title: str
+    is_loaded: bool = False
+    created_at: str
+    content: Optional[str] = None
+
+class LoadMemoryRequest(BaseModel):
+    title: str
+
+class UnloadMemoryRequest(BaseModel):
+    title: str
+
+class MemoryCreateManual(BaseModel):
+    title: constr(min_length=1)
+    content: str
+
 class LoadArtefactRequest(BaseModel):
     title: str
     version: Optional[int] = None

@@ -1,3 +1,4 @@
+// frontend/webui/src/router/index.js
 import { createRouter, createWebHistory } from 'vue-router';
 import HomeView from '../views/HomeView.vue';
 import ProfileView from '../views/ProfileView.vue';
@@ -9,6 +10,7 @@ import AdminView from '../views/AdminView.vue';
 import DataStoresView from '../views/DataStoresView.vue';
 import FriendsView from '../views/FriendsView.vue';
 import SsoLoginView from '../views/SsoLoginView.vue';
+import WelcomeView from '../views/WelcomeView.vue';
 
 const routes = [
   {
@@ -17,58 +19,56 @@ const routes = [
     component: HomeView,
   },
   {
+    path: '/welcome',
+    name: 'Welcome',
+    component: WelcomeView,
+  },
+  {
     path: '/profile/:username',
     name: 'Profile',
     component: ProfileView,
+    props: true,
   },
   {
     path: '/settings',
     name: 'Settings',
     component: SettingsView,
-    meta: { requiresAuth: true }
   },
   {
     path: '/admin',
     name: 'Admin',
     component: AdminView,
-    meta: { requiresAuth: true, requiresAdmin: true }
   },
   {
     path: '/messages',
     name: 'Messages',
     component: MessagesView,
-    meta: { requiresAuth: true }
   },
   {
     path: '/friends',
     name: 'Friends',
     component: FriendsView,
-    meta: { requiresAuth: true }
   },
   {
     path: '/datastores',
     name: 'DataStores',
     component: DataStoresView,
-    meta: { requiresAuth: true }
   },
   {
     path: '/help',
     name: 'Help',
     component: HelpView,
     props: (route) => ({ topic: route.query.topic, section: route.query.section }),
-    meta: { requiresAuth: true }
   },
   {
     path: '/reset-password',
     name: 'ResetPassword',
     component: ResetPasswordView,
-    meta: { requiresGuest: true }
   },
   {
     path: '/app/:clientId',
     name: 'SsoLogin',
     component: SsoLoginView,
-    meta: { isSsoRoute: true }
   },
 ];
 

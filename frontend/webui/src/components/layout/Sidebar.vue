@@ -6,7 +6,7 @@ import { useAuthStore } from '../../stores/auth';
 import UserInfo from './UserInfo.vue';
 import DiscussionList from './DiscussionList.vue';
 
-import logoUrl from '../../assets/logo.png';
+import logoDefault from '../../assets/logo.png';
 import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconHome from '../../assets/icons/IconHome.vue';
 import IconSettings from '../../assets/icons/IconSettings.vue';
@@ -20,6 +20,7 @@ const authStore = useAuthStore();
 
 const user = computed(() => authStore.user);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
+const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
 </script>
 
@@ -29,7 +30,7 @@ const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
     <!-- Redesigned Persistent Header -->
     <header class="flex items-center p-3 border-b dark:border-gray-700 flex-shrink-0 h-16" :class="isSidebarOpen ? 'justify-between' : 'justify-center'">
         <div v-if="isSidebarOpen" class="flex items-center space-x-3 min-w-0">
-            <img :src="logoUrl" alt="LoLLMs Logo" class="h-8 w-8 flex-shrink-0">
+            <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 flex-shrink-0 object-contain" @error="($event.target.src=logoDefault)">
             <div class="min-w-0">
                 <h1 class="text-lg font-bold text-gray-800 dark:text-gray-100 truncate">LoLLMs</h1>
                 <p class="text-xs text-gray-500 truncate">One tool to rule them all</p>

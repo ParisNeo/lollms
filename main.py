@@ -35,6 +35,7 @@ from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
 from backend.db.models.broadcast import BroadcastMessage
+from backend.db.models.fun_fact import FunFact, FunFactCategory
 from backend.security import get_password_hash as hash_password
 from backend.migration_utils import LegacyDiscussion
 from backend.session import (

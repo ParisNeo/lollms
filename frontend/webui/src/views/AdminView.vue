@@ -22,6 +22,7 @@ import IconServer from '../assets/icons/IconServer.vue';
 import IconPhoto from '../assets/icons/IconPhoto.vue';
 import IconChevronRight from '../assets/icons/IconChevronRight.vue';
 import IconLollms from '../assets/icons/IconLollms.vue';
+import IconHome from '../assets/icons/IconHome.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -48,6 +49,7 @@ const components = {
   https: defineAsyncComponent(() => import('../components/admin/HttpsSettings.vue')),
   email: defineAsyncComponent(() => import('../components/admin/EmailSettings.vue')),
   import: defineAsyncComponent(() => import('../components/admin/ImportTools.vue')),
+  welcome_settings: defineAsyncComponent(() => import('../components/admin/WelcomeSettings.vue')),
 };
 
 const sections = [
@@ -67,6 +69,7 @@ const sections = [
   { type: 'link', id: 'ai_bot', name: 'AI Bot', icon: markRaw(IconLollms) },
   { type: 'link', id: 'services', name: 'API Services', icon: markRaw(IconServer) },
   { type: 'divider', label: 'System & Tools' },
+  { type: 'link', id: 'welcome_settings', name: 'Welcome Page', icon: markRaw(IconHome) },
   { type: 'link', id: 'global_settings', name: 'Global Settings', icon: markRaw(IconCog) },
   { type: 'link', id: 'https', name: 'HTTPS Settings', icon: markRaw(IconKey) },
   { type: 'link', id: 'email', name: 'Email Settings', icon: markRaw(IconMail) },

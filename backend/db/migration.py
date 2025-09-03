@@ -2,6 +2,7 @@
 import json
 import re
 from datetime import datetime
+from pathlib import Path
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError, IntegrityError
 from sqlalchemy.schema import DropTable
@@ -12,6 +13,7 @@ from backend.db.base import CURRENT_DB_VERSION
 from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
 from backend.db.models.service import App # Ensure App is imported
 from backend.db.models.prompt import SavedPrompt
+from backend.db.models.fun_fact import FunFactCategory, FunFact
 from ascii_colors import ASCIIColors, trace_exception
 
 # This custom compiler allows us to drop tables with cascade in SQLite,
@@ -169,7 +171,6 @@ def _bootstrap_global_settings(connection):
             "value": False,
             "type": "boolean", "description": "Lock context size for all aliased models, preventing users from changing it.", "category": "Models"
         },
-        # --- NEW AI BOT SETTINGS ---
         "ai_bot_enabled": {
             "value": False,
             "type": "boolean", "description": "Enable the @lollms AI bot to respond to mentions in the social feed.", "category": "AI Bot"
@@ -185,6 +186,18 @@ def _bootstrap_global_settings(connection):
         "ai_bot_system_prompt": {
             "value": "You are lollms, a helpful AI assistant integrated into this social platform. When a user mentions you using '@lollms', you should respond to their post helpfully and concisely. Your goal is to be a friendly and informative presence in the community.",
             "type": "text", "description": "The system prompt to use for the bot if no personality is selected.", "category": "AI Bot"
+        },
+        "welcome_text": {
+            "value": "lollms",
+            "type": "string", "description": "The main text displayed on the welcome page.", "category": "Welcome Page"
+        },
+        "welcome_slogan": {
+            "value": "One tool to rule them all",
+            "type": "string", "description": "The slogan displayed under the main text on the welcome page.", "category": "Welcome Page"
+        },
+        "welcome_logo_url": {
+            "value": "",
+            "type": "string", "description": "URL to a custom logo for the welcome page. Leave empty for default.", "category": "Welcome Page"
         }        
     }
 
@@ -217,6 +230,57 @@ def _bootstrap_global_settings(connection):
         connection.execute(insert_stmt, configs_to_insert)
         connection.commit()
         print(f"INFO: Successfully bootstrapped {len(configs_to_insert)} new global settings.")
+
+def _bootstrap_fun_facts(connection):
+    """
+    Reads fun facts from the JSON file and populates the database if the tables are empty.
+    """
+    print("INFO: Checking and bootstrapping fun facts in the database.")
+    
+    try:
+        # Check if any categories exist. If so, we assume bootstrapping is done.
+        category_count = connection.execute(text("SELECT COUNT(id) FROM fun_fact_categories")).scalar_one()
+        if category_count > 0:
+            print("INFO: Fun facts already exist in the database. Skipping bootstrap.")
+            return
+
+        fun_facts_path = Path(__file__).parent.parent / "assets" / "fun_facts.json"
+        if not fun_facts_path.exists():
+            print("WARNING: fun_facts.json not found. Cannot bootstrap fun facts.")
+            return
+
+        with open(fun_facts_path, "r", encoding="utf-8") as f:
+            categorized_facts = json.load(f)
+
+        category_insert_stmt = FunFactCategory.__table__.insert()
+        fact_insert_stmt = FunFact.__table__.insert()
+        
+        default_colors = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899"]
+        color_index = 0
+
+        for category_name, facts in categorized_facts.items():
+            color = default_colors[color_index % len(default_colors)]
+            color_index += 1
+            
+            # Insert category and get its ID
+            result = connection.execute(category_insert_stmt.values(name=category_name, is_active=True, color=color))
+            category_id = result.inserted_primary_key[0]
+            
+            facts_to_insert = [
+                {"content": fact_content, "category_id": category_id}
+                for fact_content in facts if fact_content.strip()
+            ]
+            
+            if facts_to_insert:
+                connection.execute(fact_insert_stmt, facts_to_insert)
+        
+        connection.commit()
+        print(f"INFO: Successfully bootstrapped {len(categorized_facts)} categories of fun facts.")
+
+    except Exception as e:
+        print(f"CRITICAL: Failed to bootstrap fun facts. Error: {e}")
+        trace_exception(e)
+        connection.rollback()
 
 def _bootstrap_lollms_user(connection):
     """
@@ -886,6 +950,26 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         SharedDiscussionLink.__table__.create(connection)
         print("INFO: Created 'shared_discussion_links' table for discussion sharing.")
         connection.commit()
+
+    if inspector.has_table("fun_fact_categories"):
+        fun_fact_cat_cols = [col['name'] for col in inspector.get_columns('fun_fact_categories')]
+        if 'color' not in fun_fact_cat_cols:
+            connection.execute(text("ALTER TABLE fun_fact_categories ADD COLUMN color VARCHAR(7) DEFAULT '#4299e1' NOT NULL"))
+            print("INFO: Added 'color' column to 'fun_fact_categories' table.")
+            connection.commit()
+
+    # NEW: Create fun_fact tables if they don't exist
+    if not inspector.has_table("fun_fact_categories"):
+        FunFactCategory.__table__.create(connection)
+        print("INFO: Created 'fun_fact_categories' table.")
+    
+    if not inspector.has_table("fun_facts"):
+        FunFact.__table__.create(connection)
+        print("INFO: Created 'fun_facts' table.")
+
+    # NEW: Bootstrap fun facts after tables are ensured
+    if inspector.has_table("fun_fact_categories"):
+        _bootstrap_fun_facts(connection)
 
 
 def check_and_update_db_version(SessionLocal):

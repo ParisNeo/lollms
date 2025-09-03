@@ -6,13 +6,14 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Dict, Optional, Any
-import asyncio  # Import asyncio
-
+import asyncio
+import base64
 
 import psutil
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Request, Form
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
 from lollms_client import LollmsClient
@@ -24,6 +25,7 @@ from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.config import GlobalConfig as DBGlobalConfig, LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
+from backend.db.models.fun_fact import FunFact as DBFunFact, FunFactCategory as DBFunFactCategory
 from backend.security import get_password_hash as hash_password
 
 from ascii_colors import trace_exception, ASCIIColors
@@ -61,7 +63,17 @@ from backend.models import (
     TtiModelAliasUpdate,
     ModelAliasDelete,
     BindingModel,
-    ModelNamePayload
+    ModelNamePayload,
+    FunFactCategoryCreate,
+    FunFactCategoryPublic,
+    FunFactCategoryUpdate,
+    FunFactCreate,
+    FunFactPublic,
+    FunFactUpdate,
+    FunFactsImportRequest,
+    FunFactExport,
+    FunFactCategoryExport,
+    FunFactCategoryImport
 )
 from backend.session import (
     get_user_data_root,
@@ -1194,3 +1206,234 @@ async def get_my_websocket_status(
         "is_connected": is_connected,
         "is_registered_as_admin": is_registered_admin
     }
+
+# --- Custom Logo Upload (Base64) ---
+@admin_router.post("/upload-logo", response_model=Dict[str, str])
+async def upload_custom_logo(
+    file: UploadFile = File(...),
+    current_user: UserAuthDetails = Depends(get_current_admin_user)
+):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Invalid file type. Please upload an image.")
+
+    try:
+        # Read the file content and encode it to base64
+        image_bytes = await file.read()
+        encoded_logo = base64.b64encode(image_bytes).decode("utf-8")
+        
+        # Create a data URI
+        content_type = file.content_type
+        logo_url = f"data:{content_type};base64,{encoded_logo}"
+        
+        # Update the global setting in the database
+        db = next(get_db())
+        try:
+            settings_payload = {"welcome_logo_url": logo_url}
+            for key, new_value in settings_payload.items():
+                db_config = db.query(DBGlobalConfig).filter(DBGlobalConfig.key == key).first()
+                if db_config:
+                    stored_data = json.loads(db_config.value)
+                    stored_data['value'] = new_value
+                    db_config.value = json.dumps(stored_data)
+            db.commit()
+            settings.refresh() # Refresh the settings cache
+            await manager.broadcast({"type": "settings_updated"})
+        finally:
+            db.close()
+
+        return {"message": "Logo uploaded successfully.", "logo_url": logo_url}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to upload logo: {e}")
+    finally:
+        await file.close()
+
+@admin_router.delete("/remove-logo", response_model=Dict[str, str])
+async def remove_custom_logo(db: Session = Depends(get_db)):
+    db_config = db.query(DBGlobalConfig).filter(DBGlobalConfig.key == "welcome_logo_url").first()
+    if not db_config:
+        raise HTTPException(status_code=404, detail="Logo setting not found.")
+    
+    try:
+        stored_data = json.loads(db_config.value)
+        stored_data['value'] = ""
+        db_config.value = json.dumps(stored_data)
+        db.commit()
+        settings.refresh()
+        await manager.broadcast({"type": "settings_updated"})
+        return {"message": "Custom logo removed successfully."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+
+# --- Fun Facts Management Endpoints ---
+@admin_router.get("/fun-facts/categories", response_model=List[FunFactCategoryPublic])
+async def get_fun_fact_categories(db: Session = Depends(get_db)):
+    return db.query(DBFunFactCategory).order_by(DBFunFactCategory.name).all()
+
+@admin_router.post("/fun-facts/categories", response_model=FunFactCategoryPublic, status_code=status.HTTP_201_CREATED)
+async def create_fun_fact_category(category_data: FunFactCategoryCreate, db: Session = Depends(get_db)):
+    if db.query(DBFunFactCategory).filter(DBFunFactCategory.name == category_data.name).first():
+        raise HTTPException(status_code=409, detail="A category with this name already exists.")
+    new_category = DBFunFactCategory(**category_data.model_dump())
+    db.add(new_category)
+    db.commit()
+    db.refresh(new_category)
+    return new_category
+
+@admin_router.put("/fun-facts/categories/{category_id}", response_model=FunFactCategoryPublic)
+async def update_fun_fact_category(category_id: int, update_data: FunFactCategoryUpdate, db: Session = Depends(get_db)):
+    category = db.query(DBFunFactCategory).filter(DBFunFactCategory.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found.")
+    
+    update_dict = update_data.model_dump(exclude_unset=True)
+    if 'name' in update_dict and update_dict['name'] != category.name:
+        if db.query(DBFunFactCategory).filter(DBFunFactCategory.name == update_dict['name']).first():
+            raise HTTPException(status_code=409, detail="A category with this name already exists.")
+
+    for key, value in update_dict.items():
+        setattr(category, key, value)
+    
+    db.commit()
+    db.refresh(category)
+    return category
+
+@admin_router.delete("/fun-facts/categories/{category_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_fun_fact_category(category_id: int, db: Session = Depends(get_db)):
+    category = db.query(DBFunFactCategory).filter(DBFunFactCategory.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found.")
+    
+    # Cascade delete: first delete all facts in this category
+    db.query(DBFunFact).filter(DBFunFact.category_id == category_id).delete()
+    
+    # Then delete the category itself
+    db.delete(category)
+    db.commit()
+
+@admin_router.get("/fun-facts", response_model=List[FunFactPublic])
+async def get_all_fun_facts(db: Session = Depends(get_db)):
+    return db.query(DBFunFact).options(joinedload(DBFunFact.category)).order_by(DBFunFact.id.desc()).all()
+
+@admin_router.post("/fun-facts", response_model=FunFactPublic, status_code=status.HTTP_201_CREATED)
+async def create_fun_fact(fact_data: FunFactCreate, db: Session = Depends(get_db)):
+    if not db.query(DBFunFactCategory).filter(DBFunFactCategory.id == fact_data.category_id).first():
+        raise HTTPException(status_code=404, detail="Category not found.")
+    new_fact = DBFunFact(**fact_data.model_dump())
+    db.add(new_fact)
+    db.commit()
+    db.refresh(new_fact)
+    return new_fact
+
+@admin_router.put("/fun-facts/{fact_id}", response_model=FunFactPublic)
+async def update_fun_fact(fact_id: int, update_data: FunFactUpdate, db: Session = Depends(get_db)):
+    fact = db.query(DBFunFact).filter(DBFunFact.id == fact_id).first()
+    if not fact:
+        raise HTTPException(status_code=404, detail="Fun fact not found.")
+    
+    update_dict = update_data.model_dump(exclude_unset=True)
+    if 'category_id' in update_dict:
+        if not db.query(DBFunFactCategory).filter(DBFunFactCategory.id == update_dict['category_id']).first():
+            raise HTTPException(status_code=404, detail="New category not found.")
+
+    for key, value in update_dict.items():
+        setattr(fact, key, value)
+        
+    db.commit()
+    db.refresh(fact)
+    return fact
+
+@admin_router.delete("/fun-facts/{fact_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_fun_fact(fact_id: int, db: Session = Depends(get_db)):
+    fact = db.query(DBFunFact).filter(DBFunFact.id == fact_id).first()
+    if not fact:
+        raise HTTPException(status_code=404, detail="Fun fact not found.")
+    db.delete(fact)
+    db.commit()
+
+@admin_router.post("/fun-facts/import", response_model=Dict[str, int])
+async def import_fun_facts(import_data: FunFactsImportRequest, db: Session = Depends(get_db)):
+    created_categories = 0
+    created_facts = 0
+    
+    # Get all existing categories to avoid redundant queries
+    existing_categories = {cat.name: cat.id for cat in db.query(DBFunFactCategory).all()}
+    
+    for item in import_data.fun_facts:
+        category_id = existing_categories.get(item.category)
+        if not category_id:
+            new_cat = DBFunFactCategory(name=item.category, is_active=True)
+            db.add(new_cat)
+            db.flush() # Use flush to get the new ID without committing
+            category_id = new_cat.id
+            existing_categories[item.category] = category_id
+            created_categories += 1
+        
+        new_fact = DBFunFact(content=item.content, category_id=category_id)
+        db.add(new_fact)
+        created_facts += 1
+    
+    db.commit()
+    return {"categories_created": created_categories, "facts_created": created_facts}
+
+@admin_router.get("/fun-facts/export", response_model=List[FunFactExport])
+async def export_fun_facts(db: Session = Depends(get_db)):
+    all_facts = db.query(DBFunFact).options(joinedload(DBFunFact.category)).all()
+    export_data = [
+        FunFactExport(category=fact.category.name, content=fact.content)
+        for fact in all_facts
+    ]
+    return export_data
+    
+@admin_router.get("/fun-facts/categories/{category_id}/export", response_model=FunFactCategoryExport)
+async def export_fun_fact_category(category_id: int, db: Session = Depends(get_db)):
+    category = db.query(DBFunFactCategory).filter(DBFunFactCategory.id == category_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category not found.")
+    
+    facts = db.query(DBFunFact).filter(DBFunFact.category_id == category_id).all()
+    
+    export_data = FunFactCategoryExport(
+        name=category.name,
+        is_active=category.is_active,
+        color=category.color,
+        facts=[fact.content for fact in facts]
+    )
+    
+    headers = {'Content-Disposition': f'attachment; filename="fun_facts_{category.name}.json"'}
+    return JSONResponse(content=export_data.model_dump(), headers=headers)
+
+@admin_router.post("/fun-facts/categories/import", response_model=Dict[str, int])
+async def import_fun_fact_category(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    try:
+        content = await file.read()
+        data = json.loads(content)
+        import_data = FunFactCategoryImport(**data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON file or format: {e}")
+    finally:
+        await file.close()
+
+    category = db.query(DBFunFactCategory).filter(DBFunFactCategory.name == import_data.name).first()
+    if not category:
+        category = DBFunFactCategory(
+            name=import_data.name,
+            is_active=import_data.is_active,
+            color=import_data.color
+        )
+        db.add(category)
+        db.flush()
+        categories_created = 1
+    else:
+        categories_created = 0
+
+    facts_created = 0
+    for fact_content in import_data.facts:
+        new_fact = DBFunFact(content=fact_content, category_id=category.id)
+        db.add(new_fact)
+        facts_created += 1
+    
+    db.commit()
+    return {"categories_created": categories_created, "facts_created": facts_created}

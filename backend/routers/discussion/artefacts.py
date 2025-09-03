@@ -6,8 +6,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict
 
-import fitz
-from docx import Document as DocxDocument
+try:
+    import pipmaster as pm
+    pm.ensure_packages(['pandas', 'openpyxl', 'python-docx', 'PyMuPDF'])
+    from docx import Document as DocxDocument
+    import pandas as pd
+    import fitz
+except ImportError:
+    pd = None
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Form, status
 from sqlalchemy.orm import Session
 from ascii_colors import trace_exception
@@ -98,6 +104,19 @@ def build_artefacts_router(router: APIRouter):
                                 image_part = rel.target_part
                                 image_bytes = image_part.blob
                                 images.append(base64.b64encode(image_bytes).decode("utf-8"))
+                elif extension == ".xlsx" or "spreadsheetml" in file.content_type:
+                    if pd is None:
+                        content = "Error: pandas library is not installed. Cannot process XLSX files. Please run `pip install pandas openpyxl`."
+                    else:
+                        try:
+                            xls = pd.read_excel(io.BytesIO(content_bytes), sheet_name=None)
+                            md_parts = []
+                            for sheet_name, df in xls.items():
+                                md_parts.append(f"### {sheet_name}\n\n{df.to_markdown(index=False)}")
+                            content = "\n\n".join(md_parts)
+                        except Exception as e:
+                            trace_exception(e)
+                            content = f"Error processing XLSX file: {e}"
                 elif extension in CODE_EXTENSIONS:
                     lang = CODE_EXTENSIONS[extension]
                     text_content = content_bytes.decode('utf-8', errors='replace')
