@@ -89,7 +89,7 @@ const funFactTextColorClass = computed(() => getContrastTextColor(funFactColor.v
 
 const funFactStyle = computed(() => ({
     '--fun-fact-color': funFactColor.value,
-    'backgroundColor': `${funFactColor.value}20`, // Add alpha for background
+    'backgroundColor': `${funFactColor.value}15`, // Reduced alpha for better contrast
     'borderColor': funFactColor.value,
 }));
 
