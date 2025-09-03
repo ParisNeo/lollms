@@ -3,9 +3,10 @@ import { computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
+import { usePyodideStore } from './stores/pyodide';
 import { useTasksStore } from './stores/tasks';
+import { useDiscussionsStore } from './stores/discussions'; 
 import logoDefault from './assets/logo.png';
-
 // Import Layouts
 import Sidebar from './components/layout/Sidebar.vue';
 import GlobalHeader from './components/layout/GlobalHeader.vue';
@@ -22,7 +23,6 @@ import ForceSettingsModal from './components/modals/ForceSettingsModal.vue';
 import ConfirmationModal from './components/ui/ConfirmationModal.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
 import ArtefactEditorModal from './components/modals/ArtefactEditorModal.vue';
-import MemoryEditorModal from './components/modals/MemoryEditorModal.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ShareDataStoreModal from './components/modals/ShareDataStoreModal.vue';
 import ExportModal from './components/modals/ExportModal.vue';
@@ -54,76 +54,52 @@ import ManageModelsModal from './components/modals/ManageModelsModal.vue';
 import ModelCardModal from './components/modals/ModelCardModal.vue';
 import DiscussionTreeModal from './components/modals/DiscussionTreeModal.vue';
 import EditPromptModal from './components/modals/EditPromptModal.vue';
-import FunFactCategoryModal from './components/modals/FunFactCategoryModal.vue';
-import FunFactModal from './components/modals/FunFactModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
+const pyodideStore = usePyodideStore();
 const tasksStore = useTasksStore();
+const discussionsStore = useDiscussionsStore();
 const route = useRoute();
 
 const activeModal = computed(() => uiStore.activeModal);
-const isAuthenticating = computed(() => authStore.isAuthenticating);
-const isAuthenticated = computed(() => authStore.isAuthenticated);
-const logoSrc = computed(() => authStore.welcome_logo_url);
-const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
-const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
 
-// --- NEW: Contrast checker logic ---
-function getContrastTextColor(hexColor) {
-    if (!hexColor) return 'text-gray-800 dark:text-gray-100';
-    const r = parseInt(hexColor.slice(1, 3), 16);
-    const g = parseInt(hexColor.slice(3, 5), 16);
-    const b = parseInt(hexColor.slice(5, 7), 16);
-    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    return luminance > 0.5 ? 'text-gray-900' : 'text-white';
-}
-
-const funFactTextColorClass = computed(() => getContrastTextColor(funFactColor.value));
-
-const funFactStyle = computed(() => ({
-    '--fun-fact-color': funFactColor.value,
-    'backgroundColor': `${funFactColor.value}20`, // Add alpha for background
-    'borderColor': funFactColor.value,
-}));
-
-const funFactTextStyle = computed(() => ({
-    color: funFactColor.value
-}));
-// --- End Contrast checker logic ---
-
-const showMainApp = computed(() => {
-    return isAuthenticated.value || ['Welcome', 'ResetPassword', 'SsoLogin'].includes(route.name);
+const showMainContentOrLoading = computed(() => {
+    if (activeModal.value === 'firstAdminSetup') {
+        return 'modal_only'; 
+    }
+    if (authStore.isAuthenticating) {
+        return 'loading';
+    }
+    return 'main_content';
 });
 
 const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages'];
 const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
 
+
 onMounted(async () => {
     uiStore.initializeTheme();
     await authStore.attemptInitialAuth();
     uiStore.initializeSidebarState();
-    if (isAuthenticated.value) {
-        tasksStore.fetchTasks();
+    if (authStore.isAuthenticated) {
+        pyodideStore.initialize();
+        tasksStore.fetchTasks(); // Fetch initial tasks, WebSocket will handle updates
     }
 });
 </script>
 
 <template>
-  <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900 flex flex-col">
+  <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900">
     
-    <!-- Rich, Branded Loading Screen -->
-    <div v-if="isAuthenticating" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
+    <!-- Loading Screen -->
+    <div v-if="showMainContentOrLoading === 'loading'" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
         <div class="w-full max-w-lg mx-auto">
-            <div class="flex justify-center mb-6">
-                <img v-if="logoSrc" :src="logoSrc" alt="Custom Logo" class="h-28 w-auto object-contain" @error="($event.target.src=logoDefault)" />
-                <img v-else :src="logoDefault" alt="lollms Logo" class="h-28 w-28">
-            </div>
-            <h1 class="text-6xl md:text-7xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">{{ authStore.welcomeText }}</h1>
-            <p class="mt-2 text-xl md:text-2xl text-gray-600 dark:text-gray-300">{{ authStore.welcomeSlogan }}</p>
+            <h1 class="text-6xl md:text-7xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">LoLLMs</h1>
+            <p class="mt-2 text-xl md:text-2xl text-gray-600 dark:text-gray-300">One tool to rule them all</p>
             <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">by ParisNeo</p>
-            <div v-if="authStore.funFact" :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" class="mt-8 mx-auto max-w-md p-4 border-l-4 rounded-lg text-sm text-left" :style="funFactStyle" :class="funFactTextColorClass">
-                <span class="font-bold" :style="funFactTextStyle">🤓 Fun Fact:</span> {{ authStore.funFact }}
+            <div v-if="authStore.funFact" class="mt-8 mx-auto max-w-md p-3 bg-gray-200 dark:bg-white/10 border border-gray-300 dark:border-white/20 rounded-lg text-sm text-left text-gray-700 dark:text-gray-200">
+                <span class="font-bold text-yellow-600 dark:text-yellow-300">🤓 Fun Fact:</span> {{ authStore.funFact }}
             </div>
             <div class="mt-12 w-full px-4">
                 <div class="h-2.5 w-full rounded-full bg-gray-200 dark:bg-gray-600">
@@ -135,21 +111,19 @@ onMounted(async () => {
         </div>
     </div>
 
-    <!-- Main App Layout (conditionally rendered) -->
-    <div v-else-if="showMainApp" class="flex flex-col flex-grow min-h-0">
-      <div class="flex flex-grow min-h-0">
-        <Sidebar v-if="isAuthenticated && isHomePageLayout" />
-        <div class="flex-1 flex flex-col overflow-hidden">
-          <GlobalHeader v-if="isAuthenticated" />
-          <main class="flex-1 overflow-hidden">
-              <router-view />
-          </main>
-        </div>
+    <!-- Main App Layout -->
+    <div v-else-if="showMainContentOrLoading === 'main_content'" class="flex h-full w-full relative">
+      <Sidebar v-if="isHomePageLayout" />
+      <div class="flex-1 flex flex-col overflow-hidden">
+        <GlobalHeader />
+        <main class="flex-1 overflow-hidden">
+            <router-view />
+        </main>
       </div>
     </div>
-    
+
     <!-- Modals -->
-    <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" />
+    <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     <LoginModal v-if="activeModal === 'login'" />
     <RegisterModal v-if="activeModal === 'register'" />
     <ForgotPasswordModal v-if="activeModal === 'forgotPassword'" />
@@ -159,8 +133,9 @@ onMounted(async () => {
     <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <ConfirmationModal v-if="activeModal === 'confirmation'" />
+    <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <ArtefactEditorModal v-if="activeModal === 'artefactEditor'" />
-    <MemoryEditorModal v-if="activeModal === 'memoryEditor'" />
+    <NotificationPanel />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
     <ExportModal v-if="activeModal === 'export'" />
     <ImportModal v-if="activeModal === 'import'" />
@@ -177,6 +152,7 @@ onMounted(async () => {
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
     <AppConfigModal v-if="activeModal === 'appConfig'" />
     <AppLogModal v-if="activeModal === 'appLog'" />
+    <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" /> 
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
     <TasksManagerModal v-if="activeModal === 'tasksManager'" />
     <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
@@ -190,10 +166,9 @@ onMounted(async () => {
     <ModelCardModal v-if="activeModal === 'modelCard'" />
     <DiscussionTreeModal v-if="activeModal === 'discussionTree'" />
     <EditPromptModal v-if="activeModal === 'editPrompt'" />
-    <FunFactCategoryModal v-if="activeModal === 'funFactCategory'" />
-    <FunFactModal v-if="activeModal === 'funFact'" />
     
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
     <NotificationPanel />
+    <ConfirmationModal v-if="activeModal === 'confirmation'" />
   </div>
 </template>
