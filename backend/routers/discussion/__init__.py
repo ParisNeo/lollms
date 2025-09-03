@@ -371,10 +371,6 @@ def build_discussions_router():
     async def delete_specific_discussion(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db), background_tasks: BackgroundTasks = BackgroundTasks()):
         username = current_user.username
         dm = get_user_discussion_manager(username)
-        
-        if not dm.discussion_exists(discussion_id):
-            raise HTTPException(status_code=404, detail="Discussion not found or you are not the owner.")
-            
         dm.delete_discussion(discussion_id)
 
         assets_path = get_user_discussion_assets_path(username) / discussion_id
