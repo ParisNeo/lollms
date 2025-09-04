@@ -9,8 +9,9 @@ from typing import List, Optional, Dict
 
 try:
     import pipmaster as pm
-    pm.ensure_packages(['pandas', 'openpyxl', 'python-docx', 'PyMuPDF'])
+    pm.ensure_packages(['pandas', 'openpyxl', 'python-docx', 'python-pptx', 'PyMuPDF'])
     from docx import Document as DocxDocument
+    from pptx import Presentation
     import pandas as pd
     import fitz
 except ImportError:
@@ -118,6 +119,42 @@ def build_artefacts_router(router: APIRouter):
                         except Exception as e:
                             trace_exception(e)
                             content = f"Error processing XLSX file: {e}"
+                elif extension == ".pptx":
+                    if Presentation is None:
+                        content = (
+                            "Error: python-pptx library is not installed. "
+                            "Please run `pip install python-pptx`."
+                        )
+                    else:
+                        try:
+                            with io.BytesIO(content_bytes) as pptx_io:
+                                prs = Presentation(pptx_io)
+
+                                # Gather slide text
+                                slide_texts: List[str] = []
+                                for idx, slide in enumerate(prs.slides, start=1):
+                                    slide_parts: List[str] = []
+                                    for shape in slide.shapes:
+                                        if hasattr(shape, "text"):
+                                            slide_parts.append(shape.text.strip())
+                                    if slide_parts:
+                                        slide_texts.append(
+                                            f"--- Slide {idx} ---\n" + "\n".join(slide_parts)
+                                        )
+                                content = "\n\n".join(slide_texts)
+
+                                # Gather images
+                                for slide in prs.slides:
+                                    for shape in slide.shapes:
+                                        if shape.shape_type == 13:  # 13 == PICTURE
+                                            image_blob = shape.image.blob
+                                            images.append(
+                                                base64.b64encode(image_blob).decode("utf-8")
+                                            )
+                        except Exception as e:
+                            trace_exception(e)
+                            content = f"Error processing PPTX file: {e}"
+                
                 elif extension in CODE_EXTENSIONS:
                     lang = CODE_EXTENSIONS[extension]
                     text_content = content_bytes.decode('utf-8', errors='replace')
