@@ -74,6 +74,15 @@ from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
 from backend.zoo_cache import build_full_cache
 
+import uvicorn
+from backend.settings import settings
+init_database(APP_DB_URL)
+db = db_session_module.SessionLocal()
+try:
+    settings.load_from_db(db)
+finally:
+    db.close()
+
 POLLING_INTERVAL = 0.1
 CLEANUP_INTERVAL = 3600
 MAX_MESSAGE_AGE = 24 * 3600
@@ -146,15 +155,6 @@ async def start_broadcast_polling():
 
 async def startup_event():
     global polling_task
-    ASCIIColors.info("Application startup...")
-    
-    init_database(APP_DB_URL)
-    db = db_session_module.SessionLocal()
-    try:
-        settings.load_from_db(db)
-    finally:
-        db.close()
-        
     manager.set_loop(asyncio.get_running_loop())
     polling_task = asyncio.create_task(start_broadcast_polling())
     task_manager.init_app(db_session_module.SessionLocal)
@@ -486,9 +486,7 @@ app.include_router(build_discussions_router())
 add_ui_routes(app)
 
 if __name__ == "__main__":
-    import uvicorn
-    from backend.settings import settings
-    
+   
     data_dir = Path(settings.get("data_dir","data"))
     mcp_dir = data_dir / "mcps"
     apps_dir = data_dir / "apps"
