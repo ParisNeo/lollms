@@ -134,3 +134,6 @@ new ui:
 
 - add clear models button to admin interface
 - if the model does not support image input, do not remove the image list in discussion zone, just make sure you deactivate any image in that list
+
+# URGENT:
+Use REDIS instead of the polling mechanism
