@@ -418,6 +418,18 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print(f"CRITICAL: Data-safe reset for 'saved_prompts' failed. Error: {e}")
                 connection.rollback()
                 raise e
+            
+    # Add migration for DMs if its column type changed from Integer to String
+    if inspector.has_table("direct_messages"):
+        direct_messages_columns_db = [col['name'] for col in inspector.get_columns('direct_messages')]
+        new_direct_messages_cols_defs = {
+            "image_references": "JSON",
+        }
+        for col_name, col_sql_def in new_direct_messages_cols_defs.items():
+            if col_name not in direct_messages_columns_db:
+                connection.execute(text(f"ALTER TABLE direct_messages ADD COLUMN {col_name} {col_sql_def}"))
+                print(f"INFO: Added missing column '{col_name}' to 'personalities' table.")
+        connection.commit()    
 
     # Add migration for DatabaseVersion if its column type changed from Integer to String
     if inspector.has_table("database_version"):
