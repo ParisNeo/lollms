@@ -209,26 +209,35 @@ def get_personality_public_from_db(db_personality: DBPersonality, owner_username
 async def create_personality(personality_data: PersonalityCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> PersonalityPublic:
     db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
     
-    owner_id = db_user.id
-    is_public = False
-    
-    if current_user.is_admin:
+    # --- NEW, more robust authorization checks ---
+    if not current_user.is_admin:
         if personality_data.owner_type == 'system':
-            owner_id = None
+            raise HTTPException(status_code=403, detail="Only administrators may create system personalities.")
+        if personality_data.is_public:
+            raise HTTPException(status_code=403, detail="Only administrators can create public personalities.")
+        
+        # For non-admins, force ownership and privacy
+        owner_id = db_user.id
+        is_public = False
+    else: # User is an admin
+        if personality_data.owner_type == 'system':
+            owner_id = None  # System personalities have no owner
+        else:
+            owner_id = db_user.id
         is_public = personality_data.is_public
-    elif personality_data.is_public:
-        raise HTTPException(status_code=403, detail="Only administrators can create public personalities.")
     
+    # --- Check for name collision ---
     q = db.query(DBPersonality).filter(DBPersonality.name == personality_data.name)
     if owner_id:
         q = q.filter(DBPersonality.owner_user_id == owner_id)
-    else:
+    else: # System personality check
         q = q.filter(DBPersonality.owner_user_id.is_(None))
 
     if q.first():
         scope = "system-wide" if owner_id is None else "your account"
         raise HTTPException(status_code=400, detail=f"A personality named '{personality_data.name}' already exists for {scope}.")
 
+    # --- Create personality in DB ---
     db_personality = DBPersonality(
         **personality_data.model_dump(exclude={"is_public", "owner_type"}),
         owner_user_id=owner_id,

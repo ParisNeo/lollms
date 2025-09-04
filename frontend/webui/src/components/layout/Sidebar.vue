@@ -22,6 +22,10 @@ const user = computed(() => authStore.user);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
+function goToFeed() {
+    console.log("Feed button clicked in Sidebar.");
+    uiStore.setMainView('feed');
+}
 </script>
 
 <template>
@@ -52,7 +56,7 @@ const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
         <button @click="discussionsStore.createNewDiscussion()" class="p-3 bg-blue-500 text-white rounded-full shadow-lg hover:bg-blue-600 transition-colors" title="New Discussion">
           <IconPlus class="w-6 h-6" />
         </button>
-        <button v-if="user && user.user_ui_level >= 2" @click="uiStore.setMainView('feed')" class="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Feed">
+        <button v-if="user && user.user_ui_level >= 2" @click="goToFeed" class="p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Feed">
           <IconHome class="w-6 h-6 text-gray-500 dark:text-gray-400" />
         </button>
         <router-link to="/help" class="block p-3 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors" title="Help">

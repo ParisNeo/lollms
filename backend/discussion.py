@@ -1,10 +1,10 @@
 # backend/discussion.py
-# Standard Library Imports
 from pathlib import Path
 from typing import List, Optional, Any, Dict
 from lollms_client import LollmsClient, LollmsDataManager, LollmsDiscussion
 from backend.session import user_sessions, get_user_data_root, get_user_lollms_client
-
+from backend.db import get_db
+from backend.db.models.user import User as DBUser
 def get_user_discussion_manager(username: str) -> LollmsDataManager:
     """
     Retrieves or creates a LollmsDataManager for a given user.
@@ -24,7 +24,6 @@ def get_user_discussion_manager(username: str) -> LollmsDataManager:
     else:
         user_sessions[username] = {"discussion_manager": manager}
     return manager
-
 def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False, lollms_client: Optional[LollmsClient] = None) -> Optional[LollmsDiscussion]:
     """
     Retrieves or creates a LollmsDiscussion object for a user.
@@ -46,8 +45,22 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
         discussion.lollms_client = lc
         discussion.max_context_size = max_context_size
         
-        # The get_discussion_images method in the updated library handles its own migration.
-        # This call ensures that any necessary migration is triggered on discussion load.
+        # --- NEW MEMORY LOGIC ---
+        db = next(get_db())
+        try:
+            user_db = db.query(DBUser).filter(DBUser.username == username).first()
+            if user_db:
+                memory_parts = []
+                for mem in user_db.memories:
+                    date_str = f" (Created on: {mem.created_at.strftime('%Y-%m-%d')})" if user_db.include_memory_date_in_context else ""
+                    memory_parts.append(f"--- Memory: {mem.title}{date_str} ---\n{mem.content}\n--- End Memory: {mem.title} ---")
+                
+                full_memory_text = "\n\n".join(memory_parts)
+                discussion.set_memory(full_memory_text)
+        finally:
+            db.close()
+        # --- END NEW MEMORY LOGIC ---
+
         try:
             discussion.get_discussion_images()
         except Exception as e:

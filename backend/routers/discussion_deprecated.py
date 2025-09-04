@@ -327,10 +327,10 @@ def _memorize_ltm_task(task: Task, username: str, discussion_id: str, db:Session
         raise ValueError("Discussion not found.")
     
     task.set_progress(20)
-    discussion.memorize()
+    memory = discussion.memorize()
     discussion.commit()
     task.set_progress(100)
-    db_user.memory = discussion.memory
+    db_user.memories.append(memory)
     try:
         db.commit()
         db.refresh(db_user)
@@ -1014,7 +1014,7 @@ def get_all_data_zones(
         raise HTTPException(status_code=404, detail="Discussion not found")
     
     db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-    discussion.memory = db_user.memory
+    discussion.memory = "\n".join(["---"+m.title+"---\n"+m.content+"\n------" for m in db_user.memories]) if db_user and db_user.memories else ""
     
     # Use get_discussion_images to ensure data is in the correct format
     images_info = discussion.get_discussion_images()
@@ -1646,7 +1646,7 @@ async def chat_in_existing_discussion(
             return [{"error": f"Error during RAG query on datastore {ss.name}: {e}"}]
 
     db_user = db.query(DBUser).filter(DBUser.username == username).one()
-    discussion_obj.memory = db_user.memory
+    discussion_obj.memory = "\n".join(["---"+m.title+"---\n"+m.content+"\n------" for m in db_user.memories]) if db_user and db_user.memories else ""
     rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
     
     use_rag = {}

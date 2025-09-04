@@ -14,7 +14,10 @@ from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
 from backend.db.models.service import App # Ensure App is imported
 from backend.db.models.prompt import SavedPrompt
 from backend.db.models.fun_fact import FunFactCategory, FunFact
+from backend.db.models.user import User
+from backend.db.models.memory import UserMemory
 from ascii_colors import ASCIIColors, trace_exception
+
 
 # This custom compiler allows us to drop tables with cascade in SQLite,
 # though SQLAlchemy's default DROP TABLE handles foreign keys if they are defined correctly.
@@ -629,6 +632,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "is_moderator": "BOOLEAN DEFAULT 0 NOT NULL",
             "tti_binding_model_name": "VARCHAR",
             "tti_models_config": "JSON",
+            "include_memory_date_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
         }
         
         added_cols = []
@@ -685,9 +689,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print(f"Warning: Could not create unique index on password_reset_token. Error: {e}")
                 connection.rollback()
         
-        # CORRECTED: Move the bootstrap call to AFTER the column additions
-        _bootstrap_lollms_user(connection)
-
     # NEW: Migration for posts.visibility case issue
     if inspector.has_table("posts"):
         try:
@@ -700,6 +701,55 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         except Exception as e:
             print(f"WARNING: Could not run migration for 'posts.visibility' column. Error: {e}")
             connection.rollback()
+
+
+    if not inspector.has_table("user_memories"):
+        UserMemory.__table__.create(connection)
+        print("INFO: Created 'user_memories' table.")
+        connection.commit()
+    else:
+        # Migration for owner_user_id column if it's missing
+        user_memories_columns = [col['name'] for col in inspector.get_columns('user_memories')]
+        if 'owner_user_id' not in user_memories_columns:
+            try:
+                # Add the column, making it nullable temporarily for existing data
+                connection.execute(text("ALTER TABLE user_memories ADD COLUMN owner_user_id INTEGER REFERENCES users(id) ON DELETE CASCADE"))
+                print("INFO: Added 'owner_user_id' column to 'user_memories' table.")
+                
+                # Assign existing memories to the primary admin (user_id=1) as a fallback.
+                admin_user = connection.execute(text("SELECT id FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1")).first()
+                if admin_user:
+                    connection.execute(text(f"UPDATE user_memories SET owner_user_id = {admin_user[0]} WHERE owner_user_id IS NULL"))
+                    print(f"INFO: Assigned existing orphan memories to primary admin (user_id={admin_user[0]}).")
+                
+                connection.commit()
+            except Exception as e:
+                print(f"ERROR: Could not add and backfill 'owner_user_id' column in 'user_memories' table: {e}")
+                connection.rollback()
+        
+        if 'updated_at' not in user_memories_columns:
+            try:
+                connection.execute(text("ALTER TABLE user_memories ADD COLUMN updated_at DATETIME"))
+                print("INFO: Added 'updated_at' column to 'user_memories' table.")
+                # Backfill with created_at values
+                connection.execute(text("UPDATE user_memories SET updated_at = created_at WHERE updated_at IS NULL"))
+                print("INFO: Backfilled 'updated_at' values in 'user_memories' table.")
+                connection.commit()
+            except Exception as e:
+                print(f"ERROR: Could not add and backfill 'updated_at' column in 'user_memories' table: {e}")
+                connection.rollback()
+
+        # Cleanup for existing empty memories
+        try:
+            result = connection.execute(text("DELETE FROM user_memories WHERE title IS NULL OR title = '' OR content IS NULL OR content = ''"))
+            if result.rowcount > 0:
+                print(f"INFO: Cleaned up {result.rowcount} empty or invalid memories from the database.")
+                connection.commit()
+        except Exception as e:
+            print(f"WARNING: Could not run cleanup for empty memories. Error: {e}")
+            connection.rollback()
+
+    _bootstrap_lollms_user(connection)
 
     if inspector.has_table("mcps"):
         mcp_columns_db = [col['name'] for col in inspector.get_columns('mcps')]

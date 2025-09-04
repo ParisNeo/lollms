@@ -933,20 +933,16 @@ async def admin_update_global_settings(
                 
                 stored_data = {}
                 try:
-                    # Attempt to parse what's in the DB. It should be a JSON string of a dict.
                     parsed_value = json.loads(db_config.value)
                     if isinstance(parsed_value, dict) and 'type' in parsed_value:
                         stored_data = parsed_value
                     else:
-                        # Fallback for corrupted/old format data
                         stored_data['value'] = parsed_value
-                        stored_data['type'] = 'string' # Assume string if type is missing
+                        stored_data['type'] = 'string'
                 except (json.JSONDecodeError, TypeError):
-                    # Value is not JSON, e.g., just "mixed". Treat it as the value.
                     stored_data['value'] = db_config.value
-                    stored_data['type'] = 'string' # Assume string
+                    stored_data['type'] = 'string'
                 
-                # Update the value and serialize back to string for DB storage.
                 stored_data['value'] = new_value
                 db_config.value = json.dumps(stored_data)
                 updated_keys.append(key)
@@ -955,7 +951,7 @@ async def admin_update_global_settings(
 
         if updated_keys:
             db.commit()
-            settings.refresh()
+            settings.refresh(db) # UPDATED: Pass the db session to refresh
             await manager.broadcast({"type": "settings_updated"})
             print(f"INFO: Admin updated global settings: {', '.join(updated_keys)}")
         

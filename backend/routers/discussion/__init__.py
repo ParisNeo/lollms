@@ -29,7 +29,6 @@ from backend.session import (get_current_active_user,
                              get_user_discussion_assets_path,
                             )
 from backend.routers.discussion.artefacts import build_artefacts_router
-from backend.routers.discussion.memories import build_memories_router
 from backend.routers.discussion.context import build_context_router
 from backend.routers.discussion.data_zone import build_datazone_router
 from backend.routers.discussion.message import build_message_router
@@ -47,7 +46,6 @@ def build_discussions_router():
 
     # import 
     build_artefacts_router(router)
-    build_memories_router(router)
     build_context_router(router)
     build_datazone_router(router)
     build_rag_router(router)

@@ -1,4 +1,3 @@
-# main.py
 import shutil
 import datetime
 from pathlib import Path
@@ -9,7 +8,6 @@ import sys
 from multiprocessing import cpu_count
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors, trace_exception
-from contextlib import asynccontextmanager
 import asyncio
 import time
 from filelock import FileLock, Timeout
@@ -42,14 +40,10 @@ from backend.session import (
     get_user_data_root, get_user_discussion_path, user_sessions
 )
 from lollms_client import LollmsDataManager
+from backend.settings import settings
 
 from backend.routers.auth import auth_router
-# backend/routers/discussion.py
-from fastapi import APIRouter
-
 from backend.routers.discussion import build_discussions_router
-
-
 from backend.routers.admin import admin_router
 from backend.routers.languages import languages_router
 from backend.routers.personalities import personalities_router
@@ -73,29 +67,21 @@ from backend.routers.zoos.mcps_zoo import mcps_zoo_router
 from backend.routers.zoos.prompts_zoo import prompts_zoo_router
 from backend.routers.zoos.personalities_zoo import personalities_zoo_router
 from backend.routers.tasks import tasks_router
-from backend.task_manager import task_manager # Import the singleton instance
-from backend.ws_manager import manager # Import the websocket manager
-
-
+from backend.task_manager import task_manager
+from backend.ws_manager import manager
 from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
+from backend.routers.memories import memories_router
 from backend.zoo_cache import build_full_cache
 
-
-
-
-
-POLLING_INTERVAL = 0.1  # seconds
-CLEANUP_INTERVAL = 3600  # 1 hour in seconds
-MAX_MESSAGE_AGE = 24 * 3600 # 24 hours in seconds
+POLLING_INTERVAL = 0.1
+CLEANUP_INTERVAL = 3600
+MAX_MESSAGE_AGE = 24 * 3600
 CLEANUP_LOCK_PATH = APP_DATA_DIR / "broadcast_cleanup.lock"
 
+polling_task = None
 
 async def start_broadcast_polling():
-    """
-    A background task that polls the database for new broadcast messages and sends them
-    to clients connected to this specific worker process.
-    """
     last_processed_id = 0
     last_cleanup_time = time.time()
     
@@ -158,15 +144,21 @@ async def start_broadcast_polling():
             if db:
                 db.close()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
+async def startup_event():
+    global polling_task
     ASCIIColors.info("Application startup...")
+    
+    init_database(APP_DB_URL)
+    db = db_session_module.SessionLocal()
+    try:
+        settings.load_from_db(db)
+    finally:
+        db.close()
+        
     manager.set_loop(asyncio.get_running_loop())
-    
     polling_task = asyncio.create_task(start_broadcast_polling())
-    
     task_manager.init_app(db_session_module.SessionLocal)
-    print("Database initialized.")
+    print("Database initialized and settings loaded.")
 
     print("\n--- Running Automated Discussion Migration ---")
     db_session = None
@@ -264,29 +256,6 @@ async def lifespan(app: FastAPI):
                     ASCIIColors.warning("`binding_name` not found in [lollms_client_defaults] in config.toml. Cannot create initial binding.")
             else:
                 ASCIIColors.warning("[lollms_client_defaults] section is empty in config.toml. No initial binding created.")
-        
-        DEFAULT_PROMPTS = [
-            {"name": "Enhance Email", "content": """@<style>@\ntitle: Email Style\ntype: str\noptions: Formal, Friendly & Casual, Persuasive, Direct & Concise\nhelp: The desired tone for the email.\n@</style>@\nEnhance the following email draft to be more @<style>@. Refine the language, structure, and tone accordingly."""},
-            {"name": "Improve Text", "content": """@<style>@\ntitle: Writing Style\ntype: str\noptions: Professional, Academic, Creative, Simple & Clear\n@</style>@\n@<goal>@\ntitle: Main Goal\ntype: text\nhelp: e.g., 'convince the reader', 'explain a complex topic simply', 'inspire action'\n@</goal>@\nRevise the following text to make it more @<style>@. The main goal is to @<goal>@. Improve clarity, flow, and impact."""},
-            {"name": "Translate", "content": """@<language>@\ntitle: Target Language\ntype: str\noptions: English, French, Spanish, German, Italian, Chinese, Japanese, Arabic, Russian\nhelp: The language to translate the text into.\nIf you add any comments in the translated text, please also write them in @<language>@."""},
-            {"name": "Code Syntax Check", "content": """@<language>@\ntitle: Programming Language\ntype: str\noptions: Python, JavaScript, C++, Java, TypeScript, HTML, CSS, SQL\nhelp: The programming language of the code to be checked.\n@</language>@\nYou are a code syntax and style checker. Review the following @<language>@ code. Identify any syntax errors, potential bugs, style guide violations (like PEP 8 for Python), or areas for improvement. Provide your feedback as a list of suggestions."""},
-            {"name": "Translate Code", "content": """@<source_language>@\ntitle: Source Language\ntype: str\noptions: Python, JavaScript, C++, Java, C#, Go, Rust\n@</source_language>@\n@<target_language>@\ntitle: Target Language\ntype: str\noptions: Python, JavaScript, C++, Java, C#, Go, Rust\n@</target_language>@\n@<constraints>@\ntitle: Constraints\ntype: text\nhelp: e.g., 'must be object-oriented', 'avoid external libraries', 'prioritize performance'\n@</constraints>@\nTranslate the following code from @<source_language>@ to @<target_language>@. Adhere to the following constraints: @<constraints>@."""},
-            {"name": "Creative Writer", "content": """@<genre>@\ntitle: Genre\ntype: str\noptions: Fantasy, Science Fiction, Mystery, Horror, Romance, Comedy\n@</genre>@\n@<topic>@\ntitle: Topic\ntype: text\nhelp: What should the story be about? (e.g., a lost dragon, a space detective)\n@</topic>@\nWrite a short @<genre>@ story about @<topic>@."""},
-            {"name": "Poem Generator", "content": """@<style>@\ntitle: Poem Style\ntype: str\noptions: Haiku, Sonnet, Free Verse, Limerick, Ballad\n@</style>@\n@<topic>@\ntitle: Topic\ntype: text\nhelp: What should the poem be about?\n@</topic>@\nWrite a `@<style>@` poem about `@<topic>@`."""},
-            {"name": "Math Problem Solver", "content": """@<problem>@\ntitle: Math Problem\ntype: text\nhelp: Enter the math problem you want to solve.\n@</problem>@\nSolve the following math problem step-by-step, explaining your reasoning for each step:\n@<problem>@"""},
-            {"name": "Quiz Generator", "content": """@<num_questions>@\ntitle: Number of Questions\ntype: int\nhelp: How many questions to generate.\n@</num_questions>@\n@<question_type>@\ntitle: Question Type\ntype: str\noptions: Multiple Choice, True/False, Short Answer\n@</question_type>@\n@<source_material>@\ntitle: Source Material\ntype: text\nhelp: Paste the text to base the quiz on.\n@</source_material>@\nGenerate a quiz with @<num_questions>@ `@<question_type>@` questions based on the provided source material. Include a separate answer key at the end.\nSource Material:\n@<source_material>@"""}
-        ]
-
-        for default_prompt_data in DEFAULT_PROMPTS:
-            if not db_for_defaults.query(DBSavedPrompt).filter(DBSavedPrompt.name == default_prompt_data["name"], DBSavedPrompt.owner_user_id.is_(None)).first():
-                new_prompt = DBSavedPrompt(
-                    name=default_prompt_data["name"],
-                    content=default_prompt_data["content"],
-                    owner_user_id=None
-                )
-                db_for_defaults.add(new_prompt)
-                db_for_defaults.commit()
-                ASCIIColors.green(f"INFO: Added default system prompt: '{new_prompt.name}'")
 
     except Exception as e:
         ASCIIColors.error(f"ERROR during admin/personality/prompt setup: {e}")
@@ -412,27 +381,25 @@ async def lifespan(app: FastAPI):
     cleanup_and_autostart_apps()
     
     ASCIIColors.info("--- Startup complete. Application is ready. ---")
-    yield
-    ASCIIColors.info("--- Application shutting down. ---")
-    
-    polling_task.cancel()
-    try:
-        await polling_task
-    except asyncio.CancelledError:
-        ASCIIColors.info("Broadcast polling task cancelled successfully.")
 
+
+async def shutdown_event():
+    ASCIIColors.info("--- Application shutting down. ---")
+    if polling_task:
+        polling_task.cancel()
+        try:
+            await polling_task
+        except asyncio.CancelledError:
+            ASCIIColors.info("Broadcast polling task cancelled successfully.")
 
 app = FastAPI(
     title="LoLLMs Platform", 
     description="API for a multi-user LoLLMs and SafeStore chat application.", 
     version=APP_VERSION,
-    lifespan=lifespan
+    on_startup=[startup_event],
+    on_shutdown=[shutdown_event]
 )
 
-
-
-
-    
 host = SERVER_CONFIG.get("host", "0.0.0.0")
 port = SERVER_CONFIG.get("port", 9642)
 https_enabled = SERVER_CONFIG.get("https_enabled", False)
@@ -484,7 +451,6 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
-
 app.include_router(admin_router)
 app.include_router(languages_router)
 app.include_router(personalities_router)
@@ -512,11 +478,9 @@ app.include_router(personalities_zoo_router)
 app.include_router(tasks_router)
 app.include_router(help_router)
 app.include_router(prompts_router)
-
+app.include_router(memories_router)
 app.include_router(upload_router)
 app.include_router(assets_router)
-
-
 app.include_router(build_discussions_router())
 
 add_ui_routes(app)
@@ -524,7 +488,7 @@ add_ui_routes(app)
 if __name__ == "__main__":
     import uvicorn
     from backend.settings import settings
-    settings.refresh()
+    
     data_dir = Path(settings.get("data_dir","data"))
     mcp_dir = data_dir / "mcps"
     apps_dir = data_dir / "apps"

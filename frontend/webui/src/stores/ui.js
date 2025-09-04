@@ -72,7 +72,9 @@ export const useUiStore = defineStore('ui', () => {
     }
 
     function setMainView(viewName) {
+        console.log("Switching main view to:", viewName);
         if (['feed', 'chat'].includes(viewName)) {
+            console.log("Switching main view to:", viewName);
             mainView.value = viewName;
         }
     }

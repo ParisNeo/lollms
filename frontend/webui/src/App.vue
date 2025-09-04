@@ -24,6 +24,7 @@ import ForceSettingsModal from './components/modals/ForceSettingsModal.vue';
 import ConfirmationModal from './components/ui/ConfirmationModal.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
 import ArtefactEditorModal from './components/modals/ArtefactEditorModal.vue';
+import ArtefactViewerModal from './components/modals/ArtefactViewerModal.vue';
 import MemoryEditorModal from './components/modals/MemoryEditorModal.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ShareDataStoreModal from './components/modals/ShareDataStoreModal.vue';
@@ -82,7 +83,7 @@ function getContrastTextColor(hexColor) {
     const g = parseInt(hexColor.slice(3, 5), 16);
     const b = parseInt(hexColor.slice(5, 7), 16);
     const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    return luminance > 0.5 ? 'text-gray-900' : 'text-white';
+    return luminance > 0.5 ? 'text-gray-900' : 'text-gray-600';
 }
 
 const funFactTextColorClass = computed(() => getContrastTextColor(funFactColor.value));
@@ -97,20 +98,19 @@ const funFactTextStyle = computed(() => ({
     color: funFactColor.value
 }));
 
-// Fixed: Restore original three-state logic to prevent blank page
-const showMainContentOrLoading = computed(() => {
+// SIMPLIFIED logic to determine what to display
+const layoutState = computed(() => {
     if (activeModal.value === 'firstAdminSetup') {
-        return 'modal_only'; 
+        return 'modal_only'; // Special state for first admin setup
     }
     if (isAuthenticating.value) {
         return 'loading';
     }
-    return 'main_content';
-});
-
-// Additional check for routes that should be accessible without authentication
-const showMainApp = computed(() => {
-    return isAuthenticated.value || ['Welcome', 'ResetPassword', 'SsoLogin'].includes(route.name);
+    if (isAuthenticated.value) {
+        return 'authenticated';
+    }
+    // Any other state (e.g., failed auth, logged out) is 'guest'
+    return 'guest';
 });
 
 const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages'];
@@ -130,14 +130,12 @@ onMounted(async () => {
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900 flex flex-col">
     
-    <!-- Enhanced Loading Screen with Rich Branding -->
-    <div v-if="showMainContentOrLoading === 'loading'" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
+    <!-- Loading Screen -->
+    <div v-if="layoutState === 'loading'" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
         <div class="w-full max-w-lg mx-auto">
-            <!-- Enhanced logo display -->
             <div class="flex justify-center mb-6">
                 <img :src="logoSrc" alt="Logo" class="h-28 w-auto object-contain" />
             </div>
-            <!-- Dynamic welcome text -->
             <h1 class="text-6xl md:text-7xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">
                 {{ authStore.welcomeText || 'LoLLMs' }}
             </h1>
@@ -145,8 +143,6 @@ onMounted(async () => {
                 {{ authStore.welcomeSlogan || 'One tool to rule them all' }}
             </p>
             <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">by ParisNeo</p>
-            
-            <!-- Enhanced fun fact with dynamic styling and category tooltip -->
             <div v-if="authStore.funFact" 
                  :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" 
                  class="mt-8 mx-auto max-w-md p-4 border-l-4 rounded-lg text-sm text-left" 
@@ -154,7 +150,6 @@ onMounted(async () => {
                  :class="funFactTextColorClass">
                 <span class="font-bold" :style="funFactTextStyle">🤓 Fun Fact:</span> {{ authStore.funFact }}
             </div>
-            
             <div class="mt-12 w-full px-4">
                 <div class="h-2.5 w-full rounded-full bg-gray-200 dark:bg-gray-600">
                     <div class="h-2.5 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500" :style="{ width: `${authStore.loadingProgress}%` }"></div>
@@ -165,12 +160,12 @@ onMounted(async () => {
         </div>
     </div>
 
-    <!-- Main App Layout (Fixed logic to prevent blank page) -->
-    <div v-else-if="showMainContentOrLoading === 'main_content' && showMainApp" class="flex flex-col flex-grow min-h-0">
+    <!-- Authenticated App Layout -->
+    <div v-else-if="layoutState === 'authenticated'" class="flex flex-col flex-grow min-h-0">
       <div class="flex flex-grow min-h-0">
-        <Sidebar v-if="isAuthenticated && isHomePageLayout" />
+        <Sidebar v-if="isHomePageLayout" />
         <div class="flex-1 flex flex-col overflow-hidden">
-          <GlobalHeader v-if="isAuthenticated" />
+          <GlobalHeader />
           <main class="flex-1 overflow-hidden">
               <router-view />
           </main>
@@ -178,18 +173,12 @@ onMounted(async () => {
       </div>
     </div>
 
-    <!-- Fallback for edge cases (prevents blank page) -->
-    <div v-else-if="showMainContentOrLoading === 'main_content'" class="flex flex-col flex-grow min-h-0">
-      <div class="flex flex-grow min-h-0">
-        <div class="flex-1 flex flex-col overflow-hidden">
-          <main class="flex-1 overflow-hidden">
-              <router-view />
-          </main>
-        </div>
-      </div>
+    <!-- Guest/Unauthenticated View -->
+    <div v-else-if="layoutState === 'guest'" class="flex flex-col flex-grow min-h-0">
+        <router-view />
     </div>
-    
-    <!-- All Modals (Complete list from both versions) -->
+
+    <!-- Modals -->
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" />
     <LoginModal v-if="activeModal === 'login'" />
     <RegisterModal v-if="activeModal === 'register'" />
@@ -201,6 +190,7 @@ onMounted(async () => {
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <ConfirmationModal v-if="activeModal === 'confirmation'" />
     <ArtefactEditorModal v-if="activeModal === 'artefactEditor'" />
+    <ArtefactViewerModal v-if="activeModal === 'artefactViewer'" />
     <MemoryEditorModal v-if="activeModal === 'memoryEditor'" />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
     <ExportModal v-if="activeModal === 'export'" />

@@ -1,4 +1,3 @@
-// frontend/webui/src/stores/auth.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -98,6 +97,9 @@ export const useAuthStore = defineStore('auth', () => {
             switch (data.type) {
                 case 'new_dm':
                     socialStore.handleNewDm(data.data);
+                    break;
+                case 'new_comment':
+                    socialStore.handleNewComment(data.data);
                     break;
                 case 'new_shared_discussion':
                     discussionsStore.loadDiscussions();
@@ -332,6 +334,7 @@ export const useAuthStore = defineStore('auth', () => {
         const { useDataStore } = await import('./data');
         const { useSocialStore } = await import('./social');
         const { useTasksStore } = await import('./tasks');
+        const { useMemoriesStore } = await import('./memories');
 
         await apiClient.post('/api/auth/logout').catch(error => {
             console.warn("Backend logout call failed, which can be normal after token removal.", error);
@@ -343,6 +346,7 @@ export const useAuthStore = defineStore('auth', () => {
         useDataStore().$reset();
         useSocialStore().$reset();
         useTasksStore().$reset();
+        useMemoriesStore().$reset();
         
         uiStore.closeModal();
         uiStore.addNotification('You have been logged out.', 'info');
@@ -404,6 +408,13 @@ export const useAuthStore = defineStore('auth', () => {
             if (user.value) {
                 Object.assign(user.value, response.data);
             }
+            if (preferences.hasOwnProperty('include_memory_date_in_context')) {
+                const { useDiscussionsStore } = await import('./discussions');
+                const discussionsStore = useDiscussionsStore();
+                if (discussionsStore.currentDiscussionId) {
+                    discussionsStore.refreshDataZones(discussionsStore.currentDiscussionId);
+                }
+            }
             useUiStore().addNotification('Settings saved successfully.', 'success');
         } catch(error) {
             throw error;
@@ -445,19 +456,6 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    async function updateMemoryZone(content) {
-        if (!isAuthenticated.value) return;
-        try {
-            await apiClient.put('/api/auth/me/memory', { content });
-            if (user.value) {
-                user.value.memory = content;
-            }
-        } catch (error) {
-            useUiStore().addNotification('Failed to save memory.', 'error');
-            throw error;
-        }
-    }
-
     async function fetchScratchpad() {
         if (!isAuthenticated.value) return;
         try {
@@ -494,7 +492,6 @@ export const useAuthStore = defineStore('auth', () => {
         fetchScratchpad, updateScratchpad,
         fetchDataZone,
         updateDataZone,
-        updateMemoryZone,
         refreshUser
     };
 });

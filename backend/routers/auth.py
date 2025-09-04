@@ -22,6 +22,7 @@ from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.config import LLMBinding as DBLLMBinding
+from backend.models.memory import MemoryUpdate
 from backend.models import (
     Token,
     UserCreatePublic,
@@ -210,7 +211,7 @@ async def get_my_data_zone(
 async def get_my_memory(
     db_user: DBUser = Depends(get_current_db_user_from_token)
 ):
-    return {"content": db_user.memory or ""}
+    return {"content": db_user.memories or ""}
 
 @auth_router.put("/me/data-zone", status_code=status.HTTP_200_OK)
 async def update_my_data_zone(
@@ -229,11 +230,11 @@ async def update_my_data_zone(
 
 @auth_router.put("/me/memory", status_code=status.HTTP_200_OK)
 async def update_my_memory(
-    payload: DataZoneUpdate,
+    payload: MemoryUpdate,
     db_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
-    db_user.memory = payload.content
+    db_user.memories.append(title=payload.title, content=payload.content, created_at= datetime.datetime.now(timezone.utc), updated_at= datetime.datetime.now(timezone.utc))
     try:
         db.commit()
         return {"message": "Memory updated successfully."}

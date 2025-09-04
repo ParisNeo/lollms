@@ -10,9 +10,8 @@ from backend.db.models.user import User as DBUser, follows_table
 from backend.db.models.social import Post as DBPost, PostLike as DBPostLike, Comment as DBComment
 from backend.db.base import PostVisibility
 from backend.models import UserAuthDetails, PostCreate, PostPublic, CommentCreate, CommentPublic, PostUpdate
-from backend.session import get_current_db_user_from_token
+from backend.session import get_current_db_user_from_token, build_lollms_client_from_params
 from backend.task_manager import task_manager
-from backend.tasks.social_tasks import _handle_lollms_mention_task
 from sqlalchemy.orm import Session
 from lollms_client import LollmsClient
 from ascii_colors import trace_exception
@@ -26,6 +25,118 @@ from backend.settings import settings
 from backend.task_manager import Task
 
 social_router = APIRouter(prefix="/api/social", tags=["Social"])
+
+
+def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
+    """
+    A background task to generate and post a reply from the @lollms bot.
+    """
+    task.log(f"Starting AI response task for {mention_type} ID: {item_id}")
+    db = next(get_db())
+    try:
+        # 1. Fetch the @lollms bot user and its configuration
+        lollms_bot_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
+        if not lollms_bot_user:
+            task.log("CRITICAL: @lollms user not found in the database.", "ERROR")
+            raise Exception("@lollms user does not exist.")
+
+        ai_bot_enabled = settings.get("ai_bot_enabled", False)
+        if not ai_bot_enabled:
+            task.log("AI Bot is disabled in settings. Aborting.", "WARNING")
+            return {"status": "aborted", "reason": "AI Bot is disabled."}
+            
+        ai_bot_model = settings.get("ai_bot_binding_model")
+        if not ai_bot_model:
+            task.log("CRITICAL: No model is configured for the AI Bot.", "ERROR")
+            raise Exception("AI Bot model not configured.")
+
+        task.log(f"Bot enabled, using model: {ai_bot_model}")
+
+        # 2. Fetch the content that triggered the mention
+        post_id = None
+        context_text = ""
+        if mention_type == 'post':
+            post = db.query(DBPost).filter(DBPost.id == item_id).first()
+            if not post:
+                raise Exception(f"Post with ID {item_id} not found.")
+            post_id = post.id
+            context_text = f"User '{post.author.username}' wrote a post: {post.content}"
+        elif mention_type == 'comment':
+            comment = db.query(DBComment).filter(DBComment.id == item_id).first()
+            if not comment:
+                raise Exception(f"Comment with ID {item_id} not found.")
+            post_id = comment.post_id
+            context_text = f"In response to a post, user '{comment.author.username}' commented: {comment.content}"
+        else:
+            raise ValueError(f"Invalid mention type: {mention_type}")
+
+        task.set_progress(20)
+
+        # 3. Generate the response
+        task.log("Generating AI response...")
+        
+        lc = build_lollms_client_from_params(username='lollms', binding_alias=ai_bot_model.split('/')[0], model_name=ai_bot_model.split('/')[1])
+        
+        system_prompt = settings.get("ai_bot_system_prompt")
+        
+        response_text = lc.generate_text(context_text, system_prompt=system_prompt, stream=False)
+        
+        if not response_text or not response_text.strip():
+            task.log("AI generated an empty response. Aborting.", "WARNING")
+            return {"status": "aborted", "reason": "Empty response from AI."}
+
+        task.log(f"AI Response: {response_text[:100]}...")
+        task.set_progress(80)
+
+        # 4. Create and save the new comment from the bot
+        new_comment = DBComment(
+            post_id=post_id,
+            author_id=lollms_bot_user.id,
+            content=response_text.strip()
+        )
+        db.add(new_comment)
+        db.commit()
+        db.refresh(new_comment, ['author'])
+        task.log(f"Bot comment created with ID: {new_comment.id}")
+
+        # 5. Broadcast the new comment to all clients
+        comment_public = CommentPublic(
+            id=new_comment.id,
+            content=new_comment.content,
+            created_at=new_comment.created_at,
+            author=AuthorPublic.from_orm(new_comment.author)
+        )
+
+        payload = {
+            "type": "new_comment",
+            "data": {
+                "post_id": post_id,
+                "comment": comment_public.model_dump(mode="json")
+            }
+        }
+        new_comment = DBComment(
+            post_id=post_id,
+            author_id=lollms_bot_user.id,
+            content=new_comment.content
+        )
+        db.add(new_comment)
+        db.commit()
+        db.refresh(new_comment)
+        task_manager.broadcast_sync(payload)
+        task.log("Broadcasted new comment to clients.")
+        task.set_progress(100)
+        
+        return {"status": "success", "comment_id": new_comment.id}
+
+    except Exception as e:
+        task.log(f"An error occurred in the AI response task: {e}", "CRITICAL")
+        trace_exception(e)
+        if db:
+            db.rollback()
+        raise e
+    finally:
+        if db:
+            db.close()
 
 def get_post_public(db: Session, db_post: DBPost, current_user_id: int) -> PostPublic:
     like_count = db.query(func.count(DBPostLike.user_id)).filter(DBPostLike.post_id == db_post.id).scalar() or 0
@@ -89,7 +200,7 @@ def create_new_post(
     if '@lollms' in post_data.content.lower():
         task_manager.submit_task(
             name=f"Replying to mention in post {new_post.id}",
-            target=_handle_lollms_mention_task,
+            target=_respond_to_mention_task,
             args=(new_post.id, current_user.username, post_data.content, db_session_module.SessionLocal),
             owner_username=current_user.username 
         )
@@ -120,7 +231,7 @@ def add_comment_to_post(
     if '@lollms' in comment_data.content.lower():
         task_manager.submit_task(
             name=f"Replying to mention in comment on post {post_id}",
-            target=_handle_lollms_mention_task,
+            target=_respond_to_mention_task,
             args=(post_id, current_user.username, comment_data.content, db_session_module.SessionLocal, new_comment.id),
             owner_username=current_user.username
         )

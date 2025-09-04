@@ -11,6 +11,7 @@ from sqlalchemy import Enum as SQLAlchemyEnum
 from backend.security import pwd_context
 from backend.db.base import Base, FriendshipStatus, follows_table
 from backend.db.models.discussion import SharedDiscussionLink
+from backend.db.models.memory import UserMemory
 
 class User(Base):
     __tablename__ = "users"
@@ -34,7 +35,6 @@ class User(Base):
     is_searchable = Column(Boolean, default=True, nullable=False, index=True)
     first_login_done = Column(Boolean, default=False, nullable=False)
     data_zone = Column(Text, nullable=True)
-    memory = Column(Text, nullable=True)
     
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
@@ -47,6 +47,7 @@ class User(Base):
     )
 
     api_keys = relationship("OpenAIAPIKey", back_populates="user", cascade="all, delete-orphan")
+    memories = relationship("UserMemory", back_populates="owner", cascade="all, delete-orphan", foreign_keys="[UserMemory.owner_user_id]")
 
     lollms_model_name = Column(String, nullable=True)
     tti_binding_model_name = Column(String, nullable=True)
@@ -60,6 +61,7 @@ class User(Base):
     llm_repeat_penalty = Column(Float, nullable=True)
     llm_repeat_last_n = Column(Integer, nullable=True)
     put_thoughts_in_context = Column(Boolean, default=False, nullable=False)
+    include_memory_date_in_context = Column(Boolean, default=False, nullable=False)
     rag_top_k = Column(Integer, nullable=True)
     max_rag_len = Column(Integer, nullable=True)
     rag_n_hops = Column(Integer, nullable=True)
@@ -84,13 +86,13 @@ class User(Base):
     personal_apps = relationship("App", back_populates="owner", cascade="all, delete-orphan")
     
     owned_shared_discussions = relationship("SharedDiscussionLink", foreign_keys=[SharedDiscussionLink.owner_user_id], back_populates="owner", cascade="all, delete-orphan")
-    # --- THIS IS THE CORRECTED LINE ---
     received_shared_discussions = relationship("SharedDiscussionLink", foreign_keys=[SharedDiscussionLink.shared_with_user_id], back_populates="shared_with_user", cascade="all, delete-orphan")
 
     __table_args__ = (CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'), UniqueConstraint('email', name='uq_user_email'),)
     
     def verify_password(self, plain_password):
         return pwd_context.verify(plain_password, self.hashed_password)
+    
 
 class UserStarredDiscussion(Base):
     __tablename__ = "user_starred_discussions"

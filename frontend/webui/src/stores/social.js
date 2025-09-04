@@ -30,8 +30,26 @@ export const useSocialStore = defineStore('social', () => {
     // --- GETTERS ---
     const getPostsByUsername = computed(() => (username) => userPosts.value[username] || []);
     const getActiveConversation = computed(() => (userId) => activeConversations.value[userId]);
-    const getCommentsForPost = computed(() => (postId) => comments.value[postId] || null);
+    const getCommentsForPost = computed(() => (postId) => {
+        if (comments.value[postId]) {
+            return comments.value[postId];
+        }
+        const postInFeed = feedPosts.value.find(p => p.id === postId);
+        if (postInFeed && postInFeed.comments) {
+            return postInFeed.comments;
+        }
+        for (const username in userPosts.value) {
+             const postInProfile = userPosts.value[username].find(p => p.id === postId);
+             if (postInProfile && postInProfile.comments) {
+                 return postInProfile.comments;
+             }
+        }
+        return null;
+    });
     const friendRequestCount = computed(() => pendingFriendRequests.value.length);
+    const totalUnreadDms = computed(() => {
+        return conversations.value.reduce((total, convo) => total + (convo.unread_count || 0), 0);
+    });
 
     // --- ACTIONS ---
 
@@ -164,12 +182,95 @@ export const useSocialStore = defineStore('social', () => {
         }
     }
 
+    function handleNewComment({ post_id, comment }) {
+        if (comments.value[post_id]) {
+            const existing = comments.value[post_id].find(c => c.id === comment.id);
+            if (!existing) {
+                comments.value[post_id].push(comment);
+            }
+        }
+        
+        const postInFeed = feedPosts.value.find(p => p.id === post_id);
+        if (postInFeed) {
+            if (!postInFeed.comments) {
+                postInFeed.comments = [];
+            }
+            const existingComment = postInFeed.comments.find(c => c.id === comment.id);
+            if(!existingComment) {
+                postInFeed.comments.push(comment);
+            }
+        }
+        
+        for (const username in userPosts.value) {
+            const postInProfile = userPosts.value[username].find(p => p.id === post_id);
+             if (postInProfile) {
+                if (!postInProfile.comments) {
+                    postInProfile.comments = [];
+                }
+                const existingComment = postInProfile.comments.find(c => c.id === comment.id);
+                if(!existingComment) {
+                    postInProfile.comments.push(comment);
+                }
+            }
+        }
+
+        const uiStore = useUiStore();
+        const authStore = useAuthStore();
+        if(comment.author.id !== authStore.user?.id) {
+            uiStore.addNotification(`New comment from ${comment.author.username}`, 'info');
+        }
+    }
+    
     // -- WebSocket Handling --
     function handleIncomingFriendRequest(requestData) {
         const existing = pendingFriendRequests.value.find(req => req.friendship_id === requestData.friendship_id);
         if (!existing) {
             pendingFriendRequests.value.unshift(requestData);
             useUiStore().addNotification(`New friend request from ${requestData.requesting_username}`, 'info');
+        }
+    }
+
+    function handleNewDm(message) {
+        const authStore = useAuthStore();
+        const uiStore = useUiStore();
+        const currentUser = authStore.user;
+        if (!currentUser) return;
+
+        const otherUserId = message.sender_id === currentUser.id ? message.receiver_id : message.sender_id;
+        const otherUsername = message.sender_id === currentUser.id ? message.receiver_username : message.sender_username;
+
+        // If conversation is currently open, just add the message
+        if (activeConversations.value[otherUserId]) {
+            activeConversations.value[otherUserId].messages.push(message);
+        }
+
+        // Update the main conversation list
+        const convoIndex = conversations.value.findIndex(c => c.partner_user_id === otherUserId);
+        if (convoIndex > -1) {
+            const convo = conversations.value[convoIndex];
+            convo.last_message = message.content;
+            convo.last_message_at = message.sent_at;
+            if (message.sender_id !== currentUser.id) {
+                convo.unread_count = (convo.unread_count || 0) + 1;
+            }
+            // Move to top
+            conversations.value.splice(convoIndex, 1);
+            conversations.value.unshift(convo);
+        } else {
+            // New conversation
+            conversations.value.unshift({
+                partner_user_id: otherUserId,
+                partner_username: otherUsername,
+                partner_icon: message.sender_id === currentUser.id ? null : message.sender_icon, // Assuming icon is sent
+                last_message: message.content,
+                last_message_at: message.sent_at,
+                unread_count: message.sender_id !== currentUser.id ? 1 : 0
+            });
+        }
+        
+        // Show notification if it's from someone else and not currently open
+        if (message.sender_id !== currentUser.id && !activeConversations.value[otherUserId]) {
+            uiStore.addNotification(`New message from ${message.sender_username}`, 'info');
         }
     }
     
@@ -192,7 +293,10 @@ export const useSocialStore = defineStore('social', () => {
                 handleIncomingFriendRequest(message.data);
                 return;
             }
-
+            if (message.type === 'new_comment') {
+                handleNewComment(message.data);
+                return;
+            }
             const currentUser = authStore.user;
             if (!currentUser) return;
 
@@ -227,6 +331,8 @@ export const useSocialStore = defineStore('social', () => {
             feedPosts.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             console.error("Failed to fetch main feed:", error);
+            const uiStore = useUiStore();
+            uiStore.addNotification(error.response?.data?.detail || 'Could not load the feed. Please try again later.', 'error');
         } finally {
             isLoadingFeed.value = false;
         }
@@ -428,6 +534,20 @@ export const useSocialStore = defineStore('social', () => {
         }
     }
     
+    async function markConversationAsRead(userId) {
+        const convo = conversations.value.find(c => c.partner_user_id === userId);
+        if (!convo || convo.unread_count === 0) return;
+        
+        const originalCount = convo.unread_count;
+        convo.unread_count = 0; // Optimistic update
+        try {
+            await apiClient.post(`/api/dm/conversation/${userId}/read`);
+        } catch (error) {
+            convo.unread_count = originalCount; // Revert on failure
+            console.error("Failed to mark conversation as read:", error);
+        }
+    }
+
     async function toggleLike(postId) {
         const post = feedPosts.value.find(p => p.id === postId) || Object.values(userPosts.value).flat().find(p => p.id === postId);
         if (!post) return;
@@ -472,6 +592,7 @@ export const useSocialStore = defineStore('social', () => {
         isLoadingMessages,
         socket,
         isSocketConnected,
+        totalUnreadDms,
         getPostsByUsername,
         getActiveConversation,
         getCommentsForPost,
@@ -504,5 +625,8 @@ export const useSocialStore = defineStore('social', () => {
         closeConversation,
         sendDirectMessage,
         fetchMoreMessages,
+        handleNewComment,
+        handleNewDm,
+        markConversationAsRead,
     };
 });

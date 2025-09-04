@@ -1,4 +1,3 @@
-# backend/session.py
 import json
 import traceback
 import datetime
@@ -64,19 +63,12 @@ async def get_current_db_user_from_token(
     if user is None:
         raise credentials_exception
     
-    # --- CORRECTED LOGIC START ---
-    # Update last activity timestamp. The commit will be handled by the endpoint's session.
     now = datetime.datetime.now(datetime.timezone.utc)
     last_activity_aware = user.last_activity_at.replace(tzinfo=datetime.timezone.utc) if user.last_activity_at and user.last_activity_at.tzinfo is None else user.last_activity_at
 
     if not last_activity_aware or (now - last_activity_aware) > datetime.timedelta(seconds=60):
         user.last_activity_at = now
-        # DO NOT COMMIT HERE. The main endpoint will handle the commit.
     
-    # The complex logic for 'first_login_done' has been moved to the login endpoint,
-    # which is a safer place for write operations.
-    # --- CORRECTED LOGIC END ---
-
     return user
 
 def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_token)) -> UserAuthDetails:
@@ -102,7 +94,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 "active_personality_id": db_user.active_personality_id,
             }
 
-        # --- NEW: Logic to determine if settings are overridden ---
         user_model_full = user_sessions[username].get("lollms_model_name")
         llm_settings_overridden = False
         effective_llm_params = {
@@ -128,12 +119,10 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 alias_info = binding.model_aliases.get(model_name)
                 if alias_info and not alias_info.get('allow_parameters_override', True):
                     llm_settings_overridden = True
-                    # Override the effective params with values from the alias
                     param_map = {"ctx_size": "llm_ctx_size", "temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n"}
                     for alias_key, user_key in param_map.items():
                         if alias_key in alias_info and alias_info[alias_key] is not None:
                             effective_llm_params[user_key] = alias_info[alias_key]
-        # --- END NEW ---
         
         lc = get_user_lollms_client(username)
         ai_name_for_user = getattr(lc, "ai_name", "assistant")
@@ -147,8 +136,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             icon=db_user.icon, first_name=db_user.first_name, family_name=db_user.family_name, email=db_user.email,
             birth_date=db_user.birth_date, receive_notification_emails=db_user.receive_notification_emails,
             is_searchable=db_user.is_searchable, first_login_done=db_user.first_login_done,
-            data_zone=db_user.data_zone, memory=db_user.memory,
-            lollms_model_name=user_model_full,
+            data_zone=db_user.data_zone,
+            lollms_model_name=user_sessions[username].get("lollms_model_name"),
             safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
             active_personality_id=user_sessions[username].get("active_personality_id"),
             lollms_client_ai_name=ai_name_for_user,
@@ -163,6 +152,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             openai_api_require_key=is_api_require_key,
             ollama_service_enabled=is_ollama_service_enabled,
             ollama_require_key=is_ollama_require_key,
+            include_memory_date_in_context=db_user.include_memory_date_in_context,
             llm_settings_overridden=llm_settings_overridden
         )
     finally:
@@ -219,19 +209,12 @@ def invalidate_user_mcp_cache(username: str):
         print(f"INFO: Invalidated tools cache for user: {username}")
 
 def reload_lollms_client_mcp(username: str):
-    """
-    Invalidates the MCP tools cache and the lollms_client instance for a user,
-    forcing a full reload and tool re-discovery on the next request.
-    """
     if username in user_sessions:
         session = user_sessions[username]
-        # Clear the cached list of discovered tools
         if 'tools_cache' in session:
             del session['tools_cache']
             print(f"INFO: Invalidated tools cache for user: {username}")
         
-        # Clear any cached lollms_client instances that might hold old MCP connections.
-        # This forces a full reconnection on the next get_user_lollms_client call.
         if "lollms_clients" in session:
             session["lollms_clients"] = {}
             print(f"INFO: Invalidated all lollms_client instances for user: {username}")
@@ -283,7 +266,6 @@ def build_lollms_client_from_params(
             selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
             model_name_for_binding = selected_model_name if selected_binding_alias == final_alias else binding_to_use.default_model_name
 
-        # Start with parameters from binding's config field
         llm_init_params = { **binding_to_use.config }
         
         user_saved_params = {
@@ -312,12 +294,10 @@ def build_lollms_client_from_params(
             alias_params = {k: v for k, v in alias_info.items() if v is not None}
 
             if override_allowed:
-                # User/session parameters can override alias defaults
                 llm_init_params.update({**alias_params, **final_user_params})
             else:
-                # Alias parameters override user/session
-                llm_init_params.update(final_user_params) # Apply user defaults first
-                llm_init_params.update(alias_params) # Then override with alias parameters
+                llm_init_params.update(final_user_params)
+                llm_init_params.update(alias_params)
             
             if alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
                 llm_init_params["ctx_size"] = alias_info['ctx_size']
@@ -334,7 +314,7 @@ def build_lollms_client_from_params(
 
         try:
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
-            if not model_name: # Only cache the user's default client
+            if not model_name:
                 session.setdefault("lollms_clients", {})[final_alias] = lc
             return lc
         except Exception as e:

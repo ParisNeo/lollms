@@ -57,6 +57,11 @@ const sharedDiscussions = computed(() => {
     );
 });
 
+function goToFeed() {
+    console.log("Feed button clicked in DiscussionList.");
+    uiStore.setMainView('feed');
+}
+
 function handleNewDiscussion() { store.createNewDiscussion(); }
 function handleImportClick() { uiStore.openModal('import'); }
 function handleExportClick() { uiStore.openModal('export', { allDiscussions: store.sortedDiscussions }); }
@@ -103,7 +108,7 @@ onUnmounted(() => {
         
         <div class="p-2 border-b dark:border-gray-700 flex-shrink-0 space-y-2">
             <div class="flex items-center justify-between">
-                 <button @click="uiStore.setMainView('feed')" v-if="user && user.user_ui_level >= 2" class="btn-icon" title="Go to Feed">
+                 <button @click="goToFeed" v-if="user && user.user_ui_level >= 2" class="btn-icon" title="Go to Feed">
                     <IconHome class="h-5 w-5" />
                 </button>
                  <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mx-auto">Discussions</h2>

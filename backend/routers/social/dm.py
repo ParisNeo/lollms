@@ -6,8 +6,9 @@ from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, desc, func
+from sqlalchemy import or_, desc, func, update
 from werkzeug.utils import secure_filename
+from datetime import datetime
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -60,6 +61,8 @@ async def send_direct_message(
     db.refresh(new_message, ['sender', 'receiver'])
 
     response_data = DirectMessagePublic.from_orm(new_message)
+    response_data.sender_username = new_message.sender.username
+    response_data.receiver_username = new_message.receiver.username
     
     message_payload = {
         "type": "new_dm",
@@ -139,4 +142,32 @@ async def get_conversation_messages(
         desc(DBDirectMessage.sent_at)
     ).offset(skip).limit(limit).all()
 
-    return messages
+    response_data = []
+    for msg in messages:
+        msg_public = DirectMessagePublic.from_orm(msg)
+        msg_public.sender_username = msg.sender.username
+        msg_public.receiver_username = msg.receiver.username
+        response_data.append(msg_public)
+
+    return response_data
+
+@dm_router.post("/conversation/{user_id}/read", status_code=200)
+async def mark_conversation_as_read(
+    user_id: int,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Marks all messages from a specific user to the current user as read."""
+    stmt = (
+        update(DBDirectMessage)
+        .where(
+            DBDirectMessage.sender_id == user_id,
+            DBDirectMessage.receiver_id == current_user.id,
+            DBDirectMessage.read_at.is_(None)
+        )
+        .values(read_at=datetime.utcnow())
+    )
+    result = db.execute(stmt)
+    db.commit()
+    
+    return {"message": f"Marked {result.rowcount} messages as read."}

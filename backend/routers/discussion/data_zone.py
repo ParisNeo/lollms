@@ -32,7 +32,7 @@ def build_datazone_router(router: APIRouter):
             raise HTTPException(status_code=404, detail="Discussion not found")
         
         db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-        discussion.memory = db_user.memory
+        discussion.memory = "\n".join(["---"+m.title+"---\n"+m.content+"\n------" for m in db_user.memories]) if db_user and db_user.memories else ""
         
         # Use get_discussion_images to ensure data is in the correct format
         images_info = discussion.get_discussion_images()

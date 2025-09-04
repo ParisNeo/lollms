@@ -116,7 +116,7 @@ def build_llm_generation_router(router: APIRouter):
                 trace_exception(e)
                 return [{"error": f"Error during RAG query on datastore {ss.name}: {e}"}]
 
-        discussion_obj.memory = owner_db_user.memory
+        discussion_obj.memory = "\n".join(["---"+m.title+"---\n"+m.content+"\n------" for m in owner_db_user.memories]) if owner_db_user and owner_db_user.memories else ""
         rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
         
         use_rag = {}

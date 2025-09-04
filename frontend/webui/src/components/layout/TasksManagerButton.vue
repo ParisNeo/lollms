@@ -19,17 +19,19 @@ function openTasksManager() {
 <template>
     <button 
         @click="openTasksManager" 
-        :title="mostRecentActiveTask ? `${mostRecentActiveTask.name} (${mostRecentActiveTask.progress}%)` : 'Task Manager'"
-        class="flex items-center gap-2 transition-all duration-300 ease-in-out"
+        :title="mostRecentActiveTask ? `${activeTasksCount} active task(s): ${mostRecentActiveTask.name} (${mostRecentActiveTask.progress}%)` : 'Task Manager'"
+        class="relative flex items-center gap-2 transition-all duration-300 ease-in-out"
         :class="mostRecentActiveTask 
-            ? 'bg-gray-200 dark:bg-gray-700 rounded-full pl-2 pr-3 py-1.5 h-9 text-sm' 
-            : 'btn-icon relative'">
+            ? 'bg-gray-200 dark:bg-gray-700 rounded-full px-2 py-1.5 h-9 text-sm' 
+            : 'btn-icon'">
         
         <template v-if="mostRecentActiveTask">
-            <IconAnimateSpin class="w-5 h-5 text-blue-500 flex-shrink-0 animate-spin" />
-            <span class="truncate min-w-0 font-medium text-gray-700 dark:text-gray-200">{{ mostRecentActiveTask.name }}</span>
-            <div class="w-16 h-1.5 bg-gray-300 dark:bg-gray-600 rounded-full overflow-hidden flex-shrink-0">
+            <IconAnimateSpin class="w-5 h-5 text-blue-500 flex-shrink-0" />
+            <div class="w-12 h-1.5 bg-gray-300 dark:bg-gray-600 rounded-full overflow-hidden flex-shrink-0">
                 <div class="h-full bg-blue-500 rounded-full" :style="{ width: `${mostRecentActiveTask.progress}%` }"></div>
+            </div>
+            <div class="flex h-5 w-5 items-center justify-center rounded-full bg-blue-500 text-white text-xs font-bold">
+                {{ activeTasksCount }}
             </div>
         </template>
         

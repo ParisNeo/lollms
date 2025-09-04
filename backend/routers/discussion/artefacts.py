@@ -2,6 +2,7 @@
 import base64
 import io
 import asyncio
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict
@@ -175,20 +176,35 @@ def build_artefacts_router(router: APIRouter):
         db: Session = Depends(get_db)
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        if not discussion.get_artefact(title=artefact_title):
-            raise HTTPException(status_code=404, detail="Artefact not found to update.")
+        
         try:
+            # Use the unified update_artefact method from LollmsDiscussion,
+            # which now handles both creating a new version and updating in-place.
+            # This respects the class abstraction and removes direct DB access from the router.
             artefact_info = discussion.update_artefact(
-                title=artefact_title, new_content=payload.new_content, new_images=payload.kept_images_b64 + payload.new_images_b64
+                title=artefact_title, 
+                new_content=payload.new_content, 
+                new_images=payload.kept_images_b64 + payload.new_images_b64,
+                version=payload.version,
+                update_in_place=payload.update_in_place
             )
             discussion.commit()
+
+            # Ensure datetime objects are converted to ISO 8601 strings for the response model.
             if isinstance(artefact_info.get('created_at'), datetime):
                 artefact_info['created_at'] = artefact_info['created_at'].isoformat()
             if isinstance(artefact_info.get('updated_at'), datetime):
                 artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
+            
             return artefact_info
+
+        except ValueError as e:
+            # This is likely raised by LollmsDiscussion if the artefact/version is not found.
+            raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to update artefact: {e}")
+            # Catch any other unexpected errors.
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"An unexpected error occurred while updating the artefact: {e}")
 
     @router.post("/{discussion_id}/artefacts/export-context", response_model=ArtefactInfo)
     async def export_context_as_artefact(
@@ -215,28 +231,30 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to create artefact from context: {e}")
 
-    @router.get("/{discussion_id}/artefacts/{artefact_title}", response_model=ArtefactInfo)
+    @router.get("/{discussion_id}/artefact", response_model=ArtefactInfo)
     async def get_discussion_artefact_content(
         discussion_id: str,
-        artefact_title: str,
+        artefact_title: str = Query(...),
         version: Optional[int] = Query(None),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         artefact = discussion.get_artefact(title=artefact_title, version=version)
+
         if not artefact:
             raise HTTPException(status_code=404, detail="Artefact not found")
+
         if isinstance(artefact.get('created_at'), datetime):
             artefact['created_at'] = artefact['created_at'].isoformat()
         if isinstance(artefact.get('updated_at'), datetime):
             artefact['updated_at'] = artefact['updated_at'].isoformat()
         return artefact
 
-    @router.delete("/{discussion_id}/artefacts/{artefact_title}", status_code=status.HTTP_204_NO_CONTENT)
+    @router.delete("/{discussion_id}/artefact", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_discussion_artefact(
         discussion_id: str,
-        artefact_title: str,
+        artefact_title: str = Query(...),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):

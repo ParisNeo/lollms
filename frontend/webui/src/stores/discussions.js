@@ -1,6 +1,5 @@
-// frontend/webui/src/stores/discussions.js
 import { defineStore, storeToRefs } from 'pinia';
-import { ref, computed, watch, nextTick, version } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
@@ -70,9 +69,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const activeDiscussionArtefacts = ref([]);
     const isLoadingArtefacts = ref(false);
 
-    const activeDiscussionMemories = ref([]);
-    const isLoadingMemories = ref(false);
-
     const sharedWithMe = ref([]);
     
 
@@ -101,11 +97,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     });
     const activeDiscussion = computed(() => {
         if (!currentDiscussionId.value) return null;
-        // Check owned discussions first
         if (discussions.value[currentDiscussionId.value]) {
             return discussions.value[currentDiscussionId.value];
         }
-        // If not found, check shared discussions
         return sharedWithMe.value.find(d => d.id === currentDiscussionId.value) || null;
     });
     const activeMessages = computed(() => messages.value);
@@ -144,6 +138,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                     if (trackedTask.type === 'import_url' && updatedTask.status === 'completed') {
                         fetchArtefacts(discussionId);
                     }
+                    if (trackedTask.type === 'memorize' && updatedTask.status === 'completed' && updatedTask.result) {
+                        const { useMemoriesStore } = import('./memories');
+                        const memoriesStore = useMemoriesStore();
+                        memoriesStore.addMemory(updatedTask.result);
+                    }
                     _clearActiveAiTask(discussionId);
                 }
             }
@@ -179,15 +178,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 uiStore.addNotification('Data zone has been updated by AI.', 'success');
             }
         } else if (zone === 'memory') {
-            const authStore = useAuthStore();
-            if (authStore.user) {
-                authStore.user.memory = new_content;
-            }
-            const discussion = discussions.value[discussion_id];
-            if (discussion) {
-                discussion.memory = new_content;
-            }
-            uiStore.addNotification('Long-term memory has been updated.', 'success');
+            // This is now an info message, as memory is user-wide.
+            uiStore.addNotification('An AI task has suggested a new memory. Check the LTM panel.', 'info');
         }
         
         if (discussion_id === currentDiscussionId.value) {
@@ -241,7 +233,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             await fetchDataZones(discussionId);
             await fetchContextStatus(discussionId);
             await fetchArtefacts(discussionId);
-            await fetchMemories(discussionId);
         } catch(error) {
             uiStore.addNotification('Failed to refresh data zones.', 'error');
         }
@@ -283,7 +274,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const discussion = discussions.value[discussionId];
         if (!discussion) return;
         try {
-            console.log("Fetching datazones for discussion:", discussionId);
             const response = await apiClient.get(`/api/discussions/${discussionId}/data_zones`);
             const data = response.data;
 
@@ -417,10 +407,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    // UPDATE loadDiscussions to also fetch shared
     async function loadDiscussions() {
         try {
-            // Fetch owned discussions
             const response = await apiClient.get('/api/discussions');
             const discussionData = response.data;
             if (!Array.isArray(discussionData)) return;
@@ -436,7 +424,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             });
             discussions.value = newDiscussions;
             
-            // Fetch shared discussions
             await fetchSharedWithMe();
 
         } catch (error) { console.error("Failed to load discussions:", error); }
@@ -486,7 +473,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         currentDiscussionId.value = id;
         messages.value = []; 
         activeDiscussionArtefacts.value = [];
-        activeDiscussionMemories.value = [];
         
         liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
         
@@ -508,8 +494,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 fetchContextStatus(id),
                 fetchDataZones(id),
                 authStore.fetchDataZone(),
-                fetchArtefacts(id),
-                fetchMemories(id)
+                fetchArtefacts(id)
             ]);
         } catch (error) {
             useUiStore().addNotification('Failed to load discussion.', 'error');
@@ -1272,17 +1257,24 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     async function deleteArtefact({ discussionId, artefactTitle }) {
         const uiStore = useUiStore();
         try {
-            await apiClient.delete(`/api/discussions/${discussionId}/artefacts/${artefactTitle}`);
+            await apiClient.delete(`/api/discussions/${discussionId}/artefact`, {
+                params: { artefact_title: artefactTitle }
+            });
             await fetchArtefacts(discussionId);
             uiStore.addNotification(`Artefact '${artefactTitle}' deleted.`, 'success');
-        } catch (error) {}
+        } catch (error) {
+            console.error("Failed to delete artefact:", error);
+        }
     }
 
     async function fetchArtefactContent({ discussionId, artefactTitle, version }) {
         const uiStore = useUiStore();
         try {
-            const params = version ? { version } : {};
-            const response = await apiClient.get(`/api/discussions/${discussionId}/artefacts/${artefactTitle}`, { params });
+            const params = { artefact_title: artefactTitle };
+            if (version) {
+                params.version = version;
+            }
+            const response = await apiClient.get(`/api/discussions/${discussionId}/artefact`, { params });
             return response.data;
         } catch (error) {
             uiStore.addNotification(`Could not fetch content for '${artefactTitle}'.`, 'error');
@@ -1320,13 +1312,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    async function updateArtefact({ discussionId, artefactTitle, newContent, newImagesB64, keptImagesB64 }) {
+    async function updateArtefact({ discussionId, artefactTitle, newContent, newImagesB64, keptImagesB64, version, updateInPlace }) {
         const uiStore = useUiStore();
         try {
             const payload = {
                 new_content: newContent,
                 new_images_b64: newImagesB64,
                 kept_images_b64: keptImagesB64,
+                version: version,
+                update_in_place: updateInPlace
             };
             await apiClient.put(`/api/discussions/${discussionId}/artefacts/${artefactTitle}`, payload);
             await fetchArtefacts(discussionId);
@@ -1336,69 +1330,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
     
-    // --- NEW: Memory Actions ---
-    async function fetchMemories(discussionId) {
-        if (!discussionId) {
-            activeDiscussionMemories.value = [];
-            return;
-        }
-        isLoadingMemories.value = true;
-        try {
-            const response = await apiClient.get(`/api/discussions/${discussionId}/memories`);
-            activeDiscussionMemories.value = response.data.sort((a,b) => a.title.localeCompare(b.title));
-        } catch (error) {
-            console.error("Failed to fetch memories:", error);
-            activeDiscussionMemories.value = [];
-        } finally {
-            isLoadingMemories.value = false;
-        }
-    }
-
-    async function createOrUpdateMemory({ discussionId, title, content }) {
-        const uiStore = useUiStore();
-        try {
-            const payload = { title, content };
-            await apiClient.post(`/api/discussions/${discussionId}/memories`, payload);
-            await fetchMemories(discussionId);
-            uiStore.addNotification('Memory saved successfully.', 'success');
-        } catch (error) {
-            console.error("Failed to save memory:", error);
-        }
-    }
-
-    async function deleteMemory({ discussionId, memoryTitle }) {
-        const uiStore = useUiStore();
-        try {
-            await apiClient.delete(`/api/discussions/${discussionId}/memories/${memoryTitle}`);
-            await fetchMemories(discussionId);
-            uiStore.addNotification(`Memory '${memoryTitle}' deleted.`, 'success');
-        } catch (error) {
-            console.error("Failed to delete memory:", error);
-        }
-    }
-
-    async function loadMemoryToContext({ discussionId, memoryTitle }) {
-        const uiStore = useUiStore();
-        try {
-            await apiClient.post(`/api/discussions/${discussionId}/memories/load-to-context`, { title: memoryTitle });
-            await refreshDataZones(discussionId);
-            uiStore.addNotification(`Memory '${memoryTitle}' loaded into context.`, 'success');
-        } catch (error) {
-            console.error("Failed to load memory:", error);
-        }
-    }
-
-    async function unloadMemoryFromContext({ discussionId, memoryTitle }) {
-        const uiStore = useUiStore();
-        try {
-            await apiClient.post(`/api/discussions/${discussionId}/memories/unload-from-context`, { title: memoryTitle });
-            await refreshDataZones(discussionId);
-            uiStore.addNotification(`Memory '${memoryTitle}' unloaded from context.`, 'success');
-        } catch (error) {
-            console.error("Failed to unload memory:", error);
-        }
-    }
-
     function $reset() {
         discussions.value = {};
         currentDiscussionId.value = null;
@@ -1407,115 +1338,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         titleGenerationInProgressId.value = null;
         activeDiscussionContextStatus.value = null;
         activeAiTasks.value = {};
-        activeDiscussionMemories.value = [];
-    }
-    async function refreshUser() {
-        if (!token.value) return;
-        try {
-            const response = await apiClient.get('/api/auth/me');
-            user.value = response.data;
-        } catch (error) {
-            console.error("Failed to refresh user details:", error);
-        }
-    }
-
-    
-    function connectWebSocket() {
-        if (!token.value || (ws.value && (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING))) {
-            return;
-        }
-
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = import.meta.env.DEV ? 'localhost:9642' : window.location.host;
-        const wsUrl = `${protocol}//${host}/ws/dm/${token.value}`;
-        
-        ws.value = new WebSocket(wsUrl);
-
-        ws.value.onopen = () => { wsConnected.value = true; clearTimeout(reconnectTimeout); };
-
-        ws.value.onmessage = async (event) => {
-            const data = JSON.parse(event.data);
-            const { useSocialStore } = await import('./social');
-            const { useTasksStore } = await import('./tasks');
-            const { useDataStore } = await import('./data');
-            const { useDiscussionsStore } = await import('./discussions');
-            const socialStore = useSocialStore();
-            const uiStore = useUiStore();
-            const tasksStore = useTasksStore();
-            const dataStore = useDataStore();
-            const discussionsStore = useDiscussionsStore();
-
-            switch (data.type) {
-                case 'new_dm':
-                    socialStore.handleNewDm(data.data);
-                    break;
-                case 'new_shared_discussion':
-                    discussionsStore.loadDiscussions();
-                    uiStore.addNotification(`'${data.data.discussion_title}' was shared with you by ${data.data.from_user}.`, 'info');
-                    break;
-                case 'discussion_updated':
-                    if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
-                        uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
-                        discussionsStore.refreshActiveDiscussionMessages();
-                    } else {
-                        uiStore.addNotification(`A shared discussion was updated by ${data.data.sender_username}.`, 'info');
-                    }
-                    discussionsStore.loadDiscussions();
-                    break;
-                case 'discussion_unshared':
-                    if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
-                        discussionsStore.selectDiscussion(null); // Deselect if active
-                        uiStore.setMainView('feed');
-                    }
-                    discussionsStore.loadDiscussions();
-                    uiStore.addNotification(`Access to a shared discussion was revoked by ${data.data.from_user}.`, 'warning');
-                    break;
-                case 'admin_broadcast':
-                    uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender);
-                    break;
-                case 'task_update':
-                    tasksStore.addTask(data.data);
-                    break;
-                case 'app_status_changed': {
-                    const { useAdminStore } = await import('./admin');
-                    useAdminStore().handleAppStatusUpdate(data.data);
-                    dataStore.handleServiceStatusUpdate(data.data);
-                    break;
-                }
-                case 'data_zone_processed':
-                    discussionsStore.handleDataZoneUpdate(data.data);
-                    break;
-                case 'discussion_images_updated':
-                    discussionsStore.handleDiscussionImagesUpdated(data.data);
-                    break;
-                case 'tasks_cleared':
-                    tasksStore.handleTasksCleared(data.data);
-                    break;
-                case 'settings_updated':
-                    uiStore.addNotification('Global settings updated by admin. Refreshing session...', 'info');
-                    await refreshUser();
-                    break;
-                case 'bindings_updated':
-                    uiStore.addNotification('LLM bindings updated. Refreshing model list.', 'info');
-                    dataStore.fetchAvailableLollmsModels();
-                    break;
-            }
-        };
-
-        ws.value.onclose = (event) => {
-            wsConnected.value = false;
-            ws.value = null;
-            if (event.code !== 1000) {
-                reconnectTimeout = setTimeout(connectWebSocket, 5000);
-            }
-        };
-        ws.value.onerror = (error) => { wsConnected.value = false; ws.value?.close(); };
-    }
-
-    function disconnectWebSocket() {
-        wsConnected.value = false;
-        if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        if (ws.value) { ws.value.close(1000, "User logout"); ws.value = null; }
     }
 
     return {
@@ -1552,10 +1374,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         exportContextAsArtefact,
         createManualArtefact,
         updateArtefact,
-
-        activeDiscussionMemories, isLoadingMemories,
-        fetchMemories, createOrUpdateMemory, deleteMemory,
-        loadMemoryToContext, unloadMemoryFromContext,
 
         sharedWithMe,
         fetchSharedWithMe,

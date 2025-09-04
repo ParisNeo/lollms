@@ -33,14 +33,24 @@ const icon = shallowRef(null);
 watchEffect(async () => {
   if (props.name) {
     const componentName = `Icon${toPascalCase(props.name)}.vue`;
-    const pathKey = `/src/assets/icons/${props.collection}/${componentName}`;
+    const pathKeyWithCollection = `/src/assets/icons/${props.collection}/${componentName}`;
+    const pathKeyWithoutCollection = `/src/assets/icons/${componentName}`;
     
-    if (iconModules[pathKey]) {
-      const module = await iconModules[pathKey]();
+    let pathKeyToUse = null;
+
+    if (iconModules[pathKeyWithCollection]) {
+      pathKeyToUse = pathKeyWithCollection;
+    } else if (iconModules[pathKeyWithoutCollection]) {
+      pathKeyToUse = pathKeyWithoutCollection;
+    }
+
+    if (pathKeyToUse) {
+      const module = await iconModules[pathKeyToUse]();
       icon.value = module.default;
     } else {
-      console.warn(`Icon '${props.name}' (expected as ${componentName}) not found at ${pathKey}. Using fallback.`);
-      const fallbackModule = await import('../../assets/icons/ui/IconCode.vue');
+      console.warn(`Icon '${props.name}' (expected as ${componentName}) not found at ${pathKeyWithCollection} or ${pathKeyWithoutCollection}. Using fallback.`);
+      // Using a known existing fallback to be safe
+      const fallbackModule = await import('../../assets/icons/IconCode.vue');
       icon.value = fallbackModule.default;
     }
   }

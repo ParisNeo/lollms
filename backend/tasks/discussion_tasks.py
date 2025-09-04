@@ -6,7 +6,7 @@ import json
 import re
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any, AsyncGenerator, Dict, List, Optional
@@ -39,6 +39,7 @@ from backend.db.models.db_task import DBTask
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
+from backend.db.models.memory import UserMemory
 from backend.discussion import get_user_discussion, get_user_discussion_manager
 from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse,
                             DataZones, DiscussionBranchSwitchRequest,
@@ -323,10 +324,11 @@ def _memorize_ltm_task(task: Task, username: str, discussion_id: str, db:Session
         raise ValueError("Discussion not found.")
     
     task.set_progress(20)
-    discussion.memorize()
+    memory = discussion.memorize()
     discussion.commit()
     task.set_progress(100)
-    db_user.memory = discussion.memory
+    if memory:
+        db_user.memories.append(UserMemory(title=memory.get("title",""), content=memory.get("content",""), created_at= datetime.now(timezone.utc), updated_at= datetime.now(timezone.utc)) )
     try:
         db.commit()
         db.refresh(db_user)

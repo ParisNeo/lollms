@@ -28,6 +28,7 @@ import IconTicket from '../../assets/icons/IconTicket.vue';
 import IconLollms from '../../assets/icons/IconLollms.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
+import IconDataZone from '../../assets/icons/IconDataZone.vue';
 
 // CodeMirror imports
 import { markdown } from '@codemirror/lang-markdown';
@@ -490,6 +491,9 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
                     <!-- Action Buttons -->
                     <div class="flex flex-shrink-0 gap-2">
                         <button v-if="currentModelVisionSupport" @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary chat-action-button disabled:opacity-50" title="Upload Images"><IconPhoto class="w-5 h-5"/></button>
+                        <button v-if="activeDiscussion" @click="uiStore.toggleDataZone()" class="btn btn-secondary chat-action-button" title="Toggle Data Zone">
+                            <IconDataZone class="w-5 h-5" />
+                        </button>
                         <div v-if="user.user_ui_level >= 3"><MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select MCP Tools"><IconMcp class="w-5 h-5"/><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshMcps" :disabled="isRefreshingMcps" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingMcps}"/><span>{{ isRefreshingMcps ? 'Refreshing...' : 'Refresh Tools' }}</span></button></div></template></MultiSelectMenu></div>
                         <div v-if="user.user_ui_level >= 1"><MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary"><template #button="{ toggle, selected, activeClass, inactiveClass }"><button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select RAG Store"><IconDatabase class="w-5 h-5" /><span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span></button></template><template #footer><div class="p-2"><button @click="refreshRags" :disabled="isRefreshingRags" class="w-full btn btn-secondary text-sm !justify-center"><IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingRags}"/><span>{{ isRefreshingRags ? 'Refreshing...' : 'Refresh Stores' }}</span></button></div></template></MultiSelectMenu></div>
                         <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn btn-secondary chat-action-button">
@@ -505,11 +509,7 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
                                 <div class="max-h-60 overflow-y-auto">
                                     <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category">
                                         <h3 class="category-header">{{ category }}</h3>
-                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
-                                            <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
-                                            <IconTicket v-else class="h-5 w-5 mr-2 flex-shrink-0 text-gray-400" />
-                                            <span class="truncate">{{ p.name }}</span>
-                                        </button>
+                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><IconTicket v-else class="h-5 w-5 mr-2 flex-shrink-0 text-gray-400" /><span class="truncate">{{ p.name }}</span></button>
                                     </div>
                                      <div v-if="Object.keys(filteredUserPromptsByCategory).length === 0" class="px-3 py-2 text-sm text-gray-500 italic">No matching prompts.</div>
                                 </div>
@@ -521,10 +521,7 @@ function removeImage(index) { URL.revokeObjectURL(uploadedImages.value[index].lo
                                 <div class="max-h-60 overflow-y-auto">
                                     <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category">
                                         <h3 class="category-header">{{ category }}</h3>
-                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
-                                            <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
-                                            <span class="truncate">{{ p.name }}</span>
-                                        </button>
+                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button>
                                     </div>
                                     <div v-if="Object.keys(filteredSystemPromptsByZooCategory).length === 0" class="px-3 py-2 text-sm text-gray-500 italic">No matching prompts.</div>
                                 </div>

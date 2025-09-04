@@ -4,6 +4,11 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, exists, select, insert, delete
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
+from ascii_colors import trace_exception
+import re
+from backend.settings import settings
+from backend.task_manager import task_manager
+from backend.tasks.social_tasks import _respond_to_mention_task
 
 from backend.db import get_db
 from backend.db.base import PostVisibility, FriendshipStatus, follows_table
@@ -100,6 +105,19 @@ def create_post(
     db.add(new_post)
     db.commit()
     db.refresh(new_post, ['author'])
+    
+    # --- NEW: Check for @lollms mention ---
+    if settings.get("ai_bot_enabled", False):
+        if re.search(r'\B@lollms\b', post_data.content, re.IGNORECASE):
+            task_manager.submit_task(
+                name=f"AI Bot responding to post by {current_user.username}",
+                target=_respond_to_mention_task,
+                args=('post', new_post.id),
+                description=f"Generating AI reply for post ID: {new_post.id}",
+                owner_username='lollms' # Assign task to the bot user
+            )
+    # --- END NEW ---
+    
     return new_post
 
 @social_router.get("/posts/{post_id}", response_model=PostPublic)
@@ -259,34 +277,79 @@ def get_main_feed(
     db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    like_count_subquery = select(func.count(DBPostLike.user_id)).where(DBPostLike.post_id == DBPost.id).scalar_subquery()
+    print(f"--- FEED: Fetching feed for user {current_user.id} ({current_user.username}) ---")
+    try:
+        # 1. Get IDs of users the current user follows
+        following_ids_query = select(follows_table.c.following_id).where(follows_table.c.follower_id == current_user.id)
+        following_ids = db.execute(following_ids_query).scalars().all()
+        print(f"--- FEED: Following IDs: {following_ids} ---")
 
-    has_liked_subquery = select(
-        exists().where(
+        # 2. Get IDs of friends
+        friend_ids_q1 = select(DBFriendship.user2_id).where(
+            DBFriendship.user1_id == current_user.id,
+            DBFriendship.status == FriendshipStatus.ACCEPTED
+        )
+        friend_ids_q2 = select(DBFriendship.user1_id).where(
+            DBFriendship.user2_id == current_user.id,
+            DBFriendship.status == FriendshipStatus.ACCEPTED
+        )
+        friend_ids = db.execute(friend_ids_q1).scalars().all() + db.execute(friend_ids_q2).scalars().all()
+        print(f"--- FEED: Friend IDs: {friend_ids} ---")
+
+        # 3. Construct visibility conditions
+        visibility_conditions = or_(
+            DBPost.visibility == PostVisibility.public,
+            DBPost.author_id == current_user.id,
             and_(
-                DBPostLike.post_id == DBPost.id,
-                DBPostLike.user_id == current_user.id
+                DBPost.visibility == PostVisibility.followers,
+                DBPost.author_id.in_(following_ids)
+            ),
+            and_(
+                DBPost.visibility == PostVisibility.friends,
+                DBPost.author_id.in_(friend_ids)
             )
         )
-    ).correlate(DBPost).scalar_subquery()
 
-    results = db.query(
-        DBPost,
-        like_count_subquery.label("like_count"),
-        has_liked_subquery.label("has_liked")
-    ).options(
-        joinedload(DBPost.author),
-        joinedload(DBPost.comments).joinedload(DBComment.author)
-    ).order_by(DBPost.created_at.desc()).limit(50).all()
+        like_count_subquery = select(func.count(DBPostLike.user_id)).where(DBPostLike.post_id == DBPost.id).scalar_subquery()
 
-    response = []
-    for post, like_count, has_liked in results:
-        post_public = PostPublic.model_validate(post)
-        post_public.like_count = like_count
-        post_public.has_liked = has_liked
-        response.append(post_public)
+        has_liked_subquery = select(
+            exists().where(
+                and_(
+                    DBPostLike.post_id == DBPost.id,
+                    DBPostLike.user_id == current_user.id
+                )
+            )
+        ).correlate(DBPost).scalar_subquery()
+
+        results = db.query(
+            DBPost,
+            like_count_subquery.label("like_count"),
+            has_liked_subquery.label("has_liked")
+        ).options(
+            joinedload(DBPost.author),
+            joinedload(DBPost.comments).joinedload(DBComment.author)
+        ).filter(
+            visibility_conditions
+        ).order_by(DBPost.created_at.desc()).limit(50).all()
         
-    return response
+        print(f"--- FEED: Found {len(results)} posts from DB query. ---")
+
+        response = []
+        for i, (post, like_count, has_liked) in enumerate(results):
+            try:
+                post_public = PostPublic.model_validate(post)
+                post_public.like_count = like_count
+                post_public.has_liked = has_liked
+                response.append(post_public)
+            except Exception as e_model:
+                print(f"--- FEED: Error validating post model for post ID {post.id} (index {i}): {e_model} ---")
+        
+        print(f"--- FEED: Successfully processed {len(response)} posts. ---")
+        return response
+    except Exception as e:
+        print(f"--- FEED: CRITICAL ERROR fetching feed for user {current_user.id} ---")
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail="An error occurred while fetching the feed.")
 
 
 @social_router.get("/posts/{post_id}/comments", response_model=List[CommentPublic])
@@ -319,6 +382,19 @@ def create_comment_for_post(
     db.add(new_comment)
     db.commit()
     db.refresh(new_comment, ['author'])
+    
+    # --- NEW: Check for @lollms mention ---
+    if settings.get("ai_bot_enabled", False):
+        # Avoid the bot replying to itself
+        if current_user.username != 'lollms' and re.search(r'\B@lollms\b', comment_data.content, re.IGNORECASE):
+            task_manager.submit_task(
+                name=f"AI Bot responding to comment by {current_user.username}",
+                target=_respond_to_mention_task,
+                args=('comment', new_comment.id),
+                description=f"Generating AI reply for comment ID: {new_comment.id}",
+                owner_username='lollms'
+            )
+    # --- END NEW ---
     
     return new_comment
 

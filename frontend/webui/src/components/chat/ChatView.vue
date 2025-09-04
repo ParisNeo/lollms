@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/components/chat/ChatView.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
@@ -8,6 +7,7 @@ import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import { usePromptsStore } from '../../stores/prompts';
 import { useTasksStore } from '../../stores/tasks';
+import { useMemoriesStore } from '../../stores/memories'; // NEW
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 import { storeToRefs } from 'pinia';
@@ -58,12 +58,14 @@ const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
 const tasksStore = useTasksStore();
 const dataStore = useDataStore();
+const memoriesStore = useMemoriesStore(); // NEW
 const router = useRouter();
 const { on, off } = useEventBus();
-const { liveDataZoneTokens, currentModelVisionSupport, activeDiscussionArtefacts, isLoadingArtefacts, activeDiscussionMemories, isLoadingMemories } = storeToRefs(discussionsStore);
+const { liveDataZoneTokens, currentModelVisionSupport, activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { tasks } = storeToRefs(tasksStore);
 const { availableTtiModels } = storeToRefs(dataStore);
+const { memories, isLoading: isLoadingMemories } = storeToRefs(memoriesStore); // NEW
 
 // --- Component State ---
 const artefactFileInput = ref(null);
@@ -89,6 +91,8 @@ const showUrlImport = ref(false);
 const isProgrammaticChange = ref(false);
 const selectedArtefactVersions = ref({});
 const isDraggingFile = ref(false);
+const memorySearchTerm = ref(''); // NEW
+const loadedMemoryTitles = ref(new Set()); // NEW
 
 // --- Data Zone State ---
 let discussionSaveDebounceTimer = null;
@@ -224,16 +228,28 @@ const userDataZone = computed({
     }
 });
 const personalityDataZone = computed(() => activeDiscussion.value?.personality_data_zone || '');
+
+const filteredMemories = computed(() => { // NEW
+    if (!memorySearchTerm.value) return memories.value;
+    const term = memorySearchTerm.value.toLowerCase();
+    return memories.value.filter(m => 
+        m.title.toLowerCase().includes(term) || 
+        m.content.toLowerCase().includes(term)
+    );
+});
+
 const memory = computed({
-    get: () => activeDiscussion.value?.memory || '',
+    get: () => {
+        // Construct the memory string from loaded memories
+        return memories.value
+            .filter(m => loadedMemoryTitles.value.has(m.title))
+            .map(m => `--- Memory: ${m.title} ---\n${m.content}\n--- End Memory: ${m.title} ---`)
+            .join('\n\n');
+    },
     set: (newVal) => {
-        if (activeDiscussion.value) { 
+        if (activeDiscussion.value) {
             discussionsStore.activeDiscussion.memory = newVal;
         }
-        clearTimeout(memorySaveDebounceTimer);
-        memorySaveDebounceTimer = setTimeout(() => { 
-            if (activeDiscussion.value) discussionsStore.updateMemoryZone({discussionId: activeDiscussion.value.id, content:newVal}); 
-        }, 750);
     }
 });
 
@@ -281,23 +297,23 @@ watch(userDataZone, (newVal) => {
     }
 });
 
-watch(memory, (newVal) => { 
-    tokenizeContent(newVal, 'memory');
-    if (!isProgrammaticChange.value) {
-        memoryHistoryDebounceTimer = recordHistory(memoryHistory, memoryHistoryIndex, memoryHistoryDebounceTimer, newVal);
+watch(memory, (newVal) => {
+    if (activeDiscussion.value) {
+        activeDiscussion.value.lollmsDiscussion?.set_memory(newVal);
     }
-});
+    tokenizeContent(newVal, 'memory');
+}, { immediate: true });
+
 
 watch(groupedArtefacts, (newGroups) => {
     const newSelections = { ...selectedArtefactVersions.value };
     for (const group of newGroups) {
-        if (!newSelections[group.title]) {
-            const loadedVersion = group.versions.find(v => v.is_loaded);
-            if (loadedVersion) {
-                newSelections[group.title] = loadedVersion.version;
-            } else if (group.versions.length > 0) {
-                newSelections[group.title] = group.versions[0].version;
-            }
+        const loadedVersion = group.versions.find(v => v.is_loaded);
+        if (loadedVersion) {
+            newSelections[group.title] = loadedVersion.version;
+        } else if (group.versions.length > 0) {
+            // Always default to the newest version, which is the first one after sorting.
+            newSelections[group.title] = group.versions[0].version;
         }
     }
     selectedArtefactVersions.value = newSelections;
@@ -308,7 +324,7 @@ onMounted(() => {
     const savedWidth = localStorage.getItem('lollms_dataZoneWidth');
     if (savedWidth) dataZoneWidth.value = parseInt(savedWidth, 10);
     setupHistory(userHistory, userHistoryIndex, userDataZone.value);
-    setupHistory(memoryHistory, memoryHistoryIndex, memory.value);
+    memoriesStore.fetchMemories(); // NEW
     on('discussion:dataZoneUpdated', onDataZoneUpdatedFromStore);
 });
 onUnmounted(() => {
@@ -424,28 +440,12 @@ async function handleRedoUser() {
     isProgrammaticChange.value = false;
 }
 
-async function handleUndoMemory() {
-    if (!canUndoMemory.value) return;
-    isProgrammaticChange.value = true;
-    memoryHistoryIndex.value--;
-    memory.value = memoryHistory.value[memoryHistoryIndex.value];
-    await nextTick();
-    isProgrammaticChange.value = false;
-}
-
-async function handleRedoMemory() {
-    if (!canRedoMemory.value) return;
-    isProgrammaticChange.value = true;
-    memoryHistoryIndex.value++;
-    memory.value = memoryHistory.value[memoryHistoryIndex.value];
-    await nextTick();
-    isProgrammaticChange.value = false;
-}
-
 watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
     if (newDiscussion) {
         if (!oldDiscussion || newDiscussion.id !== oldDiscussion.id) {
             setupHistory(discussionHistory, discussionHistoryIndex, newDiscussion.discussion_data_zone || '');
+            // NEW: Reset loaded memories for the new discussion
+            loadedMemoryTitles.value.clear();
         }
         tokenizeContent(discussionDataZone.value, 'discussion');
         tokenizeContent(userDataZone.value, 'user');
@@ -578,15 +578,22 @@ async function handleUnloadArtefact(title, version) {
         await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: title, version: version });
     }
 }
+
 async function handleEditArtefact(title) {
     if (activeDiscussion.value) {
         const version = selectedArtefactVersions.value[title];
-        const artefact = await discussionsStore.fetchArtefactContent({ discussionId: activeDiscussion.value.id, artefactTitle: title, version: version });
-        if (artefact !== null) {
+        const artefact = await discussionsStore.fetchArtefactContent({
+            discussionId: activeDiscussion.value.id,
+            artefactTitle: title,
+            version: version
+        });
+        console.log("Fetched artefact for editing:", artefact);
+        if (artefact) {
             uiStore.openModal('artefactEditor', { artefact, discussionId: activeDiscussion.value.id });
         }
     }
 }
+
 async function handleDeleteArtefact(title) {
     if (activeDiscussion.value) {
         const confirmed = await uiStore.showConfirmation({ title: `Delete Artefact '${title}'?`, message: 'This will permanently delete the artefact and all its versions.', confirmText: 'Delete' });
@@ -613,38 +620,52 @@ function openContextToArtefactModal() {
         }, {}))
     });
 }
-// --- NEW Memory Functions ---
+
+// --- NEW/UPDATED Memory Functions ---
 function handleCreateMemory() {
-    if (!activeDiscussion.value) return;
-    uiStore.openModal('memoryEditor', { discussionId: activeDiscussion.value.id });
+    uiStore.openModal('memoryEditor');
 }
 
 function handleEditMemory(memory) {
-    if (!activeDiscussion.value) return;
-    uiStore.openModal('memoryEditor', { discussionId: activeDiscussion.value.id, memory });
+    uiStore.openModal('memoryEditor', { memory });
 }
 
-async function handleDeleteMemory(memoryTitle) {
-    if (!activeDiscussion.value) return;
+async function handleDeleteMemory(memoryId) {
+    const memoryToDelete = memories.value.find(m => m.id === memoryId);
+    if (!memoryToDelete) return;
+
     const confirmed = await uiStore.showConfirmation({
-        title: `Delete Memory '${memoryTitle}'?`,
-        message: 'This will permanently delete this memory.',
+        title: `Delete Memory '${memoryToDelete.title}'?`,
+        message: 'This will permanently delete this memory from your memory bank.',
         confirmText: 'Delete'
     });
     if (confirmed) {
-        await discussionsStore.deleteMemory({ discussionId: activeDiscussion.value.id, memoryTitle });
+        await memoriesStore.deleteMemory(memoryId);
     }
 }
 
-async function handleLoadMemory(memoryTitle) {
-    if (activeDiscussion.value) {
-        await discussionsStore.loadMemoryToContext({ discussionId: activeDiscussion.value.id, memoryTitle });
-    }
+function handleLoadMemory(memoryTitle) {
+    loadedMemoryTitles.value.add(memoryTitle);
 }
 
-async function handleUnloadMemory(memoryTitle) {
-    if (activeDiscussion.value) {
-        await discussionsStore.unloadMemoryFromContext({ discussionId: activeDiscussion.value.id, memoryTitle });
+function handleUnloadMemory(memoryTitle) {
+    loadedMemoryTitles.value.delete(memoryTitle);
+}
+
+async function handleWipeAllMemories() {
+    try {
+        const confirmed = await uiStore.showConfirmation({
+            title: 'Wipe All Memories?',
+            message: 'This will clear all loaded memories from the current context, but will not delete them from your memory bank.',
+            confirmText: 'Wipe Context'
+        });
+        if (confirmed) {
+            loadedMemoryTitles.value.clear();
+            uiStore.addNotification('All memories unloaded from context.', 'success');
+        }
+    } catch (error) {
+        console.error("An error occurred while wiping memories:", error);
+        uiStore.addNotification("Failed to wipe memories. Please check the console for details.", "error");
     }
 }
 </script>
@@ -855,15 +876,11 @@ async function handleUnloadMemory(memoryTitle) {
                         <div class="flex-grow min-h-0 flex">
                              <div class="flex-grow flex flex-col min-w-0">
                                 <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
-                                    <h4 class="font-semibold text-sm">Loaded Memory</h4>
-                                    <div class="flex items-center gap-1">
-                                        <button @click="toggleViewMode('ltm')" class="btn-icon" :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button>
-                                        <button @click="handleUndoMemory" class="btn-icon" title="Undo" :disabled="!canUndoMemory"><IconUndo class="w-5 h-5" /></button>
-                                        <button @click="handleRedoMemory" class="btn-icon" title="Redo" :disabled="!canRedoMemory"><IconRedo class="w-5 h-5" /></button>
-                                    </div>
+                                    <h4 class="font-semibold text-sm">Loaded Memory Context</h4>
+                                    <button @click="toggleViewMode('ltm')" class="btn-icon" :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button>
                                 </div>
                                 <div class="flex-grow min-h-0 p-2">
-                                    <CodeMirrorEditor v-if="dataZoneViewModes.ltm === 'edit'" v-model="memory" class="h-full" />
+                                    <CodeMirrorEditor v-if="dataZoneViewModes.ltm === 'edit'" :model-value="memory" class="h-full" :options="{readOnly: true}" />
                                     <div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="memory" /></div>
                                 </div>
                             </div>
@@ -871,12 +888,20 @@ async function handleUnloadMemory(memoryTitle) {
                             <div class="w-72 flex-shrink-0 border-l dark:border-gray-600 flex flex-col">
                                 <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
                                     <h4 class="font-semibold text-sm">Memory Bank</h4>
-                                    <button @click="handleCreateMemory" class="btn-icon" title="Create New Memory"><IconPlus class="w-5 h-5" /></button>
+                                    <div class="flex items-center gap-1">
+                                        <button @click="handleWipeAllMemories" class="btn-icon-danger" title="Unload all memories from context">
+                                            <IconTrash class="w-5 h-5" />
+                                        </button>
+                                        <button @click="handleCreateMemory" class="btn-icon" title="Create New Memory"><IconPlus class="w-5 h-5" /></button>
+                                    </div>
+                                </div>
+                                <div class="p-2 border-b dark:border-gray-600 flex-shrink-0">
+                                    <input type="text" v-model="memorySearchTerm" placeholder="Search memories..." class="input-field-sm w-full" />
                                 </div>
                                 <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="isDraggingFile = false" @drop="handleDrop($event, 'memory')" class="flex-grow overflow-y-auto p-2 space-y-2" :class="{'bg-blue-100 dark:bg-blue-900/20 border-2 border-dashed border-blue-400': isDraggingFile}">
                                     <div v-if="isLoadingMemories" class="text-center text-xs text-gray-500 pt-4">Loading...</div>
-                                    <div v-else-if="activeDiscussionMemories.length === 0" class="text-center text-xs text-gray-500 pt-4">No memories.</div>
-                                    <div v-else v-for="mem in activeDiscussionMemories" :key="mem.title" class="p-1.5 rounded-md" :class="mem.is_loaded ? 'bg-green-100 dark:bg-green-900/40' : 'bg-gray-100 dark:bg-gray-700/50'">
+                                    <div v-else-if="filteredMemories.length === 0" class="text-center text-xs text-gray-500 pt-4">No memories found.</div>
+                                    <div v-else v-for="mem in filteredMemories" :key="mem.id" class="p-1.5 rounded-md" :class="loadedMemoryTitles.has(mem.title) ? 'bg-green-100 dark:bg-green-900/40' : 'bg-gray-100 dark:bg-gray-700/50'">
                                         <div class="flex items-center justify-between">
                                             <div class="flex items-center gap-2 min-w-0">
                                                 <IconFileText class="w-4 h-4 text-gray-500 flex-shrink-0" />
@@ -884,11 +909,11 @@ async function handleUnloadMemory(memoryTitle) {
                                             </div>
                                             <div class="flex items-center gap-1 flex-shrink-0">
                                                 <button @click="handleEditMemory(mem)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="View & Edit Memory"><IconPencil class="w-3.5 h-3.5" /></button>
-                                                <button @click="handleDeleteMemory(mem.title)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Delete Memory"><IconTrash class="w-3.5 h-3.5" /></button>
+                                                <button @click="handleDeleteMemory(mem.id)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Delete Memory"><IconTrash class="w-3.5 h-3.5" /></button>
                                             </div>
                                         </div>
                                         <div class="flex items-center gap-2 mt-1.5">
-                                            <template v-if="mem.is_loaded">
+                                            <template v-if="loadedMemoryTitles.has(mem.title)">
                                                 <button @click="handleUnloadMemory(mem.title)" class="btn btn-secondary btn-sm !p-2 flex-grow justify-center" title="Unload from Context">
                                                     <IconCheckCircle class="w-4 h-4 text-green-600 dark:text-green-400" />
                                                 </button>

@@ -88,7 +88,7 @@ class ModelAliasDelete(BaseModel):
 
 class BindingModel(BaseModel):
     original_model_name: str
-    alias: Optional[Dict[str, Any]] = None # FIX: Changed from ModelAlias to support flexible TTI params
+    alias: Optional[Dict[str, Any]] = None # FIX: Changed from ModelAlias to support flexible TTI/LLM params
 
 class ModelNamePayload(BaseModel):
     model_name: str

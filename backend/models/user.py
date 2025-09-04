@@ -50,6 +50,7 @@ class UserCreateAdmin(UserLLMParams):
     rag_use_graph: Optional[bool] = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
     put_thoughts_in_context: Optional[bool] = False
+    include_memory_date_in_context: Optional[bool] = False # NEW
     first_login_done: Optional[bool] = False
 
 class UserUpdate(BaseModel):
@@ -70,6 +71,7 @@ class UserUpdate(BaseModel):
     llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
     llm_repeat_last_n: Optional[int] = Field(None, ge=0)
     put_thoughts_in_context: Optional[bool] = False
+    include_memory_date_in_context: Optional[bool] = False # NEW
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
     rag_n_hops: Optional[int] = Field(None, ge=1)
@@ -214,6 +216,7 @@ class UserAuthDetails(UserLLMParams):
     first_login_done: bool 
     data_zone: Optional[str] = None
     memory: Optional[str] = None
+    include_memory_date_in_context: bool # NEW
     llm_settings_overridden: bool = False
 
 class RelationshipStatus(BaseModel):

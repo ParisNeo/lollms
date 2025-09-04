@@ -2,7 +2,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, exists
-from typing import List
 
 from backend.db import get_db
 from backend.db.base import FriendshipStatus
@@ -11,7 +10,7 @@ from backend.db.base import follows_table
 from backend.db.models.user import User as DBUser, Friendship as DBFriendship
 from backend.models import UserAuthDetails, UserProfileResponse, UserPublic
 from backend.session import get_current_active_user
-
+from typing import List
 users_router = APIRouter(
     prefix="/api/users",
     tags=["Users"],
@@ -84,12 +83,13 @@ def search_for_mentions(
 ):
     """
     Searches for users to mention.
-    Returns users whose username starts with the query.
+    Returns users whose username starts with the query and are searchable.
     Excludes the current user.
     """
     search_term = f"{q}%"
     users = db.query(DBUser).filter(
         DBUser.id != current_user.id,
+        DBUser.is_searchable == True,
         DBUser.username.ilike(search_term)
     ).limit(5).all()
     return users
