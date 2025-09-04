@@ -380,7 +380,6 @@ async def startup_event():
     build_full_cache()
     cleanup_and_autostart_apps()
     
-    ASCIIColors.info("--- Startup complete. Application is ready. ---")
 
 
 async def shutdown_event():
@@ -391,6 +390,9 @@ async def shutdown_event():
             await polling_task
         except asyncio.CancelledError:
             ASCIIColors.info("Broadcast polling task cancelled successfully.")
+
+init_database(APP_DB_URL)
+db = db_session_module.SessionLocal()
 
 app = FastAPI(
     title="LoLLMs Platform", 
@@ -420,8 +422,6 @@ else:
     if https_enabled:
         allowed_origins.append(f"https://{host}:{port}")
 
-init_database(APP_DB_URL)
-db = db_session_module.SessionLocal()
 try:
     sso_apps = db.query(DBApp).filter(DBApp.active == True, DBApp.authentication_type == 'lollms_sso').all()
     sso_mcps = db.query(DBMCP).filter(DBMCP.active == True, DBMCP.authentication_type == 'lollms_sso').all()
@@ -501,8 +501,11 @@ if __name__ == "__main__":
 
     ssl_params = {}
     if settings.get("https_enabled"):
+        ASCIIColors.green("Https enabled")
         certfile = settings.get("ssl_certfile")
         keyfile = settings.get("ssl_keyfile")
+        ASCIIColors.green(f"certfile:{certfile}")
+        ASCIIColors.green(f"keyfile:{keyfile}")
 
         try:
             if certfile and keyfile and Path(certfile).is_file() and Path(keyfile).is_file():
