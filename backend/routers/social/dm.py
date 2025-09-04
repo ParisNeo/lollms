@@ -18,17 +18,27 @@ from backend.session import get_current_active_user, get_user_dm_assets_path
 from backend.ws_manager import manager
 from backend.config import DM_ASSETS_DIR_NAME
 
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import Body
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+
 dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
+
+class DirectMessageCreate(BaseModel):
+    """Payload expected from the client (JSON)."""
+    content: str = Field(..., min_length=1)
+    receiver_user_id: int = Field(..., alias="receiverUserId")
 
 @dm_router.post("/send", response_model=DirectMessagePublic, status_code=201)
 async def send_direct_message(
-    content: str = Form(...),
-    receiver_user_id: int = Form(..., alias="receiverUserId"),
-    files: Optional[List[UploadFile]] = File(None),
+    payload: DirectMessageCreate = Body(...),
+    files: Optional[List[UploadFile]] = File(None),  # keep if you still want file upload
     current_user: UserAuthDetails = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    receiver = db.query(DBUser).filter(DBUser.id == receiver_user_id).first()
+    receiver = db.query(DBUser).filter(DBUser.id == payload.receiver_user_id).first()
     if not receiver:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receiver user not found.")
 
@@ -53,7 +63,7 @@ async def send_direct_message(
     new_message = DBDirectMessage(
         sender_id=current_user.id,
         receiver_id=receiver.id,
-        content=content,
+        content=payload.content,
         image_references=image_paths if image_paths else None
     )
     db.add(new_message)
