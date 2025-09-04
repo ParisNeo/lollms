@@ -6,12 +6,13 @@ from sqlalchemy.orm import Session, joinedload, contains_eager
 from sqlalchemy import or_, and_, desc, func
 
 from backend.db import get_db, session as db_session_module
-from backend.db.models.user import User as DBUser, follows_table
+from backend.db.models.user import User as DBUser
 from backend.db.models.social import Post as DBPost, PostLike as DBPostLike, Comment as DBComment
 from backend.db.base import PostVisibility
-from backend.models import UserAuthDetails, PostCreate, PostPublic, CommentCreate, CommentPublic, PostUpdate
+from backend.models import UserAuthDetails, PostCreate, PostPublic, CommentCreate, CommentPublic, PostUpdate, AuthorPublic
 from backend.session import get_current_db_user_from_token, build_lollms_client_from_params
 from backend.task_manager import task_manager
+from backend.ws_manager import manager
 from sqlalchemy.orm import Session
 from lollms_client import LollmsClient
 from ascii_colors import trace_exception
@@ -74,12 +75,31 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
 
         # 3. Generate the response
         task.log("Generating AI response...")
+        binding_alias=ai_bot_model.split('/')[0]
+        model_name="/".join(ai_bot_model.split('/')[1:])
         
-        lc = build_lollms_client_from_params(username='lollms', binding_alias=ai_bot_model.split('/')[0], model_name=ai_bot_model.split('/')[1])
-        
+        target_binding_alias = binding_alias
+        if not target_binding_alias and model_name and '/' in model_name:
+            target_binding_alias = model_name.split('/', 1)[0]
+
+        if target_binding_alias:
+            binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
+
+        if not binding_to_use:
+            binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+            if not binding_to_use:
+                raise HTTPException(status_code=404, detail="No active LLM bindings are configured.")
+
+        cfg = binding_to_use.config
+        cfg["model_name"]=model_name
+
+        lc = LollmsClient(llm_binding_name=binding_to_use.name, llm_binding_config={
+            **cfg
+        })
+
         system_prompt = settings.get("ai_bot_system_prompt")
         
-        response_text = lc.generate_text(context_text, system_prompt=system_prompt, stream=False)
+        response_text = lc.generate_text(context_text, system_prompt=system_prompt+"\n"+"** important ** You are commenting on the user's post. Make sure your comment fits the 2000 letters limit.", stream=False)
         
         if not response_text or not response_text.strip():
             task.log("AI generated an empty response. Aborting.", "WARNING")
@@ -102,7 +122,7 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         # 5. Broadcast the new comment to all clients
         comment_public = CommentPublic(
             id=new_comment.id,
-            content=new_comment.content,
+            content=new_comment.content[:2000],
             created_at=new_comment.created_at,
             author=AuthorPublic.from_orm(new_comment.author)
         )
@@ -114,6 +134,7 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
                 "comment": comment_public.model_dump(mode="json")
             }
         }
+        
         new_comment = DBComment(
             post_id=post_id,
             author_id=lollms_bot_user.id,
@@ -122,7 +143,7 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         db.add(new_comment)
         db.commit()
         db.refresh(new_comment)
-        task_manager.broadcast_sync(payload)
+        manager.broadcast_sync(payload)
         task.log("Broadcasted new comment to clients.")
         task.set_progress(100)
         
