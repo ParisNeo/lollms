@@ -56,7 +56,7 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
                     memory_parts.append(f"--- Memory: {mem.title}{date_str} ---\n{mem.content}\n--- End Memory: {mem.title} ---")
                 
                 full_memory_text = "\n\n".join(memory_parts)
-                discussion.set_memory(full_memory_text)
+                discussion.memory = full_memory_text
         finally:
             db.close()
         # --- END NEW MEMORY LOGIC ---
