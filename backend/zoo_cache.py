@@ -155,7 +155,6 @@ def build_full_cache():
                     with open(CACHE_FILE, 'r') as f:
                         cached_timestamp = json.load(f).get("timestamp", 0)
                     if time.time() - cached_timestamp < CACHE_EXPIRY:
-                        ASCIIColors.info("INFO: Zoo cache is already fresh. Skipping build.")
                         if not _cache or _cache.get("timestamp", 0) < cached_timestamp:
                             load_cache()
                         return
