@@ -144,7 +144,16 @@ async def get_conversation_messages(
 
     response_data = []
     for msg in messages:
-        msg_public = DirectMessagePublic.from_orm(msg)
+        msg_public = DirectMessagePublic(
+            id=msg.id,
+            sender_id=msg.sender_id,
+            receiver_id=msg.receiver_id,
+            sent_at=msg.sent_at,
+            read_at=msg.read_at,
+            sender_username=msg.sender.username,
+            receiver_username=msg.receiver.username,
+            content = msg.content
+        )
         msg_public.sender_username = msg.sender.username
         msg_public.receiver_username = msg.receiver.username
         response_data.append(msg_public)
