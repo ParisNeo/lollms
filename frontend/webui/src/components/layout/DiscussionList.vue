@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/components/layout/DiscussionList.vue -->
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
@@ -6,6 +5,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import DiscussionItem from './DiscussionItem.vue';
 
+import logoDefault from '../../assets/logo.png';
 import IconHome from '../../assets/icons/IconHome.vue';
 import IconAdjustmentsHorizontal from '../../assets/icons/IconAdjustmentsHorizontal.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
@@ -17,6 +17,7 @@ import IconScissors from '../../assets/icons/IconScissors.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconGitBranch from '../../assets/icons/IconGitBranch.vue'; 
 import IconCopy from '../../assets/icons/IconCopy.vue';
+import IconMenu from '../../assets/icons/IconMenu.vue';
 
 const store = useDiscussionsStore();
 const authStore = useAuthStore();
@@ -26,6 +27,7 @@ const user = computed(() => authStore.user);
 const isLoading = computed(() => store.isLoadingDiscussions && store.sortedDiscussions.length === 0);
 const hasMoreDiscussions = computed(() => store.hasMoreDiscussions);
 const activeDiscussion = computed(() => store.activeDiscussion);
+const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
 const searchTerm = ref('');
 const isStarredVisible = ref(false);
@@ -104,67 +106,147 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="h-full flex flex-col bg-white dark:bg-gray-800 border-r dark:border-gray-700 w-full sm:w-80 flex-shrink-0">
+    <div class="h-full flex flex-col bg-white dark:bg-gray-900 w-full flex-shrink-0">
         
-        <div class="p-2 border-b dark:border-gray-700 flex-shrink-0 space-y-2">
+        <!-- Integrated Header with Logo -->
+        <div class="p-4 border-b border-slate-200 dark:border-gray-700 flex-shrink-0 space-y-3">
+            <!-- Logo and Actions Row -->
             <div class="flex items-center justify-between">
-                 <button @click="goToFeed" v-if="user && user.user_ui_level >= 2" class="btn-icon" title="Go to Feed">
-                    <IconHome class="h-5 w-5" />
-                </button>
-                 <h2 class="text-lg font-semibold text-gray-800 dark:text-gray-100 mx-auto">Discussions</h2>
-                <div class="flex items-center">
-                    <button @click="showToolbox = !showToolbox" v-if="user && user.user_ui_level >= 4" class="btn-icon" title="Toggle Toolbox">
-                        <IconAdjustmentsHorizontal class="h-5 w-5" />
+                <div class="flex items-center space-x-3 min-w-0">
+                    <!-- Mobile Menu Toggle (hidden on desktop) -->
+                    <button 
+                        @click="uiStore.toggleSidebar" 
+                        class="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors md:hidden" 
+                        title="Toggle Menu"
+                    >
+                        <IconMenu class="w-5 h-5" />
                     </button>
-                    <button @click="handleNewDiscussion" class="btn-icon" title="New Discussion">
-                        <IconPlus class="h-5 w-5" stroke-width="2" />
+                    
+                    <img :src="logoSrc" alt="LoLLMs Logo" class="h-6 w-6 flex-shrink-0 object-contain" @error="($event.target.src=logoDefault)">
+                    <div class="min-w-0">
+                        <h1 class="text-base font-semibold text-slate-900 dark:text-gray-100 truncate">LoLLMs</h1>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 truncate hidden sm:block">One tool to rule them all</p>
+                    </div>
+                </div>
+                
+                <div class="flex items-center space-x-1">
+                    <button 
+                        v-if="user && user.user_ui_level >= 2" 
+                        @click="goToFeed" 
+                        class="btn-icon-flat" 
+                        title="Go to Feed"
+                    >
+                        <IconHome class="h-4 w-4" />
+                    </button>
+                    
+                    <button 
+                        @click="showToolbox = !showToolbox" 
+                        v-if="user && user.user_ui_level >= 4" 
+                        class="btn-icon-flat" 
+                        :class="{ 'bg-slate-100 dark:bg-gray-700 text-slate-700 dark:text-gray-200': showToolbox }"
+                        title="Toggle Toolbox"
+                    >
+                        <IconAdjustmentsHorizontal class="h-4 w-4" />
+                    </button>
+                    
+                    <button 
+                        @click="handleNewDiscussion" 
+                        class="btn-primary-flat" 
+                        title="New Discussion"
+                    >
+                        <IconPlus class="h-4 w-4" stroke-width="2" />
                     </button>
                 </div>
             </div>
+
+            <!-- Search Bar -->
             <div class="relative">
                 <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                    <IconMagnifyingGlass class="h-4 w-4 text-gray-400" />
+                    <IconMagnifyingGlass class="h-4 w-4 text-slate-400 dark:text-gray-500" />
                 </div>
-                <input type="text" v-model="searchTerm" placeholder="Search discussions..." class="w-full rounded-md border-gray-300 bg-gray-100 dark:border-gray-600 dark:bg-gray-700/50 py-2 pl-10 pr-10 text-sm focus:border-blue-500 focus:ring-blue-500">
-                <button v-if="searchTerm" @click="searchTerm = ''" class="absolute inset-y-0 right-0 flex items-center pr-3" title="Clear search">
-                    <IconXMark class="h-4 w-4 text-gray-400 hover:text-gray-600" />
+                <input 
+                    type="text" 
+                    v-model="searchTerm" 
+                    placeholder="Search..." 
+                    class="search-input-flat"
+                >
+                <button 
+                    v-if="searchTerm" 
+                    @click="searchTerm = ''" 
+                    class="absolute inset-y-0 right-0 flex items-center pr-3" 
+                    title="Clear search"
+                >
+                    <IconXMark class="h-4 w-4 text-slate-400 hover:text-slate-600 dark:hover:text-gray-300 transition-colors" />
                 </button>
             </div>
-            <div v-if="user && user.user_ui_level >= 4 && showToolbox" class="p-2 bg-gray-50 dark:bg-gray-900/50 rounded-lg space-y-3">
-                <div class="flex items-center justify-around border-t dark:border-gray-700/50 pt-2 mt-2">
-                    <button @click="handleImportClick" class="btn-footer" title="Import"><IconArrowDownTray class="h-5 w-5" /></button>
-                    <button @click="handleExportClick" class="btn-footer" title="Export"><IconArrowUpTray class="h-5 w-5" /></button>
-                    <button @click="handleClone" class="btn-footer" title="Clone Discussion Data" :disabled="!activeDiscussion"><IconCopy class="h-5 w-5" /></button>
-                    <button @click="handleShowTree" class="btn-footer" title="Show Discussion Tree" :disabled="!activeDiscussion">
-                        <IconGitBranch class="h-5 w-5" />
-                    </button>
-                    <button @click="handlePrune" class="btn-footer-danger" title="Prune Empty"><IconScissors class="h-5 w-5" /></button>
+
+            <!-- Toolbox -->
+            <div 
+                v-if="user && user.user_ui_level >= 4 && showToolbox" 
+                class="overflow-hidden transition-all duration-300 ease-out"
+            >
+                <div class="p-3 bg-slate-50 dark:bg-gray-800 rounded-md border border-slate-200 dark:border-gray-700">
+                    <div class="grid grid-cols-5 gap-2">
+                        <button @click="handleImportClick" class="btn-toolbox-flat" title="Import">
+                            <IconArrowDownTray class="h-4 w-4" />
+                            <span class="text-xs mt-1 font-medium">Import</span>
+                        </button>
+                        <button @click="handleExportClick" class="btn-toolbox-flat" title="Export">
+                            <IconArrowUpTray class="h-4 w-4" />
+                            <span class="text-xs mt-1 font-medium">Export</span>
+                        </button>
+                        <button @click="handleClone" class="btn-toolbox-flat" title="Clone Discussion" :disabled="!activeDiscussion">
+                            <IconCopy class="h-4 w-4" />
+                            <span class="text-xs mt-1 font-medium">Clone</span>
+                        </button>
+                        <button @click="handleShowTree" class="btn-toolbox-flat" title="Show Discussion Tree" :disabled="!activeDiscussion">
+                            <IconGitBranch class="h-4 w-4" />
+                            <span class="text-xs mt-1 font-medium">Tree</span>
+                        </button>
+                        <button @click="handlePrune" class="btn-toolbox-danger-flat" title="Prune Empty">
+                            <IconScissors class="h-4 w-4" />
+                            <span class="text-xs mt-1 font-medium">Prune</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
         
-        <div ref="scrollComponent" class="flex-grow overflow-y-auto p-2">
+        <!-- Content Area -->
+        <div ref="scrollComponent" class="flex-grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
             <div v-if="isLoading" class="space-y-2 animate-pulse">
-                <div v-for="i in 10" :key="'skel-recent-' + i" class="h-10 bg-gray-200 dark:bg-gray-700/50 rounded-lg"></div>
+                <div v-for="i in 8" :key="'skel-recent-' + i" class="loading-skeleton-flat"></div>
             </div>
             
-            <div v-else>
-                <div v-if="starredDiscussions.length > 0 && !searchTerm" class="mb-2">
-                    <button @click="isStarredVisible = !isStarredVisible" class="collapsible-header">
-                        <span>Starred</span>
-                        <IconChevronRight class="w-4 h-4 transition-transform" :class="{'rotate-90': isStarredVisible}" />
+            <div v-else class="space-y-3">
+                <!-- Starred Section -->
+                <div v-if="starredDiscussions.length > 0 && !searchTerm">
+                    <button @click="isStarredVisible = !isStarredVisible" class="section-header-flat">
+                        <div class="flex items-center space-x-2">
+                            <span class="font-medium text-slate-700 dark:text-gray-300">Starred</span>
+                            <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
+                                {{ starredDiscussions.length }}
+                            </div>
+                        </div>
+                        <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isStarredVisible}" />
                     </button>
-                    <div v-if="isStarredVisible" class="mt-1 space-y-1">
+                    <div v-if="isStarredVisible" class="space-y-1 mt-2">
                         <DiscussionItem v-for="discussion in starredDiscussions" :key="discussion.id" :discussion="discussion" />
                     </div>
                 </div>
 
-                <div v-if="sharedDiscussions.length > 0" class="mb-2">
-                    <button @click="isSharedVisible = !isSharedVisible" class="collapsible-header">
-                        <span>Shared With Me</span>
-                        <IconChevronRight class="w-4 h-4 transition-transform" :class="{'rotate-90': isSharedVisible}" />
+                <!-- Shared Section -->
+                <div v-if="sharedDiscussions.length > 0">
+                    <button @click="isSharedVisible = !isSharedVisible" class="section-header-flat">
+                        <div class="flex items-center space-x-2">
+                            <span class="font-medium text-slate-700 dark:text-gray-300">Shared</span>
+                            <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
+                                {{ sharedDiscussions.length }}
+                            </div>
+                        </div>
+                        <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isSharedVisible}" />
                     </button>
-                    <div v-if="isSharedVisible" class="mt-1 space-y-1">
+                    <div v-if="isSharedVisible" class="space-y-1 mt-2">
                         <DiscussionItem 
                             v-for="discussion in sharedDiscussions" 
                             :key="discussion.share_id" 
@@ -173,23 +255,45 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <div class="mb-2">
-                    <button v-if="(starredDiscussions.length > 0 || sharedDiscussions.length > 0) && !searchTerm" @click="isRecentsVisible = !isRecentsVisible" class="collapsible-header">
-                        <span>My Discussions</span>
-                        <IconChevronRight class="w-4 h-4 transition-transform" :class="{'rotate-90': isRecentsVisible}" />
+                <!-- Recent Section -->
+                <div>
+                    <button 
+                        v-if="(starredDiscussions.length > 0 || sharedDiscussions.length > 0) && !searchTerm" 
+                        @click="isRecentsVisible = !isRecentsVisible" 
+                        class="section-header-flat"
+                    >
+                        <div class="flex items-center space-x-2">
+                            <span class="font-medium text-slate-700 dark:text-gray-300">Recent</span>
+                            <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
+                                {{ unstarredDiscussions.length }}
+                            </div>
+                        </div>
+                        <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isRecentsVisible}" />
                     </button>
-                    <div v-if="isRecentsVisible || searchTerm" class="mt-1 space-y-1">
+                    <div v-if="isRecentsVisible || searchTerm" class="space-y-1 mt-2">
                         <DiscussionItem v-for="discussion in unstarredDiscussions" :key="discussion.id" :discussion="discussion" />
                     </div>
                 </div>
 
-                <div ref="loadMoreTrigger" v-if="hasMoreDiscussions" class="p-4 text-center">
-                    <svg class="animate-spin h-6 w-6 text-gray-400 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                <!-- Load More -->
+                <div ref="loadMoreTrigger" v-if="hasMoreDiscussions" class="flex justify-center py-4">
+                    <div class="flex items-center space-x-2 text-slate-500 dark:text-gray-400">
+                        <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span class="text-sm">Loading...</span>
+                    </div>
                 </div>
                 
-                <div v-if="filteredAndSortedDiscussions.length === 0 && sharedDiscussions.length === 0 && !isLoading" class="text-center py-10 px-4">
-                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ searchTerm ? 'No matching discussions.' : 'No discussions yet.' }}</p>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">{{ searchTerm ? 'Try a different search term.' : 'Start a new conversation to begin.' }}</p>
+                <!-- Empty State -->
+                <div v-if="filteredAndSortedDiscussions.length === 0 && sharedDiscussions.length === 0 && !isLoading" class="empty-state-flat">
+                    <p class="text-base font-medium text-slate-600 dark:text-gray-300 mb-2">
+                        {{ searchTerm ? 'No matches found' : 'No conversations yet' }}
+                    </p>
+                    <p class="text-sm text-slate-500 dark:text-gray-400">
+                        {{ searchTerm ? 'Try different keywords' : 'Start your first conversation' }}
+                    </p>
                 </div>
             </div>
         </div>
@@ -197,8 +301,57 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.btn-icon { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors; }
-.btn-footer { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
-.btn-footer-danger { @apply p-2 rounded-full text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors; }
-.collapsible-header { @apply w-full flex items-center justify-between text-left p-1 text-xs font-bold uppercase text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded; }
+.btn-icon-flat { 
+    @apply p-2 rounded text-slate-600 dark:text-gray-300 hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors duration-150; 
+}
+
+.btn-primary-flat { 
+    @apply px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium transition-colors duration-150; 
+}
+
+.search-input-flat {
+    @apply w-full rounded border border-slate-200 dark:border-gray-600 bg-white dark:bg-gray-800 py-2 pl-10 pr-10 text-sm placeholder-slate-500 dark:placeholder-gray-400 text-slate-900 dark:text-gray-100 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-colors duration-150;
+}
+
+.btn-toolbox-flat { 
+    @apply flex flex-col items-center p-2 rounded text-slate-600 dark:text-gray-300 hover:bg-white dark:hover:bg-gray-700 transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed; 
+}
+
+.btn-toolbox-danger-flat { 
+    @apply flex flex-col items-center p-2 rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors duration-150; 
+}
+
+.section-header-flat { 
+    @apply w-full flex items-center justify-between text-left p-2 hover:bg-slate-50 dark:hover:bg-gray-800 rounded transition-colors duration-150; 
+}
+
+.loading-skeleton-flat {
+    @apply h-10 bg-slate-200 dark:bg-gray-700 rounded animate-pulse;
+}
+
+.empty-state-flat {
+    @apply text-center py-8 px-4;
+}
+
+.custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(203 213 225) transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: rgb(203 213 225);
+    border-radius: 2px;
+}
+
+.dark .custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: rgb(75 85 99);
+}
 </style>

@@ -10,7 +10,11 @@ export default {
   // We control this with the '.dark' class on the <html> tag.
   darkMode: 'class',
   theme: {
-    extend: {},
+    extend: {      colors: {
+        gray: {
+          750: '#374151', // Custom gray-750
+        }
+      }},
   },
   // FIX: Add the typography plugin here.
   plugins: [

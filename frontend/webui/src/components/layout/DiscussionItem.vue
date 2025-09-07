@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
@@ -11,6 +11,7 @@ import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconSend from '../../assets/icons/IconSend.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
+import IconEllipsisVertical from '../../assets/icons/IconEllipsisVertical.vue';
 
 const props = defineProps({
   discussion: {
@@ -24,6 +25,7 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 
 const user = computed(() => authStore.user);
+const showMenu = ref(false);
 
 const isSelected = computed(() => store.currentDiscussionId === props.discussion.id);
 const isActive = computed(() => store.generationInProgress && isSelected.value);
@@ -35,140 +37,227 @@ async function handleSelect() {
   }
 }
 
+function toggleMenu(event) {
+  event.stopPropagation();
+  showMenu.value = !showMenu.value;
+}
+
+function closeMenu() {
+  showMenu.value = false;
+}
+
 function handleStar(event) {
-    event.stopPropagation();
-    store.toggleStarDiscussion(props.discussion.id);
+  event.stopPropagation();
+  store.toggleStarDiscussion(props.discussion.id);
+  closeMenu();
 }
 
 function handleDelete(event) {
-    event.stopPropagation();
-    store.deleteDiscussion(props.discussion.id);
+  event.stopPropagation();
+  store.deleteDiscussion(props.discussion.id);
+  closeMenu();
 }
 
 function handleRename(event) {
-    event.stopPropagation();
-    uiStore.openModal('renameDiscussion', {
-        discussionId: props.discussion.id,
-        currentTitle: props.discussion.title
-    });
+  event.stopPropagation();
+  uiStore.openModal('renameDiscussion', {
+    discussionId: props.discussion.id,
+    currentTitle: props.discussion.title
+  });
+  closeMenu();
 }
 
 function handleSend(event) {
-    event.stopPropagation();
-    uiStore.openModal('shareDiscussion', {
-        discussionId: props.discussion.id,
-        title: props.discussion.title
-    });
+  event.stopPropagation();
+  uiStore.openModal('shareDiscussion', {
+    discussionId: props.discussion.id,
+    title: props.discussion.title
+  });
+  closeMenu();
 }
 
 function handleAutoTitle(event) {
-    event.stopPropagation();
-    store.generateAutoTitle(props.discussion.id);
+  event.stopPropagation();
+  store.generateAutoTitle(props.discussion.id);
+  closeMenu();
 }
 
 function handleUnsubscribe(event) {
-    event.stopPropagation();
-    store.unsubscribeFromSharedDiscussion(props.discussion.share_id);
+  event.stopPropagation();
+  store.unsubscribeFromSharedDiscussion(props.discussion.share_id);
+  closeMenu();
 }
 
+function handleClickOutside() {
+  closeMenu();
+}
 </script>
 
 <template>
   <div @click="handleSelect" 
        :class="[
-            'discussion-item group',
+            'discussion-item-flat',
             { 'selected': isSelected },
             { 'active-generation': isActive }
        ]">
     
-    <!-- Title Section - will shrink on hover -->
+    <!-- Content Section -->
     <div class="flex-grow min-w-0">
       <div v-if="isTitleGenerating" class="flex items-center space-x-2">
-        <svg class="animate-spin h-4 w-4 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-        <span class="text-sm text-gray-500 italic">generating...</span>
+        <div class="generating-spinner"></div>
+        <span class="text-sm text-blue-600 dark:text-blue-400 font-medium">Generating title...</span>
       </div>
-      <p v-else class="text-sm font-medium text-gray-800 dark:text-gray-100 truncate" :title="discussion.title">
-        {{ discussion.title }}
-      </p>
-      <p v-if="discussion.owner_username" class="text-xs text-gray-500 dark:text-gray-400 truncate">
-        from {{ discussion.owner_username }}
-      </p>      
+      <div v-else>
+        <p class="discussion-title" :title="discussion.title">
+          {{ discussion.title }}
+        </p>
+        <p v-if="discussion.owner_username" class="owner-info">
+          <span class="owner-badge">{{ discussion.owner_username }}</span>
+        </p>
+      </div>
     </div>
     
-    <!-- Action Buttons container animates its width -->
-    <div class="action-buttons-container">
-        <template v-if="!discussion.owner_username">
-            <button @click.stop.prevent="handleStar" class="action-btn" :title="discussion.is_starred ? 'Unstar' : 'Star'">
-                <IconStarFilled v-if="discussion.is_starred" class="h-4 w-4 text-yellow-400" />
-                <IconStar v-else class="h-4 w-4" />
+    <!-- Three Dot Menu -->
+    <div class="relative">
+      <button 
+        @click="toggleMenu" 
+        class="menu-trigger opacity-0 hover:opacity-100 transition-opacity duration-200"
+        :class="{ 'opacity-100': showMenu }"
+        title="More actions"
+      >
+        <IconEllipsisVertical class="h-4 w-4" />
+      </button>
+
+      <!-- Dropdown Menu -->
+      <div 
+        v-if="showMenu" 
+        class="dropdown-menu"
+        @click.stop
+      >
+        <div class="menu-content">
+          <template v-if="!discussion.owner_username">
+            <button @click="handleStar" class="menu-item star-item">
+              <IconStarFilled v-if="discussion.is_starred" class="h-4 w-4 text-yellow-500" />
+              <IconStar v-else class="h-4 w-4" />
+              <span>{{ discussion.is_starred ? 'Unstar' : 'Star' }}</span>
             </button>
 
-            <button v-if="user && user.user_ui_level >= 4" @click.stop.prevent="handleAutoTitle" class="action-btn" title="Auto Title">
-                <IconSparkles class="h-4 w-4" />
+            <button @click="handleRename" class="menu-item">
+              <IconPencil class="h-4 w-4" />
+              <span>Rename</span>
             </button>
 
-            <button v-if="user && user.user_ui_level >= 4" @click.stop.prevent="handleSend" class="action-btn" title="Send Discussion">
-                <IconSend class="h-4 w-4" />
-            </button>
-            
-            <button @click.stop.prevent="handleRename" class="action-btn" title="Rename">
-                <IconPencil class="h-4 w-4" />
+            <button 
+              v-if="user && user.user_ui_level >= 4" 
+              @click="handleAutoTitle" 
+              class="menu-item"
+            >
+              <IconSparkles class="h-4 w-4" />
+              <span>Generate Title</span>
             </button>
 
-            <button @click.stop.prevent="handleDelete" class="action-btn-danger" title="Delete">
-                <IconTrash class="h-4 w-4" />
+            <button 
+              v-if="user && user.user_ui_level >= 4" 
+              @click="handleSend" 
+              class="menu-item"
+            >
+              <IconSend class="h-4 w-4" />
+              <span>Share</span>
             </button>
-        </template>
-        <template v-else>
-            <button @click.stop.prevent="handleUnsubscribe" class="action-btn-danger" title="Unsubscribe">
-                <IconTrash class="h-4 w-4" />
+
+            <div class="menu-divider"></div>
+
+            <button @click="handleDelete" class="menu-item danger-item">
+              <IconTrash class="h-4 w-4" />
+              <span>Delete</span>
             </button>
-        </template>
+          </template>
+          
+          <template v-else>
+            <button @click="handleUnsubscribe" class="menu-item danger-item">
+              <IconTrash class="h-4 w-4" />
+              <span>Unsubscribe</span>
+            </button>
+          </template>
+        </div>
+      </div>
+
+      <!-- Overlay to close menu when clicking outside -->
+      <div 
+        v-if="showMenu" 
+        class="fixed inset-0 z-10" 
+        @click="handleClickOutside"
+      ></div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.discussion-item {
-  @apply w-full text-left p-2.5 rounded-lg cursor-pointer flex items-center justify-between transition-colors duration-150 overflow-hidden;
-}
-.discussion-item.selected {
-  @apply bg-blue-100 dark:bg-blue-900/60;
-}
-.discussion-item.active-generation {
-  animation: pulse-border 2s infinite;
-  border: 1px solid;
+.discussion-item-flat {
+  @apply relative w-full text-left p-3 rounded-md cursor-pointer flex items-center transition-colors duration-150 hover:bg-slate-50 dark:hover:bg-gray-700/50;
 }
 
-.action-buttons-container {
-  @apply flex items-center flex-shrink-0 space-x-0.5 pl-1
-         max-w-0 opacity-0
-         transition-all duration-300 ease-in-out;
+.discussion-item-flat.selected {
+  @apply bg-blue-50 dark:bg-blue-900/20;
 }
 
-/* On hover of the parent group, expand the button container */
-.group:hover .action-buttons-container {
-  max-width: 140px; /* Adjust this value if you add/remove buttons */
+.discussion-item-flat.active-generation {
+  @apply border-l-2 border-blue-500;
+}
+
+.discussion-item-flat:hover .menu-trigger {
   @apply opacity-100;
 }
 
-.action-btn, .action-btn-danger {
-    @apply p-1.5 rounded-full text-gray-500 dark:text-gray-400;
-}
-.action-btn:hover {
-    @apply bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200;
-}
-.discussion-item.selected .action-btn:hover {
-    @apply bg-blue-200 dark:bg-blue-800;
+.discussion-title {
+  @apply text-sm font-medium text-slate-900 dark:text-gray-100 truncate leading-5;
 }
 
-.action-btn-danger:hover {
-    @apply bg-red-100 text-red-600 dark:bg-red-900/50 dark:text-red-400;
+.owner-info {
+  @apply mt-1;
 }
 
-@keyframes pulse-border {
-  0% { border-color: transparent; }
-  50% { border-color: theme('colors.blue.400'); }
-  100% { border-color: transparent; }
+.owner-badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-300;
+}
+
+.generating-spinner {
+  @apply w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin;
+}
+
+.menu-trigger {
+  @apply p-1.5 rounded text-slate-400 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-gray-600 hover:text-slate-600 dark:hover:text-gray-300 transition-all duration-150;
+}
+
+.dropdown-menu {
+  @apply absolute right-0 top-full mt-1 z-20;
+}
+
+.menu-content {
+  @apply bg-white dark:bg-gray-800 rounded-md shadow-lg border border-slate-200 dark:border-gray-600 py-1 min-w-[160px];
+}
+
+.menu-item {
+  @apply w-full flex items-center space-x-3 px-3 py-2 text-sm text-slate-700 dark:text-gray-200 hover:bg-slate-50 dark:hover:bg-gray-700 transition-colors duration-150;
+}
+
+.menu-item:hover {
+  @apply text-slate-900 dark:text-gray-100;
+}
+
+.star-item:hover {
+  @apply bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300;
+}
+
+.danger-item {
+  @apply text-red-600 dark:text-red-400;
+}
+
+.danger-item:hover {
+  @apply bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300;
+}
+
+.menu-divider {
+  @apply border-t border-slate-200 dark:border-gray-600 mx-1 my-1;
 }
 </style>

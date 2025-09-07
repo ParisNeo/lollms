@@ -7,7 +7,7 @@ import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import { usePromptsStore } from '../../stores/prompts';
 import { useTasksStore } from '../../stores/tasks';
-import { useMemoriesStore } from '../../stores/memories'; // NEW
+import { useMemoriesStore } from '../../stores/memories';
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 import { storeToRefs } from 'pinia';
@@ -21,7 +21,6 @@ import DropdownSubmenu from '../ui/DropdownSubmenu.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer.vue';
 
 // Asset & Icon Imports
-import logoUrl from '../../assets/logo.png';
 import IconDataZone from '../../assets/icons/IconDataZone.vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
@@ -50,24 +49,24 @@ import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconSave from '../../assets/icons/IconSave.vue';
+import IconToken from '../../assets/icons/IconToken.vue';
 
-// --- Store Initialization ---
+// Store Initialization
 const discussionsStore = useDiscussionsStore();
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 const promptsStore = usePromptsStore();
 const tasksStore = useTasksStore();
 const dataStore = useDataStore();
-const memoriesStore = useMemoriesStore(); // NEW
+const memoriesStore = useMemoriesStore();
 const router = useRouter();
 const { on, off } = useEventBus();
 const { liveDataZoneTokens, currentModelVisionSupport, activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
-const { tasks } = storeToRefs(tasksStore);
 const { availableTtiModels } = storeToRefs(dataStore);
-const { memories, isLoading: isLoadingMemories } = storeToRefs(memoriesStore); // NEW
+const { memories, isLoading: isLoadingMemories } = storeToRefs(memoriesStore);
 
-// --- Component State ---
+// Component State
 const artefactFileInput = ref(null);
 const discussionImageInput = ref(null);
 const isUploadingDiscussionImage = ref(false);
@@ -91,27 +90,23 @@ const showUrlImport = ref(false);
 const isProgrammaticChange = ref(false);
 const selectedArtefactVersions = ref({});
 const isDraggingFile = ref(false);
-const memorySearchTerm = ref(''); // NEW
-const loadedMemoryTitles = ref(new Set()); // NEW
+const memorySearchTerm = ref('');
+const loadedMemoryTitles = ref(new Set());
 
-// --- Data Zone State ---
+// Data Zone State
 let discussionSaveDebounceTimer = null;
 let userSaveDebounceTimer = null;
-let memorySaveDebounceTimer = null;
 let tokenizeDebounceTimers = {};
 
-// --- History State for Undo/Redo ---
+// History State for Undo/Redo
 const discussionHistory = ref([]);
 const discussionHistoryIndex = ref(-1);
 let discussionHistoryDebounceTimer = null;
 const userHistory = ref([]);
 const userHistoryIndex = ref(-1);
 let userHistoryDebounceTimer = null;
-const memoryHistory = ref([]);
-const memoryHistoryIndex = ref(-1);
-let memoryHistoryDebounceTimer = null;
 
-// --- Computed Properties ---
+// Computed Properties
 const isTtiConfigured = computed(() => availableTtiModels.value.length > 0);
 const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
 const isDataZoneExpanded = computed(() => uiStore.isDataZoneExpanded);
@@ -128,17 +123,105 @@ const isProcessing = computed(() => {
 
 const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'memorize');
 
-const discussionEditorOptions = computed(() => {
-    return { readOnly: isProcessing.value };
-});
+const discussionEditorOptions = computed(() => ({ readOnly: isProcessing.value }));
 
 const keywords = computed(() => uiStore.keywords);
 const canUndoDiscussion = computed(() => discussionHistoryIndex.value > 0);
 const canRedoDiscussion = computed(() => discussionHistoryIndex.value < discussionHistory.value.length - 1);
 const canUndoUser = computed(() => userHistoryIndex.value > 0);
 const canRedoUser = computed(() => userHistoryIndex.value < userHistory.value.length - 1);
-const canUndoMemory = computed(() => memoryHistoryIndex.value > 0);
-const canRedoMemory = computed(() => memoryHistoryIndex.value < memoryHistory.value.length - 1);
+
+// Add these computed properties to your <script setup> section
+const filteredLollmsPrompts = computed(() => {
+    if (!Array.isArray(lollmsPrompts.value)) return [];
+    if (!userPromptSearchTerm.value) return lollmsPrompts.value;
+    const term = userPromptSearchTerm.value.toLowerCase();
+    return lollmsPrompts.value.filter(p => p?.name?.toLowerCase().includes(term) || false);
+});
+
+const filteredUserPromptsByCategory = computed(() => {
+    const term = userPromptSearchTerm.value.toLowerCase();
+    const source = userPromptsByCategory.value;
+    if (!source || typeof source !== 'object') return {};
+    
+    if (!term) return source;
+    
+    const filtered = {};
+    for (const category in source) {
+        if (Array.isArray(source[category])) {
+            const filteredPrompts = source[category].filter(p => 
+                p?.name?.toLowerCase().includes(term) || false
+            );
+            if (filteredPrompts.length > 0) {
+                filtered[category] = filteredPrompts;
+            }
+        }
+    }
+    return filtered;
+});
+
+const filteredSystemPromptsByZooCategory = computed(() => {
+    const term = zooPromptSearchTerm.value.toLowerCase();
+    const source = systemPromptsByZooCategory.value;
+    if (!source || typeof source !== 'object') return {};
+    
+    if (!term) return source;
+    
+    const filtered = {};
+    for (const category in source) {
+        if (Array.isArray(source[category])) {
+            const filteredPrompts = source[category].filter(p => 
+                p?.name?.toLowerCase().includes(term) || false
+            );
+            if (filteredPrompts.length > 0) {
+                filtered[category] = filteredPrompts;
+            }
+        }
+    }
+    return filtered;
+}); 
+
+const getProgressColorClass = (percentage) => {
+    if (percentage >= 90) return 'from-red-400 to-red-600';
+    if (percentage >= 70) return 'from-yellow-400 to-orange-500';
+    return 'from-green-400 to-green-500';
+};
+
+// Enhanced Data Zone Tabs Configuration
+const dataTabs = computed(() => [
+    {
+        id: 'discussion',
+        label: 'Discussion',
+        icon: IconDataZone,
+        tokenCount: discussionDataZoneTokens.value,
+        color: 'blue',
+        description: 'Discussion-specific context and data'
+    },
+    {
+        id: 'user',
+        label: 'User',
+        icon: IconUserCircle,
+        tokenCount: userDataZoneTokens.value,
+        color: 'green',
+        description: 'Global user context for all discussions'
+    },
+    {
+        id: 'personality',
+        label: 'Personality',
+        icon: IconSparkles,
+        tokenCount: personalityDataZoneTokens.value,
+        color: 'purple',
+        description: 'Active personality context (read-only)'
+    },
+    {
+        id: 'ltm',
+        label: 'Memory',
+        icon: IconThinking,
+        tokenCount: memoryDataZoneTokens.value,
+        color: 'yellow',
+        description: 'Long-term memory storage'
+    }
+]);
 
 const groupedArtefacts = computed(() => {
     if (!activeDiscussionArtefacts.value || !Array.isArray(activeDiscussionArtefacts.value)) return [];
@@ -148,7 +231,8 @@ const groupedArtefacts = computed(() => {
             acc[artefact.title] = {
                 title: artefact.title,
                 versions: [],
-                isAnyVersionLoaded: false
+                isAnyVersionLoaded: false,
+                fileType: getFileType(artefact.title)
             };
         }
         acc[artefact.title].versions.push(artefact);
@@ -165,47 +249,16 @@ const groupedArtefacts = computed(() => {
     return Object.values(groups);
 });
 
-const filteredLollmsPrompts = computed(() => {
-    if (!Array.isArray(lollmsPrompts.value)) return [];
-    if (!userPromptSearchTerm.value) return lollmsPrompts.value;
-    const term = userPromptSearchTerm.value.toLowerCase();
-    return lollmsPrompts.value.filter(p => p.name.toLowerCase().includes(term));
+const filteredMemories = computed(() => {
+    if (!memorySearchTerm.value) return memories.value;
+    const term = memorySearchTerm.value.toLowerCase();
+    return memories.value.filter(m => 
+        m.title.toLowerCase().includes(term) || 
+        m.content.toLowerCase().includes(term)
+    );
 });
 
-const filteredUserPromptsByCategory = computed(() => {
-    const term = userPromptSearchTerm.value.toLowerCase();
-    const source = userPromptsByCategory.value;
-    if (!source || typeof source !== 'object') return {};
-    
-    if (!term) return source;
-    
-    const filtered = {};
-    for (const category in source) {
-        const filteredPrompts = source[category].filter(p => p.name.toLowerCase().includes(term));
-        if (filteredPrompts.length > 0) {
-            filtered[category] = filteredPrompts;
-        }
-    }
-    return filtered;
-});
-
-const filteredSystemPromptsByZooCategory = computed(() => {
-    const term = zooPromptSearchTerm.value.toLowerCase();
-    const source = systemPromptsByZooCategory.value;
-    if (!source || typeof source !== 'object') return {};
-    
-    if (!term) return source;
-    
-    const filtered = {};
-    for (const category in source) {
-        const filteredPrompts = source[category].filter(p => p.name.toLowerCase().includes(term));
-        if (filteredPrompts.length > 0) {
-            filtered[category] = filteredPrompts;
-        }
-    }
-    return filtered;
-});
-
+// Data Zone Content Getters/Setters
 const discussionDataZone = computed({
     get: () => activeDiscussion.value?.discussion_data_zone || '',
     set: (newVal) => {
@@ -219,6 +272,46 @@ const discussionDataZone = computed({
     }
 });
 
+function insertPlaceholder(placeholder) {
+    let targetEditor = null;
+    
+    // Determine which editor to use based on active tab and view mode
+    switch (activeDataZoneTab.value) {
+        case 'discussion':
+            if (dataZoneViewModes.value.discussion === 'edit') {
+                targetEditor = discussionCodeMirrorEditor.value;
+            }
+            break;
+        case 'user':
+            if (dataZoneViewModes.value.user === 'edit') {
+                targetEditor = userCodeMirrorEditor.value;
+            }
+            break;
+        // Add other cases if needed for personality/ltm tabs
+        default:
+            // Fallback to user editor
+            targetEditor = userCodeMirrorEditor.value;
+            break;
+    }
+    
+    if (!targetEditor?.editorView) {
+        console.warn('No active editor found for placeholder insertion');
+        return;
+    }
+    
+    const view = targetEditor.editorView;
+    const { from, to } = view.state.selection.main;
+    const textToInsert = placeholder;
+    
+    view.dispatch({ 
+        changes: { from, to, insert: textToInsert }, 
+        selection: { anchor: from + textToInsert.length } 
+    });
+    
+    view.focus();
+}
+
+
 const userDataZone = computed({
     get: () => authStore.user?.data_zone || '',
     set: (newVal) => {
@@ -227,20 +320,11 @@ const userDataZone = computed({
         userSaveDebounceTimer = setTimeout(() => { authStore.updateDataZone(newVal); }, 750);
     }
 });
-const personalityDataZone = computed(() => activeDiscussion.value?.personality_data_zone || '');
 
-const filteredMemories = computed(() => { // NEW
-    if (!memorySearchTerm.value) return memories.value;
-    const term = memorySearchTerm.value.toLowerCase();
-    return memories.value.filter(m => 
-        m.title.toLowerCase().includes(term) || 
-        m.content.toLowerCase().includes(term)
-    );
-});
+const personalityDataZone = computed(() => activeDiscussion.value?.personality_data_zone || '');
 
 const memory = computed({
     get: () => {
-        // Construct the memory string from loaded memories
         return memories.value
             .filter(m => loadedMemoryTitles.value.has(m.title))
             .map(m => `--- Memory: ${m.title} ---\n${m.content}\n--- End Memory: ${m.title} ---`)
@@ -253,6 +337,7 @@ const memory = computed({
     }
 });
 
+// Token Management
 const contextStatus = computed(() => discussionsStore.activeDiscussionContextStatus);
 const maxTokens = computed(() => contextStatus.value?.max_tokens || 1);
 const discussionDataZoneTokens = computed(() => liveDataZoneTokens.value.discussion);
@@ -264,8 +349,62 @@ const getPercentage = (tokens) => {
     if (maxTokens.value <= 0) return 0;
     return Math.min((tokens / maxTokens.value) * 100, 100);
 };
-const formatNumber = (num) => num ? num.toLocaleString() : '0';
 
+const formatNumber = (num) => num ? num.toLocaleString() : '0';
+const formatTokens = (tokens) => tokens > 1000 ? `${(tokens/1000).toFixed(1)}K` : tokens.toString();
+
+
+// Helper Functions
+function getFileType(filename) {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    const typeMap = {
+        'pdf': { icon: 'pdf', color: 'text-red-500' },
+        'txt': { icon: 'txt', color: 'text-gray-500' },
+        'md': { icon: 'md', color: 'text-blue-500' },
+        'docx': { icon: 'doc', color: 'text-blue-600' },
+        'json': { icon: 'json', color: 'text-yellow-600' }
+    };
+    return typeMap[ext] || { icon: 'file', color: 'text-gray-500' };
+}
+
+function getContextParts() {
+    const parts = [];
+    if (discussionDataZoneTokens.value > 0) {
+        parts.push({ 
+            label: 'Discussion', 
+            value: discussionDataZoneTokens.value, 
+            colorClass: 'bg-blue-500 text-white',
+            tooltip: `Discussion Data: ${formatNumber(discussionDataZoneTokens.value)} tokens`
+        });
+    }
+    if (userDataZoneTokens.value > 0) {
+        parts.push({ 
+            label: 'User', 
+            value: userDataZoneTokens.value, 
+            colorClass: 'bg-green-500 text-white',
+            tooltip: `User Data: ${formatNumber(userDataZoneTokens.value)} tokens`
+        });
+    }
+    if (personalityDataZoneTokens.value > 0) {
+        parts.push({ 
+            label: 'Personality', 
+            value: personalityDataZoneTokens.value, 
+            colorClass: 'bg-purple-500 text-white',
+            tooltip: `Personality Data: ${formatNumber(personalityDataZoneTokens.value)} tokens`
+        });
+    }
+    if (memoryDataZoneTokens.value > 0) {
+        parts.push({ 
+            label: 'Memory', 
+            value: memoryDataZoneTokens.value, 
+            colorClass: 'bg-yellow-500 text-white',
+            tooltip: `Memory Data: ${formatNumber(memoryDataZoneTokens.value)} tokens`
+        });
+    }
+    return parts;
+}
+
+// Event Handlers
 async function tokenizeContent(content, zone) {
     clearTimeout(tokenizeDebounceTimers[zone]);
     if (!content || !content.trim()) {
@@ -282,7 +421,258 @@ async function tokenizeContent(content, zone) {
         }
     }, 750);
 }
+// Initialize history system
+function setupHistory(historyRef, indexRef, initialValue) {
+    historyRef.value = [initialValue];
+    indexRef.value = 0;
+}
 
+// Record changes in history with debounce
+function recordHistory(historyRef, indexRef, debounceTimer, content) {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+        if (historyRef.value[indexRef.value] === content) return;
+        if (indexRef.value < historyRef.value.length - 1) {
+            historyRef.value.splice(indexRef.value + 1);
+        }
+        historyRef.value.push(content);
+        indexRef.value++;
+    }, 750);
+    return debounceTimer;
+}
+
+// Undo/Redo functions for Discussion
+async function handleUndoDiscussion() {
+    if (!canUndoDiscussion.value) return;
+    isProgrammaticChange.value = true;
+    discussionHistoryIndex.value--;
+    discussionDataZone.value = discussionHistory.value[discussionHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+async function handleRedoDiscussion() {
+    if (!canRedoDiscussion.value) return;
+    isProgrammaticChange.value = true;
+    discussionHistoryIndex.value++;
+    discussionDataZone.value = discussionHistory.value[discussionHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+// Undo/Redo functions for User
+async function handleUndoUser() {
+    if (!canUndoUser.value) return;
+    isProgrammaticChange.value = true;
+    userHistoryIndex.value--;
+    userDataZone.value = userHistory.value[userHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+async function handleRedoUser() {
+    if (!canRedoUser.value) return;
+    isProgrammaticChange.value = true;
+    userHistoryIndex.value++;
+    userDataZone.value = userHistory.value[userHistoryIndex.value];
+    await nextTick();
+    isProgrammaticChange.value = false;
+}
+
+
+function handleDragOver(event) {
+    event.preventDefault();
+    isDraggingFile.value = true;
+}
+
+function handleDragLeave(event) {
+    event.preventDefault();
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+        isDraggingFile.value = false;
+    }
+}
+
+async function handleDrop(event, target) {
+    event.preventDefault();
+    isDraggingFile.value = false;
+    const files = Array.from(event.dataTransfer.files);
+    if (!files.length) return;
+
+    if (target === 'artefact') {
+        handleArtefactFileUpload({ target: { files } });
+    } else if (target === 'memory') {
+        handleArtefactFileUpload({ target: { files } });
+        uiStore.addNotification('File added as an artefact. You can now create a memory from its content.', 'info', 6000);
+    }
+}
+
+
+
+// Memory Management
+function handleCreateMemory() {
+    uiStore.openModal('memoryEditor');
+}
+
+function handleEditMemory(memory) {
+    uiStore.openModal('memoryEditor', { memory });
+}
+
+async function handleDeleteMemory(memoryId) {
+    const memoryToDelete = memories.value.find(m => m.id === memoryId);
+    if (!memoryToDelete) return;
+
+    const confirmed = await uiStore.showConfirmation({
+        title: `Delete Memory '${memoryToDelete.title}'?`,
+        message: 'This will permanently delete this memory from your memory bank.',
+        confirmText: 'Delete'
+    });
+    
+    if (confirmed) {
+        try {
+            await memoriesStore.deleteMemory(memoryId);
+            uiStore.addNotification('Memory deleted successfully', 'success');
+        } catch (error) {
+            uiStore.addNotification('Failed to delete memory', 'error');
+            console.error('Delete error:', error);
+        }
+    }
+}
+
+function handleLoadMemory(memoryTitle) {
+    loadedMemoryTitles.value.add(memoryTitle);
+    uiStore.addNotification(`Memory "${memoryTitle}" loaded to context`, 'success');
+}
+
+function handleUnloadMemory(memoryTitle) {
+    loadedMemoryTitles.value.delete(memoryTitle);
+    uiStore.addNotification(`Memory "${memoryTitle}" removed from context`, 'info');
+}
+
+// Artefact Management
+async function handleLoadArtefact(title) {
+    if (!activeDiscussion.value) return;
+    
+    try {
+        const version = selectedArtefactVersions.value[title];
+        await discussionsStore.loadArtefactToContext({ 
+            discussionId: activeDiscussion.value.id, 
+            artefactTitle: title, 
+            version: version 
+        });
+        uiStore.addNotification(`Artefact "${title}" loaded to context`, 'success');
+    } catch (error) {
+        uiStore.addNotification('Failed to load artefact', 'error');
+        console.error('Load error:', error);
+    }
+}
+
+async function handleUnloadArtefact(title, version) {
+    if (!activeDiscussion.value) return;
+    
+    try {
+        await discussionsStore.unloadArtefactFromContext({ 
+            discussionId: activeDiscussion.value.id, 
+            artefactTitle: title, 
+            version: version 
+        });
+        uiStore.addNotification(`Artefact "${title}" removed from context`, 'info');
+    } catch (error) {
+        uiStore.addNotification('Failed to unload artefact', 'error');
+        console.error('Unload error:', error);
+    }
+}
+
+async function handleEditArtefact(title) {
+    if (!activeDiscussion.value) return;
+    
+    try {
+        const version = selectedArtefactVersions.value[title];
+        const artefact = await discussionsStore.fetchArtefactContent({
+            discussionId: activeDiscussion.value.id,
+            artefactTitle: title,
+            version: version
+        });
+        
+        if (artefact) {
+            uiStore.openModal('artefactEditor', { artefact, discussionId: activeDiscussion.value.id });
+        }
+    } catch (error) {
+        uiStore.addNotification('Failed to fetch artefact', 'error');
+        console.error('Fetch error:', error);
+    }
+}
+
+async function handleDeleteArtefact(title) {
+    if (!activeDiscussion.value) return;
+    
+    try {
+        const confirmed = await uiStore.showConfirmation({ 
+            title: `Delete Artefact '${title}'?`, 
+            message: 'This will permanently delete the artefact and all its versions.', 
+            confirmText: 'Delete' 
+        });
+        
+        if (confirmed) {
+            await discussionsStore.deleteArtefact({ 
+                discussionId: activeDiscussion.value.id, 
+                artefactTitle: title 
+            });
+            uiStore.addNotification('Artefact deleted successfully', 'success');
+        }
+    } catch (error) {
+        uiStore.addNotification('Failed to delete artefact', 'error');
+        console.error('Delete error:', error);
+    }
+}
+
+function handleCreateArtefact() {
+    if (!activeDiscussion.value) return;
+    uiStore.openModal('artefactEditor', { discussionId: activeDiscussion.value.id });
+}
+
+function triggerArtefactFileUpload() {
+    artefactFileInput.value?.click();
+}
+
+async function handleArtefactFileUpload(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files || files.length === 0 || !activeDiscussion.value) return;
+    
+    isUploadingArtefact.value = true;
+    try {
+        await Promise.all(files.map(file => discussionsStore.addArtefact({
+            discussionId: activeDiscussion.value.id,
+            file: file,
+        })));
+        uiStore.addNotification(`${files.length} file(s) uploaded successfully`, 'success');
+    } catch (error) {
+        uiStore.addNotification('Failed to upload files', 'error');
+        console.error('Upload error:', error);
+    } finally {
+        isUploadingArtefact.value = false;
+        if (artefactFileInput.value) {
+            artefactFileInput.value.value = '';
+        }
+    }
+}
+
+async function handleImportArtefactFromUrl() {
+    if (!urlToImport.value.trim() || !activeDiscussion.value) return;
+    
+    try {
+        await discussionsStore.importArtefactFromUrl({
+            discussionId: activeDiscussion.value.id,
+            url: urlToImport.value
+        });
+        urlToImport.value = '';
+        showUrlImport.value = false;
+        uiStore.addNotification('URL imported successfully', 'success');
+    } catch (error) {
+        uiStore.addNotification('Failed to import URL', 'error');
+        console.error('Import error:', error);
+    }
+}
+// Watchers
 watch(discussionDataZone, (newVal) => { 
     tokenizeContent(newVal, 'discussion');
     if (!isProgrammaticChange.value) {
@@ -304,7 +694,6 @@ watch(memory, (newVal) => {
     tokenizeContent(newVal, 'memory');
 }, { immediate: true });
 
-
 watch(groupedArtefacts, (newGroups) => {
     const newSelections = { ...selectedArtefactVersions.value };
     for (const group of newGroups) {
@@ -312,24 +701,35 @@ watch(groupedArtefacts, (newGroups) => {
         if (loadedVersion) {
             newSelections[group.title] = loadedVersion.version;
         } else if (group.versions.length > 0) {
-            // Always default to the newest version, which is the first one after sorting.
             newSelections[group.title] = group.versions[0].version;
         }
     }
     selectedArtefactVersions.value = newSelections;
 }, { deep: true, immediate: true });
 
+watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
+    if (newDiscussion) {
+        if (!oldDiscussion || newDiscussion.id !== oldDiscussion.id) {
+            setupHistory(discussionHistory, discussionHistoryIndex, newDiscussion.discussion_data_zone || '');
+            loadedMemoryTitles.value.clear();
+        }
+        tokenizeContent(discussionDataZone.value, 'discussion');
+        tokenizeContent(userDataZone.value, 'user');
+        tokenizeContent(personalityDataZone.value, 'personality');
+        tokenizeContent(memory.value, 'memory');
+    }
+}, { immediate: true, deep: true });
 
+// Lifecycle
 onMounted(() => {
     const savedWidth = localStorage.getItem('lollms_dataZoneWidth');
     if (savedWidth) dataZoneWidth.value = parseInt(savedWidth, 10);
     setupHistory(userHistory, userHistoryIndex, userDataZone.value);
-    memoriesStore.fetchMemories(); // NEW
+    memoriesStore.fetchMemories();
     on('discussion:dataZoneUpdated', onDataZoneUpdatedFromStore);
 });
+
 onUnmounted(() => {
-    window.removeEventListener('mousemove', handleResize);
-    window.removeEventListener('mouseup', stopResize);
     off('discussion:dataZoneUpdated', onDataZoneUpdatedFromStore);
 });
 
@@ -339,22 +739,21 @@ function onDataZoneUpdatedFromStore({ discussionId, newContent }) {
     }
 }
 
-async function handleDrop(event, target) {
-    event.preventDefault();
-    isDraggingFile.value = false;
-    const files = Array.from(event.dataTransfer.files);
-    if (!files.length) return;
-
-    if (target === 'artefact') {
-        handleArtefactFileUpload({ target: { files } });
-    } else if (target === 'memory') {
-        // For memory, we treat it as adding an artefact. The user can then create a memory from it.
-        // This avoids needing a separate backend endpoint just for text extraction to memory.
-        handleArtefactFileUpload({ target: { files } });
-        uiStore.addNotification('File added as an artefact. You can now create a memory from its content.', 'info', 6000);
+function updateDiscussionDataZoneAndRecordHistory(newContent) {
+    if (discussionDataZone.value === newContent) return;
+    clearTimeout(discussionHistoryDebounceTimer);
+    if (discussionHistoryIndex.value < discussionHistory.value.length - 1) {
+        discussionHistory.value.splice(discussionHistoryIndex.value + 1);
     }
+    discussionHistory.value.push(newContent);
+    discussionHistoryIndex.value++;
+    
+    isProgrammaticChange.value = true;
+    discussionDataZone.value = newContent;
+    nextTick(() => { isProgrammaticChange.value = false; });
 }
 
+// Add this function in your <script setup> block
 async function handlePasteInDataZone(event) {
     const items = (event.clipboardData || window.clipboardData).items;
     if (!items) return;
@@ -375,136 +774,33 @@ async function handlePasteInDataZone(event) {
         }
     }
 }
-function setupHistory(historyRef, indexRef, initialValue) { historyRef.value = [initialValue]; indexRef.value = 0; }
-
-function recordHistory(historyRef, indexRef, debounceTimer, content) {
-    clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(() => {
-        if (historyRef.value[indexRef.value] === content) return;
-        if (indexRef.value < historyRef.value.length - 1) {
-            historyRef.value.splice(indexRef.value + 1);
-        }
-        historyRef.value.push(content);
-        indexRef.value++;
-    }, 750);
-    return debounceTimer;
-}
-
-function updateDiscussionDataZoneAndRecordHistory(newContent) {
-    if (discussionDataZone.value === newContent) return;
-    clearTimeout(discussionHistoryDebounceTimer);
-    if (discussionHistoryIndex.value < discussionHistory.value.length - 1) {
-        discussionHistory.value.splice(discussionHistoryIndex.value + 1);
-    }
-    discussionHistory.value.push(newContent);
-    discussionHistoryIndex.value++;
-    
-    isProgrammaticChange.value = true;
-    discussionDataZone.value = newContent;
-    nextTick(() => { isProgrammaticChange.value = false; });
-}
-
-async function handleUndoDiscussion() {
-    if (!canUndoDiscussion.value) return;
-    isProgrammaticChange.value = true;
-    discussionHistoryIndex.value--;
-    discussionDataZone.value = discussionHistory.value[discussionHistoryIndex.value];
-    await nextTick();
-    isProgrammaticChange.value = false;
-}
-
-async function handleRedoDiscussion() {
-    if (!canRedoDiscussion.value) return;
-    isProgrammaticChange.value = true;
-    discussionHistoryIndex.value++;
-    discussionDataZone.value = discussionHistory.value[discussionHistoryIndex.value];
-    await nextTick();
-    isProgrammaticChange.value = false;
-}
-
-async function handleUndoUser() {
-    if (!canUndoUser.value) return;
-    isProgrammaticChange.value = true;
-    userHistoryIndex.value--;
-    userDataZone.value = userHistory.value[userHistoryIndex.value];
-    await nextTick();
-    isProgrammaticChange.value = false;
-}
-
-async function handleRedoUser() {
-    if (!canRedoUser.value) return;
-    isProgrammaticChange.value = true;
-    userHistoryIndex.value++;
-    userDataZone.value = userHistory.value[userHistoryIndex.value];
-    await nextTick();
-    isProgrammaticChange.value = false;
-}
-
-watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
-    if (newDiscussion) {
-        if (!oldDiscussion || newDiscussion.id !== oldDiscussion.id) {
-            setupHistory(discussionHistory, discussionHistoryIndex, newDiscussion.discussion_data_zone || '');
-            // NEW: Reset loaded memories for the new discussion
-            loadedMemoryTitles.value.clear();
-        }
-        tokenizeContent(discussionDataZone.value, 'discussion');
-        tokenizeContent(userDataZone.value, 'user');
-        tokenizeContent(personalityDataZone.value, 'personality');
-        tokenizeContent(memory.value, 'memory');
-    }
-}, { immediate: true, deep: true });
-
-let startX = 0;
-let startWidth = 0;
 function startResize(event) {
-    isResizing.value = true; startX = event.clientX; startWidth = dataZoneWidth.value;
-    document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none';
-    window.addEventListener('mousemove', handleResize); window.addEventListener('mouseup', stopResize);
-}
-function handleResize(event) {
-    if (!isResizing.value) return; const dx = event.clientX - startX;
-    const newWidth = startWidth - dx; const minWidth = 320;
-    const maxWidth = window.innerWidth * 0.75; dataZoneWidth.value = Math.max(minWidth, Math.min(newWidth, maxWidth));
-}
-function stopResize() {
-    isResizing.value = false; document.body.style.cursor = ''; document.body.style.userSelect = '';
-    window.removeEventListener('mousemove', handleResize); window.removeEventListener('mouseup', stopResize);
-    localStorage.setItem('lollms_dataZoneWidth', dataZoneWidth.value);
-}
-watch(isDataZoneVisible, (isVisible) => { if (isVisible) { promptsStore.fetchPrompts(); uiStore.fetchKeywords(); } });
-function isImageActive(index) { return !discussionActiveImages.value || discussionActiveImages.value.length <= index || discussionActiveImages.value[index]; }
-function insertPlaceholder(placeholder) {
-    const view = userCodeMirrorEditor.value?.editorView; if (!view) return;
-    const { from, to } = view.state.selection.main; const textToInsert = placeholder;
-    view.dispatch({ changes: { from, to, insert: textToInsert }, selection: { anchor: from + textToInsert.length } }); view.focus();
-}
-function triggerArtefactFileUpload() { artefactFileInput.value?.click(); }
-
-async function handleArtefactFileUpload(event) {
-    const files = Array.from(event.target.files);
-    if (!files || files.length === 0 || !activeDiscussion.value) return;
-    isUploadingArtefact.value = true;
-    try {
-        await Promise.all(files.map(file => discussionsStore.addArtefact({
-            discussionId: activeDiscussion.value.id,
-            file: file,
-        })));
-    } finally {
-        isUploadingArtefact.value = false;
-        if (artefactFileInput.value) {
-            artefactFileInput.value.value = '';
-        }
+    isResizing.value = true;
+    const startX = event.clientX;
+    const startWidth = dataZoneWidth.value;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    
+    function handleResize(e) {
+        if (!isResizing.value) return;
+        const dx = e.clientX - startX;
+        const newWidth = startWidth - dx;
+        const minWidth = 320;
+        const maxWidth = window.innerWidth * 0.75;
+        dataZoneWidth.value = Math.max(minWidth, Math.min(newWidth, maxWidth));
     }
-}
-
-async function handleImportArtefactFromUrl() {
-    if (!urlToImport.value.trim() || !activeDiscussion.value) return;
-    await discussionsStore.importArtefactFromUrl({
-        discussionId: activeDiscussion.value.id,
-        url: urlToImport.value
-    });
-    urlToImport.value = '';
-    showUrlImport.value = false;
+    
+    function stopResize() {
+        isResizing.value = false;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        window.removeEventListener('mousemove', handleResize);
+        window.removeEventListener('mouseup', stopResize);
+        localStorage.setItem('lollms_dataZoneWidth', dataZoneWidth.value);
+    }
+    
+    window.addEventListener('mousemove', handleResize);
+    window.addEventListener('mouseup', stopResize);
 }
 
 function handleProcessContent() {
@@ -562,50 +858,12 @@ function handleGenerateImage() {
 function toggleViewMode(zone) {
     dataZoneViewModes.value[zone] = dataZoneViewModes.value[zone] === 'edit' ? 'view' : 'edit';
 }
+
 function handleCloneDiscussionContext() {
     if (activeDiscussion.value) {
         discussionsStore.cloneDiscussion(activeDiscussion.value.id);
+        uiStore.addNotification('Discussion context cloned successfully', 'success');
     }
-}
-async function handleLoadArtefact(title) {
-    if (activeDiscussion.value) {
-        const version = selectedArtefactVersions.value[title];
-        await discussionsStore.loadArtefactToContext({ discussionId: activeDiscussion.value.id, artefactTitle: title, version: version });
-    }
-}
-async function handleUnloadArtefact(title, version) {
-    if (activeDiscussion.value) {
-        await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: title, version: version });
-    }
-}
-
-async function handleEditArtefact(title) {
-    if (activeDiscussion.value) {
-        const version = selectedArtefactVersions.value[title];
-        const artefact = await discussionsStore.fetchArtefactContent({
-            discussionId: activeDiscussion.value.id,
-            artefactTitle: title,
-            version: version
-        });
-        console.log("Fetched artefact for editing:", artefact);
-        if (artefact) {
-            uiStore.openModal('artefactEditor', { artefact, discussionId: activeDiscussion.value.id });
-        }
-    }
-}
-
-async function handleDeleteArtefact(title) {
-    if (activeDiscussion.value) {
-        const confirmed = await uiStore.showConfirmation({ title: `Delete Artefact '${title}'?`, message: 'This will permanently delete the artefact and all its versions.', confirmText: 'Delete' });
-        if (confirmed) {
-            await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: title });
-        }
-    }
-}
-
-function handleCreateArtefact() {
-    if (!activeDiscussion.value) return;
-    uiStore.openModal('artefactEditor', { discussionId: activeDiscussion.value.id });
 }
 
 function openContextToArtefactModal() {
@@ -621,37 +879,15 @@ function openContextToArtefactModal() {
     });
 }
 
+// Helper function to check if image is active
+function isImageActive(index) {
+    return !discussionActiveImages.value || 
+           discussionActiveImages.value.length <= index || 
+           discussionActiveImages.value[index];
+}
+
+
 // --- NEW/UPDATED Memory Functions ---
-function handleCreateMemory() {
-    uiStore.openModal('memoryEditor');
-}
-
-function handleEditMemory(memory) {
-    uiStore.openModal('memoryEditor', { memory });
-}
-
-async function handleDeleteMemory(memoryId) {
-    const memoryToDelete = memories.value.find(m => m.id === memoryId);
-    if (!memoryToDelete) return;
-
-    const confirmed = await uiStore.showConfirmation({
-        title: `Delete Memory '${memoryToDelete.title}'?`,
-        message: 'This will permanently delete this memory from your memory bank.',
-        confirmText: 'Delete'
-    });
-    if (confirmed) {
-        await memoriesStore.deleteMemory(memoryId);
-    }
-}
-
-function handleLoadMemory(memoryTitle) {
-    loadedMemoryTitles.value.add(memoryTitle);
-}
-
-function handleUnloadMemory(memoryTitle) {
-    loadedMemoryTitles.value.delete(memoryTitle);
-}
-
 async function handleWipeAllMemories() {
     try {
         const confirmed = await uiStore.showConfirmation({
@@ -671,7 +907,7 @@ async function handleWipeAllMemories() {
 </script>
 
 <template>
-    <div class="flex-1 flex flex-col h-full bg-gray-50 dark:bg-gray-900 overflow-hidden">
+    <div class="flex-1 flex flex-col h-full bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 overflow-hidden">
         <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
         <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf" multiple>
         
@@ -683,63 +919,175 @@ async function handleWipeAllMemories() {
             </div>
 
             <!-- Resizer -->
-            <div v-if="isDataZoneVisible && !isDataZoneExpanded" @mousedown.prevent="startResize" class="flex-shrink-0 w-1.5 cursor-col-resize bg-gray-300 dark:bg-gray-600 hover:bg-blue-500 transition-colors duration-200"></div>
+            <div v-if="isDataZoneVisible && !isDataZoneExpanded" 
+                 @mousedown.prevent="startResize" 
+                 class="flex-shrink-0 w-2 cursor-col-resize bg-gradient-to-b from-gray-300 to-gray-400 dark:from-gray-600 dark:to-gray-700 hover:from-blue-400 hover:to-blue-500 transition-all duration-200 relative group">
+                <div class="absolute inset-0 flex items-center justify-center">
+                    <div class="w-0.5 h-8 bg-white/50 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                </div>
+            </div>
 
-            <!-- Data Zone Sidebar/Expanded View -->
-            <transition enter-active-class="transition ease-in-out duration-300" enter-from-class="transform translate-x-full" enter-to-class="transform translate-x-0" leave-active-class="transition ease-in-out duration-300" leave-from-class="transform translate-x-0" leave-to-class="transform translate-x-full">
-                <aside v-if="isDataZoneVisible && activeDiscussion" :class="[isDataZoneExpanded ? 'w-full' : 'flex-shrink-0']" :style="isDataZoneExpanded ? {} : { width: `${dataZoneWidth}px` }" class="h-full flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700">
-                    <div class="flex-shrink-0 border-b border-gray-200 dark:border-gray-700">
-                        <nav class="-mb-px flex space-x-2 px-4" aria-label="Tabs">
-                            <button @click="activeDataZoneTab = 'discussion'" :class="['tab-btn', {'active': activeDataZoneTab === 'discussion'}]" title="Discussion Data">Discussion</button>
-                            <button @click="activeDataZoneTab = 'user'" :class="['tab-btn', {'active': activeDataZoneTab === 'user'}]" title="User Data">User</button>
-                            <button @click="activeDataZoneTab = 'personality'" :class="['tab-btn', {'active': activeDataZoneTab === 'personality'}]" title="Personality Data">Personality</button>
-                            <button @click="activeDataZoneTab = 'ltm'" :class="['tab-btn', {'active': activeDataZoneTab === 'ltm'}]" title="Long-Term Memory">LTM</button>
-                        </nav>
-                    </div>
-                    <!-- Discussion Data Zone -->
-                    <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0 relative">
-                        <div v-if="isProcessing" class="absolute inset-0 bg-gray-400/30 dark:bg-gray-900/50 z-10 flex flex-col items-center justify-center">
-                            <IconAnimateSpin class="w-10 h-10 text-gray-800 dark:text-gray-100 animate-spin" />
-                            <p class="mt-3 font-semibold text-gray-800 dark:text-gray-100">Processing...</p>
-                        </div>
-                        <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
-                            <div class="flex justify-between items-center"><h3 class="font-semibold flex items-center gap-2"><IconDataZone class="w-5 h-5" /> Discussion Data</h3>
-                                <div class="flex items-center gap-1">
-                                    <button @click="uiStore.toggleDataZoneExpansion()" class="btn-icon" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'"><IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" /><IconMaximize v-else class="w-5 h-5" /></button>
-                                    <button @click="refreshDataZones" class="btn-icon" title="Refresh Data"><IconRefresh class="w-5 h-5" /></button>
-                                    <button @click="exportDataZone" class="btn-icon" title="Export to Markdown"><IconArrowUpTray class="w-5 h-5" /></button>
-                                    <button @click="discussionDataZone = ''" class="btn-icon-danger" title="Clear All Text"><IconTrash class="w-5 h-5" /></button>
-                                </div>
-                            </div>
-                            <div class="mt-2">
-                                <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono">
-                                    <span>Tokens</span>
-                                    <span>{{ formatNumber(discussionDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
-                                </div>
-                                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1">
-                                    <div class="h-1.5 rounded-full bg-blue-500 transition-width duration-500" :style="{ width: `${getPercentage(discussionDataZoneTokens)}%` }"></div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="flex-grow min-h-0 flex" :onpaste="handlePasteInDataZone">
-                            <div class="flex-grow flex flex-col min-w-0">
-                                <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
-                                    <h4 class="font-semibold text-sm">Content</h4>
-                                    <div class="flex items-center gap-1">
-                                        <button @click="handleCloneDiscussionContext" class="btn-icon" title="Clone Discussion Context"><IconCopy class="w-5 h-5" /></button>
-                                        <button @click="openContextToArtefactModal" class="btn-icon" title="Save Context as Artefact"><IconArrowDownTray class="w-5 h-5" /></button>
-                                        <button @click="toggleViewMode('discussion')" class="btn-icon" :title="dataZoneViewModes.discussion === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.discussion === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button>
-                                        <button @click="handleUndoDiscussion" class="btn-icon" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-5 h-5" /></button>
-                                        <button @click="handleRedoDiscussion" class="btn-icon" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-5 h-5" /></button>
+            <!-- Enhanced Data Zone Sidebar -->
+            <transition 
+                enter-active-class="transition ease-out duration-300" 
+                enter-from-class="transform translate-x-full opacity-0" 
+                enter-to-class="transform translate-x-0 opacity-100" 
+                leave-active-class="transition ease-in duration-300" 
+                leave-from-class="transform translate-x-0 opacity-100" 
+                leave-to-class="transform translate-x-full opacity-0">
+                <aside v-if="isDataZoneVisible && activeDiscussion" 
+                       :class="[isDataZoneExpanded ? 'w-full' : 'flex-shrink-0']" 
+                       :style="isDataZoneExpanded ? {} : { width: `${dataZoneWidth}px` }" 
+                       class="h-full flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl">
+                    
+                    <!-- Enhanced Tab Navigation -->
+                    <div class="flex-shrink-0 bg-gradient-to-r from-gray-50 via-white to-gray-50 dark:from-gray-800 dark:via-gray-750 dark:to-gray-800 border-b border-gray-200 dark:border-gray-700">
+                        <nav class="flex space-x-1 px-4 py-2" aria-label="Data Zone Tabs">
+                            <button v-for="tab in dataTabs" 
+                                    :key="tab.id"
+                                    @click="activeDataZoneTab = tab.id"
+                                    :class="[
+                                        'enhanced-tab-btn relative overflow-hidden transition-all duration-300',
+                                        activeDataZoneTab === tab.id 
+                                            ? 'active bg-white dark:bg-gray-800 shadow-lg border-t-2 border-blue-500 text-blue-600 dark:text-blue-400' 
+                                            : 'hover:bg-white/70 dark:hover:bg-gray-700/50 text-gray-600 dark:text-gray-400'
+                                    ]"
+                                    :title="tab.description">
+                                <div class="flex items-center gap-2 relative z-10 px-3 py-2">
+                                    <component :is="tab.icon" class="w-4 h-4 flex-shrink-0" />
+                                    <span class="font-medium text-sm">{{ tab.label }}</span>
+                                    <div v-if="tab.tokenCount > 0" 
+                                         class="token-badge px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 text-xs rounded-full font-mono">
+                                        {{ formatTokens(tab.tokenCount) }}
                                     </div>
                                 </div>
-                                <div class="flex-grow min-h-0 p-2">
-                                    <CodeMirrorEditor v-if="dataZoneViewModes.discussion === 'edit'" ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" :options="discussionEditorOptions" />
-                                    <div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="discussionDataZone" /></div>
+                                <!-- Active indicator -->
+                                <div v-if="activeDataZoneTab === tab.id" 
+                                     class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-400 to-blue-600 rounded-t">
                                 </div>
-                                <div class="p-4 border-t dark:border-gray-600 flex-shrink-0 space-y-3">
+                            </button>
+                        </nav>
+                    </div>
+
+                    <!-- Discussion Data Zone Tab -->
+                    <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0 relative">
+                        <!-- Processing Overlay -->
+                        <div v-if="isProcessing" class="absolute inset-0 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
+                            <div class="processing-spinner">
+                                <IconAnimateSpin class="w-12 h-12 text-blue-500 animate-spin" />
+                            </div>
+                            <p class="mt-4 font-semibold text-lg text-gray-800 dark:text-gray-100">Processing...</p>
+                            <p class="text-sm text-gray-600 dark:text-gray-400">This may take a moment</p>
+                        </div>
+
+                        <!-- Enhanced Header -->
+                        <div class="enhanced-header">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="header-title">
+                                    <IconDataZone class="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                                    <span class="bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">
+                                        Discussion Data
+                                    </span>
+                                </h3>
+                                <div class="action-buttons-group">
+                                    <button @click="uiStore.toggleDataZoneExpansion()" class="action-btn" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'">
+                                        <IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" />
+                                        <IconMaximize v-else class="w-5 h-5" />
+                                    </button>
+                                    <button @click="refreshDataZones" class="action-btn" title="Refresh Data">
+                                        <IconRefresh class="w-5 h-5" />
+                                    </button>
+                                    <button @click="exportDataZone" class="action-btn" title="Export to Markdown">
+                                        <IconArrowUpTray class="w-5 h-5" />
+                                    </button>
+                                    <button @click="discussionDataZone = ''" class="action-btn-danger" title="Clear All Text">
+                                        <IconTrash class="w-5 h-5" />
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <!-- Enhanced Token Progress -->
+                            <div class="token-progress-container">
+                                <div class="flex justify-between items-center text-xs text-gray-600 dark:text-gray-400 font-mono mb-2">
                                     <div class="flex items-center gap-2">
+                                        <IconToken class="w-4 h-4 text-blue-500" />
+                                        <span class="font-semibold">Context Usage</span>
+                                    </div>
+                                    <span class="font-bold">{{ formatNumber(discussionDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
+                                </div>
+                                
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-track">
+                                        <div class="progress-bar-fill"
+                                             :class="getProgressColorClass(getPercentage(discussionDataZoneTokens))"
+                                             :style="{ width: `${Math.min(getPercentage(discussionDataZoneTokens), 100)}%` }">
+                                            <div class="progress-bar-shine"></div>
+                                        </div>
+                                        <!-- Warning indicator -->
+                                        <div v-if="getPercentage(discussionDataZoneTokens) > 90" 
+                                             class="absolute right-2 top-1/2 transform -translate-y-1/2">
+                                            <div class="w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Context breakdown -->
+                                <div class="flex flex-wrap gap-1.5 mt-2">
+                                    <span v-for="part in getContextParts()" 
+                                          :key="part.label" 
+                                          class="context-chip"
+                                          :class="part.colorClass"
+                                          :title="part.tooltip">
+                                        {{ part.label }}: {{ formatNumber(part.value) }}
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Content Area -->
+                        <div class="flex-grow min-h-0 flex" :onpaste="handlePasteInDataZone">
+                            <div class="flex-grow flex flex-col min-w-0">
+                                <!-- Content Header -->
+                                <div class="content-header">
+                                    <h4 class="content-title">Content</h4>
+                                    <div class="content-actions">
+                                        <button @click="handleCloneDiscussionContext" class="action-btn-sm" title="Clone Discussion Context">
+                                            <IconCopy class="w-4 h-4" />
+                                        </button>
+                                        <button @click="openContextToArtefactModal" class="action-btn-sm" title="Save Context as Artefact">
+                                            <IconArrowDownTray class="w-4 h-4" />
+                                        </button>
+                                        <button @click="toggleViewMode('discussion')" class="action-btn-sm" 
+                                                :title="dataZoneViewModes.discussion === 'edit' ? 'Switch to Preview' : 'Switch to Edit'">
+                                            <IconEye v-if="dataZoneViewModes.discussion === 'edit'" class="w-4 h-4" />
+                                            <IconPencil v-else class="w-4 h-4" />
+                                        </button>
+                                        <button @click="handleUndoDiscussion" class="action-btn-sm" title="Undo" :disabled="!canUndoDiscussion">
+                                            <IconUndo class="w-4 h-4" />
+                                        </button>
+                                        <button @click="handleRedoDiscussion" class="action-btn-sm" title="Redo" :disabled="!canRedoDiscussion">
+                                            <IconRedo class="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                </div>
+                                
+                                <!-- Editor/Preview Area -->
+                                <div class="flex-grow min-h-0 p-3 bg-gray-50 dark:bg-gray-900/50">
+                                    <div class="h-full rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
+                                        <CodeMirrorEditor v-if="dataZoneViewModes.discussion === 'edit'" 
+                                                        ref="discussionCodeMirrorEditor" 
+                                                        v-model="discussionDataZone" 
+                                                        class="h-full" 
+                                                        :options="discussionEditorOptions" />
+                                        <div v-else class="rendered-prose-container h-full p-4 overflow-y-auto">
+                                            <MessageContentRenderer :content="discussionDataZone" />
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Enhanced Action Bar -->
+                                <div class="action-bar">
+                                    <div class="flex items-center gap-3">
                                         <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2">
                                             <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
                                                 <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button>
@@ -765,76 +1113,194 @@ async function handleWipeAllMemories() {
                                             <div v-if="(lollmsPrompts.length + Object.keys(userPromptsByCategory).length + Object.keys(systemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div>
                                             <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
                                         </DropdownMenu>
-                                        <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process the data zone content..." rows="2" class="input-field text-sm flex-grow"></textarea>
+                                        <textarea v-model="dataZonePromptText" 
+                                                placeholder="Enter a prompt to process the data zone content..." 
+                                                rows="2" 
+                                                class="enhanced-textarea"></textarea>
                                     </div>
-                                    <div class="flex items-center gap-2">
-                                        <button v-if="isTtiConfigured" @click="handleGenerateImage" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && !dataZonePromptText.trim())"><IconPhoto class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Generate Image' }}</button>
-                                        <button @click="handleProcessContent" class="btn btn-secondary btn-sm w-full" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isProcessing}"/>{{ isProcessing ? 'Processing...' : 'Process Content' }}</button>
+                                    <div class="flex items-center gap-3 mt-3">
+                                        <button v-if="isTtiConfigured" 
+                                                @click="handleGenerateImage" 
+                                                class="enhanced-primary-btn" 
+                                                :disabled="isProcessing || (!discussionDataZone.trim() && !dataZonePromptText.trim())">
+                                            <IconPhoto class="w-5 h-5" />
+                                            <span>{{ isProcessing ? 'Processing...' : 'Generate Image' }}</span>
+                                        </button>
+                                        <button @click="handleProcessContent" 
+                                                class="enhanced-secondary-btn" 
+                                                :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())">
+                                            <IconSparkles class="w-5 h-5" />
+                                            <span>{{ isProcessing ? 'Processing...' : 'Process Content' }}</span>
+                                        </button>
                                     </div>
                                 </div>
                             </div>
 
-                            <div class="w-72 flex-shrink-0 border-l dark:border-gray-600 flex flex-col">
-                                <div class="flex-1 flex flex-col min-h-0">
-                                    <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Images</h4><button @click="triggerDiscussionImageUpload" class="btn-icon" title="Add Image(s) or PDF" :disabled="isUploadingDiscussionImage"><IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-5 h-5" /><IconPhoto v-else class="w-5 h-5" /></button></div>
-                                    <div class="flex-grow overflow-y-auto p-2">
-                                        <div v-if="discussionImages.length === 0" class="text-center text-xs text-gray-500 pt-4">No images.</div>
-                                        <div v-else class="grid grid-cols-2 gap-2">
-                                            <div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="relative group/image"><img :src="'data:image/png;base64,' + img_b64" class="w-full h-16 object-cover rounded-md transition-all duration-300" :class="{'grayscale': !isImageActive(index)}"/><div class="absolute inset-0 bg-black/50 opacity-0 group-hover/image:opacity-100 transition-opacity flex items-center justify-center gap-1"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" title="View"><IconMaximize class="w-4 h-4" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="p-1.5 bg-red-500/80 text-white rounded-full hover:bg-red-600" title="Delete"><IconXMark class="w-4 h-4" /></button></div></div>
+                            <!-- Enhanced Sidebar -->
+                            <div class="sidebar-panel">
+                                <!-- Images Section -->
+                                <div class="sidebar-section">
+                                    <div class="section-header">
+                                        <h4 class="section-title">
+                                            <IconPhoto class="w-4 h-4" />
+                                            Images
+                                        </h4>
+                                        <button @click="triggerDiscussionImageUpload" 
+                                                class="action-btn-sm" 
+                                                title="Add Image(s) or PDF" 
+                                                :disabled="isUploadingDiscussionImage">
+                                            <IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-4 h-4 animate-spin" />
+                                            <IconPhoto v-else class="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                    
+                                    <div class="section-content">
+                                        <div v-if="discussionImages.length === 0 && !isUploadingDiscussionImage" class="empty-state">
+                                            <IconPhoto class="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                                            <p class="text-xs text-gray-500">No images yet</p>
                                         </div>
-                                        <div v-if="isUploadingDiscussionImage" class="grid grid-cols-2 gap-2 mt-2"><div class="relative w-full h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center animate-pulse"><IconPhoto class="w-8 h-8 text-gray-400 dark:text-gray-500" /></div></div>
+                                            <div v-else class="image-grid">
+                                                <div v-for="(img_b64, index) in discussionImages" 
+                                                    :key="img_b64.substring(0, 20) + index" 
+                                                    class="image-card group">  <!-- Add group class here -->
+                                                    <img :src="'data:image/png;base64,' + img_b64" 
+                                                        class="image-thumbnail" 
+                                                        :class="{'grayscale opacity-50': !isImageActive(index)}" />
+                                                    <div class="image-overlay">
+                                                        <button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" 
+                                                                class="overlay-btn" title="View">
+                                                            <IconMaximize class="w-3 h-3" />
+                                                        </button>
+                                                        <button @click="discussionsStore.toggleDiscussionImageActivation(index)" 
+                                                                class="overlay-btn" 
+                                                                :title="isImageActive(index) ? 'Deactivate' : 'Activate'">
+                                                            <IconEye v-if="isImageActive(index)" class="w-3 h-3" />
+                                                            <IconEyeOff v-else class="w-3 h-3" />
+                                                        </button>
+                                                        <button @click="discussionsStore.deleteDiscussionImage(index)" 
+                                                                class="overlay-btn overlay-btn-danger" title="Delete">
+                                                            <IconXMark class="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </div>
+
                                     </div>
                                 </div>
-                                <div class="flex-1 flex flex-col min-h-0">
-                                    <div class="p-2 border-t dark:border-gray-600 flex-shrink-0 flex items-center justify-between"><h4 class="font-semibold text-sm">Artefacts</h4>
-                                        <div class="flex items-center gap-1">
-                                            <button @click="handleCreateArtefact" class="btn-icon" title="Create Artefact"><IconPlus class="w-5 h-5" /></button>
-                                            <button @click="showUrlImport = !showUrlImport" class="btn-icon" title="Import from URL"><IconWeb class="w-5 h-5" /></button>
-                                            <button @click="triggerArtefactFileUpload" class="btn-icon" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-5 h-5" /><IconArrowUpTray v-else class="w-5 h-5" /></button>
+
+                                <!-- Enhanced Artefacts Section -->
+                                <div class="sidebar-section">
+                                    <div class="section-header">
+                                        <h4 class="section-title">
+                                            <IconFileText class="w-4 h-4" />
+                                            Artefacts
+                                        </h4>
+                                        <div class="section-actions">
+                                            <button @click="handleCreateArtefact" class="action-btn-sm" title="Create Artefact">
+                                                <IconPlus class="w-4 h-4" />
+                                            </button>
+                                            <button @click="showUrlImport = !showUrlImport" class="action-btn-sm" title="Import from URL">
+                                                <IconWeb class="w-4 h-4" />
+                                            </button>
+                                            <button @click="triggerArtefactFileUpload" class="action-btn-sm" title="Upload Artefact" :disabled="isUploadingArtefact">
+                                                <IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 animate-spin" />
+                                                <IconArrowUpTray v-else class="w-4 h-4" />
+                                            </button>
                                         </div>
                                     </div>
-                                    <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="isDraggingFile = false" @drop="handleDrop($event, 'artefact')" class="flex-grow overflow-y-auto p-2 space-y-2" :class="{'bg-blue-100 dark:bg-blue-900/20 border-2 border-dashed border-blue-400': isDraggingFile}">
-                                        <div v-if="showUrlImport" class="p-2 bg-gray-50 dark:bg-gray-700/50 rounded-md">
-                                            <label class="text-xs font-semibold">Import from URL</label>
-                                            <div class="flex items-center gap-1 mt-1">
-                                                <input v-model="urlToImport" type="url" placeholder="https://example.com" class="input-field-sm flex-grow">
-                                                <button @click="handleImportArtefactFromUrl" class="btn btn-secondary btn-sm !p-2" :disabled="isProcessing || !urlToImport">
-                                                    <IconAnimateSpin v-if="isProcessing" class="w-4 h-4" />
+                                    
+                                    <div class="section-content enhanced-drop-zone" 
+                                         @dragover="handleDragOver"
+                                         @dragleave="handleDragLeave" 
+                                         @drop="handleDrop($event, 'artefact')"
+                                         :class="{ 'drop-active': isDraggingFile }">
+                                        
+                                        <!-- URL Import -->
+                                        <div v-if="showUrlImport" class="url-import-section">
+                                            <label class="url-import-label">Import from URL</label>
+                                            <div class="url-import-controls">
+                                                <input v-model="urlToImport" type="url" placeholder="https://example.com" class="url-input">
+                                                <button @click="handleImportArtefactFromUrl" 
+                                                        class="fetch-btn" 
+                                                        :disabled="isProcessing || !urlToImport">
+                                                    <IconAnimateSpin v-if="isProcessing" class="w-4 h-4 animate-spin" />
                                                     <span v-else>Fetch</span>
                                                 </button>
                                             </div>
                                         </div>
-                                        <div v-if="isLoadingArtefacts" class="text-center text-xs text-gray-500 pt-4">Loading...</div>
-                                        <div v-else-if="groupedArtefacts.length === 0" class="text-center text-xs text-gray-500 pt-4">No artefacts. Drag files here to add.</div>
-                                        
-                                        <div v-else v-for="group in groupedArtefacts" :key="group.title" class="flex flex-col p-1.5 rounded-md" :class="group.isAnyVersionLoaded ? 'bg-green-100 dark:bg-green-900/40' : 'bg-gray-100 dark:bg-gray-700/50'">
-                                            <div class="flex items-center justify-between">
-                                                <div class="flex items-center gap-2 min-w-0">
-                                                    <IconFileText class="w-4 h-4 text-gray-500 flex-shrink-0" />
-                                                    <span class="truncate text-xs font-semibold" :title="group.title">{{ group.title }}</span>
-                                                </div>
-                                                <div class="flex items-center gap-1 flex-shrink-0">
-                                                    <button @click="handleEditArtefact(group.title)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="View & Edit Content"><IconPencil class="w-3.5 h-3.5" /></button>
-                                                    <button @click="handleDeleteArtefact(group.title)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Delete Artefact (all versions)"><IconTrash class="w-3.5 h-3.5" /></button>
-                                                </div>
+
+                                        <!-- Drop Overlay -->
+                                        <div v-if="isDraggingFile" class="drop-overlay">
+                                            <div class="drop-indicator">
+                                                <IconArrowUpTray class="w-8 h-8 text-blue-500 animate-bounce mb-2" />
+                                                <p class="text-sm font-semibold text-blue-600 dark:text-blue-400">Drop files here</p>
+                                                <p class="text-xs text-gray-500 mt-1">Supports PDF, images, text files</p>
                                             </div>
-                                            <div class="flex items-center gap-2 mt-1.5">
-                                                <select v-model="selectedArtefactVersions[group.title]" class="input-field-sm text-xs flex-grow min-w-0">
-                                                    <option v-for="artefact in group.versions" :key="artefact.version" :value="artefact.version">
-                                                        Version {{ artefact.version }} {{ artefact.is_loaded ? ' (Loaded)' : '' }}
-                                                    </option>
-                                                </select>
+                                        </div>
+
+                                        <!-- Loading State -->
+                                        <div v-if="isLoadingArtefacts" class="loading-state">
+                                            <IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" />
+                                            <p class="text-xs text-gray-500">Loading artefacts...</p>
+                                        </div>
+
+                                        <!-- Empty State -->
+                                        <div v-else-if="groupedArtefacts.length === 0 && !isDraggingFile" class="empty-state">
+                                            <IconFileText class="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                                            <p class="text-xs text-gray-500 mb-3">No artefacts yet</p>
+                                            <button @click="triggerArtefactFileUpload" class="empty-state-btn">
+                                                <IconPlus class="w-3 h-3 mr-1" />
+                                                Add Artefact
+                                            </button>
+                                        </div>
+                                        
+                                        <!-- Artefact Cards -->
+                                        <div v-else class="artefacts-list">
+                                            <div v-for="group in groupedArtefacts" :key="group.title" class="artefact-card group">
+                                                <div class="artefact-header">
+                                                    <div class="artefact-info">
+                                                        <div class="artefact-icon" :class="group.isAnyVersionLoaded ? 'loaded' : ''">
+                                                            <IconFileText class="w-4 h-4" />
+                                                        </div>
+                                                        <div class="artefact-details">
+                                                            <h5 class="artefact-title" :title="group.title">{{ group.title }}</h5>
+                                                            <p class="artefact-meta">
+                                                                {{ group.versions.length }} version{{ group.versions.length !== 1 ? 's' : '' }}
+                                                                <span v-if="group.isAnyVersionLoaded" class="loaded-indicator">• Loaded</span>
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <!-- ADD THESE MISSING ACTION BUTTONS -->
+                                                    <div class="artefact-actions">
+                                                        <button @click="handleEditArtefact(group.title)" class="artefact-action-btn" title="Edit Content">
+                                                            <IconPencil class="w-3 h-3" />
+                                                        </button>
+                                                        <button @click="handleDeleteArtefact(group.title)" class="artefact-action-btn artefact-action-btn-danger" title="Delete Artefact">
+                                                            <IconTrash class="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                </div>
                                                 
-                                                <template v-if="group.versions.find(v => v.version == selectedArtefactVersions[group.title])?.is_loaded">
-                                                    <button @click="handleUnloadArtefact(group.title, selectedArtefactVersions[group.title])" class="btn btn-secondary btn-sm !p-2" title="Unload from Context">
-                                                        <IconCheckCircle class="w-4 h-4 text-green-600 dark:text-green-400" />
+                                                <div class="artefact-controls">
+                                                    <select v-model="selectedArtefactVersions[group.title]" class="version-select">
+                                                        <option v-for="artefact in group.versions" :key="artefact.version" :value="artefact.version">
+                                                            Version {{ artefact.version }}{{ artefact.is_loaded ? ' (Active)' : '' }}
+                                                        </option>
+                                                    </select>
+                                                    
+                                                    <button v-if="group.versions.find(v => v.version == selectedArtefactVersions[group.title])?.is_loaded"
+                                                            @click="handleUnloadArtefact(group.title, selectedArtefactVersions[group.title])" 
+                                                            class="load-btn loaded" title="Unload from Context">
+                                                        <IconCheckCircle class="w-3 h-3" />
+                                                        Loaded
                                                     </button>
-                                                </template>
-                                                <template v-else>
-                                                     <button @click="handleLoadArtefact(group.title)" class="btn btn-secondary btn-sm !p-2" title="Load to Context">
-                                                        <IconArrowDownTray class="w-4 h-4" />
+                                                    <button v-else
+                                                            @click="handleLoadArtefact(group.title)" 
+                                                            class="load-btn" title="Load to Context">
+                                                        <IconArrowDownTray class="w-3 h-3" />
+                                                        Load
                                                     </button>
-                                                </template>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -859,76 +1325,175 @@ async function handleWipeAllMemories() {
                         </div>
                         <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-if="dataZoneViewModes.personality === 'edit'" :model-value="personalityDataZone" class="h-full" :options="{ readOnly: true }" /><div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="personalityDataZone" /></div></div>
                     </div>
+                    <!-- Memory Tab -->
                     <div v-show="activeDataZoneTab === 'ltm'" class="flex-1 flex flex-col min-h-0 relative">
-                        <div v-if="isMemorizing" class="absolute inset-0 bg-gray-400/30 dark:bg-gray-900/50 z-10 flex flex-col items-center justify-center">
-                            <IconAnimateSpin class="w-10 h-10 text-gray-800 dark:text-gray-100 animate-spin" />
-                            <p class="mt-3 font-semibold text-gray-800 dark:text-gray-100">Memorizing...</p>
+                        <!-- Processing Overlay -->
+                        <div v-if="isMemorizing" class="absolute inset-0 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
+                            <IconAnimateSpin class="w-12 h-12 text-yellow-500 animate-spin" />
+                            <p class="mt-4 font-semibold text-lg text-gray-800 dark:text-gray-100">Memorizing...</p>
+                            <p class="text-sm text-gray-600 dark:text-gray-400">Creating long-term memory</p>
                         </div>
-                        <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
-                            <div class="flex justify-between items-center">
-                                <div><h3 class="font-semibold flex items-center gap-2"><IconThinking class="w-5 h-5" /> Long-Term Memory (LTM)</h3></div>
-                                <div class="flex items-center gap-1">
-                                    <button @click="handleMemorize" class="btn-icon" title="Memorize Current Discussion"><IconSparkles class="w-5 h-5" :class="{'animate-pulse': isMemorizing}"/></button>
+
+                        <!-- Enhanced Memory Header -->
+                        <div class="enhanced-header">
+                            <div class="flex justify-between items-center mb-3">
+                                <h3 class="header-title">
+                                    <IconThinking class="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
+                                    <span class="bg-gradient-to-r from-yellow-600 to-orange-600 dark:from-yellow-400 dark:to-orange-400 bg-clip-text text-transparent">
+                                        Long-Term Memory
+                                    </span>
+                                </h3>
+                                <button @click="handleMemorize" class="memorize-btn" title="Memorize Current Discussion">
+                                    <IconSparkles class="w-5 h-5" :class="{'animate-pulse': isMemorizing}"/>
+                                    Memorize
+                                </button>
+                            </div>
+                            
+                            <!-- Memory Token Progress -->
+                            <div class="token-progress-container">
+                                <div class="flex justify-between items-center text-xs text-gray-600 dark:text-gray-400 font-mono mb-2">
+                                    <div class="flex items-center gap-2">
+                                        <IconToken class="w-4 h-4 text-yellow-500" />
+                                        <span class="font-semibold">Memory Usage</span>
+                                    </div>
+                                    <span class="font-bold">{{ formatNumber(memoryDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
+                                </div>
+                                
+                                <div class="progress-bar-container">
+                                    <div class="progress-bar-track">
+                                        <div class="progress-bar-fill bg-gradient-to-r from-yellow-400 to-orange-500"
+                                             :style="{ width: `${Math.min(getPercentage(memoryDataZoneTokens), 100)}%` }">
+                                            <div class="progress-bar-shine"></div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="mt-2"><div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono"><span>Tokens</span><span>{{ formatNumber(memoryDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span></div><div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1"><div class="h-1.5 rounded-full bg-yellow-500 transition-width duration-500" :style="{ width: `${getPercentage(memoryDataZoneTokens)}%` }"></div></div></div>
                         </div>
+
                         <div class="flex-grow min-h-0 flex">
-                             <div class="flex-grow flex flex-col min-w-0">
-                                <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
-                                    <h4 class="font-semibold text-sm">Loaded Memory Context</h4>
-                                    <button @click="toggleViewMode('ltm')" class="btn-icon" :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button>
+                            <!-- Memory Context Display -->
+                            <div class="flex-grow flex flex-col min-w-0">
+                                <div class="content-header">
+                                    <h4 class="content-title">Loaded Memory Context</h4>
+                                    <button @click="toggleViewMode('ltm')" class="action-btn-sm" 
+                                            :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'">
+                                        <IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-4 h-4" />
+                                        <IconPencil v-else class="w-4 h-4" />
+                                    </button>
                                 </div>
-                                <div class="flex-grow min-h-0 p-2">
-                                    <CodeMirrorEditor v-if="dataZoneViewModes.ltm === 'edit'" :model-value="memory" class="h-full" :options="{readOnly: true}" />
-                                    <div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="memory" /></div>
+                                
+                                <div class="flex-grow min-h-0 p-3 bg-gray-50 dark:bg-gray-900/50">
+                                    <div class="h-full rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
+                                        <CodeMirrorEditor v-if="dataZoneViewModes.ltm === 'edit'" 
+                                                        :model-value="memory" 
+                                                        class="h-full" 
+                                                        :options="{readOnly: true}" />
+                                        <div v-else class="rendered-prose-container h-full p-4 overflow-y-auto">
+                                            <MessageContentRenderer :content="memory" />
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
 
-                            <div class="w-72 flex-shrink-0 border-l dark:border-gray-600 flex flex-col">
-                                <div class="p-2 border-b dark:border-gray-600 flex-shrink-0 flex items-center justify-between">
-                                    <h4 class="font-semibold text-sm">Memory Bank</h4>
-                                    <div class="flex items-center gap-1">
-                                        <button @click="handleWipeAllMemories" class="btn-icon-danger" title="Unload all memories from context">
-                                            <IconTrash class="w-5 h-5" />
-                                        </button>
-                                        <button @click="handleCreateMemory" class="btn-icon" title="Create New Memory"><IconPlus class="w-5 h-5" /></button>
-                                    </div>
-                                </div>
-                                <div class="p-2 border-b dark:border-gray-600 flex-shrink-0">
-                                    <input type="text" v-model="memorySearchTerm" placeholder="Search memories..." class="input-field-sm w-full" />
-                                </div>
-                                <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="isDraggingFile = false" @drop="handleDrop($event, 'memory')" class="flex-grow overflow-y-auto p-2 space-y-2" :class="{'bg-blue-100 dark:bg-blue-900/20 border-2 border-dashed border-blue-400': isDraggingFile}">
-                                    <div v-if="isLoadingMemories" class="text-center text-xs text-gray-500 pt-4">Loading...</div>
-                                    <div v-else-if="filteredMemories.length === 0" class="text-center text-xs text-gray-500 pt-4">No memories found.</div>
-                                    <div v-else v-for="mem in filteredMemories" :key="mem.id" class="p-1.5 rounded-md" :class="loadedMemoryTitles.has(mem.title) ? 'bg-green-100 dark:bg-green-900/40' : 'bg-gray-100 dark:bg-gray-700/50'">
-                                        <div class="flex items-center justify-between">
-                                            <div class="flex items-center gap-2 min-w-0">
-                                                <IconFileText class="w-4 h-4 text-gray-500 flex-shrink-0" />
-                                                <span class="truncate text-xs font-semibold" :title="mem.title">{{ mem.title }}</span>
-                                            </div>
-                                            <div class="flex items-center gap-1 flex-shrink-0">
-                                                <button @click="handleEditMemory(mem)" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500" title="View & Edit Memory"><IconPencil class="w-3.5 h-3.5" /></button>
-                                                <button @click="handleDeleteMemory(mem.id)" class="p-1 rounded-full hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500" title="Delete Memory"><IconTrash class="w-3.5 h-3.5" /></button>
-                                            </div>
+                            <!-- Memory Bank Sidebar -->
+                            <div class="sidebar-panel">
+                                <div class="sidebar-section">
+                                    <div class="section-header">
+                                        <h4 class="section-title">
+                                            <IconThinking class="w-4 h-4" />
+                                            Memory Bank
+                                        </h4>
+                                        <div class="section-actions">
+                                            <button @click="handleWipeAllMemories" class="action-btn-sm action-btn-danger" title="Unload all memories">
+                                                <IconTrash class="w-4 h-4" />
+                                            </button>
+                                            <button @click="handleCreateMemory" class="action-btn-sm" title="Create New Memory">
+                                                <IconPlus class="w-4 h-4" />
+                                            </button>
                                         </div>
-                                        <div class="flex items-center gap-2 mt-1.5">
-                                            <template v-if="loadedMemoryTitles.has(mem.title)">
-                                                <button @click="handleUnloadMemory(mem.title)" class="btn btn-secondary btn-sm !p-2 flex-grow justify-center" title="Unload from Context">
-                                                    <IconCheckCircle class="w-4 h-4 text-green-600 dark:text-green-400" />
-                                                </button>
-                                            </template>
-                                            <template v-else>
-                                                <button @click="handleLoadMemory(mem.title)" class="btn btn-secondary btn-sm !p-2 flex-grow justify-center" title="Load to Context">
-                                                    <IconArrowDownTray class="w-4 h-4" />
-                                                </button>
-                                            </template>
+                                    </div>
+                                    
+                                    <!-- Memory Search -->
+                                    <div class="px-3 pb-3 border-b dark:border-gray-700">
+                                        <input type="text" v-model="memorySearchTerm" placeholder="Search memories..." 
+                                               class="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500" />
+                                    </div>
+                                    
+                                    <!-- Memory List -->
+                                    <div class="section-content enhanced-drop-zone"
+                                         @dragover="handleDragOver"
+                                         @dragleave="handleDragLeave" 
+                                         @drop="handleDrop($event, 'memory')"
+                                         :class="{ 'drop-active': isDraggingFile }">
+                                        
+                                        <!-- Loading State -->
+                                        <div v-if="isLoadingMemories" class="loading-state">
+                                            <IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" />
+                                            <p class="text-xs text-gray-500">Loading memories...</p>
+                                        </div>
+
+                                        <!-- Empty State -->
+                                        <div v-else-if="filteredMemories.length === 0" class="empty-state">
+                                            <IconThinking class="w-8 h-8 text-gray-400 mx-auto mb-2" />
+                                            <p class="text-xs text-gray-500 mb-3">No memories found</p>
+                                            <button @click="handleCreateMemory" class="empty-state-btn">
+                                                <IconPlus class="w-3 h-3 mr-1" />
+                                                Create Memory
+                                            </button>
+                                        </div>
+                                        
+                                        <!-- Memory Cards -->
+                                        <div v-else class="memories-list">
+                                            <div v-for="mem in filteredMemories" :key="mem.id" class="memory-card">
+                                                <div class="memory-header">
+                                                    <div class="memory-info">
+                                                        <div class="memory-icon" :class="{ 'loaded': loadedMemoryTitles.has(mem.title) }">
+                                                            <IconThinking class="w-4 h-4" />
+                                                        </div>
+                                                        <div class="memory-details">
+                                                            <h5 class="memory-title" :title="mem.title">{{ mem.title }}</h5>
+                                                            <p class="memory-meta">{{ mem.content.length }} chars</p>
+                                                        </div>
+                                                    </div>
+                                                    <div class="memory-actions">
+                                                        <button @click="handleEditMemory(mem)" class="memory-action-btn" title="Edit Memory">
+                                                            <IconPencil class="w-3 h-3" />
+                                                        </button>
+                                                        <button @click="handleDeleteMemory(mem.id)" class="memory-action-btn memory-action-btn-danger" title="Delete Memory">
+                                                            <IconTrash class="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                
+                                                <!-- Memory Preview -->
+                                                <div class="memory-preview">
+                                                    <p class="memory-content">{{ mem.content.substring(0, 100) }}{{ mem.content.length > 100 ? '...' : '' }}</p>
+                                                </div>
+                                                
+                                                <div class="memory-controls">
+                                                    <button v-if="loadedMemoryTitles.has(mem.title)"
+                                                            @click="handleUnloadMemory(mem.title)" 
+                                                            class="memory-load-btn loaded" title="Remove from Context">
+                                                        <IconCheckCircle class="w-3 h-3" />
+                                                        In Context
+                                                    </button>
+                                                    <button v-else
+                                                            @click="handleLoadMemory(mem.title)" 
+                                                            class="memory-load-btn" title="Add to Context">
+                                                        <IconPlus class="w-3 h-3" />
+                                                        Add to Context
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
+
+                    <!-- User and Personality tabs remain similar but with enhanced styling -->
+                    <!-- ... (implement similar enhancements for other tabs) -->
                 </aside>
             </transition>
         </div>
@@ -936,12 +1501,379 @@ async function handleWipeAllMemories() {
 </template>
 
 <style scoped>
-.tab-btn { @apply px-3 py-2 text-sm font-medium border-b-2 transition-colors; }
-.tab-btn.active { @apply border-blue-500 text-blue-600 dark:text-blue-400; }
-.tab-btn:not(.active) { @apply border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-500; }
-.btn-icon { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
-.btn-icon-danger { @apply p-2 rounded-full text-gray-500 dark:text-gray-400 hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-600 dark:hover:text-red-400 transition-colors; }
-.category-header { @apply px-3 py-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 sticky top-0 bg-gray-50 dark:bg-gray-700 z-10; }
-.menu-item { @apply w-full text-left px-3 py-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center; }
-.rendered-prose-container { @apply overflow-y-auto p-2; }
+/* Enhanced Tab Styling */
+.custom-gray-750 {
+    --tw-bg-opacity: 1;
+    background-color: rgb(55 65 81 / var(--tw-bg-opacity)); /* Custom gray-750 equivalent */
+}
+
+.enhanced-header {
+    @apply p-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-gray-800/50;
+    /* Apply custom dark background if needed */
+}
+
+.enhanced-tab-btn:hover {
+    @apply bg-gradient-to-b from-white/70 to-white/50 dark:from-gray-700/50 dark:to-gray-700/30;
+}
+
+.enhanced-tab-btn.active {
+    @apply bg-white dark:bg-gray-800 shadow-lg border-t-2;
+}
+
+.token-badge {
+    @apply px-2 py-1 bg-gradient-to-r from-blue-100 to-blue-200 dark:from-blue-900 dark:to-blue-800 text-blue-700 dark:text-blue-300 text-xs rounded-full font-mono font-medium;
+}
+
+/* Enhanced Headers */
+
+.header-title {
+    @apply font-semibold text-lg flex items-center gap-3;
+}
+
+.action-buttons-group {
+    @apply flex items-center gap-1;
+}
+
+.action-btn {
+    @apply p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-all duration-200 hover:shadow-md;
+}
+
+.action-btn-danger {
+    @apply p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 transition-all duration-200;
+}
+
+.action-btn-sm {
+    @apply p-1.5 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
+}
+
+/* Token Progress Styling */
+.token-progress-container {
+    @apply mt-3;
+}
+
+.progress-bar-container {
+    @apply relative;
+}
+
+.progress-bar-track {
+    @apply w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden shadow-inner relative;
+}
+
+.progress-bar-fill {
+    @apply h-full rounded-full transition-all duration-700 ease-out bg-gradient-to-r relative overflow-hidden;
+}
+
+.progress-bar-shine {
+    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse;
+}
+
+.context-chip {
+    @apply px-2 py-1 rounded-full text-xs font-medium;
+}
+
+/* Content Areas */
+.content-header {
+    @apply p-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between;
+}
+
+.content-title {
+    @apply font-semibold text-sm text-gray-800 dark:text-gray-100;
+}
+
+.content-actions {
+    @apply flex items-center gap-1;
+}
+
+/* Action Bar */
+.action-bar {
+    @apply p-4 border-t border-gray-200 dark:border-gray-700 bg-gradient-to-t from-white via-white to-transparent dark:from-gray-800 dark:via-gray-800;
+}
+
+.enhanced-primary-btn {
+    @apply px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-medium rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none flex items-center gap-2;
+}
+
+.enhanced-secondary-btn {
+    @apply px-4 py-2.5 bg-gradient-to-r from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 dark:from-gray-700 dark:to-gray-600 dark:hover:from-gray-600 dark:hover:to-gray-500 text-gray-700 dark:text-gray-200 font-medium rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition-all duration-200 flex items-center gap-2;
+}
+
+.enhanced-textarea {
+    @apply flex-1 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm resize-none transition-all duration-200;
+}
+
+/* Sidebar Panels */
+.sidebar-panel {
+    @apply w-72 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-800/50;
+}
+
+.sidebar-section {
+    @apply flex-1 flex flex-col min-h-0;
+}
+
+.section-header {
+    @apply p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800;
+}
+
+.section-title {
+    @apply font-semibold text-sm flex items-center gap-2;
+}
+
+.section-actions {
+    @apply flex items-center gap-1;
+}
+
+.section-content {
+    @apply flex-1 overflow-y-auto p-3;
+}
+
+/* Drop Zone Styling */
+.enhanced-drop-zone {
+    @apply relative transition-all duration-300;
+}
+
+.enhanced-drop-zone.drop-active {
+    @apply bg-blue-50 dark:bg-blue-900/20 border-2 border-dashed border-blue-400 rounded-lg;
+}
+
+.drop-overlay {
+    @apply absolute inset-0 bg-blue-50/90 dark:bg-blue-900/30 backdrop-blur-sm flex items-center justify-center z-10 rounded-lg;
+}
+
+.drop-indicator {
+    @apply text-center p-4;
+}
+
+/* Empty States */
+.empty-state {
+    @apply text-center py-8;
+}
+
+.empty-state-btn {
+    @apply px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-md text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center justify-center mx-auto;
+}
+
+.loading-state {
+    @apply text-center py-8;
+}
+
+/* Artefact Cards */
+.artefacts-list {
+    @apply space-y-3;
+}
+
+.artefact-card {
+    @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-all duration-300 border border-gray-200 dark:border-gray-700 overflow-hidden;
+}
+
+.artefact-header {
+    @apply p-3 flex items-center justify-between bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600;
+}
+
+.artefact-info {
+    @apply flex items-center gap-3 min-w-0 flex-1;
+}
+
+.artefact-icon {
+    @apply w-8 h-8 rounded-lg flex items-center justify-center bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400;
+}
+
+.artefact-icon.loaded {
+    @apply bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400;
+}
+
+.artefact-details {
+    @apply min-w-0 flex-1;
+}
+
+.artefact-title {
+    @apply font-semibold text-sm truncate text-gray-800 dark:text-gray-100;
+}
+
+.artefact-meta {
+    @apply text-xs text-gray-500 dark:text-gray-400;
+}
+
+.loaded-indicator {
+    @apply text-green-600 dark:text-green-400 font-medium;
+}
+
+.artefact-actions {
+    @apply flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
+}
+
+.artefact-action-btn {
+    @apply p-1.5 rounded-full hover:bg-white dark:hover:bg-gray-800 text-gray-500 hover:text-blue-600 transition-colors;
+}
+
+.artefact-action-btn-danger {
+    @apply hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600;
+}
+
+.artefact-controls {
+    @apply p-3 flex items-center gap-2 border-t border-gray-100 dark:border-gray-700;
+}
+
+.version-select {
+    @apply flex-1 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-blue-500;
+}
+
+.load-btn {
+    @apply px-3 py-1.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center gap-1 font-medium;
+}
+
+.load-btn.loaded {
+    @apply bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50;
+}
+
+/* Memory Cards */
+.memories-list {
+    @apply space-y-3;
+}
+
+.memory-card {
+    @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-all duration-300 border-l-4 border-gray-300 dark:border-gray-600 overflow-hidden;
+}
+
+.memory-card:has(.memory-icon.loaded) {
+    @apply border-l-yellow-500 bg-yellow-50 dark:bg-yellow-900/10;
+}
+
+.memory-header {
+    @apply p-3 flex items-center justify-between;
+}
+
+.memory-info {
+    @apply flex items-center gap-3 min-w-0 flex-1;
+}
+
+.memory-icon {
+    @apply w-8 h-8 rounded-lg flex items-center justify-center bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400;
+}
+
+.memory-icon.loaded {
+    @apply bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400;
+}
+
+.memory-details {
+    @apply min-w-0 flex-1;
+}
+
+.memory-title {
+    @apply font-semibold text-sm truncate text-gray-800 dark:text-gray-100;
+}
+
+.memory-meta {
+    @apply text-xs text-gray-500 dark:text-gray-400;
+}
+
+.memory-actions {
+    @apply flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
+}
+
+.memory-action-btn {
+    @apply p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 hover:text-blue-600 transition-colors;
+}
+
+.memory-action-btn-danger {
+    @apply hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600;
+}
+
+.memory-preview {
+    @apply px-3 pb-2;
+}
+
+.memory-content {
+    @apply text-xs text-gray-600 dark:text-gray-300 line-clamp-2;
+}
+
+.memory-controls {
+    @apply p-3 border-t border-gray-100 dark:border-gray-700;
+}
+
+.memory-load-btn {
+    @apply w-full px-3 py-1.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center gap-1 justify-center font-medium;
+}
+
+.memory-load-btn.loaded {
+    @apply bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200 dark:hover:bg-yellow-900/50;
+}
+
+.memorize-btn {
+    @apply px-4 py-2 bg-gradient-to-r from-yellow-400 to-orange-500 hover:from-yellow-500 hover:to-orange-600 text-white font-medium rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2;
+}
+
+/* Image Grid */
+.image-grid {
+    @apply grid grid-cols-2 gap-2;
+}
+
+.image-card {
+    @apply relative rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700;
+}
+
+
+.image-thumbnail {
+    @apply w-full h-16 object-cover transition-all duration-300;
+}
+
+/* This is the key fix - make overlay invisible by default and visible on hover */
+.image-overlay {
+    @apply absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-1;
+    /* Ensure it's above the image */
+    z-index: 10;
+}
+
+/* Ensure buttons are visible and interactive */
+.image-overlay button {
+    @apply p-1 bg-white/20 text-white rounded-full hover:bg-white/40 transition-colors;
+    /* Make sure buttons are clickable */
+    pointer-events: auto;
+}
+
+/* Add specific styling for danger buttons */
+.image-overlay .overlay-btn-danger {
+    @apply bg-red-500/80 hover:bg-red-600;
+}
+
+.overlay-btn {
+    @apply p-1 bg-white/20 text-white rounded-full hover:bg-white/40 transition-colors;
+}
+
+.overlay-btn-danger {
+    @apply bg-red-500/80 hover:bg-red-600;
+}
+
+/* Animations */
+.processing-spinner {
+    @apply relative;
+}
+
+.processing-spinner::before {
+    content: '';
+    @apply absolute inset-0 rounded-full border-4 border-blue-200 dark:border-blue-800;
+}
+
+.processing-spinner::after {
+    content: '';
+    @apply absolute inset-0 rounded-full border-4 border-transparent border-t-blue-500 animate-spin;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .sidebar-panel {
+        @apply w-64;
+    }
+    
+    .enhanced-tab-btn {
+        @apply px-2 py-2 text-xs;
+    }
+    
+    .token-badge {
+        @apply px-1 py-0.5 text-xs;
+    }
+}
+
+/* Fix for Image Overlay Hover Effect */
+
+
 </style>
