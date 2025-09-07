@@ -4,6 +4,9 @@
 import traceback
 import json
 from typing import List, Dict, Optional
+import io
+import base64
+from PIL import Image
 
 # Third-Party Imports
 from fastapi import (
@@ -21,7 +24,8 @@ from backend.db.models.db_task import DBTask
 from backend.models import (
     UserAuthDetails, PersonalityPublic, PersonalityCreate,
     PersonalityUpdate, PersonalitySendRequest,
-    GeneratePersonalityFromPromptRequest, TaskInfo
+    GeneratePersonalityFromPromptRequest, TaskInfo,
+    EnhancePromptRequest, GenerateIconRequest
 )
 from backend.session import (
     get_current_active_user,
@@ -31,6 +35,7 @@ from backend.session import (
 )
 from backend.task_manager import task_manager, Task
 from backend.settings import settings
+from ascii_colors import trace_exception
 
 personalities_router = APIRouter(prefix="/api/personalities", tags=["Personalities"])
 
@@ -89,6 +94,9 @@ Your task is to create a new personality based on the user's prompt."""
         task.log("Creating new personality in the database...")
         task.set_progress(90)
 
+        # FIX: Ensure newly generated personalities do not have pre-selected MCPs
+        generated_data_dict['active_mcps'] = []
+        
         existing_personality = db_session.query(DBPersonality).filter(
             DBPersonality.owner_user_id == current_user.id,
             DBPersonality.name == generated_data_dict.get("name")
@@ -147,17 +155,47 @@ You return the JSON without any comments or placeholders."""
     task.set_progress(100)
     return generated_data_dict
 
+@personalities_router.post("/generate_icon", response_model=Dict[str, str])
+async def generate_personality_icon(
+    payload: GenerateIconRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+):
+    try:
+        lc = get_user_lollms_client(current_user.username)
+        if not lc.tti:
+            raise HTTPException(status_code=400, detail="Text-to-Image service is not configured for this user.")
+
+        files = lc.tti.generate_image(payload.prompt, width=512, height=512)
+        if not files or len(files) == 0:
+            raise HTTPException(status_code=500, detail="Image generation failed or returned no files.")
+        
+        image_path = files[0]
+        
+        with Image.open(image_path) as img:
+            img.thumbnail((128, 128))
+            buffered = io.BytesIO()
+            img.save(buffered, format="PNG")
+            base64_string = base64.b64encode(buffered.getvalue()).decode("utf-8")
+            
+        return {"icon_base64": f"data:image/png;base64,{base64_string}"}
+
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- Personality Generation from Prompt Endpoint ---
 @personalities_router.post("/generate_from_prompt", response_model=TaskInfo, status_code=202)
 async def generate_personality_from_prompt(
     payload: GeneratePersonalityFromPromptRequest,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
+    prompt = payload.prompt
+    
     db_task = task_manager.submit_task(
         name="Generate Personality from Prompt",
         target=_generate_personality_task,
-        args=(current_user.username, payload.prompt),
-        description=f"Generating personality from prompt: '{payload.prompt[:50]}...'",
+        args=(current_user.username, prompt),
+        description=f"Generating personality from prompt: '{prompt[:50]}...'",
         owner_username=current_user.username
     )
     return _to_task_info(db_task)
@@ -165,11 +203,11 @@ async def generate_personality_from_prompt(
 # --- Prompt Enhancement Endpoint ---
 @personalities_router.post("/enhance_prompt", response_model=TaskInfo, status_code=202)
 async def enhance_personality_prompt(
-    payload: Dict[str, str],
+    payload: EnhancePromptRequest,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    prompt_text = payload.get("prompt_text")
-    custom_instruction = payload.get("modification_prompt")
+    prompt_text = payload.prompt_text
+    custom_instruction = payload.modification_prompt
 
     if not prompt_text:
         raise HTTPException(status_code=400, detail="Prompt text is required for enhancement.")
@@ -211,12 +249,7 @@ async def create_personality(personality_data: PersonalityCreate, current_user: 
     
     # --- NEW, more robust authorization checks ---
     if not current_user.is_admin:
-        if personality_data.owner_type == 'system':
-            raise HTTPException(status_code=403, detail="Only administrators may create system personalities.")
-        if personality_data.is_public:
-            raise HTTPException(status_code=403, detail="Only administrators can create public personalities.")
-        
-        # For non-admins, force ownership and privacy
+        # For non-admins, always force ownership and privacy, ignoring any passed-in values.
         owner_id = db_user.id
         is_public = False
     else: # User is an admin
@@ -296,12 +329,19 @@ async def update_personality(personality_id: str, personality_data: PersonalityU
     if not is_owner and not current_user.is_admin:
         raise HTTPException(status_code=403, detail="You do not have permission to update this personality.")
     
-    if personality_data.is_public is not None:
-        if not current_user.is_admin:
-            raise HTTPException(status_code=403, detail="Only administrators can change the public status of a personality.")
-        db_personality.is_public = personality_data.is_public
-    
-    update_data = personality_data.model_dump(exclude_unset=True, exclude={"is_public"})
+    update_data = personality_data.model_dump(exclude_unset=True)
+
+    # Securely handle changes to the 'is_public' flag
+    if 'is_public' in update_data:
+        # Check if the user is attempting to CHANGE the public status
+        if update_data['is_public'] != db_personality.is_public:
+            if not current_user.is_admin:
+                raise HTTPException(status_code=403, detail="Only administrators can change the public status of a personality.")
+            # If admin, allow the change
+            db_personality.is_public = update_data['is_public']
+        # If the status is not being changed, we don't need to do anything.
+        # This allows a non-admin to save their private personality without error.
+        del update_data['is_public'] # Remove from dict to avoid reprocessing
 
     if "name" in update_data and update_data["name"] != db_personality.name:
         owner_id_for_check = db_personality.owner_user_id

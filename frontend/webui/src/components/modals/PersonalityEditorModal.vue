@@ -28,6 +28,7 @@ const form = ref(getInitialFormState());
 const fileInput = ref(null);
 const staticTextInputRef = ref(null);
 const isLoading = ref(false);
+const isLoadingIcon = ref(false);
 const formIconLoadFailed = ref(false);
 
 watch(() => form.value.icon_base64, () => {
@@ -46,6 +47,14 @@ onMounted(() => {
     if(dataStore.availableRagStores.length === 0) dataStore.fetchDataStores();
     if(dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools();
 });
+
+// FIX: Reset data_source when data_source_type changes
+watch(() => form.value.data_source_type, (newType, oldType) => {
+    if (newType !== oldType) {
+        form.value.data_source = null;
+    }
+});
+
 
 async function handleSubmit() {
     isLoading.value = true;
@@ -72,6 +81,19 @@ function handleEnhancePrompt() {
             form.value.prompt_text = enhancedPrompt;
         }
     });
+}
+
+async function handleGenerateIcon() {
+    isLoadingIcon.value = true;
+    try {
+        const prompt = form.value.name || form.value.description;
+        const generatedIcon = await dataStore.generatePersonalityIcon(prompt);
+        if (generatedIcon) {
+            form.value.icon_base64 = generatedIcon;
+        }
+    } finally {
+        isLoadingIcon.value = false;
+    }
 }
 
 function triggerFileInput() {
@@ -144,7 +166,13 @@ function handleStaticTextFileSelect(event) {
               <img v-if="form.icon_base64 && !formIconLoadFailed" :src="form.icon_base64" @error="formIconLoadFailed = true" alt="Icon Preview" class="h-full w-full object-cover">
               <svg v-else class="w-16 h-16 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
             </div>
-            <button @click="triggerFileInput" type="button" class="btn btn-secondary text-sm">Upload Icon</button>
+            <div class="flex gap-2">
+                <button @click="triggerFileInput" type="button" class="btn btn-secondary btn-sm">Upload</button>
+                <button @click="handleGenerateIcon" type="button" class="btn btn-secondary btn-sm" :disabled="isLoadingIcon">
+                    <svg v-if="isLoadingIcon" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span v-else>Generate</span>
+                </button>
+            </div>
             <input type="file" ref="fileInput" @change="handleFileSelect" class="hidden" accept="image/png, image/jpeg, image/gif, image/webp, image/svg+xml">
           </div>
 

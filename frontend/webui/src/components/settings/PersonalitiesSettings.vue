@@ -13,7 +13,6 @@ const uiStore = useUiStore();
 const { user } = storeToRefs(authStore);
 const { userPersonalities, publicPersonalities } = storeToRefs(dataStore);
 
-// Define a key for localStorage
 const STARRED_LOCALSTORAGE_KEY = 'lollms-starred-personalities';
 
 const activePersonalityId = ref('');
@@ -27,15 +26,11 @@ const allPersonalities = computed(() => [...userPersonalities.value, ...publicPe
 const allCategories = computed(() => {
     const categories = new Set(['All', 'Starred']);
     allPersonalities.value.forEach(p => {
-        if (p.category) {
-            categories.add(p.category);
-        }
+        if (p.category) categories.add(p.category);
     });
     return Array.from(categories).sort((a, b) => {
-        if (a === 'All') return -1;
-        if (b === 'All') return 1;
-        if (a === 'Starred') return -1;
-        if (b === 'Starred') return 1;
+        if (a === 'All') return -1; if (b === 'All') return 1;
+        if (a === 'Starred') return -1; if (b === 'Starred') return 1;
         return a.localeCompare(b);
     });
 });
@@ -62,66 +57,53 @@ const filteredList = computed(() => {
 const filteredUserPersonalities = computed(() => filteredList.value.filter(p => !p.is_public && p.owner_username !== 'System'));
 const filteredPublicPersonalities = computed(() => filteredList.value.filter(p => p.is_public || p.owner_username === 'System'));
 
+const isShared = (personality) => {
+    return personality.author && personality.author.startsWith('Sent by ');
+};
+
+const getSharedByUsername = (personality) => {
+    if (isShared(personality)) {
+        return personality.author.replace('Sent by ', '').trim();
+    }
+    return '';
+};
+
 onMounted(() => {
     dataStore.fetchPersonalities();
-
-    // Load starred IDs from localStorage
     try {
         const storedStarred = localStorage.getItem(STARRED_LOCALSTORAGE_KEY);
-        if (storedStarred) {
-            starredPersonalityIds.value = new Set(JSON.parse(storedStarred));
-        }
+        if (storedStarred) starredPersonalityIds.value = new Set(JSON.parse(storedStarred));
     } catch (e) {
         console.error("Failed to load starred personalities from localStorage:", e);
         starredPersonalityIds.value = new Set();
     }
-    
-    // Load other preferences from user object (backend)
     if (user.value) {
         activePersonalityId.value = user.value.active_personality_id || '';
         selectedCategory.value = user.value.personalities_view_category || 'All';
     }
 });
 
-// Watchers for backend-driven state
-watch(() => user.value?.active_personality_id, (newId) => {
-    activePersonalityId.value = newId || '';
-});
+watch(() => user.value?.active_personality_id, (newId) => { activePersonalityId.value = newId || ''; });
+watch(() => user.value?.personalities_view_category, (newCategory) => { selectedCategory.value = newCategory || 'All'; });
 
-watch(() => user.value?.personalities_view_category, (newCategory) => {
-    selectedCategory.value = newCategory || 'All';
-});
-
-// Watcher for local state to save to backend
 watch(selectedCategory, (newCategory) => {
     if (user.value && newCategory !== (user.value.personalities_view_category || 'All')) {
         authStore.updateUserPreferences({ personalities_view_category: newCategory });
     }
 });
 
-// --- MODIFIED STARRING LOGIC ---
 async function handleToggleStar(personality) {
     const newStarredSet = new Set(starredPersonalityIds.value);
-    if (newStarredSet.has(personality.id)) {
-        newStarredSet.delete(personality.id);
-    } else {
-        newStarredSet.add(personality.id);
-    }
-
-    // Optimistically update the UI
+    if (newStarredSet.has(personality.id)) newStarredSet.delete(personality.id);
+    else newStarredSet.add(personality.id);
     starredPersonalityIds.value = newStarredSet;
-
-    // Persist the change to localStorage
     try {
-        const idsToStore = Array.from(newStarredSet);
-        localStorage.setItem(STARRED_LOCALSTORAGE_KEY, JSON.stringify(idsToStore));
+        localStorage.setItem(STARRED_LOCALSTORAGE_KEY, JSON.stringify(Array.from(newStarredSet)));
     } catch (error) {
-        console.error("Failed to save starred personalities to localStorage:", error);
+        console.error("Failed to save starred personalities:", error);
         uiStore.showToast({ message: 'Could not save favorite status.', type: 'error' });
-        // Optional: revert UI on failure, though localStorage failures are rare.
     }
 }
-
 
 async function handleSelectPersonality(personality) {
     if (savingPersonalityId.value) return;
@@ -129,12 +111,9 @@ async function handleSelectPersonality(personality) {
         await handleDeselectAll();
         return;
     }
-    
     savingPersonalityId.value = personality.id;
     try {
         await authStore.updateUserPreferences({ active_personality_id: personality.id });
-    } catch (error) {
-        // Handled by interceptor
     } finally {
         savingPersonalityId.value = null;
     }
@@ -142,12 +121,9 @@ async function handleSelectPersonality(personality) {
 
 async function handleDeselectAll() {
     if (!activePersonalityId.value || savingPersonalityId.value) return;
-    
     savingPersonalityId.value = activePersonalityId.value;
     try {
         await authStore.updateUserPreferences({ active_personality_id: null });
-    } catch (error) {
-        // Handled by interceptor
     } finally {
         savingPersonalityId.value = null;
     }
@@ -157,28 +133,20 @@ function openEditor(personality = null) {
     let personalityData;
     if (personality) {
         personalityData = { ...personality };
-        // If it's a public/system one AND the user is NOT an admin, we are cloning it.
         if ((personality.is_public || personality.owner_username === 'System') && !authStore.user.is_admin) {
             personalityData.id = null;
-            personalityData.is_public = false; // Cloned personalities are private by default
+            personalityData.is_public = false;
             personalityData.owner_type = 'user';
         }
     } else {
-        // This is a brand new, blank personality
-        personalityData = { 
-            id: null, name: '', category: '', description: '', 
-            prompt_text: '', is_public: false, icon_base64: null 
-        };
+        personalityData = { id: null, name: '', category: '', description: '', prompt_text: '', is_public: false, icon_base64: null };
     }
     uiStore.openModal('personalityEditor', { personality: personalityData });
 }
 
-
-// NEW: Function to open the Generate Personality modal
 function openGeneratePersonalityModal() {
     uiStore.openModal('generatePersonality');
 }
-
 
 async function handleDeletePersonality(personality) {
     const confirmed = await uiStore.showConfirmation({
@@ -187,24 +155,17 @@ async function handleDeletePersonality(personality) {
         confirmText: 'Delete'
     });
     if (confirmed) {
-        if (activePersonalityId.value === personality.id) {
-            await handleDeselectAll();
-        }
-        // Also remove from starred list if it's there
-        if (starredPersonalityIds.value.has(personality.id)) {
-            handleToggleStar(personality);
-        }
+        if (activePersonalityId.value === personality.id) await handleDeselectAll();
+        if (starredPersonalityIds.value.has(personality.id)) handleToggleStar(personality);
         await dataStore.deletePersonality(personality.id);
     }
 }
 
 async function handleShare(personality) {
-    try {
-        await navigator.clipboard.writeText(JSON.stringify(personality, null, 2));
-        uiStore.showToast({ message: `${personality.name} copied to clipboard!`, type: 'success' });
-    } catch (err) {
-        uiStore.showToast({ message: 'Failed to copy to clipboard.', type: 'error' });
-    }
+    uiStore.openModal('sharePersonality', {
+        personalityId: personality.id,
+        title: personality.name
+    });
 }
 </script>
 
@@ -238,7 +199,6 @@ async function handleShare(personality) {
         </div>
 
         <div class="space-y-10">
-            <!-- Starred View -->
             <div v-if="selectedCategory === 'Starred'">
                 <h5 class="text-md font-semibold mb-4">Starred Personalities</h5>
                 <div v-if="filteredList.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -250,6 +210,8 @@ async function handleShare(personality) {
                         :is-active="p.id === activePersonalityId"
                         :is-saving="p.id === savingPersonalityId"
                         :is-starred="starredPersonalityIds.has(p.id)"
+                        :is-shared="isShared(p)"
+                        :shared-by="getSharedByUsername(p)"
                         @select="handleSelectPersonality($event)"
                         @toggle-star="handleToggleStar($event)"
                         @clone="openEditor($event)"
@@ -263,7 +225,6 @@ async function handleShare(personality) {
                 </p>
             </div>
             
-            <!-- Default View (Categorized) -->
             <template v-else>
                 <div>
                     <h5 class="text-md font-semibold mb-4">Your Personalities</h5>
@@ -271,7 +232,7 @@ async function handleShare(personality) {
                         <div
                             @click="handleDeselectAll"
                             class="flex flex-col items-center justify-center h-full min-h-[160px] bg-white dark:bg-gray-800 border-2 border-dashed dark:border-gray-600 rounded-lg p-4 transition-all hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer"
-                            :class="{ '!border-solid ring-2 ring-offset-2 ring-blue-500 dark:ring-offset-gray-900 !border-blue-500': !activePersonalityId }"
+                            :class="{ '!border-solid ring-2 ring-offset-2 ring-green-500 dark:ring-offset-gray-900 !border-green-500': !activePersonalityId }"
                         >
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                               <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
@@ -288,6 +249,8 @@ async function handleShare(personality) {
                             :is-active="p.id === activePersonalityId"
                             :is-saving="p.id === savingPersonalityId"
                             :is-starred="starredPersonalityIds.has(p.id)"
+                            :is-shared="isShared(p)"
+                            :shared-by="getSharedByUsername(p)"
                             @select="handleSelectPersonality($event)"
                             @toggle-star="handleToggleStar($event)"
                             @edit="openEditor($event)"
@@ -314,6 +277,8 @@ async function handleShare(personality) {
                             :is-active="p.id === activePersonalityId"
                             :is-saving="p.id === savingPersonalityId"
                             :is-starred="starredPersonalityIds.has(p.id)"
+                            :is-shared="isShared(p)"
+                            :shared-by="getSharedByUsername(p)"
                             @select="handleSelectPersonality($event)"
                             @toggle-star="handleToggleStar($event)"
                             @clone="openEditor($event)"

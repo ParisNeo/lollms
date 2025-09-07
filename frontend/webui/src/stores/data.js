@@ -390,7 +390,11 @@ export const useDataStore = defineStore('data', () => {
         }
         
         const response = await apiClient.post('/api/personalities', personalityData);
-        userPersonalities.value.unshift(response.data);
+        if (response.data.owner_username === 'System') {
+            publicPersonalities.value.unshift(response.data);
+        } else {
+            userPersonalities.value.unshift(response.data);
+        }
         useUiStore().addNotification('Personality created successfully.', 'success');
     }
     async function updatePersonality(personalityData) {
@@ -417,6 +421,22 @@ export const useDataStore = defineStore('data', () => {
         const response = await apiClient.post('/api/personalities/enhance_prompt', { prompt_text, modification_prompt });
         tasksStore.addTask(response.data);
         return { task_id: response.data.id, message: 'Task started.' };
+    }
+
+    async function generatePersonalityIcon(prompt) {
+        const uiStore = useUiStore();
+        if (!prompt || !prompt.trim()) {
+            uiStore.addNotification('A prompt is needed to generate an icon.', 'warning');
+            return null;
+        }
+        try {
+            const response = await apiClient.post('/api/personalities/generate_icon', { prompt });
+            uiStore.addNotification('Icon generated successfully!', 'success');
+            return response.data.icon_base64;
+        } catch (error) {
+            // Error is handled by global interceptor
+            return null;
+        }
     }
     async function triggerMcpReload() {
         const uiStore = useUiStore();
@@ -519,6 +539,19 @@ export const useDataStore = defineStore('data', () => {
             uiStore.addNotification('Failed to refresh RAG stores.', 'error');
         }
     }
+
+
+    async function sendPersonality({ personalityId, targetUsername }) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post(`/api/personalities/${personalityId}/send`, { target_username: targetUsername });
+            uiStore.addNotification(response.data.message || `Personality sent to ${targetUsername}!`, 'success');
+            uiStore.closeModal('sharePersonality');
+        } catch (error) {
+            // Handled globally
+        }
+    }
+
     function $reset() {
         availableLollmsModels.value = [];
         availableTtiModels.value = []; // NEW
@@ -553,10 +586,12 @@ export const useDataStore = defineStore('data', () => {
         fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,
         deleteFileFromStore, fetchPersonalities, addPersonality,
         updatePersonality, deletePersonality, generatePersonalityFromPrompt, enhancePersonalityPrompt,
+        generatePersonalityIcon,
         fetchMcps, addMcp, updateMcp, deleteMcp,
         fetchMcpTools, triggerMcpReload,
         refreshMcps, refreshRags,
         fetchApps, addApp, updateApp, deleteApp,
+        sendPersonality,
         
         apiKeys,
         fetchApiKeys, 

@@ -9,6 +9,7 @@ import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
 import AppCard from '../../ui/AppCard.vue';
 import AppCardSkeleton from '../../ui/AppCardSkeleton.vue';
+import IconPlus from '../../../assets/icons/IconPlus.vue';
 
 const adminStore = useAdminStore();
 const tasksStore = useTasksStore();
@@ -119,6 +120,14 @@ async function handleUninstallItem(personality) {
 }
 async function showItemHelp(item) { const readme = await adminStore.fetchPersonalityReadme(item.repository, item.folder_name); uiStore.openModal('sourceViewer', { title: `README: ${item.name}`, content: readme, language: 'markdown' }); }
 function handleStarToggle(itemName) { const i = starredItems.value.indexOf(itemName); if (i > -1) starredItems.value.splice(i, 1); else starredItems.value.push(itemName); }
+
+// NEW: Handlers for creating personalities from admin view
+function openEditor(personality = null) {
+    uiStore.openModal('personalityEditor', { personality });
+}
+function openGeneratePersonalityModal() {
+    uiStore.openModal('generatePersonality');
+}
 </script>
 
 <style scoped>
@@ -138,7 +147,13 @@ function handleStarToggle(itemName) { const i = starredItems.value.indexOf(itemN
         </div>
 
         <section v-if="activeSubTab === 'zoo'">
-            <h3 class="text-xl font-semibold mb-4">Personality Zoo</h3>
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold">Personality Zoo</h3>
+                <div class="flex gap-2">
+                    <button @click="openGeneratePersonalityModal" class="btn btn-secondary">Generate from Prompt</button>
+                    <button @click="openEditor()" class="btn btn-primary"><IconPlus class="w-4 h-4 mr-1"/> Create New</button>
+                </div>
+            </div>
             <div class="space-y-4">
                 <div class="grid grid-cols-1 lg:grid-cols-4 gap-4">
                     <div class="relative lg:col-span-1"><input v-model="searchQuery" type="text" placeholder="Search Personalities..." class="input-field w-full pl-10" /><div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div></div>

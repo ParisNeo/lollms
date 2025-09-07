@@ -1,7 +1,8 @@
 from pydantic import BaseModel, constr
 from typing import Optional
+
 class GeneratePersonalityFromPromptRequest(BaseModel):
-    prompt: constr(min_length=10)
+    prompt: str
     
 class EnhancePromptRequest(BaseModel):
     prompt_text: str
@@ -9,3 +10,6 @@ class EnhancePromptRequest(BaseModel):
 
 class EnhancePromptResponse(BaseModel):
     enhanced_prompt: str
+
+class GenerateIconRequest(BaseModel):
+    prompt: str
