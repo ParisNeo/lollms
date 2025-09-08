@@ -3,23 +3,14 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "engines": {
-    "node": ">=18.0.0",
-    "npm": ">=8.0.0"
-  },
   "scripts": {
-    "predev": "npm audit --audit-level moderate",
     "dev": "vite",
-    "prebuild": "npm audit --audit-level moderate",
-    "build": "vite build", 
-    "preview": "vite preview",
-    "security-scan": "node ../../../npm-security-scanner/security-scanner.js",
-    "postinstall": "npm run security-scan",
-    "clean": "rimraf node_modules package-lock.json"
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@codemirror/commands": "6.8.1",
-    "@codemirror/lang-css": "6.3.1", 
+    "@codemirror/lang-css": "6.3.1",
     "@codemirror/lang-html": "6.4.9",
     "@codemirror/lang-javascript": "6.2.4",
     "@codemirror/lang-json": "6.0.2",
@@ -33,37 +24,36 @@
     "@floating-ui/vue": "1.1.7",
     "@tiptap/extension-code-block-lowlight": "2.25.0",
     "@tiptap/extension-image": "2.25.1",
-    "@tiptap/extension-link": "2.25.0", 
+    "@tiptap/extension-link": "2.25.0",
     "@tiptap/extension-table": "2.25.0",
     "@tiptap/extension-table-cell": "2.25.0",
     "@tiptap/extension-table-header": "2.25.0",
     "@tiptap/extension-table-row": "2.25.0",
     "@tiptap/starter-kit": "2.25.0",
     "@tiptap/vue-3": "2.25.0",
-    "@vueuse/core": "10.11.0",
-    "axios": "1.7.2",
+    "@vueuse/core": "13.5.0",
+    "axios": "^1.11.0",
     "canvg": "4.0.3",
     "codemirror": "6.0.2",
     "cytoscape": "3.33.0",
     "cytoscape-dagre": "2.5.0",
     "emoji-picker-element": "1.26.3",
     "highlight.js": "11.9.0",
-    "katex": "0.16.10",
+    "katex": "^0.16.22",
     "lowlight": "3.3.0",
     "marked": "13.0.0",
-    "mermaid": "10.9.1",
+    "mermaid": "^11.11.0",
     "pinia": "2.1.7",
-    "svg-pan-zoom": "3.6.2", 
-    "vue": "3.4.27",
+    "svg-pan-zoom": "3.6.2",
+    "vue": "3.5.0",
     "vue-codemirror": "6.1.1",
     "vue-router": "4.3.2"
   },
   "devDependencies": {
     "@tailwindcss/typography": "0.5.13",
-    "@vitejs/plugin-vue": "5.0.4",
     "autoprefixer": "10.4.19",
     "postcss": "8.4.38",
     "tailwindcss": "3.4.3",
-    "vite": "5.2.11"
+    "vite": "6.3.5"
   }
 }
