@@ -31,6 +31,7 @@
     "@tiptap/extension-table-row": "2.25.0",
     "@tiptap/starter-kit": "2.25.0",
     "@tiptap/vue-3": "2.25.0",
+    "@vitejs/plugin-vue": "^5.2.4",
     "@vueuse/core": "13.5.0",
     "axios": "^1.11.0",
     "canvg": "4.0.3",
