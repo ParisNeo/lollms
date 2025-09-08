@@ -137,3 +137,6 @@ new ui:
 
 # URGENT:
 Use REDIS instead of the polling mechanism
+user folders should move to a sub folder
+organize the discussion elements from recent to older with optional change of organization
+Add discussion groups
