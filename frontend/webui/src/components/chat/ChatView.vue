@@ -1035,7 +1035,8 @@ async function handleWipeAllMemories() {
                      :style="isDataZoneExpanded ? {} : { width: `${dataZoneWidth}px` }">
                     
                     <!-- Enhanced Data Zone Sidebar -->
-                    <aside class="h-full flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl">
+                    <aside 
+                       class="h-full flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl">
                         
                         <!-- Tab Navigation -->
                         <div class="flex-shrink-0 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
@@ -1085,18 +1086,6 @@ async function handleWipeAllMemories() {
                                 <div class="flex-grow flex min-h-0">
                                     <!-- Left side (Editor) -->
                                     <div class="flex-grow flex flex-col min-h-0 p-2">
-                                        <div class="flex-shrink-0 p-1 border bg-gray-50 dark:bg-gray-900/50 dark:border-gray-700 rounded-t-md flex items-center space-x-1">
-                                            <ToolbarButton @click="applyMarkdown('**', '**', 'bold text')" icon-collection="ui" icon-name="IconBold" tooltip="Bold" />
-                                            <ToolbarButton @click="applyMarkdown('*', '*', 'italic text')" icon-collection="ui" icon-name="IconItalic" tooltip="Italic" />
-                                            <ToolbarButton @click="applyMarkdown('[', '](url)', 'link text')" icon-collection="ui" icon-name="IconLink" tooltip="Link" />
-                                            <div class="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1"></div>
-                                            <ToolbarButton @click="applyMarkdown('# ', '', 'Heading 1')" icon-collection="ui" icon-name="IconType" tooltip="Heading 1" />
-                                            <ToolbarButton @click="applyMarkdown('## ', '', 'Heading 2')" icon-collection="ui" icon-name="IconHash" tooltip="Heading 2" />
-                                            <ToolbarButton @click="applyMarkdown('* ', '', 'List item')" icon-collection="ui" icon-name="IconList" tooltip="Bulleted List" />
-                                            <ToolbarButton @click="applyMarkdown('> ', '', 'Quote')" icon-collection="ui" icon-name="IconBlockquote" tooltip="Blockquote" />
-                                            <ToolbarButton @click="applyMarkdown('```\n', '\n```', 'code')" icon-collection="ui" icon-name="IconCode" tooltip="Code Block" />
-                                            <ToolbarButton @click="applyMarkdown('$$', '$$', '\\sum_{i=1}^n x_i')" icon-collection="ui" icon-name="IconSigma" tooltip="LaTeX Block" />
-                                        </div>
                                         <div class="flex-grow min-h-0 border-x border-b dark:border-gray-700 rounded-b-md overflow-hidden">
                                             <CodeMirrorEditor ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" :options="discussionEditorOptions" />
                                         </div>
@@ -1120,10 +1109,21 @@ async function handleWipeAllMemories() {
                                                 <h4 class="text-sm font-semibold flex items-center gap-2"><IconFileText class="w-4 h-4" /> Artefacts</h4>
                                                 <div class="flex items-center gap-1">
                                                     <button @click="handleCreateArtefact" class="action-btn-sm" title="Create Artefact"><IconPlus class="w-4 h-4" /></button>
-                                                    <button @click="showUrlImport = !showUrlImport" class="action-btn-sm" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
+                                                    <button @click="showUrlImport = !showUrlImport" class="action-btn-sm" :class="{'bg-gray-200 dark:bg-gray-700': showUrlImport}" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
                                                     <button @click="triggerArtefactFileUpload" class="action-btn-sm" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 animate-spin" /><IconArrowUpTray v-else class="w-4 h-4" /></button>
                                                 </div>
                                             </div>
+                                            <transition enter-active-class="transition ease-out duration-200" enter-from-class="transform opacity-0 -translate-y-2" enter-to-class="transform opacity-100 translate-y-0" leave-active-class="transition ease-in duration-150" leave-from-class="transform opacity-100 translate-y-0" leave-to-class="transform opacity-0 -translate-y-2">
+                                                <div v-if="showUrlImport" class="mb-2 p-2 bg-gray-50 dark:bg-gray-800/50 rounded-md border dark:border-gray-700">
+                                                    <div class="flex items-center gap-2">
+                                                        <input v-model="urlToImport" type="text" placeholder="https://..." class="input-field-sm flex-grow" @keydown.enter.prevent="handleImportArtefactFromUrl">
+                                                        <button @click="handleImportArtefactFromUrl" class="btn btn-secondary btn-sm" :disabled="!urlToImport.trim() || isProcessing">
+                                                            <IconAnimateSpin v-if="isProcessing" class="w-4 h-4 animate-spin" />
+                                                            <span v-else>Import</span>
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                            </transition>
                                             <div class="flex-grow min-h-0 overflow-y-auto">
                                                 <div v-if="isLoadingArtefacts" class="loading-state"><IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" /><p class="text-xs text-gray-500">Loading...</p></div>
                                                 <div v-else-if="groupedArtefacts.length === 0" class="flex flex-col items-center justify-center h-full text-center p-4 bg-gray-50 dark:bg-gray-800/50 rounded">
@@ -1270,7 +1270,7 @@ async function handleWipeAllMemories() {
                     </aside>
 
                     <!-- Generation Overlay -->
-                    <div v-if="generationInProgress" class="absolute inset-0 bg-white/75 dark:bg-gray-800/75 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
+                    <div v-if="generationInProgress" class="absolute inset-0 bg-white/75 dark:bg-gray-800/75 backdrop-blur-sm z-50 flex flex-col items-center justify-center">
                         <IconAnimateSpin class="w-10 h-10 text-blue-500 animate-spin" />
                         <p class="mt-4 text-sm font-semibold text-gray-700 dark:text-gray-200">Generating...</p>
                     </div>
