@@ -71,6 +71,7 @@ const route = useRoute();
 const activeModal = computed(() => uiStore.activeModal);
 const isAuthenticating = computed(() => authStore.isAuthenticating);
 const isAuthenticated = computed(() => authStore.isAuthenticated);
+const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 
 // Enhanced branding from second version
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
@@ -120,7 +121,14 @@ const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
 onMounted(async () => {
     uiStore.initializeTheme();
     await authStore.attemptInitialAuth();
+    
+    // Initialize sidebar state, ensuring it's closed by default on first visit.
+    const isFirstVisit = !localStorage.getItem('sidebarOpen');
     uiStore.initializeSidebarState();
+    if (isFirstVisit && window.innerWidth > 768) { // Only affect desktop
+        uiStore.closeSidebar();
+    }
+
     if (isAuthenticated.value) {
         pyodideStore.initialize();
         tasksStore.fetchTasks(); // Fetch initial tasks, WebSocket will handle updates
@@ -135,12 +143,12 @@ onMounted(async () => {
     <div v-if="layoutState === 'loading'" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
         <div class="w-full max-w-lg mx-auto">
             <div class="flex justify-center mb-6">
-                <img :src="logoSrc" alt="Logo" class="h-28 w-auto object-contain" />
+                <img :src="logoSrc" alt="Logo" class="h-24 sm:h-28 w-auto object-contain" />
             </div>
-            <h1 class="text-6xl md:text-7xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">
+            <h1 class="text-5xl sm:text-6xl md:text-7xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">
                 {{ authStore.welcomeText || 'LoLLMs' }}
             </h1>
-            <p class="mt-2 text-xl md:text-2xl text-gray-600 dark:text-gray-300">
+            <p class="mt-2 text-lg sm:text-xl md:text-2xl text-gray-600 dark:text-gray-300">
                 {{ authStore.welcomeSlogan || 'One tool to rule them all' }}
             </p>
             <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">by ParisNeo</p>
@@ -163,8 +171,14 @@ onMounted(async () => {
 
     <!-- Authenticated App Layout -->
     <div v-else-if="layoutState === 'authenticated'" class="flex flex-col flex-grow min-h-0">
-      <div class="flex flex-grow min-h-0">
-        <Sidebar v-if="isHomePageLayout" />
+      <div class="flex flex-grow min-h-0 relative">
+        <div v-if="isHomePageLayout" 
+             class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out"
+             :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
+            <Sidebar/>
+        </div>
+        <div v-if="isHomePageLayout && isSidebarOpen" @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/30 z-30 md:hidden"></div>
+
         <div class="flex-1 flex flex-col overflow-hidden">
           <GlobalHeader />
           <main class="flex-1 overflow-hidden">

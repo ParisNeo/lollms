@@ -301,6 +301,9 @@ def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
                     base64_img = item["image_url"].get("base64")
                     if base64_img:
                         image_list.append(base64_img)
+                    url_img = item["image_url"].get("url")
+                    if url_img:
+                        image_list.append(url_img)
                 elif item.get("type") == "text":
                     text_parts.append(item.get("text", ""))
                 else:

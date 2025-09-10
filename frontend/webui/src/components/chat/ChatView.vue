@@ -19,6 +19,7 @@ import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import DropdownMenu from '../ui/DropdownMenu.vue';
 import DropdownSubmenu from '../ui/DropdownSubmenu.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer.vue';
+import ToolbarButton from '../ui/ToolbarButton.vue';
 
 // Asset & Icon Imports
 import IconDataZone from '../../assets/icons/IconDataZone.vue';
@@ -722,6 +723,7 @@ watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
 
 // Lifecycle
 onMounted(() => {
+    promptsStore.fetchPrompts(); // FIXED: Fetch prompts on mount
     const savedWidth = localStorage.getItem('lollms_dataZoneWidth');
     if (savedWidth) dataZoneWidth.value = parseInt(savedWidth, 10);
     setupHistory(userHistory, userHistoryIndex, userDataZone.value);
@@ -886,6 +888,29 @@ function isImageActive(index) {
            discussionActiveImages.value[index];
 }
 
+function applyMarkdown(before, after = '', placeholder = 'text') {
+    const view = discussionCodeMirrorEditor.value?.editorView;
+    if (!view) return;
+    const { from, to } = view.state.selection.main;
+    const selectedText = view.state.doc.sliceString(from, to);
+    let textToInsert, selStart, selEnd;
+
+    if (selectedText) {
+        textToInsert = `${before}${selectedText}${after}`;
+        selStart = from;
+        selEnd = to + before.length + after.length;
+    } else {
+        textToInsert = `${before}${placeholder}${after}`;
+        selStart = from + before.length;
+        selEnd = selStart + placeholder.length;
+    }
+
+    view.dispatch({
+        changes: { from, to, insert: textToInsert },
+        selection: { anchor: selStart, head: selEnd }
+    });
+    view.focus();
+}
 
 // --- NEW/UPDATED Memory Functions ---
 async function handleWipeAllMemories() {
@@ -940,374 +965,133 @@ async function handleWipeAllMemories() {
                        :style="isDataZoneExpanded ? {} : { width: `${dataZoneWidth}px` }" 
                        class="h-full flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl">
                     
-                    <!-- Enhanced Tab Navigation -->
-                    <div class="flex-shrink-0 bg-gradient-to-r from-gray-50 via-white to-gray-50 dark:from-gray-800 dark:via-gray-750 dark:to-gray-800 border-b border-gray-200 dark:border-gray-700">
-                        <nav class="flex space-x-1 px-4 py-2" aria-label="Data Zone Tabs">
-                            <button v-for="tab in dataTabs" 
-                                    :key="tab.id"
-                                    @click="activeDataZoneTab = tab.id"
-                                    :class="[
-                                        'enhanced-tab-btn relative overflow-hidden transition-all duration-300',
-                                        activeDataZoneTab === tab.id 
-                                            ? 'active bg-white dark:bg-gray-800 shadow-lg border-t-2 border-blue-500 text-blue-600 dark:text-blue-400' 
-                                            : 'hover:bg-white/70 dark:hover:bg-gray-700/50 text-gray-600 dark:text-gray-400'
-                                    ]"
-                                    :title="tab.description">
-                                <div class="flex items-center gap-2 relative z-10 px-3 py-2">
-                                    <component :is="tab.icon" class="w-4 h-4 flex-shrink-0" />
-                                    <span class="font-medium text-sm">{{ tab.label }}</span>
-                                    <div v-if="tab.tokenCount > 0" 
-                                         class="token-badge px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 text-xs rounded-full font-mono">
-                                        {{ formatTokens(tab.tokenCount) }}
-                                    </div>
-                                </div>
-                                <!-- Active indicator -->
-                                <div v-if="activeDataZoneTab === tab.id" 
-                                     class="absolute bottom-0 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-400 to-blue-600 rounded-t">
-                                </div>
+                    <!-- Tab Navigation -->
+                    <div class="flex-shrink-0 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
+                        <div class="flex items-center justify-between px-2">
+                            <nav class="flex space-x-1" aria-label="Data Zone Tabs">
+                                <button v-for="tab in dataTabs" :key="tab.id" @click="activeDataZoneTab = tab.id"
+                                        :class="[
+                                            'flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-t-md border-b-2',
+                                            activeDataZoneTab === tab.id ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                                        ]">
+                                    <component :is="tab.icon" class="w-4 h-4" />
+                                    <span>{{ tab.label }}</span>
+                                    <span v-if="tab.tokenCount > 0" class="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 text-xs rounded-full font-mono">{{ formatTokens(tab.tokenCount) }}</span>
+                                </button>
+                            </nav>
+                            <button @click="uiStore.toggleDataZoneExpansion()" class="action-btn" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'">
+                                <IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" />
+                                <IconMaximize v-else class="w-5 h-5" />
                             </button>
-                        </nav>
+                        </div>
                     </div>
 
                     <!-- Discussion Data Zone Tab -->
-                    <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0 relative">
-                        <!-- Processing Overlay -->
-                        <div v-if="isProcessing" class="absolute inset-0 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
-                            <div class="processing-spinner">
-                                <IconAnimateSpin class="w-12 h-12 text-blue-500 animate-spin" />
+                    <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0">
+                        <!-- Main content container -->
+                        <div class="flex-grow flex flex-col min-h-0">
+                             <!-- Top Bar (Context + Actions) -->
+                            <div class="flex-shrink-0 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-sm font-medium text-gray-600 dark:text-gray-300">Context</span>
+                                    <div class="w-48 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                        <div class="h-full bg-blue-500 rounded-full" :style="{ width: `${getPercentage(discussionDataZoneTokens)}%` }"></div>
+                                    </div>
+                                    <span class="text-xs font-mono text-gray-500 dark:text-gray-400">{{ formatNumber(discussionDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
+                                </div>
+                                <div class="flex items-center gap-1">
+                                    <button @click="handleUndoDiscussion" class="action-btn-sm" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-4 h-4" /></button>
+                                    <button @click="handleRedoDiscussion" class="action-btn-sm" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-4 h-4" /></button>
+                                    <button @click="refreshDataZones" class="action-btn-sm" title="Refresh Data"><IconRefresh class="w-4 h-4" /></button>
+                                    <button @click="exportDataZone" class="action-btn-sm" title="Export to Markdown"><IconArrowDownTray class="w-4 h-4" /></button>
+                                    <button @click="discussionDataZone = ''" class="action-btn-sm-danger" title="Clear All Text"><IconTrash class="w-4 h-4" /></button>
+                                </div>
                             </div>
-                            <p class="mt-4 font-semibold text-lg text-gray-800 dark:text-gray-100">Processing...</p>
-                            <p class="text-sm text-gray-600 dark:text-gray-400">This may take a moment</p>
+
+                            <div class="flex-grow flex min-h-0">
+                                <!-- Left side (Editor) -->
+                                <div class="flex-grow flex flex-col min-h-0 p-2">
+                                    <div class="flex-shrink-0 p-1 border bg-gray-50 dark:bg-gray-900/50 dark:border-gray-700 rounded-t-md flex items-center space-x-1">
+                                        <ToolbarButton @click="applyMarkdown('**', '**', 'bold text')" icon-collection="ui" icon-name="IconBold" tooltip="Bold" />
+                                        <ToolbarButton @click="applyMarkdown('*', '*', 'italic text')" icon-collection="ui" icon-name="IconItalic" tooltip="Italic" />
+                                        <ToolbarButton @click="applyMarkdown('[', '](url)', 'link text')" icon-collection="ui" icon-name="IconLink" tooltip="Link" />
+                                        <div class="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1"></div>
+                                        <ToolbarButton @click="applyMarkdown('# ', '', 'Heading 1')" icon-collection="ui" icon-name="IconType" tooltip="Heading 1" />
+                                        <ToolbarButton @click="applyMarkdown('## ', '', 'Heading 2')" icon-collection="ui" icon-name="IconHash" tooltip="Heading 2" />
+                                        <ToolbarButton @click="applyMarkdown('* ', '', 'List item')" icon-collection="ui" icon-name="IconList" tooltip="Bulleted List" />
+                                        <ToolbarButton @click="applyMarkdown('> ', '', 'Quote')" icon-collection="ui" icon-name="IconBlockquote" tooltip="Blockquote" />
+                                        <ToolbarButton @click="applyMarkdown('```\n', '\n```', 'code')" icon-collection="ui" icon-name="IconCode" tooltip="Code Block" />
+                                        <ToolbarButton @click="applyMarkdown('$$', '$$', '\\sum_{i=1}^n x_i')" icon-collection="ui" icon-name="IconSigma" tooltip="LaTeX Block" />
+                                        <ToolbarButton @click="openContextToArtefactModal" icon-name="IconSave" tooltip="Save as Artefact" />
+                                    </div>
+                                    <div class="flex-grow min-h-0 border-x border-b dark:border-gray-700 rounded-b-md overflow-hidden">
+                                        <CodeMirrorEditor ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" :options="discussionEditorOptions" />
+                                    </div>
+                                </div>
+                                <!-- Right side (Panels) -->
+                                <div class="w-64 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col">
+                                    <!-- Images -->
+                                    <div class="p-2 border-b dark:border-gray-700">
+                                        <div class="flex justify-between items-center mb-2">
+                                            <h4 class="text-sm font-semibold flex items-center gap-2"><IconPhoto class="w-4 h-4" /> Images</h4>
+                                            <button @click="triggerDiscussionImageUpload" class="action-btn-sm" title="Add Image(s)" :disabled="isUploadingDiscussionImage">
+                                                <IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-4 h-4 animate-spin" /><IconPlus v-else class="w-4 h-4" />
+                                            </button>
+                                        </div>
+                                        <div v-if="discussionImages.length === 0 && !isUploadingDiscussionImage" class="text-center py-4 text-xs text-gray-500 bg-gray-50 dark:bg-gray-800/50 rounded">No images yet</div>
+                                        <div v-else class="image-grid"><div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="image-card group"><img :src="'data:image/png;base64,' + img_b64" class="image-thumbnail" :class="{'grayscale opacity-50': !isImageActive(index)}" /><div class="image-overlay"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="overlay-btn" title="View"><IconMaximize class="w-3 h-3" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="overlay-btn" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-3 h-3" /><IconEyeOff v-else class="w-3 h-3" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="overlay-btn overlay-btn-danger" title="Delete"><IconXMark class="w-3 h-3" /></button></div></div></div>
+                                    </div>
+                                    <!-- Artefacts -->
+                                    <div class="p-2 flex-grow flex flex-col min-h-0">
+                                        <div class="flex justify-between items-center mb-2">
+                                            <h4 class="text-sm font-semibold flex items-center gap-2"><IconFileText class="w-4 h-4" /> Artefacts</h4>
+                                            <div class="flex items-center gap-1">
+                                                <button @click="showUrlImport = !showUrlImport" class="action-btn-sm" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
+                                                <button @click="triggerArtefactFileUpload" class="action-btn-sm" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 animate-spin" /><IconArrowUpTray v-else class="w-4 h-4" /></button>
+                                            </div>
+                                        </div>
+                                        <div class="flex-grow min-h-0 overflow-y-auto">
+                                            <div v-if="isLoadingArtefacts" class="loading-state"><IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" /><p class="text-xs text-gray-500">Loading...</p></div>
+                                            <div v-else-if="groupedArtefacts.length === 0" class="flex flex-col items-center justify-center h-full text-center p-4 bg-gray-50 dark:bg-gray-800/50 rounded">
+                                                <IconFileText class="w-10 h-10 text-gray-400 mb-2" />
+                                                <p class="text-xs text-gray-500 mb-3">No artefacts yet</p>
+                                                <button @click="handleCreateArtefact" class="btn btn-secondary btn-sm"><IconPlus class="w-3 h-3 mr-1" />Add Artefact</button>
+                                            </div>
+                                            <div v-else class="artefacts-list space-y-2">
+                                                <div v-for="group in groupedArtefacts" :key="group.title" class="artefact-card group">
+                                                    <div class="artefact-header"><div class="artefact-info"><div class="artefact-icon" :class="group.isAnyVersionLoaded ? 'loaded' : ''"><IconFileText class="w-4 h-4" /></div><div class="artefact-details"><h5 class="artefact-title" :title="group.title">{{ group.title }}</h5><p class="artefact-meta">{{ group.versions.length }} version{{ group.versions.length !== 1 ? 's' : '' }}<span v-if="group.isAnyVersionLoaded" class="loaded-indicator">• Loaded</span></p></div></div><div class="artefact-actions"><button @click="handleEditArtefact(group.title)" class="artefact-action-btn" title="Edit Content"><IconPencil class="w-3 h-3" /></button><button @click="handleDeleteArtefact(group.title)" class="artefact-action-btn artefact-action-btn-danger" title="Delete Artefact"><IconTrash class="w-3 h-3" /></button></div></div>
+                                                    <div class="artefact-controls"><select v-model="selectedArtefactVersions[group.title]" class="version-select"><option v-for="artefact in group.versions" :key="artefact.version" :value="artefact.version">Version {{ artefact.version }}{{ artefact.is_loaded ? ' (Active)' : '' }}</option></select><button v-if="group.versions.find(v => v.version == selectedArtefactVersions[group.title])?.is_loaded" @click="handleUnloadArtefact(group.title, selectedArtefactVersions[group.title])" class="load-btn loaded" title="Unload from Context"><IconCheckCircle class="w-3 h-3" />Loaded</button><button v-else @click="handleLoadArtefact(group.title)" class="load-btn" title="Load to Context"><IconArrowDownTray class="w-3 h-3" />Load</button></div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
 
-                        <!-- Enhanced Header -->
-                        <div class="enhanced-header">
-                            <div class="flex justify-between items-center mb-3">
-                                <h3 class="header-title">
-                                    <IconDataZone class="w-5 h-5 text-blue-600 dark:text-blue-400" />
-                                    <span class="bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400 bg-clip-text text-transparent">
-                                        Discussion Data
-                                    </span>
-                                </h3>
-                                <div class="action-buttons-group">
-                                    <button @click="uiStore.toggleDataZoneExpansion()" class="action-btn" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'">
-                                        <IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" />
-                                        <IconMaximize v-else class="w-5 h-5" />
+                        <!-- Bottom Action Bar -->
+                        <div class="flex-shrink-0 p-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                            <div class="relative flex items-center">
+                                <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-icon absolute left-1.5 top-1/2 -translate-y-1/2 z-10">
+                                    <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"> <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button> </DropdownSubmenu>
+                                    <DropdownSubmenu v-if="Object.keys(filteredUserPromptsByCategory).length > 0" title="User" icon="user" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
+                                    <DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="zooPromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
+                                    <div v-if="(filteredLollmsPrompts.length + Object.keys(filteredUserPromptsByCategory).length + Object.keys(filteredSystemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div>
+                                    <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
+                                </DropdownMenu>
+                                <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process content..." rows="1" class="enhanced-textarea !pl-10 !pr-40 w-full resize-none"></textarea>
+                                <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                                    <button v-if="isTtiConfigured" @click="handleGenerateImage" class="btn btn-primary" :disabled="isProcessing || (!discussionDataZone.trim() && !dataZonePromptText.trim())">
+                                        <IconPhoto class="w-4 h-4 mr-1.5" /><span>Generate</span>
                                     </button>
-                                    <button @click="refreshDataZones" class="action-btn" title="Refresh Data">
-                                        <IconRefresh class="w-5 h-5" />
+                                    <button @click="handleProcessContent" class="btn btn-secondary" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())">
+                                        <IconSparkles class="w-4 h-4 mr-1.5" /><span>Process</span>
                                     </button>
-                                    <button @click="exportDataZone" class="action-btn" title="Export to Markdown">
-                                        <IconArrowUpTray class="w-5 h-5" />
-                                    </button>
-                                    <button @click="discussionDataZone = ''" class="action-btn-danger" title="Clear All Text">
-                                        <IconTrash class="w-5 h-5" />
-                                    </button>
-                                </div>
-                            </div>
-                            
-                            <!-- Enhanced Token Progress -->
-                            <div class="token-progress-container">
-                                <div class="flex justify-between items-center text-xs text-gray-600 dark:text-gray-400 font-mono mb-2">
-                                    <div class="flex items-center gap-2">
-                                        <IconToken class="w-4 h-4 text-blue-500" />
-                                        <span class="font-semibold">Context Usage</span>
-                                    </div>
-                                    <span class="font-bold">{{ formatNumber(discussionDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
-                                </div>
-                                
-                                <div class="progress-bar-container">
-                                    <div class="progress-bar-track">
-                                        <div class="progress-bar-fill"
-                                             :class="getProgressColorClass(getPercentage(discussionDataZoneTokens))"
-                                             :style="{ width: `${Math.min(getPercentage(discussionDataZoneTokens), 100)}%` }">
-                                            <div class="progress-bar-shine"></div>
-                                        </div>
-                                        <!-- Warning indicator -->
-                                        <div v-if="getPercentage(discussionDataZoneTokens) > 90" 
-                                             class="absolute right-2 top-1/2 transform -translate-y-1/2">
-                                            <div class="w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Context breakdown -->
-                                <div class="flex flex-wrap gap-1.5 mt-2">
-                                    <span v-for="part in getContextParts()" 
-                                          :key="part.label" 
-                                          class="context-chip"
-                                          :class="part.colorClass"
-                                          :title="part.tooltip">
-                                        {{ part.label }}: {{ formatNumber(part.value) }}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Content Area -->
-                        <div class="flex-grow min-h-0 flex" :onpaste="handlePasteInDataZone">
-                            <div class="flex-grow flex flex-col min-w-0">
-                                <!-- Content Header -->
-                                <div class="content-header">
-                                    <h4 class="content-title">Content</h4>
-                                    <div class="content-actions">
-                                        <button @click="handleCloneDiscussionContext" class="action-btn-sm" title="Clone Discussion Context">
-                                            <IconCopy class="w-4 h-4" />
-                                        </button>
-                                        <button @click="openContextToArtefactModal" class="action-btn-sm" title="Save Context as Artefact">
-                                            <IconArrowDownTray class="w-4 h-4" />
-                                        </button>
-                                        <button @click="toggleViewMode('discussion')" class="action-btn-sm" 
-                                                :title="dataZoneViewModes.discussion === 'edit' ? 'Switch to Preview' : 'Switch to Edit'">
-                                            <IconEye v-if="dataZoneViewModes.discussion === 'edit'" class="w-4 h-4" />
-                                            <IconPencil v-else class="w-4 h-4" />
-                                        </button>
-                                        <button @click="handleUndoDiscussion" class="action-btn-sm" title="Undo" :disabled="!canUndoDiscussion">
-                                            <IconUndo class="w-4 h-4" />
-                                        </button>
-                                        <button @click="handleRedoDiscussion" class="action-btn-sm" title="Redo" :disabled="!canRedoDiscussion">
-                                            <IconRedo class="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                </div>
-                                
-                                <!-- Editor/Preview Area -->
-                                <div class="flex-grow min-h-0 p-3 bg-gray-50 dark:bg-gray-900/50">
-                                    <div class="h-full rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
-                                        <CodeMirrorEditor v-if="dataZoneViewModes.discussion === 'edit'" 
-                                                        ref="discussionCodeMirrorEditor" 
-                                                        v-model="discussionDataZone" 
-                                                        class="h-full" 
-                                                        :options="discussionEditorOptions" />
-                                        <div v-else class="rendered-prose-container h-full p-4 overflow-y-auto">
-                                            <MessageContentRenderer :content="discussionDataZone" />
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Enhanced Action Bar -->
-                                <div class="action-bar">
-                                    <div class="flex items-center gap-3">
-                                        <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-secondary btn-sm !p-2">
-                                            <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
-                                                <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button>
-                                            </DropdownSubmenu>
-                                            <DropdownSubmenu v-if="Object.keys(userPromptsByCategory).length > 0" title="User" icon="user" collection="ui">
-                                                <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div>
-                                                <div class="max-h-60 overflow-y-auto">
-                                                    <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category">
-                                                        <h3 class="category-header">{{ category }}</h3>
-                                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button>
-                                                    </div>
-                                                </div>
-                                            </DropdownSubmenu>
-                                            <DropdownSubmenu v-if="Object.keys(systemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui">
-                                                <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="zooPromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div>
-                                                <div class="max-h-60 overflow-y-auto">
-                                                    <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category">
-                                                        <h3 class="category-header">{{ category }}</h3>
-                                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button>
-                                                    </div>
-                                                </div>
-                                            </DropdownSubmenu>
-                                            <div v-if="(lollmsPrompts.length + Object.keys(userPromptsByCategory).length + Object.keys(systemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                            <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
-                                        </DropdownMenu>
-                                        <textarea v-model="dataZonePromptText" 
-                                                placeholder="Enter a prompt to process the data zone content..." 
-                                                rows="2" 
-                                                class="enhanced-textarea"></textarea>
-                                    </div>
-                                    <div class="flex items-center gap-3 mt-3">
-                                        <button v-if="isTtiConfigured" 
-                                                @click="handleGenerateImage" 
-                                                class="enhanced-primary-btn" 
-                                                :disabled="isProcessing || (!discussionDataZone.trim() && !dataZonePromptText.trim())">
-                                            <IconPhoto class="w-5 h-5" />
-                                            <span>{{ isProcessing ? 'Processing...' : 'Generate Image' }}</span>
-                                        </button>
-                                        <button @click="handleProcessContent" 
-                                                class="enhanced-secondary-btn" 
-                                                :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())">
-                                            <IconSparkles class="w-5 h-5" />
-                                            <span>{{ isProcessing ? 'Processing...' : 'Process Content' }}</span>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Enhanced Sidebar -->
-                            <div class="sidebar-panel">
-                                <!-- Images Section -->
-                                <div class="sidebar-section">
-                                    <div class="section-header">
-                                        <h4 class="section-title">
-                                            <IconPhoto class="w-4 h-4" />
-                                            Images
-                                        </h4>
-                                        <button @click="triggerDiscussionImageUpload" 
-                                                class="action-btn-sm" 
-                                                title="Add Image(s) or PDF" 
-                                                :disabled="isUploadingDiscussionImage">
-                                            <IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-4 h-4 animate-spin" />
-                                            <IconPhoto v-else class="w-4 h-4" />
-                                        </button>
-                                    </div>
-                                    
-                                    <div class="section-content">
-                                        <div v-if="discussionImages.length === 0 && !isUploadingDiscussionImage" class="empty-state">
-                                            <IconPhoto class="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                                            <p class="text-xs text-gray-500">No images yet</p>
-                                        </div>
-                                            <div v-else class="image-grid">
-                                                <div v-for="(img_b64, index) in discussionImages" 
-                                                    :key="img_b64.substring(0, 20) + index" 
-                                                    class="image-card group">  <!-- Add group class here -->
-                                                    <img :src="'data:image/png;base64,' + img_b64" 
-                                                        class="image-thumbnail" 
-                                                        :class="{'grayscale opacity-50': !isImageActive(index)}" />
-                                                    <div class="image-overlay">
-                                                        <button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" 
-                                                                class="overlay-btn" title="View">
-                                                            <IconMaximize class="w-3 h-3" />
-                                                        </button>
-                                                        <button @click="discussionsStore.toggleDiscussionImageActivation(index)" 
-                                                                class="overlay-btn" 
-                                                                :title="isImageActive(index) ? 'Deactivate' : 'Activate'">
-                                                            <IconEye v-if="isImageActive(index)" class="w-3 h-3" />
-                                                            <IconEyeOff v-else class="w-3 h-3" />
-                                                        </button>
-                                                        <button @click="discussionsStore.deleteDiscussionImage(index)" 
-                                                                class="overlay-btn overlay-btn-danger" title="Delete">
-                                                            <IconXMark class="w-3 h-3" />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-
-                                    </div>
-                                </div>
-
-                                <!-- Enhanced Artefacts Section -->
-                                <div class="sidebar-section">
-                                    <div class="section-header">
-                                        <h4 class="section-title">
-                                            <IconFileText class="w-4 h-4" />
-                                            Artefacts
-                                        </h4>
-                                        <div class="section-actions">
-                                            <button @click="handleCreateArtefact" class="action-btn-sm" title="Create Artefact">
-                                                <IconPlus class="w-4 h-4" />
-                                            </button>
-                                            <button @click="showUrlImport = !showUrlImport" class="action-btn-sm" title="Import from URL">
-                                                <IconWeb class="w-4 h-4" />
-                                            </button>
-                                            <button @click="triggerArtefactFileUpload" class="action-btn-sm" title="Upload Artefact" :disabled="isUploadingArtefact">
-                                                <IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 animate-spin" />
-                                                <IconArrowUpTray v-else class="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <div class="section-content enhanced-drop-zone" 
-                                         @dragover="handleDragOver"
-                                         @dragleave="handleDragLeave" 
-                                         @drop="handleDrop($event, 'artefact')"
-                                         :class="{ 'drop-active': isDraggingFile }">
-                                        
-                                        <!-- URL Import -->
-                                        <div v-if="showUrlImport" class="url-import-section">
-                                            <label class="url-import-label">Import from URL</label>
-                                            <div class="url-import-controls">
-                                                <input v-model="urlToImport" type="url" placeholder="https://example.com" class="url-input">
-                                                <button @click="handleImportArtefactFromUrl" 
-                                                        class="fetch-btn" 
-                                                        :disabled="isProcessing || !urlToImport">
-                                                    <IconAnimateSpin v-if="isProcessing" class="w-4 h-4 animate-spin" />
-                                                    <span v-else>Fetch</span>
-                                                </button>
-                                            </div>
-                                        </div>
-
-                                        <!-- Drop Overlay -->
-                                        <div v-if="isDraggingFile" class="drop-overlay">
-                                            <div class="drop-indicator">
-                                                <IconArrowUpTray class="w-8 h-8 text-blue-500 animate-bounce mb-2" />
-                                                <p class="text-sm font-semibold text-blue-600 dark:text-blue-400">Drop files here</p>
-                                                <p class="text-xs text-gray-500 mt-1">Supports PDF, images, text files</p>
-                                            </div>
-                                        </div>
-
-                                        <!-- Loading State -->
-                                        <div v-if="isLoadingArtefacts" class="loading-state">
-                                            <IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" />
-                                            <p class="text-xs text-gray-500">Loading artefacts...</p>
-                                        </div>
-
-                                        <!-- Empty State -->
-                                        <div v-else-if="groupedArtefacts.length === 0 && !isDraggingFile" class="empty-state">
-                                            <IconFileText class="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                                            <p class="text-xs text-gray-500 mb-3">No artefacts yet</p>
-                                            <button @click="triggerArtefactFileUpload" class="empty-state-btn">
-                                                <IconPlus class="w-3 h-3 mr-1" />
-                                                Add Artefact
-                                            </button>
-                                        </div>
-                                        
-                                        <!-- Artefact Cards -->
-                                        <div v-else class="artefacts-list">
-                                            <div v-for="group in groupedArtefacts" :key="group.title" class="artefact-card group">
-                                                <div class="artefact-header">
-                                                    <div class="artefact-info">
-                                                        <div class="artefact-icon" :class="group.isAnyVersionLoaded ? 'loaded' : ''">
-                                                            <IconFileText class="w-4 h-4" />
-                                                        </div>
-                                                        <div class="artefact-details">
-                                                            <h5 class="artefact-title" :title="group.title">{{ group.title }}</h5>
-                                                            <p class="artefact-meta">
-                                                                {{ group.versions.length }} version{{ group.versions.length !== 1 ? 's' : '' }}
-                                                                <span v-if="group.isAnyVersionLoaded" class="loaded-indicator">• Loaded</span>
-                                                            </p>
-                                                        </div>
-                                                    </div>
-                                                    <!-- ADD THESE MISSING ACTION BUTTONS -->
-                                                    <div class="artefact-actions">
-                                                        <button @click="handleEditArtefact(group.title)" class="artefact-action-btn" title="Edit Content">
-                                                            <IconPencil class="w-3 h-3" />
-                                                        </button>
-                                                        <button @click="handleDeleteArtefact(group.title)" class="artefact-action-btn artefact-action-btn-danger" title="Delete Artefact">
-                                                            <IconTrash class="w-3 h-3" />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                                
-                                                <div class="artefact-controls">
-                                                    <select v-model="selectedArtefactVersions[group.title]" class="version-select">
-                                                        <option v-for="artefact in group.versions" :key="artefact.version" :value="artefact.version">
-                                                            Version {{ artefact.version }}{{ artefact.is_loaded ? ' (Active)' : '' }}
-                                                        </option>
-                                                    </select>
-                                                    
-                                                    <button v-if="group.versions.find(v => v.version == selectedArtefactVersions[group.title])?.is_loaded"
-                                                            @click="handleUnloadArtefact(group.title, selectedArtefactVersions[group.title])" 
-                                                            class="load-btn loaded" title="Unload from Context">
-                                                        <IconCheckCircle class="w-3 h-3" />
-                                                        Loaded
-                                                    </button>
-                                                    <button v-else
-                                                            @click="handleLoadArtefact(group.title)" 
-                                                            class="load-btn" title="Load to Context">
-                                                        <IconArrowDownTray class="w-3 h-3" />
-                                                        Load
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
+                    
                     <div v-show="activeDataZoneTab === 'user'" class="flex-1 flex flex-col min-h-0">
                         <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
                             <div class="flex justify-between items-center">
@@ -1499,381 +1283,3 @@ async function handleWipeAllMemories() {
         </div>
     </div>
 </template>
-
-<style scoped>
-/* Enhanced Tab Styling */
-.custom-gray-750 {
-    --tw-bg-opacity: 1;
-    background-color: rgb(55 65 81 / var(--tw-bg-opacity)); /* Custom gray-750 equivalent */
-}
-
-.enhanced-header {
-    @apply p-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-gray-800/50;
-    /* Apply custom dark background if needed */
-}
-
-.enhanced-tab-btn:hover {
-    @apply bg-gradient-to-b from-white/70 to-white/50 dark:from-gray-700/50 dark:to-gray-700/30;
-}
-
-.enhanced-tab-btn.active {
-    @apply bg-white dark:bg-gray-800 shadow-lg border-t-2;
-}
-
-.token-badge {
-    @apply px-2 py-1 bg-gradient-to-r from-blue-100 to-blue-200 dark:from-blue-900 dark:to-blue-800 text-blue-700 dark:text-blue-300 text-xs rounded-full font-mono font-medium;
-}
-
-/* Enhanced Headers */
-
-.header-title {
-    @apply font-semibold text-lg flex items-center gap-3;
-}
-
-.action-buttons-group {
-    @apply flex items-center gap-1;
-}
-
-.action-btn {
-    @apply p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-all duration-200 hover:shadow-md;
-}
-
-.action-btn-danger {
-    @apply p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400 transition-all duration-200;
-}
-
-.action-btn-sm {
-    @apply p-1.5 rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 hover:text-gray-700 dark:hover:text-gray-200 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed;
-}
-
-/* Token Progress Styling */
-.token-progress-container {
-    @apply mt-3;
-}
-
-.progress-bar-container {
-    @apply relative;
-}
-
-.progress-bar-track {
-    @apply w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3 overflow-hidden shadow-inner relative;
-}
-
-.progress-bar-fill {
-    @apply h-full rounded-full transition-all duration-700 ease-out bg-gradient-to-r relative overflow-hidden;
-}
-
-.progress-bar-shine {
-    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/20 to-transparent animate-pulse;
-}
-
-.context-chip {
-    @apply px-2 py-1 rounded-full text-xs font-medium;
-}
-
-/* Content Areas */
-.content-header {
-    @apply p-3 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between;
-}
-
-.content-title {
-    @apply font-semibold text-sm text-gray-800 dark:text-gray-100;
-}
-
-.content-actions {
-    @apply flex items-center gap-1;
-}
-
-/* Action Bar */
-.action-bar {
-    @apply p-4 border-t border-gray-200 dark:border-gray-700 bg-gradient-to-t from-white via-white to-transparent dark:from-gray-800 dark:via-gray-800;
-}
-
-.enhanced-primary-btn {
-    @apply px-4 py-2.5 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-medium rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none flex items-center gap-2;
-}
-
-.enhanced-secondary-btn {
-    @apply px-4 py-2.5 bg-gradient-to-r from-gray-100 to-gray-200 hover:from-gray-200 hover:to-gray-300 dark:from-gray-700 dark:to-gray-600 dark:hover:from-gray-600 dark:hover:to-gray-500 text-gray-700 dark:text-gray-200 font-medium rounded-lg shadow-md hover:shadow-lg transform hover:scale-105 transition-all duration-200 flex items-center gap-2;
-}
-
-.enhanced-textarea {
-    @apply flex-1 p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm resize-none transition-all duration-200;
-}
-
-/* Sidebar Panels */
-.sidebar-panel {
-    @apply w-72 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col bg-gray-50 dark:bg-gray-800/50;
-}
-
-.sidebar-section {
-    @apply flex-1 flex flex-col min-h-0;
-}
-
-.section-header {
-    @apply p-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-white dark:bg-gray-800;
-}
-
-.section-title {
-    @apply font-semibold text-sm flex items-center gap-2;
-}
-
-.section-actions {
-    @apply flex items-center gap-1;
-}
-
-.section-content {
-    @apply flex-1 overflow-y-auto p-3;
-}
-
-/* Drop Zone Styling */
-.enhanced-drop-zone {
-    @apply relative transition-all duration-300;
-}
-
-.enhanced-drop-zone.drop-active {
-    @apply bg-blue-50 dark:bg-blue-900/20 border-2 border-dashed border-blue-400 rounded-lg;
-}
-
-.drop-overlay {
-    @apply absolute inset-0 bg-blue-50/90 dark:bg-blue-900/30 backdrop-blur-sm flex items-center justify-center z-10 rounded-lg;
-}
-
-.drop-indicator {
-    @apply text-center p-4;
-}
-
-/* Empty States */
-.empty-state {
-    @apply text-center py-8;
-}
-
-.empty-state-btn {
-    @apply px-3 py-1.5 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-md text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center justify-center mx-auto;
-}
-
-.loading-state {
-    @apply text-center py-8;
-}
-
-/* Artefact Cards */
-.artefacts-list {
-    @apply space-y-3;
-}
-
-.artefact-card {
-    @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-all duration-300 border border-gray-200 dark:border-gray-700 overflow-hidden;
-}
-
-.artefact-header {
-    @apply p-3 flex items-center justify-between bg-gradient-to-r from-gray-50 to-gray-100 dark:from-gray-700 dark:to-gray-600;
-}
-
-.artefact-info {
-    @apply flex items-center gap-3 min-w-0 flex-1;
-}
-
-.artefact-icon {
-    @apply w-8 h-8 rounded-lg flex items-center justify-center bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400;
-}
-
-.artefact-icon.loaded {
-    @apply bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400;
-}
-
-.artefact-details {
-    @apply min-w-0 flex-1;
-}
-
-.artefact-title {
-    @apply font-semibold text-sm truncate text-gray-800 dark:text-gray-100;
-}
-
-.artefact-meta {
-    @apply text-xs text-gray-500 dark:text-gray-400;
-}
-
-.loaded-indicator {
-    @apply text-green-600 dark:text-green-400 font-medium;
-}
-
-.artefact-actions {
-    @apply flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
-}
-
-.artefact-action-btn {
-    @apply p-1.5 rounded-full hover:bg-white dark:hover:bg-gray-800 text-gray-500 hover:text-blue-600 transition-colors;
-}
-
-.artefact-action-btn-danger {
-    @apply hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600;
-}
-
-.artefact-controls {
-    @apply p-3 flex items-center gap-2 border-t border-gray-100 dark:border-gray-700;
-}
-
-.version-select {
-    @apply flex-1 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-blue-500;
-}
-
-.load-btn {
-    @apply px-3 py-1.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center gap-1 font-medium;
-}
-
-.load-btn.loaded {
-    @apply bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50;
-}
-
-/* Memory Cards */
-.memories-list {
-    @apply space-y-3;
-}
-
-.memory-card {
-    @apply bg-white dark:bg-gray-800 rounded-lg shadow-sm hover:shadow-md transition-all duration-300 border-l-4 border-gray-300 dark:border-gray-600 overflow-hidden;
-}
-
-.memory-card:has(.memory-icon.loaded) {
-    @apply border-l-yellow-500 bg-yellow-50 dark:bg-yellow-900/10;
-}
-
-.memory-header {
-    @apply p-3 flex items-center justify-between;
-}
-
-.memory-info {
-    @apply flex items-center gap-3 min-w-0 flex-1;
-}
-
-.memory-icon {
-    @apply w-8 h-8 rounded-lg flex items-center justify-center bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400;
-}
-
-.memory-icon.loaded {
-    @apply bg-yellow-100 dark:bg-yellow-900/30 text-yellow-600 dark:text-yellow-400;
-}
-
-.memory-details {
-    @apply min-w-0 flex-1;
-}
-
-.memory-title {
-    @apply font-semibold text-sm truncate text-gray-800 dark:text-gray-100;
-}
-
-.memory-meta {
-    @apply text-xs text-gray-500 dark:text-gray-400;
-}
-
-.memory-actions {
-    @apply flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity;
-}
-
-.memory-action-btn {
-    @apply p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 hover:text-blue-600 transition-colors;
-}
-
-.memory-action-btn-danger {
-    @apply hover:bg-red-50 dark:hover:bg-red-900/30 hover:text-red-600;
-}
-
-.memory-preview {
-    @apply px-3 pb-2;
-}
-
-.memory-content {
-    @apply text-xs text-gray-600 dark:text-gray-300 line-clamp-2;
-}
-
-.memory-controls {
-    @apply p-3 border-t border-gray-100 dark:border-gray-700;
-}
-
-.memory-load-btn {
-    @apply w-full px-3 py-1.5 text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-md hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors flex items-center gap-1 justify-center font-medium;
-}
-
-.memory-load-btn.loaded {
-    @apply bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200 dark:hover:bg-yellow-900/50;
-}
-
-.memorize-btn {
-    @apply px-4 py-2 bg-gradient-to-r from-yellow-400 to-orange-500 hover:from-yellow-500 hover:to-orange-600 text-white font-medium rounded-lg shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2;
-}
-
-/* Image Grid */
-.image-grid {
-    @apply grid grid-cols-2 gap-2;
-}
-
-.image-card {
-    @apply relative rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700;
-}
-
-
-.image-thumbnail {
-    @apply w-full h-16 object-cover transition-all duration-300;
-}
-
-/* This is the key fix - make overlay invisible by default and visible on hover */
-.image-overlay {
-    @apply absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-1;
-    /* Ensure it's above the image */
-    z-index: 10;
-}
-
-/* Ensure buttons are visible and interactive */
-.image-overlay button {
-    @apply p-1 bg-white/20 text-white rounded-full hover:bg-white/40 transition-colors;
-    /* Make sure buttons are clickable */
-    pointer-events: auto;
-}
-
-/* Add specific styling for danger buttons */
-.image-overlay .overlay-btn-danger {
-    @apply bg-red-500/80 hover:bg-red-600;
-}
-
-.overlay-btn {
-    @apply p-1 bg-white/20 text-white rounded-full hover:bg-white/40 transition-colors;
-}
-
-.overlay-btn-danger {
-    @apply bg-red-500/80 hover:bg-red-600;
-}
-
-/* Animations */
-.processing-spinner {
-    @apply relative;
-}
-
-.processing-spinner::before {
-    content: '';
-    @apply absolute inset-0 rounded-full border-4 border-blue-200 dark:border-blue-800;
-}
-
-.processing-spinner::after {
-    content: '';
-    @apply absolute inset-0 rounded-full border-4 border-transparent border-t-blue-500 animate-spin;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .sidebar-panel {
-        @apply w-64;
-    }
-    
-    .enhanced-tab-btn {
-        @apply px-2 py-2 text-xs;
-    }
-    
-    .token-badge {
-        @apply px-1 py-0.5 text-xs;
-    }
-}
-
-/* Fix for Image Overlay Hover Effect */
-
-
-</style>

@@ -18,6 +18,8 @@ import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import logoDefault from '../../assets/logo.png';
+import IconMenu from '../../assets/icons/IconMenu.vue';
+import IconDataZone from '../../assets/icons/IconDataZone.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -28,6 +30,7 @@ const route = useRoute();
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const user = computed(() => authStore.user);
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
+const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
 
 const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages'];
 const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
@@ -162,9 +165,11 @@ const filteredAvailableTtiModels = computed(() => {
     const term = ttiModelSearchTerm.value.toLowerCase();
     const result = [];
     for (const group of formattedAvailableTtiModels.value) {
-        const filteredItems = group.items.filter(item => item.name.toLowerCase().includes(term));
-        if (filteredItems.length > 0) {
-            result.push({ ...group, items: filteredItems });
+        if (group.items) {
+            const filteredItems = group.items.filter(item => item.name.toLowerCase().includes(term));
+            if (filteredItems.length > 0) {
+                result.push({ ...group, items: filteredItems });
+            }
         }
     }
     return result;
@@ -189,33 +194,27 @@ function selectTtiModel(id) {
 </script>
 
 <template>
-  <header class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-3 flex items-center justify-between shadow-sm z-10">
-    <!-- Left Side: App Logo and Title -->
-    <div class="flex items-center space-x-3">
-        <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 object-contain" @error="($event.target.src=logoDefault)">
-        <h1 class="text-lg font-bold text-gray-800 dark:text-gray-100 hidden sm:block">LoLLMs</h1>
-    </div>
-
+  <header class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-2 sm:p-3 flex items-center justify-between shadow-sm z-10">
     <!-- Center: Model Selectors (Home) or Page Title (Other Views) -->
     <div v-if="isHomePageLayout && user && user.user_ui_level >= 2" class="hidden md:flex items-center gap-2 flex-1 min-w-0 justify-center px-4">
       <div class="relative">
-        <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" class="toolbox-select flex items-center gap-2 max-w-sm !p-1.5">
+        <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" class="toolbox-select flex items-center gap-2 max-w-sm !p-1">
               <div class="flex items-center flex-shrink-0">
                   <!-- Model Icon -->
-                  <div class="w-8 h-8 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md">
+                  <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md">
                       <img v-if="selectedModel?.icon_base64" :src="selectedModel.icon_base64" class="h-full w-full rounded-md object-cover"/>
-                      <IconCpuChip v-else class="w-5 h-5" />
+                      <IconCpuChip v-else class="w-4 h-4" />
                   </div>
                   
                   <!-- Personality Icon -->
-                  <div class="w-8 h-8 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-4 z-10 border-2 border-white dark:border-gray-800">
+                  <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
                       <img v-if="selectedPersonality?.icon_base64" :src="selectedPersonality.icon_base64" class="h-full w-full rounded-md object-cover"/>
-                      <IconUserCircle v-else class="w-5 h-5" />
+                      <IconUserCircle v-else class="w-4 h-4" />
                   </div>
               </div>
               <div class="min-w-0 text-left flex-grow">
-                  <span class="block font-semibold truncate text-sm" :title="selectedModel?.name || 'Select Model'">{{ selectedModel?.name || 'Select Model' }}</span>
-                  <span class="block text-xs text-gray-500 truncate" :title="selectedPersonality?.name || 'Select Personality'">{{ selectedPersonality?.name || 'Select Personality' }}</span>
+                  <span class="block font-semibold truncate text-xs" :title="selectedModel?.name || 'Select Model'">{{ selectedModel?.name || 'Select Model' }}</span>
+                  <span class="block text-xs text-gray-500/80 truncate" :title="selectedPersonality?.name || 'Select Personality'">{{ selectedPersonality?.name || 'Select Personality' }}</span>
               </div>
                <svg class="w-4 h-4 text-gray-400 flex-shrink-0 ml-auto" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
         </button>
@@ -310,12 +309,15 @@ function selectTtiModel(id) {
     </div>
 
     <!-- Right Side: Action Buttons -->
-    <div class="flex items-center space-x-2">
+    <div class="flex items-center space-x-1 sm:space-x-2">
       <ThemeToggle />
       <NotificationBell v-if="user && user.user_ui_level >= 2" />
       <TasksManagerButton />      
       <!-- Slot for view-specific actions -->
       <slot name="actions"></slot>
+      <button v-if="isHomePageLayout" @click="uiStore.toggleDataZone()" class="btn-icon" :class="{'bg-gray-200 dark:bg-gray-700': isDataZoneVisible}" title="Toggle Data Zone">
+          <IconDataZone class="w-5 h-5" />
+      </button>
     </div>
   </header>
 </template>

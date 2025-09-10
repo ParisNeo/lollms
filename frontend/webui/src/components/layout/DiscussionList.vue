@@ -28,9 +28,14 @@ const user = computed(() => authStore.user);
 const isLoading = computed(() => store.isLoadingDiscussions && store.sortedDiscussions.length === 0);
 const hasMoreDiscussions = computed(() => store.hasMoreDiscussions);
 const activeDiscussion = computed(() => store.activeDiscussion);
+
+// Use welcome screen logo, text, and slogan from authStore
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
+const welcomeText = computed(() => authStore.welcomeText || 'LoLLMs');
+const welcomeSlogan = computed(() => authStore.welcomeSlogan || 'One tool to rule them all');
 
 const searchTerm = ref('');
+const isSearchVisible = ref(false);
 const isStarredVisible = ref(false);
 const isSharedVisible = ref(true);
 const isRecentsVisible = ref(true);
@@ -111,9 +116,9 @@ onUnmounted(() => {
         
         <!-- Integrated Header with Logo -->
         <div class="p-4 border-b border-slate-200 dark:border-gray-700 flex-shrink-0 space-y-3">
-            <!-- Logo and Actions Row -->
+            <!-- Top Row: Logo, Title, Slogan, and Collapse Button -->
             <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-3 min-w-0">
+                <div class="flex items-center space-x-3 min-w-0 flex-grow">
                     <!-- Mobile Menu Toggle (hidden on desktop) -->
                     <button 
                         @click="uiStore.toggleSidebar" 
@@ -123,59 +128,49 @@ onUnmounted(() => {
                         <IconMenu class="w-5 h-5" />
                     </button>
                     
-                    <img :src="logoSrc" alt="LoLLMs Logo" class="h-6 w-6 flex-shrink-0 object-contain" @error="($event.target.src=logoDefault)">
-                    <div class="min-w-0">
-                        <h1 class="text-base font-semibold text-slate-900 dark:text-gray-100 truncate">LoLLMs</h1>
-                        <p class="text-xs text-slate-500 dark:text-gray-400 truncate hidden sm:block">One tool to rule them all</p>
+                    <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 flex-shrink-0 object-contain rounded-md" @error="($event.target.src=logoDefault)">
+                    <div class="min-w-0 flex-grow">
+                        <h1 class="text-base font-semibold text-slate-900 dark:text-gray-100 truncate" :title="welcomeText">{{ welcomeText }}</h1>
+                        <p class="text-xs text-slate-500 dark:text-gray-400 truncate" :title="welcomeSlogan">{{ welcomeSlogan }}</p>
                     </div>
                 </div>
-                
-                <div class="flex items-center space-x-1">
-                    <button 
-                        v-if="user && user.user_ui_level >= 2" 
-                        @click="goToFeed" 
-                        class="btn-icon-flat" 
-                        title="Go to Feed"
-                    >
-                        <IconHome class="h-4 w-4" />
-                    </button>
-                    
-                    <button 
-                        @click="showToolbox = !showToolbox" 
-                        v-if="user && user.user_ui_level >= 4" 
-                        class="btn-icon-flat" 
-                        :class="{ 'bg-slate-100 dark:bg-gray-700 text-slate-700 dark:text-gray-200': showToolbox }"
-                        title="Toggle Toolbox"
-                    >
-                        <IconAdjustmentsHorizontal class="h-4 w-4" />
-                    </button>
-                    
-                    <button 
-                        @click="handleNewDiscussion" 
-                        class="btn-primary-flat" 
-                        title="New Discussion"
-                    >
-                        <IconPlus class="h-4 w-4" stroke-width="2" />
-                    </button>
-                    <button 
-                        @click="uiStore.toggleSidebar" 
-                        class="btn-icon-flat hidden md:inline-flex" 
-                        title="Collapse sidebar"
-                    >
-                        <IconArrowLeft class="h-4 w-4" />
-                    </button>
-                </div>
+                <button 
+                    @click="uiStore.toggleSidebar" 
+                    class="btn-icon-flat hidden md:inline-flex ml-2" 
+                    title="Collapse sidebar"
+                >
+                    <IconArrowLeft class="h-5 w-5" />
+                </button>
             </div>
 
-            <!-- Search Bar -->
-            <div class="relative">
+            <!-- Second Row: Action Buttons -->
+            <div class="flex items-center justify-between">
+                 <div class="flex items-center space-x-1">
+                    <button @click="isSearchVisible = !isSearchVisible" class="btn-icon-flat" title="Search discussions" :class="{'bg-slate-100 dark:bg-gray-700': isSearchVisible}">
+                        <IconMagnifyingGlass class="h-4 w-4" />
+                    </button>
+                    <button v-if="user && user.user_ui_level >= 2" @click="goToFeed" class="btn-icon-flat" title="Go to Feed">
+                        <IconHome class="h-4 w-4" />
+                    </button>
+                    <button @click="showToolbox = !showToolbox" v-if="user && user.user_ui_level >= 4" class="btn-icon-flat" :class="{ 'bg-slate-100 dark:bg-gray-700': showToolbox }" title="Toggle Toolbox">
+                        <IconAdjustmentsHorizontal class="h-4 w-4" />
+                    </button>
+                </div>
+                <button @click="handleNewDiscussion" class="btn-primary-flat" title="New Discussion">
+                    <IconPlus class="h-4 w-4 mr-1 sm:mr-2" stroke-width="2.5" />
+                    <span class="hidden sm:inline">New Chat</span>
+                </button>
+            </div>
+            
+            <!-- Conditionally rendered Search Bar -->
+            <div v-if="isSearchVisible" class="relative mt-2">
                 <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
                     <IconMagnifyingGlass class="h-4 w-4 text-slate-400 dark:text-gray-500" />
                 </div>
                 <input 
                     type="text" 
                     v-model="searchTerm" 
-                    placeholder="Search..." 
+                    placeholder="Search discussions..." 
                     class="search-input-flat"
                 >
                 <button 
@@ -314,7 +309,7 @@ onUnmounted(() => {
 }
 
 .btn-primary-flat { 
-    @apply px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium transition-colors duration-150; 
+    @apply px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium transition-colors duration-150 flex items-center; 
 }
 
 .search-input-flat {

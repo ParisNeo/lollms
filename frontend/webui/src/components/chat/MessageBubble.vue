@@ -275,7 +275,7 @@ function removeEditedImage(index) {
         // Also remove from the new files list
         const fileIndex = newImageFiles.value.findIndex(f => f === removed.file);
         if (fileIndex > -1) {
-            newImageFiles.value.splice(fileIndex, 1);
+            newImageFiles.value.splice(index, 1);
         }
     }
 }
@@ -493,39 +493,3 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
         </div>
     </div>
 </template>
-
-<style scoped>
-.message-row { @apply w-full; }
-.message-content-container { @apply max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex items-start space-x-4; }
-.system-bubble { @apply text-center bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 text-xs italic p-2 rounded-lg max-w-md mx-auto shadow-none; }
-.model-info { @apply text-xs leading-tight text-gray-400 dark:text-gray-500 font-mono; }
-.typing-indicator .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background-color: currentColor; margin: 0 1px; animation: bounce 1.4s infinite ease-in-out both; }
-.typing-indicator .dot:nth-of-type(1) { animation-delay: -0.32s; }
-.typing-indicator .dot:nth-of-type(2) { animation-delay: -0.16s; }
-@keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1.0); } }
-
-.source-item { @apply flex items-center gap-3 p-2 rounded-md transition-colors cursor-pointer bg-gray-50 hover:bg-gray-200 dark:bg-gray-700/50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200; }
-.source-item .similarity-chip { @apply w-2.5 h-2.5 rounded-full flex-shrink-0; }
-.events-container { @apply mt-2 border-t border-gray-200 dark:border-gray-700/50 pt-2; }
-.events-summary { @apply flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer list-none select-none; }
-.events-summary::-webkit-details-marker { display: none; }
-.toggle-icon { @apply transition-transform duration-200 w-4 h-4; }
-details[open] > summary .toggle-icon { transform: rotate(90deg); }
-.last-event-snippet { @apply ml-auto text-gray-400 dark:text-gray-500 font-normal italic truncate pl-4; }
-.events-content { @apply mt-2 space-y-3; }
-.event-item { @apply flex items-start gap-3; }
-.event-icon-container { @apply flex-shrink-0 w-5 h-5 mt-0.5 text-gray-600 dark:text-gray-300; }
-.event-details { @apply flex-1 min-w-0; }
-.event-title { @apply text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400; }
-.event-body { @apply mt-1 text-sm; }
-.event-body .message-prose :where(p, ul, ol, pre) { margin-top: 0.25em; margin-bottom: 0.25em; }
-.message-footer { @apply flex items-center justify-between mt-2 pt-2 border-t border-gray-200/80 dark:border-white/10; min-height: 28px; }
-.detail-badge { @apply flex items-center gap-1.5 px-2 py-1 rounded-full bg-gray-200/50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300 font-mono; }
-.branch-badge-nav { @apply flex items-center gap-1 p-0; }
-.action-btn { @apply p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed; }
-.message-rating { @apply flex items-center gap-1 bg-gray-200/50 dark:bg-gray-700/50 rounded-full; }
-.rating-btn { @apply p-1.5 rounded-full text-gray-500 dark:text-gray-400 hover:bg-gray-300 dark:hover:bg-gray-600; }
-.rating-btn.upvote.active { @apply text-green-500; }
-.rating-btn.downvote.active { @apply text-red-500; }
-.rating-score { @apply px-1 text-xs font-bold w-6 text-center; }
-</style>

@@ -58,21 +58,21 @@ function openRegister() {
           v-if="logoSrc" 
           :src="logoSrc" 
           alt="Custom Logo" 
-          class="h-28 w-auto object-contain border-4 border-gray-200 dark:border-gray-700 rounded-lg shadow-md" 
+          class="h-24 sm:h-28 w-auto object-contain border-4 border-gray-200 dark:border-gray-700 rounded-lg shadow-md" 
           @error="($event.target.src=logoDefault)"
         />
         <img 
           v-else 
           :src="logoDefault" 
           alt="lollms Logo" 
-          class="h-28 w-28 border-4 border-gray-200 dark:border-gray-700 rounded-lg shadow-md"
+          class="h-24 sm:h-28 w-auto border-4 border-gray-200 dark:border-gray-700 rounded-lg shadow-md"
         >
       </div>
       
-      <h1 class="text-6xl md:text-8xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">
+      <h1 class="text-5xl sm:text-6xl md:text-8xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">
         {{ welcomeText }}
       </h1>
-      <p class="mt-3 text-2xl md:text-3xl text-gray-600 dark:text-gray-300">
+      <p class="mt-3 text-xl sm:text-2xl md:text-3xl text-gray-600 dark:text-gray-300">
         {{ welcomeSlogan }}
       </p>
 

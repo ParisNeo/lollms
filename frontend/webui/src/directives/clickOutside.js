@@ -1,25 +1,21 @@
 /**
- * Vue directive to detect clicks outside of an element.
- *
- * Usage:
- * <div v-click-outside="myMethod">...</div>
- *
- * The 'myMethod' will be called when a click occurs outside the div.
+ * v-on-click-outside
+ * A Vue directive to call a method when a click occurs outside the bound element.
  */
-const clickOutside = {
-  beforeMount(el, binding) {
-    el.clickOutsideEvent = function (event) {
-      // here I check that click was outside the el and his children
+export default {
+  beforeMount: (el, binding) => {
+    el.clickOutsideEvent = event => {
+      // Check if the click is outside the element and its binding's context
       if (!(el === event.target || el.contains(event.target))) {
-        // and if it did, call method provided in attribute value
+        // Call the method provided in the directive's value
         binding.value(event);
       }
     };
-    document.body.addEventListener('click', el.clickOutsideEvent);
+    // Add event listener to the whole document
+    document.addEventListener('mousedown', el.clickOutsideEvent);
   },
-  unmounted(el) {
-    document.body.removeEventListener('click', el.clickOutsideEvent);
+  unmounted: el => {
+    // Clean up the event listener
+    document.removeEventListener('mousedown', el.clickOutsideEvent);
   },
 };
-
-export default clickOutside;

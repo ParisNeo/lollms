@@ -96,7 +96,7 @@ function handleClickOutside() {
 <template>
   <div @click="handleSelect" 
        :class="[
-            'discussion-item-flat',
+            'discussion-item-flat group',
             { 'selected': isSelected },
             { 'active-generation': isActive }
        ]">
@@ -121,7 +121,7 @@ function handleClickOutside() {
     <div class="relative">
       <button 
         @click="toggleMenu" 
-        class="menu-trigger opacity-0 hover:opacity-100 transition-opacity duration-200"
+        class="menu-trigger opacity-0 group-hover:opacity-100 transition-opacity duration-200"
         :class="{ 'opacity-100': showMenu }"
         title="More actions"
       >
@@ -191,73 +191,3 @@ function handleClickOutside() {
     </div>
   </div>
 </template>
-
-<style scoped>
-.discussion-item-flat {
-  @apply relative w-full text-left p-3 rounded-md cursor-pointer flex items-center transition-colors duration-150 hover:bg-slate-50 dark:hover:bg-gray-700/50;
-}
-
-.discussion-item-flat.selected {
-  @apply bg-blue-50 dark:bg-blue-900/20;
-}
-
-.discussion-item-flat.active-generation {
-  @apply border-l-2 border-blue-500;
-}
-
-.discussion-item-flat:hover .menu-trigger {
-  @apply opacity-100;
-}
-
-.discussion-title {
-  @apply text-sm font-medium text-slate-900 dark:text-gray-100 truncate leading-5;
-}
-
-.owner-info {
-  @apply mt-1;
-}
-
-.owner-badge {
-  @apply inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-300;
-}
-
-.generating-spinner {
-  @apply w-4 h-4 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin;
-}
-
-.menu-trigger {
-  @apply p-1.5 rounded text-slate-400 dark:text-gray-500 hover:bg-slate-100 dark:hover:bg-gray-600 hover:text-slate-600 dark:hover:text-gray-300 transition-all duration-150;
-}
-
-.dropdown-menu {
-  @apply absolute right-0 top-full mt-1 z-20;
-}
-
-.menu-content {
-  @apply bg-white dark:bg-gray-800 rounded-md shadow-lg border border-slate-200 dark:border-gray-600 py-1 min-w-[160px];
-}
-
-.menu-item {
-  @apply w-full flex items-center space-x-3 px-3 py-2 text-sm text-slate-700 dark:text-gray-200 hover:bg-slate-50 dark:hover:bg-gray-700 transition-colors duration-150;
-}
-
-.menu-item:hover {
-  @apply text-slate-900 dark:text-gray-100;
-}
-
-.star-item:hover {
-  @apply bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300;
-}
-
-.danger-item {
-  @apply text-red-600 dark:text-red-400;
-}
-
-.danger-item:hover {
-  @apply bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300;
-}
-
-.menu-divider {
-  @apply border-t border-slate-200 dark:border-gray-600 mx-1 my-1;
-}
-</style>

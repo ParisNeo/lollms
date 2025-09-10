@@ -1,40 +1,46 @@
-// frontend/webui/src/stores/ui.js
-import { ref, computed } from 'vue';
 import { defineStore } from 'pinia';
+import { markRaw } from 'vue';
 
-export const useUiStore = defineStore('ui', () => {
-    const mainView = ref('feed');
-    const modalStack = ref([]);
-    const modalProps = ref({});
-    const notifications = ref([]);
-    const currentTheme = ref(localStorage.getItem('lollms-theme') || 'light');
-    const currentLanguage = ref(localStorage.getItem('lollms-language') || 'en');
-    const isImageViewerOpen = ref(false);
-    const imageViewerSrc = ref('');
-    const confirmationOptions = ref({
+export const useUiStore = defineStore('ui', {
+  state: () => ({
+    mainView: 'chat',
+    modalStack: [],
+    modalProps: {},
+    notifications: [],
+    currentTheme: localStorage.getItem('lollms-theme') || 'light',
+    currentLanguage: localStorage.getItem('lollms-language') || 'en',
+    isImageViewerOpen: false,
+    imageViewerSrc: '',
+    confirmationOptions: {
         title: 'Are you sure?',
         message: 'This action cannot be undone.',
         confirmText: 'Confirm',
         onConfirm: () => {},
-    });
-    const availableLanguages = ref({});
-    const emailModalSubject = ref('');
-    const emailModalBody = ref('');
-    const emailModalBackgroundColor = ref('#f4f4f8');
-    const emailModalSendAsText = ref(false);
-    const isSidebarOpen = ref(true);
-    const keywords = ref([]);
-    const isDataZoneVisible = ref(false);
-    const isDataZoneExpanded = ref(false);
-    const generatePersonalityModalProps = ref({
+    },
+    availableLanguages: {},
+    emailModalSubject: '',
+    emailModalBody: '',
+    emailModalBackgroundColor: '#f4f4f8',
+    emailModalSendAsText: false,
+    isSidebarOpen: true,
+    keywords: [],
+    isDataZoneVisible: false,
+    isDataZoneExpanded: false,
+    generatePersonalityModalProps: {
         prompt: '',
         customEnhancePrompt: ''
-    });
-    const pageTitle = ref('');
-    const pageTitleIcon = ref(null);
-    const activeModal = computed(() => modalStack.value.length > 0 ? modalStack.value[modalStack.value.length - 1] : null);
+    },
+    pageTitle: '',
+    pageTitleIcon: null,
+  }),
 
-    async function copyToClipboard(textToCopy, successMessage = 'Copied to clipboard!') {
+  getters: {
+    activeModal: (state) => state.modalStack.length > 0 ? state.modalStack[state.modalStack.length - 1] : null,
+    modalData: (state) => (name) => state.modalProps[name] || null,
+  },
+
+  actions: {
+    async copyToClipboard(textToCopy, successMessage = 'Copied to clipboard!') {
         try {
             if (navigator.clipboard && window.isSecureContext) {
                 await navigator.clipboard.writeText(textToCopy);
@@ -54,208 +60,191 @@ export const useUiStore = defineStore('ui', () => {
                 document.body.removeChild(textArea);
             }
             if (successMessage) {
-                addNotification(successMessage, 'success');
+                this.addNotification(successMessage, 'success');
             }
             return true;
         } catch (error) {
             console.error('Copy to clipboard failed:', error);
-            addNotification('Could not copy text.', 'error');
+            this.addNotification('Could not copy text.', 'error');
             return false;
         }
-    }
+    },
 
-    function initEmailModalState() {
-        emailModalSubject.value = '';
-        emailModalBody.value = '';
-        emailModalBackgroundColor.value = '#f4f4f8';
-        emailModalSendAsText.value = false;
-    }
+    initEmailModalState() {
+        this.emailModalSubject = '';
+        this.emailModalBody = '';
+        this.emailModalBackgroundColor = '#f4f4f8';
+        this.emailModalSendAsText = false;
+    },
 
-    function setMainView(viewName) {
-        console.log("Switching main view to:", viewName);
+    setMainView(viewName) {
         if (['feed', 'chat'].includes(viewName)) {
-            console.log("Switching main view to:", viewName);
-            mainView.value = viewName;
+            this.mainView = viewName;
         }
-    }
+    },
 
-    function openModal(name, props = {}) {
-        modalStack.value.push(name);
-        modalProps.value[name] = props;
-    }
+    openModal(name, props = {}) {
+        if (!this.modalStack.includes(name)) {
+            this.modalStack.push(name);
+        }
+        this.modalProps[name] = props;
+    },
 
-    function closeModal(name = null) {
+    closeModal(name = null) {
         if (name === null) {
-            modalStack.value = [];
-            modalProps.value = {};
+            this.modalStack = [];
+            this.modalProps = {};
             return;
         }
-
-        if (name && activeModal.value !== name) {
+        
+        if (name && this.activeModal !== name) {
             return;
         }
-        if (modalStack.value.length > 0) {
-            const closedModalName = modalStack.value.pop();
-            delete modalProps.value[closedModalName];
+        if (this.modalStack.length > 0) {
+            const closedModalName = this.modalStack.pop();
+            delete this.modalProps[closedModalName];
         }
-    }
+    },
 
-    function addNotification(message, type = 'info', duration = 3000, persistent = false, sender = null) {
+    addNotification(message, type = 'info', duration = 3000, persistent = false, sender = null) {
         const id = Date.now() + Math.random();
-        notifications.value.push({ id, message, type, duration, persistent, sender });
-    }
+        this.notifications.push({ id, message, type, duration, persistent, sender });
+    },
 
-    function removeNotification(id) {
-        notifications.value = notifications.value.filter(n => n.id !== id);
-    }
+    removeNotification(id) {
+        this.notifications = this.notifications.filter(n => n.id !== id);
+    },
     
-    function setTheme(theme) {
-        currentTheme.value = theme;
+    setTheme(theme) {
+        this.currentTheme = theme;
         localStorage.setItem('lollms-theme', theme);
-        if (theme === 'dark') {
-            document.documentElement.classList.add('dark');
-        } else {
-            document.documentElement.classList.remove('dark');
-        }
-    }
+        document.documentElement.classList.toggle('dark', theme === 'dark');
+    },
 
-    function toggleTheme() {
-        const newTheme = currentTheme.value === 'light' ? 'dark' : 'light';
-        setTheme(newTheme);
-    }
+    toggleTheme() {
+        this.setTheme(this.currentTheme === 'light' ? 'dark' : 'light');
+    },
     
-    function initializeTheme() {
-        setTheme(currentTheme.value);
-    }
+    initializeTheme() {
+        this.setTheme(this.currentTheme);
+    },
 
-    function setLanguage(langCode) {
-        currentLanguage.value = langCode;
+    setLanguage(langCode) {
+        this.currentLanguage = langCode;
         localStorage.setItem('lollms-language', langCode);
-    }
+    },
 
-    function openImageViewer(src) {
-        imageViewerSrc.value = src;
-        isImageViewerOpen.value = true;
-    }
+    openImageViewer(src) {
+        this.imageViewerSrc = src;
+        this.isImageViewerOpen = true;
+    },
 
-    function closeImageViewer() {
-        isImageViewerOpen.value = false;
-        imageViewerSrc.value = '';
-    }
+    closeImageViewer() {
+        this.isImageViewerOpen = false;
+        this.imageViewerSrc = '';
+    },
 
-    function showConfirmation(options) {
+    showConfirmation(options) {
         return new Promise((resolve) => {
-            confirmationOptions.value = {
+            this.confirmationOptions = {
                 title: options.title || 'Are you sure?',
                 message: options.message || 'This action cannot be undone.',
                 confirmText: options.confirmText || 'Confirm',
                 onConfirm: () => {
                     resolve(true);
-                    closeModal("confirmation")
+                    this.closeModal("confirmation");
                 },
                 onCancel: () => {
                     resolve(false);
-                    closeModal("confirmation")
+                    this.closeModal("confirmation");
                 }
             };
-            openModal("confirmation")
+            this.openModal("confirmation");
         });
-    }
+    },
 
-    function confirmAction() {
-        if (confirmationOptions.value.onConfirm) {
-            confirmationOptions.value.onConfirm();
+    confirmAction() {
+        if (this.confirmationOptions.onConfirm) {
+            this.confirmationOptions.onConfirm();
         }
-    }
+    },
 
-    function cancelAction() {
-        if (confirmationOptions.value.onCancel) {
-            confirmationOptions.value.onCancel();
+    cancelAction() {
+        if (this.confirmationOptions.onCancel) {
+            this.confirmationOptions.onCancel();
         }
-    }
+    },
 
-    async function fetchLanguages() {
+    async fetchLanguages() {
         try {
             const apiClient = (await import('../services/api')).default;
             const response = await apiClient.get('/api/languages/');
-            availableLanguages.value = response.data;
+            this.availableLanguages = response.data;
         } catch (error) {
-            availableLanguages.value = { en: 'English' };
+            this.availableLanguages = { en: 'English' };
         }
-    }
+    },
     
-    async function fetchKeywords() {
-        if (keywords.value.length > 0) return;
+    async fetchKeywords() {
+        if (this.keywords.length > 0) return;
         try {
             const apiClient = (await import('../services/api')).default;
             const response = await apiClient.get('/api/help/keywords');
-            keywords.value = response.data;
+            this.keywords = response.data;
         } catch (error) {
             console.error("Failed to fetch keywords:", error);
         }
-    }
+    },
 
-    function modalData(name) {
-        return modalProps.value[name] || null;
-    }
+    isModalOpen(name) {
+        return this.activeModal === name;
+    },
 
-    function isModalOpen(name) {
-        return activeModal.value === name;
-    }
-    function openGeneratePersonalityModal() {
-        openModal('generatePersonality');
-    }
-    function setEmailModalState(subject, body, backgroundColor='#f4f4f8', sendAsText=false) {
-        emailModalSubject.value = subject;
-        emailModalBody.value = body;
-        emailModalBackgroundColor.value = backgroundColor;
-        emailModalSendAsText.value = sendAsText;
-    }
+    openGeneratePersonalityModal() {
+        this.openModal('generatePersonality');
+    },
 
-    function toggleSidebar() {
-        isSidebarOpen.value = !isSidebarOpen.value;
-        localStorage.setItem('lollms-sidebar-open', isSidebarOpen.value);
-    }
+    setEmailModalState(subject, body, backgroundColor='#f4f4f8', sendAsText=false) {
+        this.emailModalSubject = subject;
+        this.emailModalBody = body;
+        this.emailModalBackgroundColor = backgroundColor;
+        this.emailModalSendAsText = sendAsText;
+    },
 
-    function initializeSidebarState() {
+    toggleSidebar() {
+        this.isSidebarOpen = !this.isSidebarOpen;
+        localStorage.setItem('lollms-sidebar-open', this.isSidebarOpen);
+    },
+
+    closeSidebar() {
+        this.isSidebarOpen = false;
+        localStorage.setItem('lollms-sidebar-open', 'false');
+    },
+
+    initializeSidebarState() {
         const storedState = localStorage.getItem('lollms-sidebar-open');
         if (storedState !== null) {
-            isSidebarOpen.value = JSON.parse(storedState);
+            this.isSidebarOpen = JSON.parse(storedState);
+        } else {
+            // Default to closed on desktop, open on mobile
+            this.isSidebarOpen = window.innerWidth <= 768;
         }
-    }
+    },
     
-    function toggleDataZone() {
-        isDataZoneVisible.value = !isDataZoneVisible.value;
-        if (!isDataZoneVisible.value) {
-            isDataZoneExpanded.value = false; // Also shrink if hiding
+    toggleDataZone() {
+        this.isDataZoneVisible = !this.isDataZoneVisible;
+        if (!this.isDataZoneVisible) {
+            this.isDataZoneExpanded = false; // Also shrink if hiding
         }
-    }
+    },
 
-    function toggleDataZoneExpansion() {
-        isDataZoneExpanded.value = !isDataZoneExpanded.value;
-    }
+    toggleDataZoneExpansion() {
+        this.isDataZoneExpanded = !this.isDataZoneExpanded;
+    },
 
-    function setPageTitle({ title, icon = null }) {
-        pageTitle.value = title;
-        pageTitleIcon.value = icon;
-    }
-
-    return {
-        mainView, activeModal, modalProps, notifications, currentTheme,
-        currentLanguage, availableLanguages,
-        isImageViewerOpen, imageViewerSrc, confirmationOptions,
-        emailModalSubject, emailModalBody, emailModalBackgroundColor, emailModalSendAsText,
-        isSidebarOpen, keywords, generatePersonalityModalProps,
-        isDataZoneVisible, isDataZoneExpanded,
-        pageTitle, pageTitleIcon, setPageTitle,
-        initEmailModalState,
-        setMainView, openModal, closeModal, addNotification, removeNotification,
-        setTheme, toggleTheme, initializeTheme, setLanguage, fetchLanguages, fetchKeywords,
-        openImageViewer, closeImageViewer, showConfirmation, confirmAction, cancelAction,
-        isModalOpen, modalData,
-        copyToClipboard,
-        toggleSidebar, initializeSidebarState,
-        toggleDataZone, toggleDataZoneExpansion,
-        openGeneratePersonalityModal
-    };
+    setPageTitle({ title, icon = null }) {
+        this.pageTitle = title;
+        this.pageTitleIcon = icon ? markRaw(icon) : null;
+    },
+  }
 });

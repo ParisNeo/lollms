@@ -10,6 +10,8 @@ from email.mime.multipart import MIMEMultipart
 import re
 import html
 import platform
+import tempfile
+import os
 
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
@@ -174,25 +176,26 @@ def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], t
         print(f"CRITICAL: Failed to send SMTP email. Error: {e}")
         raise
 
-
-def _send_email_system_mail_html(to_email: str, subject: str, html_content: str, text_content: str):
-    """Sends a multipart/alternative email using the system's `mailx` command with proper headers inline."""
-
+def _send_email_system_mail_html_alt(to_email: str, subject: str, html_content: str, text_content: str):
+    """Alternative approach using sendmail or a temporary file with mailx."""
+    
+    # Check for sendmail first (more reliable for MIME)
+    if shutil.which("sendmail"):
+        return _send_email_sendmail_html(to_email, subject, html_content, text_content)
+    
     if not shutil.which("mailx"):
-        raise FileNotFoundError("The 'mailx' command not found. Please install mailx.")
-
+        raise FileNotFoundError("Neither 'sendmail' nor 'mailx' found.")
+    
+    safe_subject = subject.replace("\n", " ").replace("\r", " ")
     boundary = f"----=_NextPart_{secrets.token_hex(16)}"
-
-    headers = (
+    
+    # Create full email with headers
+    full_email = (
         f"To: {to_email}\n"
-        f"Subject: {subject.replace(chr(10), ' ').replace(chr(13), ' ')}\n"
+        f"Subject: {safe_subject}\n"
         f"MIME-Version: 1.0\n"
         f"Content-Type: multipart/alternative; boundary=\"{boundary}\"\n"
         f"\n"
-    )
-
-    multipart_body = (
-        f"{headers}"
         f"This is a multi-part message in MIME format.\n"
         f"--{boundary}\n"
         f"Content-Type: text/plain; charset=utf-8\n"
@@ -204,18 +207,24 @@ def _send_email_system_mail_html(to_email: str, subject: str, html_content: str,
         f"{html_content}\n\n"
         f"--{boundary}--\n"
     )
-
-    command = ["mailx", "-v", to_email]
-
+    
+    # Write to temp file and use mailx -t (read headers from message)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.eml', delete=False) as f:
+        f.write(full_email)
+        temp_file = f.name
+    
     try:
-        process = subprocess.run(
-            command,
-            input=multipart_body,
-            capture_output=True,
-            text=True,
-            check=True,
-            encoding="utf-8"
-        )
+        command = ["mailx", "-v", "-t"]  # -t means read headers from message
+        
+        with open(temp_file, 'r') as f:
+            process = subprocess.run(
+                command,
+                stdin=f,
+                capture_output=True,
+                text=True,
+                check=True
+            )
+        
         print(f"INFO: Email (HTML system mail) sent to {to_email}.")
         if process.stdout.strip():
             print(f"MAILX STDOUT:\n{process.stdout}")
@@ -224,38 +233,55 @@ def _send_email_system_mail_html(to_email: str, subject: str, html_content: str,
     except subprocess.CalledProcessError as e:
         print(f"ERROR: System 'mailx' command failed.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         raise
+    finally:
+        os.unlink(temp_file)
 
-
-import shutil
-import subprocess
-
-def _send_email_system_mail_text(to_email: str, subject: str, text_content: str):
-    """Sends a simple plain text email using the system's `mail` command with verbose logging."""
-
-    if not shutil.which("mail"):
-        raise FileNotFoundError("The 'mail' command not found. Please install mailutils.")
-
+def _send_email_sendmail_html(to_email: str, subject: str, html_content: str, text_content: str):
+    """Send HTML email using sendmail (more reliable for MIME)."""
+    
+    if not shutil.which("sendmail"):
+        raise FileNotFoundError("The 'sendmail' command not found.")
+    
     safe_subject = subject.replace("\n", " ").replace("\r", " ")
-    command = ["mail", "-v", "-s", safe_subject, to_email]
-
+    boundary = f"----=_NextPart_{secrets.token_hex(16)}"
+    
+    full_email = (
+        f"To: {to_email}\n"
+        f"Subject: {safe_subject}\n"
+        f"MIME-Version: 1.0\n"
+        f"Content-Type: multipart/alternative; boundary=\"{boundary}\"\n"
+        f"\n"
+        f"This is a multi-part message in MIME format.\n"
+        f"--{boundary}\n"
+        f"Content-Type: text/plain; charset=utf-8\n"
+        f"Content-Transfer-Encoding: 8bit\n\n"
+        f"{text_content}\n\n"
+        f"--{boundary}\n"
+        f"Content-Type: text/html; charset=utf-8\n"
+        f"Content-Transfer-Encoding: 8bit\n\n"
+        f"{html_content}\n\n"
+        f"--{boundary}--\n"
+    )
+    
+    command = ["sendmail", "-v", to_email]
+    
     try:
         process = subprocess.run(
             command,
-            input=text_content,
+            input=full_email,
             capture_output=True,
             text=True,
             check=True,
             encoding="utf-8"
         )
-        print(f"INFO: Email (Text system mail) sent to {to_email}.")
+        print(f"INFO: Email sent via sendmail to {to_email}.")
         if process.stdout.strip():
-            print(f"MAIL STDOUT:\n{process.stdout}")
+            print(f"SENDMAIL STDOUT:\n{process.stdout}")
         if process.stderr.strip():
-            print(f"MAIL STDERR:\n{process.stderr}")
+            print(f"SENDMAIL STDERR:\n{process.stderr}")
     except subprocess.CalledProcessError as e:
-        print(f"ERROR: System 'mail' command failed.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
+        print(f"ERROR: Sendmail command failed.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         raise
-
 
 def _send_email_outlook(to_email: str, subject: str, body: str):
     """Sends an email using Outlook."""

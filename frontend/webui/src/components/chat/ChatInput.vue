@@ -209,7 +209,7 @@ function clampPosition(x, y) {
 
 function autoResizeTextarea() {
     if (!textareaRef.value) return;
-    textareaRef.value.style.height = '40px';
+    textareaRef.value.style.height = 'auto';
     textareaRef.value.style.height = Math.min(textareaRef.value.scrollHeight, 120) + 'px';
 }
 
@@ -359,7 +359,7 @@ async function handleSendMessage() {
         uploadedImages.value = [];
         inputTokenCount.value = 0;
         imageErrors.value.clear();
-        if (textareaRef.value) textareaRef.value.style.height = '40px';
+        if (textareaRef.value) autoResizeTextarea();
     } catch (error) { 
         uiStore.addNotification('There was an error sending your message.', 'error'); 
     }
@@ -553,9 +553,6 @@ onUnmounted(() => {
     <!-- Shrunk State Buttons -->
     <Transition enter-active-class="transition ease-out duration-200" enter-from-class="transform opacity-0 scale-90" enter-to-class="transform opacity-100 scale-100" leave-active-class="transition ease-in duration-150" leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-90">
       <div v-if="isShrunk" class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
-        <button @click="uiStore.toggleDataZone()" class="p-3 bg-yellow-500 dark:bg-yellow-600 text-white rounded-full shadow-lg hover:bg-yellow-600 dark:hover:bg-yellow-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-yellow-400 dark:focus:ring-offset-gray-900 transition-colors duration-200" title="Toggle Data Zone">
-          <IconDataZone class="h-5 w-5" />
-        </button>
         <button @click="toggleShrink" class="relative p-3 bg-blue-500 dark:bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-600 dark:hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-400 dark:focus:ring-offset-gray-900 transition-colors duration-200" title="Expand Chat">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2-2h-5l-5 5v-5z" />
@@ -567,9 +564,9 @@ onUnmounted(() => {
 
     <!-- Main Chat Interface -->
     <Transition enter-active-class="transition ease-out duration-200" enter-from-class="transform opacity-0 scale-95 translate-y-2" enter-to-class="transform opacity-100 scale-100 translate-y-0" leave-active-class="transition ease-in duration-150" leave-from-class="transform opacity-100 scale-100 translate-y-0" leave-to-class="transform opacity-0 scale-95 translate-y-2">
-      <div v-if="!isShrunk" ref="chatbarRef" :style="chatbarStyle" :onpaste="currentModelVisionSupport ? handlePaste : null" class="fixed w-11/12 max-w-4xl bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-xl border border-gray-300 dark:border-gray-700 shadow-2xl transition-shadow z-50" :class="{'cursor-grabbing': isDragging}">
+      <div v-if="!isShrunk" ref="chatbarRef" :style="chatbarStyle" :onpaste="currentModelVisionSupport ? handlePaste : null" class="fixed w-[95%] sm:w-11/12 max-w-4xl bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-xl border border-gray-300 dark:border-gray-700 shadow-2xl transition-shadow z-50" :class="{'cursor-grabbing': isDragging}">
         <!-- Header -->
-        <div @mousedown.prevent="onMouseDown" class="flex items-center justify-between h-10 px-4 border-b border-gray-200 dark:border-gray-700 rounded-t-xl" :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'">
+        <div @mousedown.prevent="onMouseDown" class="flex items-center justify-between h-10 px-2 sm:px-4 border-b border-gray-200 dark:border-gray-700 rounded-t-xl" :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'">
             <h3 class="text-sm font-semibold truncate text-gray-800 dark:text-gray-100 select-none">{{ headerTitle }}</h3>
             <button @click.stop="toggleShrink" @mousedown.stop class="p-1 rounded-full text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600" title="Shrink Chat">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -578,21 +575,15 @@ onUnmounted(() => {
             </button>
         </div>
 
-        <div class="p-3" @mousedown.stop>
+        <div class="p-2 sm:p-3" @mousedown.stop>
             <!-- Context Bar -->
-            <div v-if="showContextBar" class="px-1 pb-2">
+            <div v-if="showContextBar" class="px-1 pb-2 relative group">
                 <div class="flex justify-between items-center mb-1 text-xs text-gray-600 dark:text-gray-400 font-mono">
-                    <div class="flex items-center gap-1.5">
+                    <div class="flex items-center gap-1.5 min-w-0">
                         <IconToken class="w-4 h-4 flex-shrink-0" />
                         <button @click="showContext" class="cursor-pointer hover:underline flex-shrink-0" title="View full context breakdown">Context:</button>
-                        <div class="flex items-center gap-x-1 text-xs truncate min-w-0">
-                            <template v-for="(part, index) in contextParts" :key="part.label">
-                                <span :title="`${part.title}: ${part.value.toLocaleString()} tokens`" class="px-1 py-0.5 rounded" :class="part.colorClass">{{ part.label }}:{{ part.value.toLocaleString() }}</span>
-                                <span v-if="index < contextParts.length - 1" class="opacity-50 mx-0.5">+</span>
-                            </template>
-                        </div>
                     </div>
-                    <span>{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
+                    <span class="flex-shrink-0 pl-2">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
                 </div>
                 <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden border transition-colors duration-300" :class="progressBorderColorClass">
                     <div class="progress-segment bg-blue-500" :style="{ width: `${systemPromptPercentage}%` }" :title="`System Prompt: ${systemPromptTokens.toLocaleString()} tokens`"></div>
@@ -602,19 +593,28 @@ onUnmounted(() => {
                     <div class="progress-segment bg-purple-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage + historyImagePercentage}%`, width: `${inputTokensPercentage}%` }" :title="`Current Input: ${inputTokenCount.toLocaleString()} tokens`"></div>
                 </div>
                 <p v-if="showContextWarning" class="mt-1.5 text-xs text-center" :class="totalPercentage > 100 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'">{{ contextWarningMessage }}</p>
+                <!-- Hover element for context breakdown -->
+                <div class="absolute bottom-full left-0 mb-2 w-auto p-2 bg-white dark:bg-gray-900 border dark:border-gray-600 rounded-lg shadow-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+                    <h4 class="font-bold mb-1 whitespace-nowrap">Context Breakdown</h4>
+                    <div class="flex flex-wrap gap-1">
+                        <template v-for="part in contextParts">
+                             <span :title="`${part.title}: ${part.value.toLocaleString()} tokens`" class="px-1.5 py-0.5 rounded" :class="part.colorClass">{{ part.label }}: {{ part.value.toLocaleString() }}</span>
+                        </template>
+                    </div>
+                </div>
             </div>
             
             <!-- Image Preview -->
             <div v-if="uploadedImages.length > 0 || isUploading" class="mb-2 p-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md">
                 <div class="flex flex-wrap gap-2">
-                    <div v-for="(image, index) in uploadedImages" :key="`img-${image.server_path}-${index}`" class="relative w-16 h-16">
+                    <div v-for="(image, index) in uploadedImages" :key="`img-${image.server_path}-${index}`" class="relative w-14 h-14 sm:w-16 sm:h-16">
                         <img v-if="!imageErrors.has(index)" :src="image.local_url" @error="handleImageError(index, $event)" @load="console.log('Image loaded:', image.server_path)" class="w-full h-full object-cover rounded-md" alt="Image preview" />
                         <div v-else class="w-full h-full bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center">
                             <span class="text-xs text-gray-500">Failed</span>
                         </div>
                         <button @click="removeImage(index)" class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold leading-none">×</button>
                     </div>
-                    <div v-if="isUploading" class="w-16 h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center">
+                    <div v-if="isUploading" class="w-14 h-14 sm:w-16 sm:h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center">
                         <IconAnimateSpin class="h-6 w-6 text-gray-500 animate-spin" />
                     </div>
                 </div>
@@ -634,11 +634,7 @@ onUnmounted(() => {
             <!-- Main Interface -->
             <div v-else class="flex items-center gap-2">
                 <!-- Action Buttons -->
-                <div class="flex flex-shrink-0 gap-2">
-                    <button @click="uiStore.toggleDataZone()" class="btn btn-secondary chat-action-button" title="Toggle Data Zone">
-                        <IconDataZone class="w-5 h-5" />
-                    </button>
-                    
+                <div class="flex flex-shrink-0 gap-1 sm:gap-2">
                     <button v-if="currentModelVisionSupport" @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary chat-action-button disabled:opacity-50" title="Upload Images">
                         <IconPhoto class="w-5 h-5"/>
                     </button>
@@ -750,15 +746,3 @@ onUnmounted(() => {
     </Transition>
   </div>
 </template>
-
-<style>
-.simple-chat-input { @apply w-full flex-1 p-2 bg-transparent rounded-md border border-gray-300 dark:border-gray-600 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 text-sm resize-none overflow-y-auto; height: 40px; }
-.cm-editor-container .cm-editor { border: 1px solid theme('colors.gray.300'); border-radius: theme('borderRadius.md'); padding-top: 0.5rem; padding-bottom: 0.5rem; font-size: theme('fontSize.sm'); outline: none; }
-.dark .cm-editor-container .cm-editor { border-color: theme('colors.gray.600'); }
-.cm-editor-container .cm-editor.cm-focused { border-color: theme('colors.blue.500'); box-shadow: 0 0 0 1px theme('colors.blue.500'); }
-.cm-editor-container .cm-scroller { overflow-y: auto; }
-.progress-segment { @apply absolute top-0 h-full transition-all duration-300 ease-out opacity-80; }
-.category-header { @apply px-3 py-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 sticky top-0 bg-gray-50 dark:bg-gray-700 z-10; }
-.menu-item { @apply w-full text-left px-3 py-1.5 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 flex items-center; }
-.chat-action-button { @apply min-w-[40px] min-h-[40px] flex items-center justify-center; }
-</style>

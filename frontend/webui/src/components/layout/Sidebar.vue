@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
@@ -22,14 +22,55 @@ const user = computed(() => authStore.user);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
+const activityTimeout = ref(null);
+const sidebarRef = ref(null);
+
 function goToFeed() {
     console.log("Feed button clicked in Sidebar.");
     uiStore.setMainView('feed');
 }
+
+const resetActivityTimer = () => {
+    clearTimeout(activityTimeout.value);
+    if (isSidebarOpen.value) {
+        activityTimeout.value = setTimeout(() => {
+            // Do not auto-close on mobile where it's an overlay
+            if (window.innerWidth > 768) {
+                uiStore.closeSidebar();
+            }
+        }, 30000); // 30 seconds
+    }
+};
+
+watch(isSidebarOpen, (isOpen) => {
+    if (isOpen) {
+        resetActivityTimer();
+    } else {
+        clearTimeout(activityTimeout.value);
+    }
+});
+
+onMounted(() => {
+    const sidebarElement = sidebarRef.value;
+    if (sidebarElement) {
+        sidebarElement.addEventListener('mousemove', resetActivityTimer);
+        sidebarElement.addEventListener('mousedown', resetActivityTimer);
+    }
+    resetActivityTimer(); // Initial timer start
+});
+
+onUnmounted(() => {
+    const sidebarElement = sidebarRef.value;
+    if (sidebarElement) {
+        sidebarElement.removeEventListener('mousemove', resetActivityTimer);
+        sidebarElement.removeEventListener('mousedown', resetActivityTimer);
+    }
+    clearTimeout(activityTimeout.value);
+});
 </script>
 
 <template>
-  <aside class="flex-shrink-0 flex flex-col h-full bg-white dark:bg-gray-900 border-r border-slate-200 dark:border-gray-700 transition-all duration-300 ease-in-out" 
+  <aside ref="sidebarRef" class="flex-shrink-0 flex flex-col h-full bg-white dark:bg-gray-900 border-r border-slate-200 dark:border-gray-700 transition-all duration-300 ease-in-out" 
          :class="isSidebarOpen ? 'w-80' : 'w-16'">
     
     <!-- Main Content Area -->
