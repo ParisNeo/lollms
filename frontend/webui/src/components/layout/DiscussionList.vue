@@ -18,6 +18,7 @@ import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconGitBranch from '../../assets/icons/IconGitBranch.vue'; 
 import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
+import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 
 const store = useDiscussionsStore();
 const authStore = useAuthStore();
@@ -155,6 +156,13 @@ onUnmounted(() => {
                         title="New Discussion"
                     >
                         <IconPlus class="h-4 w-4" stroke-width="2" />
+                    </button>
+                    <button 
+                        @click="uiStore.toggleSidebar" 
+                        class="btn-icon-flat hidden md:inline-flex" 
+                        title="Collapse sidebar"
+                    >
+                        <IconArrowLeft class="h-4 w-4" />
                     </button>
                 </div>
             </div>
