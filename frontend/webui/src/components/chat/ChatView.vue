@@ -62,7 +62,7 @@ const dataStore = useDataStore();
 const memoriesStore = useMemoriesStore();
 const router = useRouter();
 const { on, off } = useEventBus();
-const { liveDataZoneTokens, currentModelVisionSupport, activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussionsStore);
+const { liveDataZoneTokens, currentModelVisionSupport, activeDiscussionArtefacts, isLoadingArtefacts, generationInProgress } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { availableTtiModels } = storeToRefs(dataStore);
 const { memories, isLoading: isLoadingMemories } = storeToRefs(memoriesStore);
@@ -93,6 +93,7 @@ const selectedArtefactVersions = ref({});
 const isDraggingFile = ref(false);
 const memorySearchTerm = ref('');
 const loadedMemoryTitles = ref(new Set());
+const isExportingArtefact = ref(null); // Holds the title of the artefact being exported
 
 // Data Zone State
 let discussionSaveDebounceTimer = null;
@@ -626,6 +627,43 @@ async function handleDeleteArtefact(title) {
     }
 }
 
+async function handleExportArtefact(title) {
+    if (!activeDiscussion.value || isExportingArtefact.value) return;
+
+    const version = selectedArtefactVersions.value[title];
+    if (!version) {
+        uiStore.addNotification('Please select a version to export.', 'warning');
+        return;
+    }
+    isExportingArtefact.value = title;
+    try {
+        const response = await apiClient.post(
+            `/api/discussions/${activeDiscussion.value.id}/artefacts/export-zip`,
+            { artefact_title: title, version: version },
+            { responseType: 'blob' }
+        );
+
+        const blob = new Blob([response.data], { type: 'application/zip' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        const safeTitle = title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+        link.setAttribute('download', `${safeTitle}_v${version}.zip`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        uiStore.addNotification(`Artefact "${title}" exported successfully.`, 'success');
+
+    } catch (error) {
+        console.error('Artefact export failed:', error);
+        uiStore.addNotification('Failed to export artefact as ZIP.', 'error');
+    } finally {
+        isExportingArtefact.value = null;
+    }
+}
+
+
 function handleCreateArtefact() {
     if (!activeDiscussion.value) return;
     uiStore.openModal('artefactEditor', { discussionId: activeDiscussion.value.id });
@@ -720,6 +758,37 @@ watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
         tokenizeContent(memory.value, 'memory');
     }
 }, { immediate: true, deep: true });
+
+// --- Auto-unload artefacts after generation ---
+async function unloadAllArtefactsAfterGeneration() {
+    if (!activeDiscussion.value || !activeDiscussionArtefacts.value) return;
+
+    const loadedArtefacts = activeDiscussionArtefacts.value.filter(a => a.is_loaded);
+    if (loadedArtefacts.length === 0) return;
+
+    console.log('Generation finished. Unloading all artefacts...');
+    const artefactsToUnload = [...loadedArtefacts];
+
+    for (const artefact of artefactsToUnload) {
+        try {
+            await discussionsStore.unloadArtefactFromContext({
+                discussionId: activeDiscussion.value.id,
+                artefactTitle: artefact.title,
+                version: artefact.version
+            });
+        } catch (error) {
+            console.error(`Failed to auto-unload artefact: ${artefact.title}`, error);
+        }
+    }
+    uiStore.addNotification('Artefacts auto-unloaded from context.', 'info', 3000);
+}
+
+watch(generationInProgress, (newValue, oldValue) => {
+    if (oldValue === true && newValue === false) {
+        unloadAllArtefactsAfterGeneration();
+    }
+});
+// --- End Auto-unload logic ---
 
 // Lifecycle
 onMounted(() => {
@@ -861,10 +930,10 @@ function toggleViewMode(zone) {
     dataZoneViewModes.value[zone] = dataZoneViewModes.value[zone] === 'edit' ? 'view' : 'edit';
 }
 
-function handleCloneDiscussionContext() {
+function handleCloneDiscussion() {
     if (activeDiscussion.value) {
-        discussionsStore.cloneDiscussion(activeDiscussion.value.id);
-        uiStore.addNotification('Discussion context cloned successfully', 'success');
+        discussionsStore.cloneDiscussion(activeDiscussion.value.id, true); // Assuming second paramater is for cloning artefacts
+        uiStore.addNotification('Discussion and artefacts cloned successfully', 'success');
     }
 }
 
@@ -952,7 +1021,7 @@ async function handleWipeAllMemories() {
                 </div>
             </div>
 
-            <!-- Enhanced Data Zone Sidebar -->
+            <!-- Data Zone Wrapper for Transition and Overlay -->
             <transition 
                 enter-active-class="transition ease-out duration-300" 
                 enter-from-class="transform translate-x-full opacity-0" 
@@ -960,107 +1029,237 @@ async function handleWipeAllMemories() {
                 leave-active-class="transition ease-in duration-300" 
                 leave-from-class="transform translate-x-0 opacity-100" 
                 leave-to-class="transform translate-x-full opacity-0">
-                <aside v-if="isDataZoneVisible && activeDiscussion" 
-                       :class="[isDataZoneExpanded ? 'w-full' : 'flex-shrink-0']" 
-                       :style="isDataZoneExpanded ? {} : { width: `${dataZoneWidth}px` }" 
-                       class="h-full flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl">
+                <div v-if="isDataZoneVisible && activeDiscussion"
+                     class="relative h-full"
+                     :class="[isDataZoneExpanded ? 'w-full' : 'flex-shrink-0']"
+                     :style="isDataZoneExpanded ? {} : { width: `${dataZoneWidth}px` }">
                     
-                    <!-- Tab Navigation -->
-                    <div class="flex-shrink-0 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
-                        <div class="flex items-center justify-between px-2">
-                            <nav class="flex space-x-1" aria-label="Data Zone Tabs">
-                                <button v-for="tab in dataTabs" :key="tab.id" @click="activeDataZoneTab = tab.id"
-                                        :class="[
-                                            'flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-t-md border-b-2',
-                                            activeDataZoneTab === tab.id ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
-                                        ]">
-                                    <component :is="tab.icon" class="w-4 h-4" />
-                                    <span>{{ tab.label }}</span>
-                                    <span v-if="tab.tokenCount > 0" class="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 text-xs rounded-full font-mono">{{ formatTokens(tab.tokenCount) }}</span>
+                    <!-- Enhanced Data Zone Sidebar -->
+                    <aside class="h-full flex flex-col bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-xl">
+                        
+                        <!-- Tab Navigation -->
+                        <div class="flex-shrink-0 bg-gray-50 dark:bg-gray-800/50 border-b border-gray-200 dark:border-gray-700">
+                            <div class="flex items-center justify-between px-2">
+                                <nav class="flex space-x-1" aria-label="Data Zone Tabs">
+                                    <button v-for="tab in dataTabs" :key="tab.id" @click="activeDataZoneTab = tab.id"
+                                            :class="[
+                                                'flex items-center gap-2 px-3 py-2.5 text-sm font-medium rounded-t-md border-b-2',
+                                                activeDataZoneTab === tab.id ? 'border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-gray-800' : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                                            ]">
+                                        <component :is="tab.icon" class="w-4 h-4" />
+                                        <span>{{ tab.label }}</span>
+                                        <span v-if="tab.tokenCount > 0" class="px-1.5 py-0.5 bg-gray-200 dark:bg-gray-600 text-xs rounded-full font-mono">{{ formatTokens(tab.tokenCount) }}</span>
+                                    </button>
+                                </nav>
+                                <button @click="uiStore.toggleDataZoneExpansion()" class="action-btn" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'">
+                                    <IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" />
+                                    <IconMaximize v-else class="w-5 h-5" />
                                 </button>
-                            </nav>
-                            <button @click="uiStore.toggleDataZoneExpansion()" class="action-btn" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'">
-                                <IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" />
-                                <IconMaximize v-else class="w-5 h-5" />
-                            </button>
+                            </div>
                         </div>
-                    </div>
 
-                    <!-- Discussion Data Zone Tab -->
-                    <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0">
-                        <!-- Main content container -->
-                        <div class="flex-grow flex flex-col min-h-0">
-                             <!-- Top Bar (Context + Actions) -->
-                            <div class="flex-shrink-0 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-4">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm font-medium text-gray-600 dark:text-gray-300">Context</span>
-                                    <div class="w-48 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                                        <div class="h-full bg-blue-500 rounded-full" :style="{ width: `${getPercentage(discussionDataZoneTokens)}%` }"></div>
+                        <!-- Discussion Data Zone Tab -->
+                        <div v-show="activeDataZoneTab === 'discussion'" class="flex-1 flex flex-col min-h-0">
+                            <!-- Main content container -->
+                            <div class="flex-grow flex flex-col min-h-0">
+                                 <!-- Top Bar (Context + Actions) -->
+                                <div class="flex-shrink-0 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-4">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-sm font-medium text-gray-600 dark:text-gray-300">Context</span>
+                                        <div class="w-48 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                            <div class="h-full bg-blue-500 rounded-full" :style="{ width: `${getPercentage(discussionDataZoneTokens)}%` }"></div>
+                                        </div>
+                                        <span class="text-xs font-mono text-gray-500 dark:text-gray-400">{{ formatNumber(discussionDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
                                     </div>
-                                    <span class="text-xs font-mono text-gray-500 dark:text-gray-400">{{ formatNumber(discussionDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
+                                    <div class="flex items-center gap-1">
+                                        <button @click="handleCloneDiscussion" class="action-btn-sm" title="Clone Discussion & Artefacts"><IconCopy class="w-4 h-4" /></button>
+                                        <button @click="openContextToArtefactModal" class="action-btn-sm" title="Save as Artefact"><IconSave class="w-4 h-4" /></button>
+                                        <div class="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1"></div>
+                                        <button @click="handleUndoDiscussion" class="action-btn-sm" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-4 h-4" /></button>
+                                        <button @click="handleRedoDiscussion" class="action-btn-sm" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-4 h-4" /></button>
+                                        <button @click="refreshDataZones" class="action-btn-sm" title="Refresh Data"><IconRefresh class="w-4 h-4" /></button>
+                                        <button @click="discussionDataZone = ''" class="action-btn-sm-danger" title="Clear All Text"><IconTrash class="w-4 h-4" /></button>
+                                    </div>
+                                </div>
+
+                                <div class="flex-grow flex min-h-0">
+                                    <!-- Left side (Editor) -->
+                                    <div class="flex-grow flex flex-col min-h-0 p-2">
+                                        <div class="flex-shrink-0 p-1 border bg-gray-50 dark:bg-gray-900/50 dark:border-gray-700 rounded-t-md flex items-center space-x-1">
+                                            <ToolbarButton @click="applyMarkdown('**', '**', 'bold text')" icon-collection="ui" icon-name="IconBold" tooltip="Bold" />
+                                            <ToolbarButton @click="applyMarkdown('*', '*', 'italic text')" icon-collection="ui" icon-name="IconItalic" tooltip="Italic" />
+                                            <ToolbarButton @click="applyMarkdown('[', '](url)', 'link text')" icon-collection="ui" icon-name="IconLink" tooltip="Link" />
+                                            <div class="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1"></div>
+                                            <ToolbarButton @click="applyMarkdown('# ', '', 'Heading 1')" icon-collection="ui" icon-name="IconType" tooltip="Heading 1" />
+                                            <ToolbarButton @click="applyMarkdown('## ', '', 'Heading 2')" icon-collection="ui" icon-name="IconHash" tooltip="Heading 2" />
+                                            <ToolbarButton @click="applyMarkdown('* ', '', 'List item')" icon-collection="ui" icon-name="IconList" tooltip="Bulleted List" />
+                                            <ToolbarButton @click="applyMarkdown('> ', '', 'Quote')" icon-collection="ui" icon-name="IconBlockquote" tooltip="Blockquote" />
+                                            <ToolbarButton @click="applyMarkdown('```\n', '\n```', 'code')" icon-collection="ui" icon-name="IconCode" tooltip="Code Block" />
+                                            <ToolbarButton @click="applyMarkdown('$$', '$$', '\\sum_{i=1}^n x_i')" icon-collection="ui" icon-name="IconSigma" tooltip="LaTeX Block" />
+                                        </div>
+                                        <div class="flex-grow min-h-0 border-x border-b dark:border-gray-700 rounded-b-md overflow-hidden">
+                                            <CodeMirrorEditor ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" :options="discussionEditorOptions" />
+                                        </div>
+                                    </div>
+                                    <!-- Right side (Panels) -->
+                                    <div class="w-64 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col">
+                                        <!-- Images -->
+                                        <div class="p-2 border-b dark:border-gray-700">
+                                            <div class="flex justify-between items-center mb-2">
+                                                <h4 class="text-sm font-semibold flex items-center gap-2"><IconPhoto class="w-4 h-4" /> Images</h4>
+                                                <button @click="triggerDiscussionImageUpload" class="action-btn-sm" title="Add Image(s)" :disabled="isUploadingDiscussionImage">
+                                                    <IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-4 h-4 animate-spin" /><IconPlus v-else class="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                            <div v-if="discussionImages.length === 0 && !isUploadingDiscussionImage" class="text-center py-4 text-xs text-gray-500 bg-gray-50 dark:bg-gray-800/50 rounded">No images yet</div>
+                                            <div v-else class="image-grid"><div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="image-card group"><img :src="'data:image/png;base64,' + img_b64" class="image-thumbnail" :class="{'grayscale opacity-50': !isImageActive(index)}" /><div class="image-overlay"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="overlay-btn" title="View"><IconMaximize class="w-3 h-3" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="overlay-btn" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-3 h-3" /><IconEyeOff v-else class="w-3 h-3" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="overlay-btn overlay-btn-danger" title="Delete"><IconXMark class="w-3 h-3" /></button></div></div></div>
+                                        </div>
+                                        <!-- Artefacts -->
+                                        <div class="p-2 flex-grow flex flex-col min-h-0">
+                                            <div class="flex justify-between items-center mb-2">
+                                                <h4 class="text-sm font-semibold flex items-center gap-2"><IconFileText class="w-4 h-4" /> Artefacts</h4>
+                                                <div class="flex items-center gap-1">
+                                                    <button @click="handleCreateArtefact" class="action-btn-sm" title="Create Artefact"><IconPlus class="w-4 h-4" /></button>
+                                                    <button @click="showUrlImport = !showUrlImport" class="action-btn-sm" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
+                                                    <button @click="triggerArtefactFileUpload" class="action-btn-sm" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 animate-spin" /><IconArrowUpTray v-else class="w-4 h-4" /></button>
+                                                </div>
+                                            </div>
+                                            <div class="flex-grow min-h-0 overflow-y-auto">
+                                                <div v-if="isLoadingArtefacts" class="loading-state"><IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" /><p class="text-xs text-gray-500">Loading...</p></div>
+                                                <div v-else-if="groupedArtefacts.length === 0" class="flex flex-col items-center justify-center h-full text-center p-4 bg-gray-50 dark:bg-gray-800/50 rounded">
+                                                    <IconFileText class="w-10 h-10 text-gray-400 mb-2" />
+                                                    <p class="text-xs text-gray-500 mb-3">No artefacts yet</p>
+                                                    <button @click="handleCreateArtefact" class="btn btn-secondary btn-sm"><IconPlus class="w-3 h-3 mr-1" />Add Artefact</button>
+                                                </div>
+                                                <div v-else class="artefacts-list space-y-2">
+                                                    <div v-for="group in groupedArtefacts" :key="group.title" class="artefact-card group">
+                                                        <div class="artefact-header"><div class="artefact-info"><div class="artefact-icon" :class="group.isAnyVersionLoaded ? 'loaded' : ''"><IconFileText class="w-4 h-4" /></div><div class="artefact-details"><h5 class="artefact-title" :title="group.title">{{ group.title }}</h5></div></div>
+                                                            <div class="artefact-actions">
+                                                                <button @click="handleExportArtefact(group.title)" class="artefact-action-btn" :title="`Export ${group.title} as ZIP`" :disabled="isExportingArtefact === group.title">
+                                                                    <IconAnimateSpin v-if="isExportingArtefact === group.title" class="w-3 h-3 animate-spin" />
+                                                                    <IconSave v-else class="w-3 h-3" />
+                                                                </button>
+                                                                <button @click="handleEditArtefact(group.title)" class="artefact-action-btn" title="Edit Content"><IconPencil class="w-3 h-3" /></button>
+                                                                <button @click="handleDeleteArtefact(group.title)" class="artefact-action-btn artefact-action-btn-danger" title="Delete Artefact"><IconTrash class="w-3 h-3" /></button>
+                                                            </div>
+                                                        </div>
+                                                        <div class="artefact-controls"><select v-model="selectedArtefactVersions[group.title]" class="version-select"><option v-for="artefact in group.versions" :key="artefact.version" :value="artefact.version">Version {{ artefact.version }}{{ artefact.is_loaded ? ' (Active)' : '' }}</option></select><button v-if="group.versions.find(v => v.version == selectedArtefactVersions[group.title])?.is_loaded" @click="handleUnloadArtefact(group.title, selectedArtefactVersions[group.title])" class="load-btn loaded" title="Unload from Context"><IconCheckCircle class="w-3 h-3" />Loaded</button><button v-else @click="handleLoadArtefact(group.title)" class="load-btn" title="Load to Context"><IconArrowDownTray class="w-3 h-3" />Load</button></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Bottom Action Bar -->
+                            <div class="flex-shrink-0 p-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                                <div class="relative flex items-center">
+                                    <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-icon absolute left-1.5 top-1/2 -translate-y-1/2 z-10">
+                                        <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"> <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button> </DropdownSubmenu>
+                                        <DropdownSubmenu v-if="Object.keys(filteredUserPromptsByCategory).length > 0" title="User" icon="user" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
+                                        <DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="zooPromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
+                                        <div v-if="(filteredLollmsPrompts.length + Object.keys(filteredUserPromptsByCategory).length + Object.keys(filteredSystemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div>
+                                        <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
+                                    </DropdownMenu>
+                                    <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process content..." rows="1" class="enhanced-textarea !pl-10 !pr-40 w-full resize-none"></textarea>
+                                    <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-2">
+                                        <button v-if="isTtiConfigured" @click="handleGenerateImage" class="btn btn-primary w-28" :disabled="isProcessing || (!discussionDataZone.trim() && !dataZonePromptText.trim())">
+                                            <IconAnimateSpin v-if="isProcessing" class="w-4 h-4 mr-1.5" />
+                                            <IconPhoto v-else class="w-4 h-4 mr-1.5" />
+                                            <span>{{ isProcessing ? 'Generating...' : 'Generate' }}</span>
+                                        </button>
+                                        <button @click="handleProcessContent" class="btn btn-secondary w-28" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())">
+                                            <IconAnimateSpin v-if="isProcessing" class="w-4 h-4 mr-1.5" />
+                                            <IconSparkles v-else class="w-4 h-4 mr-1.5" />
+                                            <span>{{ isProcessing ? 'Processing...' : 'Process' }}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div v-show="activeDataZoneTab === 'user'" class="flex-1 flex flex-col min-h-0">
+                            <div class="flex-shrink-0 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-2 flex-grow">
+                                    <span class="text-sm font-medium text-gray-600 dark:text-gray-300">User Context</span>
+                                    <div class="w-48 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                        <div class="h-full bg-green-500 rounded-full" :style="{ width: `${getPercentage(userDataZoneTokens)}%` }"></div>
+                                    </div>
+                                    <span class="text-xs font-mono text-gray-500 dark:text-gray-400">{{ formatNumber(userDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
                                 </div>
                                 <div class="flex items-center gap-1">
-                                    <button @click="handleUndoDiscussion" class="action-btn-sm" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-4 h-4" /></button>
-                                    <button @click="handleRedoDiscussion" class="action-btn-sm" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-4 h-4" /></button>
-                                    <button @click="refreshDataZones" class="action-btn-sm" title="Refresh Data"><IconRefresh class="w-4 h-4" /></button>
-                                    <button @click="exportDataZone" class="action-btn-sm" title="Export to Markdown"><IconArrowDownTray class="w-4 h-4" /></button>
-                                    <button @click="discussionDataZone = ''" class="action-btn-sm-danger" title="Clear All Text"><IconTrash class="w-4 h-4" /></button>
-                                </div>
-                            </div>
-
-                            <div class="flex-grow flex min-h-0">
-                                <!-- Left side (Editor) -->
-                                <div class="flex-grow flex flex-col min-h-0 p-2">
-                                    <div class="flex-shrink-0 p-1 border bg-gray-50 dark:bg-gray-900/50 dark:border-gray-700 rounded-t-md flex items-center space-x-1">
-                                        <ToolbarButton @click="applyMarkdown('**', '**', 'bold text')" icon-collection="ui" icon-name="IconBold" tooltip="Bold" />
-                                        <ToolbarButton @click="applyMarkdown('*', '*', 'italic text')" icon-collection="ui" icon-name="IconItalic" tooltip="Italic" />
-                                        <ToolbarButton @click="applyMarkdown('[', '](url)', 'link text')" icon-collection="ui" icon-name="IconLink" tooltip="Link" />
-                                        <div class="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1"></div>
-                                        <ToolbarButton @click="applyMarkdown('# ', '', 'Heading 1')" icon-collection="ui" icon-name="IconType" tooltip="Heading 1" />
-                                        <ToolbarButton @click="applyMarkdown('## ', '', 'Heading 2')" icon-collection="ui" icon-name="IconHash" tooltip="Heading 2" />
-                                        <ToolbarButton @click="applyMarkdown('* ', '', 'List item')" icon-collection="ui" icon-name="IconList" tooltip="Bulleted List" />
-                                        <ToolbarButton @click="applyMarkdown('> ', '', 'Quote')" icon-collection="ui" icon-name="IconBlockquote" tooltip="Blockquote" />
-                                        <ToolbarButton @click="applyMarkdown('```\n', '\n```', 'code')" icon-collection="ui" icon-name="IconCode" tooltip="Code Block" />
-                                        <ToolbarButton @click="applyMarkdown('$$', '$$', '\\sum_{i=1}^n x_i')" icon-collection="ui" icon-name="IconSigma" tooltip="LaTeX Block" />
-                                        <ToolbarButton @click="openContextToArtefactModal" icon-name="IconSave" tooltip="Save as Artefact" />
-                                    </div>
-                                    <div class="flex-grow min-h-0 border-x border-b dark:border-gray-700 rounded-b-md overflow-hidden">
-                                        <CodeMirrorEditor ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" :options="discussionEditorOptions" />
-                                    </div>
-                                </div>
-                                <!-- Right side (Panels) -->
-                                <div class="w-64 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col">
-                                    <!-- Images -->
-                                    <div class="p-2 border-b dark:border-gray-700">
-                                        <div class="flex justify-between items-center mb-2">
-                                            <h4 class="text-sm font-semibold flex items-center gap-2"><IconPhoto class="w-4 h-4" /> Images</h4>
-                                            <button @click="triggerDiscussionImageUpload" class="action-btn-sm" title="Add Image(s)" :disabled="isUploadingDiscussionImage">
-                                                <IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-4 h-4 animate-spin" /><IconPlus v-else class="w-4 h-4" />
+                                    <button @click="toggleViewMode('user')" class="action-btn-sm" :title="dataZoneViewModes.user === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.user === 'edit'" class="w-4 h-4" /><IconPencil v-else class="w-4 h-4" /></button>
+                                    <DropdownMenu title="Insert Placeholder" icon="ticket" collection="ui" button-class="action-btn-sm">
+                                        <div class="max-h-60 overflow-y-auto">
+                                            <button v-for="keyword in keywords" :key="keyword.keyword" @click="insertPlaceholder(keyword.keyword)" class="w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
+                                                <div class="font-mono font-semibold">{{ keyword.keyword }}</div>
+                                                <div class="text-xs text-gray-500">{{ keyword.description }}</div>
                                             </button>
                                         </div>
-                                        <div v-if="discussionImages.length === 0 && !isUploadingDiscussionImage" class="text-center py-4 text-xs text-gray-500 bg-gray-50 dark:bg-gray-800/50 rounded">No images yet</div>
-                                        <div v-else class="image-grid"><div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="image-card group"><img :src="'data:image/png;base64,' + img_b64" class="image-thumbnail" :class="{'grayscale opacity-50': !isImageActive(index)}" /><div class="image-overlay"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="overlay-btn" title="View"><IconMaximize class="w-3 h-3" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="overlay-btn" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-3 h-3" /><IconEyeOff v-else class="w-3 h-3" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="overlay-btn overlay-btn-danger" title="Delete"><IconXMark class="w-3 h-3" /></button></div></div></div>
+                                    </DropdownMenu>
+                                    <button @click="handleUndoUser" class="action-btn-sm" title="Undo" :disabled="!canUndoUser"><IconUndo class="w-4 h-4" /></button>
+                                    <button @click="handleRedoUser" class="action-btn-sm" title="Redo" :disabled="!canRedoUser"><IconRedo class="w-4 h-4" /></button>
+                                </div>
+                            </div>
+                            <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-if="dataZoneViewModes.user === 'edit'" ref="userCodeMirrorEditor" v-model="userDataZone" class="h-full border dark:border-gray-700 rounded-md" /><div v-else class="rendered-prose-container h-full p-2 border dark:border-gray-700 rounded-md"><MessageContentRenderer :content="userDataZone" /></div></div>
+                        </div>
+                        
+                        <div v-show="activeDataZoneTab === 'personality'" class="flex-1 flex flex-col min-h-0">
+                            <div class="flex-shrink-0 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-4">
+                                 <div class="flex items-center gap-2 flex-grow">
+                                    <span class="text-sm font-medium text-gray-600 dark:text-gray-300">Personality Context</span>
+                                    <div class="w-48 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                        <div class="h-full bg-purple-500 rounded-full" :style="{ width: `${getPercentage(personalityDataZoneTokens)}%` }"></div>
                                     </div>
-                                    <!-- Artefacts -->
-                                    <div class="p-2 flex-grow flex flex-col min-h-0">
-                                        <div class="flex justify-between items-center mb-2">
-                                            <h4 class="text-sm font-semibold flex items-center gap-2"><IconFileText class="w-4 h-4" /> Artefacts</h4>
-                                            <div class="flex items-center gap-1">
-                                                <button @click="showUrlImport = !showUrlImport" class="action-btn-sm" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
-                                                <button @click="triggerArtefactFileUpload" class="action-btn-sm" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 animate-spin" /><IconArrowUpTray v-else class="w-4 h-4" /></button>
+                                    <span class="text-xs font-mono text-gray-500 dark:text-gray-400">{{ formatNumber(personalityDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
+                                </div>
+                                <button @click="toggleViewMode('personality')" class="action-btn-sm" title="Toggle View"><IconPencil class="w-4 h-4" /></button>
+                            </div>
+                            <div class="flex-grow min-h-0 p-2"><div class="rendered-prose-container h-full p-2 border dark:border-gray-700 rounded-md"><MessageContentRenderer :content="personalityDataZone" /></div></div>
+                        </div>
+                        
+                        <!-- Memory Tab -->
+                        <div v-show="activeDataZoneTab === 'ltm'" class="flex-1 flex flex-col min-h-0">
+                            <div class="flex-shrink-0 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between gap-4">
+                                <div class="flex items-center gap-2 flex-grow">
+                                    <span class="text-sm font-medium text-gray-600 dark:text-gray-300">Memory Context</span>
+                                    <div class="w-48 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                        <div class="h-full bg-yellow-500 rounded-full" :style="{ width: `${getPercentage(memoryDataZoneTokens)}%` }"></div>
+                                    </div>
+                                    <span class="text-xs font-mono text-gray-500 dark:text-gray-400">{{ formatNumber(memoryDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
+                                </div>
+                                <button @click="handleMemorize" class="btn btn-secondary btn-sm" title="Memorize Current Discussion"><IconSparkles class="w-4 h-4 mr-1.5" :class="{'animate-pulse': isMemorizing}"/>Memorize</button>
+                            </div>
+
+                            <div class="flex-grow min-h-0 flex">
+                                <!-- Memory Context Display -->
+                                <div class="flex-grow flex flex-col min-w-0 p-2">
+                                    <div class="flex-grow min-h-0 border dark:border-gray-700 rounded-md overflow-hidden">
+                                       <div class="rendered-prose-container h-full p-2"><MessageContentRenderer :content="memory" /></div>
+                                    </div>
+                                </div>
+
+                                <!-- Memory Bank Sidebar -->
+                                <div class="w-64 flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col p-2">
+                                    <div class="sidebar-section">
+                                        <div class="section-header">
+                                            <h4 class="section-title"><IconThinking class="w-4 h-4" /> Memory Bank</h4>
+                                            <div class="section-actions">
+                                                <button @click="handleWipeAllMemories" class="action-btn-sm-danger" title="Unload all memories"><IconTrash class="w-4 h-4" /></button>
+                                                <button @click="handleCreateMemory" class="action-btn-sm" title="Create New Memory"><IconPlus class="w-4 h-4" /></button>
                                             </div>
                                         </div>
-                                        <div class="flex-grow min-h-0 overflow-y-auto">
-                                            <div v-if="isLoadingArtefacts" class="loading-state"><IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" /><p class="text-xs text-gray-500">Loading...</p></div>
-                                            <div v-else-if="groupedArtefacts.length === 0" class="flex flex-col items-center justify-center h-full text-center p-4 bg-gray-50 dark:bg-gray-800/50 rounded">
-                                                <IconFileText class="w-10 h-10 text-gray-400 mb-2" />
-                                                <p class="text-xs text-gray-500 mb-3">No artefacts yet</p>
-                                                <button @click="handleCreateArtefact" class="btn btn-secondary btn-sm"><IconPlus class="w-3 h-3 mr-1" />Add Artefact</button>
-                                            </div>
-                                            <div v-else class="artefacts-list space-y-2">
-                                                <div v-for="group in groupedArtefacts" :key="group.title" class="artefact-card group">
-                                                    <div class="artefact-header"><div class="artefact-info"><div class="artefact-icon" :class="group.isAnyVersionLoaded ? 'loaded' : ''"><IconFileText class="w-4 h-4" /></div><div class="artefact-details"><h5 class="artefact-title" :title="group.title">{{ group.title }}</h5><p class="artefact-meta">{{ group.versions.length }} version{{ group.versions.length !== 1 ? 's' : '' }}<span v-if="group.isAnyVersionLoaded" class="loaded-indicator">• Loaded</span></p></div></div><div class="artefact-actions"><button @click="handleEditArtefact(group.title)" class="artefact-action-btn" title="Edit Content"><IconPencil class="w-3 h-3" /></button><button @click="handleDeleteArtefact(group.title)" class="artefact-action-btn artefact-action-btn-danger" title="Delete Artefact"><IconTrash class="w-3 h-3" /></button></div></div>
-                                                    <div class="artefact-controls"><select v-model="selectedArtefactVersions[group.title]" class="version-select"><option v-for="artefact in group.versions" :key="artefact.version" :value="artefact.version">Version {{ artefact.version }}{{ artefact.is_loaded ? ' (Active)' : '' }}</option></select><button v-if="group.versions.find(v => v.version == selectedArtefactVersions[group.title])?.is_loaded" @click="handleUnloadArtefact(group.title, selectedArtefactVersions[group.title])" class="load-btn loaded" title="Unload from Context"><IconCheckCircle class="w-3 h-3" />Loaded</button><button v-else @click="handleLoadArtefact(group.title)" class="load-btn" title="Load to Context"><IconArrowDownTray class="w-3 h-3" />Load</button></div>
+                                        <div class="px-1 pb-2">
+                                            <input type="text" v-model="memorySearchTerm" placeholder="Search memories..." class="w-full px-2 py-1.5 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md focus:ring-1 focus:ring-yellow-500 focus:border-yellow-500" />
+                                        </div>
+                                        <div class="section-content flex-grow min-h-0 overflow-y-auto">
+                                            <div v-if="isLoadingMemories" class="loading-state"><IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" /><p class="text-xs text-gray-500">Loading...</p></div>
+                                            <div v-else-if="filteredMemories.length === 0" class="empty-state"><IconThinking class="w-8 h-8 text-gray-400 mx-auto mb-2" /><p class="text-xs text-gray-500 mb-3">No memories</p></div>
+                                            <div v-else class="memories-list space-y-2">
+                                                <div v-for="mem in filteredMemories" :key="mem.id" class="memory-card">
+                                                    <div class="memory-header"><div class="memory-info"><div class="memory-icon" :class="{ 'loaded': loadedMemoryTitles.has(mem.title) }"><IconThinking class="w-4 h-4" /></div><div class="memory-details"><h5 class="memory-title" :title="mem.title">{{ mem.title }}</h5></div></div><div class="memory-actions"><button @click="handleEditMemory(mem)" class="memory-action-btn" title="Edit Memory"><IconPencil class="w-3 h-3" /></button><button @click="handleDeleteMemory(mem.id)" class="memory-action-btn memory-action-btn-danger" title="Delete Memory"><IconTrash class="w-3 h-3" /></button></div></div>
+                                                    <div class="memory-controls"><button v-if="loadedMemoryTitles.has(mem.title)" @click="handleUnloadMemory(mem.title)" class="memory-load-btn loaded" title="Remove from Context"><IconCheckCircle class="w-3 h-3" />In Context</button><button v-else @click="handleLoadMemory(mem.title)" class="memory-load-btn" title="Add to Context"><IconPlus class="w-3 h-3" />Add to Context</button></div>
                                                 </div>
                                             </div>
                                         </div>
@@ -1068,217 +1267,15 @@ async function handleWipeAllMemories() {
                                 </div>
                             </div>
                         </div>
+                    </aside>
 
-                        <!-- Bottom Action Bar -->
-                        <div class="flex-shrink-0 p-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                            <div class="relative flex items-center">
-                                <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-icon absolute left-1.5 top-1/2 -translate-y-1/2 z-10">
-                                    <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"> <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button> </DropdownSubmenu>
-                                    <DropdownSubmenu v-if="Object.keys(filteredUserPromptsByCategory).length > 0" title="User" icon="user" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
-                                    <DropdownSubmenu v-if="Object.keys(filteredSystemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="zooPromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
-                                    <div v-if="(filteredLollmsPrompts.length + Object.keys(filteredUserPromptsByCategory).length + Object.keys(filteredSystemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                    <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
-                                </DropdownMenu>
-                                <textarea v-model="dataZonePromptText" placeholder="Enter a prompt to process content..." rows="1" class="enhanced-textarea !pl-10 !pr-40 w-full resize-none"></textarea>
-                                <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-2">
-                                    <button v-if="isTtiConfigured" @click="handleGenerateImage" class="btn btn-primary" :disabled="isProcessing || (!discussionDataZone.trim() && !dataZonePromptText.trim())">
-                                        <IconPhoto class="w-4 h-4 mr-1.5" /><span>Generate</span>
-                                    </button>
-                                    <button @click="handleProcessContent" class="btn btn-secondary" :disabled="isProcessing || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())">
-                                        <IconSparkles class="w-4 h-4 mr-1.5" /><span>Process</span>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <div v-show="activeDataZoneTab === 'user'" class="flex-1 flex flex-col min-h-0">
-                        <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
-                            <div class="flex justify-between items-center">
-                                <div><h3 class="font-semibold flex items-center gap-2"><IconUserCircle class="w-5 h-5" /> User Data Zone</h3><p class="text-xs text-gray-500 mt-1">Context for all of your discussions.</p></div>
-                                <div class="flex items-center gap-1"><button @click="toggleViewMode('user')" class="btn-icon" :title="dataZoneViewModes.user === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.user === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button><DropdownMenu title="Insert Placeholder" icon="ticket" collection="ui" button-class="btn-icon"><button v-for="keyword in keywords" :key="keyword.keyword" @click="insertPlaceholder(keyword.keyword)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm"><div class="font-mono font-semibold">{{ keyword.keyword }}</div><div class="text-xs text-gray-500">{{ keyword.description }}</div></button></DropdownMenu><button @click="handleUndoUser" class="btn-icon" title="Undo" :disabled="!canUndoUser"><IconUndo class="w-5 h-5" /></button><button @click="handleRedoUser" class="btn-icon" title="Redo" :disabled="!canRedoUser"><IconRedo class="w-5 h-5" /></button></div>
-                            </div>
-                            <div class="mt-2"><div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono"><span>Tokens</span><span>{{ formatNumber(userDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span></div><div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1"><div class="h-1.5 rounded-full bg-green-500 transition-width duration-500" :style="{ width: `${getPercentage(userDataZoneTokens)}%` }"></div></div></div>
-                        </div>
-                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-if="dataZoneViewModes.user === 'edit'" ref="userCodeMirrorEditor" v-model="userDataZone" class="h-full" /><div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="userDataZone" /></div></div>
-                    </div>
-                    <div v-show="activeDataZoneTab === 'personality'" class="flex-1 flex flex-col min-h-0">
-                        <div class="p-4 border-b dark:border-gray-600 flex-shrink-0">
-                             <div class="flex justify-between items-center"><div><h3 class="font-semibold flex items-center gap-2"><IconSparkles class="w-5 h-5" /> Personality Data Zone</h3><p class="text-xs text-gray-500 mt-1">Read-only context from the active personality.</p></div><button @click="toggleViewMode('personality')" class="btn-icon" :title="dataZoneViewModes.personality === 'edit' ? 'Switch to Preview' : 'Switch to Edit'"><IconEye v-if="dataZoneViewModes.personality === 'edit'" class="w-5 h-5" /><IconPencil v-else class="w-5 h-5" /></button></div>
-                            <div class="mt-2"><div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 font-mono"><span>Tokens</span><span>{{ formatNumber(personalityDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span></div><div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-1"><div class="h-1.5 rounded-full bg-purple-500 transition-width duration-500" :style="{ width: `${getPercentage(personalityDataZoneTokens)}%` }"></div></div></div>
-                        </div>
-                        <div class="flex-grow min-h-0 p-2"><CodeMirrorEditor v-if="dataZoneViewModes.personality === 'edit'" :model-value="personalityDataZone" class="h-full" :options="{ readOnly: true }" /><div v-else class="rendered-prose-container h-full"><MessageContentRenderer :content="personalityDataZone" /></div></div>
-                    </div>
-                    <!-- Memory Tab -->
-                    <div v-show="activeDataZoneTab === 'ltm'" class="flex-1 flex flex-col min-h-0 relative">
-                        <!-- Processing Overlay -->
-                        <div v-if="isMemorizing" class="absolute inset-0 bg-white/90 dark:bg-gray-800/90 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
-                            <IconAnimateSpin class="w-12 h-12 text-yellow-500 animate-spin" />
-                            <p class="mt-4 font-semibold text-lg text-gray-800 dark:text-gray-100">Memorizing...</p>
-                            <p class="text-sm text-gray-600 dark:text-gray-400">Creating long-term memory</p>
-                        </div>
-
-                        <!-- Enhanced Memory Header -->
-                        <div class="enhanced-header">
-                            <div class="flex justify-between items-center mb-3">
-                                <h3 class="header-title">
-                                    <IconThinking class="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
-                                    <span class="bg-gradient-to-r from-yellow-600 to-orange-600 dark:from-yellow-400 dark:to-orange-400 bg-clip-text text-transparent">
-                                        Long-Term Memory
-                                    </span>
-                                </h3>
-                                <button @click="handleMemorize" class="memorize-btn" title="Memorize Current Discussion">
-                                    <IconSparkles class="w-5 h-5" :class="{'animate-pulse': isMemorizing}"/>
-                                    Memorize
-                                </button>
-                            </div>
-                            
-                            <!-- Memory Token Progress -->
-                            <div class="token-progress-container">
-                                <div class="flex justify-between items-center text-xs text-gray-600 dark:text-gray-400 font-mono mb-2">
-                                    <div class="flex items-center gap-2">
-                                        <IconToken class="w-4 h-4 text-yellow-500" />
-                                        <span class="font-semibold">Memory Usage</span>
-                                    </div>
-                                    <span class="font-bold">{{ formatNumber(memoryDataZoneTokens) }} / {{ formatNumber(maxTokens) }}</span>
-                                </div>
-                                
-                                <div class="progress-bar-container">
-                                    <div class="progress-bar-track">
-                                        <div class="progress-bar-fill bg-gradient-to-r from-yellow-400 to-orange-500"
-                                             :style="{ width: `${Math.min(getPercentage(memoryDataZoneTokens), 100)}%` }">
-                                            <div class="progress-bar-shine"></div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="flex-grow min-h-0 flex">
-                            <!-- Memory Context Display -->
-                            <div class="flex-grow flex flex-col min-w-0">
-                                <div class="content-header">
-                                    <h4 class="content-title">Loaded Memory Context</h4>
-                                    <button @click="toggleViewMode('ltm')" class="action-btn-sm" 
-                                            :title="dataZoneViewModes.ltm === 'edit' ? 'Switch to Preview' : 'Switch to Edit'">
-                                        <IconEye v-if="dataZoneViewModes.ltm === 'edit'" class="w-4 h-4" />
-                                        <IconPencil v-else class="w-4 h-4" />
-                                    </button>
-                                </div>
-                                
-                                <div class="flex-grow min-h-0 p-3 bg-gray-50 dark:bg-gray-900/50">
-                                    <div class="h-full rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden bg-white dark:bg-gray-800">
-                                        <CodeMirrorEditor v-if="dataZoneViewModes.ltm === 'edit'" 
-                                                        :model-value="memory" 
-                                                        class="h-full" 
-                                                        :options="{readOnly: true}" />
-                                        <div v-else class="rendered-prose-container h-full p-4 overflow-y-auto">
-                                            <MessageContentRenderer :content="memory" />
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <!-- Memory Bank Sidebar -->
-                            <div class="sidebar-panel">
-                                <div class="sidebar-section">
-                                    <div class="section-header">
-                                        <h4 class="section-title">
-                                            <IconThinking class="w-4 h-4" />
-                                            Memory Bank
-                                        </h4>
-                                        <div class="section-actions">
-                                            <button @click="handleWipeAllMemories" class="action-btn-sm action-btn-danger" title="Unload all memories">
-                                                <IconTrash class="w-4 h-4" />
-                                            </button>
-                                            <button @click="handleCreateMemory" class="action-btn-sm" title="Create New Memory">
-                                                <IconPlus class="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                    
-                                    <!-- Memory Search -->
-                                    <div class="px-3 pb-3 border-b dark:border-gray-700">
-                                        <input type="text" v-model="memorySearchTerm" placeholder="Search memories..." 
-                                               class="w-full px-3 py-2 text-xs bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-md focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500" />
-                                    </div>
-                                    
-                                    <!-- Memory List -->
-                                    <div class="section-content enhanced-drop-zone"
-                                         @dragover="handleDragOver"
-                                         @dragleave="handleDragLeave" 
-                                         @drop="handleDrop($event, 'memory')"
-                                         :class="{ 'drop-active': isDraggingFile }">
-                                        
-                                        <!-- Loading State -->
-                                        <div v-if="isLoadingMemories" class="loading-state">
-                                            <IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" />
-                                            <p class="text-xs text-gray-500">Loading memories...</p>
-                                        </div>
-
-                                        <!-- Empty State -->
-                                        <div v-else-if="filteredMemories.length === 0" class="empty-state">
-                                            <IconThinking class="w-8 h-8 text-gray-400 mx-auto mb-2" />
-                                            <p class="text-xs text-gray-500 mb-3">No memories found</p>
-                                            <button @click="handleCreateMemory" class="empty-state-btn">
-                                                <IconPlus class="w-3 h-3 mr-1" />
-                                                Create Memory
-                                            </button>
-                                        </div>
-                                        
-                                        <!-- Memory Cards -->
-                                        <div v-else class="memories-list">
-                                            <div v-for="mem in filteredMemories" :key="mem.id" class="memory-card">
-                                                <div class="memory-header">
-                                                    <div class="memory-info">
-                                                        <div class="memory-icon" :class="{ 'loaded': loadedMemoryTitles.has(mem.title) }">
-                                                            <IconThinking class="w-4 h-4" />
-                                                        </div>
-                                                        <div class="memory-details">
-                                                            <h5 class="memory-title" :title="mem.title">{{ mem.title }}</h5>
-                                                            <p class="memory-meta">{{ mem.content.length }} chars</p>
-                                                        </div>
-                                                    </div>
-                                                    <div class="memory-actions">
-                                                        <button @click="handleEditMemory(mem)" class="memory-action-btn" title="Edit Memory">
-                                                            <IconPencil class="w-3 h-3" />
-                                                        </button>
-                                                        <button @click="handleDeleteMemory(mem.id)" class="memory-action-btn memory-action-btn-danger" title="Delete Memory">
-                                                            <IconTrash class="w-3 h-3" />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                                
-                                                <!-- Memory Preview -->
-                                                <div class="memory-preview">
-                                                    <p class="memory-content">{{ mem.content.substring(0, 100) }}{{ mem.content.length > 100 ? '...' : '' }}</p>
-                                                </div>
-                                                
-                                                <div class="memory-controls">
-                                                    <button v-if="loadedMemoryTitles.has(mem.title)"
-                                                            @click="handleUnloadMemory(mem.title)" 
-                                                            class="memory-load-btn loaded" title="Remove from Context">
-                                                        <IconCheckCircle class="w-3 h-3" />
-                                                        In Context
-                                                    </button>
-                                                    <button v-else
-                                                            @click="handleLoadMemory(mem.title)" 
-                                                            class="memory-load-btn" title="Add to Context">
-                                                        <IconPlus class="w-3 h-3" />
-                                                        Add to Context
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
+                    <!-- Generation Overlay -->
+                    <div v-if="generationInProgress" class="absolute inset-0 bg-white/75 dark:bg-gray-800/75 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
+                        <IconAnimateSpin class="w-10 h-10 text-blue-500 animate-spin" />
+                        <p class="mt-4 text-sm font-semibold text-gray-700 dark:text-gray-200">Generating...</p>
                     </div>
 
-                    <!-- User and Personality tabs remain similar but with enhanced styling -->
-                    <!-- ... (implement similar enhancements for other tabs) -->
-                </aside>
+                </div>
             </transition>
         </div>
     </div>

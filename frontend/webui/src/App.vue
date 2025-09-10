@@ -78,18 +78,6 @@ const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
 const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
 
-// Contrast checker logic for fun fact styling
-function getContrastTextColor(hexColor) {
-    if (!hexColor) return 'text-gray-800 dark:text-gray-100';
-    const r = parseInt(hexColor.slice(1, 3), 16);
-    const g = parseInt(hexColor.slice(3, 5), 16);
-    const b = parseInt(hexColor.slice(5, 7), 16);
-    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-    return luminance > 0.5 ? 'text-gray-900' : 'text-gray-600';
-}
-
-const funFactTextColorClass = computed(() => getContrastTextColor(funFactColor.value));
-
 const funFactStyle = computed(() => ({
     '--fun-fact-color': funFactColor.value,
     'backgroundColor': `${funFactColor.value}15`, // Reduced alpha for better contrast
@@ -151,12 +139,11 @@ onMounted(async () => {
             <p class="mt-2 text-lg sm:text-xl md:text-2xl text-gray-600 dark:text-gray-300">
                 {{ authStore.welcomeSlogan || 'One tool to rule them all' }}
             </p>
-            <p class="mt-4 text-sm text-gray-500 dark:text-gray-400">by ParisNeo</p>
+            
             <div v-if="authStore.funFact" 
                  :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" 
-                 class="mt-8 mx-auto max-w-md p-4 border-l-4 rounded-lg text-sm text-left" 
-                 :style="funFactStyle" 
-                 :class="funFactTextColorClass">
+                 class="mt-8 mx-auto max-w-md p-4 border-l-4 rounded-lg text-sm text-left text-gray-900 dark:text-gray-100" 
+                 :style="funFactStyle">
                 <span class="font-bold" :style="funFactTextStyle">🤓 Fun Fact:</span> {{ authStore.funFact }}
             </div>
             <div class="mt-12 w-full px-4">
@@ -167,6 +154,9 @@ onMounted(async () => {
                 <p class="mt-1 text-lg font-semibold text-gray-700 dark:text-gray-200">{{ authStore.loadingProgress }}%</p>
             </div>
         </div>
+        <footer class="absolute bottom-4 w-full text-center text-xs text-gray-500 dark:text-gray-400">
+            Powered by <a href="https://github.com/ParisNeo/lollms-webui" target="_blank" class="font-semibold hover:underline">LoLLMs</a> by <a href="https://github.com/ParisNeo" target="_blank" class="font-semibold hover:underline">ParisNeo</a>
+        </footer>
     </div>
 
     <!-- Authenticated App Layout -->

@@ -14,23 +14,6 @@ const logoSrc = computed(() => authStore.welcome_logo_url);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
 const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
 
-// --- Contrast checker logic ---
-function getContrastTextColor(hexColor) {
-    if (!hexColor) return 'text-gray-800 dark:text-gray-100';
-    try {
-        const r = parseInt(hexColor.slice(1, 3), 16);
-        const g = parseInt(hexColor.slice(3, 5), 16);
-        const b = parseInt(hexColor.slice(5, 7), 16);
-        const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        return luminance > 0.5 ? 'text-gray-900' : 'text-white';
-    } catch (e) {
-        console.error("Invalid color format for contrast check:", hexColor);
-        return 'text-gray-800 dark:text-gray-100';
-    }
-}
-
-const funFactTextColorClass = computed(() => getContrastTextColor(funFactColor.value));
-
 const funFactStyle = computed(() => ({
     '--fun-fact-color': funFactColor.value,
     'backgroundColor': `${funFactColor.value}20`,
@@ -40,7 +23,6 @@ const funFactStyle = computed(() => ({
 const funFactTextStyle = computed(() => ({
     color: funFactColor.value
 }));
-// --- End Contrast checker logic ---
 
 function openLogin() {
   uiStore.openModal('login');
@@ -51,7 +33,7 @@ function openRegister() {
 </script>
 
 <template>
-  <div class="h-screen w-screen bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-100 flex flex-col items-center justify-center p-6 relative">
+  <div class="h-screen w-screen bg-gray-100 dark:bg-gray-900 flex flex-col items-center justify-center p-6 relative">
     <div class="text-center w-full max-w-2xl">
       <div class="flex justify-center mb-6">
         <img 
@@ -76,7 +58,7 @@ function openRegister() {
         {{ welcomeSlogan }}
       </p>
 
-      <div v-if="funFact" :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" class="mt-10 mx-auto max-w-md p-4 border-l-4 rounded-lg text-sm text-left" :style="funFactStyle" :class="funFactTextColorClass">
+      <div v-if="funFact" :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" class="mt-10 mx-auto max-w-md p-4 border-l-4 rounded-lg text-sm text-left text-gray-900 dark:text-gray-100" :style="funFactStyle">
         <span class="font-bold" :style="funFactTextStyle">🤓 Fun Fact:</span> {{ funFact }}
       </div>
 
@@ -90,7 +72,7 @@ function openRegister() {
       </div>
     </div>
     <footer class="absolute bottom-4 w-full text-center text-xs text-gray-500 dark:text-gray-400">
-      Powered by <a href="https://github.com/ParisNeo/lollms-webui" target="_blank" class="font-semibold hover:underline">lollms</a> by <a href="https://github.com/ParisNeo" target="_blank" class="font-semibold hover:underline">ParisNeo</a>
+      Powered by <a href="https://github.com/ParisNeo/lollms-webui" target="_blank" class="font-semibold hover:underline">LoLLMs</a> by <a href="https://github.com/ParisNeo" target="_blank" class="font-semibold hover:underline">ParisNeo</a>
     </footer>
   </div>
 </template>

@@ -578,19 +578,19 @@ onUnmounted(() => {
         <div class="p-2 sm:p-3" @mousedown.stop>
             <!-- Context Bar -->
             <div v-if="showContextBar" class="px-1 pb-2 relative group">
-                <div class="flex justify-between items-center mb-1 text-xs text-gray-600 dark:text-gray-400 font-mono">
-                    <div class="flex items-center gap-1.5 min-w-0">
+                <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 font-mono">
+                    <div class="flex items-center gap-1.5 flex-shrink-0">
                         <IconToken class="w-4 h-4 flex-shrink-0" />
                         <button @click="showContext" class="cursor-pointer hover:underline flex-shrink-0" title="View full context breakdown">Context:</button>
                     </div>
+                    <div class="flex-grow w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden border transition-colors duration-300" :class="progressBorderColorClass">
+                        <div class="progress-segment bg-blue-500" :style="{ width: `${systemPromptPercentage}%` }" :title="`System Prompt: ${systemPromptTokens.toLocaleString()} tokens`"></div>
+                        <div class="progress-segment bg-yellow-500" :style="{ left: `${systemPromptPercentage}%`, width: `${dataZonesPercentage}%` }" :title="`Data Zones: ${dataZonesTokens.toLocaleString()} tokens`"></div>
+                        <div class="progress-segment bg-green-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage}%`, width: `${historyTextPercentage}%` }" :title="`History (Text): ${historyTextTokens.toLocaleString()} tokens`"></div>
+                        <div class="progress-segment bg-teal-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage}%`, width: `${historyImagePercentage}%` }" :title="`History (Images): ${historyImageTokens.toLocaleString()} tokens`"></div>
+                        <div class="progress-segment bg-purple-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage + historyImagePercentage}%`, width: `${inputTokensPercentage}%` }" :title="`Current Input: ${inputTokenCount.toLocaleString()} tokens`"></div>
+                    </div>
                     <span class="flex-shrink-0 pl-2">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
-                </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden border transition-colors duration-300" :class="progressBorderColorClass">
-                    <div class="progress-segment bg-blue-500" :style="{ width: `${systemPromptPercentage}%` }" :title="`System Prompt: ${systemPromptTokens.toLocaleString()} tokens`"></div>
-                    <div class="progress-segment bg-yellow-500" :style="{ left: `${systemPromptPercentage}%`, width: `${dataZonesPercentage}%` }" :title="`Data Zones: ${dataZonesTokens.toLocaleString()} tokens`"></div>
-                    <div class="progress-segment bg-green-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage}%`, width: `${historyTextPercentage}%` }" :title="`History (Text): ${historyTextTokens.toLocaleString()} tokens`"></div>
-                    <div class="progress-segment bg-teal-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage}%`, width: `${historyImagePercentage}%` }" :title="`History (Images): ${historyImageTokens.toLocaleString()} tokens`"></div>
-                    <div class="progress-segment bg-purple-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage + historyImagePercentage}%`, width: `${inputTokensPercentage}%` }" :title="`Current Input: ${inputTokenCount.toLocaleString()} tokens`"></div>
                 </div>
                 <p v-if="showContextWarning" class="mt-1.5 text-xs text-center" :class="totalPercentage > 100 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'">{{ contextWarningMessage }}</p>
                 <!-- Hover element for context breakdown -->
