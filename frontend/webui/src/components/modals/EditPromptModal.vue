@@ -110,11 +110,11 @@ async function handleSavePrompt() {
                         <p><code class="font-mono bg-blue-200 dark:bg-blue-800/50 px-1 rounded">@&lt;name&gt;@</code>: Simple text replacement.</p>
                         <p>For advanced options with a user-friendly form:</p>
                         <pre class="whitespace-pre-wrap font-mono text-xs bg-blue-100 dark:bg-blue-900/40 p-2 rounded">@&lt;name&gt;@
-title: Display Title
-type: str | text | int | float | bool
-options: comma, separated, list
-default: default value
-help: A helpful tip for the user.
+title (optional): Display Title
+type (optional): str | text | int | float | bool
+options (optional, only use if you want to fix the value to a restricted subset): comma, separated, list
+default (optional): default value
+help (optional): A helpful tip for the user.
 @&lt;/name&gt;@</pre>
                     </div>
                 </div>

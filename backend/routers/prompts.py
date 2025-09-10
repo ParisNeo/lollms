@@ -185,8 +185,7 @@ def create_saved_prompt(
     # For user-created prompts, the author is always the user.
     new_prompt = DBSavedPrompt(
         **prompt_data.model_dump(),
-        owner_user_id=current_user.id,
-        author=current_user.username
+        owner_user_id=current_user.id
     )
     db.add(new_prompt)
     try:
