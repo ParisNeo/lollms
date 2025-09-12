@@ -319,3 +319,12 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .toolbox-select { @apply w-full text-left text-sm bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500; }
 .menu-item-button { @apply w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between gap-2; }
 .menu-item-button.selected { @apply bg-blue-100 dark:bg-blue-900/50 font-semibold; }
+
+/* Code mirror */
+.message-prose { @apply prose prose-base dark:prose-invert max-w-none break-words; }
+.think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
+details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
+.think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
+.think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
+.think-summary::-webkit-details-marker { display: none; }
+.think-content { @apply p-3; }

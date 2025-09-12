@@ -1,6 +1,6 @@
 <template>
     <div :class="['markdown-editor-container  flex flex-col h-full border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden', editorClass]">
-        <div :class="['toolbar bg-gray-100 dark:bg-gray-700 p-1 border-b border-gray-300 dark:border-gray-600', toolbarClass]">
+        <div :class="['toolbar bg-gray-100 dark:bg-gray-700 p-1 border-b border-gray-300 dark:border-gray-600 flex items-center justify-between', toolbarClass]">
             <div class="flex flex-nowrap overflow-x-auto items-center gap-1">
                 <ToolbarButton :title="getButtonTitle('bold')" @click="applyFormat('bold')" icon="bold" :button-class="toolbarButtonBaseClass" collection="ui"/>
                 <ToolbarButton :title="getButtonTitle('italic')" @click="applyFormat('italic')" icon="italic" :button-class="toolbarButtonBaseClass" collection="ui"/>
@@ -90,9 +90,36 @@
                     <ToolbarButton @click="insertImage" title="Image" icon="image" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Image</span></ToolbarButton>
                 </DropdownMenu>
             </div>
+            <!-- Enhanced Edit/Preview Mode Switcher -->
+            <div v-if="renderable" class="pl-2 flex items-center">
+                <div class="flex items-center rounded-md border border-gray-300 dark:border-gray-500 bg-gray-200 dark:bg-gray-900/50 p-0.5">
+                    <button
+                        @click="setMode('edit')"
+                        title="Edit Mode"
+                        :class="['px-2.5 py-1 text-sm rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 flex items-center gap-1.5', currentMode === 'edit' ? 'bg-white dark:bg-gray-600 text-gray-800 dark:text-gray-100 shadow-sm' : 'bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-300/50 dark:hover:bg-gray-700/50']"
+                    >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg>
+                        <span>Edit</span>
+                    </button>
+                    <button
+                        @click="setMode('view')"
+                        title="Preview Mode"
+                        :class="['px-2.5 py-1 text-sm rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 flex items-center gap-1.5', currentMode === 'view' ? 'bg-white dark:bg-gray-600 text-gray-800 dark:text-gray-100 shadow-sm' : 'bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-300/50 dark:hover:bg-gray-700/50']"
+                    >
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                        <span>Preview</span>
+                    </button>
+                </div>
+            </div>
         </div>
-        <div class="editor-content flex-1 overflow-hidden p-1">
-        <div ref="editorRef" class="editor-wrapper h-full w-full"></div>
+        <div class="editor-content flex-1 overflow-hidden relative p-1 bg-white dark:bg-gray-800">
+            <div v-show="currentMode === 'edit' || !renderable" ref="editorRef" class="editor-wrapper h-full w-full"></div>
+            <div v-if="renderable && currentMode === 'view'" class="absolute inset-0 p-2 overflow-y-auto">
+                <MessageContentRenderer :content="modelValue" />
+            </div>
+        </div>
+        <div v-if="renderable" class="statusbar bg-gray-50 dark:bg-gray-700/50 p-1 border-t border-gray-300 dark:border-gray-600 text-xs text-gray-500 dark:text-gray-400 text-right px-2 select-none">
+            <span>{{ charCount }} characters, {{ wordCount }} words</span>
         </div>
     </div>
 </template>
@@ -108,20 +135,24 @@ import { html } from "@codemirror/lang-html";
 import { python } from "@codemirror/lang-python";
 import { javascript } from "@codemirror/lang-javascript";
 import { indentWithTab } from "@codemirror/commands";
+
 import DropdownMenu from './DropdownMenu.vue';
 import DropdownSubmenu from './DropdownSubmenu.vue';
 import ToolbarButton from './ToolbarButton.vue';
+import MessageContentRenderer from './MessageContentRenderer.vue';
 
 const props = defineProps({
     modelValue: { type: String, required: true },
     editorClass: { type: [String, Object, Array], default: '' },
-    toolbarClass: { type: [String, Object, Array], default: '' },
+    toolbarClass: { type: [String, Object,Array], default: '' },
     buttonClass: { type: [String, Object, Array], default: '' },
     theme: { type: Object, default: null },
     placeholder: { type: String, default: '' },
     autofocus: { type: Boolean, default: false },
     extensions: { type: Array, default: () => [] },
-    language: { type: String, default: 'markdown' }
+    language: { type: String, default: 'markdown' },
+    renderable: { type: Boolean, default: true },
+    initialMode: { type: String, default: 'edit', validator: (val) => ['edit', 'view'].includes(val) },
 });
 
 const emit = defineEmits(['update:modelValue', 'ready']);
@@ -129,8 +160,31 @@ const emit = defineEmits(['update:modelValue', 'ready']);
 const editorRef = ref(null);
 const editorView = ref(null);
 let updatingFromSelf = false;
+const currentMode = ref(props.initialMode);
 
 defineExpose({ editorView });
+
+// --- STATUS & MODE ---
+const charCount = computed(() => props.modelValue.length);
+const wordCount = computed(() => props.modelValue.trim() ? props.modelValue.trim().split(/\s+/).length : 0);
+
+const setMode = (mode) => {
+    if (['edit', 'view'].includes(mode)) {
+        currentMode.value = mode;
+    }
+};
+
+watch(currentMode, (newMode) => {
+    if (newMode === 'edit') {
+        nextTick(() => editorView.value?.focus());
+    }
+});
+
+watch(() => props.initialMode, (newMode) => {
+    if (['edit', 'view'].includes(newMode)) {
+        currentMode.value = newMode;
+    }
+});
 
 // --- STYLING ---
 const toolbarButtonBaseClass = computed(() => {
@@ -332,7 +386,6 @@ const initializeEditor = () => {
     emit('ready', { view: editorView.value, state: editorView.value.state });
 };
 
-
 watch(() => props.modelValue, (newValue) => {
     if (editorView.value && newValue !== editorView.value.state.doc.toString()) {
         updatingFromSelf = true;
@@ -351,7 +404,6 @@ watch(() => props.language, () => {
     initializeEditor();
 });
 
-
 onMounted(() => {
     initializeEditor();
 });
@@ -365,17 +417,16 @@ onBeforeUnmount(() => {
 
 <style>
 .cm-editor {
-  min-height: 150px;
-  max-height: 70vh;
-  height: 100%;          /* let it stretch to container */
+  height: 100%;
   outline: none !important;
   font-size: 0.9rem;
 }
 
 .cm-scroller {
   overflow: auto;
-  padding-right: 4px;    /* add breathing space for scrollbar */
-  box-sizing: content-box;
 }
 
+.rendered-prose-container {
+    @apply prose prose-base dark:prose-invert max-w-none break-words;
+}
 </style>
