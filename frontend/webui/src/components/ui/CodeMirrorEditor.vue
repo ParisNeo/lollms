@@ -1,7 +1,7 @@
 <template>
     <div :class="['markdown-editor-container  flex flex-col h-full border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden', editorClass]">
         <div :class="['toolbar bg-gray-100 dark:bg-gray-700 p-1 border-b border-gray-300 dark:border-gray-600 flex items-center justify-between', toolbarClass]">
-            <div class="flex flex-nowrap overflow-x-auto items-center gap-1">
+            <div class="flex-1 flex flex-nowrap overflow-x-auto items-center gap-1">
                 <ToolbarButton :title="getButtonTitle('bold')" @click="applyFormat('bold')" icon="bold" :button-class="toolbarButtonBaseClass" collection="ui"/>
                 <ToolbarButton :title="getButtonTitle('italic')" @click="applyFormat('italic')" icon="italic" :button-class="toolbarButtonBaseClass" collection="ui"/>
                 <ToolbarButton :title="getButtonTitle('link')" @click="insertLink" icon="link" :button-class="toolbarButtonBaseClass" collection="ui"/>
@@ -30,6 +30,8 @@
                 <DropdownMenu title="Insert Code Block" icon="code" :button-class="toolbarButtonBaseClass" collection="ui">
                     <ToolbarButton @click="applyFormat('codeblock')" title="Generic Code Block" icon="terminal" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Generic Code</span></ToolbarButton>
                     <div class="my-1 border-t border-gray-200 dark:border-gray-600"></div>
+                    
+                    <!-- UPDATED: Restored all programming languages -->
                     <DropdownSubmenu title="Programming Languages" icon="programming" collection="ui">
                         <ToolbarButton @click="applyFormat('codeblock', { language: 'python' })" title="Python" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Python</span></ToolbarButton>
                         <ToolbarButton @click="applyFormat('codeblock', { language: 'javascript' })" title="JavaScript" icon="javascript" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">JavaScript</span></ToolbarButton>
@@ -73,39 +75,32 @@
                 <DropdownMenu title="LaTeX Equations" icon="sigma" :button-class="toolbarButtonBaseClass" collection="ui">
                     <ToolbarButton @click="applyFormat('latex')" title="Inline Math ($...$)" icon="latex" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Inline Math</span></ToolbarButton>
                     <ToolbarButton @click="applyFormat('latexBlock')" title="Display Math ($$...$$)" icon="latexBlock" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Display Math</span></ToolbarButton>
-                    <div class="my-1 border-t border-gray-200 dark:border-gray-600"></div>
-                    <DropdownSubmenu title="Numbered Environments" icon="hash" collection="ui">
-                        <ToolbarButton @click="applyFormat('latexEnvEquation')" title="Equation" icon="equation" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Equation</span></ToolbarButton>
-                        <ToolbarButton @click="applyFormat('latexEnvAlign')" title="Align" icon="align" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Align</span></ToolbarButton>
-                        <ToolbarButton @click="applyFormat('latexEnvGather')" title="Gather" icon="gather" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Gather</span></ToolbarButton>
-                    </DropdownSubmenu>
-                    <DropdownSubmenu title="Unnumbered Environments" icon="minus-circle" collection="ui">
-                        <ToolbarButton @click="applyFormat('latexEnvEquationStar')" title="Equation*" icon="equation" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Equation*</span></ToolbarButton>
-                        <ToolbarButton @click="applyFormat('latexEnvAlignStar')" title="Align*" icon="align" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Align*</span></ToolbarButton>
-                        <ToolbarButton @click="applyFormat('latexEnvGatherStar')" title="Gather*" icon="gather" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Gather*</span></ToolbarButton>
-                    </DropdownSubmenu>
                 </DropdownMenu>
 
-                <DropdownMenu title="Insert" icon="paperclip" :button-class="toolbarButtonBaseClass" collection="ui">
-                    <ToolbarButton @click="insertImage" title="Image" icon="image" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Image</span></ToolbarButton>
+                <DropdownMenu title="File" icon="folder" :button-class="toolbarButtonBaseClass" collection="ui">
+                    <ToolbarButton @click="importContent" title="Import from .md" icon="upload" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Import...</span></ToolbarButton>
+                    <ToolbarButton @click="exportContent" title="Export as .md" icon="download" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Export as MD</span></ToolbarButton>
+                    <ToolbarButton @click="insertImage" title="Image" icon="image" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Insert Image</span></ToolbarButton>
                 </DropdownMenu>
+                
+                <div class="border-l border-gray-300 dark:border-gray-600 h-5 mx-1"></div>
+                
+                <ToolbarButton 
+                    :title="isWrappingEnabled ? 'Disable Text Wrapping' : 'Enable Text Wrapping'" 
+                    @click="toggleWrapping" 
+                    icon="wrap-text" 
+                    :button-class="[toolbarButtonBaseClass, {'bg-blue-100 dark:bg-blue-800/50': isWrappingEnabled}]" 
+                    collection="ui"
+                />
             </div>
-            <!-- Enhanced Edit/Preview Mode Switcher -->
+            
             <div v-if="renderable" class="pl-2 flex items-center">
                 <div class="flex items-center rounded-md border border-gray-300 dark:border-gray-500 bg-gray-200 dark:bg-gray-900/50 p-0.5">
-                    <button
-                        @click="setMode('edit')"
-                        title="Edit Mode"
-                        :class="['px-2.5 py-1 text-sm rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 flex items-center gap-1.5', currentMode === 'edit' ? 'bg-white dark:bg-gray-600 text-gray-800 dark:text-gray-100 shadow-sm' : 'bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-300/50 dark:hover:bg-gray-700/50']"
-                    >
+                    <button @click="setMode('edit')" title="Edit Mode" :class="['px-2.5 py-1 text-sm rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 flex items-center gap-1.5', currentMode === 'edit' ? 'bg-white dark:bg-gray-600 text-gray-800 dark:text-gray-100 shadow-sm' : 'bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-300/50 dark:hover:bg-gray-700/50']">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg>
                         <span>Edit</span>
                     </button>
-                    <button
-                        @click="setMode('view')"
-                        title="Preview Mode"
-                        :class="['px-2.5 py-1 text-sm rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 flex items-center gap-1.5', currentMode === 'view' ? 'bg-white dark:bg-gray-600 text-gray-800 dark:text-gray-100 shadow-sm' : 'bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-300/50 dark:hover:bg-gray-700/50']"
-                    >
+                    <button @click="setMode('view')" title="Preview Mode" :class="['px-2.5 py-1 text-sm rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 flex items-center gap-1.5', currentMode === 'view' ? 'bg-white dark:bg-gray-600 text-gray-800 dark:text-gray-100 shadow-sm' : 'bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-300/50 dark:hover:bg-gray-700/50']">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
                         <span>Preview</span>
                     </button>
@@ -113,7 +108,7 @@
             </div>
         </div>
         <div class="editor-content flex-1 overflow-hidden relative p-1 bg-white dark:bg-gray-800">
-            <div v-show="currentMode === 'edit' || !renderable" ref="editorRef" class="editor-wrapper h-full w-full"></div>
+            <div v-show="currentMode === 'edit' || !renderable" ref="editorRef" class="editor-wrapper h-full w-full overflow-hidden"></div>
             <div v-if="renderable && currentMode === 'view'" class="absolute inset-0 p-2 overflow-y-auto">
                 <MessageContentRenderer :content="modelValue" />
             </div>
@@ -128,7 +123,7 @@
 import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, defineExpose } from 'vue';
 import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder as cmPlaceholder } from "@codemirror/view";
-import { EditorState } from "@codemirror/state";
+import { EditorState, Compartment } from "@codemirror/state";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { html } from "@codemirror/lang-html";
@@ -161,6 +156,8 @@ const editorRef = ref(null);
 const editorView = ref(null);
 let updatingFromSelf = false;
 const currentMode = ref(props.initialMode);
+const isWrappingEnabled = ref(true);
+let wrappingCompartment = new Compartment();
 
 defineExpose({ editorView });
 
@@ -195,6 +192,36 @@ const toolbarMenuItemClass = computed(() => {
     return 'w-full p-1.5 bg-transparent rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 dark:text-gray-200 flex items-center justify-start';
 });
 
+// --- FILE OPERATIONS ---
+const exportContent = () => {
+    const blob = new Blob([props.modelValue], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'document.md';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+};
+
+const importContent = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.md,.txt,text/markdown,text/plain';
+    input.onchange = e => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = re => {
+            const content = re.target.result;
+            emit('update:modelValue', content);
+        };
+        reader.readAsText(file);
+    };
+    input.click();
+};
+
 // --- EDITOR HELPERS ---
 const getSelectedLines = (state) => {
     let lines = [];
@@ -221,8 +248,6 @@ const getButtonTitle = (type) => {
         ul: 'Unordered List', ol: 'Ordered List', codeblock: 'Code Block',
         inlinecode: 'Inline Code', link: 'Insert Link', image: 'Insert Image',
         hr: 'Horizontal Rule', latex: 'Inline LaTeX ($...$)', latexBlock: 'LaTeX Block ($$...$$)',
-        latexEnvEquation: 'Equation Environment', latexEnvAlign: 'Align Environment', latexEnvGather: 'Gather Environment',
-        latexEnvEquationStar: 'Equation* Environment (Unnumbered)', latexEnvAlignStar: 'Align* Environment (Unnumbered)', latexEnvGatherStar: 'Gather* Environment (Unnumbered)',
     };
     return map[type] || type;
 };
@@ -251,15 +276,8 @@ const applyFormat = (type, options = {}) => {
         case 'ul': blockPrefix = '- '; break;
         case 'ol': blockPrefix = '1. '; break;
         case 'latexBlock': prefix = '$$\n'; suffix = '\n$$'; isBlockEnv = true; break;
-        case 'codeblock': prefix = '```' + (options.language || '') + '\n'; suffix = '\n```'; isBlockEnv = true; break;
+        case 'codeblock': prefix = '```' + (options.language || '') + '\n'; suffix = '\n```'; isBliockEnv = true; break;
         case 'hr': changes.push({ from: selection.from, insert: (needsNewline(state, selection.from, true) ? '\n' : '') + '---\n' }); break;
-        // LaTeX Environments
-        case 'latexEnvEquation': isBlockEnv = true; prefix = '\\begin{equation}\n'; suffix = '\n\\end{equation}'; break;
-        case 'latexEnvAlign': isBlockEnv = true; prefix = '\\begin{align}\n'; suffix = '\n\\end{align}'; break;
-        case 'latexEnvGather': isBlockEnv = true; prefix = '\\begin{gather}\n'; suffix = '\n\\end{gather}'; break;
-        case 'latexEnvEquationStar': isBlockEnv = true; prefix = '\\begin{equation*}\n'; suffix = '\n\\end{equation*}'; break;
-        case 'latexEnvAlignStar': isBlockEnv = true; prefix = '\\begin{align*}\n'; suffix = '\n\\end{align*}'; break;
-        case 'latexEnvGatherStar': isBlockEnv = true; prefix = '\\begin{gather*}\n'; suffix = '\n\\end{gather*}'; break;
     }
 
     let effectivePrefix = prefix;
@@ -342,6 +360,16 @@ const getLanguageExtension = () => {
     }
 }
 
+const toggleWrapping = () => {
+    isWrappingEnabled.value = !isWrappingEnabled.value;
+    if (editorView.value) {
+        editorView.value.dispatch({
+            effects: wrappingCompartment.reconfigure(isWrappingEnabled.value ? EditorView.lineWrapping : [])
+        });
+        editorView.value.focus();
+    }
+};
+
 // --- LIFECYCLE & WATCHERS ---
 const initializeEditor = () => {
     if (editorView.value) {
@@ -352,7 +380,7 @@ const initializeEditor = () => {
         basicSetup,
         keymap.of([indentWithTab]),
         getLanguageExtension(),
-        EditorView.lineWrapping,
+        wrappingCompartment.of(isWrappingEnabled.value ? EditorView.lineWrapping : []), // Dynamic wrapping
         EditorView.updateListener.of((update) => {
             if (update.docChanged && !updatingFromSelf) {
                 emit('update:modelValue', update.state.doc.toString());
@@ -424,6 +452,7 @@ onBeforeUnmount(() => {
 
 .cm-scroller {
   overflow: auto;
+  overflow-x: auto;
 }
 
 .rendered-prose-container {

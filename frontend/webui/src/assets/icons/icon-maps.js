@@ -25,6 +25,10 @@ import IconStrikethrough from './ui/IconStrikethrough.vue';
 import IconTerminal from './ui/IconTerminal.vue';
 import IconType from './ui/IconType.vue';
 import IconImage from '../icons/IconPhoto.vue'; // Alias for consistency
+import IconArrowUpTray from '../icons/IconArrowUpTray.vue';
+import IconFolder from '../icons/IconFolder.vue';
+import IconWrapText from  '../icons/IconWrapText.vue'
+
 
 // Language Icons
 import IconAngular from './languages/IconAngular.vue';
@@ -81,6 +85,9 @@ export const uiIconMap = {
     'ticket': IconTicket,
     // Add aliases for icons that might have different names in different places
     'equation': IconSigma, 
+    'upload': IconArrowUpTray,
+    'folder': IconFolder,
+    'wrap-text': IconWrapText
 };
 
 export const languageIconMap = {
