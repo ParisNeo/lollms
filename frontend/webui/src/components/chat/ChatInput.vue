@@ -593,7 +593,6 @@ onUnmounted(() => {
                     <span class="flex-shrink-0 pl-2">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
                 </div>
                 <p v-if="showContextWarning" class="mt-1.5 text-xs text-center" :class="totalPercentage > 100 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'">{{ contextWarningMessage }}</p>
-                <!-- Hover element for context breakdown -->
                 <div class="absolute bottom-full left-0 mb-2 w-auto p-2 bg-white dark:bg-gray-900 border dark:border-gray-600 rounded-lg shadow-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
                     <h4 class="font-bold mb-1 whitespace-nowrap">Context Breakdown</h4>
                     <div class="flex flex-wrap gap-1">
@@ -632,9 +631,9 @@ onUnmounted(() => {
             </div>
             
             <!-- Main Interface -->
-            <div v-else class="flex items-center gap-2">
+            <div v-else class="flex items-start gap-2">
                 <!-- Action Buttons -->
-                <div class="flex flex-shrink-0 gap-1 sm:gap-2">
+                <div class="flex flex-shrink-0 gap-1 sm:gap-2 pt-1.5">
                     <button v-if="currentModelVisionSupport" @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary chat-action-button disabled:opacity-50" title="Upload Images">
                         <IconPhoto class="w-5 h-5"/>
                     </button>
@@ -724,9 +723,9 @@ onUnmounted(() => {
                     <div v-if="!isAdvancedMode">
                         <textarea ref="textareaRef" v-model="messageText" @keydown="handleKeyDown" :placeholder="inputPlaceholder" rows="1" class="simple-chat-input"></textarea>
                     </div>
-                    <div v-else class="space-y-2">
-                        <CodeMirrorEditor v-model="messageText" :placeholder="inputPlaceholder" :style="{ maxHeight: '200px' }" :autofocus="true" :extensions="advancedEditorExtensions" @ready="handleEditorReady" class="w-full"/>
-                        <div class="flex justify-end">
+                    <div v-else class="flex-1 flex flex-col min-h-0">
+                        <CodeMirrorEditor class="flex-grow min-h-0" v-model="messageText" :placeholder="inputPlaceholder" :style="{ maxHeight: '200px' }" :autofocus="true" :extensions="advancedEditorExtensions" @ready="handleEditorReady" />
+                        <div class="flex justify-end mt-2">
                             <button @click="isAdvancedMode = false" class="btn btn-secondary !p-2" title="Switch to Simple Input">
                                 <IconChevronDown class="w-5 h-5" />
                             </button>
@@ -735,7 +734,7 @@ onUnmounted(() => {
                 </div>
 
                 <!-- Send Button -->
-                <div class="flex-shrink-0">
+                <div class="flex-shrink-0 pt-1.5">
                     <button @click="handleSendMessage" :disabled="isSendDisabled" class="btn btn-primary chat-action-button" title="Send Message (Enter or Ctrl+Enter)">
                         <IconSend class="w-5 h-5"/>
                     </button>

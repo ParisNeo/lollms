@@ -1,11 +1,16 @@
 # backend/routers/discussion/utils.py
+import base64
 import io
 import re
+import shutil
+import subprocess
+import tempfile
 import zipfile
+from pathlib import Path
 from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,6 +19,8 @@ from backend.db.models.user import UserStarredDiscussion
 from backend.models import (DiscussionInfo, MessageCodeExportRequest,
                             TaskInfo, UserAuthDetails)
 from backend.discussion import get_user_discussion  
+from backend.settings import settings
+from backend.session import get_user_discussion_assets_path
 from backend.tasks.discussion_tasks import (_prune_empty_discussions_task,
                                              _to_task_info)
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
@@ -24,6 +31,9 @@ from ascii_colors import trace_exception
 
 class TokenizeRequest(BaseModel):
     text: str
+
+class LatexCompilationRequest(BaseModel):
+    code: str
 
 def build_utils_router(router: APIRouter):
     @router.post("/tokenize", response_model=Dict[str, int])
@@ -39,6 +49,55 @@ def build_utils_router(router: APIRouter):
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to tokenize text: {e}")
+    
+    @router.post("/{discussion_id}/compile-latex", response_model=Dict[str, Optional[str]])
+    async def compile_latex_code(
+        discussion_id: str,
+        request: LatexCompilationRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user)
+    ):
+        if not settings.get("latex_builder_enabled", False):
+            raise HTTPException(status_code=403, detail="LaTeX builder is not enabled in the server settings.")
+        
+        latex_executable = settings.get("latex_builder_path")
+        if not latex_executable or not shutil.which(latex_executable):
+            raise HTTPException(status_code=400, detail=f"LaTeX executable '{latex_executable}' not found or not configured.")
+
+        assets_path = get_user_discussion_assets_path(current_user.username)
+        build_dir_parent = assets_path / discussion_id / "latex_builds"
+        build_dir_parent.mkdir(parents=True, exist_ok=True)
+        
+        with tempfile.TemporaryDirectory(dir=build_dir_parent) as temp_dir_str:
+            temp_dir = Path(temp_dir_str)
+            tex_file_path = temp_dir / "document.tex"
+            with open(tex_file_path, "w", encoding="utf-8") as f:
+                f.write(request.code)
+            
+            try:
+                process = subprocess.run(
+                    [latex_executable, "-interaction=nonstopmode", "-output-directory", str(temp_dir), str(tex_file_path)],
+                    capture_output=True, text=True, timeout=30 # 30 second timeout
+                )
+                
+                pdf_path = temp_dir / "document.pdf"
+                log_path = temp_dir / "document.log"
+                logs = ""
+                if log_path.exists():
+                    logs = log_path.read_text(encoding="utf-8", errors="ignore")
+
+                if process.returncode != 0 or not pdf_path.exists():
+                    return JSONResponse(status_code=400, content={"error": "LaTeX compilation failed.", "logs": logs})
+
+                pdf_bytes = pdf_path.read_bytes()
+                pdf_b64 = base64.b64encode(pdf_bytes).decode('utf-8')
+                
+                return {"pdf_b64": pdf_b64, "logs": logs}
+                
+            except subprocess.TimeoutExpired:
+                return JSONResponse(status_code=400, content={"error": "LaTeX compilation timed out after 30 seconds.", "logs": "Timeout occurred."})
+            except Exception as e:
+                trace_exception(e)
+                return JSONResponse(status_code=500, content={"error": f"An unexpected error occurred: {e}", "logs": ""})
         
     @router.post("/prune", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
     async def prune_empty_discussions(current_user: UserAuthDetails = Depends(get_current_active_user)):

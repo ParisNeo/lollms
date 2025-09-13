@@ -23,6 +23,7 @@ import IconPhoto from '../assets/icons/IconPhoto.vue';
 import IconChevronRight from '../assets/icons/IconChevronRight.vue';
 import IconLollms from '../assets/icons/IconLollms.vue';
 import IconHome from '../assets/icons/IconHome.vue';
+import IconBuild from '../assets/icons/IconBuild.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -39,6 +40,7 @@ const components = {
   broadcast: defineAsyncComponent(() => import('../components/admin/BroadcastMessage.vue')),
   llm_bindings: defineAsyncComponent(() => import('../components/admin/bindings/LLMBindingsSettings.vue')),
   tti_bindings: defineAsyncComponent(() => import('../components/admin/bindings/TTIBindingsSettings.vue')),
+  builders: defineAsyncComponent(() => import('../components/admin/BuildersSettings.vue')),
   ai_bot: defineAsyncComponent(() => import('../components/admin/AiBotSettings.vue')),
   services: defineAsyncComponent(() => import('../components/settings/ServicesSettings.vue')),
   apps: defineAsyncComponent(() => import('../components/admin/zoos/AppsManagement.vue')),
@@ -66,6 +68,7 @@ const sections = [
   { type: 'divider', label: 'Bindings & Services' },
   { type: 'link', id: 'llm_bindings', name: 'LLM Bindings', icon: markRaw(IconCpuChip) },
   { type: 'link', id: 'tti_bindings', name: 'TTI Bindings', icon: markRaw(IconPhoto) },
+  { type: 'link', id: 'builders', name: 'Code Builders', icon: markRaw(IconBuild) },
   { type: 'link', id: 'ai_bot', name: 'AI Bot', icon: markRaw(IconLollms) },
   { type: 'link', id: 'services', name: 'API Services', icon: markRaw(IconServer) },
   { type: 'divider', label: 'System & Tools' },

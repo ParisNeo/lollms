@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/discussions.js
 import { defineStore, storeToRefs } from 'pinia';
 import { ref, computed, watch, nextTick } from 'vue';
 import apiClient from '../services/api';
@@ -519,6 +520,26 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             console.error("Failed to create discussion:", error);
             useUiStore().addNotification('Failed to create new discussion.', 'error');
             throw error;
+        }
+    }
+    
+    async function compileLatexCode({ code }) {
+        if (!currentDiscussionId.value) {
+            uiStore.addNotification('No active discussion selected.', 'error');
+            throw new Error('No active discussion.');
+        }
+        try {
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/compile-latex`, { code });
+            if (response.data.pdf_b64) {
+                uiStore.addNotification('LaTeX compiled successfully!', 'success');
+            }
+            return response.data; // { pdf_b64, logs, error? }
+        } catch (error) {
+            const errorData = error.response?.data;
+            const errorMessage = errorData?.error || 'LaTeX compilation failed.';
+            const errorLogs = errorData?.logs || 'No logs available.';
+            uiStore.addNotification(errorMessage, 'error');
+            throw { message: errorMessage, logs: errorLogs };
         }
     }
 
@@ -1379,5 +1400,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         fetchSharedWithMe,
         shareDiscussion,
         unsubscribeFromSharedDiscussion,
+
+        compileLatexCode,
     };
 });

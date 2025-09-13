@@ -218,6 +218,7 @@ class UserAuthDetails(UserLLMParams):
     memory: Optional[str] = None
     include_memory_date_in_context: bool # NEW
     llm_settings_overridden: bool = False
+    latex_builder_enabled: bool = False
 
 class RelationshipStatus(BaseModel):
     is_following: bool

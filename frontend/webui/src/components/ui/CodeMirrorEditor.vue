@@ -31,7 +31,6 @@
                     <ToolbarButton @click="applyFormat('codeblock')" title="Generic Code Block" icon="terminal" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Generic Code</span></ToolbarButton>
                     <div class="my-1 border-t border-gray-200 dark:border-gray-600"></div>
                     
-                    <!-- UPDATED: Restored all programming languages -->
                     <DropdownSubmenu title="Programming Languages" icon="programming" collection="ui">
                         <ToolbarButton @click="applyFormat('codeblock', { language: 'python' })" title="Python" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Python</span></ToolbarButton>
                         <ToolbarButton @click="applyFormat('codeblock', { language: 'javascript' })" title="JavaScript" icon="javascript" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">JavaScript</span></ToolbarButton>
@@ -59,6 +58,7 @@
                         <ToolbarButton @click="applyFormat('codeblock', { language: 'json' })" title="JSON" icon="json" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">JSON</span></ToolbarButton>
                         <ToolbarButton @click="applyFormat('codeblock', { language: 'yaml' })" title="YAML" icon="yaml" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">YAML</span></ToolbarButton>
                         <ToolbarButton @click="applyFormat('codeblock', { language: 'markdown' })" title="Markdown" icon="markdown" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Markdown</span></ToolbarButton>
+                        <ToolbarButton @click="applyFormat('codeblock', { language: 'latex' })" title="LaTeX" icon="latex" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">LaTeX</span></ToolbarButton>
                     </DropdownSubmenu>
                     <DropdownSubmenu title="Scripting and Shell" icon="terminal" collection="ui">
                         <ToolbarButton @click="applyFormat('codeblock', { language: 'bash' })" title="Bash" icon="bash" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Bash</span></ToolbarButton>
@@ -108,9 +108,9 @@
             </div>
         </div>
         <div class="editor-content flex-1 overflow-hidden relative p-1 bg-white dark:bg-gray-800">
-            <div v-show="currentMode === 'edit' || !renderable" ref="editorRef" class="editor-wrapper h-full w-full overflow-hidden"></div>
-            <div v-if="renderable && currentMode === 'view'" class="absolute inset-0 p-2 overflow-y-auto">
-                <MessageContentRenderer :content="modelValue" />
+            <div v-show="currentMode === 'edit' || !renderable" ref="editorRef" class="editor-wrapper h-full w-full"></div>
+            <div v-show="renderable && currentMode === 'view'" class="absolute inset-0 p-2 overflow-y-auto">
+                <MessageContentRenderer :content="modelValue" :key="currentMode" />
             </div>
         </div>
         <div v-if="renderable" class="statusbar bg-gray-50 dark:bg-gray-700/50 p-1 border-t border-gray-300 dark:border-gray-600 text-xs text-gray-500 dark:text-gray-400 text-right px-2 select-none">
@@ -260,6 +260,44 @@ const applyFormat = (type, options = {}) => {
     let changes = [];
     const selection = state.selection.main;
     const selectedText = state.doc.sliceString(selection.from, selection.to);
+    
+    if (type === 'codeblock') {
+        const lang = options.language || '';
+        const startTag = '```' + lang + '\n';
+        const endTag = '\n```';
+        
+        let textToInsert;
+        let selectionStart, selectionEnd;
+
+        if (selectedText) {
+            textToInsert = startTag + selectedText + endTag;
+            selectionStart = selection.from;
+            selectionEnd = selection.from + textToInsert.length;
+        } else {
+            const placeholder = 'code here';
+            textToInsert = startTag + placeholder + endTag;
+            selectionStart = selection.from + startTag.length;
+            selectionEnd = selectionStart + placeholder.length;
+        }
+        
+        let finalInsertion = textToInsert;
+        if (needsNewline(state, selection.from, true) && selection.from > 0) {
+            finalInsertion = '\n' + finalInsertion;
+            selectionStart += 1;
+            selectionEnd += 1;
+        }
+        if (needsNewline(state, selection.to, false) && selection.to < state.doc.length) {
+            finalInsertion += '\n';
+        }
+        
+        view.dispatch({
+            changes: { from: selection.from, to: selection.to, insert: finalInsertion },
+            selection: { anchor: selectionStart, head: selectionEnd }
+        });
+        view.focus();
+        return;
+    }
+
     let prefix = '', suffix = '', blockPrefix = '';
     let isBlockEnv = false;
 
@@ -276,7 +314,6 @@ const applyFormat = (type, options = {}) => {
         case 'ul': blockPrefix = '- '; break;
         case 'ol': blockPrefix = '1. '; break;
         case 'latexBlock': prefix = '$$\n'; suffix = '\n$$'; isBlockEnv = true; break;
-        case 'codeblock': prefix = '```' + (options.language || '') + '\n'; suffix = '\n```'; isBliockEnv = true; break;
         case 'hr': changes.push({ from: selection.from, insert: (needsNewline(state, selection.from, true) ? '\n' : '') + '---\n' }); break;
     }
 
@@ -442,20 +479,3 @@ onBeforeUnmount(() => {
     }
 });
 </script>
-
-<style>
-.cm-editor {
-  height: 100%;
-  outline: none !important;
-  font-size: 0.9rem;
-}
-
-.cm-scroller {
-  overflow: auto;
-  overflow-x: auto;
-}
-
-.rendered-prose-container {
-    @apply prose prose-base dark:prose-invert max-w-none break-words;
-}
-</style>

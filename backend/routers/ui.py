@@ -23,6 +23,7 @@ async def get_welcome_info(db: Session = Depends(get_db)):
     welcome_text = settings.get("welcome_text", "lollms")
     welcome_slogan = settings.get("welcome_slogan", "One tool to rule them all")
     welcome_logo_url = settings.get("welcome_logo_url", None)
+    latex_builder_enabled = settings.get("latex_builder_enabled", False)
 
     # Fetch a random fun fact from an active category
     fun_fact_content = "Welcome to lollms!" # Default fallback
@@ -44,7 +45,8 @@ async def get_welcome_info(db: Session = Depends(get_db)):
         "welcome_logo_url": welcome_logo_url,
         "fun_fact": fun_fact_content,
         "fun_fact_color": fun_fact_color,
-        "fun_fact_category": fun_fact_category
+        "fun_fact_category": fun_fact_category,
+        "latex_builder_enabled": latex_builder_enabled,
     }
 
 @ui_router.get("/api/fun-fact", include_in_schema=True)

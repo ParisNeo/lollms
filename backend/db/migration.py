@@ -201,7 +201,15 @@ def _bootstrap_global_settings(connection):
         "welcome_logo_url": {
             "value": "",
             "type": "string", "description": "URL to a custom logo for the welcome page. Leave empty for default.", "category": "Welcome Page"
-        }        
+        },
+        "latex_builder_enabled": {
+            "value": False,
+            "type": "boolean", "description": "Enable the LaTeX builder to compile LaTeX code blocks into PDFs.", "category": "Builders"
+        },
+        "latex_builder_path": {
+            "value": "pdflatex",
+            "type": "string", "description": "Path to the pdflatex executable. On Windows, this might be 'C:\\texlive\\2023\\bin\\win32\\pdflatex.exe'. On Linux, 'pdflatex' should suffice if it's in the system's PATH.", "category": "Builders"
+        }
     }
 
     select_keys_query = text("SELECT key FROM global_configs")

@@ -130,6 +130,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         is_api_require_key = settings.get("openai_api_require_key", True)
         is_ollama_service_enabled = settings.get("ollama_service_enabled", False)
         is_ollama_require_key = settings.get("ollama_require_key", True)
+        latex_builder_enabled = settings.get("latex_builder_enabled", False)
 
         return UserAuthDetails(
             id=db_user.id, username=username, is_admin=db_user.is_admin, is_moderator=(db_user.is_admin or db_user.is_moderator), is_active=db_user.is_active,

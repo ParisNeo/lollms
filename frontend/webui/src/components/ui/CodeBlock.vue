@@ -5,6 +5,8 @@ import mermaid from 'mermaid';
 import { useUiStore } from '../../stores/ui';
 import { usePyodideStore } from '../../stores/pyodide';
 import { useDiscussionsStore } from '../../stores/discussions';
+import { useAuthStore } from '../../stores/auth';
+import IconLatex from '../../assets/icons/IconLatex.vue';
 
 const props = defineProps({
   language: {
@@ -20,6 +22,7 @@ const props = defineProps({
 const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
 const discussionsStore = useDiscussionsStore();
+const authStore = useAuthStore();
 
 const copyStatus = ref('Copy');
 const executionOutput = ref('');
@@ -36,6 +39,9 @@ const isInstalling = ref(false);
 const fileInput = ref(null);
 const uploadedFiles = ref([]);
 
+const isCompiling = ref(false);
+const compilationResult = ref(null);
+
 const canvasId = `code-canvas-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 const canvasSelector = `#${canvasId}`;
 
@@ -51,6 +57,8 @@ const highlightedCode = computed(() => {
 
 const displayLanguage = computed(() => props.language || 'text');
 const isPython = computed(() => props.language?.toLowerCase() === 'python');
+const isLatex = computed(() => ['latex', 'tex'].includes(props.language?.toLowerCase()));
+const isLatexBuilderEnabled = computed(() => authStore.latex_builder_enabled);
 const canExecute = computed(() => ['python', 'javascript', 'html', 'svg', 'mermaid'].includes(props.language?.toLowerCase()));
 
 const executeButtonText = computed(() => {
@@ -62,6 +70,13 @@ const executeButtonText = computed(() => {
     }
     if (['svg', 'mermaid', 'html'].includes(props.language?.toLowerCase())) return 'Show';
     return 'Run';
+});
+
+const compileButtonTitle = computed(() => {
+    if (!isLatexBuilderEnabled.value) {
+        return 'LaTeX builder is not enabled by the administrator.';
+    }
+    return 'Compile LaTeX';
 });
 
 const themeClass = computed(() => uiStore.currentTheme === 'dark' ? 'theme-dark' : 'theme-light');
@@ -137,6 +152,29 @@ function removeFile(index) {
     uploadedFiles.value.splice(index, 1);
 }
 
+async function compileLatex() {
+    if (isCompiling.value) return;
+    isCompiling.value = true;
+    compilationResult.value = { logs: 'Compiling LaTeX document...' };
+    try {
+        const result = await discussionsStore.compileLatexCode({ code: props.code });
+        compilationResult.value = result;
+        if (result.pdf_b64) {
+            const pdfWindow = window.open("");
+            if(pdfWindow) {
+                pdfWindow.document.write(`<title>PDF Preview</title><iframe width='100%' height='100%' src='data:application/pdf;base64,${result.pdf_b64}'></iframe>`);
+                pdfWindow.document.close();
+            } else {
+                uiStore.addNotification('Could not open a new tab. Please allow pop-ups for this site.', 'warning');
+            }
+        }
+    } catch (error) {
+        compilationResult.value = { error: error.message || 'An unknown error occurred.', logs: error.logs || '' };
+    } finally {
+        isCompiling.value = false;
+    }
+}
+
 async function executeCode() {
     if (!canExecute.value || isExecuting.value) return;
     isExecuting.value = true;
@@ -144,6 +182,7 @@ async function executeCode() {
     executionOutput.value = `Processing ${props.language} code...`;
     executionImage.value = null;
     createdFiles.value = [];
+    compilationResult.value = null;
     
     try {
         const lang = props.language.toLowerCase();
@@ -184,7 +223,6 @@ async function executeCode() {
             executionOutput.value = 'SVG rendered in a modal window.';
         } else if (lang === 'mermaid') {
             try {
-                // First, try to parse. If it succeeds, open interactive view.
                 await mermaid.parse(props.code);
                 uiStore.openModal('interactiveOutput', {
                     title: 'Interactive Mermaid Diagram',
@@ -194,7 +232,6 @@ async function executeCode() {
                 });
                 executionOutput.value = 'Interactive Mermaid diagram opened.';
             } catch (parseError) {
-                // If parsing fails, fall back to static rendering to show the error.
                 try {
                     mermaid.initialize({ startOnLoad: false, theme: uiStore.currentTheme, securityLevel: 'loose' });
                     const { svg } = await mermaid.render(`mermaid-graph-${canvasId}`, props.code);
@@ -245,6 +282,29 @@ ${executionOutput.value}
     });
 }
 
+function sendLatexErrorToAI() {
+    const prompt = `The following LaTeX code failed to compile. Please analyze the error logs and provide a corrected version of the code.
+
+Original Code:
+\`\`\`latex
+${props.code}
+\`\`\`
+
+Compilation Logs:
+\`\`\`
+${compilationResult.value.logs || compilationResult.value.error}
+\`\`\`
+
+Correct the LaTeX code block below:
+`;
+    discussionsStore.sendMessage({
+        prompt: prompt,
+        image_server_paths: [],
+        localImageUrls: [],
+    });
+    compilationResult.value = null;
+}
+
 
 async function downloadCreatedFile(filename) {
     const fileData = await pyodideStore.readFile(filename);
@@ -290,6 +350,10 @@ async function downloadCreatedFile(filename) {
               <svg v-else class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
               <span>{{ executeButtonText }}</span>
           </button>
+          <button v-if="isLatex" @click="compileLatex" class="code-action-btn" :disabled="isCompiling || !isLatexBuilderEnabled" :title="compileButtonTitle">
+                <IconLatex class="w-4 h-4" />
+                <span>{{ isCompiling ? 'Compiling...' : 'Compile' }}</span>
+          </button>
           <button @click="copyCode" class="code-action-btn" title="Copy code">
               <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>
               <span>{{ copyStatus }}</span>
@@ -321,10 +385,16 @@ async function downloadCreatedFile(filename) {
 
     <pre v-if="!isCollapsed" class="code-block-scrollable"><code class="hljs" v-html="highlightedCode"></code></pre>
 
-    <div v-if="!isCollapsed && (executionOutput || executionImage || createdFiles.length > 0)" class="code-execution-output" :class="{'is-error': isError}">
+    <div v-if="!isCollapsed && (executionOutput || executionImage || createdFiles.length > 0 || compilationResult)" class="code-execution-output" :class="{'is-error': isError || compilationResult?.error}">
         <div v-if="executionOutput" class="output-section">
             <div class="output-header">Execution Output</div>
             <pre>{{ executionOutput }}</pre>
+        </div>
+        <div v-if="compilationResult" class="output-section">
+            <div class="output-header">Compilation Result</div>
+            <div v-if="compilationResult.error" class="text-red-500 font-semibold">{{ compilationResult.error }}</div>
+            <pre v-if="compilationResult.logs" class="text-xs max-h-40 overflow-y-auto">{{ compilationResult.logs }}</pre>
+            <div v-if="compilationResult.pdf_b64 && !compilationResult.error" class="text-green-600 dark:text-green-400 font-semibold mt-2">PDF generated successfully and opened in a new tab.</div>
         </div>
         <img v-if="executionImage" :src="executionImage" alt="Matplotlib plot" class="mt-2 max-w-full h-auto rounded-md bg-white">
         <div v-if="createdFiles.length > 0" class="output-section">
@@ -341,6 +411,12 @@ async function downloadCreatedFile(filename) {
         <div v-if="isError" class="mt-4 pt-3 border-t border-red-500/30">
             <button @click="sendErrorToAI" class="btn btn-danger-outline btn-sm">
                  <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
+                Send Error to AI for Correction
+            </button>
+        </div>
+         <div v-if="compilationResult && compilationResult.error" class="mt-4 pt-3 border-t border-red-500/30">
+            <button @click="sendLatexErrorToAI" class="btn btn-danger-outline btn-sm">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
                 Send Error to AI for Correction
             </button>
         </div>
