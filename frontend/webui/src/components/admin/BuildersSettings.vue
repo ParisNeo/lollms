@@ -1,19 +1,21 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { useAdminStore } from '../../stores/admin';
-import { useUiStore } from '../../stores/ui';
 
 const adminStore = useAdminStore();
-const uiStore = useUiStore();
-
 const settings = ref({});
 
 const builderSettings = computed(() => {
-  return adminStore.globalSettings.filter(s => s.category === 'Builders');
+  // Sort to keep a consistent order
+  return adminStore.globalSettings
+    .filter(s => s.category === 'Builders')
+    .sort((a, b) => a.key.localeCompare(b.key));
 });
 
 onMounted(async () => {
-  await adminStore.fetchGlobalSettings();
+  if (adminStore.globalSettings.length === 0) {
+    await adminStore.fetchGlobalSettings();
+  }
   const settingsObject = {};
   adminStore.globalSettings.forEach(setting => {
     settingsObject[setting.key] = setting.value;
@@ -34,8 +36,8 @@ async function saveSettings() {
 <template>
   <div class="space-y-6">
     <div>
-      <h2 class="text-xl font-semibold">Code Builders</h2>
-      <p class="text-gray-500 mt-1">Configure executables for compiling code blocks within discussions.</p>
+      <h2 class="text-xl font-semibold">Builders & Export Settings</h2>
+      <p class="text-gray-500 mt-1">Configure executables for code compilation and enable/disable message export formats.</p>
     </div>
 
     <div v-if="adminStore.isLoadingSettings" class="text-center">Loading settings...</div>

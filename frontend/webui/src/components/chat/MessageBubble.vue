@@ -14,6 +14,7 @@ import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
 import UserAvatar from '../ui/UserAvatar.vue';
+import DropdownMenu from '../ui/DropdownMenu.vue';
 
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';
@@ -36,6 +37,7 @@ import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
+import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 
 const props = defineProps({
   message: {
@@ -104,6 +106,27 @@ const senderPersonalityIcon = computed(() => {
     const personality = dataStore.allPersonalities.find(p => p.name === props.message.sender);
     return personality ? personality.icon_base64 : null;
 });
+
+const exportFormats = computed(() => {
+    const formats = [];
+    if (authStore.export_to_txt_enabled) formats.push({ label: 'Text (.txt)', value: 'txt' });
+    if (authStore.export_to_markdown_enabled) formats.push({ label: 'Markdown (.md)', value: 'md' });
+    if (authStore.export_to_html_enabled) formats.push({ label: 'HTML (.html)', value: 'html' });
+    if (authStore.export_to_pdf_enabled) formats.push({ label: 'PDF (.pdf)', value: 'pdf' });
+    if (authStore.export_to_docx_enabled) formats.push({ label: 'Word (.docx)', value: 'docx' });
+    if (authStore.export_to_xlsx_enabled) formats.push({ label: 'Excel (.xlsx)', value: 'xlsx' });
+    if (authStore.export_to_pptx_enabled) formats.push({ label: 'PowerPoint (.pptx)', value: 'pptx' });
+    return formats;
+});
+
+function handleExport(format) {
+    discussionsStore.exportMessage({
+        discussionId: discussionsStore.currentDiscussionId,
+        messageId: props.message.id,
+        format: format,
+    });
+}
+
 
 onMounted(() => {
     if (props.message.sources && props.message.sources.length > 3) {
@@ -349,7 +372,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
     let textToInsert, selStart, selEnd;
     if (selectedText) { textToInsert = `${before}${selectedText}${after}`; selStart = from + before.length; selEnd = selStart + selectedText.length; } 
     else { textToInsert = `${before}${placeholder}${after}`; selStart = from + before.length; selEnd = selStart + placeholder.length; }
-    view.dispatch({ changes: { from, to, insert: textToInsert }, selection: { anchor: selStart, head: selEnd } });
+    view.dispatch({ changes: { from: to, to: to, insert: textToInsert }, selection: { anchor: selStart, head: selEnd } });
     view.focus();
 }
 </script>
@@ -476,6 +499,11 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                     </div>
                     <div v-if="!isEditing" class="flex-shrink-0 flex items-center gap-1">
                         <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <DropdownMenu v-if="exportFormats.length > 0" title="Export" icon="ticket" button-class="action-btn">
+                                <button v-for="format in exportFormats" :key="format.value" @click="handleExport(format.value)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
+                                    {{ format.label }}
+                                </button>
+                            </DropdownMenu>
                             <button v-if="containsCode" :disabled="areActionsDisabled" @click="handleExportCode" title="Export Code" class="action-btn"><IconCode class="w-4 h-4" /></button>
                             <button :disabled="areActionsDisabled" @click="copyContent" title="Copy" class="action-btn"><IconCopy /></button>
                             <button :disabled="areActionsDisabled" @click="toggleEdit" title="Edit" class="action-btn"><IconPencil /></button>

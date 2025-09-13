@@ -209,6 +209,41 @@ def _bootstrap_global_settings(connection):
         "latex_builder_path": {
             "value": "pdflatex",
             "type": "string", "description": "Path to the pdflatex executable. On Windows, this might be 'C:\\texlive\\2023\\bin\\win32\\pdflatex.exe'. On Linux, 'pdflatex' should suffice if it's in the system's PATH.", "category": "Builders"
+        },
+        "export_to_txt_enabled": {
+            "value": True, "type": "boolean",
+            "description": "Allow users to export messages as plain text (.txt) files.",
+            "category": "Builders"
+        },
+        "export_to_markdown_enabled": {
+            "value": True, "type": "boolean",
+            "description": "Allow users to export messages as Markdown (.md) files.",
+            "category": "Builders"
+        },
+        "export_to_html_enabled": {
+            "value": True, "type": "boolean",
+            "description": "Allow users to export messages as HTML (.html) files.",
+            "category": "Builders"
+        },
+        "export_to_pdf_enabled": {
+            "value": False, "type": "boolean",
+            "description": "Allow users to export messages as PDF (.pdf) files. Requires PyMuPDF (fitz).",
+            "category": "Builders"
+        },
+        "export_to_docx_enabled": {
+            "value": False, "type": "boolean",
+            "description": "Allow users to export messages as Word (.docx) files. Requires python-docx.",
+            "category": "Builders"
+        },
+        "export_to_xlsx_enabled": {
+            "value": False, "type": "boolean",
+            "description": "Allow users to export messages as Excel (.xlsx) files. Requires openpyxl.",
+            "category": "Builders"
+        },
+        "export_to_pptx_enabled": {
+            "value": False, "type": "boolean",
+            "description": "Allow users to export messages as PowerPoint (.pptx) files. Requires python-pptx.",
+            "category": "Builders"
         }
     }
 

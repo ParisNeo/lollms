@@ -25,6 +25,7 @@ const PromptsManagement = defineAsyncComponent(() => import('./zoos/PromptsManag
 const PersonalitiesManagement = defineAsyncComponent(() => import('./zoos/PersonalitiesManagement.vue'));
 const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
 const BroadcastMessage = defineAsyncComponent(() => import('./BroadcastMessage.vue'));
+const BuildersSettings = defineAsyncComponent(() => import('./BuildersSettings.vue'));
 
 const tabs = [
     { id: 'dashboard', component: Dashboard },
@@ -34,6 +35,7 @@ const tabs = [
     { id: 'https', component: HttpsSettings },
     { id: 'llm_bindings', component: LLMBindingsSettings },
     { id: 'tti_bindings', component: TTIBindingsSettings },
+    { id: 'builders', component: BuildersSettings },
     { id: 'ai_bot', component: AiBotSettings },
     { id: 'services', component: ServicesSettings },
     { id: 'apps', component: AppsManagement },

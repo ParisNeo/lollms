@@ -1350,6 +1350,76 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             console.error("Failed to update artefact:", error);
         }
     }
+
+    async function exportMessage({ discussionId, messageId, format }) {
+        const uiStore = useUiStore();
+        uiStore.addNotification(`Exporting message as ${format.toUpperCase()}...`, 'info');
+        try {
+            const response = await apiClient.post(
+                `/api/discussions/${discussionId}/messages/${messageId}/export`, 
+                { format: format },
+                { responseType: 'blob' }
+            );
+
+            const blob = new Blob([response.data], { type: response.headers['content-type'] });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            
+            let filename = `message_export.${format}`;
+            const contentDisposition = response.headers['content-disposition'];
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                if (filenameMatch && filenameMatch.length === 2) {
+                    filename = filenameMatch[1];
+                }
+            }
+            
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Message export failed:", error);
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to export message.', 'error');
+        }
+    }
+
+    async function exportRawContent({ content, format }) {
+        const uiStore = useUiStore();
+        uiStore.addNotification(`Exporting content as ${format.toUpperCase()}...`, 'info');
+        try {
+            const response = await apiClient.post(
+                `/api/files/export-content`, 
+                { content, format },
+                { responseType: 'blob' }
+            );
+
+            const blob = new Blob([response.data], { type: response.headers['content-type'] });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            
+            let filename = `export.${format}`;
+            const contentDisposition = response.headers['content-disposition'];
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="(.+)"/);
+                if (filenameMatch && filenameMatch.length === 2) {
+                    filename = filenameMatch[1];
+                }
+            }
+            
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            console.error("Content export failed:", error);
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to export content.', 'error');
+        }
+    }
     
     function $reset() {
         discussions.value = {};
@@ -1402,5 +1472,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         unsubscribeFromSharedDiscussion,
 
         compileLatexCode,
+        exportMessage,
+        exportRawContent,
     };
 });

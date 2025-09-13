@@ -198,6 +198,9 @@ class ArtefactUpdate(BaseModel):
     version: Optional[int] = None
     update_in_place: bool = False
 
+class MessageExportPayload(BaseModel):
+    format: str
+
 # --- ADDED THIS CLASS ---
 class UrlImportRequest(BaseModel):
     url: str

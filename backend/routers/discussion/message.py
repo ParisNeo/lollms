@@ -23,13 +23,18 @@ from fastapi import (
     UploadFile, status)
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
-                               PlainTextResponse, StreamingResponse)
+                               PlainTextResponse, StreamingResponse, Response)
 from lollms_client import (LollmsClient, LollmsDiscussion, LollmsMessage,
                            LollmsPersonality, MSG_TYPE)
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from ascii_colors import ASCIIColors, trace_exception
+import markdown2
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+from pptx import Presentation
+from pptx.util import Inches
 
 # Local Application Imports
 from backend.config import APP_VERSION, SERVER_CONFIG
@@ -50,7 +55,7 @@ from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse
                             DiscussionTitleUpdate, ExportContextRequest,
                             ExportData, LoadArtefactRequest, ManualMessageCreate,
                             MessageCodeExportRequest, MessageContentUpdate,
-                            MessageGradeUpdate, MessageOutput,
+                            MessageGradeUpdate, MessageOutput, MessageExportPayload,
                             MessageUpdateWithImages, TaskInfo,
                             UnloadArtefactRequest, ArtefactCreateManual, ArtefactUpdate)
 from backend.session import (get_current_active_user,
@@ -60,6 +65,10 @@ from backend.session import (get_current_active_user,
                              get_user_lollms_client,
                              get_user_temp_uploads_path, user_sessions)
 from backend.task_manager import task_manager, Task
+from backend.settings import settings
+import pipmaster as pm
+pm.ensure_packages(['markdown2'])
+
 
 # safe_store is needed for RAG callbacks
 try:
@@ -208,3 +217,125 @@ def build_message_router(router: APIRouter):
         db.commit()
         return {"message": "Message and its branch deleted successfully."}
 
+    @router.post("/{discussion_id}/messages/{message_id}/export")
+    async def export_message(
+        discussion_id: str,
+        message_id: str,
+        payload: MessageExportPayload,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        message = discussion.get_message(message_id)
+
+        if not message:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        export_format = payload.format.lower()
+        
+        # Normalize format name for setting key
+        setting_key_format = 'markdown' if export_format == 'md' else export_format
+        setting_key = f"export_to_{setting_key_format}_enabled"
+
+        if not settings.get(setting_key, False):
+            raise HTTPException(status_code=403, detail=f"Export to '{export_format}' is disabled by the administrator.")
+
+        content = message.content
+        filename = f"message_{message_id[:8]}.{export_format}"
+        media_type = "application/octet-stream"
+        file_content = b''
+
+        try:
+            if export_format == 'txt':
+                media_type = "text/plain"
+                file_content = content.encode('utf-8')
+            elif export_format in ['md', 'markdown']:
+                media_type = "text/markdown"
+                file_content = content.encode('utf-8')
+            elif export_format == 'html':
+                media_type = "text/html"
+                html_content = markdown2.markdown(content, extras=["fenced-code-blocks", "tables", "spoiler"])
+                file_content = f"<html><head><meta charset='utf-8'><title>Message Export</title></head><body>{html_content}</body></html>".encode('utf-8')
+            elif export_format == 'pdf':
+                media_type = "application/pdf"
+                doc = fitz.open()
+                page = doc.new_page()
+                page.insert_text((72, 72), content, fontname="helv", fontsize=11)
+                file_content = doc.write()
+                doc.close()
+            elif export_format == 'docx':
+                media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                document = DocxDocument()
+                document.add_paragraph(content)
+                bio = io.BytesIO()
+                document.save(bio)
+                file_content = bio.getvalue()
+            elif export_format == 'xlsx':
+                media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                wb = Workbook()
+                
+                # Regex to find markdown tables
+                table_regex = re.compile(r'(\|.*\|(?:\r?\n|\r)?\|[-| :]*\|(?:\r?\n|\r)?(?:\|.*\|(?:\r?\n|\r)?)+)')
+                tables = table_regex.findall(content)
+
+                if tables:
+                    for i, table_md in enumerate(tables):
+                        ws = wb.create_sheet(title=f"Table {i+1}")
+                        lines = [line.strip() for line in table_md.strip().split('\n')]
+                        
+                        # Skip header separator line
+                        data_rows = [line for line in lines if not re.match(r'^\|[-| :]*\|$', line)]
+
+                        for row_idx, line in enumerate(data_rows):
+                            cells = [cell.strip() for cell in line.strip('|').split('|')]
+                            for col_idx, cell_text in enumerate(cells):
+                                ws.cell(row=row_idx + 1, column=col_idx + 1, value=cell_text)
+                        
+                        # Auto-adjust column widths
+                        for col in ws.columns:
+                            max_length = 0
+                            column = get_column_letter(col[0].column)
+                            for cell in col:
+                                try:
+                                    if len(str(cell.value)) > max_length:
+                                        max_length = len(cell.value)
+                                except:
+                                    pass
+                            adjusted_width = (max_length + 2)
+                            ws.column_dimensions[column].width = adjusted_width
+
+                    if wb.sheetnames[0] == 'Sheet':
+                        wb.remove(wb['Sheet']) # Remove default sheet if we added new ones
+                else:
+                    # Fallback for content without tables
+                    ws = wb.active
+                    ws.title = "Message"
+                    ws['A1'] = content
+                    ws.column_dimensions['A'].width = 100
+                    ws['A1'].alignment = ws['A1'].alignment.copy(wrapText=True)
+
+                bio = io.BytesIO()
+                wb.save(bio)
+                file_content = bio.getvalue()
+            elif export_format == 'pptx':
+                media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                prs = Presentation()
+                slide_layout = prs.slide_layouts[5]  # Blank slide
+                slide = prs.slides.add_slide(slide_layout)
+                txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.5), prs.slide_width - Inches(1), prs.slide_height - Inches(1))
+                tf = txBox.text_frame
+                tf.text = content
+                tf.word_wrap = True
+                bio = io.BytesIO()
+                prs.save(bio)
+                file_content = bio.getvalue()
+            else:
+                raise HTTPException(status_code=400, detail="Unsupported export format")
+        except ImportError as e:
+            raise HTTPException(status_code=501, detail=f"A required library for '{export_format}' export is missing: {e.name}")
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Failed to generate export file: {e}")
+
+        headers = {'Content-Disposition': f'attachment; filename="{filename}"'}
+        return Response(content=file_content, media_type=media_type, headers=headers)

@@ -24,6 +24,13 @@ async def get_welcome_info(db: Session = Depends(get_db)):
     welcome_slogan = settings.get("welcome_slogan", "One tool to rule them all")
     welcome_logo_url = settings.get("welcome_logo_url", None)
     latex_builder_enabled = settings.get("latex_builder_enabled", False)
+    export_to_txt_enabled = settings.get("export_to_txt_enabled", True)
+    export_to_markdown_enabled = settings.get("export_to_markdown_enabled", True)
+    export_to_html_enabled = settings.get("export_to_html_enabled", True)
+    export_to_pdf_enabled = settings.get("export_to_pdf_enabled", False)
+    export_to_docx_enabled = settings.get("export_to_docx_enabled", False)
+    export_to_xlsx_enabled = settings.get("export_to_xlsx_enabled", False)
+    export_to_pptx_enabled = settings.get("export_to_pptx_enabled", False)
 
     # Fetch a random fun fact from an active category
     fun_fact_content = "Welcome to lollms!" # Default fallback
@@ -47,6 +54,13 @@ async def get_welcome_info(db: Session = Depends(get_db)):
         "fun_fact_color": fun_fact_color,
         "fun_fact_category": fun_fact_category,
         "latex_builder_enabled": latex_builder_enabled,
+        "export_to_txt_enabled": export_to_txt_enabled,
+        "export_to_markdown_enabled": export_to_markdown_enabled,
+        "export_to_html_enabled": export_to_html_enabled,
+        "export_to_pdf_enabled": export_to_pdf_enabled,
+        "export_to_docx_enabled": export_to_docx_enabled,
+        "export_to_xlsx_enabled": export_to_xlsx_enabled,
+        "export_to_pptx_enabled": export_to_pptx_enabled,
     }
 
 @ui_router.get("/api/fun-fact", include_in_schema=True)

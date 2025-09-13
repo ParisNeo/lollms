@@ -80,6 +80,11 @@
                 <DropdownMenu title="File" icon="folder" :button-class="toolbarButtonBaseClass" collection="ui">
                     <ToolbarButton @click="importContent" title="Import from .md" icon="upload" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Import...</span></ToolbarButton>
                     <ToolbarButton @click="exportContent" title="Export as .md" icon="download" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Export as MD</span></ToolbarButton>
+                     <DropdownSubmenu v-if="exportFormats.length > 0" title="Export As..." icon="arrow-down-tray" collection="ui">
+                        <ToolbarButton v-for="format in exportFormats" :key="format.value" @click="handleExport(format.value)" :button-class="toolbarMenuItemClass">
+                            <span class="ml-2">{{ format.label }}</span>
+                        </ToolbarButton>
+                    </DropdownSubmenu>
                     <ToolbarButton @click="insertImage" title="Image" icon="image" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Insert Image</span></ToolbarButton>
                 </DropdownMenu>
                 
@@ -107,7 +112,7 @@
                 </div>
             </div>
         </div>
-        <div class="editor-content flex-1 overflow-hidden relative p-1 bg-white dark:bg-gray-800">
+        <div class="editor-content flex-1 overflow-auto relative p-1 bg-white dark:bg-gray-800">
             <div v-show="currentMode === 'edit' || !renderable" ref="editorRef" class="editor-wrapper h-full w-full"></div>
             <div v-show="renderable && currentMode === 'view'" class="absolute inset-0 p-2 overflow-y-auto">
                 <MessageContentRenderer :content="modelValue" :key="currentMode" />
@@ -131,6 +136,8 @@ import { python } from "@codemirror/lang-python";
 import { javascript } from "@codemirror/lang-javascript";
 import { indentWithTab } from "@codemirror/commands";
 
+import { useAuthStore } from '../../stores/auth';
+import { useDiscussionsStore } from '../../stores/discussions';
 import DropdownMenu from './DropdownMenu.vue';
 import DropdownSubmenu from './DropdownSubmenu.vue';
 import ToolbarButton from './ToolbarButton.vue';
@@ -152,6 +159,8 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue', 'ready']);
 
+const authStore = useAuthStore();
+const discussionsStore = useDiscussionsStore();
 const editorRef = ref(null);
 const editorView = ref(null);
 let updatingFromSelf = false;
@@ -191,6 +200,27 @@ const toolbarButtonBaseClass = computed(() => {
 const toolbarMenuItemClass = computed(() => {
     return 'w-full p-1.5 bg-transparent rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 dark:text-gray-200 flex items-center justify-start';
 });
+
+// --- EXPORT ---
+const exportFormats = computed(() => {
+    const formats = [];
+    if (authStore.export_to_txt_enabled) formats.push({ label: 'Text (.txt)', value: 'txt' });
+    if (authStore.export_to_markdown_enabled) formats.push({ label: 'Markdown (.md)', value: 'md' });
+    if (authStore.export_to_html_enabled) formats.push({ label: 'HTML (.html)', value: 'html' });
+    if (authStore.export_to_pdf_enabled) formats.push({ label: 'PDF (.pdf)', value: 'pdf' });
+    if (authStore.export_to_docx_enabled) formats.push({ label: 'Word (.docx)', value: 'docx' });
+    if (authStore.export_to_xlsx_enabled) formats.push({ label: 'Excel (.xlsx)', value: 'xlsx' });
+    if (authStore.export_to_pptx_enabled) formats.push({ label: 'PowerPoint (.pptx)', value: 'pptx' });
+    return formats;
+});
+
+function handleExport(format) {
+    discussionsStore.exportRawContent({
+        content: props.modelValue,
+        format: format,
+    });
+}
+
 
 // --- FILE OPERATIONS ---
 const exportContent = () => {

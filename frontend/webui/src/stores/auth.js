@@ -17,6 +17,13 @@ export const useAuthStore = defineStore('auth', () => {
     const welcome_fun_fact_color = ref('#3B82F6');
     const welcome_fun_fact_category = ref(null);
     const latex_builder_enabled = ref(false);
+    const export_to_txt_enabled = ref(true);
+    const export_to_markdown_enabled = ref(true);
+    const export_to_html_enabled = ref(true);
+    const export_to_pdf_enabled = ref(false);
+    const export_to_docx_enabled = ref(false);
+    const export_to_xlsx_enabled = ref(false);
+    const export_to_pptx_enabled = ref(false);
 
     // --- WebSocket State ---
     const ws = ref(null);
@@ -40,6 +47,13 @@ export const useAuthStore = defineStore('auth', () => {
             welcome_fun_fact_color.value = welcomeInfoResponse.data.fun_fact_color;
             welcome_fun_fact_category.value = welcomeInfoResponse.data.fun_fact_category;
             latex_builder_enabled.value = welcomeInfoResponse.data.latex_builder_enabled;
+            export_to_txt_enabled.value = welcomeInfoResponse.data.export_to_txt_enabled;
+            export_to_markdown_enabled.value = welcomeInfoResponse.data.export_to_markdown_enabled;
+            export_to_html_enabled.value = welcomeInfoResponse.data.export_to_html_enabled;
+            export_to_pdf_enabled.value = welcomeInfoResponse.data.export_to_pdf_enabled;
+            export_to_docx_enabled.value = welcomeInfoResponse.data.export_to_docx_enabled;
+            export_to_xlsx_enabled.value = welcomeInfoResponse.data.export_to_xlsx_enabled;
+            export_to_pptx_enabled.value = welcomeInfoResponse.data.export_to_pptx_enabled;
         } catch (e) {
             console.warn("Could not fetch welcome info. Using defaults.");
             funFact.value = 'The LoLLMs project is open source and seeks to democratize AI.';
@@ -491,6 +505,13 @@ export const useAuthStore = defineStore('auth', () => {
         user, token, isAuthenticating, isAuthenticated, isAdmin,
         loadingMessage, loadingProgress, funFact, welcomeText, welcomeSlogan, welcome_logo_url, welcome_fun_fact_color, welcome_fun_fact_category, wsConnected,
         latex_builder_enabled,
+        export_to_txt_enabled,
+        export_to_markdown_enabled,
+        export_to_html_enabled,
+        export_to_pdf_enabled,
+        export_to_docx_enabled,
+        export_to_xlsx_enabled,
+        export_to_pptx_enabled,
         attemptInitialAuth, login, register, logout, fetchWelcomeInfo,
         updateUserProfile, updateUserPreferences, changePassword,
         ssoLoginWithPassword, ssoAuthorizeApplication,
