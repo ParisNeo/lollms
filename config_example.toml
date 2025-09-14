@@ -48,3 +48,9 @@ binding_name = "dalle"
 # You can add binding-specific configurations here if needed.
 # For DALL-E, you can specify the model.
 binding_config = { model_name = "dall-e-3" }
+
+[redis]
+host = "localhost"
+port = 6379
+db = 0
+# password = "your_redis_password" # Uncomment if needed

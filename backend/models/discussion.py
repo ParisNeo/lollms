@@ -4,6 +4,26 @@ from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, constr, field_validator
 from .shared import PaginatedResponse
 
+# --- NEW: Discussion Group Models ---
+class DiscussionGroupBase(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+
+class DiscussionGroupCreate(DiscussionGroupBase):
+    pass
+
+class DiscussionGroupUpdate(DiscussionGroupBase):
+    pass
+
+class DiscussionGroupPublic(DiscussionGroupBase):
+    id: str
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    class Config:
+        from_attributes = True
+
+# --- END NEW ---
+
 class ArtefactInfo(BaseModel):
     title: str
     version: int
@@ -41,6 +61,13 @@ class DiscussionInfo(BaseModel):
     owner_username: Optional[str] = None
     permission_level: Optional[str] = None
     share_id: Optional[int] = None
+    group_id: Optional[str] = None # NEW
+
+class DiscussionCreate(BaseModel):
+    group_id: Optional[str] = None
+
+class DiscussionGroupUpdatePayload(BaseModel):
+    group_id: Optional[str] = None
 
 class DataZones(BaseModel):
     user_data_zone: Optional[str] = None

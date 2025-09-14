@@ -12,6 +12,7 @@ from backend.security import pwd_context
 from backend.db.base import Base, FriendshipStatus, follows_table
 from backend.db.models.discussion import SharedDiscussionLink
 from backend.db.models.memory import UserMemory
+from backend.db.models.discussion_group import DiscussionGroup
 
 class User(Base):
     __tablename__ = "users"
@@ -48,6 +49,7 @@ class User(Base):
 
     api_keys = relationship("OpenAIAPIKey", back_populates="user", cascade="all, delete-orphan")
     memories = relationship("UserMemory", back_populates="owner", cascade="all, delete-orphan", foreign_keys="[UserMemory.owner_user_id]")
+    discussion_groups = relationship("DiscussionGroup", back_populates="owner", cascade="all, delete-orphan")
 
     lollms_model_name = Column(String, nullable=True)
     tti_binding_model_name = Column(String, nullable=True)

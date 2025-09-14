@@ -12,6 +12,7 @@ import IconSend from '../../assets/icons/IconSend.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconEllipsisVertical from '../../assets/icons/IconEllipsisVertical.vue';
+import IconFolder from '../../assets/icons/IconFolder.vue';
 
 const props = defineProps({
   discussion: {
@@ -26,6 +27,8 @@ const authStore = useAuthStore();
 
 const user = computed(() => authStore.user);
 const showMenu = ref(false);
+const showMoveMenu = ref(false);
+const discussionGroups = computed(() => store.discussionGroups);
 
 const isSelected = computed(() => store.currentDiscussionId === props.discussion.id);
 const isActive = computed(() => store.generationInProgress && isSelected.value);
@@ -40,10 +43,12 @@ async function handleSelect() {
 function toggleMenu(event) {
   event.stopPropagation();
   showMenu.value = !showMenu.value;
+  showMoveMenu.value = false;
 }
 
 function closeMenu() {
   showMenu.value = false;
+  showMoveMenu.value = false;
 }
 
 function handleStar(event) {
@@ -85,6 +90,12 @@ function handleAutoTitle(event) {
 function handleUnsubscribe(event) {
   event.stopPropagation();
   store.unsubscribeFromSharedDiscussion(props.discussion.share_id);
+  closeMenu();
+}
+
+function handleMoveToGroup(groupId, event) {
+  event.stopPropagation();
+  store.moveDiscussionToGroup(props.discussion.id, groupId);
   closeMenu();
 }
 
@@ -134,7 +145,7 @@ function handleClickOutside() {
         class="dropdown-menu"
         @click.stop
       >
-        <div class="menu-content">
+        <div class="menu-content relative">
           <template v-if="!discussion.owner_username">
             <button @click="handleStar" class="menu-item star-item">
               <IconStarFilled v-if="discussion.is_starred" class="h-4 w-4 text-yellow-500" />
@@ -147,20 +158,24 @@ function handleClickOutside() {
               <span>Rename</span>
             </button>
 
-            <button 
-              v-if="user && user.user_ui_level >= 4" 
-              @click="handleAutoTitle" 
-              class="menu-item"
-            >
+            <div @mouseover="showMoveMenu = true" @mouseleave="showMoveMenu = false" class="menu-item justify-between">
+              <div class="flex items-center">
+                  <IconFolder class="h-4 w-4" />
+                  <span>Move to</span>
+              </div>
+              <div class="submenu-container" v-if="showMoveMenu">
+                <button @click="handleMoveToGroup(null, $event)" class="submenu-item">Ungrouped</button>
+                <div v-if="discussionGroups.length > 0" class="menu-divider my-1"></div>
+                <button v-for="group in discussionGroups" :key="group.id" @click="handleMoveToGroup(group.id, $event)" class="submenu-item">{{ group.name }}</button>
+              </div>
+            </div>
+
+            <button v-if="user && user.user_ui_level >= 4" @click="handleAutoTitle" class="menu-item">
               <IconSparkles class="h-4 w-4" />
               <span>Generate Title</span>
             </button>
 
-            <button 
-              v-if="user && user.user_ui_level >= 4" 
-              @click="handleSend" 
-              class="menu-item"
-            >
+            <button v-if="user && user.user_ui_level >= 4" @click="handleSend" class="menu-item">
               <IconSend class="h-4 w-4" />
               <span>Share</span>
             </button>

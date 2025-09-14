@@ -53,6 +53,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const { emit } = useEventBus();
 
     const discussions = ref({});
+    const discussionGroups = ref([]); // NEW
     const currentDiscussionId = ref(null);
     const messages = ref([]);
     const generationInProgress = ref(false);
@@ -408,26 +409,85 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
+    async function fetchDiscussionGroups() {
+        try {
+            const response = await apiClient.get('/api/discussion-groups');
+            discussionGroups.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch discussion groups:", error);
+            discussionGroups.value = [];
+        }
+    }
+
+    async function createGroup(name) {
+        const response = await apiClient.post('/api/discussion-groups', { name });
+        discussionGroups.value.push(response.data);
+        uiStore.addNotification(`Group "${name}" created.`, 'success');
+    }
+
+    async function updateGroup(id, name) {
+        const response = await apiClient.put(`/api/discussion-groups/${id}`, { name });
+        const index = discussionGroups.value.findIndex(g => g.id === id);
+        if (index !== -1) {
+            discussionGroups.value[index] = response.data;
+        }
+        uiStore.addNotification(`Group renamed to "${name}".`, 'success');
+    }
+
+    async function deleteGroup(id) {
+        await apiClient.delete(`/api/discussion-groups/${id}`);
+        discussionGroups.value = discussionGroups.value.filter(g => g.id !== id);
+        // Discussions in this group will now appear as ungrouped
+        Object.values(discussions.value).forEach(d => {
+            if (d.group_id === id) {
+                d.group_id = null;
+            }
+        });
+        uiStore.addNotification('Group deleted.', 'success');
+    }
+    
+    async function moveDiscussionToGroup(discussionId, groupId) {
+        const discussion = discussions.value[discussionId];
+        if (!discussion) return;
+
+        const originalGroupId = discussion.group_id;
+        discussion.group_id = groupId;
+
+        try {
+            await apiClient.put(`/api/discussions/${discussionId}/group`, { group_id: groupId });
+        } catch (error) {
+            discussion.group_id = originalGroupId; // Revert on failure
+            uiStore.addNotification('Failed to move discussion.', 'error');
+        }
+    }
+
     async function loadDiscussions() {
         try {
-            const response = await apiClient.get('/api/discussions');
-            const discussionData = response.data;
-            if (!Array.isArray(discussionData)) return;
-            const newDiscussions = {};
-            discussionData.forEach(d => {
-                const existingData = discussions.value[d.id] || {};
-                newDiscussions[d.id] = {
-                    ...d,
-                    discussion_data_zone: existingData.discussion_data_zone || '',
-                    personality_data_zone: existingData.personality_data_zone || '',
-                    memory: existingData.memory || ''
-                };
-            });
-            discussions.value = newDiscussions;
+            const [discussionsResponse, groupsResponse] = await Promise.all([
+                apiClient.get('/api/discussions'),
+                apiClient.get('/api/discussion-groups')
+            ]);
+            
+            const discussionData = discussionsResponse.data;
+            if (Array.isArray(discussionData)) {
+                const newDiscussions = {};
+                discussionData.forEach(d => {
+                    const existingData = discussions.value[d.id] || {};
+                    newDiscussions[d.id] = {
+                        ...d,
+                        discussion_data_zone: existingData.discussion_data_zone || '',
+                        personality_data_zone: existingData.personality_data_zone || '',
+                        memory: existingData.memory || ''
+                    };
+                });
+                discussions.value = newDiscussions;
+            }
+            
+            discussionGroups.value = groupsResponse.data;
             
             await fetchSharedWithMe();
 
-        } catch (error) { console.error("Failed to load discussions:", error); }
+        } catch (error) { console.error("Failed to load discussions and groups:", error); }
     }
 
     async function shareDiscussion({ discussionId, targetUserId, permissionLevel }) {
@@ -504,9 +564,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    async function createNewDiscussion() {
+    async function createNewDiscussion(groupId = null) {
         try {
-            const response = await apiClient.post('/api/discussions');
+            const payload = groupId ? { group_id: groupId } : {};
+            const response = await apiClient.post('/api/discussions', payload);
             const newDiscussion = response.data;
             discussions.value[newDiscussion.id] = { 
                 ...newDiscussion,
@@ -1423,6 +1484,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     
     function $reset() {
         discussions.value = {};
+        discussionGroups.value = [];
         currentDiscussionId.value = null;
         messages.value = [];
         generationInProgress.value = false;
@@ -1433,6 +1495,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     return {
         discussions, currentDiscussionId, messages, generationInProgress,
+        discussionGroups, // NEW
         titleGenerationInProgressId, activeDiscussion, activeMessages, activeDiscussionContainsCode,
         activeDiscussionContextStatus, activePersonality, activeAiTasks,
         sortedDiscussions, dataZonesTokenCount, liveDataZoneTokens, 
@@ -1474,5 +1537,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         compileLatexCode,
         exportMessage,
         exportRawContent,
+        // NEW GROUP ACTIONS
+        fetchDiscussionGroups,
+        createGroup,
+        updateGroup,
+        deleteGroup,
+        moveDiscussionToGroup,
     };
 });

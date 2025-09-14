@@ -60,6 +60,7 @@ import EditPromptModal from './components/modals/EditPromptModal.vue';
 import FunFactCategoryModal from './components/modals/FunFactCategoryModal.vue';
 import FunFactModal from './components/modals/FunFactModal.vue';
 import SharePersonalityModal from './components/modals/SharePersonalityModal.vue';
+import DiscussionGroupModal from './components/modals/DiscussionGroupModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -229,6 +230,7 @@ onMounted(async () => {
     <FunFactCategoryModal v-if="activeModal === 'funFactCategory'" />
     <FunFactModal v-if="activeModal === 'funFact'" />
     <SharePersonalityModal v-if="activeModal === 'sharePersonality'" />
+    <DiscussionGroupModal v-if="activeModal === 'discussionGroup'" />
     
     <!-- Always rendered modals/panels -->
     <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
