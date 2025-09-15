@@ -28,6 +28,8 @@ import IconImage from '../icons/IconPhoto.vue'; // Alias for consistency
 import IconArrowUpTray from '../icons/IconArrowUpTray.vue';
 import IconFolder from '../icons/IconFolder.vue';
 import IconWrapText from  '../icons/IconWrapText.vue'
+import IconMenu from  '../icons/IconMenu.vue'
+
 
 
 // Language Icons
@@ -87,7 +89,8 @@ export const uiIconMap = {
     'equation': IconSigma, 
     'upload': IconArrowUpTray,
     'folder': IconFolder,
-    'wrap-text': IconWrapText
+    'wrap-text': IconWrapText,
+    'menu': IconMenu
 };
 
 export const languageIconMap = {

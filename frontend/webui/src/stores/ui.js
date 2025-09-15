@@ -16,6 +16,9 @@ export const useUiStore = defineStore('ui', {
         message: 'This action cannot be undone.',
         confirmText: 'Confirm',
         onConfirm: () => {},
+        inputType: null,
+        inputOptions: [],
+        inputValue: null,
     },
     availableLanguages: {},
     emailModalSubject: '',
@@ -150,12 +153,15 @@ export const useUiStore = defineStore('ui', {
                 title: options.title || 'Are you sure?',
                 message: options.message || 'This action cannot be undone.',
                 confirmText: options.confirmText || 'Confirm',
-                onConfirm: () => {
-                    resolve(true);
+                inputType: options.inputType || null,
+                inputOptions: options.inputOptions || [],
+                inputValue: options.inputValue !== undefined ? options.inputValue : null,
+                onConfirm: (value) => {
+                    resolve({ confirmed: true, value: value });
                     this.closeModal("confirmation");
                 },
                 onCancel: () => {
-                    resolve(false);
+                    resolve({ confirmed: false, value: null });
                     this.closeModal("confirmation");
                 }
             };
@@ -163,9 +169,9 @@ export const useUiStore = defineStore('ui', {
         });
     },
 
-    confirmAction() {
+    confirmAction(value) {
         if (this.confirmationOptions.onConfirm) {
-            this.confirmationOptions.onConfirm();
+            this.confirmationOptions.onConfirm(value);
         }
     },
 

@@ -25,6 +25,8 @@ from backend.discussion import get_user_discussion, get_user_discussion_manager
 from backend.models import (UserAuthDetails, DiscussionBranchSwitchRequest,
                             DiscussionInfo, DiscussionTitleUpdate, MessageOutput
                             )
+from backend.models.discussion import DiscussionGroupUpdatePayload
+from backend.db.models.discussion_group import DiscussionGroup as DBDiscussionGroup
 from backend.session import (get_current_active_user,
                              get_user_discussion_assets_path,
                             )
@@ -98,7 +100,8 @@ def build_discussions_router():
                     created_at=disc_data.get('created_at'),
                     last_activity_at=disc_data.get('updated_at'),
                     discussion_images=discussion_images_b64,
-                    active_discussion_images=active_discussion_images
+                    active_discussion_images=active_discussion_images,
+                    group_id=metadata.get('group_id')
                 )
                 infos.append(info)
             except Exception as e:
@@ -423,6 +426,42 @@ def build_discussions_router():
             id=discussion_id,
             title=metadata.get('title', "Untitled"),
             is_starred=False,
+            rag_datastore_ids=metadata.get('rag_datastore_ids'),
+            active_tools=metadata.get('active_tools', []),
+            active_branch_id=discussion_obj.active_branch_id,
+            created_at=discussion_obj.created_at,
+            last_activity_at=discussion_obj.updated_at
+        )
+
+    @router.put("/{discussion_id}/group", response_model=DiscussionInfo)
+    async def update_discussion_group_association(
+        discussion_id: str,
+        payload: DiscussionGroupUpdatePayload,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        if payload.group_id:
+            group = db.query(DBDiscussionGroup).filter(
+                DBDiscussionGroup.id == payload.group_id,
+                DBDiscussionGroup.owner_user_id == current_user.id
+            ).first()
+            if not group:
+                raise HTTPException(status_code=404, detail="Group not found or you do not have permission to use it.")
+
+        discussion_obj.set_metadata_item('group_id', payload.group_id)
+        discussion_obj.commit()
+
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
+        is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
+        metadata = discussion_obj.metadata or {}
+
+        return DiscussionInfo(
+            id=discussion_id,
+            title=metadata.get('title', "Untitled"),
+            is_starred=is_starred,
+            group_id=payload.group_id,
             rag_datastore_ids=metadata.get('rag_datastore_ids'),
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,

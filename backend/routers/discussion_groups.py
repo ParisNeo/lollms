@@ -19,6 +19,29 @@ discussion_groups_router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 
+def check_for_circular_dependency(db: Session, group_id: str, new_parent_id: str, owner_id: int):
+    """
+    Checks if setting new_parent_id as the parent of group_id would create a circular dependency.
+    """
+    if not new_parent_id:
+        return  # Moving to top-level, no cycle possible
+
+    path = {group_id}
+    current_id = new_parent_id
+    
+    while current_id:
+        if current_id in path:
+            raise HTTPException(status_code=400, detail="Circular dependency detected. A group cannot be a descendant of itself.")
+        
+        path.add(current_id)
+        
+        parent = db.query(DBDiscussionGroup.parent_id).filter(
+            DBDiscussionGroup.id == current_id,
+            DBDiscussionGroup.owner_user_id == owner_id
+        ).scalar()
+        
+        current_id = parent
+
 @discussion_groups_router.get("", response_model=List[DiscussionGroupPublic])
 def get_user_discussion_groups(
     db: Session = Depends(get_db),
@@ -34,7 +57,8 @@ def create_discussion_group(
 ):
     new_group = DBDiscussionGroup(
         name=group_data.name,
-        owner_user_id=current_user.id
+        owner_user_id=current_user.id,
+        parent_id=group_data.parent_id
     )
     db.add(new_group)
     db.commit()
@@ -55,7 +79,15 @@ def update_discussion_group(
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found or you don't have permission to edit it.")
     
+    if group_data.parent_id == group_id:
+        raise HTTPException(status_code=400, detail="A group cannot be its own parent.")
+
+    # New check for circular dependencies
+    if group_data.parent_id:
+        check_for_circular_dependency(db, group_id, group_data.parent_id, current_user.id)
+
     group.name = group_data.name
+    group.parent_id = group_data.parent_id
     db.commit()
     db.refresh(group)
     return group
@@ -70,8 +102,14 @@ def delete_discussion_group(
         DBDiscussionGroup.id == group_id,
         DBDiscussionGroup.owner_user_id == current_user.id
     ).first()
+
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found or you don't have permission to delete it.")
+    
+    # Re-parent any child groups to null (making them top-level) before deleting
+    child_groups = db.query(DBDiscussionGroup).filter(DBDiscussionGroup.parent_id == group_id).all()
+    for child in child_groups:
+        child.parent_id = None
     
     db.delete(group)
     db.commit()

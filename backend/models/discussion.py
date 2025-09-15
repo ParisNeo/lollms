@@ -9,13 +9,14 @@ class DiscussionGroupBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
 
 class DiscussionGroupCreate(DiscussionGroupBase):
-    pass
+    parent_id: Optional[str] = None
 
 class DiscussionGroupUpdate(DiscussionGroupBase):
-    pass
+    parent_id: Optional[str] = None
 
 class DiscussionGroupPublic(DiscussionGroupBase):
     id: str
+    parent_id: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
 

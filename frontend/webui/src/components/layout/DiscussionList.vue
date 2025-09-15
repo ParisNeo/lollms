@@ -1,9 +1,10 @@
 <script setup>
-import { computed, ref, onMounted, onUnmounted } from 'vue';
+import { computed, ref } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import DiscussionItem from './DiscussionItem.vue';
+import DiscussionGroupItem from './DiscussionGroupItem.vue';
 
 import logoDefault from '../../assets/logo.png';
 import IconHome from '../../assets/icons/IconHome.vue';
@@ -20,18 +21,16 @@ import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconFolder from '../../assets/icons/IconFolder.vue';
-import IconPencil from '../../assets/icons/IconPencil.vue';
-import IconTrash from '../../assets/icons/IconTrash.vue';
 
 const store = useDiscussionsStore();
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 
 const user = computed(() => authStore.user);
-const isLoading = computed(() => store.isLoadingDiscussions && store.sortedDiscussions.length === 0);
+const isLoading = computed(() => store.isLoadingDiscussions);
 const hasMoreDiscussions = computed(() => store.hasMoreDiscussions);
 const activeDiscussion = computed(() => store.activeDiscussion);
-const discussionGroups = computed(() => store.discussionGroups);
+const discussionGroupsTree = computed(() => store.discussionGroupsTree);
 
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const welcomeText = computed(() => authStore.welcomeText || 'LoLLMs');
@@ -41,13 +40,10 @@ const searchTerm = ref('');
 const isSearchVisible = ref(false);
 const isStarredVisible = ref(true);
 const showToolbox = ref(false);
-const openGroupIds = ref([]);
-const isUngroupedVisible = ref(true); // State for ungrouped section
+const isUngroupedVisible = ref(true);
 
 const filteredAndSortedDiscussions = computed(() => {
-    if (!searchTerm.value) {
-        return store.sortedDiscussions;
-    }
+    if (!searchTerm.value) return store.sortedDiscussions;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
     return store.sortedDiscussions.filter(d => 
         d.title.toLowerCase().includes(lowerCaseSearch)
@@ -63,52 +59,28 @@ const ungroupedDiscussions = computed(() => {
 });
 
 const groupsWithDiscussions = computed(() => {
-    const groupsMap = new Map(discussionGroups.value.map(g => [g.id, { ...g, discussions: [] }]));
-    
-    filteredAndSortedDiscussions.value.forEach(d => {
-        if (d.is_starred) return;
+    const allDiscussions = filteredAndSortedDiscussions.value;
+    const groupsMap = new Map(store.discussionGroups.map(g => [g.id, { ...g, children: [], discussions: [] }]));
+    const tree = [];
 
+    allDiscussions.forEach(d => {
         if (d.group_id && groupsMap.has(d.group_id)) {
             groupsMap.get(d.group_id).discussions.push(d);
         }
     });
 
-    return Array.from(groupsMap.values()).sort((a,b) => a.name.localeCompare(b.name));
+    for (const group of groupsMap.values()) {
+        if (group.parent_id && groupsMap.has(group.parent_id)) {
+            groupsMap.get(group.parent_id).children.push(group);
+        } else {
+            tree.push(group);
+        }
+    }
+    return tree.sort((a,b) => a.name.localeCompare(b.name));
 });
 
-function toggleGroup(groupId) {
-    const index = openGroupIds.value.indexOf(groupId);
-    if (index > -1) {
-        openGroupIds.value.splice(index, 1);
-    } else {
-        openGroupIds.value.push(groupId);
-    }
-}
-
 function handleNewGroup() {
-    uiStore.openModal('discussionGroup', { group: null });
-}
-
-function handleEditGroup(group, event) {
-    event.stopPropagation();
-    uiStore.openModal('discussionGroup', { group });
-}
-
-async function handleDeleteGroup(group, event) {
-    event.stopPropagation();
-    const confirmed = await uiStore.showConfirmation({
-        title: `Delete Group "${group.name}"?`,
-        message: 'Discussions in this group will become ungrouped. This action cannot be undone.',
-        confirmText: 'Delete'
-    });
-    if (confirmed) {
-        store.deleteGroup(group.id);
-    }
-}
-
-function handleNewDiscussionInGroup(groupId, event) {
-    event.stopPropagation();
-    store.createNewDiscussion(groupId);
+    uiStore.openModal('discussionGroup', { parentGroup: null });
 }
 
 function goToFeed() {
@@ -221,27 +193,12 @@ function handleClone() {
                     </div>
                 </div>
 
-                 <!-- Groups Section -->
-                <div v-for="group in groupsWithDiscussions" :key="group.id" class="discussion-group">
-                    <button @click="toggleGroup(group.id)" class="group-header group">
-                        <div class="flex items-center space-x-2 flex-grow min-w-0">
-                            <IconFolder class="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-gray-400" />
-                            <span class="font-medium text-slate-700 dark:text-gray-300 truncate">{{ group.name }}</span>
-                            <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
-                                {{ group.discussions.length }}
-                            </div>
-                        </div>
-                        <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button @click="handleEditGroup(group, $event)" class="btn-icon-flat p-1" title="Edit group"><IconPencil class="w-3 h-3" /></button>
-                            <button @click="handleDeleteGroup(group, $event)" class="btn-icon-flat p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/50" title="Delete group"><IconTrash class="w-3 h-3" /></button>
-                            <button @click="handleNewDiscussionInGroup(group.id, $event)" class="btn-icon-flat p-1" title="New chat in group"><IconPlus class="w-3 h-3" /></button>
-                        </div>
-                        <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400 ml-2 flex-shrink-0" :class="{'rotate-90': openGroupIds.includes(group.id)}" />
-                    </button>
-                    <div v-if="openGroupIds.includes(group.id)" class="pl-2 space-y-1 mt-1 border-l-2 border-slate-200 dark:border-gray-700">
-                        <DiscussionItem v-for="discussion in group.discussions" :key="discussion.id" :discussion="discussion" />
-                    </div>
-                </div>
+                <!-- Groups Section -->
+                <DiscussionGroupItem 
+                    v-for="group in groupsWithDiscussions" 
+                    :key="group.id" 
+                    :group="group" 
+                />
 
                 <!-- Ungrouped Section -->
                 <div v-if="ungroupedDiscussions.length > 0">
@@ -261,10 +218,10 @@ function handleClone() {
 
                 <div v-if="filteredAndSortedDiscussions.length === 0 && !isLoading" class="empty-state-flat">
                     <p class="text-base font-medium text-slate-600 dark:text-gray-300 mb-2">
-                        {{ searchTerm ? 'No matches found' : 'No conversations yet' }}
+                        {{ searchTerm ? 'No matches found' : 'Start your first conversation' }}
                     </p>
                     <p class="text-sm text-slate-500 dark:text-gray-400">
-                        {{ searchTerm ? 'Try different keywords' : 'Start your first conversation' }}
+                        {{ searchTerm ? 'Try different keywords' : 'Click the "New Chat" button to begin' }}
                     </p>
                 </div>
             </div>

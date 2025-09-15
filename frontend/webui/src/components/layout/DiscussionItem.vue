@@ -27,8 +27,6 @@ const authStore = useAuthStore();
 
 const user = computed(() => authStore.user);
 const showMenu = ref(false);
-const showMoveMenu = ref(false);
-const discussionGroups = computed(() => store.discussionGroups);
 
 const isSelected = computed(() => store.currentDiscussionId === props.discussion.id);
 const isActive = computed(() => store.generationInProgress && isSelected.value);
@@ -43,12 +41,10 @@ async function handleSelect() {
 function toggleMenu(event) {
   event.stopPropagation();
   showMenu.value = !showMenu.value;
-  showMoveMenu.value = false;
 }
 
 function closeMenu() {
   showMenu.value = false;
-  showMoveMenu.value = false;
 }
 
 function handleStar(event) {
@@ -93,10 +89,14 @@ function handleUnsubscribe(event) {
   closeMenu();
 }
 
-function handleMoveToGroup(groupId, event) {
-  event.stopPropagation();
-  store.moveDiscussionToGroup(props.discussion.id, groupId);
-  closeMenu();
+function handleMoveToGroupModal(event) {
+    event.stopPropagation();
+    closeMenu();
+    uiStore.openModal('moveDiscussion', { 
+        discussionId: props.discussion.id,
+        currentTitle: props.discussion.title,
+        currentGroupId: props.discussion.group_id
+    });
 }
 
 function handleClickOutside() {
@@ -158,17 +158,10 @@ function handleClickOutside() {
               <span>Rename</span>
             </button>
 
-            <div @mouseover="showMoveMenu = true" @mouseleave="showMoveMenu = false" class="menu-item justify-between">
-              <div class="flex items-center">
-                  <IconFolder class="h-4 w-4" />
-                  <span>Move to</span>
-              </div>
-              <div class="submenu-container" v-if="showMoveMenu">
-                <button @click="handleMoveToGroup(null, $event)" class="submenu-item">Ungrouped</button>
-                <div v-if="discussionGroups.length > 0" class="menu-divider my-1"></div>
-                <button v-for="group in discussionGroups" :key="group.id" @click="handleMoveToGroup(group.id, $event)" class="submenu-item">{{ group.name }}</button>
-              </div>
-            </div>
+            <button @click="handleMoveToGroupModal" class="menu-item">
+                <IconFolder class="h-4 w-4" />
+                <span>Move to...</span>
+            </button>
 
             <button v-if="user && user.user_ui_level >= 4" @click="handleAutoTitle" class="menu-item">
               <IconSparkles class="h-4 w-4" />

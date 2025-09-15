@@ -328,3 +328,10 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
 .think-summary::-webkit-details-marker { display: none; }
 .think-content { @apply p-3; }
+
+
+/* Discussion groups*/
+.discussion-group {@apply bg-blue-100}
+.discussion-group-header { @apply relative w-full text-left px-3 py-2.5 rounded-lg cursor-pointer flex items-center transition-colors duration-150 hover:bg-slate-100 dark:hover:bg-gray-700/50; }
+.discussion-group-header.selected { @apply bg-blue-100 dark:bg-blue-900/30; }
+.discussion-group-header.active-generation { @apply ring-2 ring-blue-500/50; }

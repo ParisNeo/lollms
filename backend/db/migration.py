@@ -757,6 +757,17 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             print(f"WARNING: Could not run migration for 'posts.visibility' column. Error: {e}")
             connection.rollback()
 
+    if inspector.has_table("discussion_groups"):
+        discussion_groups_columns = [col['name'] for col in inspector.get_columns('discussion_groups')]
+        if 'parent_id' not in discussion_groups_columns:
+            try:
+                # Add the column, making it nullable and a foreign key
+                connection.execute(text("ALTER TABLE discussion_groups ADD COLUMN parent_id VARCHAR REFERENCES discussion_groups(id) ON DELETE SET NULL"))
+                print("INFO: Added 'parent_id' column to 'discussion_groups' table for nesting.")
+                connection.commit()
+            except Exception as e:
+                print(f"ERROR: Could not add 'parent_id' column to 'discussion_groups' table: {e}")
+                connection.rollback()
 
     if not inspector.has_table("user_memories"):
         UserMemory.__table__.create(connection)

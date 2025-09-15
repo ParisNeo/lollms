@@ -54,6 +54,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     const discussions = ref({});
     const discussionGroups = ref([]); // NEW
+    const isLoadingDiscussions = ref(false);
     const currentDiscussionId = ref(null);
     const messages = ref([]);
     const generationInProgress = ref(false);
@@ -73,6 +74,19 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     const sharedWithMe = ref([]);
     
+    const discussionGroupsTree = computed(() => {
+        const groups = JSON.parse(JSON.stringify(discussionGroups.value));
+        const map = new Map(groups.map(g => [g.id, { ...g, children: [] }]));
+        const tree = [];
+        for (const group of map.values()) {
+            if (group.parent_id && map.has(group.parent_id)) {
+                map.get(group.parent_id).children.push(group);
+            } else {
+                tree.push(group);
+            }
+        }
+        return tree;
+    });
 
     const dataZonesTokenCount = computed(() => {
         return liveDataZoneTokens.value.discussion + 
@@ -419,14 +433,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    async function createGroup(name) {
-        const response = await apiClient.post('/api/discussion-groups', { name });
+    async function createGroup(name, parentId = null) {
+        const response = await apiClient.post('/api/discussion-groups', { name, parent_id: parentId });
         discussionGroups.value.push(response.data);
         uiStore.addNotification(`Group "${name}" created.`, 'success');
     }
 
-    async function updateGroup(id, name) {
-        const response = await apiClient.put(`/api/discussion-groups/${id}`, { name });
+    async function updateGroup(id, name, parentId = null) {
+        const response = await apiClient.put(`/api/discussion-groups/${id}`, { name, parent_id: parentId });
         const index = discussionGroups.value.findIndex(g => g.id === id);
         if (index !== -1) {
             discussionGroups.value[index] = response.data;
@@ -437,7 +451,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     async function deleteGroup(id) {
         await apiClient.delete(`/api/discussion-groups/${id}`);
         discussionGroups.value = discussionGroups.value.filter(g => g.id !== id);
-        // Discussions in this group will now appear as ungrouped
         Object.values(discussions.value).forEach(d => {
             if (d.group_id === id) {
                 d.group_id = null;
@@ -462,6 +475,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     async function loadDiscussions() {
+        isLoadingDiscussions.value = true;
         try {
             const [discussionsResponse, groupsResponse] = await Promise.all([
                 apiClient.get('/api/discussions'),
@@ -487,7 +501,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             
             await fetchSharedWithMe();
 
-        } catch (error) { console.error("Failed to load discussions and groups:", error); }
+        } catch (error) { 
+            console.error("Failed to load discussions and groups:", error); 
+        } finally {
+            isLoadingDiscussions.value = false;
+        }
     }
 
     async function shareDiscussion({ discussionId, targetUserId, permissionLevel }) {
@@ -1496,6 +1514,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     return {
         discussions, currentDiscussionId, messages, generationInProgress,
         discussionGroups, // NEW
+        isLoadingDiscussions,
+        discussionGroupsTree,
         titleGenerationInProgressId, activeDiscussion, activeMessages, activeDiscussionContainsCode,
         activeDiscussionContextStatus, activePersonality, activeAiTasks,
         sortedDiscussions, dataZonesTokenCount, liveDataZoneTokens, 
