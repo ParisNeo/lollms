@@ -32,12 +32,12 @@ const hasImages = computed(() => images.value && images.value.length > 0);
     >
         <template #body>
             <div v-if="artefact" class="space-y-4">
-                <div v-if="!hasContent && !hasImages" class="text-center text-gray-500 italic p-4">
+                <div v-if="hasContent && !hasImages" class="text-center text-gray-500 italic p-4">
                     This artefact has no displayable content or images.
                 </div>
                 
                 <div v-if="hasImages" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                    <div v-for="(img_b64, index) in images" :key="index" class="relative group rounded-lg overflow-hidden">
+                    <div v-for="(img_b64, index) in images" :key="`${index}-${img_b64.slice(0, 30)}`" class="relative group rounded-lg overflow-hidden">
                         <img :src="'data:image/png;base64,' + img_b64" class="w-full h-48 object-cover cursor-pointer" @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" alt="Artefact image"/>
                     </div>
                 </div>

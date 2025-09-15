@@ -406,7 +406,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                     <div v-if="!isEditing">
                         <div v-if="imagesToRender.length > 0" class="my-2 grid gap-2" :class="[imagesToRender.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
                             <div v-for="(imgSrc, index) in imagesToRender" 
-                                 :key="index"
+                                 :key="imgSrc"
                                  @click.stop="uiStore.openImageViewer(imgSrc)"
                                  class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer">
                                 <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain transition-all duration-300" :class="{'grayscale': !isImageActive(index)}" />

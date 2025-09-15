@@ -158,11 +158,11 @@ async function handleSubmit() {
                         No images attached.
                     </div>
                     <div v-else class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 p-2 border rounded-lg">
-                        <div v-for="(imgSrc, index) in keptImages" :key="`kept-${index}`" class="relative group">
+                        <div v-for="(imgSrc, index) in keptImages" :key="imgSrc" class="relative group">
                             <img :src="imgSrc" class="w-full h-24 object-cover rounded-md" alt="Kept image">
                             <button @click="removeKeptImage(index)" type="button" class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
                         </div>
-                        <div v-for="(imgSrc, index) in newImagePreviews" :key="`new-${index}`" class="relative group">
+                        <div v-for="(imgSrc, index) in newImagePreviews" :key="imgSrc" class="relative group">
                             <img :src="imgSrc" class="w-full h-24 object-cover rounded-md" alt="New image preview">
                             <button @click="removeNewImage(index)" type="button" class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
                         </div>

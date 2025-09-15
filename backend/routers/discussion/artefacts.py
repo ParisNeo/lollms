@@ -1,4 +1,5 @@
 # backend/routers/discussion/artefacts.py
+
 import base64
 import io
 import asyncio
@@ -21,8 +22,8 @@ from sqlalchemy.orm import Session
 from ascii_colors import trace_exception
 
 from backend.db import get_db
-from backend.models import UserAuthDetails, ArtefactInfo, ArtefactCreateManual, ArtefactUpdate, ExportContextRequest, LoadArtefactRequest, TaskInfo, UnloadArtefactRequest, UrlImportRequest
-from backend.session import get_current_active_user
+from backend.models import UserAuthDetails, ArtefactInfo, ArtefactCreateManual, ArtefactUpdate, ExportContextRequest, LoadArtefactRequest, TaskInfo, UnloadArtefactRequest, UrlImportRequest, ArtefactAndDataZoneUpdateResponse
+from backend.session import get_current_active_user, get_user_lollms_client
 from backend.discussion import get_user_discussion
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.task_manager import task_manager
@@ -302,7 +303,51 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to delete artefact: {e}")
 
-    @router.post("/{discussion_id}/artefacts/load-to-context", response_model=Dict[str, str])
+    @router.post("/{discussion_id}/artefacts/load-all-to-context", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def load_all_artefacts_to_data_zone(
+        discussion_id: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        try:
+            discussion.discussion_data_zone = "" # Clear it first
+            all_artefacts_infos = discussion.list_artefacts()
+            
+            # Group by title and get only the latest version of each
+            latest_artefacts = {}
+            for art_info in all_artefacts_infos:
+                if art_info['title'] not in latest_artefacts or art_info['version'] > latest_artefacts[art_info['title']]['version']:
+                    latest_artefacts[art_info['title']] = art_info
+            
+            # Load the latest version of each artefact
+            for title, art_info in latest_artefacts.items():
+                discussion.load_artefact_into_data_zone(title=title, version=art_info['version'])
+
+            discussion.commit()
+            
+            # Get updated artefacts list
+            artefacts = discussion.list_artefacts()
+            for artefact in artefacts:
+                if isinstance(artefact.get('created_at'), datetime):
+                    artefact['created_at'] = artefact['created_at'].isoformat()
+                if isinstance(artefact.get('updated_at'), datetime):
+                    artefact['updated_at'] = artefact['updated_at'].isoformat()
+
+            lc = get_user_lollms_client(current_user.username)
+            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+            
+            return {
+                "discussion_data_zone": discussion.discussion_data_zone,
+                "artefacts": artefacts,
+                "discussion_data_zone_tokens": token_count
+            }
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to load all artefacts: {e}")        
+
+    @router.post("/{discussion_id}/artefacts/load-to-context", response_model=ArtefactAndDataZoneUpdateResponse)
     async def load_artefact_to_data_zone(
         discussion_id: str,
         request: LoadArtefactRequest,
@@ -313,13 +358,29 @@ def build_artefacts_router(router: APIRouter):
         try:
             discussion.load_artefact_into_data_zone(title=request.title, version=request.version)
             discussion.commit()
-            return {"content": discussion.discussion_data_zone}
+            
+            # Get updated artefacts list
+            artefacts = discussion.list_artefacts()
+            for artefact in artefacts:
+                if isinstance(artefact.get('created_at'), datetime):
+                    artefact['created_at'] = artefact['created_at'].isoformat()
+                if isinstance(artefact.get('updated_at'), datetime):
+                    artefact['updated_at'] = artefact['updated_at'].isoformat()
+            
+            lc = get_user_lollms_client(current_user.username)
+            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+
+            return {
+                "discussion_data_zone": discussion.discussion_data_zone,
+                "artefacts": artefacts,
+                "discussion_data_zone_tokens": token_count
+            }
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to load artefact: {e}")
 
-    @router.post("/{discussion_id}/artefacts/unload-from-context", response_model=Dict[str, str])
+    @router.post("/{discussion_id}/artefacts/unload-from-context", response_model=ArtefactAndDataZoneUpdateResponse)
     async def unload_artefact_from_data_zone(
         discussion_id: str,
         request: UnloadArtefactRequest,
@@ -330,7 +391,23 @@ def build_artefacts_router(router: APIRouter):
         try:
             discussion.unload_artefact_from_data_zone(title=request.title, version=getattr(request, 'version', None))
             discussion.commit()
-            return {"content": discussion.discussion_data_zone}
+            
+            # Get updated artefacts list
+            artefacts = discussion.list_artefacts()
+            for artefact in artefacts:
+                if isinstance(artefact.get('created_at'), datetime):
+                    artefact['created_at'] = artefact['created_at'].isoformat()
+                if isinstance(artefact.get('updated_at'), datetime):
+                    artefact['updated_at'] = artefact['updated_at'].isoformat()
+
+            lc = get_user_lollms_client(current_user.username)
+            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+
+            return {
+                "discussion_data_zone": discussion.discussion_data_zone,
+                "artefacts": artefacts,
+                "discussion_data_zone_tokens": token_count
+            }
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:

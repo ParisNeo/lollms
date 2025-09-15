@@ -236,3 +236,23 @@ def build_datazone_router(router: APIRouter):
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to delete image from discussion: {str(e)}")
+
+    @router.delete("/{discussion_id}/images", response_model=Dict[str, List[Any]])
+    async def delete_all_discussion_images(
+        discussion_id: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user)
+    ):
+        discussion = get_user_discussion(current_user.username, discussion_id)
+        if not discussion:
+            raise HTTPException(status_code=404, detail="Discussion not found")
+        try:
+            discussion.images = []
+            discussion.commit()
+            
+            return {
+                "discussion_images": [],
+                "active_discussion_images": []
+            }
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Failed to delete all images from discussion: {str(e)}")

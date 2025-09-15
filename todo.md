@@ -38,6 +38,9 @@ new ui:
 - OK fix multi workers apps orphans detection to use a singleton
 - OK task status is not automatically updated and reflected on all the ui
 - OK when a task is done, it needs to update the corresponding ui
+- OK Add discussion groups
+- OK Left sidebar must be collapsible
+
 
 ## Discussion:
 - start/stop events must be collapsible, all that happens in between should be put inside in between
@@ -139,5 +142,7 @@ new ui:
 Use REDIS instead of the polling mechanism
 user folders should move to a sub folder
 organize the discussion elements from recent to older with optional change of organization
-Add discussion groups
-Left sidebar must be collapsible
+
+Extract discussion zone from chatview
+fix adding images
+Fix uploading artefacts

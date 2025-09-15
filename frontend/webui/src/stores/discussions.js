@@ -73,7 +73,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const isLoadingArtefacts = ref(false);
 
     const sharedWithMe = ref([]);
-    
+    const promptInsertionText = ref('');
+    const promptLoadedArtefacts = ref(new Set());
+
     const discussionGroupsTree = computed(() => {
         const groups = JSON.parse(JSON.stringify(discussionGroups.value));
         const map = new Map(groups.map(g => [g.id, { ...g, children: [] }]));
@@ -192,9 +194,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             if (discussion) {
                 emit('discussion:dataZoneUpdated', { discussionId: discussion_id, newContent: new_content });
                 uiStore.addNotification('Data zone has been updated by AI.', 'success');
+                if (discussion_id === currentDiscussionId.value) {
+                    if (activeDiscussionArtefacts.value && activeDiscussionArtefacts.value.length > 0) {
+                        const updatedArtefacts = activeDiscussionArtefacts.value.map(artefact => ({
+                            ...artefact,
+                            is_loaded: false
+                        }));
+                        activeDiscussionArtefacts.value = updatedArtefacts;
+                    }
+                }
             }
         } else if (zone === 'memory') {
-            // This is now an info message, as memory is user-wide.
             uiStore.addNotification('An AI task has suggested a new memory. Check the LTM panel.', 'info');
         }
         
@@ -244,12 +254,30 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     
     async function refreshDataZones(discussionId) {
         const uiStore = useUiStore();
-        if (!discussions.value[discussionId]) return;
+        const discussion = discussions.value[discussionId];
+        if (!discussion) return;
+
         try {
-            await fetchDataZones(discussionId);
-            await fetchContextStatus(discussionId);
-            await fetchArtefacts(discussionId);
-        } catch(error) {
+            // Step 1: Fetch all data in parallel
+            const [zonesDataResponse, contextStatusResponse, artefactsResponse] = await Promise.all([
+                apiClient.get(`/api/discussions/${discussionId}/data_zones`),
+                apiClient.get(`/api/discussions/${discussionId}/context_status`),
+                apiClient.get(`/api/discussions/${discussionId}/artefacts`)
+            ]);
+
+            // Step 2: Update store state with all fetched data
+            const discussionToUpdate = discussions.value[discussionId];
+            if (discussionToUpdate) {
+                // Use Object.assign to mutate the existing object properties,
+                // which is less disruptive to Vue's reactivity system.
+                Object.assign(discussionToUpdate, zonesDataResponse.data);
+            }
+            
+            activeDiscussionContextStatus.value = contextStatusResponse.data;
+            activeDiscussionArtefacts.value = artefactsResponse.data.sort((a, b) => a.title.localeCompare(b.title));
+            
+        } catch (error) {
+            console.error("Failed to refresh data zones:", error);
             uiStore.addNotification('Failed to refresh data zones.', 'error');
         }
     }
@@ -482,6 +510,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 apiClient.get('/api/discussion-groups')
             ]);
             
+            // Preserve the active discussion's data zone content if it exists
+            const activeDataZoneContent = currentDiscussionId.value && discussions.value[currentDiscussionId.value]
+                ? discussions.value[currentDiscussionId.value].discussion_data_zone
+                : undefined;
+
             const discussionData = discussionsResponse.data;
             if (Array.isArray(discussionData)) {
                 const newDiscussions = {};
@@ -495,6 +528,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                     };
                 });
                 discussions.value = newDiscussions;
+                
+                // Restore the active discussion's data zone content if it was preserved
+                if (currentDiscussionId.value && discussions.value[currentDiscussionId.value] && activeDataZoneContent !== undefined) {
+                    discussions.value[currentDiscussionId.value].discussion_data_zone = activeDataZoneContent;
+                }
             }
             
             discussionGroups.value = groupsResponse.data;
@@ -552,6 +590,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         currentDiscussionId.value = id;
         messages.value = []; 
         activeDiscussionArtefacts.value = [];
+        promptLoadedArtefacts.value.clear(); // Clear prompt loaded state
         
         liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
         
@@ -593,6 +632,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 personality_data_zone: '',
                 memory: ''
             };
+            
+            // Explicitly clear artefacts here before selecting, to be safe.
+            activeDiscussionArtefacts.value = [];
+
             await selectDiscussion(newDiscussion.id);
             return newDiscussion;
         } catch (error) {
@@ -806,6 +849,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
 
         generationInProgress.value = true;
+        promptLoadedArtefacts.value.clear(); // Clear prompt loaded artefacts
         activeGenerationAbortController = new AbortController();
         const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
         
@@ -1254,6 +1298,26 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
+    async function deleteAllDiscussionImages() {
+        if (!currentDiscussionId.value) return;
+        const discussionId = currentDiscussionId.value;
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.delete(`/api/discussions/${discussionId}/images`);
+            const disc = discussions.value[discussionId];
+            if (disc) {
+                disc.discussion_images = response.data.discussion_images || [];
+                disc.active_discussion_images = response.data.active_discussion_images || [];
+            }
+            await fetchContextStatus(discussionId);
+            uiStore.addNotification('All discussion images have been deleted.', 'success');
+        } catch (error) {
+            console.error("Failed to delete all discussion images:", error);
+            uiStore.addNotification('Failed to delete images.', 'error');
+        }
+    }
+
+
     async function addArtefact({ discussionId, file }) {
         if (!discussionId || !file) return;
         const uiStore = useUiStore();
@@ -1385,19 +1449,83 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     async function loadArtefactToContext({ discussionId, artefactTitle, version }) {
         const uiStore = useUiStore();
         try {
-            await apiClient.post(`/api/discussions/${discussionId}/artefacts/load-to-context`, { title: artefactTitle, version: version });
-            await refreshDataZones(discussionId);
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/load-to-context`, { title: artefactTitle, version: version });
+            
+            if (discussions.value[discussionId]) {
+                discussions.value[discussionId].discussion_data_zone = response.data.discussion_data_zone;
+            }
+            activeDiscussionArtefacts.value = response.data.artefacts.sort((a,b) => a.title.localeCompare(b.title));
+            updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
+            await fetchContextStatus(discussionId);
+
             uiStore.addNotification(`'${artefactTitle}' loaded into context.`, 'success');
-        } catch (error) {}
+        } catch (error) {
+            console.error(`Failed to load artefact '${artefactTitle}':`, error);
+            uiStore.addNotification(`Failed to load artefact '${artefactTitle}'.`, 'error');
+        }
+    }
+
+    async function loadAllArtefactsToContext(discussionId) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/load-all-to-context`);
+            
+            if (discussions.value[discussionId]) {
+                discussions.value[discussionId].discussion_data_zone = response.data.discussion_data_zone;
+            }
+            activeDiscussionArtefacts.value = response.data.artefacts.sort((a,b) => a.title.localeCompare(b.title));
+            updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
+            await fetchContextStatus(discussionId); 
+
+            uiStore.addNotification('All artefacts loaded into context.', 'success');
+        } catch (error) {
+            console.error(`Failed to load all artefacts:`, error);
+            uiStore.addNotification('Failed to load all artefacts.', 'error');
+        }
     }
     
+    async function loadArtefactToPrompt({ discussionId, artefactTitle, version }) {
+        const uiStore = useUiStore();
+        try {
+            const artefact = await fetchArtefactContent({ discussionId, artefactTitle, version });
+            if (artefact && artefact.content) {
+                promptInsertionText.value = artefact.content;
+                promptLoadedArtefacts.value.add(artefactTitle);
+                uiStore.addNotification(`Content from '${artefactTitle}' is ready to be pasted into the prompt.`, 'success');
+            } else {
+                uiStore.addNotification(`Could not load content for '${artefactTitle}'.`, 'warning');
+            }
+        } catch (error) {
+            // fetchArtefactContent already shows a notification
+        }
+    }
+
+    function clearPromptInsertionText() {
+        promptInsertionText.value = '';
+    }
+
+    async function unloadArtefactFromPrompt(artefactTitle) {
+        promptLoadedArtefacts.value.delete(artefactTitle);
+        uiStore.addNotification(`'${artefactTitle}' unloaded from prompt.`, 'info');
+    }
+
     async function unloadArtefactFromContext({ discussionId, artefactTitle, version }) {
         const uiStore = useUiStore();
         try {
-            await apiClient.post(`/api/discussions/${discussionId}/artefacts/unload-from-context`, { title: artefactTitle, version });
-            await refreshDataZones(discussionId);
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/unload-from-context`, { title: artefactTitle, version });
+            
+            if (discussions.value[discussionId]) {
+                discussions.value[discussionId].discussion_data_zone = response.data.discussion_data_zone;
+            }
+            activeDiscussionArtefacts.value = response.data.artefacts.sort((a,b) => a.title.localeCompare(b.title));
+            updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
+            await fetchContextStatus(discussionId);
+
             uiStore.addNotification(`'${artefactTitle}' unloaded from context.`, 'success');
-        } catch (error) {}
+        } catch (error) {
+            console.error(`Failed to unload artefact '${artefactTitle}':`, error);
+            uiStore.addNotification(`Failed to unload artefact '${artefactTitle}'.`, 'error');
+        }
     }
 
     async function createManualArtefact({ discussionId, title, content, imagesB64 }) {
@@ -1536,7 +1664,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         addManualMessage,
         saveManualMessage,
         toggleImageActivation,
-        uploadDiscussionImage, toggleDiscussionImageActivation, deleteDiscussionImage,
+        uploadDiscussionImage, toggleDiscussionImageActivation, deleteDiscussionImage, deleteAllDiscussionImages,
         fetchDiscussionTree,
         handleDataZoneUpdate,
         handleDiscussionImagesUpdated,
@@ -1563,5 +1691,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         updateGroup,
         deleteGroup,
         moveDiscussionToGroup,
+        
+        promptInsertionText,
+        promptLoadedArtefacts,
+        loadArtefactToPrompt,
+        unloadArtefactFromPrompt,
+        clearPromptInsertionText,
+
+        loadAllArtefactsToContext
     };
+    
 });

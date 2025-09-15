@@ -228,7 +228,9 @@ class ArtefactUpdate(BaseModel):
 
 class MessageExportPayload(BaseModel):
     format: str
-
-# --- ADDED THIS CLASS ---
 class UrlImportRequest(BaseModel):
     url: str
+class ArtefactAndDataZoneUpdateResponse(BaseModel):
+    discussion_data_zone: str
+    artefacts: List[ArtefactInfo]
+    discussion_data_zone_tokens: int
