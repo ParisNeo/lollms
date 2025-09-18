@@ -74,7 +74,7 @@ from backend.ws_manager import manager
 from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
-from backend.zoo_cache import build_full_cache
+from backend.zoo_cache import load_cache
 
 import uvicorn
 from backend.settings import settings
@@ -379,7 +379,7 @@ async def startup_event():
     finally:
         if db_for_sync: db_for_sync.close()
 
-    build_full_cache()
+    load_cache()
     cleanup_and_autostart_apps()
     
 

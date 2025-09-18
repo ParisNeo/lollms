@@ -29,6 +29,7 @@ from backend.db.models.fun_fact import FunFact as DBFunFact, FunFactCategory as 
 from backend.security import get_password_hash as hash_password
 
 from ascii_colors import trace_exception, ASCIIColors
+from backend.zoo_cache import force_build_full_cache
 
 from backend.db.models.db_task import DBTask
 from backend.models import (
@@ -178,6 +179,15 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
     )
 
 # --- Task Functions ---
+def _refresh_zoo_cache_task(task: Task):
+    """Wrapper function to run the zoo cache build as a background task."""
+    task.log("Starting Zoo cache refresh.")
+    task.set_progress(10)
+    force_build_full_cache()
+    task.set_progress(100)
+    task.log("Zoo cache refresh completed.")
+    return {"message": "Zoo cache refreshed successfully."}
+
 def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, background_color: Optional[str], send_as_text: bool):
     db_session_local = next(get_db())
     try:
@@ -254,6 +264,19 @@ def _purge_unused_temp_files_task(task: Task):
 
     task.set_progress(100)
     return {"message": f"Purge complete. Scanned {total_scanned} files and deleted {deleted_count}."}
+
+# --- Zoo Cache Refresh Endpoint ---
+@admin_router.post("/refresh-zoo-cache", response_model=TaskInfo, status_code=202)
+async def refresh_zoo_cache_endpoint(current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    """Triggers a background task to refresh the entire Zoo cache."""
+    db_task = task_manager.submit_task(
+        name="Refreshing Zoo Cache",
+        target=_refresh_zoo_cache_task,
+        description="Scanning all Zoo repositories and rebuilding the cache.",
+        owner_username=current_user.username
+    )
+    return _to_task_info(db_task)
+
 
 # --- System Status Endpoint ---
 @admin_router.get("/system-status", response_model=SystemUsageStats)

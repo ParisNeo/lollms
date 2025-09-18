@@ -1,4 +1,3 @@
-# backend/routers/zoos/prompts_zoo.py
 import shutil
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -16,12 +15,12 @@ from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.service import PromptZooRepository as DBPromptZooRepository
 from backend.models import (
     PromptZooRepositoryCreate, PromptZooRepositoryPublic, ZooPromptInfo, ZooPromptInfoResponse,
-    PromptInstallRequest, TaskInfo, PromptPublic, PromptCreate, PromptUpdate, GeneratePromptRequest
+    PromptInstallRequest, TaskInfo, PromptPublic, PromptCreate, PromptUpdate, GeneratePromptRequest, UserAuthDetails
 )
 from backend.session import get_current_admin_user, get_user_lollms_client
 from backend.config import PROMPTS_ZOO_ROOT_PATH
 from backend.task_manager import task_manager, Task
-from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
+from backend.zoo_cache import get_all_items, get_all_categories, force_build_full_cache
 from backend.settings import settings
 from backend.routers.extensions.app_utils import to_task_info, pull_repo_task
 
@@ -30,6 +29,15 @@ prompts_zoo_router = APIRouter(
     tags=["Prompts Zoo Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
+
+def _refresh_zoo_cache_task(task: Task):
+    """Wrapper function to run the zoo cache build as a background task."""
+    task.log("Starting Zoo cache refresh.")
+    task.set_progress(10)
+    force_build_full_cache()
+    task.set_progress(100)
+    task.log("Zoo cache refresh completed.")
+    return {"message": "Zoo cache refreshed successfully."}
 
 def _install_prompt_task(task: Task, repo_name: str, folder_name: str):
     prompt_path = PROMPTS_ZOO_ROOT_PATH / repo_name / folder_name
@@ -166,6 +174,17 @@ Return ONLY the JSON object. Do not add any extra text or explanations.
     except Exception as e:
         task.log(f"Failed to parse AI response or save prompt. Error: {e}\nRaw Response: {response}", "ERROR")
         raise
+
+@prompts_zoo_router.post("/rescan", response_model=TaskInfo, status_code=202)
+def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    """Triggers a background task to refresh the entire Zoo cache."""
+    task = task_manager.submit_task(
+        name="Refreshing Zoo Cache",
+        target=_refresh_zoo_cache_task,
+        description="Scanning all Zoo repositories and rebuilding the cache.",
+        owner_username=current_user.username
+    )
+    return to_task_info(task)
     
 @prompts_zoo_router.get("/categories", response_model=List[str])
 def get_prompt_zoo_categories():
@@ -176,7 +195,7 @@ def get_prompt_zoo_repositories(db: Session = Depends(get_db)):
     return db.query(DBPromptZooRepository).all()
 
 @prompts_zoo_router.post("/repositories", response_model=PromptZooRepositoryPublic, status_code=201)
-def add_prompt_zoo_repository(repo: PromptZooRepositoryCreate, db: Session = Depends(get_db)):
+def add_prompt_zoo_repository(repo: PromptZooRepositoryCreate, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     if db.query(DBPromptZooRepository).filter(DBPromptZooRepository.name == repo.name).first():
         raise HTTPException(status_code=409, detail="A repository with this name already exists.")
 
@@ -192,21 +211,30 @@ def add_prompt_zoo_repository(repo: PromptZooRepositoryCreate, db: Session = Dep
     db.add(new_repo)
     db.commit()
     db.refresh(new_repo)
-    build_full_cache()
+    task_manager.submit_task(
+        name=f"Refreshing Zoo Cache after adding prompt repo '{repo.name}'",
+        target=_refresh_zoo_cache_task,
+        owner_username=current_user.username
+    )
     return new_repo
 
 @prompts_zoo_router.delete("/repositories/{repo_id}", status_code=204)
-def delete_prompt_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
+def delete_prompt_zoo_repository(repo_id: int, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     repo = db.query(DBPromptZooRepository).filter(DBPromptZooRepository.id == repo_id).first()
     if not repo: raise HTTPException(status_code=404, detail="Repository not found.")
     if not repo.is_deletable: raise HTTPException(status_code=403, detail="This is a default repository.")
 
+    repo_name_for_task = repo.name
     if repo.type == 'git':
         shutil.rmtree(PROMPTS_ZOO_ROOT_PATH / repo.name, ignore_errors=True)
 
     db.delete(repo)
     db.commit()
-    build_full_cache()
+    task_manager.submit_task(
+        name=f"Refreshing Zoo Cache after deleting prompt repo '{repo_name_for_task}'",
+        target=_refresh_zoo_cache_task,
+        owner_username=current_user.username
+    )
 
 @prompts_zoo_router.post("/repositories/{repo_id}/pull", response_model=TaskInfo, status_code=202)
 def pull_prompt_zoo_repository(repo_id: int, db: Session = Depends(get_db)):

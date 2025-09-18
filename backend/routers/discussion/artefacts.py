@@ -29,6 +29,12 @@ from backend.routers.discussion.helpers import get_discussion_and_owner_for_requ
 from backend.task_manager import task_manager
 from ...tasks.discussion_tasks import _import_artefact_from_url_task, _to_task_info
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
+# .msg handling
+try:
+    pm.ensure_packages("extract-msg")
+    import extract_msg  # pip install extract-msg
+except ImportError:
+    extract_msg = None
 
 from backend.db import get_db
 
@@ -56,7 +62,7 @@ def build_artefacts_router(router: APIRouter):
         discussion_id: str,
         file: UploadFile = File(...),
         current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)  
+        db: Session = Depends(get_db) 
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         if not discussion:
@@ -68,7 +74,7 @@ def build_artefacts_router(router: APIRouter):
             extension = Path(title).suffix.lower()
             
             content = ""
-            images = []
+            images: List[str] = []
             
             image_mimetypes = ["image/jpeg", "image/png", "image/gif", "image/webp"]
             if file.content_type in image_mimetypes:
@@ -94,72 +100,155 @@ def build_artefacts_router(router: APIRouter):
                             image_bytes = base_image["image"]
                             images.append(base64.b64encode(image_bytes).decode('utf-8'))
                     content = "\n".join(text_parts)
-                    pdf_doc.close()
+                    pdf_doc.close()  # Use PyMuPDF to get text and images reliably [web:81][web:78]
+
                 elif extension == ".docx":
                     with io.BytesIO(content_bytes) as docx_io:
                         doc = DocxDocument(docx_io)
-                        # Extract text
+                        # Extract text paragraphs
                         content = "\n".join([p.text for p in doc.paragraphs])
-                
-                        # Extract images
+                        # Extract images from relationships
                         for rel in doc.part._rels.values():
-                            if "image" in rel.target_ref:  # detect images
+                            if "image" in rel.target_ref:
                                 image_part = rel.target_part
                                 image_bytes = image_part.blob
-                                images.append(base64.b64encode(image_bytes).decode("utf-8"))
+                                images.append(base64.b64encode(image_bytes).decode("utf-8"))  # Common docx pattern [web:35]
+
                 elif extension == ".xlsx" or "spreadsheetml" in file.content_type:
-                    if pd is None:
-                        content = "Error: pandas library is not installed. Cannot process XLSX files. Please run `pip install pandas openpyxl`."
-                    else:
-                        try:
-                            xls = pd.read_excel(io.BytesIO(content_bytes), sheet_name=None)
-                            md_parts = []
-                            for sheet_name, df in xls.items():
-                                md_parts.append(f"### {sheet_name}\n\n{df.to_markdown(index=False)}")
-                            content = "\n\n".join(md_parts)
-                        except Exception as e:
-                            trace_exception(e)
-                            content = f"Error processing XLSX file: {e}"
+                    try:
+                        xls = pd.read_excel(io.BytesIO(content_bytes), sheet_name=None)
+                        md_parts = []
+                        for sheet_name, df in xls.items():
+                            md_parts.append(f"### {sheet_name}\n\n{df.to_markdown(index=False)}")
+                        content = "\n\n".join(md_parts)
+                    except Exception as e:
+                        trace_exception(e)
+                        content = f"Error processing XLSX file: {e}"
+
                 elif extension == ".pptx":
-                    if Presentation is None:
+                    try:
+                        with io.BytesIO(content_bytes) as pptx_io:
+                            prs = Presentation(pptx_io)
+
+                            # Gather slide text
+                            slide_texts: List[str] = []
+                            for idx, slide in enumerate(prs.slides, start=1):
+                                slide_parts: List[str] = []
+                                for shape in slide.shapes:
+                                    if hasattr(shape, "text"):
+                                        txt = (shape.text or "").strip()
+                                        if txt:
+                                            slide_parts.append(txt)
+                                if slide_parts:
+                                    slide_texts.append(f"--- Slide {idx} ---\n" + "\n".join(slide_parts))
+                            content = "\n\n".join(slide_texts)
+
+                            # Gather images
+                            from pptx.enum.shapes import MSO_SHAPE_TYPE
+                            for slide in prs.slides:
+                                for shape in slide.shapes:
+                                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                                        image_blob = shape.image.blob
+                                        images.append(base64.b64encode(image_blob).decode("utf-8"))  # python-pptx approach [web:76][web:82]
+                    except Exception as e:
+                        trace_exception(e)
+                        content = f"Error processing PPTX file: {e}"
+
+                elif extension == ".msg":
+                    # Outlook .msg parsing: body, headers, and attachments
+                    if extract_msg is None:
                         content = (
-                            "Error: python-pptx library is not installed. "
-                            "Please run `pip install python-pptx`."
-                        )
+                            "Error: extract-msg library is not installed. "
+                            "Please run `pip install extract-msg` to enable .msg parsing."
+                        )  # Use extract-msg for MSG files [web:67]
                     else:
                         try:
-                            with io.BytesIO(content_bytes) as pptx_io:
-                                prs = Presentation(pptx_io)
+                            # extract_msg expects a file-like path or bytes; use temp file for bytes
+                            with io.BytesIO(content_bytes) as bio:
+                                # Write to a NamedTemporaryFile because extract_msg API reads from path
+                                import tempfile, os
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".msg") as tf:
+                                    tf.write(bio.getvalue())
+                                    temp_path = tf.name
+                            try:
+                                msg = extract_msg.Message(temp_path)
+                                msg_sender = getattr(msg, "sender", None) or getattr(msg, "from_", None) or ""
+                                msg_to = getattr(msg, "to", "") or ""
+                                msg_cc = getattr(msg, "cc", "") or ""
+                                msg_date = getattr(msg, "date", "")
+                                msg_subject = getattr(msg, "subject", "") or title
+                                msg_body = (getattr(msg, "body", "") or "").strip()
 
-                                # Gather slide text
-                                slide_texts: List[str] = []
-                                for idx, slide in enumerate(prs.slides, start=1):
-                                    slide_parts: List[str] = []
-                                    for shape in slide.shapes:
-                                        if hasattr(shape, "text"):
-                                            slide_parts.append(shape.text.strip())
-                                    if slide_parts:
-                                        slide_texts.append(
-                                            f"--- Slide {idx} ---\n" + "\n".join(slide_parts)
-                                        )
-                                content = "\n\n".join(slide_texts)
+                                # Prefer body (plain) over HTML to avoid markup; if body empty, fallback to htmlBody text
+                                html_body = getattr(msg, "htmlBody", None)
+                                if not msg_body and html_body:
+                                    try:
+                                        from bs4 import BeautifulSoup
+                                        msg_body = BeautifulSoup(html_body, "html.parser").get_text()
+                                    except Exception:
+                                        pass
 
-                                # Gather images
-                                for slide in prs.slides:
-                                    for shape in slide.shapes:
-                                        if shape.shape_type == 13:  # 13 == PICTURE
-                                            image_blob = shape.image.blob
-                                            images.append(
-                                                base64.b64encode(image_blob).decode("utf-8")
-                                            )
+                                header_lines = []
+                                if msg_subject: header_lines.append(f"# {msg_subject}")
+                                meta = []
+                                if msg_sender: meta.append(f"From: {msg_sender}")
+                                if msg_to: meta.append(f"To: {msg_to}")
+                                if msg_cc: meta.append(f"CC: {msg_cc}")
+                                if msg_date: meta.append(f"Date: {msg_date}")
+                                if meta: header_lines.append("\n".join(meta))
+                                header = "\n\n".join(header_lines)
+
+                                # Attachments
+                                attachment_text_parts: List[str] = []
+                                for att in msg.attachments:
+                                    # att has .longFilename, .data (bytes), possibly .mimetype
+                                    att_name = getattr(att, "longFilename", None) or getattr(att, "shortFilename", None) or "attachment"
+                                    att_bytes = att.data or b""
+                                    att_ext = Path(att_name).suffix.lower()
+
+                                    # Handle images directly
+                                    if att_ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"]:
+                                        images.append(base64.b64encode(att_bytes).decode("utf-8"))
+                                        continue
+
+                                    # Text-like attachments
+                                    try:
+                                        text_guess = att_bytes.decode("utf-8")
+                                    except UnicodeDecodeError:
+                                        try:
+                                            text_guess = att_bytes.decode("latin-1", errors="replace")
+                                        except Exception:
+                                            text_guess = ""
+
+                                    # If looks like Markdown or plain text/code, include as fenced block
+                                    if att_ext in [".txt", ".md", ".py", ".json", ".csv", ".log", ".yaml", ".yml", ".xml", ".html", ".js", ".ts", ".css"]:
+                                        lang = {
+                                            ".md": "markdown", ".py": "python", ".json": "json", ".csv": "csv",
+                                            ".yaml": "yaml", ".yml": "yaml", ".xml": "xml", ".html": "html",
+                                            ".js": "javascript", ".ts": "typescript", ".css": "css"
+                                        }.get(att_ext, "")
+                                        fence = f"``````" if lang else text_guess
+                                        attachment_text_parts.append(f"### Attachment: {att_name}\n\n{fence}")
+                                    else:
+                                        # Other binaries: just list the name
+                                        attachment_text_parts.append(f"- Attachment: {att_name} ({len(att_bytes)} bytes)")
+
+                                attachments_md = "\n\n".join(attachment_text_parts)
+                                content = "\n\n".join([p for p in [header, msg_body, attachments_md] if p])
+
+                            finally:
+                                try:
+                                    os.unlink(temp_path)
+                                except Exception:
+                                    pass
                         except Exception as e:
                             trace_exception(e)
-                            content = f"Error processing PPTX file: {e}"
-                
+                            content = f"Error processing MSG file: {e}"  # MSG parsing approach via extract-msg [web:67][web:68][web:71]
+
                 elif extension in CODE_EXTENSIONS:
                     lang = CODE_EXTENSIONS[extension]
                     text_content = content_bytes.decode('utf-8', errors='replace')
-                    content = f"```{lang}\n{text_content}\n```"
+                    content = f"``````"
                 else:
                     try:
                         content = content_bytes.decode('utf-8')

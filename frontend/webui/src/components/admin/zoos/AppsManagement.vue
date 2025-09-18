@@ -32,6 +32,11 @@ const isLoadingAction = ref(null);
 const starredItems = ref(JSON.parse(localStorage.getItem('starredApps') || '[]'));
 let debounceTimer = null;
 
+const currentPage = computed({
+  get: () => appFilters.currentPage,
+  set: (val) => { appFilters.currentPage = val; }
+});
+
 const sortOptions = [
     { value: 'last_update_date', label: 'Last Updated' }, { value: 'creation_date', label: 'Creation Date' },
     { value: 'name', label: 'Name' }, { value: 'author', label: 'Author' },
@@ -154,6 +159,13 @@ async function handleFixItem(item) {
 }
 function handleShowDetails(app) { uiStore.openModal('appDetails', { app }); }
 function handleRegisterApp() { uiStore.openModal('serviceRegistration', { itemType: 'app', ownerType: 'system', onRegistered: adminStore.fetchZooApps }); }
+
+async function handleRefreshCache() {
+    const task = await adminStore.refreshZooCache();
+    if (task) {
+        uiStore.openModal('tasksManager', { initialTaskId: task.id });
+    }
+}
 </script>
 
 <style scoped>
@@ -176,6 +188,9 @@ function handleRegisterApp() { uiStore.openModal('serviceRegistration', { itemTy
             <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <h3 class="text-xl font-semibold">App Zoo</h3>
                 <div class="flex items-center gap-2">
+                    <button @click="handleRefreshCache" class="btn btn-secondary" title="Refresh Zoo Cache from all sources">
+                        <IconRefresh class="w-4 h-4" />
+                    </button>
                     <button @click="handleRegisterApp" class="btn btn-secondary">Register External App</button>
                     <button @click="handleSync" class="btn btn-secondary-outline" title="Repair broken installations and remove orphaned DB entries.">Sync Installations</button>
                 </div>

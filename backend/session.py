@@ -16,7 +16,7 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
 from backend.db.models.service import MCP as DBMCP
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.config import LLMBinding as DBLLMBinding
+from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
 from lollms_client import LollmsClient
 from backend.models import UserAuthDetails, TokenData
 from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM, decode_main_access_token
@@ -139,6 +139,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             is_searchable=db_user.is_searchable, first_login_done=db_user.first_login_done,
             data_zone=db_user.data_zone,
             lollms_model_name=user_sessions[username].get("lollms_model_name"),
+            tti_binding_model_name=db_user.tti_binding_model_name,
             safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
             active_personality_id=user_sessions[username].get("active_personality_id"),
             lollms_client_ai_name=ai_name_for_user,
@@ -302,6 +303,48 @@ def build_lollms_client_from_params(
 
         llm_init_params["model_name"] = model_name_for_binding
         client_init_params = {"llm_binding_name": binding_to_use.name, "llm_binding_config": llm_init_params}    
+        
+        # --- NEW: TTI Binding Integration ---
+        user_tti_model_full = user_db.tti_binding_model_name
+        selected_tti_binding = None
+        selected_tti_model_name = None
+        
+        if user_tti_model_full and '/' in user_tti_model_full:
+            tti_binding_alias, tti_model_name = user_tti_model_full.split('/', 1)
+            selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == tti_binding_alias, DBTTIBinding.is_active == True).first()
+            selected_tti_model_name = tti_model_name
+
+        if not selected_tti_binding:
+            selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
+            if selected_tti_binding:
+                selected_tti_model_name = selected_tti_binding.default_model_name
+        
+        if selected_tti_binding:
+            tti_binding_config = selected_tti_binding.config.copy() if selected_tti_binding.config else {}
+            
+            tti_model_aliases = selected_tti_binding.model_aliases or {}
+            tti_alias_info = tti_model_aliases.get(selected_tti_model_name)
+            
+            if tti_alias_info:
+                for key, value in tti_alias_info.items():
+                    if key not in ['title', 'description', 'icon'] and value is not None:
+                        tti_binding_config[key] = value
+                        
+            allow_tti_override = (tti_alias_info or {}).get('allow_parameters_override', True)
+            if allow_tti_override:
+                user_tti_configs = user_db.tti_models_config or {}
+                model_user_config = user_tti_configs.get(user_tti_model_full)
+                if model_user_config:
+                    for key, value in model_user_config.items():
+                        if value is not None:
+                            tti_binding_config[key] = value
+                            
+            if selected_tti_model_name:
+                tti_binding_config['model_name'] = selected_tti_model_name
+                
+            client_init_params["tti_binding_name"] = selected_tti_binding.name
+            client_init_params["tti_binding_config"] = tti_binding_config
+        # --- END TTI Binding Integration ---
         
         servers_infos = load_mcps(username)
         if servers_infos:

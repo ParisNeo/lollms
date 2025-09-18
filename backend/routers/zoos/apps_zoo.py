@@ -1,4 +1,3 @@
-# backend/routers/zoos/apps_zoo.py
 import shutil
 import yaml
 from pathlib import Path
@@ -21,12 +20,12 @@ from backend.db import get_db
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP
 from backend.models import (
     AppZooRepositoryCreate, AppZooRepositoryPublic, ZooAppInfo, ZooAppInfoResponse,
-    AppInstallRequest, AppPublic, AppActionResponse, TaskInfo, AppUpdate, AppLog
+    AppInstallRequest, AppPublic, AppActionResponse, TaskInfo, AppUpdate, AppLog, UserAuthDetails
 )
 from backend.session import get_current_admin_user
 from backend.config import APPS_ZOO_ROOT_PATH, APPS_ROOT_PATH
-from backend.task_manager import task_manager
-from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
+from backend.task_manager import task_manager, Task
+from backend.zoo_cache import get_all_items, get_all_categories, force_build_full_cache
 from backend.settings import settings
 from backend.routers.extensions.app_utils import (
     to_task_info, pull_repo_task, install_item_task, get_all_zoo_metadata, 
@@ -45,6 +44,15 @@ apps_zoo_router = APIRouter(
 class BrokenItemPayload(BaseModel):
     item_type: str
     folder_name: str
+
+def _refresh_zoo_cache_task(task: Task):
+    """Wrapper function to run the zoo cache build as a background task."""
+    task.log("Starting Zoo cache refresh.")
+    task.set_progress(10)
+    force_build_full_cache()
+    task.set_progress(100)
+    task.log("Zoo cache refresh completed.")
+    return {"message": "Zoo cache refreshed successfully."}
 
 @apps_zoo_router.post("/purge-broken", response_model=TaskInfo, status_code=202)
 def purge_broken_installation(payload: BrokenItemPayload):
@@ -80,10 +88,16 @@ def sync_installed_items():
     )
     return to_task_info(task)
 
-@apps_zoo_router.post("/rescan", response_model=Dict[str, str])
-def rescan_all_zoos():
-    build_full_cache()
-    return {"message": "Full Zoo cache rebuild initiated."}
+@apps_zoo_router.post("/rescan", response_model=TaskInfo, status_code=202)
+def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    """Triggers a background task to refresh the entire Zoo cache."""
+    task = task_manager.submit_task(
+        name="Refreshing Zoo Cache",
+        target=_refresh_zoo_cache_task,
+        description="Scanning all Zoo repositories and rebuilding the cache.",
+        owner_username=current_user.username
+    )
+    return to_task_info(task)
 
 @apps_zoo_router.get("/categories", response_model=List[str])
 def get_app_zoo_categories():
@@ -94,7 +108,7 @@ def get_app_zoo_repositories(db: Session = Depends(get_db)):
     return db.query(DBAppZooRepository).all()
 
 @apps_zoo_router.post("/repositories", response_model=AppZooRepositoryPublic, status_code=201)
-def add_app_zoo_repository(repo: AppZooRepositoryCreate, db: Session = Depends(get_db)):
+def add_app_zoo_repository(repo: AppZooRepositoryCreate, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     if db.query(DBAppZooRepository).filter(DBAppZooRepository.name == repo.name).first():
         raise HTTPException(status_code=409, detail="A repository with this name already exists.")
 
@@ -110,21 +124,30 @@ def add_app_zoo_repository(repo: AppZooRepositoryCreate, db: Session = Depends(g
     db.add(new_repo)
     db.commit()
     db.refresh(new_repo)
-    build_full_cache() # Rescan all to include the new one
+    task_manager.submit_task(
+        name=f"Refreshing Zoo Cache after adding repo '{repo.name}'",
+        target=_refresh_zoo_cache_task,
+        owner_username=current_user.username
+    )
     return new_repo
 
 @apps_zoo_router.delete("/repositories/{repo_id}", status_code=204)
-def delete_app_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
+def delete_app_zoo_repository(repo_id: int, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     repo = db.query(DBAppZooRepository).filter(DBAppZooRepository.id == repo_id).first()
     if not repo: raise HTTPException(status_code=404, detail="Repository not found.")
     if not repo.is_deletable: raise HTTPException(status_code=403, detail="This is a default repository.")
     
+    repo_name_for_task = repo.name
     if repo.type == 'git':
         shutil.rmtree(APPS_ZOO_ROOT_PATH / repo.name, ignore_errors=True)
     
     db.delete(repo)
     db.commit()
-    build_full_cache()
+    task_manager.submit_task(
+        name=f"Refreshing Zoo Cache after deleting repo '{repo_name_for_task}'",
+        target=_refresh_zoo_cache_task,
+        owner_username=current_user.username
+    )
 
 @apps_zoo_router.post("/repositories/{repo_id}/pull", response_model=TaskInfo, status_code=202)
 def pull_app_zoo_repository(repo_id: int, db: Session = Depends(get_db)):

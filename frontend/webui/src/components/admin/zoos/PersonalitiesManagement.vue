@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/admin/zoos/PersonalitiesManagement.vue -->
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -128,6 +129,13 @@ function openEditor(personality = null) {
 function openGeneratePersonalityModal() {
     uiStore.openModal('generatePersonality');
 }
+
+async function handleRefreshCache() {
+    const task = await adminStore.refreshZooCache();
+    if (task) {
+        uiStore.openModal('tasksManager', { initialTaskId: task.id });
+    }
+}
 </script>
 
 <style scoped>
@@ -150,6 +158,9 @@ function openGeneratePersonalityModal() {
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-semibold">Personality Zoo</h3>
                 <div class="flex gap-2">
+                    <button @click="handleRefreshCache" class="btn btn-secondary" title="Refresh Zoo Cache from all sources">
+                        <IconRefresh class="w-4 h-4" />
+                    </button>
                     <button @click="openGeneratePersonalityModal" class="btn btn-secondary">Generate from Prompt</button>
                     <button @click="openEditor()" class="btn btn-primary"><IconPlus class="w-4 h-4 mr-1"/> Create New</button>
                 </div>

@@ -33,6 +33,11 @@ const starredItems = ref(JSON.parse(localStorage.getItem('starredPrompts') || '[
 let debounceTimer = null;
 const pendingGenerationTaskId = ref(null);
 
+const currentPage = computed({
+  get: () => promptFilters.currentPage,
+  set: (val) => { promptFilters.currentPage = val; }
+});
+
 const totalItems = computed(() => zooPrompts.value.total || 0);
 const totalPages = computed(() => zooPrompts.value.pages || 1);
 const pageInfo = computed(() => {
@@ -128,6 +133,13 @@ async function handleUpdatePrompt(prompt) {
 function handleEditPrompt(prompt) {
     uiStore.openModal('editPrompt', { prompt: { ...prompt }, isSystemPrompt: true });
 }
+
+async function handleRefreshCache() {
+    const task = await adminStore.refreshZooCache();
+    if (task) {
+        uiStore.openModal('tasksManager', { initialTaskId: task.id });
+    }
+}
 </script>
 
 <style scoped>
@@ -150,6 +162,9 @@ function handleEditPrompt(prompt) {
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-semibold">Prompts Zoo</h3>
                 <div class="flex gap-2">
+                    <button @click="handleRefreshCache" class="btn btn-secondary" title="Refresh Zoo Cache from all sources">
+                        <IconRefresh class="w-4 h-4" />
+                    </button>
                     <button @click="handleGeneratePrompt" class="btn btn-secondary">
                         <IconSparkles class="w-4 h-4 mr-2" /> Generate with AI
                     </button>
@@ -181,7 +196,7 @@ function handleEditPrompt(prompt) {
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                         <PromptCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :prompt="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem" @uninstall="handleUninstallItem" @help="showItemHelp" @update="handleUpdatePrompt(item)" @edit="handleEditPrompt(item)" />
                     </div>
-                    <div v-if="totalPages > 1" class="flex justify-between items-center mt-6"><button @click="promptFilters.currentPage--" :disabled="promptFilters.currentPage === 1" class="btn btn-secondary">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span><button @click="promptFilters.currentPage++" :disabled="promptFilters.currentPage >= totalPages" class="btn btn-secondary">Next</button></div>
+                    <div v-if="totalPages > 1" class="flex justify-between items-center mt-6"><button @click="currentPage--" :disabled="currentPage === 1" class="btn btn-secondary">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div>
                 </div>
             </div>
         </section>

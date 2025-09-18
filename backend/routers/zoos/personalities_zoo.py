@@ -1,4 +1,3 @@
-# backend/routers/zoos/personalities_zoo.py
 import shutil
 import yaml
 import base64
@@ -7,7 +6,7 @@ from typing import List, Optional
 from packaging import version as packaging_version
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from pydantic import ValidationError as PydanticValidationError
@@ -19,12 +18,13 @@ from backend.models import (
     ZooAppInfo as ZooPersonalityInfo,
     ZooAppInfoResponse as ZooPersonalityInfoResponse,
     PromptInstallRequest as PersonalityInstallRequest,
-    TaskInfo
+    TaskInfo,
+    UserAuthDetails
 )
 from backend.session import get_current_admin_user
 from backend.config import PERSONALITIES_ZOO_ROOT_PATH
-from backend.task_manager import task_manager
-from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
+from backend.task_manager import task_manager, Task
+from backend.zoo_cache import get_all_items, get_all_categories, force_build_full_cache
 from backend.routers.extensions.app_utils import to_task_info, pull_repo_task
 from backend.routers.zoos.prompts_zoo import PromptZooRepositoryCreate, PromptZooRepositoryPublic
 
@@ -33,6 +33,15 @@ personalities_zoo_router = APIRouter(
     tags=["Personalities Zoo Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
+
+def _refresh_zoo_cache_task(task: Task):
+    """Wrapper function to run the zoo cache build as a background task."""
+    task.log("Starting Zoo cache refresh.")
+    task.set_progress(10)
+    force_build_full_cache()
+    task.set_progress(100)
+    task.log("Zoo cache refresh completed.")
+    return {"message": "Zoo cache refreshed successfully."}
 
 def _install_personality_task(task, repo_name: str, folder_name: str):
     source_path = PERSONALITIES_ZOO_ROOT_PATH / repo_name / folder_name
@@ -82,6 +91,17 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
     task.log(f"Personality '{config['name']}' installed successfully.", "INFO")
     return {"message": "Personality installed."}
 
+@personalities_zoo_router.post("/rescan", response_model=TaskInfo, status_code=202)
+def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    """Triggers a background task to refresh the entire Zoo cache."""
+    task = task_manager.submit_task(
+        name="Refreshing Zoo Cache",
+        target=_refresh_zoo_cache_task,
+        description="Scanning all Zoo repositories and rebuilding the cache.",
+        owner_username=current_user.username
+    )
+    return to_task_info(task)
+
 @personalities_zoo_router.get("/categories", response_model=List[str])
 def get_personality_zoo_categories():
     return get_all_categories('personality')
@@ -91,7 +111,7 @@ def get_repositories(db: Session = Depends(get_db)):
     return db.query(DBPersonalityZooRepository).all()
 
 @personalities_zoo_router.post("/repositories", response_model=PromptZooRepositoryPublic, status_code=201)
-def add_repository(repo: PromptZooRepositoryCreate, db: Session = Depends(get_db)):
+def add_repository(repo: PromptZooRepositoryCreate, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     if db.query(DBPersonalityZooRepository).filter(DBPersonalityZooRepository.name == repo.name).first():
         raise HTTPException(status_code=409, detail="A repository with this name already exists.")
     
@@ -102,16 +122,27 @@ def add_repository(repo: PromptZooRepositoryCreate, db: Session = Depends(get_db
     
     new_repo = DBPersonalityZooRepository(name=repo.name, url=url_or_path, type=repo_type)
     db.add(new_repo); db.commit(); db.refresh(new_repo)
-    build_full_cache()
+    task_manager.submit_task(
+        name=f"Refreshing Zoo Cache after adding personality repo '{repo.name}'",
+        target=_refresh_zoo_cache_task,
+        owner_username=current_user.username
+    )
     return new_repo
 
 @personalities_zoo_router.delete("/repositories/{repo_id}", status_code=204)
-def delete_repository(repo_id: int, db: Session = Depends(get_db)):
+def delete_repository(repo_id: int, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     repo = db.query(DBPersonalityZooRepository).filter(DBPersonalityZooRepository.id == repo_id).first()
     if not repo: raise HTTPException(status_code=404, detail="Repository not found.")
     if not repo.is_deletable: raise HTTPException(status_code=403, detail="This is a default repository.")
+    repo_name_for_task = repo.name
     if repo.type == 'git': shutil.rmtree(PERSONALITIES_ZOO_ROOT_PATH / repo.name, ignore_errors=True)
-    db.delete(repo); db.commit(); build_full_cache()
+    db.delete(repo); db.commit()
+    task_manager.submit_task(
+        name=f"Refreshing Zoo Cache after deleting personality repo '{repo_name_for_task}'",
+        target=_refresh_zoo_cache_task,
+        owner_username=current_user.username
+    )
+
 
 @personalities_zoo_router.post("/repositories/{repo_id}/pull", response_model=TaskInfo, status_code=202)
 def pull_repository(repo_id: int, db: Session = Depends(get_db)):

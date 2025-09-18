@@ -165,23 +165,39 @@ async def generate_personality_icon(
         if not lc.tti:
             raise HTTPException(status_code=400, detail="Text-to-Image service is not configured for this user.")
 
-        files = lc.tti.generate_image(payload.prompt, width=512, height=512)
-        if not files or len(files) == 0:
-            raise HTTPException(status_code=500, detail="Image generation failed or returned no files.")
-        
-        image_path = files[0]
-        
-        with Image.open(image_path) as img:
-            img.thumbnail((128, 128))
-            buffered = io.BytesIO()
-            img.save(buffered, format="PNG")
-            base64_string = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            
-        return {"icon_base64": f"data:image/png;base64,{base64_string}"}
+        # Generate image as raw bytes (not base64)
+        img_data = lc.tti.generate_image(payload.prompt, width=512, height=512)
+        # If API returns a list, pick the first
+        if isinstance(img_data, (list, tuple)):
+            if not img_data:
+                raise HTTPException(status_code=500, detail="Image generation returned empty list.")
+            img_data = img_data[0]
 
+        # If the provider sometimes returns a data URI or base64 str, normalize:
+        if isinstance(img_data, str):
+            # Remove any data URI prefix if present
+            if img_data.startswith("data:"):
+                img_data = img_data.split(",", 1)[1]
+            # Base64 string -> raw bytes
+            img_data = base64.b64decode(img_data)
+
+        if not isinstance(img_data, (bytes, bytearray)):
+            raise HTTPException(status_code=500, detail="Unsupported image payload type from generator.")
+
+        with Image.open(io.BytesIO(img_data)) as img:
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGBA")
+            img.thumbnail((128, 128))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            icon_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        return {"icon_base64": f"data:image/png;base64,{icon_b64}"}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Icon generation failed: {e}")
 
 # --- Personality Generation from Prompt Endpoint ---
 @personalities_router.post("/generate_from_prompt", response_model=TaskInfo, status_code=202)

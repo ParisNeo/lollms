@@ -66,8 +66,13 @@ from backend.session import (get_current_active_user,
                              get_user_temp_uploads_path, user_sessions)
 from backend.task_manager import task_manager, Task
 from backend.settings import settings
-import pipmaster as pm
-pm.ensure_packages(['markdown2'])
+from backend.routers.files import (
+    md2_to_html,              # markdown2 renderer with extras
+    html_to_docx_bytes,       # HTML → python-docx mapper
+    md_to_pdf_bytes,          # Markdown → PDF (images/tables/code/TOC)
+    md_to_pptx_bytes,         # Markdown → PPTX (slides via ---)
+    html_wrapper              # Wrap HTML body in a shell
+)
 
 
 # safe_store is needed for RAG callbacks
@@ -217,6 +222,7 @@ def build_message_router(router: APIRouter):
         db.commit()
         return {"message": "Message and its branch deleted successfully."}
 
+
     @router.post("/{discussion_id}/messages/{message_id}/export")
     async def export_message(
         discussion_id: str,
@@ -232,7 +238,7 @@ def build_message_router(router: APIRouter):
             raise HTTPException(status_code=404, detail="Message not found")
 
         export_format = payload.format.lower()
-        
+
         # Normalize format name for setting key
         setting_key_format = 'markdown' if export_format == 'md' else export_format
         setting_key = f"export_to_{setting_key_format}_enabled"
@@ -249,31 +255,33 @@ def build_message_router(router: APIRouter):
             if export_format == 'txt':
                 media_type = "text/plain"
                 file_content = content.encode('utf-8')
+
             elif export_format in ['md', 'markdown']:
                 media_type = "text/markdown"
                 file_content = content.encode('utf-8')
+
             elif export_format == 'html':
                 media_type = "text/html"
-                html_content = markdown2.markdown(content, extras=["fenced-code-blocks", "tables", "spoiler"])
-                file_content = f"<html><head><meta charset='utf-8'><title>Message Export</title></head><body>{html_content}</body></html>".encode('utf-8')
+                html_content = md2_to_html(content)  # markdown2 with extras
+                file_content = html_wrapper(html_content, title="Message Export")
+
             elif export_format == 'pdf':
                 media_type = "application/pdf"
-                doc = fitz.open()
-                page = doc.new_page()
-                page.insert_text((72, 72), content, fontname="helv", fontsize=11)
-                file_content = doc.write()
-                doc.close()
+                file_content = md_to_pdf_bytes(content)  # preserves headings/lists/code/images/tables
+
             elif export_format == 'docx':
                 media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                document = DocxDocument()
-                document.add_paragraph(content)
-                bio = io.BytesIO()
-                document.save(bio)
-                file_content = bio.getvalue()
+                html_content = md2_to_html(content)
+                file_content = html_to_docx_bytes(html_content)
+
+            elif export_format == 'pptx':
+                media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+                file_content = md_to_pptx_bytes(content)  # Markdown slides delimited by ---
+
             elif export_format == 'xlsx':
                 media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 wb = Workbook()
-                
+
                 # Regex to find markdown tables
                 table_regex = re.compile(r'(\|.*\|(?:\r?\n|\r)?\|[-| :]*\|(?:\r?\n|\r)?(?:\|.*\|(?:\r?\n|\r)?)+)')
                 tables = table_regex.findall(content)
@@ -282,30 +290,25 @@ def build_message_router(router: APIRouter):
                     for i, table_md in enumerate(tables):
                         ws = wb.create_sheet(title=f"Table {i+1}")
                         lines = [line.strip() for line in table_md.strip().split('\n')]
-                        
                         # Skip header separator line
                         data_rows = [line for line in lines if not re.match(r'^\|[-| :]*\|$', line)]
-
                         for row_idx, line in enumerate(data_rows):
                             cells = [cell.strip() for cell in line.strip('|').split('|')]
                             for col_idx, cell_text in enumerate(cells):
                                 ws.cell(row=row_idx + 1, column=col_idx + 1, value=cell_text)
-                        
                         # Auto-adjust column widths
                         for col in ws.columns:
                             max_length = 0
                             column = get_column_letter(col[0].column)
                             for cell in col:
                                 try:
-                                    if len(str(cell.value)) > max_length:
-                                        max_length = len(cell.value)
-                                except:
+                                    if cell.value and len(str(cell.value)) > max_length:
+                                        max_length = len(str(cell.value))
+                                except Exception:
                                     pass
-                            adjusted_width = (max_length + 2)
-                            ws.column_dimensions[column].width = adjusted_width
-
+                            ws.column_dimensions[column].width = (max_length + 2)
                     if wb.sheetnames[0] == 'Sheet':
-                        wb.remove(wb['Sheet']) # Remove default sheet if we added new ones
+                        wb.remove(wb['Sheet'])  # Remove default sheet if we added new ones
                 else:
                     # Fallback for content without tables
                     ws = wb.active
@@ -317,20 +320,38 @@ def build_message_router(router: APIRouter):
                 bio = io.BytesIO()
                 wb.save(bio)
                 file_content = bio.getvalue()
-            elif export_format == 'pptx':
-                media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                prs = Presentation()
-                slide_layout = prs.slide_layouts[5]  # Blank slide
-                slide = prs.slides.add_slide(slide_layout)
-                txBox = slide.shapes.add_textbox(Inches(0.5), Inches(0.5), prs.slide_width - Inches(1), prs.slide_height - Inches(1))
-                tf = txBox.text_frame
-                tf.text = content
-                tf.word_wrap = True
-                bio = io.BytesIO()
-                prs.save(bio)
-                file_content = bio.getvalue()
+
+            elif export_format == 'epub':
+                media_type = "application/epub+zip"
+                html_content = md2_to_html(content)
+                file_content = html_wrapper(html_content, title="Message Export")  # placeholder XHTML
+
+            elif export_format == 'odt':
+                media_type = "application/vnd.oasis.opendocument.text"
+                html_content = md2_to_html(content)
+                file_content = html_wrapper(html_content, title="Message Export")  # placeholder
+
+            elif export_format == 'rtf':
+                media_type = "application/rtf"
+                text_only = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
+                rtf = r"{\rtf1\ansi " + text_only.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}") \
+                    .replace("\n", r"\par ") + "}"
+                file_content = rtf.encode("utf-8", errors="ignore")
+
+            elif export_format in ['tex', 'latex']:
+                media_type = "application/x-tex"
+                text_only = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
+                def esc(t: str) -> str:
+                    rep = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
+                    for k, v in rep.items():
+                        t = t.replace(k, v)
+                    return t
+                tex = "\\documentclass{article}\n\\usepackage[utf8]{inputenc}\n\\begin{document}\n" + esc(text_only) + "\n\\end{document}\n"
+                file_content = tex.encode("utf-8")
+
             else:
                 raise HTTPException(status_code=400, detail="Unsupported export format")
+
         except ImportError as e:
             raise HTTPException(status_code=501, detail=f"A required library for '{export_format}' export is missing: {e.name}")
         except Exception as e:

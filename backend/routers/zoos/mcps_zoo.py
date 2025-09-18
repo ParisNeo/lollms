@@ -1,34 +1,61 @@
-# backend/routers/zoos/mcps_zoo.py
 import shutil
+import yaml
 from pathlib import Path
+from packaging import version as packaging_version
 from typing import Dict, Any, List, Optional
 import datetime
-import yaml
-from packaging import version as packaging_version
+import signal
+import os
+import json
+import traceback
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Body
 from fastapi.responses import PlainTextResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
 from pydantic import ValidationError as PydanticValidationError
+from jsonschema import validate, ValidationError
 
 from backend.db import get_db
 from backend.db.models.service import MCPZooRepository as DBMCPZooRepository, App as DBApp, MCP as DBMCP
 from backend.models import (
     MCPZooRepositoryCreate, MCPZooRepositoryPublic, ZooMCPInfo, ZooMCPInfoResponse,
-    AppInstallRequest, TaskInfo
+    AppInstallRequest, TaskInfo, UserAuthDetails
 )
 from backend.session import get_current_admin_user
 from backend.config import MCPS_ZOO_ROOT_PATH, MCPS_ROOT_PATH
-from backend.task_manager import task_manager
-from backend.zoo_cache import get_all_items, get_all_categories, build_full_cache
+from backend.task_manager import task_manager, Task
+from backend.zoo_cache import get_all_items, get_all_categories, force_build_full_cache
 from backend.routers.extensions.app_utils import to_task_info, pull_repo_task, install_item_task, get_installed_app_path
 from backend.utils import get_accessible_host
+from ascii_colors import trace_exception
 
 mcps_zoo_router = APIRouter(
     prefix="/api/mcps_zoo",
     tags=["MCPs Zoo Management"],
     dependencies=[Depends(get_current_admin_user)]
 )
+
+def _refresh_zoo_cache_task(task: Task):
+    """Wrapper function to run the zoo cache build as a background task."""
+    task.log("Starting Zoo cache refresh.")
+    task.set_progress(10)
+    force_build_full_cache()
+    task.set_progress(100)
+    task.log("Zoo cache refresh completed.")
+    return {"message": "Zoo cache refreshed successfully."}
+
+@mcps_zoo_router.post("/rescan", response_model=TaskInfo, status_code=202)
+def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    """Triggers a background task to refresh the entire Zoo cache."""
+    task = task_manager.submit_task(
+        name="Refreshing Zoo Cache",
+        target=_refresh_zoo_cache_task,
+        description="Scanning all Zoo repositories and rebuilding the cache.",
+        owner_username=current_user.username
+    )
+    return to_task_info(task)
+
 
 @mcps_zoo_router.get("/categories", response_model=List[str])
 def get_mcp_zoo_categories():
@@ -39,7 +66,7 @@ def get_mcp_zoo_repositories(db: Session = Depends(get_db)):
     return db.query(DBMCPZooRepository).all()
 
 @mcps_zoo_router.post("/repositories", response_model=MCPZooRepositoryPublic, status_code=201)
-def add_mcp_zoo_repository(repo: MCPZooRepositoryCreate, db: Session = Depends(get_db)):
+def add_mcp_zoo_repository(repo: MCPZooRepositoryCreate, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     if db.query(DBMCPZooRepository).filter(DBMCPZooRepository.name == repo.name).first():
         raise HTTPException(status_code=409, detail="A repository with this name already exists.")
     
@@ -55,21 +82,30 @@ def add_mcp_zoo_repository(repo: MCPZooRepositoryCreate, db: Session = Depends(g
     db.add(new_repo)
     db.commit()
     db.refresh(new_repo)
-    build_full_cache()
+    task_manager.submit_task(
+        name=f"Refreshing Zoo Cache after adding MCP repo '{repo.name}'",
+        target=_refresh_zoo_cache_task,
+        owner_username=current_user.username
+    )
     return new_repo
 
 @mcps_zoo_router.delete("/repositories/{repo_id}", status_code=204)
-def delete_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
+def delete_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     repo = db.query(DBMCPZooRepository).filter(DBMCPZooRepository.id == repo_id).first()
     if not repo: raise HTTPException(status_code=404, detail="Repository not found.")
     if not repo.is_deletable: raise HTTPException(status_code=403, detail="This is a default repository.")
     
+    repo_name_for_task = repo.name
     if repo.type == 'git':
         shutil.rmtree(MCPS_ZOO_ROOT_PATH / repo.name, ignore_errors=True)
         
     db.delete(repo)
     db.commit()
-    build_full_cache()
+    task_manager.submit_task(
+        name=f"Refreshing Zoo Cache after deleting MCP repo '{repo_name_for_task}'",
+        target=_refresh_zoo_cache_task,
+        owner_username=current_user.username
+    )
 
 @mcps_zoo_router.post("/repositories/{repo_id}/pull", response_model=TaskInfo, status_code=202)
 def pull_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):

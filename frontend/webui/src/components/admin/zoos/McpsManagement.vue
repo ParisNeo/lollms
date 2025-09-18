@@ -173,6 +173,13 @@ async function handlePurgeItem(item) { if (await uiStore.showConfirmation({ titl
 async function handleFixItem(item) { if (await uiStore.showConfirmation({ title: `Fix '${item.name}'?`, message: 'This will attempt to re-create the database entry for this item.', confirmText: 'Fix' })) { await adminStore.fixBrokenInstallation({...item, item_type: 'mcp'}); }}
 function handleShowDetails(app) { uiStore.openModal('appDetails', { app }); }
 function handleRegisterMcp() { uiStore.openModal('serviceRegistration', { itemType: 'mcp', ownerType: 'system', onRegistered: adminStore.fetchZooMcps }); }
+
+async function handleRefreshCache() {
+    const task = await adminStore.refreshZooCache();
+    if (task) {
+        uiStore.openModal('tasksManager', { initialTaskId: task.id });
+    }
+}
 </script>
 
 <style scoped>
@@ -195,6 +202,9 @@ function handleRegisterMcp() { uiStore.openModal('serviceRegistration', { itemTy
             <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
                 <h3 class="text-xl font-semibold">MCP Zoo</h3>
                 <div class="flex items-center gap-2">
+                    <button @click="handleRefreshCache" class="btn btn-secondary" title="Refresh Zoo Cache from all sources">
+                        <IconRefresh class="w-4 h-4" />
+                    </button>
                     <button @click="handleRegisterMcp" class="btn btn-secondary">Register External MCP</button>
                     <button @click="handleSync" class="btn btn-secondary-outline" title="Repair broken installations and remove orphaned DB entries.">Sync Installations</button>
                 </div>
