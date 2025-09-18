@@ -13,7 +13,7 @@ python-jose[cryptography]
 python-multipart
 
 # --- LoLLMs Client Library and Common Backends ---
-lollms-client>=1.3.4
+lollms-client>=1.5.2
 ascii_colors>0.11.0
 pipmaster>=1.0.3
 
