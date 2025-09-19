@@ -1517,7 +1517,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             if (discussions.value[discussionId]) {
                 discussions.value[discussionId].discussion_data_zone = response.data.discussion_data_zone;
             }
-            activeDiscussionArtefacts.value = response.data.artefacts.sort((a,b) => a.title.localeCompare(b.title));
+            if (response.data.artefacts && Array.isArray(response.data.artefacts)) {
+                activeDiscussionArtefacts.value = response.data.artefacts.sort((a, b) => a.title.localeCompare(b.title));
+            } else {
+                activeDiscussionArtefacts.value = [];
+            }
             updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
             await fetchContextStatus(discussionId);
 

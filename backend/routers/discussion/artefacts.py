@@ -445,7 +445,20 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            discussion.load_artefact_into_data_zone(title=request.title, version=request.version)
+            # FIX: Manually manage loaded artefacts list and rebuild context to ensure correct state.
+            loaded_artefacts = discussion.loaded_artefacts or []
+            new_artefact_ref = {'title': request.title, 'version': request.version}
+
+            # Add new artefact if not already loaded.
+            if not any(a['title'] == new_artefact_ref['title'] and a.get('version') == new_artefact_ref.get('version') for a in loaded_artefacts):
+                loaded_artefacts.append(new_artefact_ref)
+
+            # Rebuild context from scratch
+            discussion.discussion_data_zone = ""
+            discussion.loaded_artefacts = []
+            for art_ref in loaded_artefacts:
+                discussion.load_artefact_into_data_zone(title=art_ref['title'], version=art_ref.get('version'))
+            
             discussion.commit()
             
             # Get updated artefacts list
@@ -478,7 +491,21 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            discussion.unload_artefact_from_data_zone(title=request.title, version=getattr(request, 'version', None))
+            # FIX: Manually manage loaded artefacts list and rebuild context to ensure correct state.
+            loaded_artefacts = discussion.loaded_artefacts or []
+            
+            # Filter out the artefact to be unloaded
+            remaining_artefacts = [
+                art for art in loaded_artefacts 
+                if not (art['title'] == request.title and (request.version is None or art.get('version') == request.version))
+            ]
+
+            # Rebuild context from scratch
+            discussion.discussion_data_zone = ""
+            discussion.loaded_artefacts = []
+            for art_ref in remaining_artefacts:
+                discussion.load_artefact_into_data_zone(title=art_ref['title'], version=art_ref.get('version'))
+            
             discussion.commit()
             
             # Get updated artefacts list

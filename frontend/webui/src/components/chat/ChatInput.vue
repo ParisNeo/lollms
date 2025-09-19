@@ -62,16 +62,6 @@ const inputTokenCount = ref(0);
 const isTokenizingInput = ref(false);
 let tokenizeInputDebounceTimer = null;
 
-// Position state
-const isShrunk = ref(false);
-const chatbarRef = ref(null);
-const isDragging = ref(false);
-const isPositionModified = ref(false);
-const startDragPos = ref({ x: 0, y: 0 });
-const startChatboxPos = ref({ x: 0, y: 0 });
-const currentChatboxPos = ref(null);
-let nonReactivePosition = { x: 0, y: 0 };
-
 // UI state
 const userPromptSearchTerm = ref('');
 const zooPromptSearchTerm = ref('');
@@ -129,7 +119,6 @@ const inputPlaceholder = computed(() => {
     if (generationInProgress.value) return "Please wait for generation to complete...";
     return isAdvancedMode.value ? "Type your message... (Ctrl+Enter to send)" : "Type your message... (Shift+Enter for advanced editor)";
 });
-const headerTitle = computed(() => activeDiscussion.value?.title || "New Chat");
 const showContextBar = computed(() => user.value?.show_token_counter && user.value?.user_ui_level >= 2 && contextStatus.value);
 
 // Context calculations
@@ -170,12 +159,6 @@ const contextWarningMessage = computed(() => {
            totalPercentage.value > 90 ? "You are approaching the context limit. Consider shortening your message or data zones." : "";
 });
 
-const chatbarStyle = computed(() => {
-    return isPositionModified.value && currentChatboxPos.value ? 
-        { left: `${currentChatboxPos.value.x}px`, top: `${currentChatboxPos.value.y}px`, bottom: 'auto', transform: 'none' } :
-        { left: '50%', bottom: '1rem', transform: 'translateX(-50%)' };
-});
-
 // Tool selections
 const ragStoreSelection = computed({
     get: () => activeDiscussion.value?.rag_datastore_ids || [],
@@ -199,14 +182,6 @@ const advancedEditorExtensions = computed(() => {
 });
 
 // Utility functions
-function clampPosition(x, y) {
-    const el = chatbarRef.value;
-    if (!el) return { x, y };
-    const maxX = window.innerWidth - el.offsetWidth;
-    const maxY = window.innerHeight - el.offsetHeight;
-    return { x: Math.max(0, Math.min(x, maxX)), y: Math.max(0, Math.min(y, maxY)) };
-}
-
 function autoResizeTextarea() {
     if (!textareaRef.value) return;
     textareaRef.value.style.height = 'auto';
@@ -221,69 +196,8 @@ function focusInput() {
 }
 
 // Core functions
-function toggleShrink() {
-    isShrunk.value = !isShrunk.value;
-    localStorage.setItem('lollms_chatbarShrunk', JSON.stringify(isShrunk.value));
-}
-
 function showContext() {
     if (activeDiscussion.value) uiStore.openModal('contextViewer');
-}
-
-// Drag functionality
-function onMouseDown(event) {
-    if (event.button !== 0 || isShrunk.value) return;
-    isDragging.value = true;
-    document.body.style.userSelect = 'none';
-    startDragPos.value = { x: event.clientX, y: event.clientY };
-    const el = chatbarRef.value;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    if (!isPositionModified.value) {
-        isPositionModified.value = true;
-        nonReactivePosition = { x: rect.left, y: rect.top };
-    } else {
-        nonReactivePosition = { x: currentChatboxPos.value.x, y: currentChatboxPos.value.y };
-    }
-    startChatboxPos.value = { ...nonReactivePosition };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-}
-
-function onMouseMove(event) {
-    if (!isDragging.value) return;
-    event.preventDefault();
-    const dx = event.clientX - startDragPos.value.x;
-    const dy = event.clientY - startDragPos.value.y;
-    nonReactivePosition = clampPosition(startChatboxPos.value.x + dx, startChatboxPos.value.y + dy);
-    if (chatbarRef.value) {
-        chatbarRef.value.style.transform = `translate(${nonReactivePosition.x}px, ${nonReactivePosition.y}px)`;
-        chatbarRef.value.style.left = '0px';
-        chatbarRef.value.style.top = '0px';
-        chatbarRef.value.style.bottom = 'auto';
-    }
-}
-
-function onMouseUp() {
-    if (!isDragging.value) return;
-    isDragging.value = false;
-    document.body.style.userSelect = '';
-    window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
-    
-    currentChatboxPos.value = { ...nonReactivePosition };
-    if (chatbarRef.value) chatbarRef.value.style.transform = '';
-    
-    if (isPositionModified.value && currentChatboxPos.value) {
-        localStorage.setItem('lollms_chatbarPosition', JSON.stringify(currentChatboxPos.value));
-        localStorage.setItem('lollms_chatbarPositionModified', 'true');
-    }
-}
-
-function handleResize() {
-    if (isPositionModified.value && currentChatboxPos.value) {
-        currentChatboxPos.value = clampPosition(currentChatboxPos.value.x, currentChatboxPos.value.y);
-    }
 }
 
 // Token counting
@@ -521,61 +435,21 @@ watch(activeDiscussion, () => {
     clearTimeout(tokenizeInputDebounceTimer);
     inputTokenCount.value = 0;
     isAdvancedMode.value = false;
-    if (!isPositionModified.value) currentChatboxPos.value = null;
 }, { immediate: true });
 
 // Lifecycle
 onMounted(() => {
     promptsStore.fetchPrompts();
-    const storedShrunk = localStorage.getItem('lollms_chatbarShrunk');
-    if (storedShrunk) isShrunk.value = JSON.parse(storedShrunk);
-    const storedPosModified = localStorage.getItem('lollms_chatbarPositionModified');
-    const storedPos = localStorage.getItem('lollms_chatbarPosition');
-    if (storedPosModified === 'true' && storedPos) {
-        isPositionModified.value = true;
-        currentChatboxPos.value = JSON.parse(storedPos);
-        handleResize();
-    }
-    window.addEventListener('resize', handleResize);
 });
 
 onUnmounted(() => {
-    window.removeEventListener('resize', handleResize);
-    window.removeEventListener('mousemove', onMouseMove);
-    window.removeEventListener('mouseup', onMouseUp);
     clearTimeout(tokenizeInputDebounceTimer);
     uploadedImages.value.forEach(img => { if (img.local_url) URL.revokeObjectURL(img.local_url); });
 });
 </script>
-
 <template>
-  <div>
-    <!-- Shrunk State Buttons -->
-    <Transition enter-active-class="transition ease-out duration-200" enter-from-class="transform opacity-0 scale-90" enter-to-class="transform opacity-100 scale-100" leave-active-class="transition ease-in duration-150" leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-90">
-      <div v-if="isShrunk" class="fixed bottom-4 right-4 z-[60] flex flex-col gap-2">
-        <button @click="toggleShrink" class="relative p-3 bg-blue-500 dark:bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-600 dark:hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-400 dark:focus:ring-offset-gray-900 transition-colors duration-200" title="Expand Chat">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2-2h-5l-5 5v-5z" />
-          </svg>
-          <span v-if="hasActiveTools" class="absolute -top-1 -right-1 w-3 h-3 bg-green-500 rounded-full"></span>
-        </button>
-      </div>
-    </Transition>
-
-    <!-- Main Chat Interface -->
-    <Transition enter-active-class="transition ease-out duration-200" enter-from-class="transform opacity-0 scale-95 translate-y-2" enter-to-class="transform opacity-100 scale-100 translate-y-0" leave-active-class="transition ease-in duration-150" leave-from-class="transform opacity-100 scale-100 translate-y-0" leave-to-class="transform opacity-0 scale-95 translate-y-2">
-      <div v-if="!isShrunk" ref="chatbarRef" :style="chatbarStyle" :onpaste="currentModelVisionSupport ? handlePaste : null" class="fixed w-[95%] sm:w-11/12 max-w-4xl bg-white/80 dark:bg-gray-800/80 backdrop-blur-md rounded-xl border border-gray-300 dark:border-gray-700 shadow-2xl transition-shadow z-50" :class="{'cursor-grabbing': isDragging}">
-        <!-- Header -->
-        <div @mousedown.prevent="onMouseDown" class="flex items-center justify-between h-10 px-2 sm:px-4 border-b border-gray-200 dark:border-gray-700 rounded-t-xl" :class="isDragging ? 'cursor-grabbing' : 'cursor-grab'">
-            <h3 class="text-sm font-semibold truncate text-gray-800 dark:text-gray-100 select-none">{{ headerTitle }}</h3>
-            <button @click.stop="toggleShrink" @mousedown.stop class="p-1 rounded-full text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600" title="Shrink Chat">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M18 12H6" />
-              </svg>
-            </button>
-        </div>
-
-        <div class="p-2 sm:p-3" @mousedown.stop>
+    <div class="flex-shrink-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-4 border-t dark:border-gray-700" :onpaste="currentModelVisionSupport ? handlePaste : null">
+        <div class="w-full max-w-4xl mx-auto">
             <!-- Context Bar -->
             <div v-if="showContextBar" class="px-1 pb-2 relative group">
                 <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 font-mono">
@@ -597,7 +471,7 @@ onUnmounted(() => {
                     <h4 class="font-bold mb-1 whitespace-nowrap">Context Breakdown</h4>
                     <div class="flex flex-wrap gap-1">
                         <template v-for="part in contextParts">
-                             <span :title="`${part.title}: ${part.value.toLocaleString()} tokens`" class="px-1.5 py-0.5 rounded" :class="part.colorClass">{{ part.label }}: {{ part.value.toLocaleString() }}</span>
+                            <span :title="`${part.title}: ${part.value.toLocaleString()} tokens`" class="px-1.5 py-0.5 rounded" :class="part.colorClass">{{ part.label }}: {{ part.value.toLocaleString() }}</span>
                         </template>
                     </div>
                 </div>
@@ -741,7 +615,5 @@ onUnmounted(() => {
                 </div>
             </div>
         </div>
-      </div>
-    </Transition>
-  </div>
+    </div>
 </template>
