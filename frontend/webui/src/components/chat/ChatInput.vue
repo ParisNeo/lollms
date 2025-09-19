@@ -11,9 +11,9 @@ import { storeToRefs } from 'pinia';
 
 // UI Components
 import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
-import DropdownMenu from '../ui/DropdownMenu.vue';
-import DropdownSubmenu from '../ui/DropdownSubmenu.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
+import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
+import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
 
 // Icon Components
 import IconToken from '../../assets/icons/IconToken.vue';

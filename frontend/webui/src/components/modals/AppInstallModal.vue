@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';

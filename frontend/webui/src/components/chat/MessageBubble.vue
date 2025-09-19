@@ -8,13 +8,13 @@ import { useDataStore } from '../../stores/data';
 import { storeToRefs } from 'pinia';
 
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
-import MessageContentRenderer from '../ui/MessageContentRenderer.vue';
+import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import StepDetail from './StepDetail.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
-import UserAvatar from '../ui/UserAvatar.vue';
-import DropdownMenu from '../ui/DropdownMenu.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
+import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';

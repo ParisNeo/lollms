@@ -1,5 +1,5 @@
 # backend/routers/discussion/artefacts.py
-
+# Standard Library Imports
 import base64
 import io
 import asyncio
@@ -227,7 +227,7 @@ def build_artefacts_router(router: APIRouter):
                                             ".yaml": "yaml", ".yml": "yaml", ".xml": "xml", ".html": "html",
                                             ".js": "javascript", ".ts": "typescript", ".css": "css"
                                         }.get(att_ext, "")
-                                        fence = f"``````" if lang else text_guess
+                                        fence = f"````{lang}\n{text_guess}\n````"
                                         attachment_text_parts.append(f"### Attachment: {att_name}\n\n{fence}")
                                     else:
                                         # Other binaries: just list the name
@@ -248,7 +248,7 @@ def build_artefacts_router(router: APIRouter):
                 elif extension in CODE_EXTENSIONS:
                     lang = CODE_EXTENSIONS[extension]
                     text_content = content_bytes.decode('utf-8', errors='replace')
-                    content = f"``````"
+                    content = f"````{lang}\n{text_content}\n````"
                 else:
                     try:
                         content = content_bytes.decode('utf-8')
@@ -400,22 +400,21 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            discussion.discussion_data_zone = "" # Clear it first
+            discussion.discussion_data_zone = ""
+            discussion.loaded_artefacts = []
+            
             all_artefacts_infos = discussion.list_artefacts()
             
-            # Group by title and get only the latest version of each
             latest_artefacts = {}
             for art_info in all_artefacts_infos:
                 if art_info['title'] not in latest_artefacts or art_info['version'] > latest_artefacts[art_info['title']]['version']:
                     latest_artefacts[art_info['title']] = art_info
             
-            # Load the latest version of each artefact
             for title, art_info in latest_artefacts.items():
                 discussion.load_artefact_into_data_zone(title=title, version=art_info['version'])
 
             discussion.commit()
             
-            # Get updated artefacts list
             artefacts = discussion.list_artefacts()
             for artefact in artefacts:
                 if isinstance(artefact.get('created_at'), datetime):
@@ -445,23 +444,9 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            # FIX: Manually manage loaded artefacts list and rebuild context to ensure correct state.
-            loaded_artefacts = discussion.loaded_artefacts or []
-            new_artefact_ref = {'title': request.title, 'version': request.version}
-
-            # Add new artefact if not already loaded.
-            if not any(a['title'] == new_artefact_ref['title'] and a.get('version') == new_artefact_ref.get('version') for a in loaded_artefacts):
-                loaded_artefacts.append(new_artefact_ref)
-
-            # Rebuild context from scratch
-            discussion.discussion_data_zone = ""
-            discussion.loaded_artefacts = []
-            for art_ref in loaded_artefacts:
-                discussion.load_artefact_into_data_zone(title=art_ref['title'], version=art_ref.get('version'))
-            
+            discussion.load_artefact_into_data_zone(title=request.title, version=request.version)
             discussion.commit()
             
-            # Get updated artefacts list
             artefacts = discussion.list_artefacts()
             for artefact in artefacts:
                 if isinstance(artefact.get('created_at'), datetime):
@@ -480,6 +465,7 @@ def build_artefacts_router(router: APIRouter):
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
+            trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to load artefact: {e}")
 
     @router.post("/{discussion_id}/artefacts/unload-from-context", response_model=ArtefactAndDataZoneUpdateResponse)
@@ -491,24 +477,9 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            # FIX: Manually manage loaded artefacts list and rebuild context to ensure correct state.
-            loaded_artefacts = discussion.loaded_artefacts or []
-            
-            # Filter out the artefact to be unloaded
-            remaining_artefacts = [
-                art for art in loaded_artefacts 
-                if not (art['title'] == request.title and (request.version is None or art.get('version') == request.version))
-            ]
-
-            # Rebuild context from scratch
-            discussion.discussion_data_zone = ""
-            discussion.loaded_artefacts = []
-            for art_ref in remaining_artefacts:
-                discussion.load_artefact_into_data_zone(title=art_ref['title'], version=art_ref.get('version'))
-            
+            discussion.unload_artefact_from_data_zone(title=request.title, version=request.version)
             discussion.commit()
             
-            # Get updated artefacts list
             artefacts = discussion.list_artefacts()
             for artefact in artefacts:
                 if isinstance(artefact.get('created_at'), datetime):

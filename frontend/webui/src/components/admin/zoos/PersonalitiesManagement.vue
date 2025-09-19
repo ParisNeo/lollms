@@ -8,8 +8,8 @@ import { useUiStore } from '../../../stores/ui';
 import { useDataStore } from '../../../stores/data';
 import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
-import AppCard from '../../ui/AppCard.vue';
-import AppCardSkeleton from '../../ui/AppCardSkeleton.vue';
+import AppCard from '../../ui/Cards/AppCard.vue';
+import AppCardSkeleton from '../../ui/Cards/AppCardSkeleton.vue';
 import IconPlus from '../../../assets/icons/IconPlus.vue';
 
 const adminStore = useAdminStore();

@@ -4,7 +4,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useAuthStore } from '../../stores/auth';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import DiscussionTreeNode from './DiscussionTreeNode.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 

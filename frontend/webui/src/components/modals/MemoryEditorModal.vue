@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
-import GenericModal from '../ui/GenericModal.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
+import GenericModal from './GenericModal.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
 

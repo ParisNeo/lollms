@@ -7,11 +7,10 @@ import { useUiStore } from '../../../stores/ui';
 import { useDataStore } from '../../../stores/data';
 import { usePromptsStore } from '../../../stores/prompts';
 import useEventBus from '../../../services/eventBus';
-import CodeMirrorEditor from '../../ui/CodeMirrorEditor.vue';
-import ArtefactCard from '../../ui/ArtefactCard.vue';
-import MessageContentRenderer from '../../ui/MessageContentRenderer.vue';
-import DropdownMenu from '../../ui/DropdownMenu.vue';
-import DropdownSubmenu from '../../ui/DropdownSubmenu.vue';
+import CodeMirrorEditor from '../../ui/CodeMirrorComponent/index.vue';
+import ArtefactZone from './ArtefactZone.vue'; // NEW: Import the dedicated component
+import DropdownMenu from '../../ui/DropdownMenu/DropdownMenu.vue';
+import DropdownSubmenu from '../../ui/DropdownMenu/DropdownSubmenu.vue';
 
 // Icons
 import IconCopy from '../../../assets/icons/IconCopy.vue';
@@ -23,21 +22,12 @@ import IconTrash from '../../../assets/icons/IconTrash.vue';
 import IconPhoto from '../../../assets/icons/IconPhoto.vue';
 import IconPlus from '../../../assets/icons/IconPlus.vue';
 import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
-import IconFileText from '../../../assets/icons/IconFileText.vue';
-import IconWeb from '../../../assets/icons/ui/IconWeb.vue';
-import IconArrowUpTray from '../../../assets/icons/IconArrowUpTray.vue';
 import IconChevronRight from '../../../assets/icons/IconChevronRight.vue';
 import IconMaximize from '../../../assets/icons/IconMaximize.vue';
 import IconEye from '../../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 import IconXMark from '../../../assets/icons/IconXMark.vue';
 import IconSparkles from '../../../assets/icons/IconSparkles.vue';
-import IconTicket from '../../../assets/icons/IconTicket.vue';
-import IconLollms from '../../../assets/icons/IconLollms.vue';
-import IconUser from '../../../assets/icons/IconUser.vue';
-import IconServer from '../../../assets/icons/IconServer.vue';
-import IconGather from '../../../assets/icons/IconGather.vue';
-
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -46,25 +36,19 @@ const promptsStore = usePromptsStore();
 const router = useRouter();
 const { on, off } = useEventBus();
 
-const { liveDataZoneTokens, activeDiscussionArtefacts, isLoadingArtefacts, promptLoadedArtefacts } = storeToRefs(discussionsStore);
+const { promptLoadedArtefacts } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { availableTtiModels } = storeToRefs(dataStore);
 
-const discussionCodeMirrorEditor = ref(null);
+const codeMirrorView = ref(null);
 const isProgrammaticChange = ref(false);
-const showUrlImport = ref(false);
-const urlToImport = ref('');
-const isUploadingArtefact = ref(false);
 const isImagesCollapsed = ref(false);
-const isArtefactsCollapsed = ref(false);
 const artefactListWidth = ref(384);
 const isResizingArtefacts = ref(false);
-const artefactFileInput = ref(null);
 const discussionImageInput = ref(null);
 const isUploadingDiscussionImage = ref(false);
 const dataZonePromptText = ref('');
 const dataZonePromptTextareaRef = ref(null);
-const isDraggingFile = ref(false);
 const discussionHistory = ref([]);
 const discussionHistoryIndex = ref(-1);
 let discussionHistoryDebounceTimer = null;
@@ -87,27 +71,10 @@ const isProcessing = computed(() => activeDiscussion.value && discussionsStore.a
 const isGeneratingImage = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'generate_image');
 const isTaskRunning = computed(() => isProcessing.value || isGeneratingImage.value);
 
-const discussionEditorOptions = computed(() => ({
-    readOnly: isTaskRunning.value
-}));
-
+const discussionEditorOptions = computed(() => ({ readOnly: isTaskRunning.value }));
 const isTtiConfigured = computed(() => availableTtiModels.value.length > 0);
 const canUndoDiscussion = computed(() => discussionHistoryIndex.value > 0);
 const canRedoDiscussion = computed(() => discussionHistoryIndex.value < discussionHistory.value.length - 1);
-
-const groupedArtefacts = computed(() => {
-    if (!activeDiscussionArtefacts.value || !Array.isArray(activeDiscussionArtefacts.value)) return [];
-    const groups = activeDiscussionArtefacts.value.reduce((acc, artefact) => {
-        if (!acc[artefact.title]) { acc[artefact.title] = { title: artefact.title, versions: [] }; }
-        acc[artefact.title].versions.push(artefact);
-        return acc;
-    }, {});
-    Object.values(groups).forEach(group => {
-        group.versions.sort((a, b) => b.version - a.version);
-        group.isAnyVersionLoaded = group.versions.some(v => v.is_loaded);
-    });
-    return Object.values(groups);
-});
 
 const filteredLollmsPrompts = computed(() => {
     if (!Array.isArray(lollmsPrompts.value)) return [];
@@ -142,6 +109,28 @@ const filteredSystemPromptsByZooCategory = computed(() => {
     }
     return filtered;
 });
+
+function handleEditorReady(payload) { codeMirrorView.value = payload.view; }
+
+function handlePromptSelection(promptContent) {
+    const processAndInsert = (finalContent) => {
+        dataZonePromptText.value = finalContent;
+        nextTick(() => {
+            dataZonePromptTextareaRef.value?.focus();
+        });
+    };
+
+    if (/@<.*?>@/g.test(promptContent)) {
+        uiStore.openModal('fillPlaceholders', { 
+            promptTemplate: promptContent, 
+            onConfirm: (filled) => { 
+                processAndInsert(filled);
+            } 
+        });
+    } else {
+        processAndInsert(promptContent);
+    }
+}
 
 function setupHistory(initialValue) {
     discussionHistory.value = [initialValue];
@@ -179,9 +168,7 @@ async function handleRedoDiscussion() {
 }
 
 watch(discussionDataZone, (newVal) => {
-    if (!isProgrammaticChange.value) {
-        recordHistory(newVal);
-    }
+    if (!isProgrammaticChange.value) recordHistory(newVal);
 });
 
 watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
@@ -251,46 +238,6 @@ async function handleDiscussionImageUpload(event) {
     }
 }
 
-function handleRefreshArtefacts() {
-    if (activeDiscussion.value) discussionsStore.fetchArtefacts(activeDiscussion.value.id);
-}
-
-async function handleLoadAllArtefacts() {
-    if (!activeDiscussion.value) return;
-    const confirmed = await uiStore.showConfirmation({ title: 'Load All Artefacts?', message: `This will clear the current Discussion Data Zone and load all ${groupedArtefacts.value.length} artefact(s).`, confirmText: 'Load All' });
-    if (confirmed) discussionsStore.loadAllArtefactsToContext(activeDiscussion.value.id);
-}
-
-function handleCreateArtefact() {
-    if (activeDiscussion.value) uiStore.openModal('artefactEditor', { discussionId: activeDiscussion.value.id });
-}
-
-function triggerArtefactFileUpload() {
-    artefactFileInput.value?.click();
-}
-
-async function handleArtefactFileUpload(event) {
-    const files = Array.from(event.target.files || []);
-    if (!files.length || !activeDiscussion.value) return;
-    isUploadingArtefact.value = true;
-    try {
-        await Promise.all(files.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file })));
-    } finally {
-        isUploadingArtefact.value = false;
-        if (artefactFileInput.value) artefactFileInput.value.value = '';
-    }
-}
-
-function handleDragLeave(event) {
-    if (!event.currentTarget.contains(event.relatedTarget)) isDraggingFile.value = false;
-}
-
-async function handleDrop(event) {
-    isDraggingFile.value = false;
-    const files = Array.from(event.dataTransfer.files);
-    if (files.length) await handleArtefactFileUpload({ target: { files } });
-}
-
 function handleProcessContent() {
     if (activeDiscussion.value) discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, dataZonePromptText.value);
 }
@@ -303,14 +250,6 @@ function handleGenerateImage() {
         return;
     }
     discussionsStore.generateImageFromDataZone(activeDiscussion.value.id, prompt);
-}
-
-function handlePromptSelection(promptContent) {
-    if (/@<.*?>@/g.test(promptContent)) {
-        uiStore.openModal('fillPlaceholders', { promptTemplate: promptContent, onConfirm: (filled) => { dataZonePromptText.value = filled; } });
-    } else {
-        dataZonePromptText.value = promptContent;
-    }
 }
 
 function openPromptLibrary() {
@@ -341,23 +280,28 @@ function updateDiscussionDataZoneAndRecordHistory(newContent) {
     nextTick(() => { isProgrammaticChange.value = false; });
 }
 
+function handleLoadArtefactToPrompt(content) { dataZonePromptText.value = content; }
+function handleUnloadArtefactFromPrompt() { if (promptLoadedArtefacts.value.size === 0) dataZonePromptText.value = ''; }
+
 onMounted(() => {
     const savedWidth = localStorage.getItem('lollms_artefactListWidth');
     if (savedWidth) artefactListWidth.value = parseInt(savedWidth, 10);
     on('discussion:dataZoneUpdated', onDataZoneUpdatedFromStore);
+    on('artefact:load-to-prompt', handleLoadArtefactToPrompt);
+    on('artefact:unload-from-prompt', handleUnloadArtefactFromPrompt);
 });
 
 onUnmounted(() => {
     off('discussion:dataZoneUpdated', onDataZoneUpdatedFromStore);
+    off('artefact:load-to-prompt', handleLoadArtefactToPrompt);
+    off('artefact:unload-from-prompt', handleUnloadArtefactFromPrompt);
 });
 </script>
 
 <template>
   <div class="flex-1 flex flex-col min-h-0">
     <div class="flex-grow flex flex-col min-h-0">
-        <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
         <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf" multiple>
-        <!-- Main Content -->
         <div class="flex-grow flex min-h-0">
             <!-- Left side (Editor) -->
             <div class="flex-grow flex flex-col min-h-0 p-2">
@@ -373,14 +317,19 @@ onUnmounted(() => {
                     </div>
                 </div>
                 <div class="flex-grow min-h-0 border dark:border-gray-700 rounded-md overflow-hidden">
-                    <CodeMirrorEditor ref="discussionCodeMirrorEditor" v-model="discussionDataZone" class="h-full" :options="discussionEditorOptions" />
+                    <CodeMirrorEditor 
+                        ref="discussionCodeMirrorEditor" 
+                        v-model="discussionDataZone" 
+                        class="h-full" 
+                        :options="discussionEditorOptions"
+                        @ready="handleEditorReady"
+                    />
                 </div>
             </div>
-            <!-- Artefacts/Images resizer -->
+            
             <div @mousedown.prevent="startArtefactResize" class="resizer"></div>
-            <!-- Right side (Panels) -->
+            
             <div :style="{ width: `${artefactListWidth}px` }" class="flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col h-full min-w-[256px]">
-                <!-- Images -->
                 <div class="p-2 border-b dark:border-gray-700 flex flex-col">
                     <div class="flex justify-between items-center mb-2 flex-shrink-0">
                         <button @click="isImagesCollapsed = !isImagesCollapsed" class="flex items-center gap-2 text-sm font-semibold w-full text-left">
@@ -399,46 +348,10 @@ onUnmounted(() => {
                         <div v-else class="image-grid"><div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="image-card group"><img :src="'data:image/png;base64,' + img_b64" class="image-thumbnail" :class="{'grayscale opacity-50': !isImageActive(index)}" /><div class="image-overlay"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="overlay-btn" title="View"><IconMaximize class="w-3 h-3" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="overlay-btn" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-3 h-3" /><IconEyeOff v-else class="w-3 h-3" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="overlay-btn overlay-btn-danger" title="Delete"><IconXMark class="w-3 h-3" /></button></div></div></div>
                     </div>
                 </div>
-                <!-- Artefacts -->
-                <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="handleDragLeave" @drop.prevent="handleDrop" class="p-2 flex flex-col min-h-0 flex-grow relative">
-                    <div v-if="isDraggingFile" class="absolute inset-0 bg-blue-500/20 border-2 border-dashed border-blue-500 rounded-lg z-10 flex items-center justify-center">
-                        <p class="font-semibold text-blue-600">Drop files to upload</p>
-                    </div>
-                     <div class="flex justify-between items-center mb-2 flex-shrink-0">
-                        <button @click="isArtefactsCollapsed = !isArtefactsCollapsed" class="flex items-center gap-2 text-sm font-semibold w-full text-left">
-                            <IconFileText class="w-4 h-4" /> <span>Artefacts</span>
-                            <IconChevronRight class="w-4 h-4 ml-auto transition-transform" :class="{'rotate-90': !isArtefactsCollapsed}"/>
-                        </button>
-                        <div @click.stop class="flex items-center gap-1">
-                            <button @click="handleRefreshArtefacts" class="action-btn-sm" title="Refresh Artefacts"> <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingArtefacts}" /> </button>
-                            <button @click="handleLoadAllArtefacts" class="action-btn-sm" title="Load All Artefacts to Context"> <IconGather class="w-4 h-4" /> </button>
-                            <button @click="handleCreateArtefact" class="action-btn-sm" title="Create Artefact"><IconPlus class="w-4 h-4" /></button>
-                            <button @click="showUrlImport = !showUrlImport" class="action-btn-sm" :class="{'bg-gray-200 dark:bg-gray-700': showUrlImport}" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
-                            <button @click="triggerArtefactFileUpload" class="action-btn-sm" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 animate-spin" /><IconArrowUpTray v-else class="w-4 h-4" /></button>
-                        </div>
-                    </div>
-                    <div v-if="!isArtefactsCollapsed" class="flex-grow flex flex-col min-h-0">
-                        <div class="flex-grow min-h-0 overflow-y-auto custom-scrollbar">
-                            <div v-if="isLoadingArtefacts" key="artefacts-loading" class="loading-state"><IconAnimateSpin class="w-6 h-6 text-gray-400 animate-spin mx-auto mb-2" /><p class="text-xs text-gray-500">Loading...</p></div>
-                            <div v-else-if="groupedArtefacts.length === 0" key="artefacts-empty" class="flex flex-col items-center justify-center h-full text-center p-4 bg-gray-50 dark:bg-gray-800/50 rounded">
-                                <IconFileText class="w-10 h-10 text-gray-400 mb-2" />
-                                <p class="text-xs text-gray-500 mb-3">No artefacts yet</p>
-                                <button @click="triggerArtefactFileUpload" class="btn btn-secondary btn-sm"><IconPlus class="w-3 h-3 mr-1" />Add Artefact</button>
-                            </div>
-                            <div v-else key="artefacts-list" class="artefacts-list space-y-2">
-                                <ArtefactCard 
-                                    v-for="group in groupedArtefacts" 
-                                    :key="group.title"
-                                    :artefact-group="group"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
+                <ArtefactZone />
             </div>
         </div>
     </div>
-    <!-- Bottom Action Bar -->
     <div class="flex-shrink-0 p-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
       <div class="relative flex items-center">
         <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-icon absolute left-1.5 top-1/2 -translate-y-1/2 z-10">

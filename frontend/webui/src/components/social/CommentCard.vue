@@ -4,7 +4,7 @@ import { marked } from 'marked';
 import { useAuthStore } from '../../stores/auth';
 import { useSocialStore } from '../../stores/social';
 import { useUiStore } from '../../stores/ui';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 
 const props = defineProps({
   comment: {

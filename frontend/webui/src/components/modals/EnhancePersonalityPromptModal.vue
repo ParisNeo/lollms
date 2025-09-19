@@ -3,7 +3,7 @@ import { ref, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
 import { useTasksStore } from '../../stores/tasks';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const uiStore = useUiStore();

@@ -1,8 +1,8 @@
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
-import GenericModal from '../ui/GenericModal.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
+import GenericModal from './GenericModal.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';

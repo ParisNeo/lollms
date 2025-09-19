@@ -9,8 +9,8 @@ import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
 import IconArrowUp from '../../../assets/icons/IconArrowUp.vue';
 import IconArrowDown from '../../../assets/icons/IconArrowDown.vue';
-import AppCard from '../../ui/AppCard.vue';
-import AppCardSkeleton from '../../ui/AppCardSkeleton.vue';
+import AppCard from '../../ui/Cards/AppCard.vue';
+import AppCardSkeleton from '../../ui/Cards/AppCardSkeleton.vue';
 
 const adminStore = useAdminStore();
 const tasksStore = useTasksStore();

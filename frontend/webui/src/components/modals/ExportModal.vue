@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();

@@ -4,7 +4,7 @@ import { useDiscussionsStore } from '../../../stores/discussions';
 import { useMemoriesStore } from '../../../stores/memories';
 import { useUiStore } from '../../../stores/ui';
 import { storeToRefs } from 'pinia';
-import MessageContentRenderer from '../../ui/MessageContentRenderer.vue';
+import MessageContentRenderer from '../../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import IconThinking from '../../../assets/icons/IconThinking.vue';
 import IconSparkles from '../../../assets/icons/IconSparkles.vue';
 import IconPlus from '../../../assets/icons/IconPlus.vue';

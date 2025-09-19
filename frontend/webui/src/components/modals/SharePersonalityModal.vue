@@ -1,10 +1,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
 import { useSocialStore } from '../../stores/social';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 
 const uiStore = useUiStore();
 const dataStore = useDataStore();

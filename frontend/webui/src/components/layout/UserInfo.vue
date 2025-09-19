@@ -3,7 +3,7 @@ import { ref, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 
 // --- Import icons ---
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';

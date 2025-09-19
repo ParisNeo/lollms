@@ -5,7 +5,7 @@ import { useAuthStore } from '../../stores/auth';
 import CreatePostForm from './CreatePostForm.vue';
 import PostCard from './PostCard.vue';
 import DmFooter from '../layout/DmFooter.vue';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 
 const socialStore = useSocialStore();
 const authStore = useAuthStore();

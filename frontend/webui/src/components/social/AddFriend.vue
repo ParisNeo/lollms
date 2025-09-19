@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import { useSocialStore } from '../../stores/social';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
 
 const socialStore = useSocialStore();

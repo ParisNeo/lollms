@@ -6,7 +6,7 @@ import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
 import { useTasksStore } from '../stores/tasks'; // NEW IMPORT
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
-import UserAvatar from '../components/ui/UserAvatar.vue';
+import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
 import IconRefresh from '../assets/icons/IconRefresh.vue';

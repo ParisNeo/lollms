@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useDiscussionsStore } from '../../../stores/discussions';
-import CodeMirrorEditor from '../../ui/CodeMirrorEditor.vue';
+import CodeMirrorEditor from '../../ui/CodeMirrorComponent/index.vue';
 
 const discussionsStore = useDiscussionsStore();
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);

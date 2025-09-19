@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import apiClient from '../../services/api';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 
 const uiStore = useUiStore();
 

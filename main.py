@@ -5,12 +5,12 @@ from typing import Optional
 import os
 import subprocess
 import sys
-from multiprocessing import cpu_count
+from multiprocessing import cpu_count, Manager, Lock
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors, trace_exception
 import asyncio
 import time
-from filelock import FileLock, Timeout
+
 
 from multipart.multipart import FormParser
 FormParser.max_size = 50 * 1024 * 1024  # 50 MB
@@ -32,8 +32,6 @@ from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
-from backend.db.models.broadcast import BroadcastMessage
-from backend.db.models.fun_fact import FunFact, FunFactCategory
 from backend.security import get_password_hash as hash_password
 from backend.migration_utils import LegacyDiscussion
 from backend.session import (
@@ -70,7 +68,7 @@ from backend.routers.discussion_groups import discussion_groups_router
 
 from backend.routers.tasks import tasks_router
 from backend.task_manager import task_manager
-from backend.ws_manager import manager
+from backend.ws_manager import manager, listen_for_broadcasts
 from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
@@ -78,6 +76,7 @@ from backend.zoo_cache import load_cache
 
 import uvicorn
 from backend.settings import settings
+
 init_database(APP_DB_URL)
 db = db_session_module.SessionLocal()
 try:
@@ -85,313 +84,265 @@ try:
 finally:
     db.close()
 
-POLLING_INTERVAL = 0.1
-CLEANUP_INTERVAL = 3600
-MAX_MESSAGE_AGE = 24 * 3600
-CLEANUP_LOCK_PATH = APP_DATA_DIR / "broadcast_cleanup.lock"
+broadcast_listener_task = None
 
-polling_task = None
-
-async def start_broadcast_polling():
-    last_processed_id = 0
-    last_cleanup_time = time.time()
+def run_one_time_startup_tasks(lock: Lock):
+    """
+    This function runs all tasks that should only be executed once across all worker processes.
+    It uses a multiprocessing lock to ensure single execution.
+    """
+    acquired = lock.acquire(block=False)
+    if not acquired:
+        ASCIIColors.yellow(f"Worker {os.getpid()} did not acquire startup lock. Skipping one-time tasks.")
+        return
     
-    db = next(get_db())
+    ASCIIColors.green(f"Worker {os.getpid()} acquired startup lock. Running one-time tasks...")
     try:
-        latest_message = db.query(BroadcastMessage).order_by(BroadcastMessage.id.desc()).first()
-        if latest_message:
-            last_processed_id = latest_message.id
-        ASCIIColors.green(f"Broadcast poller initialized. Starting after message ID {last_processed_id}.")
-    finally:
-        db.close()
+        print("--- Running One-Time Startup Tasks ---")
         
-    while True:
+        # ... (rest of the startup logic: migration, db defaults, repo cloning, etc.)
+        
+        print("\n--- Running Automated Discussion Migration ---")
+        db_session = None
+        if APP_SETTINGS.get("migrate"):
+            try:
+                db_session = next(get_db())
+                all_users = db_session.query(DBUser).all()
+                for user in all_users:
+                    username = user.username
+                    old_discussion_path = get_user_discussion_path(username)
+                    if not (old_discussion_path.exists() and old_discussion_path.is_dir()):
+                        continue
+                    print(f"Found legacy discussion folder for '{username}'. Starting migration...")
+                    if username not in user_sessions:
+                        user_sessions[username] = {
+                                                    "lollms_clients": {}, 
+                                                    "lollms_model_name": user.lollms_model_name,
+                                                    "llm_params": {}
+                                                }
+                    db_path = get_user_data_root(username) / "discussions.db"
+                    dm = LollmsDataManager(db_path=f"sqlite:///{db_path.resolve()}")
+                    migrated_count = 0
+                    for file_path in old_discussion_path.glob("*.yaml"):
+                        discussion_db_session = None
+                        try:
+                            old_disc = LegacyDiscussion.load_from_yaml(file_path)
+                            if not old_disc: continue
+                            discussion_db_session = dm.get_session()
+                            if discussion_db_session.query(dm.DiscussionModel).filter_by(id=old_disc.discussion_id).first():
+                                discussion_db_session.close()
+                                continue
+                            new_db_disc_orm = dm.DiscussionModel(id=old_disc.discussion_id, discussion_metadata={"title": old_disc.title, "rag_datastore_ids": old_disc.rag_datastore_ids}, active_branch_id=old_disc.active_branch_id)
+                            discussion_db_session.add(new_db_disc_orm)
+                            for msg in old_disc.messages:
+                                msg_orm = dm.MessageModel(id=msg.id, discussion_id=new_db_disc_orm.id, parent_id=msg.parent_id, sender=msg.sender, sender_type=msg.sender_type, content=msg.content, created_at=msg.created_at, binding_name=msg.binding_name, model_name=msg.model_name, tokens=msg.token_count, message_metadata={"sources": msg.sources, "steps": msg.steps})
+                                discussion_db_session.add(msg_orm)
+                            discussion_db_session.commit()
+                            migrated_count += 1
+                        except Exception as e:
+                            if discussion_db_session: discussion_db_session.rollback()
+                            print(f"    - FAILED to migrate {file_path.name}: {e}")
+                        finally:
+                            if discussion_db_session: discussion_db_session.close()
+                    if migrated_count > 0:
+                        backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                        shutil.move(str(old_discussion_path), str(backup_path))
+                        print(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
+                    if username in user_sessions: user_sessions[username]['lollms_clients'] = {}
+                
+            except Exception as e:
+                print(f"CRITICAL ERROR during migration: {e}")
+            finally:
+                if db_session: db_session.close()
+            print("--- Migration Finished ---\n")
+
+        ASCIIColors.yellow("--- Verifying Default Database Entries & Repositories ---")
+        db_for_defaults: Optional[Session] = None
         try:
-            await asyncio.sleep(POLLING_INTERVAL)
-            db = next(get_db())
+            db_for_defaults = next(get_db())
             
-            new_messages = db.query(BroadcastMessage).filter(BroadcastMessage.id > last_processed_id).order_by(BroadcastMessage.id.asc()).all()
+            admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
+            admin_password = INITIAL_ADMIN_USER_CONFIG.get("password")
+            if admin_username and admin_password and not db_for_defaults.query(DBUser).filter(DBUser.username == admin_username).first():
+                new_admin = DBUser(username=admin_username, hashed_password=hash_password(admin_password), is_admin=True)
+                db_for_defaults.add(new_admin)
+                db_for_defaults.commit()
+                ASCIIColors.green(f"INFO: Initial admin user '{admin_username}' created successfully.")
 
-            if new_messages:
-                for msg in new_messages:
-                    payload = msg.payload
-                    broadcast_type = payload.get("type")
-                    data = payload.get("data")
-                    
-                    if broadcast_type == "broadcast":
-                        await manager.broadcast(data)
-                    elif broadcast_type == "admins":
-                        await manager.broadcast_to_admins(data)
-                    elif broadcast_type == "personal":
-                        user_id = payload.get("user_id")
-                        if user_id:
-                            await manager.send_personal_message(data, user_id)
-                    
-                    last_processed_id = msg.id
-
-            current_time = time.time()
-            if current_time - last_cleanup_time > CLEANUP_INTERVAL:
-                lock = FileLock(str(CLEANUP_LOCK_PATH), timeout=1)
-                try:
-                    with lock:
-                        if time.time() - last_cleanup_time > CLEANUP_INTERVAL:
-                            try:
-                                cutoff_time = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(seconds=MAX_MESSAGE_AGE)
-                                deleted_count = db.query(BroadcastMessage).filter(BroadcastMessage.created_at < cutoff_time).delete()
-                                db.commit()
-                                if deleted_count > 0:
-                                    ASCIIColors.info(f"Cleaned up {deleted_count} old broadcast messages.")
-                                last_cleanup_time = time.time()
-                            except Exception as e:
-                                ASCIIColors.error(f"Error during broadcast message cleanup: {e}")
-                                db.rollback()
-                except Timeout:
-                    pass
+            if not db_for_defaults.query(DBLLMBinding).first():
+                ASCIIColors.yellow("No LLM bindings found in the database. Creating one from config.toml.")
+                if LOLLMS_CLIENT_DEFAULTS:
+                    binding_name = LOLLMS_CLIENT_DEFAULTS.get("binding_name")
+                    if binding_name:
+                        try:
+                            config_data = LOLLMS_CLIENT_DEFAULTS.copy()
+                            name = config_data.pop("binding_name", None)
+                            default_model_name = config_data.pop("default_model_name", None)
+                            alias = name
+                            counter = 1
+                            while db_for_defaults.query(DBLLMBinding).filter(DBLLMBinding.alias == alias).first():
+                                alias = f"{name}_{counter}"
+                                counter += 1
+                            new_binding = DBLLMBinding(
+                                alias=alias, name=name, config=config_data,
+                                default_model_name=default_model_name, is_active=True
+                            )
+                            db_for_defaults.add(new_binding)
+                            db_for_defaults.commit()
+                            ASCIIColors.green(f"INFO: Successfully created initial LLM binding '{alias}' from config.toml.")
+                        except Exception as e:
+                            ASCIIColors.error(f"Failed to create initial binding: {e}")
+                            db_for_defaults.rollback()
+                            trace_exception(e) 
+                    else:
+                        ASCIIColors.warning("`binding_name` not found in [lollms_client_defaults] in config.toml. Cannot create initial binding.")
+                else:
+                    ASCIIColors.warning("[lollms_client_defaults] section is empty in config.toml. No initial binding created.")
 
         except Exception as e:
-            ASCIIColors.error(f"Error in broadcast polling loop: {e}")
+            ASCIIColors.error(f"ERROR during admin/personality/prompt setup: {e}")
             trace_exception(e)
+            if db_for_defaults: db_for_defaults.rollback()
         finally:
-            if db:
-                db.close()
+            if db_for_defaults: db_for_defaults.close()
+
+        db_for_repos: Optional[Session] = None
+        try:
+            db_for_repos = next(get_db())
+            app_zoo_name = "Official LoLLMs Apps Zoo"
+            app_zoo_url = "https://github.com/ParisNeo/lollms_apps_zoo.git"
+            app_zoo_repo_path = APPS_ZOO_ROOT_PATH / app_zoo_name
+            
+            if not db_for_repos.query(DBAppZooRepository).filter(or_(DBAppZooRepository.name == app_zoo_name, DBAppZooRepository.url == app_zoo_url)).first():
+                default_repo = DBAppZooRepository(name=app_zoo_name, url=app_zoo_url, is_deletable=False)
+                db_for_repos.add(default_repo)
+                db_for_repos.commit()
+                ASCIIColors.green(f"INFO: Default App Zoo repo '{app_zoo_name}' added to DB.")
+
+            if not app_zoo_repo_path.exists():
+                ASCIIColors.yellow(f"First setup: Cloning '{app_zoo_name}'. This may take a moment...")
+                subprocess.run(["git", "clone", app_zoo_url, str(app_zoo_repo_path)], check=True)
+                ASCIIColors.green("Cloning complete.")
+
+        except Exception as e:
+            ASCIIColors.error(f"ERROR during App Zoo repository setup: {e}")
+            trace_exception(e)
+            if db_for_repos: db_for_repos.rollback()
+        finally:
+            if db_for_repos: db_for_repos.close()
+            
+        db_for_mcps: Optional[Session] = None
+        try:
+            db_for_mcps = next(get_db())
+            mcp_zoo_name = "lollms_mcps_zoo"
+            mcp_zoo_url = "https://github.com/ParisNeo/lollms_mcps_zoo.git"
+            mcp_zoo_repo_path = MCPS_ZOO_ROOT_PATH / mcp_zoo_name
+
+            if not db_for_mcps.query(DBMCPZooRepository).filter(or_(DBMCPZooRepository.name == mcp_zoo_name, DBMCPZooRepository.url == mcp_zoo_url)).first():
+                default_mcp_repo = DBMCPZooRepository(name=mcp_zoo_name, url=mcp_zoo_url, is_deletable=False)
+                db_for_mcps.add(default_mcp_repo)
+                db_for_mcps.commit()
+                ASCIIColors.green(f"INFO: Default MCP Zoo repo '{mcp_zoo_name}' added to DB.")
+
+            if not mcp_zoo_repo_path.exists():
+                ASCIIColors.yellow(f"First setup: Cloning '{mcp_zoo_name}'. This may take a moment...")
+                subprocess.run(["git", "clone", mcp_zoo_url, str(mcp_zoo_repo_path)], check=True)
+                ASCIIColors.green("Cloning complete.")
+        except Exception as e:
+            ASCIIColors.error(f"ERROR during MCP Zoo repository setup: {e}")
+            trace_exception(e)
+            if db_for_mcps: db_for_mcps.rollback()
+        finally:
+            if db_for_mcps: db_for_mcps.close()
+        
+        db_for_prompts: Optional[Session] = None
+        try:
+            db_for_prompts = next(get_db())
+            prompt_zoo_name = "lollms_prompts_zoo"
+            prompt_zoo_url = "https://github.com/ParisNeo/lollms_prompts_zoo.git"
+            prompt_zoo_repo_path = PROMPTS_ZOO_ROOT_PATH / prompt_zoo_name
+
+            if not db_for_prompts.query(DBPromptZooRepository).filter(or_(DBPromptZooRepository.name == prompt_zoo_name, DBPromptZooRepository.url == prompt_zoo_url)).first():
+                default_prompt_repo = DBPromptZooRepository(name=prompt_zoo_name, url=prompt_zoo_url, is_deletable=False)
+                db_for_prompts.add(default_prompt_repo)
+                db_for_prompts.commit()
+                ASCIIColors.green(f"INFO: Default Prompt Zoo repo '{prompt_zoo_name}' added to DB.")
+
+            if not prompt_zoo_repo_path.exists():
+                ASCIIColors.yellow(f"First setup: Cloning '{prompt_zoo_name}'. This may take a moment...")
+                subprocess.run(["git", "clone", prompt_zoo_url, str(prompt_zoo_repo_path)], check=True)
+                ASCIIColors.green("Cloning complete.")
+        except Exception as e:
+            ASCIIColors.error(f"ERROR during Prompt Zoo repository setup: {e}")
+            trace_exception(e)
+            if db_for_prompts: db_for_prompts.rollback()
+        finally:
+            if db_for_prompts: db_for_prompts.close()
+
+        db_for_personalities: Optional[Session] = None
+        try:
+            db_for_personalities = next(get_db())
+            personality_zoo_name = "lollms_personalities_zoo"
+            personality_zoo_url = "https://github.com/ParisNeo/lollms_personalities_zoo.git"
+            personality_zoo_repo_path = PERSONALITIES_ZOO_ROOT_PATH / personality_zoo_name
+
+            if not db_for_personalities.query(DBPersonalityZooRepository).filter(or_(DBPersonalityZooRepository.name == personality_zoo_name, DBPersonalityZooRepository.url == personality_zoo_url)).first():
+                default_personality_repo = DBPersonalityZooRepository(name=personality_zoo_name, url=personality_zoo_url, is_deletable=False)
+                db_for_personalities.add(default_personality_repo)
+                db_for_personalities.commit()
+                ASCIIColors.green(f"INFO: Default Personality Zoo repo '{personality_zoo_name}' added to DB.")
+
+            if not personality_zoo_repo_path.exists():
+                ASCIIColors.yellow(f"First setup: Cloning '{personality_zoo_name}'. This may take a moment...")
+                subprocess.run(["git", "clone", personality_zoo_url, str(personality_zoo_repo_path)], check=True)
+                ASCIIColors.green("Cloning complete.")
+        except Exception as e:
+            ASCIIColors.error(f"ERROR during Personality Zoo repository setup: {e}")
+            trace_exception(e)
+            if db_for_personalities: db_for_personalities.rollback()
+        finally:
+            if db_for_personalities: db_for_personalities.close()
+
+
+        ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
+
+        ASCIIColors.yellow("--- Synchronizing Filesystem Installations with Database ---")
+        db_for_sync: Optional[Session] = None
+        try:
+            db_for_sync = next(get_db())
+            synchronize_filesystem_and_db(db_for_sync)
+            ASCIIColors.green("--- Synchronization Complete ---")
+        except Exception as e:
+            ASCIIColors.error(f"ERROR during startup synchronization: {e}")
+            trace_exception(e)
+            if db_for_sync: db_for_sync.rollback()
+        finally:
+            if db_for_sync: db_for_sync.close()
+
+        load_cache()
+    finally:
+        lock.release()
 
 async def startup_event():
-    global polling_task
+    """
+    This event runs for EACH worker process created by Uvicorn.
+    """
+    global broadcast_listener_task
     manager.set_loop(asyncio.get_running_loop())
-    polling_task = asyncio.create_task(start_broadcast_polling())
     task_manager.init_app(db_session_module.SessionLocal)
-    print("Database initialized and settings loaded.")
-
-    print("\n--- Running Automated Discussion Migration ---")
-    db_session = None
-    if APP_SETTINGS.get("migrate"):
-        try:
-            db_session = next(get_db())
-            all_users = db_session.query(DBUser).all()
-            for user in all_users:
-                username = user.username
-                old_discussion_path = get_user_discussion_path(username)
-                if not (old_discussion_path.exists() and old_discussion_path.is_dir()):
-                    continue
-                print(f"Found legacy discussion folder for '{username}'. Starting migration...")
-                if username not in user_sessions:
-                    user_sessions[username] = {
-                                                "lollms_clients": {}, 
-                                                "lollms_model_name": user.lollms_model_name,
-                                                "llm_params": {}
-                                            }
-                db_path = get_user_data_root(username) / "discussions.db"
-                dm = LollmsDataManager(db_path=f"sqlite:///{db_path.resolve()}")
-                migrated_count = 0
-                for file_path in old_discussion_path.glob("*.yaml"):
-                    discussion_db_session = None
-                    try:
-                        old_disc = LegacyDiscussion.load_from_yaml(file_path)
-                        if not old_disc: continue
-                        discussion_db_session = dm.get_session()
-                        if discussion_db_session.query(dm.DiscussionModel).filter_by(id=old_disc.discussion_id).first():
-                            discussion_db_session.close()
-                            continue
-                        new_db_disc_orm = dm.DiscussionModel(id=old_disc.discussion_id, discussion_metadata={"title": old_disc.title, "rag_datastore_ids": old_disc.rag_datastore_ids}, active_branch_id=old_disc.active_branch_id)
-                        discussion_db_session.add(new_db_disc_orm)
-                        for msg in old_disc.messages:
-                            msg_orm = dm.MessageModel(id=msg.id, discussion_id=new_db_disc_orm.id, parent_id=msg.parent_id, sender=msg.sender, sender_type=msg.sender_type, content=msg.content, created_at=msg.created_at, binding_name=msg.binding_name, model_name=msg.model_name, tokens=msg.token_count, message_metadata={"sources": msg.sources, "steps": msg.steps})
-                            discussion_db_session.add(msg_orm)
-                        discussion_db_session.commit()
-                        migrated_count += 1
-                    except Exception as e:
-                        if discussion_db_session: discussion_db_session.rollback()
-                        print(f"    - FAILED to migrate {file_path.name}: {e}")
-                    finally:
-                        if discussion_db_session: discussion_db_session.close()
-                if migrated_count > 0:
-                    backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-                    shutil.move(str(old_discussion_path), str(backup_path))
-                    print(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
-                if username in user_sessions: user_sessions[username]['lollms_clients'] = {}
-            
-        except Exception as e:
-            print(f"CRITICAL ERROR during migration: {e}")
-        finally:
-            if db_session: db_session.close()
-        print("--- Migration Finished ---\n")
-
-    ASCIIColors.yellow("--- Verifying Default Database Entries & Repositories ---")
-    db_for_defaults: Optional[Session] = None
-    try:
-        db_for_defaults = next(get_db())
-        
-        admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
-        admin_password = INITIAL_ADMIN_USER_CONFIG.get("password")
-        if admin_username and admin_password and not db_for_defaults.query(DBUser).filter(DBUser.username == admin_username).first():
-            new_admin = DBUser(username=admin_username, hashed_password=hash_password(admin_password), is_admin=True)
-            db_for_defaults.add(new_admin)
-            db_for_defaults.commit()
-            ASCIIColors.green(f"INFO: Initial admin user '{admin_username}' created successfully.")
-
-        if not db_for_defaults.query(DBLLMBinding).first():
-            ASCIIColors.yellow("No LLM bindings found in the database. Creating one from config.toml.")
-            if LOLLMS_CLIENT_DEFAULTS:
-                binding_name = LOLLMS_CLIENT_DEFAULTS.get("binding_name")
-                if binding_name:
-                    try:
-                        config_data = LOLLMS_CLIENT_DEFAULTS.copy()
-                        name = config_data.pop("binding_name", None)
-                        default_model_name = config_data.pop("default_model_name", None)
-                        alias = name
-                        counter = 1
-                        while db_for_defaults.query(DBLLMBinding).filter(DBLLMBinding.alias == alias).first():
-                            alias = f"{name}_{counter}"
-                            counter += 1
-                        new_binding = DBLLMBinding(
-                            alias=alias, name=name, config=config_data,
-                            default_model_name=default_model_name, is_active=True
-                        )
-                        db_for_defaults.add(new_binding)
-                        db_for_defaults.commit()
-                        ASCIIColors.green(f"INFO: Successfully created initial LLM binding '{alias}' from config.toml.")
-                    except Exception as e:
-                        ASCIIColors.error(f"Failed to create initial binding: {e}")
-                        db_for_defaults.rollback()
-                        trace_exception(e) 
-                else:
-                    ASCIIColors.warning("`binding_name` not found in [lollms_client_defaults] in config.toml. Cannot create initial binding.")
-            else:
-                ASCIIColors.warning("[lollms_client_defaults] section is empty in config.toml. No initial binding created.")
-
-    except Exception as e:
-        ASCIIColors.error(f"ERROR during admin/personality/prompt setup: {e}")
-        trace_exception(e)
-        if db_for_defaults: db_for_defaults.rollback()
-    finally:
-        if db_for_defaults: db_for_defaults.close()
-
-    db_for_repos: Optional[Session] = None
-    try:
-        db_for_repos = next(get_db())
-        app_zoo_name = "Official LoLLMs Apps Zoo"
-        app_zoo_url = "https://github.com/ParisNeo/lollms_apps_zoo.git"
-        app_zoo_repo_path = APPS_ZOO_ROOT_PATH / app_zoo_name
-        
-        if not db_for_repos.query(DBAppZooRepository).filter(or_(DBAppZooRepository.name == app_zoo_name, DBAppZooRepository.url == app_zoo_url)).first():
-            default_repo = DBAppZooRepository(name=app_zoo_name, url=app_zoo_url, is_deletable=False)
-            db_for_repos.add(default_repo)
-            db_for_repos.commit()
-            ASCIIColors.green(f"INFO: Default App Zoo repo '{app_zoo_name}' added to DB.")
-
-        if not app_zoo_repo_path.exists():
-            ASCIIColors.yellow(f"First setup: Cloning '{app_zoo_name}'. This may take a moment...")
-            subprocess.run(["git", "clone", app_zoo_url, str(app_zoo_repo_path)], check=True)
-            ASCIIColors.green("Cloning complete.")
-
-    except Exception as e:
-        ASCIIColors.error(f"ERROR during App Zoo repository setup: {e}")
-        trace_exception(e)
-        if db_for_repos: db_for_repos.rollback()
-    finally:
-        if db_for_repos: db_for_repos.close()
-        
-    db_for_mcps: Optional[Session] = None
-    try:
-        db_for_mcps = next(get_db())
-        mcp_zoo_name = "lollms_mcps_zoo"
-        mcp_zoo_url = "https://github.com/ParisNeo/lollms_mcps_zoo.git"
-        mcp_zoo_repo_path = MCPS_ZOO_ROOT_PATH / mcp_zoo_name
-
-        if not db_for_mcps.query(DBMCPZooRepository).filter(or_(DBMCPZooRepository.name == mcp_zoo_name, DBMCPZooRepository.url == mcp_zoo_url)).first():
-            default_mcp_repo = DBMCPZooRepository(name=mcp_zoo_name, url=mcp_zoo_url, is_deletable=False)
-            db_for_mcps.add(default_mcp_repo)
-            db_for_mcps.commit()
-            ASCIIColors.green(f"INFO: Default MCP Zoo repo '{mcp_zoo_name}' added to DB.")
-
-        if not mcp_zoo_repo_path.exists():
-            ASCIIColors.yellow(f"First setup: Cloning '{mcp_zoo_name}'. This may take a moment...")
-            subprocess.run(["git", "clone", mcp_zoo_url, str(mcp_zoo_repo_path)], check=True)
-            ASCIIColors.green("Cloning complete.")
-    except Exception as e:
-        ASCIIColors.error(f"ERROR during MCP Zoo repository setup: {e}")
-        trace_exception(e)
-        if db_for_mcps: db_for_mcps.rollback()
-    finally:
-        if db_for_mcps: db_for_mcps.close()
     
-    db_for_prompts: Optional[Session] = None
-    try:
-        db_for_prompts = next(get_db())
-        prompt_zoo_name = "lollms_prompts_zoo"
-        prompt_zoo_url = "https://github.com/ParisNeo/lollms_prompts_zoo.git"
-        prompt_zoo_repo_path = PROMPTS_ZOO_ROOT_PATH / prompt_zoo_name
-
-        if not db_for_prompts.query(DBPromptZooRepository).filter(or_(DBPromptZooRepository.name == prompt_zoo_name, DBPromptZooRepository.url == prompt_zoo_url)).first():
-            default_prompt_repo = DBPromptZooRepository(name=prompt_zoo_name, url=prompt_zoo_url, is_deletable=False)
-            db_for_prompts.add(default_prompt_repo)
-            db_for_prompts.commit()
-            ASCIIColors.green(f"INFO: Default Prompt Zoo repo '{prompt_zoo_name}' added to DB.")
-
-        if not prompt_zoo_repo_path.exists():
-            ASCIIColors.yellow(f"First setup: Cloning '{prompt_zoo_name}'. This may take a moment...")
-            subprocess.run(["git", "clone", prompt_zoo_url, str(prompt_zoo_repo_path)], check=True)
-            ASCIIColors.green("Cloning complete.")
-    except Exception as e:
-        ASCIIColors.error(f"ERROR during Prompt Zoo repository setup: {e}")
-        trace_exception(e)
-        if db_for_prompts: db_for_prompts.rollback()
-    finally:
-        if db_for_prompts: db_for_prompts.close()
-
-    db_for_personalities: Optional[Session] = None
-    try:
-        db_for_personalities = next(get_db())
-        personality_zoo_name = "lollms_personalities_zoo"
-        personality_zoo_url = "https://github.com/ParisNeo/lollms_personalities_zoo.git"
-        personality_zoo_repo_path = PERSONALITIES_ZOO_ROOT_PATH / personality_zoo_name
-
-        if not db_for_personalities.query(DBPersonalityZooRepository).filter(or_(DBPersonalityZooRepository.name == personality_zoo_name, DBPersonalityZooRepository.url == personality_zoo_url)).first():
-            default_personality_repo = DBPersonalityZooRepository(name=personality_zoo_name, url=personality_zoo_url, is_deletable=False)
-            db_for_personalities.add(default_personality_repo)
-            db_for_personalities.commit()
-            ASCIIColors.green(f"INFO: Default Personality Zoo repo '{personality_zoo_name}' added to DB.")
-
-        if not personality_zoo_repo_path.exists():
-            ASCIIColors.yellow(f"First setup: Cloning '{personality_zoo_name}'. This may take a moment...")
-            subprocess.run(["git", "clone", personality_zoo_url, str(personality_zoo_repo_path)], check=True)
-            ASCIIColors.green("Cloning complete.")
-    except Exception as e:
-        ASCIIColors.error(f"ERROR during Personality Zoo repository setup: {e}")
-        trace_exception(e)
-        if db_for_personalities: db_for_personalities.rollback()
-    finally:
-        if db_for_personalities: db_for_personalities.close()
-
-
-    ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
-
-    ASCIIColors.yellow("--- Synchronizing Filesystem Installations with Database ---")
-    db_for_sync: Optional[Session] = None
-    try:
-        db_for_sync = next(get_db())
-        synchronize_filesystem_and_db(db_for_sync)
-        ASCIIColors.green("--- Synchronization Complete ---")
-    except Exception as e:
-        ASCIIColors.error(f"ERROR during startup synchronization: {e}")
-        trace_exception(e)
-        if db_for_sync: db_for_sync.rollback()
-    finally:
-        if db_for_sync: db_for_sync.close()
-
-    load_cache()
-    cleanup_and_autostart_apps()
+    broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
     
-
+    print(f"INFO: Worker process (PID: {os.getpid()}) started and initialized.")
 
 async def shutdown_event():
-    ASCIIColors.info("--- Application shutting down. ---")
-    if polling_task:
-        polling_task.cancel()
+    ASCIIColors.info(f"--- Worker process (PID: {os.getpid()}) shutting down. ---")
+    if broadcast_listener_task:
+        broadcast_listener_task.cancel()
         try:
-            await polling_task
+            await broadcast_listener_task
         except asyncio.CancelledError:
-            ASCIIColors.info("Broadcast polling task cancelled successfully.")
+            ASCIIColors.info(f"Broadcast listener task in worker {os.getpid()} cancelled successfully.")
 
 init_database(APP_DB_URL)
 db = db_session_module.SessionLocal()
@@ -404,9 +355,9 @@ app = FastAPI(
     on_shutdown=[shutdown_event]
 )
 
-host = SERVER_CONFIG.get("host", "0.0.0.0")
-port = SERVER_CONFIG.get("port", 9642)
-https_enabled = SERVER_CONFIG.get("https_enabled", False)
+host = SERVER_CONFIG.get("host")
+port = SERVER_CONFIG.get("port")
+https_enabled = SERVER_CONFIG.get("https_enabled")
 
 allowed_origins = [
     "http://localhost:5173",
@@ -499,6 +450,26 @@ if __name__ == "__main__":
 
     port_setting = int(settings.get("port", port))
     workers = int(os.getenv("LOLLMS_WORKERS", settings.get("workers", SERVER_CONFIG.get("workers", cpu_count()))))
+
+    # --- MAIN PROCESS ONLY SETUP ---
+    mp_manager = Manager()
+    broadcast_queue = mp_manager.Queue()
+    startup_lock = Lock()
+    manager.set_broadcast_queue(broadcast_queue)
+
+    run_one_time_startup_tasks(startup_lock)
+    
+    # Initialize the task manager in the main process BEFORE using it for autostart.
+    task_manager.init_app(db_session_module.SessionLocal)
+
+    try:
+        ASCIIColors.yellow("--- Running App Cleanup and Autostart (once) ---")
+        cleanup_and_autostart_apps()
+        ASCIIColors.green("--- Autostart Complete ---")
+    except Exception as e:
+        ASCIIColors.error(f"--- Autostart Failed: {e} ---")
+        trace_exception(e)
+    # --- END MAIN PROCESS ONLY SETUP ---
 
     ssl_params = {}
     if settings.get("https_enabled"):

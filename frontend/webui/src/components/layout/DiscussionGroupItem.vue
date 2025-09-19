@@ -3,7 +3,7 @@ import { ref, computed } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import DiscussionItem from './DiscussionItem.vue';
-import DropdownMenu from '../ui/DropdownMenu.vue';
+import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 
 import IconFolder from '../../assets/icons/IconFolder.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';

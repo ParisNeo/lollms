@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { useAuthStore } from '../../../stores/auth';
-import CodeMirrorEditor from '../../ui/CodeMirrorEditor.vue';
+import CodeMirrorEditor from '../../ui/CodeMirrorComponent/index.vue';
 
 // Icons
 import IconUndo from '../../../assets/icons/IconUndo.vue';

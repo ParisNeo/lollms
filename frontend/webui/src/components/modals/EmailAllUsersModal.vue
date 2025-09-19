@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
 import { storeToRefs } from 'pinia';

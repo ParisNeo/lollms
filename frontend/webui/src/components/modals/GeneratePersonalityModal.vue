@@ -1,6 +1,6 @@
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
 import { useTasksStore } from '../../stores/tasks';

@@ -3,7 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
 import { useSocialStore } from '../../stores/social';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 
 const uiStore = useUiStore();
 const dataStore = useDataStore();

@@ -4,7 +4,7 @@ import { storeToRefs } from 'pinia';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
-import PersonalityCard from '../ui/PersonalityCard.vue';
+import PersonalityCard from '../ui/Cards/PersonalityCard.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore();

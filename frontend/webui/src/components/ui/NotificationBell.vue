@@ -3,7 +3,7 @@ import { ref, computed } from 'vue';
 import { useSocialStore } from '../../stores/social';
 import { useUiStore } from '../../stores/ui';
 import { useRouter } from 'vue-router';
-import UserAvatar from './UserAvatar.vue';
+import UserAvatar from './Cards/UserAvatar.vue';
 
 const socialStore = useSocialStore();
 const uiStore = useUiStore();

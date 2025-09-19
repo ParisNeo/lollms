@@ -4,7 +4,7 @@ import { onMounted, computed } from 'vue';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import { storeToRefs } from 'pinia';
-import McpCard from '../ui/McpCard.vue';
+import McpCard from '../ui/Cards/McpCard.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();

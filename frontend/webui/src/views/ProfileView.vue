@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import { useSocialStore } from '../stores/social';
-import UserAvatar from '../components/ui/UserAvatar.vue';
+import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
 import PostCard from '../components/social/PostCard.vue';
 
 const route = useRoute();

@@ -4,7 +4,7 @@ import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
 import { storeToRefs } from 'pinia';
 import GenericModal from '../ui/GenericModal.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';

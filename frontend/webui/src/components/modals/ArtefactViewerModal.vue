@@ -1,8 +1,8 @@
 <script setup>
 import { computed } from 'vue';
 import { useUiStore } from '../../stores/ui';
-import GenericModal from '../ui/GenericModal.vue';
-import MessageContentRenderer from '../ui/MessageContentRenderer.vue';
+import GenericModal from './GenericModal.vue';
+import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 
 const uiStore = useUiStore();

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUpdated, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useSocialStore } from '../../stores/social';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 
 const props = defineProps({
   conversation: {

@@ -2,7 +2,7 @@
 import { ref, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';

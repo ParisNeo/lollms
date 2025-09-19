@@ -39,7 +39,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useUiStore } from '../../stores/ui';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 
 const uiStore = useUiStore();

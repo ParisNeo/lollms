@@ -2,7 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import appLogo from '../../assets/logo.png';
 
 const authStore = useAuthStore();

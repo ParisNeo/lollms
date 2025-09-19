@@ -2,7 +2,7 @@
 import { onMounted, computed, ref } from 'vue';
 import { useSocialStore } from '../../stores/social';
 import { useAuthStore } from '../../stores/auth';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 
 const socialStore = useSocialStore();
 const authStore = useAuthStore();

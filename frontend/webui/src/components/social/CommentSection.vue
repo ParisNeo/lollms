@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, defineAsyncComponent, nextTick } from 'vue';
 import { useSocialStore } from '../../stores/social';
 import { useAuthStore } from '../../stores/auth';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 
 const CommentCard = defineAsyncComponent(() => import('./CommentCard.vue'));
 

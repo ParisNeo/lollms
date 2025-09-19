@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import { useUiStore } from '../../stores/ui';
 
 const uiStore = useUiStore();

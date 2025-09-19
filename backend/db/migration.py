@@ -8,7 +8,7 @@ from sqlalchemy.exc import OperationalError, IntegrityError
 from sqlalchemy.schema import DropTable
 from sqlalchemy.ext.compiler import compiles
 
-from backend.config import LOLLMS_CLIENT_DEFAULTS, config
+from backend.config import LOLLMS_CLIENT_DEFAULTS, SERVER_CONFIG, APP_SETTINGS, SAFE_STORE_DEFAULTS
 from backend.db.base import CURRENT_DB_VERSION
 from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
 from backend.db.models.service import App # Ensure App is imported
@@ -55,39 +55,39 @@ def _bootstrap_global_settings(connection):
     
     all_possible_settings = {
         "host": {
-            "value": config.get("server", {}).get("host", "0.0.0.0"),
+            "value": SERVER_CONFIG.get("host", "0.0.0.0"),
             "type": "string", "description": "Server host address. Requires a restart to take effect.", "category": "Server"
         },
         "port": {
-            "value": config.get("server", {}).get("port", 9642),
+            "value": SERVER_CONFIG.get("port", 9642),
             "type": "integer", "description": "Server port. Requires a restart to take effect.", "category": "Server"
         },
         "https_enabled": {
-            "value": config.get("server", {}).get("https_enabled", False),
+            "value": SERVER_CONFIG.get("https_enabled", False),
             "type": "boolean", "description": "Enable HTTPS for the server. Requires a restart to take effect.", "category": "Server"
         },
         "ssl_certfile": {
-            "value": config.get("server", {}).get("ssl_certfile", ""),
+            "value": SERVER_CONFIG.get("ssl_certfile", ""),
             "type": "string", "description": "Path to the SSL certificate file (e.g., cert.pem). Requires a restart.", "category": "Server"
         },
         "ssl_keyfile": {
-            "value": config.get("server", {}).get("ssl_keyfile", ""),
+            "value": SERVER_CONFIG.get("ssl_keyfile", ""),
             "type": "string", "description": "Path to the SSL private key file (e.g., key.pem). Requires a restart.", "category": "Server"
         },
         "public_domain_name": {
-            "value": "",
+            "value": APP_SETTINGS.get("public_domain_name", ""),
             "type": "string", "description": "Public domain or IP to use for links when server is on 0.0.0.0. If empty, auto-detects IP.", "category": "Server"
         },
         "allow_new_registrations": {
-            "value": config.get("app_settings", {}).get("allow_new_registrations", True),
+            "value": APP_SETTINGS.get("allow_new_registrations", True),
             "type": "boolean", "description": "Allow new users to register an account.", "category": "Registration"
         },
         "registration_mode": {
-            "value": config.get("app_settings", {}).get("registration_mode", "admin_approval"),
+            "value": APP_SETTINGS.get("registration_mode", "admin_approval"),
             "type": "string", "description": "Method for new user activation: 'direct' or 'admin_approval'.", "category": "Registration"
         },
         "access_token_expire_minutes": {
-            "value": config.get("app_settings", {}).get("access_token_expires_mintes", 43200),
+            "value": APP_SETTINGS.get("access_token_expires_minutes", 43200),
             "type": "integer", "description": "Duration in minutes a user's login session remains valid.", "category": "Authentication"
         },
         "password_recovery_mode": {
@@ -131,7 +131,7 @@ def _bootstrap_global_settings(connection):
             "type": "float", "description": "Default generation temperature for new users.", "category": "Defaults"
         },
         "default_safe_store_vectorizer": {
-            "value": config.get("safe_store_defaults", {}).get("global_default_vectorizer", "st:all-MiniLM-L6-v2"),
+            "value": SAFE_STORE_DEFAULTS.get("global_default_vectorizer", "st:all-MiniLM-L6-v2"),
             "type": "string", "description": "Default vectorizer assigned to newly created users.", "category": "Defaults"
         },
         "force_model_mode": {

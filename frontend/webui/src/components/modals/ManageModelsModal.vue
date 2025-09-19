@@ -174,7 +174,7 @@ import { ref, watch, computed, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
 import { storeToRefs } from 'pinia';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import IconUploader from '../ui/IconUploader.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';

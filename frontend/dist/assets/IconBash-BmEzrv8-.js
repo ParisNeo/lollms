@@ -1,0 +1,17 @@
+const n=`<template>\r
+    <svg fill="currentColor"  version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"  width="800px"\r
+	 height="800px" viewBox="0 0 512 512" enable-background="new 0 0 512 512" xml:space="preserve">\r
+\r
+<g id="5151e0c8492e5103c096af88a51f9b27">\r
+\r
+<path display="inline" d="M77.554,296.055l101.189-39.863v-0.611L77.554,215.413v-44.464l154.539,68.379v32.807L77.554,340.514\r
+		V296.055z M434.446,343.887v39.863H251.7v-39.863H434.446z M468.917,0.5H43.083C19.662,0.5,0.5,19.663,0.5,43.083v425.833\r
+		c0,23.421,19.162,42.583,42.583,42.583h425.834c23.421,0,42.583-19.162,42.583-42.583V43.083C511.5,19.663,492.338,0.5,468.917,0.5\r
+		z M468.917,468.917H43.083V106.958h425.834V468.917z">\r
+\r
+</path>\r
+\r
+</g>\r
+\r
+</svg>\r
+</template>`;export{n as default};

@@ -3,7 +3,7 @@
 import { ref, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import IconUploader from '../ui/IconUploader.vue';
 
 const uiStore = useUiStore();

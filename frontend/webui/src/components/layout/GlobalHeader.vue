@@ -1,37 +1,34 @@
 <script setup>
 import { computed, ref, provide, watch, nextTick } from 'vue';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 
-import DropdownSubmenu from '../ui/DropdownSubmenu.vue';
+import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
 import TasksManagerButton from './TasksManagerButton.vue';
-import NotificationBell from '../ui/NotificationBell.vue'; // IMPORT a new component
+import NotificationBell from '../ui/NotificationBell.vue';
 import ThemeToggle from '../ui/ThemeToggle.vue';
-import IconPlusCircle from '../../assets/icons/IconPlusCircle.vue';
 import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
-import logoDefault from '../../assets/logo.png';
 import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconDataZone from '../../assets/icons/IconDataZone.vue';
+import IconPencil from '../../assets/icons/IconPencil.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const dataStore = useDataStore();
 const route = useRoute();
+const router = useRouter();
 
-const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const user = computed(() => authStore.user);
-const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
-
 const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages'];
 const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
 const pageTitle = computed(() => uiStore.pageTitle);
@@ -45,6 +42,8 @@ const ttiModelSearchTerm = ref('');
 const isMenuOpen = ref(false);
 const menuTriggerRef = ref(null);
 const menuFloatingRef = ref(null);
+const isSubmenuActive = ref(false);
+let closeTimer = null;
 
 const { floatingStyles } = useFloating(menuTriggerRef, menuFloatingRef, {
   placement: 'bottom',
@@ -52,12 +51,19 @@ const { floatingStyles } = useFloating(menuTriggerRef, menuFloatingRef, {
   middleware: [offset(5), flip(), shift({ padding: 5 })],
 });
 
-// For submenus to prevent parent from closing
+// --- FIX: Provide context for submenus ---
+function setSubmenuActive(status) {
+    isSubmenuActive.value = status;
+}
+function cancelClose() {
+    clearTimeout(closeTimer);
+}
 provide('dropdown-context', {
-  cancelClose: () => {}
+  setSubmenuActive,
+  cancelClose
 });
+// --- END FIX ---
 
-// v-on-click-outside directive
 const vOnClickOutside = {
   mounted: (el, binding) => {
     el.clickOutsideEvent = event => {
@@ -73,23 +79,19 @@ const vOnClickOutside = {
     document.removeEventListener('mousedown', el.clickOutsideEvent);
   },
 };
-// --- End Dropdown Logic ---
 
 const activePersonalityId = computed({
     get: () => user.value?.active_personality_id,
     set: (id) => authStore.updateUserPreferences({ active_personality_id: id })
 });
-
 const activeModelName = computed({
     get: () => user.value?.lollms_model_name,
     set: (name) => authStore.updateUserPreferences({ lollms_model_name: name })
 });
-
 const activeTtiModelName = computed({
     get: () => user.value?.tti_binding_model_name,
     set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name })
 });
-
 
 const availablePersonalities = computed(() => {
     return [
@@ -111,7 +113,6 @@ const selectedModel = computed(() => {
     }
     return null;
 });
-
 const selectedPersonality = computed(() => {
     if (!activePersonalityId.value || !availablePersonalities.value) return null;
     for (const group of availablePersonalities.value) {
@@ -122,7 +123,6 @@ const selectedPersonality = computed(() => {
     }
     return null;
 });
-
 const selectedTtiModel = computed(() => {
     if (!activeTtiModelName.value || !formattedAvailableTtiModels.value) return null;
     for (const group of formattedAvailableTtiModels.value) {
@@ -175,7 +175,6 @@ const filteredAvailableTtiModels = computed(() => {
     return result;
 });
 
-
 function openModelCard(model) {
     uiStore.openModal('modelCard', { model });
 }
@@ -191,6 +190,15 @@ function selectPersonality(id) {
 function selectTtiModel(id) {
     activeTtiModelName.value = id;
 }
+
+function handleEditPersonality(personality, event) {
+    event.stopPropagation();
+    isMenuOpen.value = false;
+    router.push({ path: '/settings', query: { tab: 'personalities' } });
+    nextTick(() => {
+        uiStore.openModal('personalityEditor', { personality: personality, isSystemPersonality: false });
+    });
+}
 </script>
 
 <template>
@@ -200,14 +208,20 @@ function selectTtiModel(id) {
       <div class="relative">
         <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" class="toolbox-select flex items-center gap-2 max-w-sm !p-1">
               <div class="flex items-center flex-shrink-0">
-                  <!-- Model Icon -->
+                  <!-- LLM Icon -->
                   <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md">
                       <img v-if="selectedModel?.icon_base64" :src="selectedModel.icon_base64" class="h-full w-full rounded-md object-cover"/>
                       <IconCpuChip v-else class="w-4 h-4" />
                   </div>
                   
-                  <!-- Personality Icon -->
+                  <!-- TTI Icon -->
                   <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
+                      <img v-if="selectedTtiModel?.icon_base64" :src="selectedTtiModel.icon_base64" class="h-full w-full rounded-md object-cover"/>
+                      <IconPhoto v-else class="w-4 h-4" />
+                  </div>
+                  
+                  <!-- Personality Icon -->
+                  <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-20 border-2 border-white dark:border-gray-800">
                       <img v-if="selectedPersonality?.icon_base64" :src="selectedPersonality.icon_base64" class="h-full w-full rounded-md object-cover"/>
                       <IconUserCircle v-else class="w-4 h-4" />
                   </div>
@@ -232,7 +246,7 @@ function selectTtiModel(id) {
                         v-if="isMenuOpen" 
                         ref="menuFloatingRef" 
                         :style="floatingStyles" 
-                        v-on-click-outside="() => isMenuOpen = false"
+                        v-on-click-outside="() => { isMenuOpen = false; isSubmenuActive = false; }"
                         class="z-50 w-64 origin-top-left rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1 flex flex-col max-h-[80vh]">
                         <DropdownSubmenu title="LLM Model" icon="cpu-chip" :icon-src="selectedModel?.icon_base64">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
@@ -257,25 +271,6 @@ function selectTtiModel(id) {
                             </div>
                         </DropdownSubmenu>
 
-                        <DropdownSubmenu title="Personality" icon="user-circle" :icon-src="selectedPersonality?.icon_base64">
-                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="personalitySearchTerm" @click.stop placeholder="Search personalities..." class="input-field-sm w-full">
-                            </div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
-                                <div v-if="dataStore.isLoadingPersonalities" class="text-center p-4 text-sm text-gray-500">Loading...</div>
-                                <div v-for="group in filteredAvailablePersonalities" :key="group.label">
-                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
-                                    <button v-for="item in group.items" :key="item.id" @click="selectPersonality(item.id)" class="menu-item-button" :class="{'selected': activePersonalityId === item.id}">
-                                    <div class="flex items-center space-x-3 truncate">
-                                            <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
-                                            <IconUserCircle v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                            <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
-                        </DropdownSubmenu>
-
                         <DropdownSubmenu title="Text-to-Image" icon="photo" :icon-src="selectedTtiModel?.icon_base64">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search TTI models..." class="input-field-sm w-full">
@@ -292,6 +287,30 @@ function selectTtiModel(id) {
                                             <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
                                         </div>
                                     </button>
+                                </div>
+                            </div>
+                        </DropdownSubmenu>
+
+                        <DropdownSubmenu title="Personality" icon="user-circle" :icon-src="selectedPersonality?.icon_base64">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
+                                <input type="text" v-model="personalitySearchTerm" @click.stop placeholder="Search personalities..." class="input-field-sm w-full">
+                            </div>
+                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                                <div v-if="dataStore.isLoadingPersonalities" class="text-center p-4 text-sm text-gray-500">Loading...</div>
+                                <div v-for="group in filteredAvailablePersonalities" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
+                                    <div v-for="item in group.items" :key="item.id" class="relative group/personality">
+                                        <button @click="selectPersonality(item.id)" class="menu-item-button w-full" :class="{'selected': activePersonalityId === item.id}">
+                                            <div class="flex items-center space-x-3 truncate">
+                                                <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
+                                                <IconUserCircle v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                                <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
+                                            </div>
+                                        </button>
+                                        <button v-if="group.label === 'Personal'" @click="handleEditPersonality(item, $event)" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 opacity-0 group-hover/personality:opacity-100 transition-opacity" title="Edit Personality">
+                                            <IconPencil class="w-4 h-4"/>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </DropdownSubmenu>

@@ -16,7 +16,7 @@ import js from 'highlight.js/lib/languages/javascript';
 import python from 'highlight.js/lib/languages/python';
 import json from 'highlight.js/lib/languages/json';
 import 'highlight.js/styles/github-dark.css';
-import CodeMirrorEditor from './CodeMirrorEditor.vue';
+import CodeMirrorEditor from './CodeMirrorComponent/index.vue';
 import { useUiStore } from '../../stores/ui'; // Import UI store
 import InsertImageModal from '../modals/InsertImageModal.vue';
 

@@ -1,0 +1,6 @@
+const t=`<template>\r
+<svg width="50px" height="50px" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">\r
+<path d="M16 8L13 11L10 10L6 6L5 3L8 0L11 1L15 5L16 8Z" fill="currentColor"/>\r
+<path d="M0 13L5.08579 7.91418L8.08579 10.9142L3 16L0 13Z" fill="currentColor"/>\r
+</svg>\r
+</template>`;export{t as default};

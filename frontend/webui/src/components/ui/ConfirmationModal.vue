@@ -1,7 +1,7 @@
 <script>
 import { mapState, mapActions } from 'pinia';
 import { useUiStore } from '../../stores/ui';
-import GenericModal from './GenericModal.vue';
+import GenericModal from '../modals/GenericModal.vue';
 
 export default {
   name: 'ConfirmationModal',

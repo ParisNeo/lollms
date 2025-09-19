@@ -1,0 +1,3 @@
+const t=`<template>\r
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-4"/><path d="M10 18H5.8a1.8 1.8 0 0 1-1.7-1.2 2 2 0 0 1 .3-2.1L8 11l-2.6-3.7A2 2 0 0 1 5.8 5h8.4a2 2 0 0 1 1.7 1.2 2 2 0 0 1-.3 2.1L12 12l4 6"/><path d="M14 18h4.2a1.8 1.8 0 0 0 1.7-1.2 2 2 0 0 0-.3-2.1L16 11l2.6-3.7A2 2 0 0 0 18.2 5h-2.4"/></svg>\r
+</template>`;export{t as default};

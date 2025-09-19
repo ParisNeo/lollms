@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useSocialStore } from '../../stores/social';
 import { useUiStore } from '../../stores/ui';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 import IconMessage from '../../assets/icons/IconMessage.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 

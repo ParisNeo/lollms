@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useTasksStore } from '../../stores/tasks';
 import { useUiStore } from '../../stores/ui'; // Import useUiStore
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';

@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue';
 import { useUiStore } from '../../stores/ui';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import IconTag from '../../assets/icons/IconTag.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 

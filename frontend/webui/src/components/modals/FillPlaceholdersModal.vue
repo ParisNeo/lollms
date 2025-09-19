@@ -2,8 +2,8 @@
 import { ref, watch, computed } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import placeholderParser from '../../services/placeholderParser';
-import GenericModal from '../ui/GenericModal.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorEditor.vue'; // Import the editor
+import GenericModal from './GenericModal.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue'; // Import the editor
 
 const uiStore = useUiStore();
 const modalData = computed(() => uiStore.modalData('fillPlaceholders'));

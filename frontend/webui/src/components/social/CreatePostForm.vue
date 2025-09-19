@@ -2,7 +2,7 @@
 import { ref, computed, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useSocialStore } from '../../stores/social';
-import UserAvatar from '../ui/UserAvatar.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
 
 const emit = defineEmits(['posted', 'close']);
 

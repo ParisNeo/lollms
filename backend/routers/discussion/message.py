@@ -1,4 +1,4 @@
-# backend/routers/discussion.py
+# backend/routers/discussion/message.py
 # Standard Library Imports
 import base64
 import io
@@ -214,9 +214,25 @@ def build_message_router(router: APIRouter):
     async def delete_discussion_message(discussion_id: str, message_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
         username = current_user.username
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        if not discussion_obj: raise HTTPException(status_code=404, detail="Discussion not found.")
-        try: discussion_obj.delete_branch(message_id)
-        except ValueError as e: raise HTTPException(status_code=404, detail=str(e))
+        if not discussion_obj:
+            raise HTTPException(status_code=404, detail="Discussion not found.")
+        
+        try:
+            message_to_delete = discussion_obj.get_message(message_id)
+            if not message_to_delete:
+                raise ValueError("Message to be deleted not found in discussion.")
+            
+            parent_id = message_to_delete.parent_id
+            
+            discussion_obj.delete_branch(message_id)
+            
+            # After deleting, set the active branch to the parent of the deleted branch
+            discussion_obj.switch_to_branch(parent_id)
+
+            discussion_obj.commit()
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        
         db_user = db.query(DBUser).filter(DBUser.username == username).one()
         db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).delete(synchronize_session=False)
         db.commit()

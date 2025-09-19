@@ -4,7 +4,7 @@ import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
 import { usePromptsStore } from '../../stores/prompts';
 import { useTasksStore } from '../../stores/tasks';
-import GenericModal from '../ui/GenericModal.vue';
+import GenericModal from './GenericModal.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
 const uiStore = useUiStore();
