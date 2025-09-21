@@ -223,14 +223,28 @@ def build_llm_generation_router(router: APIRouter):
                                 images_for_message.append(b64_data)
 
                     if is_resend:
-                        result = discussion_obj.regenerate_branch(personality=active_personality, use_mcps=combined_mcps, use_data_store=use_rag, streaming_callback=llm_callback)
+                        result = discussion_obj.regenerate_branch(
+                            personality=active_personality, 
+                            use_mcps=combined_mcps, 
+                            use_data_store=use_rag, 
+                            streaming_callback=llm_callback,
+                            user_name=current_user.username,
+                            user_icon=current_user.icon
+                        )
                     else:
                         result = discussion_obj.chat(
-                            user_message=prompt, personality=active_personality, use_mcps=combined_mcps,
-                            use_data_store=use_rag, images=images_for_message,
-                            streaming_callback=llm_callback, max_reasoning_steps=owner_db_user.rag_n_hops,
-                            rag_top_k=owner_db_user.rag_top_k, rag_min_similarity_percent=owner_db_user.rag_min_sim_percent,
-                            debug=SERVER_CONFIG.get("debug", False)
+                            user_message=prompt, 
+                            personality=active_personality, 
+                            use_mcps=combined_mcps,
+                            use_data_store=use_rag, 
+                            images=images_for_message,
+                            streaming_callback=llm_callback, 
+                            max_reasoning_steps=owner_db_user.rag_n_hops,
+                            rag_top_k=owner_db_user.rag_top_k, 
+                            rag_min_similarity_percent=owner_db_user.rag_min_sim_percent,
+                            debug=SERVER_CONFIG.get("debug", False),
+                            user_name=current_user.username,
+                            user_icon=current_user.icon
                         )
                     
                     ai_message_obj = result.get('ai_message')

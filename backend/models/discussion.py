@@ -204,6 +204,9 @@ class SharedDiscussionInfo(BaseModel):
     owner_id: int
     owner_username: str
     owner_icon: Optional[str] = None
+    shared_with_user_id: int
+    shared_with_username: str
+    shared_with_user_icon: Optional[str] = None
 
 class PaginatedDiscussionInfo(PaginatedResponse[DiscussionInfo]):
     pass

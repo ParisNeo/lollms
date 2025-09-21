@@ -3,64 +3,73 @@ import apiClient from '../../services/api';
 import { processMessages } from './discussionProcessor';
 
 export function useDiscussionCore(state, stores, getActions) {
-    const { 
-        discussions, 
-        currentDiscussionId, 
-        messages, 
-        isLoadingMessages, 
-        isLoadingDiscussions, 
-        titleGenerationInProgressId,
-        activeDiscussionArtefacts
-    } = state;
+    const { discussions, currentDiscussionId, messages, isLoadingDiscussions, isLoadingMessages, activeDiscussionParticipants } = state;
+    const { uiStore } = stores;
+
+    async function fetchParticipants(discussionId) {
+        if (!discussionId) {
+            activeDiscussionParticipants.value = {};
+            return;
+        }
+        try {
+            const response = await apiClient.get(`/api/discussions/${discussionId}/participants`);
+            const participantsMap = {};
+            for (const user of response.data) {
+                participantsMap[user.username] = user;
+            }
+            activeDiscussionParticipants.value = participantsMap;
+        } catch (error) {
+            console.error("Failed to fetch discussion participants:", error);
+            activeDiscussionParticipants.value = {};
+        }
+    }
 
     async function loadDiscussions() {
         isLoadingDiscussions.value = true;
         try {
             const response = await apiClient.get('/api/discussions');
             const newDiscussions = {};
-            if (Array.isArray(response.data)) {
-                response.data.forEach(d => {
-                    newDiscussions[d.id] = { ...d, discussion_data_zone: '', personality_data_zone: '', memory: '' };
-                });
+            for (const disc of response.data) {
+                newDiscussions[disc.id] = disc;
             }
             discussions.value = newDiscussions;
         } catch (error) {
             console.error("Failed to load discussions:", error);
+            discussions.value = {};
         } finally {
             isLoadingDiscussions.value = false;
         }
     }
 
-    async function selectDiscussion(discussionId, branchId = null, force = false) {
-        if (!discussionId) {
-            currentDiscussionId.value = null;
-            messages.value = [];
-            activeDiscussionArtefacts.value = [];
+    async function selectDiscussion(discussionId, branchId = null, forceReload = false) {
+        if (!forceReload && currentDiscussionId.value === discussionId) {
             return;
         }
-        
-        if (currentDiscussionId.value === discussionId && !branchId && !force) return;
 
         currentDiscussionId.value = discussionId;
-        messages.value = [];
-        isLoadingMessages.value = true;
         
-        try {
-            const response = await apiClient.get(`/api/discussions/${discussionId}`, { params: { branch_id: branchId } });
-            messages.value = processMessages(response.data);
+        if (discussionId) {
+            isLoadingMessages.value = true;
+            messages.value = [];
             
-            const actions = getActions();
-            await Promise.all([
-                actions.fetchContextStatus(discussionId),
-                actions.fetchArtefacts(discussionId),
-                actions.fetchDataZones(discussionId)
-            ]);
-            state.emit('discussion:refreshed');
-        } catch (error) {
-            currentDiscussionId.value = null;
-            stores.uiStore.addNotification('Could not load discussion.', 'error');
-        } finally {
-            isLoadingMessages.value = false;
+            await fetchParticipants(discussionId);
+
+            try {
+                const response = await apiClient.get(`/api/discussions/${discussionId}`, { params: { branch_id: branchId } });
+                messages.value = processMessages(response.data);
+                state.emit('discussion:refreshed');
+                await getActions().fetchContextStatus(discussionId);
+                await getActions().fetchArtefacts(discussionId);
+            } catch (error) {
+                uiStore.addNotification('Could not load the selected discussion.', 'error');
+                messages.value = [];
+                currentDiscussionId.value = null;
+            } finally {
+                isLoadingMessages.value = false;
+            }
+        } else {
+            messages.value = [];
+            activeDiscussionParticipants.value = {};
         }
     }
 
@@ -68,24 +77,23 @@ export function useDiscussionCore(state, stores, getActions) {
         try {
             const response = await apiClient.post('/api/discussions', { group_id: groupId });
             const newDiscussion = response.data;
-            discussions.value[newDiscussion.id] = { ...newDiscussion, discussion_data_zone: '', personality_data_zone: '', memory:'' };
+            discussions.value[newDiscussion.id] = newDiscussion;
             await selectDiscussion(newDiscussion.id);
-            return newDiscussion;
+            if (uiStore.mainView !== 'chat') {
+                uiStore.setMainView('chat');
+            }
         } catch (error) {
-            stores.uiStore.addNotification('Failed to create new discussion.', 'error');
+            console.error("Failed to create new discussion:", error);
+            uiStore.addNotification('Could not create a new discussion.', 'error');
         }
     }
 
     async function deleteDiscussion(discussionId) {
-        const discussionToDelete = discussions.value[discussionId];
-        if (!discussionToDelete) return;
-
-        const confirmed = await stores.uiStore.showConfirmation({
+        const confirmed = await uiStore.showConfirmation({
             title: 'Delete Discussion',
-            message: `Are you sure you want to delete "${discussionToDelete.title}"?`,
+            message: 'Are you sure you want to permanently delete this discussion and all its messages?',
             confirmText: 'Delete'
         });
-
         if (!confirmed) return;
 
         try {
@@ -95,9 +103,38 @@ export function useDiscussionCore(state, stores, getActions) {
                 currentDiscussionId.value = null;
                 messages.value = [];
             }
-            stores.uiStore.addNotification('Discussion deleted.', 'success');
+            uiStore.addNotification('Discussion deleted successfully.', 'success');
         } catch (error) {
-            stores.uiStore.addNotification('Failed to delete discussion.', 'error');
+            console.error("Failed to delete discussion:", error);
+        }
+    }
+
+    async function cloneDiscussion(discussionId) {
+        uiStore.addNotification('Cloning discussion...', 'info');
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/clone`);
+            const cloned = response.data;
+            discussions.value[cloned.id] = cloned;
+            await selectDiscussion(cloned.id);
+            uiStore.addNotification('Discussion cloned successfully.', 'success');
+        } catch(e) {
+            // Error handled by global interceptor
+        }
+    }
+
+    async function generateAutoTitle(discussionId) {
+        state.titleGenerationInProgressId.value = discussionId;
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/auto-title`);
+            const updatedDiscussion = response.data;
+            if (discussions.value[discussionId]) {
+                discussions.value[discussionId].title = updatedDiscussion.title;
+            }
+        } catch (error) {
+            console.error("Failed to generate title:", error);
+            uiStore.addNotification('Could not generate a title.', 'error');
+        } finally {
+            state.titleGenerationInProgressId.value = null;
         }
     }
 
@@ -105,61 +142,28 @@ export function useDiscussionCore(state, stores, getActions) {
         const discussion = discussions.value[discussionId];
         if (!discussion) return;
         const isCurrentlyStarred = discussion.is_starred;
-        discussion.is_starred = !isCurrentlyStarred;
+        discussion.is_starred = !isCurrentlyStarred; // Optimistic update
         try {
-            const endpoint = `/api/discussions/${discussionId}/star`;
             if (isCurrentlyStarred) {
-                await apiClient.delete(endpoint);
+                await apiClient.delete(`/api/discussions/${discussionId}/star`);
             } else {
-                await apiClient.post(endpoint);
+                await apiClient.post(`/api/discussions/${discussionId}/star`);
             }
         } catch (error) {
             discussion.is_starred = isCurrentlyStarred; // Revert on failure
-            stores.uiStore.addNotification('Failed to update star status.', 'error');
-        }
-    }
-    
-    async function generateAutoTitle(discussionId) {
-        if (titleGenerationInProgressId.value) return;
-        titleGenerationInProgressId.value = discussionId;
-        try {
-            const response = await apiClient.post(`/api/discussions/${discussionId}/auto-title`);
-            if (discussions.value[discussionId]) {
-                discussions.value[discussionId].title = response.data.title;
-            }
-        } catch(error) {
-            stores.uiStore.addNotification('Failed to generate title.', 'error');
-        } finally {
-            titleGenerationInProgressId.value = null;
+            console.error("Failed to toggle star:", error);
         }
     }
 
-    async function pruneDiscussions() {
-        const confirmed = await stores.uiStore.showConfirmation({
-            title: 'Prune Discussions?',
-            message: 'This will delete all discussions with 1 or fewer messages. This cannot be undone.',
-            confirmText: 'Prune'
-        });
-        if (!confirmed) return;
-
+    async function renameDiscussion({ discussionId, newTitle }) {
+        if (!discussions.value[discussionId]) return;
+        const originalTitle = discussions.value[discussionId].title;
+        discussions.value[discussionId].title = newTitle; // Optimistic update
         try {
-            const response = await apiClient.post('/api/discussions/prune');
-            stores.tasksStore.addTask(response.data);
-            stores.uiStore.addNotification('Pruning task started.', 'info');
+            await apiClient.put(`/api/discussions/${discussionId}/title`, { title: newTitle });
+            uiStore.addNotification('Discussion renamed.', 'success');
         } catch (error) {
-            // Error is handled by global interceptor
-        }
-    }
-
-    async function cloneDiscussion(discussionId) {
-        try {
-            const response = await apiClient.post(`/api/discussions/${discussionId}/clone`);
-            const newDiscussion = response.data;
-            discussions.value[newDiscussion.id] = newDiscussion;
-            await selectDiscussion(newDiscussion.id);
-            stores.uiStore.addNotification(`Discussion cloned successfully.`, 'success');
-        } catch (error) {
-            stores.uiStore.addNotification(`Failed to clone discussion.`, 'error');
+            discussions.value[discussionId].title = originalTitle; // Revert
         }
     }
 
@@ -168,9 +172,10 @@ export function useDiscussionCore(state, stores, getActions) {
         selectDiscussion,
         createNewDiscussion,
         deleteDiscussion,
-        toggleStarDiscussion,
+        cloneDiscussion,
         generateAutoTitle,
-        pruneDiscussions,
-        cloneDiscussion
+        toggleStarDiscussion,
+        renameDiscussion,
+        fetchParticipants
     };
 }

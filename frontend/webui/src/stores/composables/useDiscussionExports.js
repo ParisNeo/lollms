@@ -2,7 +2,7 @@
 import apiClient from '../../services/api';
 
 export function useDiscussionExports(state, stores, getActions) {
-    const { uiStore, authStore } = stores;
+    const { uiStore, authStore, tasksStore } = stores;
 
     async function exportDiscussions(discussionIds) {
         uiStore.addNotification('Preparing export...', 'info');
@@ -133,6 +133,24 @@ export function useDiscussionExports(state, stores, getActions) {
             throw { message: errorMessage, logs: errorLogs };
         }
     }
+    
+    async function pruneDiscussions() {
+        const confirmed = await uiStore.showConfirmation({
+            title: 'Prune Empty Discussions',
+            message: 'This will permanently delete all of your discussions that contain one message or fewer. This action cannot be undone.',
+            confirmText: 'Prune Discussions',
+        });
+
+        if (confirmed) {
+            try {
+                const response = await apiClient.post('/api/discussions/prune');
+                tasksStore.addTask(response.data);
+                uiStore.addNotification('Discussion pruning has started.', 'info');
+            } catch (error) {
+                console.error("Failed to start discussion pruning task:", error);
+            }
+        }
+    }
 
     return {
         exportDiscussions,
@@ -140,6 +158,7 @@ export function useDiscussionExports(state, stores, getActions) {
         exportMessageCodeToZip,
         exportMessage,
         exportRawContent,
-        compileLatexCode
+        compileLatexCode,
+        pruneDiscussions
     };
 }

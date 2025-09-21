@@ -1,7 +1,8 @@
+# [UPDATE] backend/models/task.py
 import datetime
 from typing import List, Optional, Any
 from pydantic import BaseModel
-from backend.db.base import TaskStatus  # CORRECTED IMPORT
+from backend.db.base import TaskStatus
 
 class TaskLogMessage(BaseModel):
     timestamp: str

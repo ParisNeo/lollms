@@ -22,7 +22,8 @@ def build_discussion_sharing_router(router: APIRouter):
         shared_links = db.query(DBSharedDiscussionLink).options(
             joinedload(DBSharedDiscussionLink.owner)
         ).filter(
-            DBSharedDiscussionLink.shared_with_user_id == current_user.id
+            DBSharedDiscussionLink.shared_with_user_id == current_user.id,
+            DBSharedDiscussionLink.owner_user_id != current_user.id
         ).order_by(DBSharedDiscussionLink.shared_at.desc()).all()
 
         return [

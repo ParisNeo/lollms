@@ -6,7 +6,6 @@ import CodeMirrorEditor from '../../ui/CodeMirrorComponent/index.vue';
 const discussionsStore = useDiscussionsStore();
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const personalityDataZone = computed(() => activeDiscussion.value?.personality_data_zone || '');
-const editorOptions = { readOnly: true };
 </script>
 
 <template>
@@ -15,7 +14,7 @@ const editorOptions = { readOnly: true };
             <CodeMirrorEditor
                 v-model="personalityDataZone"
                 class="h-full"
-                :options="editorOptions"
+                :read-only="true"
             />
         </div>
     </div>

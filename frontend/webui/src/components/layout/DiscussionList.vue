@@ -16,7 +16,7 @@ import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconScissors from '../../assets/icons/IconScissors.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
-import IconGitBranch from '../../assets/icons/IconGitBranch.vue'; 
+import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue'; 
 import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
@@ -38,7 +38,8 @@ const welcomeSlogan = computed(() => authStore.welcomeSlogan || 'One tool to rul
 
 const searchTerm = ref('');
 const isSearchVisible = ref(false);
-const isStarredVisible = ref(true);
+const isStarredVisible = ref(false);
+const isSharedVisible = ref(false);
 const showToolbox = ref(false);
 const isUngroupedVisible = ref(true);
 
@@ -46,6 +47,14 @@ const filteredAndSortedDiscussions = computed(() => {
     if (!searchTerm.value) return store.sortedDiscussions;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
     return store.sortedDiscussions.filter(d => 
+        d.title.toLowerCase().includes(lowerCaseSearch)
+    );
+});
+
+const sharedDiscussions = computed(() => {
+    if (!searchTerm.value) return store.sharedWithMe;
+    const lowerCaseSearch = searchTerm.value.toLowerCase();
+    return store.sharedWithMe.filter(d => 
         d.title.toLowerCase().includes(lowerCaseSearch)
     );
 });
@@ -177,6 +186,22 @@ function handleClone() {
             </div>
             
             <div v-else class="space-y-3">
+                <!-- Shared With Me -->
+                <div v-if="sharedDiscussions.length > 0">
+                    <button @click="isSharedVisible = !isSharedVisible" class="section-header-flat">
+                        <div class="flex items-center space-x-2">
+                            <span class="font-medium text-slate-700 dark:text-gray-300">Shared with me</span>
+                            <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
+                                {{ sharedDiscussions.length }}
+                            </div>
+                        </div>
+                        <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isSharedVisible}" />
+                    </button>
+                    <div v-if="isSharedVisible" class="space-y-1 mt-2">
+                        <DiscussionItem v-for="discussion in sharedDiscussions" :key="discussion.share_id" :discussion="discussion" />
+                    </div>
+                </div>
+
                 <!-- Starred Section -->
                 <div v-if="starredDiscussions.length > 0">
                     <button @click="isStarredVisible = !isStarredVisible" class="section-header-flat">
@@ -216,7 +241,7 @@ function handleClone() {
                     </div>
                 </div>
 
-                <div v-if="filteredAndSortedDiscussions.length === 0 && !isLoading" class="empty-state-flat">
+                <div v-if="filteredAndSortedDiscussions.length === 0 && sharedDiscussions.length === 0 && !isLoading" class="empty-state-flat">
                     <p class="text-base font-medium text-slate-600 dark:text-gray-300 mb-2">
                         {{ searchTerm ? 'No matches found' : 'Start your first conversation' }}
                     </p>

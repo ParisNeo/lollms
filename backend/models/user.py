@@ -174,6 +174,7 @@ class UserPublic(UserLLMParams):
     first_login_done: Optional[bool] = False
     data_zone: Optional[str] = None
     memory: Optional[str] = None
+    icon: Optional[str] = None
     class Config:
         from_attributes = True
 

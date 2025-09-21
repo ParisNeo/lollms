@@ -3,10 +3,11 @@ from typing import Dict, Set, Any
 from fastapi import WebSocket
 import json
 import logging
-from multiprocessing import Queue
-from queue import Empty
 import os
 from ascii_colors import trace_exception
+from .db import session as db_session_module
+from .db.models.broadcast import BroadcastMessage
+
 logger = logging.getLogger("uvicorn.info")
 
 class ConnectionManager:
@@ -14,13 +15,9 @@ class ConnectionManager:
         self.active_connections: Dict[int, WebSocket] = {}
         self.admin_user_ids: Set[int] = set()
         self._loop: asyncio.AbstractEventLoop = None
-        self.broadcast_queue: Queue = Queue()
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
-
-    def set_broadcast_queue(self, queue: Queue):
-        self.broadcast_queue = queue
 
     async def connect(self, user_id: int, websocket: WebSocket):
         await websocket.accept()
@@ -68,63 +65,75 @@ class ConnectionManager:
         for user_id in connected_admins:
             await self.send_personal_message(message_data, user_id)
 
-    # --- Sync wrappers that put messages on the multiprocessing queue ---
-    def _put_on_queue(self, payload: dict):
-        if self.broadcast_queue:
-            try:
-                self.broadcast_queue.put_nowait(json.dumps(payload))
-            except Exception as e:
-                logger.error(f"Failed to put message on broadcast queue: {e}")
-        else:
-            logger.warning("Broadcast queue is not initialized. Message dropped.")
+    def _put_on_db_queue(self, payload: dict):
+        db = None
+        try:
+            db = db_session_module.SessionLocal()
+            db_message = BroadcastMessage(payload=payload)
+            db.add(db_message)
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to put message on DB broadcast queue: {e}")
+            if db:
+                db.rollback()
+        finally:
+            if db:
+                db.close()
 
     def broadcast_sync(self, message_data: dict):
         payload = {"type": "broadcast", "data": message_data}
-        self._put_on_queue(payload)
+        self._put_on_db_queue(payload)
 
     def send_personal_message_sync(self, message_data: dict, user_id: int):
         payload = {"type": "personal", "user_id": user_id, "data": message_data}
-        self._put_on_queue(payload)
+        self._put_on_db_queue(payload)
 
     def broadcast_to_admins_sync(self, message_data: dict):
         payload = {"type": "admins", "data": message_data}
-        self._put_on_queue(payload)
+        self._put_on_db_queue(payload)
 
 manager = ConnectionManager()
 
 async def listen_for_broadcasts():
-    """
-    Listens for messages on the shared queue and dispatches them.
-    This runs in each worker process's event loop.
-    """
-    logger.info(f"Worker {os.getpid()} starting broadcast listener.")
+    logger.info(f"Worker {os.getpid()} starting DB broadcast listener.")
+    last_id_processed = 0
     while True:
         try:
-            while not manager.broadcast_queue.empty():
-                try:
-                    message_str = manager.broadcast_queue.get_nowait()
-                    payload = json.loads(message_str)
-                    broadcast_type = payload.get("type")
-                    data = payload.get("data")
+            db = None
+            try:
+                db = db_session_module.SessionLocal()
+                messages = db.query(BroadcastMessage).filter(BroadcastMessage.id > last_id_processed).order_by(BroadcastMessage.id).limit(100).all()
+                if messages:
+                    for message in messages:
+                        try:
+                            payload = message.payload
+                            broadcast_type = payload.get("type")
+                            data = payload.get("data")
+                            
+                            if broadcast_type == "broadcast":
+                                await manager.broadcast(data)
+                            elif broadcast_type == "admins":
+                                await manager.broadcast_to_admins(data)
+                            elif broadcast_type == "personal":
+                                user_id = payload.get("user_id")
+                                if user_id:
+                                    await manager.send_personal_message(data, user_id)
+                            
+                            last_id_processed = message.id
+                        except Exception as e:
+                            logger.error(f"Error processing message from DB queue (ID: {message.id}): {e}")
                     
-                    if broadcast_type == "broadcast":
-                        await manager.broadcast(data)
-                    elif broadcast_type == "admins":
-                        await manager.broadcast_to_admins(data)
-                    elif broadcast_type == "personal":
-                        user_id = payload.get("user_id")
-                        if user_id:
-                            await manager.send_personal_message(data, user_id)
-                except Empty:
-                    continue # No more messages for now
-                except Exception as e:
-                    logger.error(f"Error processing message from queue: {e}")
+                    db.query(BroadcastMessage).filter(BroadcastMessage.id <= last_id_processed).delete(synchronize_session=False)
+                    db.commit()
+            finally:
+                if db:
+                    db.close()
             
-            await asyncio.sleep(0.1) # Prevent a tight loop from consuming 100% CPU
+            await asyncio.sleep(0.2)
         except asyncio.CancelledError:
             logger.info("Broadcast listener task cancelled.")
             break
         except Exception as e:
             trace_exception(e)
             logger.error(f"Error in broadcast listener loop: {e}")
-            await asyncio.sleep(1) # Wait a bit before retrying on major error
+            await asyncio.sleep(1)

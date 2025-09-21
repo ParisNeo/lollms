@@ -52,8 +52,9 @@ const props = defineProps({
     autofocus: { type: Boolean, default: false },
     extensions: { type: Array, default: () => [] },
     language: { type: String, default: 'markdown' },
-    renderable: { type: Boolean, default: true },
+    renderable: { type: Boolean, default: false },
     initialMode: { type: String, default: 'edit', validator: (val) => ['edit', 'view'].includes(val) },
+    readOnly: { type: Boolean, default: false },
 });
 
 const emit = defineEmits(['update:modelValue', 'ready']);
@@ -65,6 +66,7 @@ let updatingFromSelf = false;
 const currentMode = ref(props.initialMode);
 const isWrappingEnabled = ref(true);
 let wrappingCompartment = new Compartment();
+let readOnlyCompartment = new Compartment();
 
 defineExpose({ editorView });
 
@@ -281,7 +283,8 @@ const initializeEditor = () => {
         basicSetup,
         keymap.of([indentWithTab]),
         getLanguageExtension(),
-        wrappingCompartment.of(isWrappingEnabled.value ? EditorView.lineWrapping : []), // Dynamic wrapping
+        wrappingCompartment.of(isWrappingEnabled.value ? EditorView.lineWrapping : []),
+        readOnlyCompartment.of(props.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
         EditorView.updateListener.of((update) => {
             if (update.docChanged && !updatingFromSelf) {
                 emit('update:modelValue', update.state.doc.toString());
@@ -314,6 +317,14 @@ const initializeEditor = () => {
 
     emit('ready', { view: editorView.value, state: editorView.value.state });
 };
+
+watch(() => props.readOnly, (isReadOnly) => {
+    if (editorView.value) {
+        editorView.value.dispatch({
+            effects: readOnlyCompartment.reconfigure(isReadOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [])
+        });
+    }
+});
 
 watch(() => props.modelValue, (newValue) => {
     if (editorView.value && newValue !== editorView.value.state.doc.toString()) {

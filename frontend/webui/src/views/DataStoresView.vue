@@ -180,19 +180,8 @@ async function handleAddStore() {
     }
 }
 
-async function handleUpdateStore() {
-    if (!currentSelectedStore.value || !currentSelectedStore.value.id || !currentSelectedStore.value.name) return;
-
-    isLoadingAction.value = 'update_store';
-    try {
-        await dataStore.updateDataStore({
-            id: currentSelectedStore.value.id,
-            name: currentSelectedStore.value.name,
-            description: currentSelectedStore.value.description
-        });
-    } finally {
-        isLoadingAction.value = null;
-    }
+function handleEditStore(store) {
+    uiStore.openModal('editDataStore', { store });
 }
 
 async function handleDeleteStore(store) {
@@ -368,9 +357,11 @@ async function handleRevectorize() {
 
 // Function to check permissions
 function canReadWrite(store) {
-    return store.permission_level === 'owner' || store.permission_level === 'read_write' || store.permission_level === 'revectorize';
+    if (!store) return false;
+    return ['owner', 'read_write', 'revectorize'].includes(store.permission_level);
 }
 function canRevectorize(store) {
+    if (!store) return false;
     return store.permission_level === 'owner' || store.permission_level === 'revectorize';
 }
 </script>
@@ -459,11 +450,11 @@ function canRevectorize(store) {
                     <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleShareStore(currentSelectedStore)" class="btn btn-secondary btn-sm">
                         <IconShare class="w-4 h-4 mr-2" /> Share
                     </button>
+                    <button v-if="canReadWrite(currentSelectedStore)" @click="handleEditStore(currentSelectedStore)" class="btn btn-secondary btn-sm">
+                        <IconPencil class="w-4 h-4 mr-2" /> Edit
+                    </button>
                     <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleDeleteStore(currentSelectedStore)" class="btn btn-danger btn-sm">
                         <IconTrash class="w-4 h-4 mr-2" /> Delete
-                    </button>
-                    <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleUpdateStore" class="btn btn-secondary btn-sm" :disabled="isLoadingAction === 'update_store'">
-                        <IconPencil class="w-4 h-4 mr-2" /> Edit
                     </button>
                     <button @click="fetchFilesInStore(currentSelectedStore.id)" class="btn btn-secondary btn-sm" :disabled="filesLoading || isAnyTaskRunningForSelectedStore">
                         <IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': filesLoading || isAnyTaskRunningForSelectedStore}" /> Refresh Files

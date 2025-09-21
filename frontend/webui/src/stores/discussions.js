@@ -33,7 +33,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const isLoadingDiscussions = ref(false);
     const currentDiscussionId = ref(null);
     const messages = ref([]);
-    const isLoadingMessages = ref(false); // FIX: Added missing state variable
+    const isLoadingMessages = ref(false);
     const generationInProgress = ref(false);
     const titleGenerationInProgressId = ref(null);
     const activeDiscussionContextStatus = ref(null);
@@ -43,6 +43,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const liveDataZoneTokens = ref({ discussion: 0, user: 0, personality: 0, memory: 0 });
     const promptInsertionText = ref('');
     const promptLoadedArtefacts = ref(new Set());
+    const activeDiscussionParticipants = ref({});
 
     function _clearActiveAiTask(discussionId) {
         if (activeAiTasks.value[discussionId]) {
@@ -104,10 +105,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     const composableState = {
         discussions, discussionGroups, sharedWithMe, isLoadingDiscussions, currentDiscussionId, messages,
-        isLoadingMessages, // FIX: Pass state to composables
+        isLoadingMessages, 
         generationInProgress, titleGenerationInProgressId, activeDiscussionContextStatus, activeAiTasks,
         activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
-        promptLoadedArtefacts, _clearActiveAiTask, activeDiscussion, activePersonality, emit
+        promptLoadedArtefacts, _clearActiveAiTask, activeDiscussion, activePersonality, emit,
+        activeDiscussionParticipants
     };
     const composableStores = { uiStore, authStore, dataStore, tasksStore };
 
@@ -140,21 +142,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     function $reset() {
         discussions.value = {};
         discussionGroups.value = [];
+        sharedWithMe.value = [];
+        isLoadingDiscussions.value = false;
         currentDiscussionId.value = null;
         messages.value = [];
-        generationInProgress.value = false;
         isLoadingMessages.value = false;
-        // ... reset other state properties
+        generationInProgress.value = false;
+        titleGenerationInProgressId.value = null;
+        activeDiscussionContextStatus.value = null;
+        activeAiTasks.value = {};
+        activeDiscussionArtefacts.value = [];
+        isLoadingArtefacts.value = false;
+        liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
+        promptInsertionText.value = '';
+        promptLoadedArtefacts.value = new Set();
+        activeDiscussionParticipants.value = {};
     }
 
     // --- FINAL RETURN ---
     return {
         // State
         discussions, currentDiscussionId, messages, generationInProgress, discussionGroups,
-        isLoadingDiscussions, isLoadingMessages, // FIX: Expose state
+        isLoadingDiscussions, isLoadingMessages, 
         titleGenerationInProgressId, activeDiscussionContextStatus,
         activeAiTasks, activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens,
-        promptInsertionText, promptLoadedArtefacts, sharedWithMe,
+        promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
         // Computed
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,

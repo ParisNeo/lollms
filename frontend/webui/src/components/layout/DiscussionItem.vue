@@ -13,6 +13,7 @@ import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconEllipsisVertical from '../../assets/icons/IconEllipsisVertical.vue';
 import IconFolder from '../../assets/icons/IconFolder.vue';
+import IconCopy from '../../assets/icons/IconCopy.vue';
 
 const props = defineProps({
   discussion: {
@@ -68,12 +69,18 @@ function handleRename(event) {
   closeMenu();
 }
 
-function handleSend(event) {
+function handleShare(event) {
   event.stopPropagation();
   uiStore.openModal('shareDiscussion', {
     discussionId: props.discussion.id,
     title: props.discussion.title
   });
+  closeMenu();
+}
+
+function handleClone(event) {
+  event.stopPropagation();
+  store.cloneDiscussion(props.discussion.id);
   closeMenu();
 }
 
@@ -168,7 +175,7 @@ function handleClickOutside() {
               <span>Generate Title</span>
             </button>
 
-            <button v-if="user && user.user_ui_level >= 4" @click="handleSend" class="menu-item">
+            <button v-if="user && user.user_ui_level >= 4" @click="handleShare" class="menu-item">
               <IconSend class="h-4 w-4" />
               <span>Share</span>
             </button>
@@ -182,6 +189,11 @@ function handleClickOutside() {
           </template>
           
           <template v-else>
+            <button @click="handleClone" class="menu-item">
+              <IconCopy class="h-4 w-4" />
+              <span>Clone Discussion</span>
+            </button>
+            <div class="menu-divider"></div>
             <button @click="handleUnsubscribe" class="menu-item danger-item">
               <IconTrash class="h-4 w-4" />
               <span>Unsubscribe</span>

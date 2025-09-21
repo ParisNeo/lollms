@@ -101,6 +101,17 @@ const editImageInput = ref(null);
 const areActionsDisabled = computed(() => discussionsStore.generationInProgress);
 const user = computed(() => authStore.user);
 
+const isCurrentUser = computed(() => props.message.sender_type === 'user' && props.message.sender === authStore.user?.username);
+const isOtherUser = computed(() => props.message.sender_type === 'user' && props.message.sender !== authStore.user?.username);
+const isAi = computed(() => props.message.sender_type === 'assistant');
+const isSystem = computed(() => props.message.sender_type === 'system');
+const isNewManualMessage = computed(() => props.message.id.startsWith('temp-manual-'));
+
+const otherUserIcon = computed(() => {
+    if (!isOtherUser.value) return null;
+    return discussionsStore.activeDiscussionParticipants[props.message.sender]?.icon;
+});
+
 const senderPersonalityIcon = computed(() => {
     if (!isAi.value || !props.message.sender) return null;
     const personality = dataStore.allPersonalities.find(p => p.name === props.message.sender);
@@ -161,17 +172,13 @@ const toggleImage = (index) => {
     });
 };
 
-const isUser = computed(() => props.message.sender_type === 'user');
-const isAi = computed(() => props.message.sender_type === 'assistant');
-const isSystem = computed(() => props.message.sender_type === 'system');
-const isNewManualMessage = computed(() => props.message.id.startsWith('temp-manual-'));
-
 const containsCode = computed(() => {
     return props.message.content && props.message.content.includes('```');
 });
 
 const senderName = computed(() => {
-    if (isUser.value) return authStore.user?.username || 'You';
+    if (isCurrentUser.value) return authStore.user?.username || 'You';
+    if (isOtherUser.value) return props.message.sender;
     if (isAi.value) return props.message.sender || 'Assistant';
     return props.message.sender || 'System';
 });
@@ -252,7 +259,7 @@ const editorExtensions = computed(() => {
             { key: "Escape", run: () => { handleCancelEdit(); return true; }}
         ])
     ];
-    if (uiStore.currentTheme === 'dark' || isUser.value) {
+    if (uiStore.currentTheme === 'dark' || isCurrentUser.value) {
         extensions.push(oneDark);
     }
     return extensions;
@@ -382,14 +389,14 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
         <div class="system-bubble" v-html="parsedMarkdown(message.content)"></div>
     </div>
     <div v-else class="message-row group" :class="{
-        'bg-white dark:bg-slate-800': isAi,
-        'border-t border-gray-200 dark:border-gray-700/50': isAi
+        'bg-white dark:bg-slate-800': isAi || isOtherUser,
+        'border-t border-gray-200 dark:border-gray-700/50': isAi || isOtherUser
     }">
         <div class="message-content-container">
             <!-- Avatar -->
             <div class="flex-shrink-0 pt-1">
-                <UserAvatar v-if="isUser" :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
-                <UserAvatar v-else-if="isAi" :icon="senderPersonalityIcon" :username="senderName" size-class="h-8 w-8" />
+                <UserAvatar v-if="isCurrentUser" :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
+                <UserAvatar v-else-if="isAi || isOtherUser" :icon="isAi ? senderPersonalityIcon : otherUserIcon" :username="senderName" size-class="h-8 w-8" />
             </div>
 
             <!-- Main Content -->
@@ -421,7 +428,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                         <MessageContentRenderer
                             :content="message.content"
                             :is-streaming="message.isStreaming"
-                            :is-user="isUser"
+                            :is-user="isCurrentUser"
                             :has-images="imagesToRender.length > 0"
                         />
                         <div v-if="message.isStreaming && !message.content && (!imagesToRender || imagesToRender.length === 0)" class="typing-indicator">
@@ -507,7 +514,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                             <button v-if="containsCode" :disabled="areActionsDisabled" @click="handleExportCode" title="Export Code" class="action-btn"><IconCode class="w-4 h-4" /></button>
                             <button :disabled="areActionsDisabled" @click="copyContent" title="Copy" class="action-btn"><IconCopy /></button>
                             <button :disabled="areActionsDisabled" @click="toggleEdit" title="Edit" class="action-btn"><IconPencil /></button>
-                            <button :disabled="areActionsDisabled" @click="handleBranchOrRegenerate" :title="isUser ? 'Resend / Branch' : 'Regenerate'" class="action-btn"><IconRefresh /></button>
+                            <button :disabled="areActionsDisabled" @click="handleBranchOrRegenerate" :title="isCurrentUser ? 'Resend / Branch' : 'Regenerate'" class="action-btn"><IconRefresh /></button>
                             <button :disabled="areActionsDisabled" @click="handleDelete" title="Delete" class="action-btn text-red-500 hover:bg-red-200 dark:hover:bg-red-700"><IconTrash /></button>
                         </div>
                         <div v-if="isAi" class="message-rating">

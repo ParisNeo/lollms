@@ -14,17 +14,18 @@ import threading
 import fitz  # PyMuPDF
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, HTTPException, Query)
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from ascii_colors import ASCIIColors, trace_exception
 
 # Local Application Imports
 from backend.db import get_db
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
-from backend.discussion import get_user_discussion, get_user_discussion_manager
+from backend.discussion import get_user_discussion
+from backend.discussion_manager import get_user_discussion_manager
 from backend.models import (UserAuthDetails, DiscussionBranchSwitchRequest,
-                            DiscussionInfo, DiscussionTitleUpdate, MessageOutput
-                            )
+                            DiscussionInfo, DiscussionTitleUpdate, MessageOutput,
+                            UserPublic)
 from backend.models.discussion import DiscussionGroupUpdatePayload
 from backend.db.models.discussion_group import DiscussionGroup as DBDiscussionGroup
 from backend.session import (get_current_active_user,
@@ -107,6 +108,35 @@ def build_discussions_router():
             except Exception as e:
                 trace_exception(e)
         return sorted(infos, key=lambda d: d.last_activity_at or datetime.min, reverse=True)
+
+    @router.get("/{discussion_id}/participants", response_model=List[UserPublic])
+    async def get_discussion_participants(
+        discussion_id: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        dm = get_user_discussion_manager(current_user.username)
+        owner_id = current_user.id
+
+        if not dm.discussion_exists(discussion_id):
+            shared_link = db.query(SharedDiscussionLink).filter(
+                SharedDiscussionLink.discussion_id == discussion_id,
+                SharedDiscussionLink.shared_with_user_id == current_user.id
+            ).first()
+            if not shared_link:
+                raise HTTPException(status_code=404, detail="Discussion not found or you don't have access.")
+            owner_id = shared_link.owner_user_id
+
+        shared_links = db.query(SharedDiscussionLink).filter(
+            SharedDiscussionLink.discussion_id == discussion_id,
+            SharedDiscussionLink.owner_user_id == owner_id
+        ).all()
+        
+        participant_ids = {owner_id}
+        for link in shared_links:
+            participant_ids.add(link.shared_with_user_id)
+            
+        return db.query(DBUser).filter(DBUser.id.in_(list(participant_ids))).all()
 
     @router.get("/{discussion_id}", response_model=List[MessageOutput])
     async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[str] = Query(None), current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[MessageOutput]:

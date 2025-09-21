@@ -2,37 +2,65 @@
 from pathlib import Path
 from typing import List, Optional, Any, Dict
 from lollms_client import LollmsClient, LollmsDataManager, LollmsDiscussion
-from backend.session import user_sessions, get_user_data_root, get_user_lollms_client
+from backend.session import user_sessions, get_user_lollms_client
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
-def get_user_discussion_manager(username: str) -> LollmsDataManager:
-    """
-    Retrieves or creates a LollmsDataManager for a given user.
-    """
-    if "discussion_manager" in user_sessions.get(username, {}):
-        manager = user_sessions[username].get("discussion_manager")
-        if manager:
-            return manager
+from backend.db.models.config import LLMBinding as DBLLMBinding
+from backend.discussion_manager import get_user_discussion_manager
 
-    user_data_path = get_user_data_root(username)
-    db_path = user_data_path / "discussions.db"
-    db_url = f"sqlite:///{db_path.resolve()}"
-    manager = LollmsDataManager(db_path=db_url)
-    
-    if username in user_sessions:
-        user_sessions[username]["discussion_manager"] = manager
-    else:
-        user_sessions[username] = {"discussion_manager": manager}
-    return manager
+
 def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False, lollms_client: Optional[LollmsClient] = None) -> Optional[LollmsDiscussion]:
     """
     Retrieves or creates a LollmsDiscussion object for a user.
     This function now relies on the lollms-client's native LollmsDiscussion class.
     """
-    lc = lollms_client if lollms_client is not None else get_user_lollms_client(username)
+    lc = lollms_client
+    max_context_size = 4096  # Default fallback
+
+    if not lc:
+        if username in user_sessions:
+            lc = get_user_lollms_client(username)
+            max_context_size = user_sessions[username].get("llm_params", {}).get("ctx_size", None) or lc.get_ctx_size() or 4096
+        else:
+            # User is not logged in on this worker (e.g., owner of a shared discussion).
+            # We must build a temporary client from their DB settings.
+            db = next(get_db())
+            try:
+                owner_db = db.query(DBUser).filter(DBUser.username == username).first()
+                if not owner_db:
+                    return None  # Owner not found
+
+                binding_to_use = None
+                user_model_full = owner_db.lollms_model_name
+
+                if user_model_full and '/' in user_model_full:
+                    binding_alias, _ = user_model_full.split('/', 1)
+                    binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias, DBLLMBinding.is_active == True).first()
+
+                if not binding_to_use:
+                    binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+
+                if not binding_to_use:
+                    # No bindings available, cannot create a client.
+                    return None
+                
+                # Simplified client build from DB user settings
+                lc = LollmsClient(
+                    llm_binding_name=binding_to_use.name,
+                    llm_binding_config={
+                        **binding_to_use.config,
+                        "model_name": owner_db.lollms_model_name.split('/')[-1] if user_model_full else binding_to_use.default_model_name
+                    }
+                )
+                max_context_size = owner_db.llm_ctx_size or lc.get_ctx_size() or 4096
+
+            finally:
+                db.close()
+
+    if not lc:
+        return None
+
     dm = get_user_discussion_manager(username)
-    
-    max_context_size = user_sessions[username].get("llm_params", {}).get("ctx_size", None) or lc.get_ctx_size() or 4096
     
     discussion = dm.get_discussion(
         lollms_client=lc,

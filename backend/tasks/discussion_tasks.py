@@ -316,30 +316,42 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
     
     return {"discussion_id": discussion_id, "new_content": summary, "zone": "discussion"}
 
-def _memorize_ltm_task(task: Task, username: str, discussion_id: str, db:Session):
+def _memorize_ltm_task(task: Task, username: str, discussion_id: str):
     task.log("Starting long-term memory memorization task...")
-    db_user = db.query(DBUser).filter(DBUser.username == username).first()
+    with task.db_session_factory() as db:
+        db_user = db.query(DBUser).filter(DBUser.username == username).first()
+        if not db_user:
+            raise Exception("User not found.")
+        
+        discussion = get_user_discussion(username, discussion_id)
+        if not discussion:
+            raise ValueError("Discussion not found.")
+        
+        task.set_progress(20)
+        memory_dict = discussion.memorize()
+        discussion.commit()
+        task.set_progress(80)
+
+        if memory_dict and memory_dict.get("title") and memory_dict.get("content"):
+            new_memory = UserMemory(
+                title=memory_dict["title"],
+                content=memory_dict["content"],
+                owner_user_id=db_user.id
+            )
+            db.add(new_memory)
+            try:
+                db.commit()
+                task.log(f"New memory '{memory_dict['title']}' saved to database.")
+            except Exception as e:
+                trace_exception(e)
+                db.rollback()
+                raise Exception(f"Database error while saving memory: {e}")
+        else:
+            task.log("No new memory was extracted from the discussion.", "INFO")
     
-    discussion = get_user_discussion(username, discussion_id)
-    if not discussion:
-        raise ValueError("Discussion not found.")
-    
-    task.set_progress(20)
-    memory = discussion.memorize()
-    discussion.commit()
     task.set_progress(100)
-    if memory:
-        db_user.memories.append(UserMemory(title=memory.get("title",""), content=memory.get("content",""), created_at= datetime.now(timezone.utc), updated_at= datetime.now(timezone.utc)) )
-    try:
-        db.commit()
-        db.refresh(db_user)
-    except Exception as e:
-        trace_exception(e)
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"Database error: {e}")
-    
-    task.log("Memorization complete and saved.")
-    return {"discussion_id": discussion_id, "new_content": discussion.memory, "zone": "memory"}
+    task.log("Memorization task finished.")
+    return {"discussion_id": discussion_id, "zone": "memory"}
 
 
 def _prune_empty_discussions_task(task: Task, username: str):

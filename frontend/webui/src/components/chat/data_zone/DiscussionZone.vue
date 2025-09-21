@@ -6,6 +6,7 @@ import { useDiscussionsStore } from '../../../stores/discussions';
 import { useUiStore } from '../../../stores/ui';
 import { useDataStore } from '../../../stores/data';
 import { usePromptsStore } from '../../../stores/prompts';
+import { useTasksStore } from '../../../stores/tasks'; // Import tasks store
 import useEventBus from '../../../services/eventBus';
 import CodeMirrorEditor from '../../ui/CodeMirrorComponent/index.vue';
 import ArtefactZone from './ArtefactZone.vue'; // NEW: Import the dedicated component
@@ -33,12 +34,14 @@ const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const dataStore = useDataStore();
 const promptsStore = usePromptsStore();
+const tasksStore = useTasksStore(); // Instantiate tasks store
 const router = useRouter();
 const { on, off } = useEventBus();
 
 const { promptLoadedArtefacts } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { availableTtiModels } = storeToRefs(dataStore);
+const { tasks } = storeToRefs(tasksStore); // Get tasks reactively
 
 const codeMirrorView = ref(null);
 const isProgrammaticChange = ref(false);
@@ -71,7 +74,13 @@ const isProcessing = computed(() => activeDiscussion.value && discussionsStore.a
 const isGeneratingImage = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'generate_image');
 const isTaskRunning = computed(() => isProcessing.value || isGeneratingImage.value);
 
-const discussionEditorOptions = computed(() => ({ readOnly: isTaskRunning.value }));
+const activeTask = computed(() => {
+    if (!activeDiscussion.value) return null;
+    const taskInfo = discussionsStore.activeAiTasks[activeDiscussion.value.id];
+    if (!taskInfo || !taskInfo.taskId) return null;
+    return tasks.value.find(t => t.id === taskInfo.taskId);
+});
+
 const isTtiConfigured = computed(() => availableTtiModels.value.length > 0);
 const canUndoDiscussion = computed(() => discussionHistoryIndex.value > 0);
 const canRedoDiscussion = computed(() => discussionHistoryIndex.value < discussionHistory.value.length - 1);
@@ -168,11 +177,17 @@ async function handleRedoDiscussion() {
 }
 
 watch(discussionDataZone, (newVal) => {
-    if (!isProgrammaticChange.value) recordHistory(newVal);
+    if (!isProgrammaticChange.value) {
+        recordHistory(newVal);
+    }
 });
 
 watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
     if (newDiscussion && (!oldDiscussion || newDiscussion.id !== oldDiscussion.id)) {
+        // If the data zone content is missing, fetch it.
+        if (newDiscussion.discussion_data_zone === undefined) {
+            discussionsStore.refreshDataZones(newDiscussion.id);
+        }
         setupHistory(newDiscussion.discussion_data_zone || '');
     }
 }, { immediate: true, deep: true });
@@ -260,41 +275,22 @@ function isImageActive(index) {
     return !discussionActiveImages.value || discussionActiveImages.value.length <= index || discussionActiveImages.value[index];
 }
 
-function onDataZoneUpdatedFromStore({ discussionId, newContent }) {
-    if (activeDiscussion.value && activeDiscussion.value.id === discussionId) {
-        updateDiscussionDataZoneAndRecordHistory(newContent);
-    }
-}
-
-function updateDiscussionDataZoneAndRecordHistory(newContent) {
-    if (discussionDataZone.value === newContent) return;
-    clearTimeout(discussionHistoryDebounceTimer);
-    if (discussionHistoryIndex.value < discussionHistory.value.length - 1) {
-        discussionHistory.value.splice(discussionHistoryIndex.value + 1);
-    }
-    discussionHistory.value.push(newContent);
-    discussionHistoryIndex.value++;
-    
-    isProgrammaticChange.value = true;
-    discussionDataZone.value = newContent;
-    nextTick(() => { isProgrammaticChange.value = false; });
-}
-
 function handleLoadArtefactToPrompt(content) { dataZonePromptText.value = content; }
 function handleUnloadArtefactFromPrompt() { if (promptLoadedArtefacts.value.size === 0) dataZonePromptText.value = ''; }
+function handleZoneProcessed() { dataZonePromptText.value = ''; }
 
 onMounted(() => {
     const savedWidth = localStorage.getItem('lollms_artefactListWidth');
     if (savedWidth) artefactListWidth.value = parseInt(savedWidth, 10);
-    on('discussion:dataZoneUpdated', onDataZoneUpdatedFromStore);
     on('artefact:load-to-prompt', handleLoadArtefactToPrompt);
     on('artefact:unload-from-prompt', handleUnloadArtefactFromPrompt);
+    on('discussion_zone:processed', handleZoneProcessed);
 });
 
 onUnmounted(() => {
-    off('discussion:dataZoneUpdated', onDataZoneUpdatedFromStore);
     off('artefact:load-to-prompt', handleLoadArtefactToPrompt);
     off('artefact:unload-from-prompt', handleUnloadArtefactFromPrompt);
+    off('discussion_zone:processed', handleZoneProcessed);
 });
 </script>
 
@@ -307,13 +303,13 @@ onUnmounted(() => {
             <div class="flex-grow flex flex-col min-h-0 p-2">
                  <div class="flex-shrink-0 px-1 pb-2 flex items-center justify-between gap-4">
                     <div class="flex items-center gap-1">
-                        <button @click="handleUndoDiscussion" class="action-btn-sm" title="Undo" :disabled="!canUndoDiscussion"><IconUndo class="w-4 h-4" /></button>
-                        <button @click="handleRedoDiscussion" class="action-btn-sm" title="Redo" :disabled="!canRedoDiscussion"><IconRedo class="w-4 h-4" /></button>
+                        <button @click="handleUndoDiscussion" class="action-btn-sm" title="Undo" :disabled="!canUndoDiscussion || isTaskRunning"><IconUndo class="w-4 h-4" /></button>
+                        <button @click="handleRedoDiscussion" class="action-btn-sm" title="Redo" :disabled="!canRedoDiscussion || isTaskRunning"><IconRedo class="w-4 h-4" /></button>
                         <div class="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1"></div>
-                        <button @click="handleCloneDiscussion" class="action-btn-sm" title="Clone Discussion & Artefacts"><IconCopy class="w-4 h-4" /></button>
-                        <button @click="openContextToArtefactModal" class="action-btn-sm" title="Save as Artefact"><IconSave class="w-4 h-4" /></button>
-                        <button @click="refreshDataZones" class="action-btn-sm" title="Refresh Data"><IconRefresh class="w-4 h-4" /></button>
-                        <button @click="discussionDataZone = ''" class="action-btn-sm-danger" title="Clear All Text"><IconTrash class="w-4 h-4" /></button>
+                        <button @click="handleCloneDiscussion" class="action-btn-sm" title="Clone Discussion & Artefacts" :disabled="isTaskRunning"><IconCopy class="w-4 h-4" /></button>
+                        <button @click="openContextToArtefactModal" class="action-btn-sm" title="Save as Artefact" :disabled="isTaskRunning"><IconSave class="w-4 h-4" /></button>
+                        <button @click="refreshDataZones" class="action-btn-sm" title="Refresh Data" :disabled="isTaskRunning"><IconRefresh class="w-4 h-4" /></button>
+                        <button @click="discussionDataZone = ''" class="action-btn-sm-danger" title="Clear All Text" :disabled="isTaskRunning"><IconTrash class="w-4 h-4" /></button>
                     </div>
                 </div>
                 <div class="flex-grow min-h-0 border dark:border-gray-700 rounded-md overflow-hidden">
@@ -321,7 +317,7 @@ onUnmounted(() => {
                         ref="discussionCodeMirrorEditor" 
                         v-model="discussionDataZone" 
                         class="h-full" 
-                        :options="discussionEditorOptions"
+                        :read-only="isTaskRunning"
                         @ready="handleEditorReady"
                     />
                 </div>
@@ -337,8 +333,8 @@ onUnmounted(() => {
                             <IconChevronRight class="w-4 h-4 ml-auto transition-transform" :class="{'rotate-90': !isImagesCollapsed}"/>
                         </button>
                         <div @click.stop class="flex items-center gap-1">
-                            <button @click="handleDeleteAllImages" class="action-btn-sm-danger" title="Delete All Images" :disabled="discussionImages.length === 0"><IconTrash class="w-4 h-4" /></button>
-                            <button @click="triggerDiscussionImageUpload" class="action-btn-sm" title="Add Image(s)" :disabled="isUploadingDiscussionImage">
+                            <button @click="handleDeleteAllImages" class="action-btn-sm-danger" title="Delete All Images" :disabled="discussionImages.length === 0 || isTaskRunning"><IconTrash class="w-4 h-4" /></button>
+                            <button @click="triggerDiscussionImageUpload" class="action-btn-sm" title="Add Image(s)" :disabled="isUploadingDiscussionImage || isTaskRunning">
                                 <IconAnimateSpin v-if="isUploadingDiscussionImage" class="w-4 h-4 animate-spin" /><IconPlus v-else class="w-4 h-4" />
                             </button>
                         </div>
@@ -348,12 +344,28 @@ onUnmounted(() => {
                         <div v-else class="image-grid"><div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="image-card group"><img :src="'data:image/png;base64,' + img_b64" class="image-thumbnail" :class="{'grayscale opacity-50': !isImageActive(index)}" /><div class="image-overlay"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="overlay-btn" title="View"><IconMaximize class="w-3 h-3" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="overlay-btn" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-3 h-3" /><IconEyeOff v-else class="w-3 h-3" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="overlay-btn overlay-btn-danger" title="Delete"><IconXMark class="w-3 h-3" /></button></div></div></div>
                     </div>
                 </div>
-                <ArtefactZone />
+                <ArtefactZone :is-task-running="isTaskRunning" />
             </div>
         </div>
     </div>
     <div class="flex-shrink-0 p-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-      <div class="relative flex items-center">
+      <div v-if="isTaskRunning" class="p-2 space-y-2">
+            <div v-if="activeTask">
+                <div class="flex justify-between items-center text-xs font-semibold">
+                    <span class="text-gray-600 dark:text-gray-300">{{ activeTask.name }}</span>
+                    <span class="font-mono text-gray-500 dark:text-gray-400">{{ activeTask.progress }}%</span>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                    <div class="bg-blue-600 h-1.5 rounded-full" :style="{width: `${activeTask.progress}%`}"></div>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" :title="activeTask.description">{{ activeTask.description }}</p>
+            </div>
+            <div v-else class="flex items-center space-x-3 h-[42px]">
+                <IconAnimateSpin class="h-6 w-6 text-blue-500 animate-spin" />
+                <p class="text-sm font-semibold text-gray-600 dark:text-gray-300">Initializing task...</p>
+            </div>
+      </div>
+      <div v-else class="relative flex items-center">
         <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-icon absolute left-1.5 top-1/2 -translate-y-1/2 z-10">
             <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"> <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button> </DropdownSubmenu>
             <DropdownSubmenu v-if="Object.keys(userPromptsByCategory).length > 0" title="User" icon="user" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>

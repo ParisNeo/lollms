@@ -155,7 +155,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             ollama_service_enabled=is_ollama_service_enabled,
             ollama_require_key=is_ollama_require_key,
             include_memory_date_in_context=db_user.include_memory_date_in_context,
-            llm_settings_overridden=llm_settings_overridden
+            llm_settings_overridden=llm_settings_overridden,
+            latex_builder_enabled=latex_builder_enabled
         )
     finally:
         db.close()
@@ -217,6 +218,10 @@ def reload_lollms_client_mcp(username: str):
             del session['tools_cache']
             print(f"INFO: Invalidated tools cache for user: {username}")
         
+        if 'servers_infos' in session:
+            del session['servers_infos']
+            print(f"INFO: Invalidated MCP servers cache for user: {username}")
+
         if "lollms_clients" in session:
             session["lollms_clients"] = {}
             print(f"INFO: Invalidated all lollms_client instances for user: {username}")
@@ -346,7 +351,10 @@ def build_lollms_client_from_params(
             client_init_params["tti_binding_config"] = tti_binding_config
         # --- END TTI Binding Integration ---
         
-        servers_infos = load_mcps(username)
+        if 'servers_infos' not in session:
+            session['servers_infos'] = load_mcps(username)
+        servers_infos = session['servers_infos']
+        
         if servers_infos:
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}

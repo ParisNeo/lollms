@@ -5,7 +5,7 @@ from typing import Optional
 import os
 import subprocess
 import sys
-from multiprocessing import cpu_count, Manager, Lock
+from multiprocessing import cpu_count, Lock
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors, trace_exception
 import asyncio
@@ -18,7 +18,7 @@ FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, inspect
 
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
@@ -27,6 +27,8 @@ from backend.config import (
     LOLLMS_CLIENT_DEFAULTS, APP_DATA_DIR
 )
 from backend.db import init_database, get_db, session as db_session_module
+from backend.db.base import Base
+from backend.db.migration import run_schema_migrations_and_bootstrap, check_and_update_db_version
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
@@ -77,13 +79,6 @@ from backend.zoo_cache import load_cache
 import uvicorn
 from backend.settings import settings
 
-init_database(APP_DB_URL)
-db = db_session_module.SessionLocal()
-try:
-    settings.load_from_db(db)
-finally:
-    db.close()
-
 broadcast_listener_task = None
 
 def run_one_time_startup_tasks(lock: Lock):
@@ -93,14 +88,27 @@ def run_one_time_startup_tasks(lock: Lock):
     """
     acquired = lock.acquire(block=False)
     if not acquired:
-        ASCIIColors.yellow(f"Worker {os.getpid()} did not acquire startup lock. Skipping one-time tasks.")
         return
     
     ASCIIColors.green(f"Worker {os.getpid()} acquired startup lock. Running one-time tasks...")
     try:
         print("--- Running One-Time Startup Tasks ---")
         
-        # ... (rest of the startup logic: migration, db defaults, repo cloning, etc.)
+        # --- Database Migration and Bootstrapping (run by one worker) ---
+        engine = db_session_module.engine
+        Base.metadata.create_all(bind=engine)
+        print(f"INFO: Database tables checked/created using metadata at URL: {APP_DB_URL}")
+        with engine.connect() as connection:
+            inspector = inspect(connection)
+            try:
+                run_schema_migrations_and_bootstrap(connection, inspector)
+                print("INFO: Database schema migration/check completed successfully.")
+            except Exception as e_migrate:
+                print(f"CRITICAL: Database migration failed: {e_migrate}.")
+                trace_exception(e_migrate)
+                raise
+        check_and_update_db_version(db_session_module.SessionLocal)
+        # --- End Database Migration ---
         
         print("\n--- Running Automated Discussion Migration ---")
         db_session = None
@@ -320,14 +328,39 @@ def run_one_time_startup_tasks(lock: Lock):
             if db_for_sync: db_for_sync.close()
 
         load_cache()
+        
+        # Initialize the task manager AFTER DB is stable
+        task_manager.init_app(db_session_module.SessionLocal)
+
+        try:
+            ASCIIColors.yellow("--- Running App Cleanup and Autostart (once) ---")
+            cleanup_and_autostart_apps()
+            ASCIIColors.green("--- Autostart Complete ---")
+        except Exception as e:
+            ASCIIColors.error(f"--- Autostart Failed: {e} ---")
+            trace_exception(e)
+            
     finally:
         lock.release()
+        ASCIIColors.green(f"Worker {os.getpid()} released startup lock.")
 
 async def startup_event():
     """
     This event runs for EACH worker process created by Uvicorn.
     """
     global broadcast_listener_task
+    
+    # Each worker must initialize its own database connection pool.
+    init_database(APP_DB_URL)
+    
+    # Each worker needs to load settings into its own memory.
+    # The _is_loaded flag in settings will prevent redundant logging.
+    db = db_session_module.SessionLocal()
+    try:
+        settings.load_from_db(db)
+    finally:
+        db.close()
+    
     manager.set_loop(asyncio.get_running_loop())
     task_manager.init_app(db_session_module.SessionLocal)
     
@@ -344,63 +377,12 @@ async def shutdown_event():
         except asyncio.CancelledError:
             ASCIIColors.info(f"Broadcast listener task in worker {os.getpid()} cancelled successfully.")
 
-init_database(APP_DB_URL)
-db = db_session_module.SessionLocal()
-
 app = FastAPI(
     title="LoLLMs Platform", 
     description="API for a multi-user LoLLMs and SafeStore chat application.", 
     version=APP_VERSION,
     on_startup=[startup_event],
     on_shutdown=[shutdown_event]
-)
-
-host = SERVER_CONFIG.get("host")
-port = SERVER_CONFIG.get("port")
-https_enabled = SERVER_CONFIG.get("https_enabled")
-
-allowed_origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
-if host == "0.0.0.0":
-    allowed_origins.append(f"http://localhost:{port}")
-    allowed_origins.append(f"http://127.0.0.1:{port}")
-    if https_enabled:
-        allowed_origins.append(f"https://localhost:{port}")
-        allowed_origins.append(f"https://127.0.0.1:{port}")
-else:
-    allowed_origins.append(f"http://{host}:{port}")
-    if https_enabled:
-        allowed_origins.append(f"https://{host}:{port}")
-
-try:
-    sso_apps = db.query(DBApp).filter(DBApp.active == True, DBApp.authentication_type == 'lollms_sso').all()
-    sso_mcps = db.query(DBMCP).filter(DBMCP.active == True, DBMCP.authentication_type == 'lollms_sso').all()
-    openai_apps = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.allow_openai_api_access == True).all()
-    
-    sso_services = sso_apps + sso_mcps + openai_apps
-    
-    for service in sso_services:
-        if service.url:
-            try:
-                parsed_url = urlparse(service.url)
-                origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                if origin not in allowed_origins:
-                    allowed_origins.append(origin)
-                    ASCIIColors.green(f"CORS: Allowing authenticated app origin: {origin}")
-            except Exception as e:
-                ASCIIColors.warning(f"CORS: Could not parse URL for service '{service.name}': {service.url}. Error: {e}")
-finally:
-    db.close()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 app.include_router(auth_router)
@@ -440,35 +422,72 @@ app.include_router(discussion_groups_router)
 add_ui_routes(app)
 
 if __name__ == "__main__":
+    # This block is executed only by the main process, before Uvicorn starts workers.
+    init_database(APP_DB_URL)
+    db = db_session_module.SessionLocal()
+    try:
+        # Load settings once for the main process to use for CORS, etc.
+        settings.load_from_db(db)
+        
+        # --- CORS Setup ---
+        host = SERVER_CONFIG.get("host")
+        port = SERVER_CONFIG.get("port")
+        https_enabled = SERVER_CONFIG.get("https_enabled")
+
+        allowed_origins = [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+        ]
+
+        if host == "0.0.0.0":
+            allowed_origins.extend([f"http://localhost:{port}", f"http://127.0.0.1:{port}"])
+            if https_enabled:
+                allowed_origins.extend([f"https://localhost:{port}", f"https://127.0.0.1:{port}"])
+        else:
+            allowed_origins.append(f"http://{host}:{port}")
+            if https_enabled:
+                allowed_origins.append(f"https://{host}:{port}")
+
+        sso_apps = db.query(DBApp).filter(DBApp.active == True, DBApp.authentication_type == 'lollms_sso').all()
+        sso_mcps = db.query(DBMCP).filter(DBMCP.active == True, DBMCP.authentication_type == 'lollms_sso').all()
+        openai_apps = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.allow_openai_api_access == True).all()
+        
+        sso_services = sso_apps + sso_mcps + openai_apps
+        for service in sso_services:
+            if service.url:
+                try:
+                    parsed_url = urlparse(service.url)
+                    origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+                    if origin not in allowed_origins:
+                        allowed_origins.append(origin)
+                        ASCIIColors.green(f"CORS: Allowing authenticated app origin: {origin}")
+                except Exception as e:
+                    ASCIIColors.warning(f"CORS: Could not parse URL for service '{service.name}': {service.url}. Error: {e}")
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=allowed_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
+    finally:
+        db.close()
    
     data_dir = Path(settings.get("data_dir","data"))
     mcp_dir = data_dir / "mcps"
     apps_dir = data_dir / "apps"
     mcp_dir.mkdir(parents=True, exist_ok=True)
     apps_dir.mkdir(parents=True, exist_ok=True)
-    host_setting = settings.get("host", host)
-
-    port_setting = int(settings.get("port", port))
+    host_setting = settings.get("host", "0.0.0.0")
+    port_setting = int(settings.get("port", SERVER_CONFIG.get("port", 9642)))
     workers = int(os.getenv("LOLLMS_WORKERS", settings.get("workers", SERVER_CONFIG.get("workers", cpu_count()))))
 
     # --- MAIN PROCESS ONLY SETUP ---
-    mp_manager = Manager()
-    broadcast_queue = mp_manager.Queue()
     startup_lock = Lock()
-    manager.set_broadcast_queue(broadcast_queue)
 
     run_one_time_startup_tasks(startup_lock)
     
-    # Initialize the task manager in the main process BEFORE using it for autostart.
-    task_manager.init_app(db_session_module.SessionLocal)
-
-    try:
-        ASCIIColors.yellow("--- Running App Cleanup and Autostart (once) ---")
-        cleanup_and_autostart_apps()
-        ASCIIColors.green("--- Autostart Complete ---")
-    except Exception as e:
-        ASCIIColors.error(f"--- Autostart Failed: {e} ---")
-        trace_exception(e)
     # --- END MAIN PROCESS ONLY SETUP ---
 
     ssl_params = {}
@@ -491,6 +510,7 @@ if __name__ == "__main__":
             print(f"         Keyfile path: '{keyfile}'")
             print("         Server will start without HTTPS to avoid crashing.")
 
+    # This banner is now printed only once by the main process
     print("")
     ASCIIColors.cyan(f"--- LoLLMs Plateform (v{APP_VERSION}) ---")
     protocol = "https" if ssl_params else "http"

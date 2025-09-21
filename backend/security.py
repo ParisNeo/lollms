@@ -69,12 +69,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta
     else:
-        expire_minutes = settings.get("access_token_expire_minutes", 30)
         try:
+            expire_minutes = settings.get("access_token_expire_minutes", 30*24*3600)
+            if isinstance(expire_minutes, dict):
+                expire_minutes = expire_minutes.get("value", 30*24*3600) # Default to 30 days
             minutes = int(expire_minutes)
         except (ValueError, TypeError):
-            print(f"WARNING: Invalid 'access_token_expire_minutes' value ({expire_minutes}). Using fallback of 30 minutes.")
-            minutes = 30
+            print(f"WARNING: Invalid 'access_token_expire_minutes' value ({expire_minutes}). Using fallback of 30 days.")
+            minutes = 30*24*3600 # 30 days in minutes
 
         expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
 

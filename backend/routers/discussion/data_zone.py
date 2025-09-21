@@ -14,7 +14,7 @@ from backend.db import get_db
 from backend.models import UserAuthDetails, DataZones, DiscussionDataZoneUpdate, TaskInfo, DiscussionImageUpdateResponse
 from backend.session import get_current_active_user
 from backend.task_manager import task_manager
-from backend.routers.discussion.helpers import get_discussion_and_owner_for_request, get_user_discussion
+from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.tasks.discussion_tasks import _generate_image_task, _process_data_zone_task, _memorize_ltm_task, _to_task_info
 
 from backend.db.models.user import (User as DBUser)
@@ -22,23 +22,20 @@ from backend.db.models.user import (User as DBUser)
 
 def build_datazone_router(router: APIRouter):
     @router.get("/{discussion_id}/data_zones", response_model=DataZones)
-    def get_all_data_zones(
+    async def get_all_data_zones(
         discussion_id: str,
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        discussion, owner_username, _, owner_db_user = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         
-        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
-        discussion.memory = "\n".join(["---"+m.title+"---\n"+m.content+"\n------" for m in db_user.memories]) if db_user and db_user.memories else ""
+        discussion.memory = "\n".join(["---"+m.title+"---\n"+m.content+"\n------" for m in owner_db_user.memories]) if owner_db_user and owner_db_user.memories else ""
         
         # Use get_discussion_images to ensure data is in the correct format
         images_info = discussion.get_discussion_images()
         
         return DataZones(
-            user_data_zone=db_user.data_zone if db_user else "",
+            user_data_zone=owner_db_user.data_zone if owner_db_user else "",
             discussion_data_zone=discussion.discussion_data_zone,
             personality_data_zone=discussion.personality_data_zone,
             memory=discussion.memory,
@@ -47,24 +44,22 @@ def build_datazone_router(router: APIRouter):
         )
 
     @router.get("/{discussion_id}/data_zone", response_model=Dict[str, str])
-    def get_discussion_data_zone(
+    async def get_discussion_data_zone(
         discussion_id: str,
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         return {"content": discussion.discussion_data_zone or ""}
 
     @router.put("/{discussion_id}/data_zone", status_code=200)
-    def update_discussion_data_zone(
+    async def update_discussion_data_zone(
         discussion_id: str,
         payload: DiscussionDataZoneUpdate,
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
         try:
             discussion.discussion_data_zone = payload.content
@@ -75,39 +70,36 @@ def build_datazone_router(router: APIRouter):
             raise HTTPException(status_code=500, detail=f"Failed to update Data Zone: {e}")
 
     @router.post("/{discussion_id}/process_data_zone", response_model=TaskInfo, status_code=202)
-    def summarize_discussion_data_zone(
+    async def summarize_discussion_data_zone(
         discussion_id: str,
         prompt: Optional[str] = Form(None),
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
         db_task = task_manager.submit_task(
             name=f"Processing Data Zone for: {discussion.metadata.get('title', 'Untitled')}",
             target=_process_data_zone_task,
-            args=(current_user.username, discussion_id, prompt),
+            args=(owner_username, discussion_id, prompt),
             description=f"AI is processing the discussion data zone content.",
             owner_username=current_user.username
         )
         return _to_task_info(db_task)
 
     @router.post("/{discussion_id}/memorize", response_model=TaskInfo, status_code=202)
-    def memorize_ltm(
+    async def memorize_ltm(
         discussion_id: str,
         db: Session = Depends(get_db),
         current_user: UserAuthDetails = Depends(get_current_active_user)    
     ):
         
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
 
         db_task = task_manager.submit_task(
             name=f"Memorize LTM for: {discussion.metadata.get('title', 'Untitled')}",
             target=_memorize_ltm_task,
-            args=(current_user.username, discussion_id, db),
+            args=(owner_username, discussion_id),
             description="AI is analyzing the conversation to extract key facts for long-term memory.",
             owner_username=current_user.username
         )
@@ -117,11 +109,10 @@ def build_datazone_router(router: APIRouter):
     async def add_discussion_image(
         discussion_id: str,
         file: UploadFile = File(...),
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
 
         try:
             content_type = file.content_type
@@ -187,11 +178,10 @@ def build_datazone_router(router: APIRouter):
     async def toggle_discussion_image(
         discussion_id: str,
         image_index: int,
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
             discussion.toggle_discussion_image_activation(image_index)
             discussion.commit()
@@ -214,11 +204,10 @@ def build_datazone_router(router: APIRouter):
     async def delete_discussion_image_from_discussion(
         discussion_id: str,
         image_index: int,
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
             discussion.remove_discussion_image(image_index)
             discussion.commit()
@@ -240,11 +229,10 @@ def build_datazone_router(router: APIRouter):
     @router.delete("/{discussion_id}/images", response_model=Dict[str, List[Any]])
     async def delete_all_discussion_images(
         discussion_id: str,
-        current_user: UserAuthDetails = Depends(get_current_active_user)
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
             discussion.images = []
             discussion.commit()

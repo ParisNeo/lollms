@@ -58,8 +58,8 @@ export const useDataStore = defineStore('data', () => {
         const grouped = mcpTools.value.reduce((acc, tool) => {
             const parts = tool.name.split('::');
             if (parts.length !== 2) return acc;
-            const mcpName = parts[0];
-            const toolName = parts[1];
+            const mcpName = parts;
+            const toolName = parts;
             if (!acc[mcpName]) {
                 acc[mcpName] = [];
             }
@@ -554,7 +554,7 @@ export const useDataStore = defineStore('data', () => {
 
     function $reset() {
         availableLollmsModels.value = [];
-        availableTtiModels.value = []; // NEW
+        availableTtiModels.value = [];
         ownedDataStores.value = [];
         sharedDataStores.value = [];
         userPersonalities.value = [];
@@ -564,7 +564,10 @@ export const useDataStore = defineStore('data', () => {
         mcpTools.value = [];
         userApps.value = [];
         systemApps.value = [];
+        isLoadingLollmsModels.value = false;
+        isLoadingTtiModels.value = false;
         _languages.value = [];
+        isLoadingLanguages.value = false;
         apiKeys.value = [];
     }
 

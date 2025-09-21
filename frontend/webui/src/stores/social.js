@@ -572,6 +572,28 @@ export const useSocialStore = defineStore('social', () => {
         }
     }
 
+    function $reset() {
+        friends.value = [];
+        pendingFriendRequests.value = [];
+        blockedUsers.value = [];
+        isLoadingFriends.value = false;
+        feedPosts.value = [];
+        profiles.value = {};
+        userPosts.value = {};
+        isLoadingFeed.value = false;
+        isLoadingProfile.value = false;
+        isLoadingRequests.value = false;
+        isLoadingBlocked.value = false;
+        comments.value = {};
+        isLoadingComments.value = {};
+        conversations.value = [];
+        activeConversations.value = {};
+        isLoadingConversations.value = false;
+        isLoadingMessages.value = false;
+        socket.value = null;
+        isSocketConnected.value = false;
+    }
+
     return {
         feedPosts,
         profiles,
@@ -628,5 +650,6 @@ export const useSocialStore = defineStore('social', () => {
         handleNewComment,
         handleNewDm,
         markConversationAsRead,
+        $reset
     };
 });

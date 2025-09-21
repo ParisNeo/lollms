@@ -21,12 +21,22 @@ export function useDiscussionSharing(state, stores, getActions) {
                 target_user_id: targetUserId,
                 permission_level: permissionLevel,
             });
-            uiStore.addNotification(response.data.message || `Discussion shared successfully!`, 'success');
-            uiStore.closeModal();
+            // Notifications are handled in the modal for individual/bulk actions
         } catch (error) {
             console.error("Failed to share discussion:", error);
+            throw error; // Re-throw to be handled in the component
         }
     }
+
+    async function revokeShare({ discussionId, shareId }) {
+        try {
+            await apiClient.delete(`/api/discussions/${discussionId}/share/${shareId}`);
+        } catch (error) {
+            console.error("Failed to revoke share:", error);
+            throw error; // Re-throw to be handled in the component
+        }
+    }
+
 
     async function unsubscribeFromSharedDiscussion(shareId) {
         const confirmed = await uiStore.showConfirmation({
@@ -37,12 +47,23 @@ export function useDiscussionSharing(state, stores, getActions) {
         if (!confirmed) return;
 
         try {
+            const linkToRemove = sharedWithMe.value.find(d => d.share_id === shareId);
+            const discussionIdToRemove = linkToRemove?.id;
+
             await apiClient.delete(`/api/discussions/unsubscribe/${shareId}`);
+            
             sharedWithMe.value = sharedWithMe.value.filter(d => d.share_id !== shareId);
-            if (currentDiscussionId.value && !discussions.value[currentDiscussionId.value] && !sharedWithMe.value.some(d => d.id === currentDiscussionId.value)) {
-                currentDiscussionId.value = null;
-                state.messages.value = [];
+            
+            if (discussionIdToRemove) {
+                if (discussions.value[discussionIdToRemove]) {
+                    delete discussions.value[discussionIdToRemove];
+                }
+
+                if (currentDiscussionId.value === discussionIdToRemove) {
+                    getActions().selectDiscussion(null);
+                }
             }
+            
             uiStore.addNotification('Successfully unsubscribed from the discussion.', 'success');
         } catch (error) {
             console.error("Failed to unsubscribe:", error);
@@ -62,6 +83,7 @@ export function useDiscussionSharing(state, stores, getActions) {
     return {
         fetchSharedWithMe,
         shareDiscussion,
+        revokeShare,
         unsubscribeFromSharedDiscussion,
         sendDiscussion
     };

@@ -12,7 +12,7 @@ export function processSingleMessage(msg) {
     const authStore = useAuthStore();
     const dataStore = useDataStore();
     if (!msg) return null;
-    const username = authStore.user?.username?.toLowerCase();
+    const username = authStore.user?.username;
     
     // Consolidate metadata access
     const metadata = msg.metadata || {};
@@ -25,11 +25,28 @@ export function processSingleMessage(msg) {
     // Default to true if model info is not found (e.g., for older messages)
     const visionSupport = modelInfo?.alias?.has_vision ?? true;
     
+    // --- Sender Type Correction Logic ---
+    let senderType = msg.sender_type;
+    if (!senderType) {
+        // This is a fallback for older messages that might not have sender_type
+        const allPersonalityNames = new Set(dataStore.allPersonalities.map(p => p.name));
+        if (msg.sender === username) {
+            senderType = 'user';
+        } else if (allPersonalityNames.has(msg.sender)) {
+            senderType = 'assistant';
+        } else {
+            // If it's not the current user and not a known personality,
+            // it's most likely another user in a shared discussion.
+            senderType = 'user';
+        }
+    }
+    // --- End Correction Logic ---
+
     return {
         ...msg,
         binding_name,
         model_name,
-        sender_type: msg.sender_type || (msg.sender?.toLowerCase() === username ? 'user' : 'assistant'),
+        sender_type: senderType,
         events: msg.events || metadata.events || [],
         sources: msg.sources || metadata.sources || [],
         image_references: msg.image_references || [],

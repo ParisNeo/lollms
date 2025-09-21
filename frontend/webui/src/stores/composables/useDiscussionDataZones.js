@@ -3,7 +3,7 @@ import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 
 export function useDiscussionDataZones(state, stores, getActions) {
-    const { discussions, currentDiscussionId, activeDiscussionContextStatus, liveDataZoneTokens, activeAiTasks, _clearActiveAiTask } = state;
+    const { discussions, currentDiscussionId, activeDiscussionContextStatus, liveDataZoneTokens, activeAiTasks, _clearActiveAiTask, sharedWithMe } = state;
     const { uiStore, tasksStore } = stores;
     const { emit } = useEventBus();
 
@@ -138,20 +138,31 @@ export function useDiscussionDataZones(state, stores, getActions) {
         }
     }
 
-    function handleDataZoneUpdate({ discussion_id, zone, new_content }) {
+    async function handleDataZoneUpdate({ discussion_id, zone, new_content }) {
         if (zone === 'discussion') {
             const discussion = discussions.value[discussion_id];
             if (discussion) {
-                emit('discussion:dataZoneUpdated', { discussionId: discussion_id, newContent: new_content });
+                // Force reactivity by creating a new object
+                discussions.value[discussion_id] = {
+                    ...discussion,
+                    discussion_data_zone: new_content
+                };
+                
                 uiStore.addNotification('Data zone has been updated by AI.', 'success');
+                
                 if (discussion_id === currentDiscussionId.value) {
-                    if (state.activeDiscussionArtefacts.value && state.activeDiscussionArtefacts.value.length > 0) {
-                        state.activeDiscussionArtefacts.value = state.activeDiscussionArtefacts.value.map(artefact => ({ ...artefact, is_loaded: false }));
-                    }
+                    emit('discussion_zone:processed');
+                    // The backend task clears loaded artefacts, so we need to refresh the list
+                    getActions().fetchArtefacts(discussion_id);
                 }
             }
         } else if (zone === 'memory') {
-            uiStore.addNotification('An AI task has suggested a new memory. Check the LTM panel.', 'info');
+            const { useMemoriesStore } = await import('../../stores/memories');
+            await useMemoriesStore().fetchMemories();
+            uiStore.addNotification('A new memory has been created.', 'info');
+            if (discussion_id === currentDiscussionId.value) {
+                emit('discussion_zone:processed');
+            }
         }
         
         if (discussion_id === currentDiscussionId.value) {
@@ -159,6 +170,22 @@ export function useDiscussionDataZones(state, stores, getActions) {
         }
     }
     
+    async function handleDiscussionImagesUpdated({ discussion_id, discussion_images, active_discussion_images }) {
+        const discussion = discussions.value[discussion_id];
+        if (discussion) {
+            // Force reactivity
+            discussions.value[discussion_id] = {
+                ...discussion,
+                discussion_images: discussion_images,
+                active_discussion_images: active_discussion_images
+            };
+
+            if (discussion_id === currentDiscussionId.value) {
+                emit('discussion_zone:processed');
+            }
+        }
+    }
+
     function setDiscussionDataZoneContent(discussionId, content) {
         if (discussions.value[discussionId]) {
             discussions.value[discussionId].discussion_data_zone = content;
@@ -200,6 +227,6 @@ export function useDiscussionDataZones(state, stores, getActions) {
         fetchContextStatus, fetchDataZones, updateDataZone,
         summarizeDiscussionDataZone, generateImageFromDataZone, memorizeLTM,
         handleDataZoneUpdate, setDiscussionDataZoneContent, refreshDataZones,
-        updateLiveTokenCount
+        updateLiveTokenCount, handleDiscussionImagesUpdated
     };
 }

@@ -28,6 +28,7 @@ import ArtefactViewerModal from './components/modals/ArtefactViewerModal.vue';
 import MemoryEditorModal from './components/modals/MemoryEditorModal.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ShareDataStoreModal from './components/modals/ShareDataStoreModal.vue';
+import EditDataStoreModal from './components/modals/EditDataStoreModal.vue';
 import ExportModal from './components/modals/ExportModal.vue';
 import ImportModal from './components/modals/ImportModal.vue';
 import InteractiveOutputModal from './components/modals/InteractiveOutputModal.vue';
@@ -200,6 +201,7 @@ onMounted(async () => {
     <ArtefactViewerModal v-if="activeModal === 'artefactViewer'" />
     <MemoryEditorModal v-if="activeModal === 'memoryEditor'" />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
+    <EditDataStoreModal v-if="activeModal === 'editDataStore'" />
     <ExportModal v-if="activeModal === 'export'" />
     <ImportModal v-if="activeModal === 'import'" />
     <InteractiveOutputModal v-if="activeModal === 'interactiveOutput'" />
