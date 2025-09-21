@@ -275,6 +275,7 @@ async function handleSendMessage() {
         imageErrors.value.clear();
         if (textareaRef.value) autoResizeTextarea();
     } catch (error) { 
+        console.error(error)
         uiStore.addNotification('There was an error sending your message.', 'error'); 
     }
 }

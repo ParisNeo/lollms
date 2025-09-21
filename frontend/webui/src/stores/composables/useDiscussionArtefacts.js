@@ -1,10 +1,9 @@
 // frontend/webui/src/stores/composables/useDiscussionArtefacts.js
-import { ref, nextTick } from 'vue'; // Import nextTick
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 
-export function useDiscussionArtefacts(state, stores) {
-    const { discussions, currentDiscussionId, activeDiscussionArtefacts, isLoadingArtefacts, promptLoadedArtefacts } = state;
+export function useDiscussionArtefacts(state, stores, getActions) {
+    const { discussions, activeDiscussionArtefacts, isLoadingArtefacts, promptLoadedArtefacts } = state;
     const { uiStore, tasksStore } = stores;
     const { emit } = useEventBus();
 
@@ -99,18 +98,15 @@ export function useDiscussionArtefacts(state, stores) {
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/load-to-context`, { title: artefactTitle, version: version });
             
-            // First, update the list of artefacts.
             activeDiscussionArtefacts.value = response.data.artefacts.sort((a,b) => a.title.localeCompare(b.title));
 
-            // Wait for the next event loop tick to process the second update.
             setTimeout(() => {
-                // Then, update the data zone content.
                 if (discussions.value[discussionId]) {
                     discussions.value[discussionId].discussion_data_zone = response.data.discussion_data_zone;
                 }
                 
-                state.updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
-                state.fetchContextStatus(discussionId);
+                getActions().updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
+                getActions().fetchContextStatus(discussionId);
             }, 0);
             
             uiStore.addNotification(`'${artefactTitle}' loaded into context.`, 'success');
@@ -124,17 +120,15 @@ export function useDiscussionArtefacts(state, stores) {
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/load-all-to-context`);
             
-            // First, update artefacts
             activeDiscussionArtefacts.value = response.data.artefacts.sort((a,b) => a.title.localeCompare(b.title));
 
-            // Then, update data zone in the next tick
             setTimeout(() => {
                 if (discussions.value[discussionId]) {
                     discussions.value[discussionId].discussion_data_zone = response.data.discussion_data_zone;
                 }
                 
-                state.updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
-                state.fetchContextStatus(discussionId); 
+                getActions().updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
+                getActions().fetchContextStatus(discussionId); 
             }, 0);
             
             uiStore.addNotification('All artefacts loaded into context.', 'success');
@@ -169,21 +163,19 @@ export function useDiscussionArtefacts(state, stores) {
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/unload-from-context`, { title: artefactTitle, version });
             
-            // First, update the list of artefacts.
             if (response.data.artefacts && Array.isArray(response.data.artefacts)) {
                 activeDiscussionArtefacts.value = response.data.artefacts.sort((a, b) => a.title.localeCompare(b.title));
             } else {
                 activeDiscussionArtefacts.value = [];
             }
             
-            // Then, update the data zone content in the next tick.
             setTimeout(() => {
                 if (discussions.value[discussionId]) {
                     discussions.value[discussionId].discussion_data_zone = response.data.discussion_data_zone;
                 }
                 
-                state.updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
-                state.fetchContextStatus(discussionId);
+                getActions().updateLiveTokenCount('discussion', response.data.discussion_data_zone_tokens);
+                getActions().fetchContextStatus(discussionId);
             }, 0);
             
             uiStore.addNotification(`'${artefactTitle}' unloaded from context.`, 'success');

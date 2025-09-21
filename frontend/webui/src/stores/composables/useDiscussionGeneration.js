@@ -1,48 +1,20 @@
 // frontend/webui/src/stores/composables/useDiscussionGeneration.js
-import { ref } from 'vue';
 import apiClient from '../../services/api';
-import { useUiStore } from '../ui';
-import { useAuthStore } from '../auth';
-import { useDataStore } from '../data';
+import { processSingleMessage } from './discussionProcessor'; // IMPORT the shared function
 
-// LOCAL HELPER to break import cycle
-function processSingleMessage(msg, authStore, dataStore) {
-    if (!msg) return null;
-    const username = authStore.user?.username?.toLowerCase();
-    const binding_name = msg.binding_name || msg.metadata?.binding;
-    const model_name = msg.model_name || msg.metadata?.model;
-    const modelUsedId = `${binding_name}/${model_name}`;
-    const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelUsedId);
-    const visionSupport = modelInfo?.alias?.has_vision ?? true;
-    return {
-        ...msg,
-        binding_name, model_name,
-        sender_type: msg.sender_type || (msg.sender?.toLowerCase() === username ? 'user' : 'assistant'),
-        events: msg.events || (msg.metadata?.events) || [],
-        sources: msg.sources || (msg.metadata?.sources) || [],
-        image_references: msg.image_references || [],
-        active_images: msg.active_images || [],
-        vision_support: visionSupport,
-        branches: msg.branches || null,
-    };
-}
-
-export function useDiscussionGeneration(state) {
+export function useDiscussionGeneration(state, stores, getActions) {
     const { discussions, currentDiscussionId, messages, generationInProgress, activePersonality, promptLoadedArtefacts, _clearActiveAiTask } = state;
-    const uiStore = useUiStore(); // Moved to the top level of the composable
+    const { uiStore, authStore, dataStore } = stores;
 
     let activeGenerationAbortController = null;
 
     async function sendMessage(payload) {
-        const dataStore = useDataStore();
-        const authStore = useAuthStore();
-        
         if (generationInProgress.value) {
             uiStore.addNotification('A generation is already in progress.', 'warning');
             return;
         }
         if (!currentDiscussionId.value) {
-            await state.createNewDiscussion();
+            await getActions().createNewDiscussion();
         }
         if (!state.activeDiscussion.value) return;
 
@@ -140,12 +112,12 @@ export function useDiscussionGeneration(state) {
                                 const finalData = data.data;
                                 const userMsgIndex = messages.value.findIndex(m => m.id === tempUserMessage.id);
                                 if (userMsgIndex !== -1 && finalData.user_message) {
-                                    messages.value.splice(userMsgIndex, 1, processSingleMessage(finalData.user_message, authStore, dataStore));
+                                    messages.value.splice(userMsgIndex, 1, processSingleMessage(finalData.user_message));
                                 }
 
                                 const aiMsgIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
                                 if (aiMsgIndex !== -1 && finalData.ai_message) {
-                                    messages.value.splice(aiMsgIndex, 1, processSingleMessage(finalData.ai_message, authStore, dataStore));
+                                    messages.value.splice(aiMsgIndex, 1, processSingleMessage(finalData.ai_message));
                                 }
                                 break;
                             }
@@ -163,8 +135,8 @@ export function useDiscussionGeneration(state) {
             if (messageToUpdate) messageToUpdate.isStreaming = false;
             generationInProgress.value = false;
             activeGenerationAbortController = null;
-            await state.fetchContextStatus(currentDiscussionId.value);
-            state.loadDiscussions();
+            await getActions().fetchContextStatus(currentDiscussionId.value);
+            await getActions().loadDiscussions();
         }
     }
 
@@ -179,7 +151,7 @@ export function useDiscussionGeneration(state) {
             try { 
                 await apiClient.post(`/api/discussions/${currentDiscussionId.value}/stop_generation`); 
             } catch(e) { console.warn("Backend stop signal failed.", e); }
-            await state.refreshActiveDiscussionMessages();
+            await getActions().refreshActiveDiscussionMessages();
         }
         uiStore.addNotification('Generation stopped.', 'info');
     }
@@ -190,16 +162,17 @@ export function useDiscussionGeneration(state) {
             await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: userMessageToResend.id });
             const promptIndex = messages.value.findIndex(m => m.id === userMessageToResend.id);
             if (promptIndex > -1) messages.value = messages.value.slice(0, promptIndex + 1);
-            else { await state.selectDiscussion(currentDiscussionId.value); return; }
+            else { await getActions().selectDiscussion(currentDiscussionId.value); return; }
             await sendMessage({
                 prompt: userMessageToResend.content,
                 image_server_paths: userMessageToResend.server_image_paths || [],
                 localImageUrls: userMessageToResend.image_references || [],
                 is_resend: true,
             });
-        } catch(e) {
+        } catch(error) {
+            console.error("Failed to start new branch:", error);
             uiStore.addNotification('Failed to start new branch.', 'error');
-            if (currentDiscussionId.value) await state.selectDiscussion(currentDiscussionId.value);
+            if (currentDiscussionId.value) await getActions().selectDiscussion(currentDiscussionId.value);
         }
     }
 
@@ -207,11 +180,11 @@ export function useDiscussionGeneration(state) {
         if (!state.activeDiscussion.value || generationInProgress.value) return;
         try {
             await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: newBranchMessageId });
-            await state.selectDiscussion(currentDiscussionId.value, newBranchMessageId); 
+            await getActions().selectDiscussion(currentDiscussionId.value, newBranchMessageId); 
             uiStore.addNotification(`Switched branch.`, 'info');
         } catch (error) {
             uiStore.addNotification('Failed to switch branch.', 'error');
-            await state.selectDiscussion(currentDiscussionId.value);
+            await getActions().selectDiscussion(currentDiscussionId.value);
         }
     }
 

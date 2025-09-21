@@ -1,7 +1,7 @@
 // frontend/webui/src/stores/composables/useDiscussionSharing.js
 import apiClient from '../../services/api';
 
-export function useDiscussionSharing(state, stores) {
+export function useDiscussionSharing(state, stores, getActions) {
     const { sharedWithMe, currentDiscussionId, discussions } = state;
     const { uiStore } = stores;
 

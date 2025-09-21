@@ -1,8 +1,7 @@
 // frontend/webui/src/stores/composables/useDiscussionExports.js
 import apiClient from '../../services/api';
 
-export function useDiscussionExports(state, stores) {
-    const { discussions } = state;
+export function useDiscussionExports(state, stores, getActions) {
     const { uiStore, authStore } = stores;
 
     async function exportDiscussions(discussionIds) {

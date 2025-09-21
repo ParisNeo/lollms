@@ -1,5 +1,6 @@
 // frontend/webui/src/stores/composables/useDiscussionMessages.js
 import apiClient from '../../services/api';
+import { processSingleMessage, processMessages } from './discussionProcessor';
 
 function fileToBase64(file) {
     return new Promise((resolve, reject) => {
@@ -10,36 +11,9 @@ function fileToBase64(file) {
     });
 }
 
-// REMOVED export keyword to make this a local helper
-function processSingleMessage(msg, authStore, dataStore) {
-    if (!msg) return null;
-    const username = authStore.user?.username?.toLowerCase();
-    const binding_name = msg.binding_name || msg.metadata?.binding;
-    const model_name = msg.model_name || msg.metadata?.model;
-    const modelUsedId = `${binding_name}/${model_name}`;
-    const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelUsedId);
-    const visionSupport = modelInfo?.alias?.has_vision ?? true;
-    return {
-        ...msg,
-        binding_name, model_name,
-        sender_type: msg.sender_type || (msg.sender?.toLowerCase() === username ? 'user' : 'assistant'),
-        events: msg.events || (msg.metadata?.events) || [],
-        sources: msg.sources || (msg.metadata?.sources) || [],
-        image_references: msg.image_references || [],
-        active_images: msg.active_images || [],
-        vision_support: visionSupport,
-        branches: msg.branches || null,
-    };
-}
-
-export function useDiscussionMessages(state, stores) {
+export function useDiscussionMessages(state, stores, getActions) {
     const { messages, currentDiscussionId } = state;
-    const { uiStore, authStore, dataStore } = stores;
-
-    function processMessages(rawMessages) {
-        if (!Array.isArray(rawMessages)) return [];
-        return rawMessages.map(msg => processSingleMessage(msg, authStore, dataStore));
-    }
+    const { uiStore, authStore } = stores;
 
     async function refreshActiveDiscussionMessages() {
         if (!currentDiscussionId.value) return;
@@ -47,7 +21,7 @@ export function useDiscussionMessages(state, stores) {
             const response = await apiClient.get(`/api/discussions/${currentDiscussionId.value}`);
             messages.value = processMessages(response.data);
             state.emit('discussion:refreshed');
-            await state.fetchContextStatus(currentDiscussionId.value);
+            await getActions().fetchContextStatus(currentDiscussionId.value);
         } catch (error) {
             uiStore.addNotification('Could not refresh discussion.', 'error');
         }
@@ -57,10 +31,10 @@ export function useDiscussionMessages(state, stores) {
         if (!currentDiscussionId.value) return;
         try {
             const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/images/${imageIndex}/toggle`);
-            const updatedMessage = processSingleMessage(response.data, authStore, dataStore);
+            const updatedMessage = processSingleMessage(response.data);
             const index = messages.value.findIndex(m => m.id === messageId);
             if (index !== -1) messages.value[index] = updatedMessage;
-            await state.fetchContextStatus(currentDiscussionId.value);
+            await getActions().fetchContextStatus(currentDiscussionId.value);
         } catch (error) {
             uiStore.addNotification('Failed to toggle image status.', 'error');
         }
@@ -87,7 +61,7 @@ export function useDiscussionMessages(state, stores) {
             const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/messages`, {
                 content, sender_type: tempMessage.sender_type, parent_message_id: tempMessage.parent_message_id
             });
-            const finalMessage = processSingleMessage(response.data, authStore, dataStore);
+            const finalMessage = processSingleMessage(response.data);
             const index = messages.value.findIndex(m => m.id === tempId);
             if (index !== -1) messages.value.splice(index, 1, finalMessage);
             uiStore.addNotification("Message added successfully.", "success");
@@ -103,11 +77,11 @@ export function useDiscussionMessages(state, stores) {
         const payload = { content: newContent, kept_images_b64: keptImagesB64, new_images_b64: newImagesAsBase64 };
         try {
             const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`, payload);
-            const updatedMessage = processSingleMessage(response.data, authStore, dataStore);
+            const updatedMessage = processSingleMessage(response.data);
             const index = messages.value.findIndex(m => m.id === messageId);
             if (index !== -1) messages.value[index] = updatedMessage;
             uiStore.addNotification('Message updated.', 'success');
-            await state.fetchContextStatus(currentDiscussionId.value);
+            await getActions().fetchContextStatus(currentDiscussionId.value);
         } catch (e) {}
     }
 
@@ -116,7 +90,7 @@ export function useDiscussionMessages(state, stores) {
         const discussionId = currentDiscussionId.value;
         try {
             await apiClient.delete(`/api/discussions/${discussionId}/messages/${messageId}`);
-            await state.selectDiscussion(discussionId); 
+            await getActions().selectDiscussion(discussionId, null, true); 
             uiStore.addNotification('Message and branch deleted.', 'success');
         } catch (error) {
             uiStore.addNotification('Failed to delete message.', 'error');
@@ -141,7 +115,7 @@ export function useDiscussionMessages(state, stores) {
             if (state.discussions.value[currentDiscussionId.value]) {
                 Object.assign(state.discussions.value[currentDiscussionId.value], response.data);
             }
-            await state.fetchContextStatus(currentDiscussionId.value);
+            await getActions().fetchContextStatus(currentDiscussionId.value);
             const message = file.type === 'application/pdf' ? 'PDF pages added as images.' : 'Image added.';
             uiStore.addNotification(message, 'success');
         } catch(error) { uiStore.addNotification('Failed to add file.', 'error'); }
@@ -154,7 +128,7 @@ export function useDiscussionMessages(state, stores) {
             if (state.discussions.value[currentDiscussionId.value]) {
                 Object.assign(state.discussions.value[currentDiscussionId.value], response.data);
             }
-            await state.fetchContextStatus(currentDiscussionId.value);
+            await getActions().fetchContextStatus(currentDiscussionId.value);
             uiStore.addNotification('All images deleted.', 'success');
         } catch (error) { uiStore.addNotification('Failed to delete images.', 'error'); }
     }
@@ -166,12 +140,12 @@ export function useDiscussionMessages(state, stores) {
             if (state.discussions.value[currentDiscussionId.value]) {
                 Object.assign(state.discussions.value[currentDiscussionId.value], response.data);
             }
-            await state.fetchContextStatus(currentDiscussionId.value);
+            await getActions().fetchContextStatus(currentDiscussionId.value);
         } catch(error) {}
     }
 
     return {
-        processMessages, refreshActiveDiscussionMessages,
+        refreshActiveDiscussionMessages,
         toggleImageActivation, addManualMessage, saveManualMessage,
         saveMessageChanges, deleteMessage, gradeMessage,
         uploadDiscussionImage, deleteAllDiscussionImages, deleteDiscussionImage

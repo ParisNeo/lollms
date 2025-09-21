@@ -5,7 +5,8 @@ import json
 import logging
 from multiprocessing import Queue
 from queue import Empty
-
+import os
+from ascii_colors import trace_exception
 logger = logging.getLogger("uvicorn.info")
 
 class ConnectionManager:
@@ -13,7 +14,7 @@ class ConnectionManager:
         self.active_connections: Dict[int, WebSocket] = {}
         self.admin_user_ids: Set[int] = set()
         self._loop: asyncio.AbstractEventLoop = None
-        self.broadcast_queue: Queue = None
+        self.broadcast_queue: Queue = Queue()
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -124,5 +125,6 @@ async def listen_for_broadcasts():
             logger.info("Broadcast listener task cancelled.")
             break
         except Exception as e:
+            trace_exception(e)
             logger.error(f"Error in broadcast listener loop: {e}")
             await asyncio.sleep(1) # Wait a bit before retrying on major error

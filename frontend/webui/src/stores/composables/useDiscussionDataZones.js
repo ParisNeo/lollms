@@ -2,7 +2,7 @@
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 
-export function useDiscussionDataZones(state, stores) {
+export function useDiscussionDataZones(state, stores, getActions) {
     const { discussions, currentDiscussionId, activeDiscussionContextStatus, liveDataZoneTokens, activeAiTasks, _clearActiveAiTask } = state;
     const { uiStore, tasksStore } = stores;
     const { emit } = useEventBus();
