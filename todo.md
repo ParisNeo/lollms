@@ -149,3 +149,5 @@ Fix uploading artefacts
 
 export word needs to be reworked. I need to be able to export images and tables as well as good formatting
 format the exported pdf
+
+add more details about the source chunks
