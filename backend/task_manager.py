@@ -3,6 +3,7 @@ import uuid
 import datetime
 import threading
 import traceback
+import json
 from typing import List, Dict, Any, Callable, Optional
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm.attributes import flag_modified
@@ -32,11 +33,12 @@ def _serialize_task(db_task: DBTask) -> Optional[dict]:
         "created_at": db_task.created_at,
         "started_at": db_task.started_at,
         "completed_at": db_task.completed_at,
+        "updated_at": db_task.updated_at,
         "file_name": db_task.file_name,
         "total_files": db_task.total_files,
         "owner_username": db_task.owner.username if db_task.owner else "System"
     }
-    for key in ['created_at', 'started_at', 'completed_at']:
+    for key in ['created_at', 'started_at', 'completed_at', 'updated_at']:
         if task_info[key] and isinstance(task_info[key], datetime.datetime):
             task_info[key] = task_info[key].isoformat()
 
@@ -69,20 +71,24 @@ class Task:
         task_data = _serialize_task(db_task)
         payload = {"type": "task_update", "data": task_data}
         
-        # Always send to the specific user if they are the owner
         if db_task.owner_user_id:
             manager.send_personal_message_sync(payload, db_task.owner_user_id)
         
-        # Only broadcast to all admins if there's an owner OR if any admins are actually connected.
-        # This prevents spamming logs on startup for system tasks.
         if db_task.owner_user_id or len(manager.admin_user_ids) > 0:
             manager.broadcast_to_admins_sync(payload)
 
-        # --- NEW: Send specific event for data zone tasks on completion ---
         if db_task.status == TaskStatus.COMPLETED and db_task.result:
-            if isinstance(db_task.result, dict):
-                # Handle Data Zone updates
-                zone_info = db_task.result
+            result_data = None
+            if isinstance(db_task.result, str):
+                try:
+                    result_data = json.loads(db_task.result)
+                except json.JSONDecodeError:
+                    pass
+            elif isinstance(db_task.result, dict):
+                result_data = db_task.result
+
+            if isinstance(result_data, dict):
+                zone_info = result_data
                 if "zone" in zone_info and "discussion_id" in zone_info:
                     if zone_info.get("zone") in ["discussion", "memory"]:
                         custom_payload = {
@@ -109,11 +115,9 @@ class Task:
                             manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
                         manager.broadcast_to_admins_sync(custom_payload)
                 
-                # NEW: Handle App Status updates
                 app_data = zone_info.get("updated_app")
                 if "updated_app" in zone_info and (app_data):
                     app_payload = {"type": "app_status_changed", "data": app_data}
-                    # Broadcast to everyone as multiple users (admins, owner) might need the update
                     manager.broadcast_sync(app_payload)
 
 

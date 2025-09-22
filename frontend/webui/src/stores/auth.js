@@ -154,6 +154,7 @@ export const useAuthStore = defineStore('auth', () => {
                     break;
                 }
                 case 'data_zone_processed':
+                    console.log("Data zone processed event received.");
                     discussionsStore.handleDataZoneUpdate(data.data);
                     break;
                 case 'discussion_images_updated':

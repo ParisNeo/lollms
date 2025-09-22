@@ -20,7 +20,7 @@ from passlib.context import CryptContext
 
 from backend.config import SECRET_KEY, ALGORITHM
 from backend.settings import settings
-
+import json
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -73,6 +73,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
             expire_minutes = settings.get("access_token_expire_minutes", 30*24*3600)
             if isinstance(expire_minutes, dict):
                 expire_minutes = expire_minutes.get("value", 30*24*3600) # Default to 30 days
+            elif isinstance(expire_minutes, str):
+                try:
+                    expire_minutes = json.loads(expire_minutes).get("value", 30*24*3600) # Default to 30 days
+                except Exception: 
+                    expire_minutes = 30*24*3600
             minutes = int(expire_minutes)
         except (ValueError, TypeError):
             print(f"WARNING: Invalid 'access_token_expire_minutes' value ({expire_minutes}). Using fallback of 30 days.")

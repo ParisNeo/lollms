@@ -58,8 +58,8 @@ export const useDataStore = defineStore('data', () => {
         const grouped = mcpTools.value.reduce((acc, tool) => {
             const parts = tool.name.split('::');
             if (parts.length !== 2) return acc;
-            const mcpName = parts;
-            const toolName = parts;
+            const mcpName = parts[0];
+            const toolName = parts[1];
             if (!acc[mcpName]) {
                 acc[mcpName] = [];
             }

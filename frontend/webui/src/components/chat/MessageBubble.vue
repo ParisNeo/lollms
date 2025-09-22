@@ -471,10 +471,10 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                         <span>Sources ({{sortedSources.length}})</span>
                     </button>
                     <div v-if="isSourcesVisible" class="mt-2 space-y-2 pl-4">
-                        <div v-for="source in sortedSources" :key="source.document" @click="showSourceDetails(source)" class="source-item">
-                            <div class="similarity-chip" :class="getSimilarityColor(source.similarity_percent)" :title="typeof source.similarity_percent === 'number' ? `Similarity: ${(source.similarity_percent).toFixed(1)}%` : 'Similarity: N/A'"></div>
-                            <div class="truncate flex-grow" :title="source.document">{{ source.document }}</div>
-                            <div v-if="typeof source.similarity_percent === 'number'" class="font-mono text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{{ (source.similarity_percent).toFixed(1) }}%</div>
+                        <div v-for="source in sortedSources" :key="source.title" @click="showSourceDetails(source)" class="source-item">
+                            <div class="similarity-chip" :class="getSimilarityColor(source.score)" :title="typeof source.score === 'number' ? `Similarity: ${(source.score).toFixed(1)}%` : 'Similarity: N/A'"></div>
+                            <div class="truncate flex-grow" :title="source.title">{{ source.title }}</div>
+                            <div v-if="typeof source.similarity_percent === 'number'" class="font-mono text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{{ (source.score).toFixed(1) }}%</div>
                         </div>
                     </div>
                 </div>

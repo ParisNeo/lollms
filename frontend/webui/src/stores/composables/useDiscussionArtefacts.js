@@ -7,6 +7,11 @@ export function useDiscussionArtefacts(state, stores, getActions) {
     const { uiStore, tasksStore } = stores;
     const { emit } = useEventBus();
 
+    const sortArtefacts = (artefacts) => {
+        if (!Array.isArray(artefacts)) return [];
+        return artefacts.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    };
+
     async function fetchArtefacts(discussionId) {
         if (!discussionId) {
             activeDiscussionArtefacts.value = [];
@@ -15,7 +20,7 @@ export function useDiscussionArtefacts(state, stores, getActions) {
         isLoadingArtefacts.value = true;
         try {
             const response = await apiClient.get(`/api/discussions/${discussionId}/artefacts`);
-            activeDiscussionArtefacts.value = response.data.sort((a,b) => a.title.localeCompare(b.title));
+            activeDiscussionArtefacts.value = sortArtefacts(response.data);
         } catch (error) {
             console.error("Failed to fetch artefacts:", error);
             activeDiscussionArtefacts.value = [];
@@ -98,7 +103,7 @@ export function useDiscussionArtefacts(state, stores, getActions) {
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/load-to-context`, { title: artefactTitle, version: version });
             
-            activeDiscussionArtefacts.value = response.data.artefacts.sort((a,b) => a.title.localeCompare(b.title));
+            activeDiscussionArtefacts.value = sortArtefacts(response.data.artefacts);
 
             setTimeout(() => {
                 if (discussions.value[discussionId]) {
@@ -120,7 +125,7 @@ export function useDiscussionArtefacts(state, stores, getActions) {
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/load-all-to-context`);
             
-            activeDiscussionArtefacts.value = response.data.artefacts.sort((a,b) => a.title.localeCompare(b.title));
+            activeDiscussionArtefacts.value = sortArtefacts(response.data.artefacts);
 
             setTimeout(() => {
                 if (discussions.value[discussionId]) {
@@ -163,11 +168,7 @@ export function useDiscussionArtefacts(state, stores, getActions) {
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/unload-from-context`, { title: artefactTitle, version });
             
-            if (response.data.artefacts && Array.isArray(response.data.artefacts)) {
-                activeDiscussionArtefacts.value = response.data.artefacts.sort((a, b) => a.title.localeCompare(b.title));
-            } else {
-                activeDiscussionArtefacts.value = [];
-            }
+            activeDiscussionArtefacts.value = sortArtefacts(response.data.artefacts);
             
             setTimeout(() => {
                 if (discussions.value[discussionId]) {

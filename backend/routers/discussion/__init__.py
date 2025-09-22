@@ -25,7 +25,7 @@ from backend.discussion import get_user_discussion
 from backend.discussion_manager import get_user_discussion_manager
 from backend.models import (UserAuthDetails, DiscussionBranchSwitchRequest,
                             DiscussionInfo, DiscussionTitleUpdate, MessageOutput,
-                            UserPublic)
+                            UserPublic, DiscussionToolsUpdate)
 from backend.models.discussion import DiscussionGroupUpdatePayload
 from backend.db.models.discussion_group import DiscussionGroup as DBDiscussionGroup
 from backend.session import (get_current_active_user,
@@ -109,6 +109,31 @@ def build_discussions_router():
                 trace_exception(e)
         return sorted(infos, key=lambda d: d.last_activity_at or datetime.min, reverse=True)
 
+    @router.put("/{discussion_id}/tools", response_model=DiscussionInfo)
+    async def update_discussion_tools(
+        discussion_id: str,
+        update_payload: DiscussionToolsUpdate,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ) -> DiscussionInfo:
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        discussion_obj.set_metadata_item('active_tools', update_payload.tools)
+
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
+        is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
+        metadata = discussion_obj.metadata or {}
+        
+        return DiscussionInfo(
+            id=discussion_id,
+            title=metadata.get('title', "Untitled"),
+            is_starred=is_starred,
+            rag_datastore_ids=metadata.get('rag_datastore_ids'),
+            active_tools=metadata.get('active_tools', []),
+            active_branch_id=discussion_obj.active_branch_id,
+            created_at=discussion_obj.created_at,
+            last_activity_at=discussion_obj.updated_at
+        )
     @router.get("/{discussion_id}/participants", response_model=List[UserPublic])
     async def get_discussion_participants(
         discussion_id: str,

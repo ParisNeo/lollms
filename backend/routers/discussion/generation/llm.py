@@ -105,11 +105,11 @@ def build_llm_generation_router(router: APIRouter):
                 for entry in retrieved_chunks:
                     revamped_entry = {}
                     if "file_path" in entry:
-                        revamped_entry["document"]=Path(entry["file_path"]).name
+                        revamped_entry["title"]=Path(entry["file_path"]).name
                     if "chunk_text" in entry:
                         revamped_entry["content"]=entry["chunk_text"]
-                    if "similarity" in entry:
-                        revamped_entry["similarity_percent"] = entry["similarity"] * 100
+                    if "similarity_percent" in entry:
+                        revamped_entry["score"] = entry["similarity_percent"]
                     revamped_chunks.append(revamped_entry)
                 return revamped_chunks
             except Exception as e:

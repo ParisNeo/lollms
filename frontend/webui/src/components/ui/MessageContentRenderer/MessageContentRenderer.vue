@@ -4,6 +4,7 @@ import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection
 
 import CodeBlock from './CodeBlock.vue';
 import IconThinking from '../../../assets/icons/IconThinking.vue';
+import IconFileText from '../../../assets/icons/IconFileText.vue';
 
 const props = defineProps({
   content: { type: String, default: '' },
@@ -74,21 +75,52 @@ const messageParts = computed(() => {
   return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
 });
 
-const getContentTokens = (text) => {
-  return getContentTokensWithMathProtection(text);
+const getTokens = (text) => {
+    if (!text) return [];
+    const allTokens = [];
+    // Regex to capture the document block, allowing for an optional version number in the start tag.
+    const docRegex = /(?:^|\n)--- Document: ([\w.\s-]+?)( v\d+)? ---\r?\n([\s\S]*?)\r?\n--- End Document: \1 ---/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = docRegex.exec(text)) !== null) {
+        // Process text before this document block
+        if (match.index > lastIndex) {
+            const markdownPart = text.substring(lastIndex, match.index);
+            allTokens.push(...getContentTokensWithMathProtection(markdownPart));
+        }
+
+        // Construct the full title from the file path and optional version
+        const title = match[1].trim() + (match[2] || '');
+
+        allTokens.push({
+            type: 'document',
+            title: title,
+            content: match[3], // Content is now in capture group 3
+            raw: match[0]
+        });
+
+        lastIndex = docRegex.lastIndex;
+    }
+
+    // Process any remaining text after the last document block
+    if (lastIndex < text.length) {
+        const markdownPart = text.substring(lastIndex);
+        allTokens.push(...getContentTokensWithMathProtection(markdownPart));
+    }
+
+    return allTokens;
 };
 
-// Function to generate a simple hash for keys
 const simpleHash = str => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
     hash = (hash << 5) - hash + char;
-    hash |= 0; // Convert to 32bit integer
+    hash |= 0;
   }
   return hash;
 };
-
 </script>
 
 <template>
@@ -98,8 +130,17 @@ const simpleHash = str => {
       <template v-else>
         <template v-for="(part, index) in messageParts" :key="`part-${index}-${part.type}`">
           <template v-if="part.type === 'content'">
-            <template v-for="(token, tokenIndex) in getContentTokens(part.content)" :key="`token-${tokenIndex}-${token.type}-${simpleHash(token.raw)}`">
+            <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="`token-${tokenIndex}-${token.type}-${simpleHash(token.raw)}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" />
+              <details v-else-if="token.type === 'document'" class="document-block my-4">
+                  <summary class="document-summary">
+                      <IconFileText class="w-4 h-4 text-gray-600 dark:text-gray-400 flex-shrink-0" />
+                      <span class="font-mono">{{ token.title }}</span>
+                  </summary>
+                  <div class="document-content">
+                      <MessageContentRenderer :content="token.content" />
+                  </div>
+              </details>
               <div v-else v-html="parsedMarkdown(token.raw)"></div>
             </template>
           </template>
@@ -124,4 +165,18 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
 .think-summary::-webkit-details-marker { display: none; }
 .think-content { @apply p-3; }
+
+.document-block {
+    @apply bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/50 rounded-lg;
+}
+.document-summary {
+    @apply flex items-center gap-2 p-2 text-sm font-semibold text-gray-800 dark:text-gray-200 cursor-pointer list-none select-none;
+    -webkit-tap-highlight-color: transparent;
+}
+.document-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
+.document-summary::-webkit-details-marker { display: none; }
+details[open] > .document-summary {
+    @apply border-b border-gray-200 dark:border-gray-700/50;
+}
+.document-content { @apply p-3; }
 </style>

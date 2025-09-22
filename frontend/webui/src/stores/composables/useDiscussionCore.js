@@ -167,6 +167,23 @@ export function useDiscussionCore(state, stores, getActions) {
         }
     }
 
+    async function updateDiscussionMcps({ discussionId, mcp_tool_ids }) {
+        const discussion = discussions.value[discussionId];
+        if (!discussion) return;
+
+        const originalTools = discussion.active_tools;
+        discussion.active_tools = mcp_tool_ids; // Optimistic update
+
+        try {
+            await apiClient.put(`/api/discussions/${discussionId}/tools`, { tools: mcp_tool_ids });
+            // No need to do anything else, optimistic update is sufficient.
+        } catch (error) {
+            discussion.active_tools = originalTools; // Revert on failure
+            console.error("Failed to update discussion tools:", error);
+            uiStore.addNotification('Failed to update discussion tools.', 'error');
+        }
+    }
+
     return {
         loadDiscussions,
         selectDiscussion,
@@ -176,6 +193,7 @@ export function useDiscussionCore(state, stores, getActions) {
         generateAutoTitle,
         toggleStarDiscussion,
         renameDiscussion,
-        fetchParticipants
+        fetchParticipants,
+        updateDiscussionMcps 
     };
 }

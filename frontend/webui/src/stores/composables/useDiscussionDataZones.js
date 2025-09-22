@@ -222,11 +222,36 @@ export function useDiscussionDataZones(state, stores, getActions) {
             uiStore.addNotification('Failed to refresh data zones.', 'error');
         }
     }
+    
+    async function updateDiscussionRagStores({ discussionId, ragDatastoreIds }) {
+        if (!state.discussions.value[discussionId]) return;
+
+        const originalIds = state.discussions.value[discussionId].rag_datastore_ids;
+        state.discussions.value[discussionId].rag_datastore_ids = ragDatastoreIds;
+
+        try {
+            const response = await apiClient.put(`/api/discussions/${discussionId}/rag_datastore`, { rag_datastore_ids: ragDatastoreIds });
+            const updatedDiscussionInfo = response.data;
+            if (state.discussions.value[discussionId]) {
+                state.discussions.value[discussionId].rag_datastore_ids = updatedDiscussionInfo.rag_datastore_ids;
+            }
+            
+            getActions().fetchContextStatus(discussionId);
+        } catch (error) {
+            console.error("Failed to update RAG stores:", error);
+            if (state.discussions.value[discussionId]) {
+                state.discussions.value[discussionId].rag_datastore_ids = originalIds;
+            }
+            stores.uiStore.addNotification('Failed to update RAG data stores.', 'error');
+        }
+    }
+
 
     return {
         fetchContextStatus, fetchDataZones, updateDataZone,
         summarizeDiscussionDataZone, generateImageFromDataZone, memorizeLTM,
         handleDataZoneUpdate, setDiscussionDataZoneContent, refreshDataZones,
-        updateLiveTokenCount, handleDiscussionImagesUpdated
+        updateLiveTokenCount, handleDiscussionImagesUpdated,
+        updateDiscussionRagStores
     };
 }

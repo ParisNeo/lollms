@@ -318,6 +318,7 @@ onUnmounted(() => {
                         v-model="discussionDataZone" 
                         class="h-full" 
                         :read-only="isTaskRunning"
+                        :renderable="true"
                         @ready="handleEditorReady"
                     />
                 </div>

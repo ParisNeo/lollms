@@ -1,7 +1,7 @@
 <template>
-    <div :class="['markdown-editor-container flex flex-col h-full border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden', editorClass]">
+    <div :class="['markdown-editor-container flex flex-col h-full min-h-0 border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden', editorClass]">
         <Toolbar
-            :toolbarClass="toolbarClass"
+            :toolbarClass="[toolbarClass, 'flex-shrink-0']"
             :buttonClass="buttonClass"
             :renderable="renderable"
             :currentMode="currentMode"
@@ -14,13 +14,19 @@
             @set-mode="setMode"
             @toggle-wrapping="toggleWrapping"
         />
-        <div class="editor-content flex-1 overflow-auto relative p-1 bg-white dark:bg-gray-800">
-            <div v-show="currentMode === 'edit' || !renderable" ref="editorRef" class="editor-wrapper h-full w-full"></div>
-            <div v-show="renderable && currentMode === 'view'" class="absolute inset-0 p-2 overflow-y-auto">
+        <div class="editor-content-host flex-1 overflow-hidden relative min-h-[4.5rem]">
+            <div ref="editorRef" class="w-full h-full"></div>
+            <div v-if="renderable && currentMode === 'view'" class="absolute inset-0 p-2 overflow-y-auto bg-white dark:bg-gray-800 z-10">
                 <MessageContentRenderer :content="modelValue" :key="currentMode" />
             </div>
         </div>
-        <StatusBar :modelValue="modelValue" :renderable="renderable" />
+        <StatusBar 
+            :modelValue="modelValue" 
+            :renderable="renderable"
+            :currentMode="currentMode"
+            @set-mode="setMode"
+            class="flex-shrink-0"
+        />
     </div>
 </template>
 
@@ -86,6 +92,9 @@ const toggleWrapping = () => {
 };
 
 watch(currentMode, (newMode) => {
+    if (editorView.value?.dom) {
+        editorView.value.dom.style.display = newMode === 'edit' ? '' : 'none';
+    }
     if (newMode === 'edit') nextTick(() => editorView.value?.focus());
 });
 watch(() => props.initialMode, (newMode) => {
@@ -315,6 +324,11 @@ const initializeEditor = () => {
         });
     }
 
+    // Initial mode setting
+    if (editorView.value?.dom) {
+        editorView.value.dom.style.display = currentMode.value === 'edit' ? '' : 'none';
+    }
+
     emit('ready', { view: editorView.value, state: editorView.value.state });
 };
 
@@ -341,3 +355,11 @@ watch(() => props.language, initializeEditor);
 onMounted(initializeEditor);
 onBeforeUnmount(() => editorView.value?.destroy());
 </script>
+
+<style>
+.editor-content-host > .cm-editor {
+    height: 100%;
+    padding: 0.25rem;
+    background-color: transparent;
+}
+</style>
