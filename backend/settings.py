@@ -2,7 +2,7 @@ import json
 from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 from backend.db.models.config import GlobalConfig
-
+import json
 class _Settings:
     _instance = None
     _settings_cache: Dict[str, Any] = {}
@@ -34,6 +34,8 @@ class _Settings:
                     try:
                         # Attempt to parse the value as JSON
                         parsed_value = json.loads(config.value)
+                        if isinstance(parsed_value,str):
+                            parsed_value = json.loads(parsed_value)
                         
                         # Check if it's our structured format: { "value": ..., "type": ... }
                         if isinstance(parsed_value, dict) and 'value' in parsed_value and 'type' in parsed_value:
