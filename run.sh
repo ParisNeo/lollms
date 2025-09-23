@@ -113,7 +113,7 @@ fi
 # --- Determine port (prefer .env SERVER_PORT if present) ---
 PORT_TO_USE="9642"
 if [[ -f "$PROJECT_DIR/.env" ]]; then
-  PORT_FROM_ENV="$(grep -E '^\s*SERVER_PORT\s*=' "$PROJECT_DIR/.env" | cut -d '=' -f2- | tr -d ' "'\'' | xargs || true)"
+  PORT_FROM_ENV="$(grep -E '^\s*SERVER_PORT\s*=' "$PROJECT_DIR/.env" | cut -d '=' -f2- | tr -d '\"\'\'' | xargs || true)"
   if [[ -n "${PORT_FROM_ENV:-}" ]]; then
     PORT_TO_USE="$PORT_FROM_ENV"
   fi
