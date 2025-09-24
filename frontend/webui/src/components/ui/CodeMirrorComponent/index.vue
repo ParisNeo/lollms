@@ -1,5 +1,5 @@
 <template>
-    <div :class="['markdown-editor-container flex flex-col h-full min-h-0 border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden', editorClass]">
+    <div :class="['markdown-editor-container flex flex-col h-full min-h-0 border border-gray-300 dark:border-gray-600 rounded-md', editorClass]">
         <Toolbar
             :toolbarClass="[toolbarClass, 'flex-shrink-0']"
             :buttonClass="buttonClass"
@@ -14,7 +14,7 @@
             @set-mode="setMode"
             @toggle-wrapping="toggleWrapping"
         />
-        <div class="editor-content-host flex-1 overflow-hidden relative min-h-[4.5rem]">
+        <div class="editor-content-host flex-1 overflow-y-auto relative min-h-[4.5rem]">
             <div ref="editorRef" class="w-full h-full"></div>
             <div v-if="renderable && currentMode === 'view'" class="absolute inset-0 p-2 overflow-y-auto bg-white dark:bg-gray-800 z-10">
                 <MessageContentRenderer :content="modelValue" :key="currentMode" />

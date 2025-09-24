@@ -207,6 +207,53 @@ const eventIconMap = {
   'step_start': IconStepStart, 'step_end': IconStepEnd,
 };
 
+const groupedEvents = computed(() => {
+    if (!hasEvents.value) return [];
+
+    const result = [];
+    const stack = []; // To handle nested steps
+
+    for (const event of props.message.events) {
+        const lowerType = event.type?.toLowerCase() || '';
+
+        if (lowerType.includes('step_start')) {
+            const newGroup = {
+                type: 'step_group',
+                startEvent: event,
+                children: [],
+                endEvent: null,
+                isInitiallyOpen: false, // Default to closed
+            };
+            
+            if (stack.length > 0) {
+                stack[stack.length - 1].children.push(newGroup);
+            } else {
+                result.push(newGroup);
+            }
+            stack.push(newGroup);
+        } else if (lowerType.includes('step_end')) {
+            if (stack.length > 0) {
+                const currentGroup = stack.pop();
+                currentGroup.endEvent = event;
+                const hasContent = (currentGroup.startEvent.content && String(currentGroup.startEvent.content).trim() !== '') || 
+                                   (currentGroup.endEvent.content && String(currentGroup.endEvent.content).trim() !== '');
+                if (currentGroup.children.length > 0 || hasContent) {
+                    currentGroup.isInitiallyOpen = true; // Open important steps by default
+                }
+            } else {
+                result.push(event);
+            }
+        } else {
+            if (stack.length > 0) {
+                stack[stack.length - 1].children.push(event);
+            } else {
+                result.push(event);
+            }
+        }
+    }
+    return result;
+});
+
 function getEventIcon(type) {
   const lowerType = type?.toLowerCase() || 'default';
   if (eventIconMap[lowerType]) return eventIconMap[lowerType];
@@ -218,29 +265,25 @@ const branchInfo = computed(() => {
     const hasMultipleBranches = props.message.branches && props.message.branches.length > 1;
     if (!hasMultipleBranches || props.message.sender_type !== 'user') return null; // Only show for user messages with multiple AI children
 
-    // Find the immediate child of this user message that is currently displayed in the active messages path
     const currentMessages = discussionsStore.activeMessages;
     const currentMessageIndex = currentMessages.findIndex(m => m.id === props.message.id);
-    const nextMessage = currentMessages[currentMessageIndex + 1]; // This should be the AI response to this user message
+    const nextMessage = currentMessages[currentMessageIndex + 1];
 
     let activeBranchIndex = -1;
     if (nextMessage && nextMessage.parent_message_id === props.message.id) {
         activeBranchIndex = props.message.branches.findIndex(id => id === nextMessage.id);
     }
     
-    // Fallback: If no next message or it's not a direct child (e.g., initial load of a new branch tip), default to the first branch
-    // This handles cases where the current branch might have been deleted, or a fresh load of a discussion where
-    // the active_branch_id is a child that is not the first in the `branches` array.
     if (activeBranchIndex === -1) {
-        activeBranchIndex = 0; // Default to first branch if we can't determine which one is active
+        activeBranchIndex = 0;
     }
 
     return {
         isBranchPoint: true,
-        current: activeBranchIndex + 1, // 1-based index
+        current: activeBranchIndex + 1,
         total: props.message.branches.length,
         branchIds: props.message.branches,
-        currentIndex: activeBranchIndex, // 0-based index
+        currentIndex: activeBranchIndex,
     };
 });
 
@@ -270,7 +313,6 @@ function toggleEdit() {
     isEditing.value = !isEditing.value;
     if (isEditing.value) {
         editedContent.value = props.message.content;
-        // FIX: Ensure image_references is treated as an array even if it's null/undefined
         editedImages.value = (props.message.image_references || []).map(url => ({ url, isNew: false, file: null }));
         newImageFiles.value = [];
         isFormattingMenuOpen.value = false;
@@ -279,7 +321,6 @@ function toggleEdit() {
 
 async function handleSaveEdit() {
     if (isNewManualMessage.value) {
-        // This flow is simpler and should be handled separately if it needs image support
         await discussionsStore.saveManualMessage({
             tempId: props.message.id,
             content: editedContent.value
@@ -287,7 +328,7 @@ async function handleSaveEdit() {
     } else {
         const keptImagesB64 = editedImages.value
             .filter(img => !img.isNew)
-            .map(img => img.url.split(',')); // Extract base64 part
+            .map(img => img.url.split(','));
 
         await discussionsStore.saveMessageChanges({
             messageId: props.message.id,
@@ -302,7 +343,6 @@ async function handleSaveEdit() {
 function removeEditedImage(index) {
     const removed = editedImages.value.splice(index, 1);
     if (removed.isNew) {
-        // Also remove from the new files list
         const fileIndex = newImageFiles.value.findIndex(f => f === removed.file);
         if (fileIndex > -1) {
             newImageFiles.value.splice(index, 1);
@@ -321,13 +361,12 @@ function handleEditImageSelected(event) {
         editedImages.value.push({ url: localUrl, isNew: true, file: file });
         newImageFiles.value.push(file);
     }
-    event.target.value = ''; // Reset input
+    event.target.value = '';
 }
 
 
 function handleCancelEdit() {
     if (isNewManualMessage.value) {
-        // If it's a new manual message, cancel means removing it.
         const index = discussionsStore.activeMessages.findIndex(m => m.id === props.message.id);
         if (index !== -1) {
             discussionsStore.activeMessages.splice(index, 1);
@@ -441,7 +480,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                             <div class="flex flex-wrap gap-2">
                                 <div v-for="(image, index) in editedImages" :key="image.url" class="relative w-16 h-16">
                                     <img :src="image.url" class="w-full h-full object-cover rounded-md" alt="Image preview" />
-                                    <button @click="removeEditedImage(index)" class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold leading-none">×</button>
+                                    <button @click="removeEditedImage(index)" type="button" class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold leading-none">×</button>
                                 </div>
                             </div>
                         </div>
@@ -450,6 +489,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                             placeholder="Enter your message..."
                             :autofocus="true"
                             :extensions="editorExtensions"
+                            editorClass="max-h-[500px]"
                             @ready="handleEditorReady"
                         />
                         <div class="flex justify-between items-center mt-2">
@@ -483,10 +523,51 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                 <details v-if="hasEvents" class="events-container" :open="!isEventsCollapsed" @toggle="event => isEventsCollapsed = !event.target.open">
                     <summary class="events-summary"><IconChevronRight class="toggle-icon" /><span>{{ isEventsCollapsed ? 'Show Events' : 'Hide Events' }}</span><span v-if="isEventsCollapsed" class="last-event-snippet">{{ lastEventSummary }}</span></summary>
                     <div class="events-content">
-                        <div v-for="(event, index) in message.events" :key="index" class="event-item">
-                            <div class="event-icon-container" :title="event.type"><component :is="getEventIcon(event.type)" /></div>
-                            <div class="event-details"><div class="event-title">{{ event.type }}</div><div class="event-body"><div v-if="typeof event.content === 'string'" class="message-prose" v-html="parsedMarkdown(event.content)"></div><StepDetail v-else :data="event.content" /></div></div>
-                        </div>
+                        <template v-for="(item, index) in groupedEvents" :key="index">
+                            <details v-if="item.type === 'step_group'" class="step-group-block" :open="item.isInitiallyOpen">
+                                <summary class="step-group-summary">
+                                    <IconChevronRight class="toggle-icon" />
+                                    <div class="event-icon-container" :title="item.startEvent.type"><component :is="getEventIcon(item.startEvent.type)" /></div>
+                                    <div class="event-details">
+                                        <div class="event-title">{{ item.startEvent.type }}</div>
+                                        <div v-if="item.startEvent.content" class="event-body-summary prose-sm dark:prose-invert" v-html="parsedMarkdown(String(item.startEvent.content))"></div>
+                                    </div>
+                                </summary>
+                                <div class="step-group-content">
+                                    <div v-for="(childEvent, childIndex) in item.children" :key="childIndex" class="event-item" :class="`event-type-${childEvent.type.toLowerCase()}`">
+                                        <div class="event-icon-container" :title="childEvent.type"><component :is="getEventIcon(childEvent.type)" /></div>
+                                        <div class="event-details">
+                                            <div class="event-title">{{ childEvent.type }}</div>
+                                            <div class="event-body">
+                                                <div v-if="typeof childEvent.content === 'string'" class="message-prose" v-html="parsedMarkdown(childEvent.content)"></div>
+                                                <StepDetail v-else :data="childEvent.content" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-if="item.endEvent" class="event-item event-type-step_end">
+                                        <div class="event-icon-container" :title="item.endEvent.type"><component :is="getEventIcon(item.endEvent.type)" /></div>
+                                        <div class="event-details">
+                                            <div class="event-title">{{ item.endEvent.type }}</div>
+                                            <div v-if="item.endEvent.content" class="event-body">
+                                                <div v-if="typeof item.endEvent.content === 'string'" class="message-prose" v-html="parsedMarkdown(item.endEvent.content)"></div>
+                                                <StepDetail v-else :data="item.endEvent.content" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </details>
+
+                            <div v-else class="event-item" :class="`event-type-${item.type.toLowerCase()}`">
+                                <div class="event-icon-container" :title="item.type"><component :is="getEventIcon(item.type)" /></div>
+                                <div class="event-details">
+                                    <div class="event-title">{{ item.type }}</div>
+                                    <div class="event-body">
+                                        <div v-if="typeof item.content === 'string'" class="message-prose" v-html="parsedMarkdown(item.content)"></div>
+                                        <StepDetail v-else :data="item.content" />
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
                     </div>
                 </details>
 
@@ -528,3 +609,64 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
         </div>
     </div>
 </template>
+<style scoped>
+/* Event Visualization Enhancements */
+.events-content {
+    @apply space-y-1 p-2 bg-gray-50 dark:bg-gray-900/50 rounded-b-lg;
+}
+
+.event-item, .step-group-summary {
+    @apply flex items-start gap-3;
+}
+
+.step-group-summary {
+    @apply p-2 rounded-lg list-none select-none cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-800;
+    -webkit-tap-highlight-color: transparent;
+}
+.step-group-block[open] > .step-group-summary {
+    @apply bg-gray-100 dark:bg-gray-800 rounded-b-none;
+}
+.step-group-block[open] > .step-group-summary .toggle-icon {
+    transform: rotate(90deg);
+}
+.step-group-content {
+    @apply pl-4 border-l-2 border-gray-300 dark:border-gray-600 space-y-1 py-2;
+}
+
+.event-icon-container {
+    @apply flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center;
+}
+.event-details {
+    @apply flex-1 min-w-0;
+}
+.event-title {
+    @apply text-xs font-semibold tracking-wider uppercase;
+}
+.event-body {
+    @apply mt-1;
+}
+.event-body-summary {
+    @apply text-sm text-gray-600 dark:text-gray-400 truncate;
+}
+
+/* Event-specific styling */
+.event-type-thought .event-icon-container { @apply bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300; }
+.event-type-thought .event-title { @apply text-purple-600 dark:text-purple-300; }
+
+.event-type-tool_call .event-icon-container { @apply bg-yellow-100 dark:bg-yellow-900/50 text-yellow-600 dark:text-yellow-300; }
+.event-type-tool_call .event-title { @apply text-yellow-600 dark:text-yellow-300; }
+.event-type-tool_call .event-body { @apply p-2 bg-white dark:bg-gray-800 rounded; }
+
+.event-type-observation .event-icon-container { @apply bg-cyan-100 dark:bg-cyan-900/50 text-cyan-600 dark:text-cyan-300; }
+.event-type-observation .event-title { @apply text-cyan-600 dark:text-cyan-300; }
+
+.event-type-scratchpad .event-icon-container { @apply bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-300; }
+.event-type-scratchpad .event-title { @apply text-orange-600 dark:text-orange-300; }
+.event-type-scratchpad .event-body { @apply p-2 bg-white dark:bg-gray-800 rounded max-h-40 overflow-y-auto; }
+
+.event-type-error .event-icon-container, .event-type-exception .event-icon-container { @apply bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300; }
+.event-type-error .event-title, .event-type-exception .event-title { @apply text-red-600 dark:text-red-300; }
+
+.event-type-step_start .event-icon-container, .event-type-step_end .event-icon-container { @apply bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300; }
+.event-type-step_start .event-title, .event-type-step_end .event-title { @apply text-gray-600 dark:text-gray-300; }
+</style>
