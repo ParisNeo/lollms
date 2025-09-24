@@ -41,7 +41,7 @@ function handleConfirm() {
     </template>
     <template #footer>
       <button @click="uiStore.cancelAction" type="button" class="btn btn-secondary">
-        Cancel
+        {{ options.cancelText || 'Cancel' }}
       </button>
       <button @click="handleConfirm" type="button" class="btn btn-primary">
         {{ options.confirmText }}

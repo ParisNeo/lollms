@@ -37,6 +37,11 @@ class User(Base):
     first_login_done = Column(Boolean, default=False, nullable=False)
     data_zone = Column(Text, nullable=True)
     
+    # NEW FIELDS
+    coding_style_constraints = Column(Text, nullable=True)
+    programming_language_preferences = Column(Text, nullable=True)
+    tell_llm_os = Column(Boolean, default=False, nullable=False)
+    
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
     following = relationship(

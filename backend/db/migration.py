@@ -688,6 +688,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "tti_binding_model_name": "VARCHAR",
             "tti_models_config": "JSON",
             "include_memory_date_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
+            # ADD NEW FIELDS
+            "coding_style_constraints": "TEXT",
+            "programming_language_preferences": "TEXT",
+            "tell_llm_os": "BOOLEAN DEFAULT 0 NOT NULL",
         }
         
         added_cols = []

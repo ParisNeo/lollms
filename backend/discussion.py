@@ -1,5 +1,6 @@
 # backend/discussion.py
 from pathlib import Path
+import platform
 from typing import List, Optional, Any, Dict
 from lollms_client import LollmsClient, LollmsDataManager, LollmsDiscussion
 from backend.session import user_sessions, get_user_lollms_client
@@ -73,21 +74,46 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
         discussion.lollms_client = lc
         discussion.max_context_size = max_context_size
         
-        # --- NEW MEMORY LOGIC ---
+        # --- NEW MEMORY & USER DATA ZONE LOGIC ---
         db = next(get_db())
         try:
             user_db = db.query(DBUser).filter(DBUser.username == username).first()
             if user_db:
+                # Memory
                 memory_parts = []
                 for mem in user_db.memories:
                     date_str = f" (Created on: {mem.created_at.strftime('%Y-%m-%d')})" if user_db.include_memory_date_in_context else ""
                     memory_parts.append(f"--- Memory: {mem.title}{date_str} ---\n{mem.content}\n--- End Memory: {mem.title} ---")
+                discussion.memory = "\n\n".join(memory_parts)
+
+                # User Data Zone construction
+                user_data_zone_parts = [
+                    "--- User preferences ---",
+                    "date: {{date}}",
+                    "time: {{time}}",
+                    "datetime: {{datetime}}",
+                    "user name: {{user_name}}",
+                ]
+
+                if user_db.tell_llm_os:
+                    user_data_zone_parts.append(f"Operating System: {platform.system()}")
                 
-                full_memory_text = "\n\n".join(memory_parts)
-                discussion.memory = full_memory_text
+                if user_db.coding_style_constraints and user_db.coding_style_constraints.strip():
+                    user_data_zone_parts.append("\n--- Coding Style Constraints ---")
+                    user_data_zone_parts.append(user_db.coding_style_constraints)
+
+                if user_db.programming_language_preferences and user_db.programming_language_preferences.strip():
+                    user_data_zone_parts.append("\n--- Programming Language & Library Preferences ---")
+                    user_data_zone_parts.append(user_db.programming_language_preferences)
+                
+                if user_db.data_zone and user_db.data_zone.strip():
+                    user_data_zone_parts.append("\n--- User General Information ---")
+                    user_data_zone_parts.append(user_db.data_zone)
+
+                discussion.user_data_zone = "\n".join(user_data_zone_parts)
         finally:
             db.close()
-        # --- END NEW MEMORY LOGIC ---
+        # --- END NEW LOGIC ---
 
         try:
             discussion.get_discussion_images()

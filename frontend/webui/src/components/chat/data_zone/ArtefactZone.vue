@@ -65,12 +65,48 @@ function triggerArtefactFileUpload() {
     artefactFileInput.value?.click();
 }
 
+
 async function handleArtefactFileUpload(event) {
     const files = Array.from(event.target.files || []);
     if (!files.length || !activeDiscussion.value) return;
+
+    const imageExtractableTypes = [
+        'application/pdf', 
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+    ];
+    // .msg is often application/octet-stream, so we check extension
+    const imageExtractableExtensions = ['.pdf', '.docx', '.pptx', '.msg'];
+    
+    const filesToUpload = [];
+
+    for (const file of files) {
+        let extractImages = true;
+        const fileExtension = `.${file.name.split('.').pop()}`.toLowerCase();
+
+        if (imageExtractableTypes.includes(file.type) || imageExtractableExtensions.includes(fileExtension)) {
+            const result = await uiStore.showConfirmation({
+                title: `Extract Images from ${file.name}?`,
+                message: 'This file may contain images. Do you want to extract and add them to the discussion context? Choosing "Text Only" may be faster.',
+                confirmText: 'Yes, Extract Images',
+                cancelText: 'No, Text Only'
+            });
+            extractImages = result.confirmed;
+        }
+        filesToUpload.push({ file, extractImages });
+    }
+    
+    if (filesToUpload.length === 0) return;
+
     isUploadingArtefact.value = true;
     try {
-        await Promise.all(files.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file })));
+        await Promise.all(filesToUpload.map(({ file, extractImages }) => 
+            discussionsStore.addArtefact({ 
+                discussionId: activeDiscussion.value.id, 
+                file, 
+                extractImages 
+            })
+        ));
     } finally {
         isUploadingArtefact.value = false;
         if (artefactFileInput.value) artefactFileInput.value.value = '';

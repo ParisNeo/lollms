@@ -156,7 +156,11 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             ollama_require_key=is_ollama_require_key,
             include_memory_date_in_context=db_user.include_memory_date_in_context,
             llm_settings_overridden=llm_settings_overridden,
-            latex_builder_enabled=latex_builder_enabled
+            latex_builder_enabled=latex_builder_enabled,
+            # NEW FIELDS
+            coding_style_constraints=db_user.coding_style_constraints,
+            programming_language_preferences=db_user.programming_language_preferences,
+            tell_llm_os=db_user.tell_llm_os            
         )
     finally:
         db.close()

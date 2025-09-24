@@ -72,7 +72,6 @@ export const useUiStore = defineStore('ui', {
             return false;
         }
     },
-
     initEmailModalState() {
         this.emailModalSubject = '';
         this.emailModalBody = '';
@@ -153,9 +152,7 @@ export const useUiStore = defineStore('ui', {
                 title: options.title || 'Are you sure?',
                 message: options.message || 'This action cannot be undone.',
                 confirmText: options.confirmText || 'Confirm',
-                inputType: options.inputType || null,
-                inputOptions: options.inputOptions || [],
-                inputValue: options.inputValue !== undefined ? options.inputValue : null,
+                cancelText: options.cancelText || 'Cancel', // Added this line
                 onConfirm: (value) => {
                     resolve({ confirmed: true, value: value });
                     this.closeModal("confirmation");
@@ -163,7 +160,10 @@ export const useUiStore = defineStore('ui', {
                 onCancel: () => {
                     resolve({ confirmed: false, value: null });
                     this.closeModal("confirmation");
-                }
+                },
+                inputType: options.inputType || null,
+                inputOptions: options.inputOptions || [],
+                inputValue: options.inputValue !== undefined ? options.inputValue : null,
             };
             this.openModal("confirmation");
         });

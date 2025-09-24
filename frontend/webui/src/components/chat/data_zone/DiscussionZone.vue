@@ -399,7 +399,7 @@ onUnmounted(() => {
             <div @mousedown.prevent="startArtefactResize" class="resizer"></div>
             
             <div :style="{ width: `${artefactListWidth}px` }" class="flex-shrink-0 border-l border-gray-200 dark:border-gray-700 flex flex-col h-full min-w-[256px]">
-                <div class="p-2 border-b dark:border-gray-700 flex flex-col">
+                <div class="p-2 border-b dark:border-gray-700 flex flex-col max-h-[50%] min-h-0">
                     <div class="flex justify-between items-center mb-2 flex-shrink-0">
                         <button @click="isImagesCollapsed = !isImagesCollapsed" class="flex items-center gap-2 text-sm font-semibold w-full text-left">
                             <IconPhoto class="w-4 h-4" /> <span>Images</span>
