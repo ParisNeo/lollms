@@ -29,6 +29,8 @@ import IconEye from '../../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 import IconXMark from '../../../assets/icons/IconXMark.vue';
 import IconSparkles from '../../../assets/icons/IconSparkles.vue';
+import { useAuthStore } from '../../../stores/auth';
+import IconToken from '../../../assets/icons/IconToken.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -37,8 +39,9 @@ const promptsStore = usePromptsStore();
 const tasksStore = useTasksStore(); // Instantiate tasks store
 const router = useRouter();
 const { on, off } = useEventBus();
+const authStore = useAuthStore();
 
-const { promptLoadedArtefacts } = storeToRefs(discussionsStore);
+const { promptLoadedArtefacts, activeDiscussionContextStatus, dataZonesTokensFromContext } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { availableTtiModels } = storeToRefs(dataStore);
 const { tasks } = storeToRefs(tasksStore); // Get tasks reactively
@@ -84,6 +87,50 @@ const activeTask = computed(() => {
 const isTtiConfigured = computed(() => availableTtiModels.value.length > 0);
 const canUndoDiscussion = computed(() => discussionHistoryIndex.value > 0);
 const canRedoDiscussion = computed(() => discussionHistoryIndex.value < discussionHistory.value.length - 1);
+
+const user = computed(() => authStore.user);
+const contextStatus = computed(() => discussionsStore.activeDiscussionContextStatus);
+const showContextBar = computed(() => user.value?.show_token_counter && user.value?.user_ui_level >= 2 && contextStatus.value);
+
+// CONTEXT BAR LOGIC (copied from ChatInput.vue, without inputTokenCount)
+const maxTokens = computed(() => contextStatus.value?.max_tokens || 1);
+const systemPromptTokens = computed(() => contextStatus.value?.zones?.system_context?.breakdown?.system_prompt?.tokens || 0);
+const dataZonesTokens = computed(() => dataZonesTokensFromContext.value);
+const historyTextTokens = computed(() => contextStatus.value?.zones?.message_history?.breakdown?.text_tokens || 0);
+const historyImageTokens = computed(() => contextStatus.value?.zones?.message_history?.breakdown?.image_tokens || 0);
+const totalCurrentTokens = computed(() => systemPromptTokens.value + dataZonesTokens.value + historyTextTokens.value + historyImageTokens.value);
+
+const getPercentage = (tokens) => maxTokens.value > 0 ? (tokens / maxTokens.value) * 100 : 0;
+
+const contextParts = computed(() => {
+    const parts = [];
+    if (systemPromptTokens.value > 0) parts.push({ label: 'S', value: systemPromptTokens.value, title: 'System Prompt', colorClass: 'bg-blue-100 dark:bg-blue-900/50' });
+    if (dataZonesTokens.value > 0) parts.push({ label: 'D', value: dataZonesTokens.value, title: 'Data Zones', colorClass: 'bg-yellow-100 dark:bg-yellow-900/50' });
+    if (historyTextTokens.value > 0) parts.push({ label: 'H', value: historyTextTokens.value, title: 'History (Text)', colorClass: 'bg-green-100 dark:bg-green-900/50' });
+    if (historyImageTokens.value > 0) parts.push({ label: 'I', value: historyImageTokens.value, title: 'History (Images)', colorClass: 'bg-teal-100 dark:bg-teal-900/50' });
+    if (parts.length === 0) parts.push({ label: 'Empty', value: 0, title: 'Empty context', colorClass: 'bg-gray-100 dark:bg-gray-900/50' });
+    return parts;
+});
+
+const systemPromptPercentage = computed(() => getPercentage(systemPromptTokens.value));
+const dataZonesPercentage = computed(() => getPercentage(dataZonesTokens.value));
+const historyTextPercentage = computed(() => getPercentage(historyTextTokens.value));
+const historyImagePercentage = computed(() => getPercentage(historyImageTokens.value));
+const totalPercentage = computed(() => getPercentage(totalCurrentTokens.value));
+
+const progressBorderColorClass = computed(() => {
+    const percentage = totalPercentage.value;
+    return percentage >= 90 ? 'border-red-500 dark:border-red-400' : percentage >= 75 ? 'border-yellow-500 dark:border-yellow-400' : 'border-gray-300 dark:border-gray-600';
+});
+
+const showContextWarning = computed(() => totalPercentage.value > 90);
+const contextWarningMessage = computed(() => {
+    return totalPercentage.value > 100 ? "Context limit exceeded! The model may not see all of your message." : 
+           totalPercentage.value > 90 ? "You are approaching the context limit. Consider shortening your message or data zones." : "";
+});
+function showContext() {
+    if (activeDiscussion.value) uiStore.openModal('contextViewer');
+}
 
 const filteredLollmsPrompts = computed(() => {
     if (!Array.isArray(lollmsPrompts.value)) return [];
@@ -296,6 +343,31 @@ onUnmounted(() => {
 
 <template>
   <div class="flex-1 flex flex-col min-h-0">
+    <!-- NEW CONTEXT BAR -->
+    <div v-if="showContextBar" class="px-3 pt-2 pb-1 border-b border-gray-200 dark:border-gray-700 relative group flex-shrink-0">
+        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 font-mono">
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+                <IconToken class="w-4 h-4 flex-shrink-0" />
+                <button @click="showContext" class="cursor-pointer hover:underline flex-shrink-0" title="View full context breakdown">Context:</button>
+            </div>
+            <div class="flex-grow w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden border transition-colors duration-300" :class="progressBorderColorClass">
+                <div class="progress-segment bg-blue-500" :style="{ width: `${systemPromptPercentage}%` }" :title="`System Prompt: ${systemPromptTokens.toLocaleString()} tokens`"></div>
+                <div class="progress-segment bg-yellow-500" :style="{ left: `${systemPromptPercentage}%`, width: `${dataZonesPercentage}%` }" :title="`Data Zones: ${dataZonesTokens.toLocaleString()} tokens`"></div>
+                <div class="progress-segment bg-green-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage}%`, width: `${historyTextPercentage}%` }" :title="`History (Text): ${historyTextTokens.toLocaleString()} tokens`"></div>
+                <div class="progress-segment bg-teal-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage}%`, width: `${historyImagePercentage}%` }" :title="`History (Images): ${historyImageTokens.toLocaleString()} tokens`"></div>
+            </div>
+            <span class="flex-shrink-0 pl-2">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
+        </div>
+        <p v-if="showContextWarning" class="mt-1.5 text-xs text-center" :class="totalPercentage > 100 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'">{{ contextWarningMessage }}</p>
+        <div class="absolute bottom-full left-0 mb-2 w-auto p-2 bg-white dark:bg-gray-900 border dark:border-gray-600 rounded-lg shadow-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+            <h4 class="font-bold mb-1 whitespace-nowrap">Context Breakdown</h4>
+            <div class="flex flex-wrap gap-1">
+                <template v-for="part in contextParts">
+                    <span :title="`${part.title}: ${part.value.toLocaleString()} tokens`" class="px-1.5 py-0.5 rounded" :class="part.colorClass">{{ part.label }}: {{ part.value.toLocaleString() }}</span>
+                </template>
+            </div>
+        </div>
+    </div>
     <div class="flex-grow flex flex-col min-h-0">
         <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf" multiple>
         <div class="flex-grow flex min-h-0">
@@ -399,3 +471,8 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+<style>
+.progress-segment {
+    @apply absolute h-full top-0;
+}
+</style>

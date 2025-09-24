@@ -31,7 +31,7 @@ import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconError from '../../assets/icons/IconError.vue';
 import IconScratchpad from '../../assets/icons/IconScratchpad.vue';
 import IconEventDefault from '../../assets/icons/IconEventDefault.vue';
-import IconStepStart from '../../assets/icons/IconStepStart.vue';
+import IconCog from '../../assets/icons/IconCog.vue'; // Changed from IconStepStart
 import IconStepEnd from '../../assets/icons/IconStepEnd.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
@@ -204,7 +204,7 @@ const eventIconMap = {
   'thought': IconThinking, 'tool_call': IconTool, 'observation': IconObservation,
   'info': IconInfo, 'exception': IconError, 'error': IconError,
   'scratchpad': IconScratchpad, 'default': IconEventDefault,
-  'step_start': IconStepStart, 'step_end': IconStepEnd,
+  'step_start': IconCog, 'step_end': IconStepEnd,
 };
 
 const groupedEvents = computed(() => {
@@ -528,10 +528,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                                 <summary class="step-group-summary">
                                     <IconChevronRight class="toggle-icon" />
                                     <div class="event-icon-container" :title="item.startEvent.type"><component :is="getEventIcon(item.startEvent.type)" /></div>
-                                    <div class="event-details">
-                                        <div class="event-title">{{ item.startEvent.type }}</div>
-                                        <div v-if="item.startEvent.content" class="event-body-summary prose-sm dark:prose-invert" v-html="parsedMarkdown(String(item.startEvent.content))"></div>
-                                    </div>
+                                    <div class="event-details font-semibold prose-sm dark:prose-invert" v-html="parsedMarkdown(String(item.startEvent.content || 'Step'))"></div>
                                 </summary>
                                 <div class="step-group-content">
                                     <div v-for="(childEvent, childIndex) in item.children" :key="childIndex" class="event-item" :class="`event-type-${childEvent.type.toLowerCase()}`">
@@ -544,13 +541,15 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                                             </div>
                                         </div>
                                     </div>
-                                    <div v-if="item.endEvent" class="event-item event-type-step_end">
-                                        <div class="event-icon-container" :title="item.endEvent.type"><component :is="getEventIcon(item.endEvent.type)" /></div>
-                                        <div class="event-details">
-                                            <div class="event-title">{{ item.endEvent.type }}</div>
-                                            <div v-if="item.endEvent.content" class="event-body">
-                                                <div v-if="typeof item.endEvent.content === 'string'" class="message-prose" v-html="parsedMarkdown(item.endEvent.content)"></div>
-                                                <StepDetail v-else :data="item.endEvent.content" />
+                                    <div v-if="item.endEvent" class="step-end-block">
+                                        <div class="event-item">
+                                            <div class="event-icon-container" :title="item.endEvent.type"><component :is="getEventIcon(item.endEvent.type)" /></div>
+                                            <div class="event-details">
+                                                <div class="event-title">Step Result</div>
+                                                <div v-if="item.endEvent.content" class="event-body">
+                                                    <div v-if="typeof item.endEvent.content === 'string'" class="message-prose" v-html="parsedMarkdown(item.endEvent.content)"></div>
+                                                    <StepDetail v-else :data="item.endEvent.content" />
+                                                </div>
                                             </div>
                                         </div>
                                     </div>
@@ -648,7 +647,9 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
 .event-body-summary {
     @apply text-sm text-gray-600 dark:text-gray-400 truncate;
 }
-
+.step-end-block {
+    @apply mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 p-1 rounded-md;
+}
 /* Event-specific styling */
 .event-type-thought .event-icon-container { @apply bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300; }
 .event-type-thought .event-title { @apply text-purple-600 dark:text-purple-300; }
