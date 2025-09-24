@@ -5,6 +5,8 @@ import json
 import asyncio
 import threading
 import uuid
+import base64
+from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -17,13 +19,13 @@ from pydantic import BaseModel, Field
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
-from backend.db.models.config import LLMBinding as DBLLMBinding
+from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
 from backend.db.models.personality import Personality as DBPersonality
 from backend.security import verify_api_key
-from backend.session import get_user_lollms_client, user_sessions, build_lollms_client_from_params
+from backend.session import get_user_lollms_client, user_sessions, build_lollms_client_from_params, get_user_data_root
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
-from ascii_colors import ASCIIColors
+from ascii_colors import ASCIIColors, trace_exception
 
 
 openai_v1_router = APIRouter(prefix="/v1")
@@ -78,6 +80,26 @@ class ChatCompletionStreamResponse(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()))
     model: str
     choices: List[ChatCompletionResponseStreamChoice]
+
+# --- NEW: Models for Image Generation ---
+class ImageGenerationRequest(BaseModel):
+    prompt: str
+    model: Optional[str] = None
+    n: Optional[int] = Field(default=1, ge=1, le=10)
+    quality: Optional[str] = "standard"
+    response_format: Optional[str] = "url"
+    size: Optional[str] = "1024x1024"
+    style: Optional[str] = "vivid"
+    user: Optional[str] = None
+
+class ImageObject(BaseModel):
+    b64_json: Optional[str] = None
+    url: Optional[str] = None
+    revised_prompt: Optional[str] = None
+
+class ImageGenerationResponse(BaseModel):
+    created: int = Field(default_factory=lambda: int(time.time()))
+    data: List[ImageObject]
 
 # --- NEW: Models for Embeddings ---
 class EmbeddingRequest(BaseModel):
@@ -516,6 +538,73 @@ async def chat_completions(
             raise HTTPException(status_code=500, detail=f"Generation error: {e}")
         
         
+@openai_v1_router.post("/images/generations", response_model=ImageGenerationResponse)
+async def create_image_generation(
+    request_data: ImageGenerationRequest,
+    fastapi_request: Request,
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
+):
+    if request_data.model is None:
+        if user.tti_binding_model_name:
+            request_data.model = user.tti_binding_model_name
+        else:
+            default_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
+            if not default_binding:
+                raise HTTPException(status_code=400, detail="No TTI model specified in request and no default TTI binding configured for user or system.")
+            request_data.model = f"{default_binding.alias}/{default_binding.default_model_name or ''}"
+
+    if '/' not in request_data.model:
+        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'tti_binding_alias/model_name' format.")
+
+    tti_binding_alias, tti_model_name = request_data.model.split('/', 1)
+
+    try:
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            tti_binding_alias=tti_binding_alias,
+            tti_model_name=tti_model_name
+        )
+        
+        if not hasattr(lc, 'tti') or not lc.tti:
+            raise HTTPException(status_code=500, detail=f"TTI functionality is not available for binding '{tti_binding_alias}'.")
+        
+        generated_images_data = []
+        for i in range(request_data.n):
+            image_bytes = lc.tti.generate_image(
+                prompt=request_data.prompt,
+                size=request_data.size, 
+                quality=request_data.quality, 
+                style=request_data.style
+            )
+
+            if not image_bytes:
+                raise Exception("TTI binding returned empty image data.")
+
+            if request_data.response_format == "b64_json":
+                b64_json = base64.b64encode(image_bytes).decode('utf-8')
+                generated_images_data.append(ImageObject(b64_json=b64_json))
+            else: # "url"
+                user_generated_path = get_user_data_root(user.username) / "generated_images"
+                user_generated_path.mkdir(parents=True, exist_ok=True)
+                
+                filename = f"{uuid.uuid4().hex}.png"
+                file_path = user_generated_path / filename
+                with open(file_path, "wb") as f:
+                    f.write(image_bytes)
+                
+                base_url = str(fastapi_request.base_url).rstrip('/')
+                image_url = f"{base_url}/api/files/generated/{filename}"
+                generated_images_data.append(ImageObject(url=image_url))
+
+        return ImageGenerationResponse(data=generated_images_data)
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
 
 @openai_v1_router.post("/embeddings", response_model=EmbeddingResponse)
 async def create_embeddings(

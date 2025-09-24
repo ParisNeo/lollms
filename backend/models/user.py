@@ -50,12 +50,12 @@ class UserCreateAdmin(UserLLMParams):
     rag_use_graph: Optional[bool] = False
     rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
     put_thoughts_in_context: Optional[bool] = False
-    include_memory_date_in_context: Optional[bool] = False # NEW
+    include_memory_date_in_context: Optional[bool] = False
     first_login_done: Optional[bool] = False
-    # NEW FIELDS
     coding_style_constraints: Optional[str] = None
     programming_language_preferences: Optional[str] = None
     tell_llm_os: Optional[bool] = False
+    share_dynamic_info_with_llm: Optional[bool] = True
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100)
@@ -90,10 +90,11 @@ class UserUpdate(BaseModel):
     fun_mode: Optional[bool] = False
     show_token_counter: Optional[bool] = None
     is_searchable: Optional[bool] = None
-    # NEW FIELDS
+    data_zone: Optional[str] = None # THIS LINE IS THE FIX
     coding_style_constraints: Optional[str] = None
     programming_language_preferences: Optional[str] = None
     tell_llm_os: Optional[bool] = None
+    share_dynamic_info_with_llm: Optional[bool] = None
 
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
@@ -183,10 +184,10 @@ class UserPublic(UserLLMParams):
     data_zone: Optional[str] = None
     memory: Optional[str] = None
     icon: Optional[str] = None
-    # NEW FIELDS
     coding_style_constraints: Optional[str] = None
     programming_language_preferences: Optional[str] = None
     tell_llm_os: Optional[bool] = None
+    share_dynamic_info_with_llm: Optional[bool] = None
     class Config:
         from_attributes = True
 
@@ -229,13 +230,13 @@ class UserAuthDetails(UserLLMParams):
     first_login_done: bool 
     data_zone: Optional[str] = None
     memory: Optional[str] = None
-    include_memory_date_in_context: bool
+    include_memory_date_in_context: bool # NEW
     llm_settings_overridden: bool = False
     latex_builder_enabled: bool = False
-    # NEW FIELDS
     coding_style_constraints: Optional[str] = None
     programming_language_preferences: Optional[str] = None
     tell_llm_os: bool
+    share_dynamic_info_with_llm: bool
 
 class RelationshipStatus(BaseModel):
     is_following: bool

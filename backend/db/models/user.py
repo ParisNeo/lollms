@@ -41,6 +41,7 @@ class User(Base):
     coding_style_constraints = Column(Text, nullable=True)
     programming_language_preferences = Column(Text, nullable=True)
     tell_llm_os = Column(Boolean, default=False, nullable=False)
+    share_dynamic_info_with_llm = Column(Boolean, default=True, nullable=False)
     
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
@@ -99,7 +100,7 @@ class User(Base):
     
     def verify_password(self, plain_password):
         return pwd_context.verify(plain_password, self.hashed_password)
-    
+   
 
 class UserStarredDiscussion(Base):
     __tablename__ = "user_starred_discussions"

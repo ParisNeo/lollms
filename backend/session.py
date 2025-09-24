@@ -160,7 +160,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             # NEW FIELDS
             coding_style_constraints=db_user.coding_style_constraints,
             programming_language_preferences=db_user.programming_language_preferences,
-            tell_llm_os=db_user.tell_llm_os            
+            tell_llm_os=db_user.tell_llm_os,
+            share_dynamic_info_with_llm=db_user.share_dynamic_info_with_llm
         )
     finally:
         db.close()

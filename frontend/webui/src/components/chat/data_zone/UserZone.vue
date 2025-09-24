@@ -12,6 +12,7 @@ const generalInfo = ref('');
 const codingStyle = ref('');
 const langPrefs = ref('');
 const tellOS = ref(false);
+const shareDynamicInfo = ref(true);
 
 const hasChanges = ref(false);
 
@@ -22,6 +23,7 @@ function updateLocalState() {
     codingStyle.value = user.value.coding_style_constraints || '';
     langPrefs.value = user.value.programming_language_preferences || '';
     tellOS.value = user.value.tell_llm_os || false;
+    shareDynamicInfo.value = user.value.share_dynamic_info_with_llm ?? true;
     // Use nextTick to ensure the DOM is updated before resetting hasChanges
     nextTick(() => {
         hasChanges.value = false;
@@ -33,7 +35,7 @@ function updateLocalState() {
 watch(user, updateLocalState, { immediate: true, deep: true });
 
 // Watch for changes in local form fields to enable the save button
-watch([generalInfo, codingStyle, langPrefs, tellOS], () => {
+watch([generalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo], () => {
   hasChanges.value = true;
 });
 
@@ -50,7 +52,8 @@ async function handleSaveChanges() {
         data_zone: generalInfo.value,
         coding_style_constraints: codingStyle.value,
         programming_language_preferences: langPrefs.value,
-        tell_llm_os: tellOS.value
+        tell_llm_os: tellOS.value,
+        share_dynamic_info_with_llm: shareDynamicInfo.value
     });
     hasChanges.value = false; // Disable button after save
 }
@@ -69,9 +72,16 @@ async function handleSaveChanges() {
       
         <!-- Static Info Section -->
         <div class="p-4 bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg">
-            <h3 class="text-sm font-semibold mb-3 text-gray-700 dark:text-gray-200">Dynamic Information</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">The AI will automatically know the following information. You can use these placeholders in your prompts.</p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Dynamic Information</h3>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="shareDynamicInfo" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+            <p v-if="shareDynamicInfo" class="text-xs text-gray-500 dark:text-gray-400 mb-3">The AI will automatically know the following information. You can use these placeholders in your prompts.</p>
+            <p v-else class="text-xs text-gray-500 dark:text-gray-400 mb-3">Dynamic information is currently disabled and will not be sent to the AI.</p>
+            <div v-if="shareDynamicInfo" class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
                 <div v-for="info in staticInfo" :key="info.label" class="flex justify-between items-center">
                     <span class="text-gray-800 dark:text-gray-200">{{ info.label }}:</span>
                     <code class="px-2 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">{{ info.placeholder }}</code>

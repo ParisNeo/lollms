@@ -87,17 +87,25 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
                 discussion.memory = "\n\n".join(memory_parts)
 
                 # User Data Zone construction
-                user_data_zone_parts = [
-                    "--- User preferences ---",
-                    "date: {{date}}",
-                    "time: {{time}}",
-                    "datetime: {{datetime}}",
-                    "user name: {{user_name}}",
-                ]
+                preferences_lines = []
+
+                if user_db.share_dynamic_info_with_llm:
+                    preferences_lines.extend([
+                        "date: {{date}}",
+                        "time: {{time}}",
+                        "datetime: {{datetime}}",
+                        "user name: {{user_name}}",
+                    ])
 
                 if user_db.tell_llm_os:
-                    user_data_zone_parts.append(f"Operating System: {platform.system()}")
+                    preferences_lines.append(f"Operating System: {platform.system()}")
                 
+                user_data_zone_parts = []
+                if preferences_lines:
+                    user_data_zone_parts.append("--- User Preferences ---")
+                    user_data_zone_parts.extend(preferences_lines)
+                    user_data_zone_parts.append("--- End User Preferences ---")
+
                 if user_db.coding_style_constraints and user_db.coding_style_constraints.strip():
                     user_data_zone_parts.append("\n--- Coding Style Constraints ---")
                     user_data_zone_parts.append(user_db.coding_style_constraints)
