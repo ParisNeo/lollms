@@ -221,9 +221,9 @@ async def get_user_from_api_key(
             "active_personality_id": user.active_personality_id,
         }
 
+    # Mark the key as used. The commit will be handled by FastAPI's dependency management.
     db_key.last_used_at = datetime.datetime.now(datetime.timezone.utc)
-    db.commit()
-
+    
     return user
 
 # --- Routes ---
