@@ -24,6 +24,7 @@ def get_env_var(key, default, cast_type=str):
 
 # --- Project Root ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+env_path = PROJECT_ROOT / ".env"
 
 # --- One-Time Migration from config.toml to .env ---
 def _migrate_toml_to_env_if_needed():
@@ -32,7 +33,7 @@ def _migrate_toml_to_env_if_needed():
     if .env doesn't already exist.
     """
     toml_path = PROJECT_ROOT / "config.toml"
-    env_path = PROJECT_ROOT / ".env"
+
     
     if not env_path.exists() and toml_path.exists():
         print("INFO: Found config.toml. Migrating settings to .env file...")
@@ -72,7 +73,7 @@ def _migrate_toml_to_env_if_needed():
 
 # --- Load Environment Variables ---
 _migrate_toml_to_env_if_needed()
-load_dotenv()
+load_dotenv(env_path, override=True)
 
 # --- Application Version ---
 APP_VERSION = "1.7.0"
