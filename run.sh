@@ -158,5 +158,5 @@ fi
 if [[ -n "$PORT_VAL" ]]; then
   CMD+=(--port "$PORT_VAL")
 fi
-
+echo "${CMD[@]}"
 exec "${CMD[@]}"
