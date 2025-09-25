@@ -1,13 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-# ==========================================================
+# ================================================================
 #   Simplified LOLLMs – Installer & Runner (TTY‑safe)
-# ==========================================================
+#   Runs the application via the Python interpreter instead of uvicorn
+# ================================================================
 
 VENV_DIR="venv"
 REQUIREMENTS_FILE="requirements.txt"
-APP_MODULE="main:app"
+MAIN_SCRIPT="main.py"
 PYTHON_EXECUTABLE="python3"
 
 # Detect if stdout is a TTY
@@ -132,10 +133,10 @@ done
 # --- Paths ---
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHONPATH_VALUE="$PROJECT_DIR"
-UVICORN_BIN="$PROJECT_DIR/$VENV_DIR/bin/uvicorn"
+PYTHON_BIN="$PROJECT_DIR/$VENV_DIR/bin/python"
 
-if [ ! -x "$UVICORN_BIN" ]; then
-  print_error "uvicorn not found at '$UVICORN_BIN'. Did dependency install succeed?"
+if [ ! -x "$PYTHON_BIN" ]; then
+  print_error "Python executable not found at '$PYTHON_BIN'. Did dependency install succeed?"
   exit 1
 fi
 
@@ -144,19 +145,19 @@ print_header "Starting Simplified LOLLMs"
 export PYTHONPATH="$PYTHONPATH_VALUE"
 export PYTHONUNBUFFERED=1
 
-print_info "Launching Uvicorn server"
+print_info "Launching application via Python"
 if [ "$IS_TTY" -eq 1 ]; then
-  print_info "Press Ctrl+C to stop the server."
+  print_info "Press Ctrl+C to stop the application."
 fi
 echo
 
 # Build command array – only add host/port if supplied
-CMD=("$UVICORN_BIN" "$APP_MODULE")
+CMD=("$PYTHON_BIN" "$MAIN_SCRIPT")
 if [[ -n "$HOST_VAL" ]]; then
   CMD+=(--host "$HOST_VAL")
 fi
 if [[ -n "$PORT_VAL" ]]; then
   CMD+=(--port "$PORT_VAL")
 fi
-echo "${CMD[@]}"
+
 exec "${CMD[@]}"
