@@ -1,11 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
-# ===============================================================
-#
-#   Simplified LOLLMs - Installer & Runner for Linux/macOS (TTY-safe)
-#
-# ===============================================================
+# ==========================================================
+#   Simplified LOLLMs – Installer & Runner (TTY‑safe)
+# ==========================================================
 
 VENV_DIR="venv"
 REQUIREMENTS_FILE="requirements.txt"
@@ -18,7 +16,7 @@ if [ -t 1 ]; then
   IS_TTY=1
 fi
 
-# --- Style and Helper Functions (colors only if TTY) ---
+# --- Colours (only if TTY) ---
 if [ "$IS_TTY" -eq 1 ]; then
   COLOR_RESET=$'\e[0m'
   COLOR_INFO=$'\e[1;34m'
@@ -41,7 +39,7 @@ print_success() { echo -e "${COLOR_SUCCESS}[SUCCESS]${COLOR_RESET} $*"; }
 print_error()   { echo -e "${COLOR_ERROR}[ERROR]${COLOR_RESET} $*" >&2; }
 print_warn()    { echo -e "${COLOR_WARN}[WARNING]${COLOR_RESET} $*"; }
 
-# --- Initial System Checks ---
+# --- Initial system checks ---
 if [ "$IS_TTY" -eq 1 ] && command -v tput >/dev/null 2>&1; then
   tput reset || true
 fi
@@ -49,17 +47,17 @@ fi
 print_header "Simplified LOLLMs Installer & Runner"
 print_info "Performing initial system checks..."
 
-# Pick python
+# Choose Python interpreter
 if ! command -v python3 &>/dev/null; then
   if ! command -v python &>/dev/null; then
-    print_error "Python not found. Please install Python 3.10 or newer."
+    print_error "Python not found. Please install Python 3.10 or newer."
     exit 1
   else
     PYTHON_EXECUTABLE="python"
   fi
 fi
 
-# Ensure venv module exists
+# Verify venv module
 if ! $PYTHON_EXECUTABLE -m venv -h &>/dev/null; then
   print_error "Python 'venv' module unavailable. Install it (e.g., 'sudo apt-get install python3-venv')."
   exit 1
@@ -67,7 +65,7 @@ fi
 
 print_success "Python environment is ready."
 
-# --- Setup (only in TTY) ---
+# --- Setup (only when a TTY is present) ---
 if [ ! -d "$VENV_DIR" ]; then
   if [ "$IS_TTY" -eq 1 ]; then
     print_header "[Step 1/2] Initial Setup"
@@ -93,7 +91,7 @@ else
   print_info "Virtual environment found."
 fi
 
-# --- .env File Check (only in TTY) ---
+# --- .env handling (only when a TTY is present) ---
 if [ "$IS_TTY" -eq 1 ] && [ ! -f ".env" ] && [ -f ".env.example" ]; then
   print_info "'.env' file not found. Creating one from '.env.example'."
   cp ".env.example" ".env"
@@ -141,7 +139,7 @@ if [ ! -x "$UVICORN_BIN" ]; then
   exit 1
 fi
 
-# --- Start Server (foreground, service‑safe) ---
+# --- Start server (foreground, service‑safe) ---
 print_header "Starting Simplified LOLLMs"
 export PYTHONPATH="$PYTHONPATH_VALUE"
 export PYTHONUNBUFFERED=1
@@ -152,7 +150,7 @@ if [ "$IS_TTY" -eq 1 ]; then
 fi
 echo
 
-# Build command array, adding host/port only if supplied
+# Build command array – only add host/port if supplied
 CMD=("$UVICORN_BIN" "$APP_MODULE")
 if [[ -n "$HOST_VAL" ]]; then
   CMD+=(--host "$HOST_VAL")
