@@ -16,16 +16,14 @@ import requests
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
 from PIL import Image
 
 from backend.db import get_db as get_lollms_db
 from backend.db.models.user import User as LollmsUser
-from backend.security import get_password_hash
-from backend.session import get_user_data_root
 from lollms_client import LollmsDiscussion
-from backend.session import get_user_discussion_path, get_user_lollms_client
-from backend.discussion import get_user_discussion_manager, get_user_discussion
+from backend.session import get_user_lollms_client
+from backend.discussion import get_user_discussion_manager
 
 # --- LEGACY DISCUSSION CLASSES FOR MIGRATION ---
 @dataclass
@@ -220,7 +218,12 @@ def find_database_files(directory):
 
 def discover_database_schema(db_path: str):
     try:
-        engine = create_engine(f"sqlite:///{db_path}")
+        engine = create_engine(f"sqlite:///{db_path}",
+                                pool_size=20,          # base pool size
+                                max_overflow=30,       # additional connections beyond pool_size
+                                pool_timeout=30,       # seconds to wait before raising TimeoutError
+                                pool_pre_ping=True    # helps detect stale connections                               
+                               )
         inspector = inspect(engine)
 
         markdown_output = "# Database Schema\n\n"
