@@ -151,3 +151,4 @@ export word needs to be reworked. I need to be able to export images and tables 
 format the exported pdf
 
 add more details about the source chunks
+loading the artefact adds the images to the data zone!
