@@ -159,3 +159,7 @@ PERSONALITIES_ZOO_ROOT_PATH.mkdir(exist_ok=True, parents=True)
 # --- Security Constants (Not moved to DB) ---
 ALGORITHM = "HS256"
 # SECRET_KEY is already defined above
+
+USERS_DIR_NAME = "users"
+TEMP_UPLOADS_DIR_NAME = "temp_uploads"
+DISCUSSION_ASSETS_DIR_NAME = "discussion_assets"

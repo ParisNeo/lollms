@@ -1,3 +1,4 @@
+# backend/session.py
 import json
 import traceback
 import datetime
@@ -23,6 +24,7 @@ from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM, decode_main_a
 from backend.config import (
     APP_DATA_DIR,
     SAFE_STORE_DEFAULTS,
+    USERS_DIR_NAME,  # Import USERS_DIR_NAME
     TEMP_UPLOADS_DIR_NAME,
     DISCUSSION_ASSETS_DIR_NAME,
     DM_ASSETS_DIR_NAME,
@@ -443,7 +445,7 @@ def get_safe_store_instance(
 
 def get_user_data_root(username: str) -> Path:
     safe_username = secure_filename(username)
-    path = APP_DATA_DIR / safe_username
+    path = APP_DATA_DIR / USERS_DIR_NAME / safe_username
     path.mkdir(parents=True, exist_ok=True)
     return path
 

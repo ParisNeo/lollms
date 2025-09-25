@@ -260,6 +260,25 @@ export const useAdminStore = defineStore('admin', () => {
         return response.data;
     }
 
+        async function fetchSystemStatus() {
+        isLoadingSystemStatus.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/system-status');
+            systemStatus.value = response.data;
+        } finally {
+            isLoadingSystemStatus.value = false;
+        }
+    }
+
+    async function purgeUnusedUploads() {
+        const { useTasksStore } = await import('./tasks');
+        const tasksStore = useTasksStore();
+        const response = await apiClient.post('/api/admin/purge-unused-uploads');
+        tasksStore.addTask(response.data);
+        return response.data;
+    }
+
+
     async function fetchAllUsers() {
         isLoadingUsers.value = true;
         try {

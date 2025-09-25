@@ -4,6 +4,7 @@ import apiClient from '../../services/api';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
 import SystemStatus from './SystemStatus.vue';
+import IconTrash from '../../assets/icons/IconTrash.vue';
 
 const stats = ref(null);
 const isLoading = ref(true);
@@ -33,12 +34,25 @@ async function fetchDashboardData() {
     }
 }
 
+async function handlePurge() {
+  const confirmed = await uiStore.showConfirmation({
+    title: 'Purge Temporary Files?',
+    message: 'This will permanently delete temporary files from all users that are older than 24 hours. This action cannot be undone. Check the Task Manager for progress.',
+    confirmText: 'Purge Now',
+    cancelText: 'Cancel'
+  });
+  if (confirmed && confirmed.confirmed) {
+    adminStore.purgeUnusedUploads();
+    uiStore.addNotification('Purge task has been started.', 'info');
+  }
+}
+
+
 onMounted(fetchDashboardData);
 </script>
 
 <template>
-    <div class="space-y-12">
-        <div class="space-y-6">
+        <div class="space-y-12">
             <div class="flex items-center justify-between">
                 <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
                     Application Overview
@@ -86,6 +100,26 @@ onMounted(fetchDashboardData);
 
             <div v-else class="text-center p-10 bg-white dark:bg-gray-800 rounded-lg shadow">
                 <p class="text-gray-500">Could not load dashboard data.</p>
+            </div>
+
+        <div class="space-y-6">
+            <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
+                Maintenance Actions
+            </h3>
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h4 class="font-semibold text-gray-800 dark:text-gray-100">Purge Temporary Files</h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Delete all user-uploaded files in temporary folders that are older than 24 hours. 
+                            This does not affect discussions, artefacts, or data stores.
+                        </p>
+                    </div>
+                    <button @click="handlePurge" class="btn btn-danger flex items-center">
+                        <IconTrash class="w-4 h-4 mr-2" />
+                        <span>Purge Now</span>
+                    </button>
+                </div>
             </div>
         </div>
 

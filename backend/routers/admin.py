@@ -86,7 +86,7 @@ from backend.session import (
 )
 from backend.security import create_reset_token, send_generic_email
 from backend.settings import settings
-from backend.config import INITIAL_ADMIN_USER_CONFIG, APP_DATA_DIR, TEMP_UPLOADS_DIR_NAME, PROJECT_ROOT
+from backend.config import INITIAL_ADMIN_USER_CONFIG, APP_DATA_DIR, TEMP_UPLOADS_DIR_NAME, PROJECT_ROOT, USERS_DIR_NAME
 from backend.migration_utils import run_openwebui_migration
 from backend.task_manager import task_manager, Task
 from fastapi import status
@@ -224,6 +224,9 @@ def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, 
     finally:
         db_session_local.close()
 
+# ... (imports) ...
+
+# ... (existing code) ...
 def _purge_unused_temp_files_task(task: Task):
     task.log("Starting purge of unused temporary files older than 24 hours.")
     deleted_count = 0
@@ -231,11 +234,17 @@ def _purge_unused_temp_files_task(task: Task):
     retention_period = timedelta(hours=24)
     now = datetime.now(timezone.utc)
     
-    all_user_dirs = [d for d in APP_DATA_DIR.iterdir() if d.is_dir()]
+    users_root_path = APP_DATA_DIR / USERS_DIR_NAME
+    if not users_root_path.exists():
+        task.log("Users directory not found. Nothing to purge.")
+        task.set_progress(100)
+        return {"message": "Purge complete. Users directory not found."}
+    
+    all_user_dirs = [d for d in users_root_path.iterdir() if d.is_dir()]
     task.set_progress(5)
 
     if not all_user_dirs:
-        task.log("No user data directories found to scan.")
+        task.log("No user directories found to scan.")
         task.set_progress(100)
         return {"message": "Purge complete. No user directories found."}
 
@@ -264,6 +273,7 @@ def _purge_unused_temp_files_task(task: Task):
 
     task.set_progress(100)
     return {"message": f"Purge complete. Scanned {total_scanned} files and deleted {deleted_count}."}
+
 
 # --- Zoo Cache Refresh Endpoint ---
 @admin_router.post("/refresh-zoo-cache", response_model=TaskInfo, status_code=202)
@@ -736,6 +746,7 @@ async def email_users(
         args=(payload.user_ids, payload.subject, payload.body, payload.background_color, payload.send_as_text),
         description=f"Sending email with subject: '{payload.subject}'",
         owner_username=current_admin.username
+
     )
     return _to_task_info(db_task)
 

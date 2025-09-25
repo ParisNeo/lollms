@@ -1,6 +1,7 @@
 # backend/db/migration.py
 import json
 import re
+import shutil
 from datetime import datetime
 from pathlib import Path
 from sqlalchemy import text
@@ -8,7 +9,7 @@ from sqlalchemy.exc import OperationalError, IntegrityError
 from sqlalchemy.schema import DropTable
 from sqlalchemy.ext.compiler import compiles
 
-from backend.config import LOLLMS_CLIENT_DEFAULTS, SERVER_CONFIG, APP_SETTINGS, SAFE_STORE_DEFAULTS
+from backend.config import LOLLMS_CLIENT_DEFAULTS, SERVER_CONFIG, APP_SETTINGS, SAFE_STORE_DEFAULTS, APP_DATA_DIR, USERS_DIR_NAME
 from backend.db.base import CURRENT_DB_VERSION
 from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
 from backend.db.models.service import App # Ensure App is imported
@@ -382,6 +383,9 @@ def _bootstrap_lollms_user(connection):
         print("INFO: AI user '@lollms' already exists.")
 
 def run_schema_migrations_and_bootstrap(connection, inspector):
+    # This should run early, before other logic that might depend on user folders.
+    _migrate_user_data_folders(connection)
+
     if inspector.has_table("global_configs"):
         _bootstrap_global_settings(connection)
 
@@ -1113,3 +1117,46 @@ def check_and_update_db_version(SessionLocal):
         session.rollback()
     finally:
         session.close()
+
+def _migrate_user_data_folders(connection):
+    """
+    Migrates user data folders from `data/<username>` to `data/users/<username>`.
+    """
+    users_root_path = APP_DATA_DIR / USERS_DIR_NAME
+    users_root_path.mkdir(exist_ok=True)
+    
+    print("INFO: Checking for legacy user data folder structure...")
+    
+    try:
+        # Get all usernames from the database
+        usernames = {row[0] for row in connection.execute(text("SELECT username FROM users")).fetchall()}
+        
+        migrated_count = 0
+        non_user_folders = {USERS_DIR_NAME, "cache", "zoo", "apps", "mcps", "custom_apps", "apps_zoo", "mcps_zoo", "prompts_zoo", "personalities_zoo"}
+        
+        # Iterate over items in the root data directory
+        for item in APP_DATA_DIR.iterdir():
+            # Check if it's a directory, its name is a valid username, and it's not a system folder
+            if item.is_dir() and item.name in usernames and item.name not in non_user_folders:
+                old_path = item
+                new_path = users_root_path / item.name
+                
+                if not new_path.exists():
+                    print(f"INFO: Migrating user data for '{item.name}' from '{old_path}' to '{new_path}'.")
+                    try:
+                        shutil.move(str(old_path), str(new_path))
+                        migrated_count += 1
+                    except Exception as e:
+                        print(f"ERROR: Failed to move folder for user '{item.name}': {e}")
+                        trace_exception(e)
+                else:
+                    print(f"WARNING: New user folder for '{item.name}' already exists. Skipping migration for this user. Manual check may be required.")
+        
+        if migrated_count > 0:
+            print(f"INFO: Successfully migrated data for {migrated_count} user(s).")
+        else:
+            print("INFO: No user data folders needed migration.")
+            
+    except Exception as e:
+        print(f"CRITICAL: An error occurred during user data folder migration: {e}")
+        trace_exception(e)
