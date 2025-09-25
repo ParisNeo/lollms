@@ -34,6 +34,9 @@ const isActive = computed(() => store.generationInProgress && isSelected.value);
 const isTitleGenerating = computed(() => store.titleGenerationInProgressId === props.discussion.id);
 
 async function handleSelect() {
+  if (uiStore.mainView !== 'chat') {
+      uiStore.setMainView('chat');
+  }  
   if (!isSelected.value) {
     await store.selectDiscussion(props.discussion.id);
   }

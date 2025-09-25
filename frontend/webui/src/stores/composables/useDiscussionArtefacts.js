@@ -45,6 +45,8 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     async function addArtefact({ discussionId, file, extractImages }) {
         const formData = new FormData();
         formData.append('file', file);
+        console.log("extractImages:", extractImages);
+        formData.append('extract_images', extractImages.toString());
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },

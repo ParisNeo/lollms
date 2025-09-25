@@ -62,9 +62,11 @@ def build_artefacts_router(router: APIRouter):
     async def add_discussion_artefact(
         discussion_id: str,
         file: UploadFile = File(...),
+        extract_images: bool = Form(True),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db) 
     ):
+        print(f"extract_images: {extract_images}")
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
@@ -94,12 +96,13 @@ def build_artefacts_router(router: APIRouter):
                     text_parts = []
                     for page in pdf_doc:
                         text_parts.append(page.get_text())
-                        img_list = page.get_images(full=True)
-                        for img_info in img_list:
-                            xref = img_info[0]
-                            base_image = pdf_doc.extract_image(xref)
-                            image_bytes = base_image["image"]
-                            images.append(base64.b64encode(image_bytes).decode('utf-8'))
+                        if extract_images:
+                            img_list = page.get_images(full=True)
+                            for img_info in img_list:
+                                xref = img_info[0]
+                                base_image = pdf_doc.extract_image(xref)
+                                image_bytes = base_image["image"]
+                                images.append(base64.b64encode(image_bytes).decode('utf-8'))
                     content = "\n".join(text_parts)
                     pdf_doc.close()
 
@@ -107,11 +110,12 @@ def build_artefacts_router(router: APIRouter):
                     with io.BytesIO(content_bytes) as docx_io:
                         doc = DocxDocument(docx_io)
                         content = "\n".join([p.text for p in doc.paragraphs])
-                        for rel in doc.part._rels.values():
-                            if "image" in rel.target_ref:
-                                image_part = rel.target_part
-                                image_bytes = image_part.blob
-                                images.append(base64.b64encode(image_bytes).decode("utf-8"))
+                        if extract_images:
+                            for rel in doc.part._rels.values():
+                                if "image" in rel.target_ref:
+                                    image_part = rel.target_part
+                                    image_bytes = image_part.blob
+                                    images.append(base64.b64encode(image_bytes).decode("utf-8"))
 
                 elif extension == ".xlsx" or "spreadsheetml" in file.content_type:
                     try:
@@ -139,12 +143,13 @@ def build_artefacts_router(router: APIRouter):
                                 if slide_parts:
                                     slide_texts.append(f"--- Slide {idx} ---\n" + "\n".join(slide_parts))
                             content = "\n\n".join(slide_texts)
-                            from pptx.enum.shapes import MSO_SHAPE_TYPE
-                            for slide in prs.slides:
-                                for shape in slide.shapes:
-                                    if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                                        image_blob = shape.image.blob
-                                        images.append(base64.b64encode(image_blob).decode("utf-8"))
+                            if extract_images:                            
+                                from pptx.enum.shapes import MSO_SHAPE_TYPE
+                                for slide in prs.slides:
+                                    for shape in slide.shapes:
+                                        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                                            image_blob = shape.image.blob
+                                            images.append(base64.b64encode(image_blob).decode("utf-8"))
                     except Exception as e:
                         trace_exception(e)
                         content = f"Error processing PPTX file: {e}"
@@ -195,10 +200,11 @@ def build_artefacts_router(router: APIRouter):
                                     att_bytes = att.data or b""
                                     att_ext = Path(att_name).suffix.lower()
 
-                                    # Handle images directly
-                                    if att_ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"]:
-                                        images.append(base64.b64encode(att_bytes).decode("utf-8"))
-                                        continue
+                                    if extract_images:
+                                        # Handle images directly
+                                        if att_ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"]:
+                                            images.append(base64.b64encode(att_bytes).decode("utf-8"))
+                                            continue
 
                                     # Text-like attachments
                                     try:
@@ -240,9 +246,6 @@ def build_artefacts_router(router: APIRouter):
                         content = content_bytes.decode('utf-8')
                     except UnicodeDecodeError:
                         content = content_bytes.decode('latin-1', errors='replace')
-
-            for img_b64 in images:
-                discussion.add_discussion_image(img_b64, source=f"artefact:{title}")
 
             artefact_info = discussion.add_artefact(
                 title=title,
