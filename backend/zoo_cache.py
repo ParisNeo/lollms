@@ -168,6 +168,49 @@ def force_build_full_cache():
     except Timeout:
         ASCIIColors.warning("Could not acquire lock for force cache build. Another process might be building it.")
 
+def refresh_repo_cache(repo_name: str, item_type: ITEM_TYPES):
+    global _cache
+    lock = FileLock(str(CACHE_LOCK_FILE), timeout=60)
+    try:
+        with lock:
+            if not _cache.get("data"):
+                load_cache()
+            
+            _cache["data"][item_type] = [item for item in _cache.get("data", {}).get(item_type, []) if item.get('repository') != repo_name]
+            
+            db = next(get_db())
+            try:
+                repo = db.query(get_db_repo_model(item_type)).filter_by(name=repo_name).first()
+                if repo:
+                    repo_path = Path(repo.url) if repo.type == 'local' else get_zoo_root_path(item_type) / repo.name
+                    if repo_path.is_dir():
+                        config_files = list(repo_path.glob('**/description.yaml'))
+                        if item_type == 'personality': config_files.extend(list(repo_path.glob('**/config.yaml')))
+
+                        for config_file in config_files:
+                            item_folder = config_file.parent
+                            try:
+                                metadata = parse_item_metadata(item_folder, item_type)
+                                if not metadata.get('name'): metadata['name'] = item_folder.name
+                                if 'category' in metadata and isinstance(metadata['category'], list):
+                                    metadata['category'] = metadata['category'][0] if metadata['category'] else 'Uncategorized'
+                                if item_type == 'personality' and (item_folder / "scripts" / "processor.py").exists():
+                                    metadata['is_legacy_scripted'] = True
+                                icon_path = next((p for p in [item_folder / "icon.png", item_folder / "assets" / "logo.png"] if p.exists()), None)
+                                icon_b64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode('utf-8')}" if icon_path else None
+                                folder_name_rel = item_folder.relative_to(repo_path).as_posix()
+                                _cache["data"][item_type].append(_sanitize_for_json({**metadata, 'item_type': item_type, 'repository': repo.name, 'folder_name': folder_name_rel, 'icon': icon_b64}))
+                            except Exception as e:
+                                print(f"Warning: Could not process item '{item_folder}' on refresh: {e}")
+
+                _cache["timestamp"] = time.time()
+                with open(CACHE_FILE, 'w') as f: json.dump(_cache, f)
+            finally:
+                db.close()
+    except Timeout:
+        ASCIIColors.warning(f"Could not acquire lock to refresh repo '{repo_name}'. Cache may be slightly stale.")
+
+
 def load_cache():
     """Loads the cache from file if it exists, otherwise builds it."""
     global _cache
