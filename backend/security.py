@@ -183,7 +183,7 @@ def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], t
         print(f"CRITICAL: Failed to send SMTP email. Error: {e}")
         raise
 
-def _send_email_system_mail_html_alt(to_email: str, subject: str, html_content: str, text_content: str):
+def _send_email_system_mail_html(to_email: str, subject: str, html_content: str, text_content: str):
     """Alternative approach using sendmail or a temporary file with mailx."""
     
     # Check for sendmail first (more reliable for MIME)
