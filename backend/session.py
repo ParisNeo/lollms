@@ -1,7 +1,5 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-# The migration functions are no longer called from here.
-from backend.config import SERVER_CONFIG
 engine = None
 SessionLocal = None
 
@@ -18,9 +16,9 @@ def init_database(db_url: str):
             connect_args={"check_same_thread": False, "timeout": 60}, 
             echo=False,
             pool_pre_ping=True,
-            pool_size=SERVER_CONFIG.get("DB_POOL_SIZE",20),          # base pool size
-            max_overflow=SERVER_CONFIG.get("DB_MAX_OVERFLOW",30),       # additional connections beyond pool_size
-            pool_timeout=SERVER_CONFIG.get("DB_POOL_TIMEOUT",60)       # seconds to wait before raising TimeoutError
+            pool_size=20,#SERVER_CONFIG.get("DB_POOL_SIZE",20),          # base pool size
+            max_overflow=30,#SERVER_CONFIG.get("DB_MAX_OVERFLOW",30),       # additional connections beyond pool_size
+            pool_timeout=60,#SERVER_CONFIG.get("DB_POOL_TIMEOUT",60)       # seconds to wait before raising TimeoutError
         )
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         # The verbose "Database tables checked/created" log is now handled
