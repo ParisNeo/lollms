@@ -152,3 +152,4 @@ format the exported pdf
 
 add more details about the source chunks
 loading the artefact adds the images to the data zone!
+pressing a discussion must switch to discussion view instead of feed
