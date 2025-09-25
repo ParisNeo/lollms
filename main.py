@@ -479,9 +479,9 @@ if __name__ == "__main__":
     apps_dir = data_dir / "apps"
     mcp_dir.mkdir(parents=True, exist_ok=True)
     apps_dir.mkdir(parents=True, exist_ok=True)
-    host_setting = settings.get("host", "0.0.0.0")
-    port_setting = int(settings.get("port", SERVER_CONFIG.get("port", 9642)))
-    workers = int(os.getenv("LOLLMS_WORKERS", settings.get("workers", SERVER_CONFIG.get("workers", cpu_count()))))
+    host_setting = SERVER_CONFIG.get("host", "localhost")
+    port_setting = int(SERVER_CONFIG.get("port", 9642))
+    workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
 
     # --- MAIN PROCESS ONLY SETUP ---
     startup_lock = Lock()
