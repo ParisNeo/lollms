@@ -458,3 +458,57 @@ def update_app_config(app_id: str, config: Dict[str, Any], db: Session = Depends
         yaml.dump(config, f)
         
     return AppActionResponse(success=True, message="Configuration saved.")
+
+
+@apps_zoo_router.post("/installed/{app_id}/start", response_model=TaskInfo, status_code=202)
+def start_app(app_id: str, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    app = db.query(DBApp).filter(DBApp.id == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="App not found.")
+    
+    task = task_manager.submit_task(
+        name=f"Starting app: {app.name}",
+        target=start_app_process,
+        args=(app.id, db.get_bind().url),
+        description=f"Initiating startup sequence for {app.name}",
+        owner_username=current_user.username
+    )
+    return _to_task_info(task)
+
+@apps_zoo_router.post("/installed/{app_id}/stop", response_model=TaskInfo, status_code=202)
+def stop_app(app_id: str, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    app = db.query(DBApp).filter(DBApp.id == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="App not found.")
+        
+    task = task_manager.submit_task(
+        name=f"Stopping app: {app.name}",
+        target=stop_app_process,
+        args=(app.id, db.get_bind().url),
+        description=f"Initiating shutdown sequence for {app.name}",
+        owner_username=current_user.username
+    )
+    return _to_task_info(task)
+
+@apps_zoo_router.get("/installed/{app_id}/logs", response_model=dict)
+def get_app_log(app_id: str, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    from backend.config import APPS_ROOT_PATH
+    app = db.query(DBApp).filter(DBApp.id == app_id).first()
+    if not app:
+        raise HTTPException(status_code=404, detail="App not found.")
+    
+    if not app.folder_name:
+        return {"log_content": "Log not available: App folder name is missing."}
+        
+    log_file_path = APPS_ROOT_PATH / app.folder_name / "log.log"
+    if not log_file_path.exists():
+        return {"log_content": f"Log file not found at: {log_file_path}"}
+        
+    try:
+        with open(log_file_path, "r", encoding="utf-8") as f:
+            # Read last 500 lines for performance
+            lines = f.readlines()
+            log_content = "".join(lines[-500:])
+        return {"log_content": log_content}
+    except Exception as e:
+        return {"log_content": f"Error reading log file: {e}"}

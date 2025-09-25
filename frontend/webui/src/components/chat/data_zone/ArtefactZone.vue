@@ -54,7 +54,7 @@ function handleRefreshArtefacts() {
 async function handleLoadAllArtefacts() {
     if (!activeDiscussion.value) return;
     const confirmed = await uiStore.showConfirmation({ title: 'Load All Artefacts?', message: `This will clear the current Discussion Data Zone and load all ${groupedArtefacts.value.length} artefact(s).`, confirmText: 'Load All' });
-    if (confirmed) discussionsStore.loadAllArtefactsToContext(activeDiscussion.value.id);
+    if (confirmed) discussionsStore.loadAllArtefactsToDataZone(activeDiscussion.value.id);
 }
 
 function handleCreateArtefact() {

@@ -908,3 +908,106 @@ def update_item_task(task: Task, app_id: str):
         raise e
     finally:
         db.close()
+
+def _get_db_session_from_url(db_url: str):
+    engine = create_engine(db_url)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    return SessionLocal()
+
+def start_app_process(task: Task, app_id: str, db_url: str):
+    db = _get_db_session_from_url(db_url)
+    try:
+        app = db.query(DBApp).filter(DBApp.id == app_id).first()
+        if not app:
+            task.log(f"App with ID {app_id} not found.", "ERROR")
+            raise ValueError("App not found.")
+
+        app.status = 'starting'
+        db.commit()
+        task.set_progress(10)
+
+        app_folder = APPS_ROOT_PATH / app.folder_name
+        main_script_path = app_folder / "main.py"
+        if not main_script_path.exists():
+            app.status = 'stopped'
+            db.commit()
+            raise FileNotFoundError(f"main.py not found in {app_folder}")
+
+        venv_path = app_folder / "venv"
+        python_executable = str(venv_path / "bin" / "python") if venv_path.exists() else sys.executable
+        
+        host = get_accessible_host()
+        port = find_next_available_port(app.port if app.port and app.port >= 1024 else 9601, host)
+        
+        url = f"http://{host}:{port}"
+        app.port = port
+        app.url = url
+        db.commit()
+        task.log(f"Starting {app.name} on {url}")
+        
+        log_file_path = app_folder / "log.log"
+        env = os.environ.copy()
+        env["APP_HOST"] = host
+        env["APP_PORT"] = str(port)
+        
+        with open(log_file_path, "w") as log_file:
+            process = subprocess.Popen(
+                [python_executable, str(main_script_path)],
+                stdout=log_file,
+                stderr=log_file,
+                env=env
+            )
+
+        app.pid = process.pid
+        app.status = 'running'
+        db.commit()
+        task.set_progress(100)
+        task.log(f"{app.name} started successfully with PID {process.pid}.")
+        return {"status": "success", "app_id": app_id, "updated_app": app.to_dict()}
+    except Exception as e:
+        task.log(f"Failed to start app: {e}", "ERROR")
+        if 'app' in locals() and app:
+            app.status = 'stopped'
+            app.pid = None
+            db.commit()
+        raise e
+    finally:
+        db.close()
+
+def stop_app_process(task: Task, app_id: str, db_url: str):
+    db = _get_db_session_from_url(db_url)
+    try:
+        app = db.query(DBApp).filter(DBApp.id == app_id).first()
+        if not app:
+            raise ValueError("App not found.")
+        
+        if not app.pid:
+            task.log(f"{app.name} has no PID. Setting status to stopped.", "WARNING")
+            app.status = 'stopped'
+            db.commit()
+            return {"status": "success", "app_id": app_id, "updated_app": app.to_dict()}
+
+        try:
+            process = psutil.Process(app.pid)
+            for proc in process.children(recursive=True):
+                proc.terminate()
+            process.terminate()
+            task.log(f"Termination signal sent to PID {app.pid}.")
+        except psutil.NoSuchProcess:
+            task.log(f"Process with PID {app.pid} not found. It may have already stopped.", "WARNING")
+        
+        app.pid = None
+        app.status = 'stopped'
+        db.commit()
+        task.log(f"{app.name} has been stopped.")
+        task.set_progress(100)
+        return {"status": "success", "app_id": app_id, "updated_app": app.to_dict()}
+    except Exception as e:
+        task.log(f"Failed to stop app: {e}", "ERROR")
+        if 'app' in locals() and app:
+            app.status = 'stopped'
+            app.pid = None
+            db.commit()
+        raise e
+    finally:
+        db.close()

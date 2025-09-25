@@ -546,4 +546,4 @@ if __name__ == "__main__":
     ASCIIColors.green(f"Using {workers} Workers")
     print("----------------------")
 
-    uvicorn.run("main:app", host=host_setting, port=port_setting, reload=False, workers=workers, **ssl_params)
+    uvicorn.run("main:app", host=host_setting, port=port_setting, reload=False, workers=workers, timeout_keep_alive=600, **ssl_params)

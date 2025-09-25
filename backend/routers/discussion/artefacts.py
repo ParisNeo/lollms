@@ -23,6 +23,7 @@ from ascii_colors import trace_exception
 
 from backend.db import get_db
 from backend.models import UserAuthDetails, ArtefactInfo, ArtefactCreateManual, ArtefactUpdate, ExportContextRequest, LoadArtefactRequest, TaskInfo, UnloadArtefactRequest, UrlImportRequest, ArtefactAndDataZoneUpdateResponse
+from backend.models.discussion import ArtefactUploadResponse
 from backend.session import get_current_active_user, get_user_lollms_client
 from backend.discussion import get_user_discussion
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
@@ -57,14 +58,14 @@ def build_artefacts_router(router: APIRouter):
                 artefact['updated_at'] = artefact['updated_at'].isoformat()
         return artefacts
 
-    @router.post("/{discussion_id}/artefacts", response_model=ArtefactInfo)
+    @router.post("/{discussion_id}/artefacts", response_model=ArtefactUploadResponse)
     async def add_discussion_artefact(
         discussion_id: str,
         file: UploadFile = File(...),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db) 
     ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
         
@@ -100,19 +101,17 @@ def build_artefacts_router(router: APIRouter):
                             image_bytes = base_image["image"]
                             images.append(base64.b64encode(image_bytes).decode('utf-8'))
                     content = "\n".join(text_parts)
-                    pdf_doc.close()  # Use PyMuPDF to get text and images reliably [web:81][web:78]
+                    pdf_doc.close()
 
                 elif extension == ".docx":
                     with io.BytesIO(content_bytes) as docx_io:
                         doc = DocxDocument(docx_io)
-                        # Extract text paragraphs
                         content = "\n".join([p.text for p in doc.paragraphs])
-                        # Extract images from relationships
                         for rel in doc.part._rels.values():
                             if "image" in rel.target_ref:
                                 image_part = rel.target_part
                                 image_bytes = image_part.blob
-                                images.append(base64.b64encode(image_bytes).decode("utf-8"))  # Common docx pattern [web:35]
+                                images.append(base64.b64encode(image_bytes).decode("utf-8"))
 
                 elif extension == ".xlsx" or "spreadsheetml" in file.content_type:
                     try:
@@ -129,8 +128,6 @@ def build_artefacts_router(router: APIRouter):
                     try:
                         with io.BytesIO(content_bytes) as pptx_io:
                             prs = Presentation(pptx_io)
-
-                            # Gather slide text
                             slide_texts: List[str] = []
                             for idx, slide in enumerate(prs.slides, start=1):
                                 slide_parts: List[str] = []
@@ -142,30 +139,22 @@ def build_artefacts_router(router: APIRouter):
                                 if slide_parts:
                                     slide_texts.append(f"--- Slide {idx} ---\n" + "\n".join(slide_parts))
                             content = "\n\n".join(slide_texts)
-
-                            # Gather images
                             from pptx.enum.shapes import MSO_SHAPE_TYPE
                             for slide in prs.slides:
                                 for shape in slide.shapes:
                                     if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
                                         image_blob = shape.image.blob
-                                        images.append(base64.b64encode(image_blob).decode("utf-8"))  # python-pptx approach [web:76][web:82]
+                                        images.append(base64.b64encode(image_blob).decode("utf-8"))
                     except Exception as e:
                         trace_exception(e)
                         content = f"Error processing PPTX file: {e}"
 
                 elif extension == ".msg":
-                    # Outlook .msg parsing: body, headers, and attachments
                     if extract_msg is None:
-                        content = (
-                            "Error: extract-msg library is not installed. "
-                            "Please run `pip install extract-msg` to enable .msg parsing."
-                        )  # Use extract-msg for MSG files [web:67]
+                        content = "Error: extract-msg library is not installed."
                     else:
                         try:
-                            # extract_msg expects a file-like path or bytes; use temp file for bytes
                             with io.BytesIO(content_bytes) as bio:
-                                # Write to a NamedTemporaryFile because extract_msg API reads from path
                                 import tempfile, os
                                 with tempfile.NamedTemporaryFile(delete=False, suffix=".msg") as tf:
                                     tf.write(bio.getvalue())
@@ -237,13 +226,10 @@ def build_artefacts_router(router: APIRouter):
                                 content = "\n\n".join([p for p in [header, msg_body, attachments_md] if p])
 
                             finally:
-                                try:
-                                    os.unlink(temp_path)
-                                except Exception:
-                                    pass
+                                os.unlink(temp_path)
                         except Exception as e:
                             trace_exception(e)
-                            content = f"Error processing MSG file: {e}"  # MSG parsing approach via extract-msg [web:67][web:68][web:71]
+                            content = f"Error processing MSG file: {e}"
 
                 elif extension in CODE_EXTENSIONS:
                     lang = CODE_EXTENSIONS[extension]
@@ -255,6 +241,9 @@ def build_artefacts_router(router: APIRouter):
                     except UnicodeDecodeError:
                         content = content_bytes.decode('latin-1', errors='replace')
 
+            for img_b64 in images:
+                discussion.add_discussion_image(img_b64, source=f"artefact:{title}")
+
             artefact_info = discussion.add_artefact(
                 title=title,
                 content=content,
@@ -262,11 +251,19 @@ def build_artefacts_router(router: APIRouter):
                 author=current_user.username
             )
             discussion.commit()
+
+            all_images_info = discussion.get_discussion_images()
+            
             if isinstance(artefact_info.get('created_at'), datetime):
                 artefact_info['created_at'] = artefact_info['created_at'].isoformat()
             if isinstance(artefact_info.get('updated_at'), datetime):
                 artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
-            return artefact_info
+
+            return {
+                "new_artefact_info": artefact_info,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to add artefact: {e}")
@@ -305,9 +302,6 @@ def build_artefacts_router(router: APIRouter):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
         try:
-            # Use the unified update_artefact method from LollmsDiscussion,
-            # which now handles both creating a new version and updating in-place.
-            # This respects the class abstraction and removes direct DB access from the router.
             artefact_info = discussion.update_artefact(
                 title=artefact_title, 
                 new_content=payload.new_content, 
@@ -317,7 +311,6 @@ def build_artefacts_router(router: APIRouter):
             )
             discussion.commit()
 
-            # Ensure datetime objects are converted to ISO 8601 strings for the response model.
             if isinstance(artefact_info.get('created_at'), datetime):
                 artefact_info['created_at'] = artefact_info['created_at'].isoformat()
             if isinstance(artefact_info.get('updated_at'), datetime):
@@ -326,10 +319,8 @@ def build_artefacts_router(router: APIRouter):
             return artefact_info
 
         except ValueError as e:
-            # This is likely raised by LollmsDiscussion if the artefact/version is not found.
             raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
-            # Catch any other unexpected errors.
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"An unexpected error occurred while updating the artefact: {e}")
 
@@ -425,10 +416,13 @@ def build_artefacts_router(router: APIRouter):
             lc = get_user_lollms_client(current_user.username)
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
             
+            all_images_info = discussion.get_discussion_images()
             return {
                 "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count
+                "discussion_data_zone_tokens": token_count,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
             }
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
@@ -457,10 +451,13 @@ def build_artefacts_router(router: APIRouter):
             lc = get_user_lollms_client(current_user.username)
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
 
+            all_images_info = discussion.get_discussion_images()
             return {
                 "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count
+                "discussion_data_zone_tokens": token_count,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
             }
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
@@ -490,10 +487,13 @@ def build_artefacts_router(router: APIRouter):
             lc = get_user_lollms_client(current_user.username)
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
 
+            all_images_info = discussion.get_discussion_images()
             return {
                 "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count
+                "discussion_data_zone_tokens": token_count,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
             }
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))

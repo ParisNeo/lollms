@@ -166,6 +166,15 @@ async function handleRefreshCache() {
         uiStore.openModal('tasksManager', { initialTaskId: task.id });
     }
 }
+
+const getTaskForApp = (app) => {
+  if (!app.folder_name) return null;
+  // This finds any task whose name includes the app's folder_name
+  return tasksStore.tasks.find(task =>
+    (task.name.toLowerCase().includes(app.folder_name.toLowerCase())) &&
+    (task.status === 'running' || task.status === 'pending')
+  );
+};
 </script>
 
 <style scoped>
@@ -211,6 +220,7 @@ async function handleRefreshCache() {
                 <div v-else>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
                         <AppCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @uninstall="handleUninstallApp(item)" @delete="handleDeleteRegisteredItem(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" @start="handleAppAction(item.id, 'start')" @stop="handleAppAction(item.id, 'stop')" @configure="handleConfigureApp(item)" @fix="handleFixItem(item)" @purge="handlePurgeItem(item)" @details="handleShowDetails" @logs="handleViewLogs(item)" />
+
                     </div>
                     <div v-if="totalPages > 1" class="flex justify-between items-center mt-6"><button @click="currentPage--" :disabled="currentPage === 1" class="btn btn-secondary">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div>
                 </div>

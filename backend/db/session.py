@@ -18,7 +18,7 @@ def init_database(db_url: str):
     if engine is None:  # Ensure it's only created once per process
         engine = create_engine(
             db_url, 
-            connect_args={"check_same_thread": False, "timeout": 30}, 
+            connect_args={"check_same_thread": False, "timeout": 60}, 
             echo=False,
             pool_pre_ping=True
         )

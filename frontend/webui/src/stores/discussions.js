@@ -1,6 +1,7 @@
 // frontend/webui/src/stores/discussions.js
 import { defineStore, storeToRefs } from 'pinia';
 import { ref, computed, watch } from 'vue';
+import apiClient from '../services/api'; // Import apiClient
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
 import { useDataStore } from './data';
@@ -121,7 +122,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     Object.assign(_actions, useDiscussionGroups(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionMessages(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionSharing(composableState, composableStores, getActions));
-
 
     // --- WATCHERS ---
     watch(tasks, (currentTasks) => {

@@ -35,6 +35,11 @@ class ArtefactInfo(BaseModel):
     content: Optional[str] = None # Will be populated only on single-artefact fetch
     images: Optional[List[str]] = None
 
+class ArtefactUploadResponse(BaseModel):
+    new_artefact_info: ArtefactInfo
+    discussion_images: List[str]
+    active_discussion_images: List[bool]
+
 class LoadArtefactRequest(BaseModel):
     title: str
     version: Optional[int] = None
@@ -237,3 +242,5 @@ class ArtefactAndDataZoneUpdateResponse(BaseModel):
     discussion_data_zone: str
     artefacts: List[ArtefactInfo]
     discussion_data_zone_tokens: int
+    discussion_images: List[str]
+    active_discussion_images: List[bool]

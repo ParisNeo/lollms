@@ -2,7 +2,7 @@ import json
 from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 from backend.db.models.config import GlobalConfig
-import json
+
 class _Settings:
     _instance = None
     _settings_cache: Dict[str, Any] = {}
@@ -32,17 +32,17 @@ class _Settings:
                 for config in configs:
                     final_value = None
                     try:
-                        # Attempt to parse the value as JSON
-                        parsed_value = json.loads(config.value)
-                        if isinstance(parsed_value,str):
-                            parsed_value = json.loads(parsed_value)
+                        # First, assume it's our structured format: {"value": ..., "type": ...}
+                        structured_data = json.loads(config.value)
                         
-                        # Check if it's our structured format: { "value": ..., "type": ... }
-                        if isinstance(parsed_value, dict) and 'value' in parsed_value and 'type' in parsed_value:
-                            val = parsed_value['value']
-                            val_type = parsed_value['type']
+                        # Handle cases where the JSON is double-encoded (stored as a string within a string)
+                        if isinstance(structured_data, str):
+                            structured_data = json.loads(structured_data)
+
+                        if isinstance(structured_data, dict) and 'value' in structured_data and 'type' in structured_data:
+                            val = structured_data['value']
+                            val_type = structured_data['type']
                             
-                            # Cast to the correct Python type
                             try:
                                 if val_type == 'integer':
                                     final_value = int(val)
@@ -50,13 +50,13 @@ class _Settings:
                                     final_value = float(val)
                                 elif val_type == 'boolean':
                                     final_value = str(val).lower() in ('true', '1', 'yes', 'on')
-                                else:  # string, text, etc.
+                                else:
                                     final_value = val
                             except (ValueError, TypeError):
                                 final_value = val  # Fallback to the raw value if casting fails
                         else:
                             # It's a valid JSON value, but not our structured format. Use it as is.
-                            final_value = parsed_value
+                            final_value = structured_data
                     except (json.JSONDecodeError, TypeError):
                         # The value is not a valid JSON string, use it as a raw string.
                         final_value = config.value

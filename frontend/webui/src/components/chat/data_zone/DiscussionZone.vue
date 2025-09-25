@@ -280,9 +280,20 @@ function refreshDataZones() {
 }
 
 async function handleDeleteAllImages() {
-    const confirmed = await uiStore.showConfirmation({ title: 'Delete All Images?', message: 'This will remove all images from this discussion\'s context.', confirmText: 'Delete All' });
-    if (confirmed) discussionsStore.deleteAllDiscussionImages();
+    const confirmed = await uiStore.showConfirmation({
+        title: `Delete All ${discussionImages.value.length} Images?`,
+        message: 'This will remove all images from this discussion\'s context. This action cannot be undone.',
+        confirmText: 'Delete All'
+    });
+    if (confirmed) {
+        // Iterate and delete one by one from the end to avoid index shifting issues
+        const imageCount = discussionImages.value.length;
+        for (let i = imageCount - 1; i >= 0; i--) {
+            await discussionsStore.deleteDiscussionImage(i);
+        }
+    }
 }
+
 
 function triggerDiscussionImageUpload() {
     discussionImageInput.value?.click();
@@ -474,5 +485,59 @@ onUnmounted(() => {
 <style>
 .progress-segment {
     @apply absolute h-full top-0;
+}
+.resizer {
+    @apply flex-shrink-0 w-1.5 cursor-col-resize bg-gray-200 dark:bg-gray-700 hover:bg-blue-400 transition-colors duration-200;
+}
+.enhanced-textarea {
+    @apply w-full p-2.5 pr-20 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 focus:ring-blue-500 focus:border-blue-500 transition text-sm resize-none;
+    min-height: 44px; /* Adjust to match button height */
+}
+.sidebar-section {
+    @apply flex flex-col flex-grow min-h-0;
+}
+.section-header {
+    @apply flex justify-between items-center mb-2 flex-shrink-0;
+}
+.section-title {
+    @apply text-sm font-semibold flex items-center gap-2;
+}
+.section-actions {
+    @apply flex items-center gap-1;
+}
+.section-content {
+    @apply flex-grow min-h-0 overflow-y-auto;
+}
+
+/* Image grid styles */
+.image-grid {
+    @apply grid grid-cols-2 gap-2;
+}
+.image-card {
+    @apply relative overflow-hidden rounded-md;
+}
+.image-thumbnail {
+    @apply w-full h-20 object-cover;
+}
+.image-overlay {
+    @apply absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2;
+}
+.overlay-btn {
+    @apply p-1.5 bg-white/20 text-white rounded-full hover:bg-white/40;
+}
+.overlay-btn-danger {
+    @apply hover:bg-red-500/80;
+}
+.loading-state, .empty-state {
+    @apply text-center p-4;
+}
+.menu-item {
+    @apply w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm flex items-center;
+}
+.danger-item {
+    @apply text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50;
+}
+.category-header {
+    @apply px-3 py-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-700/50 sticky top-0;
 }
 </style>

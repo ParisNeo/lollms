@@ -5,6 +5,25 @@ import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import useEventBus from '../services/eventBus';
 
+async function startApp(appId) {
+    const { useTasksStore } = await import('./tasks.js');
+    const tasksStore = useTasksStore();
+    const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/start`);
+    tasksStore.addTask(res.data);
+}
+
+async function stopApp(appId) {
+    const { useTasksStore } = await import('./tasks.js');
+    const tasksStore = useTasksStore();
+    const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/stop`);
+    tasksStore.addTask(res.data);
+}
+
+async function fetchAppLog(appId) {
+    const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/logs`);
+    return res.data.log_content;
+}
+
 // Helper to safely get and parse localStorage data
 function getStoredFilters(key, defaults) {
     try {
@@ -551,6 +570,11 @@ export const useAdminStore = defineStore('admin', () => {
         funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories,
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact,
         createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, importFunFacts,
-        exportCategory, importCategoryFromFile
+        exportCategory, importCategoryFromFile,
+
+
+        startApp,
+        stopApp,
+        fetchAppLog,
     };
 });

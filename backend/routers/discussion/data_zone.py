@@ -234,7 +234,10 @@ def build_datazone_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            discussion.images = []
+            if discussion.images:
+                discussion.images.clear()
+            else:
+                discussion.images = []
             discussion.commit()
             
             return {

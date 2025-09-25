@@ -7,7 +7,6 @@ import { useUiStore } from '../../../stores/ui';
 import IconFileText from '../../../assets/icons/IconFileText.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
-import IconSave from '../../../assets/icons/IconSave.vue';
 import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import IconArrowDownTray from '../../../assets/icons/IconArrowDownTray.vue';
 import IconXMark from '../../../assets/icons/IconXMark.vue';
@@ -105,13 +104,13 @@ async function handleDelete() {
         </div>
       </div>
       <div class="artefact-actions">
-        <button @click="handleEdit" class="artefact-action-btn" title="Edit Content"><IconPencil class="w-3 h-3" /></button>
-        <button @click="handleDelete" class="artefact-action-btn artefact-action-btn-danger" title="Delete Artefact"><IconTrash class="w-3 h-3" /></button>
+        <button @click.stop="handleEdit" class="artefact-action-btn" title="Edit Content"><IconPencil class="w-3 h-3" /></button>
+        <button @click.stop="handleDelete" class="artefact-action-btn artefact-action-btn-danger" title="Delete Artefact"><IconTrash class="w-3 h-3" /></button>
       </div>
     </div>
     <div class="artefact-body">
         <div class="w-full">
-            <select v-model="selectedVersion" class="version-select">
+            <select v-model="selectedVersion" @click.stop class="version-select">
                 <option v-for="v in artefactGroup.versions" :key="v.version" :value="v.version">
                   Version {{ v.version }}
                 </option>
@@ -119,26 +118,28 @@ async function handleDelete() {
         </div>
       
         <div class="grid grid-cols-2 gap-1 w-full mt-1.5">
-            <button v-if="!isLoadedToDataZone" @click="handleLoadToDataZone" class="load-btn" title="Load to Data Zone">
+            <button v-if="!isLoadedToDataZone" @click.stop="handleLoadToDataZone" class="load-btn" title="Load to Data Zone">
                 <IconArrowDownTray class="w-3 h-3" /> Load DZ
             </button>
-            <button v-else @click="handleUnloadFromDataZone" class="load-btn loaded-data-zone-btn" title="Unload from Data Zone">
+            <button v-else @click.stop="handleUnloadFromDataZone" class="load-btn loaded-data-zone-btn" title="Unload from Data Zone">
                 <IconCheckCircle class="w-3 h-3" /> Unload DZ
             </button>
             
-            <button v-if="!isLoadedToPrompt" @click="handleLoadToPrompt" class="load-btn" title="Load to Prompt">
+            <button v-if="!isLoadedToPrompt" @click.stop="handleLoadToPrompt" class="load-btn" title="Load to Prompt">
                 <IconPlus class="w-3 h-3" /> Load PMPT
             </button>
-            <button v-else @click="handleUnloadFromPrompt" class="load-btn loaded-prompt-btn" title="Unload from Prompt">
+            <button v-else @click.stop="handleUnloadFromPrompt" class="load-btn loaded-prompt-btn" title="Unload from Prompt">
                 <IconXMark class="w-3 h-3" /> Unload PMPT
             </button>
         </div>
     </div>
   </div>
 </template>
-
 <style scoped>
 /* Main card styling */
+.artefact-card {
+    @apply bg-white dark:bg-gray-800 border dark:border-gray-700/50 rounded-md p-0 flex flex-col;
+}
 .artefact-card.loaded-data-zone {
     @apply border-green-500 bg-green-50 dark:bg-green-900/20;
 }
@@ -151,9 +152,36 @@ async function handleDelete() {
 .artefact-icon.loaded-prompt {
     @apply bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300;
 }
+.artefact-header {
+    @apply flex items-center justify-between p-1.5 pr-1;
+}
+.artefact-info {
+    @apply flex items-center gap-2 min-w-0;
+}
+.artefact-icon {
+    @apply w-6 h-6 rounded-md flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300;
+}
+.artefact-details {
+    @apply min-w-0;
+}
+.artefact-title {
+    @apply text-xs font-semibold truncate;
+}
+.artefact-actions {
+    @apply flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity;
+}
+.artefact-action-btn {
+    @apply p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400;
+}
+.artefact-action-btn-danger {
+    @apply hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-600 dark:hover:text-red-400;
+}
 
 .artefact-body {
     @apply p-1.5 pt-1 border-t border-gray-200 dark:border-gray-700;
+}
+.version-select {
+    @apply w-full text-xs bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded-md px-2 py-1 focus:ring-1 focus:ring-blue-500;
 }
 
 /* Action buttons styling */
