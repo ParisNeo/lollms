@@ -92,6 +92,9 @@ export const useAdminStore = defineStore('admin', () => {
     const systemStatus = ref(null);
     const isLoadingSystemStatus = ref(false);
     
+    const connectedUsers = ref([]);
+    const isLoadingConnectedUsers = ref(false);
+    
     // NEW Fun Facts State
     const funFacts = ref([]);
     const isLoadingFunFacts = ref(false);
@@ -217,6 +220,19 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    async function fetchConnectedUsers() {
+        isLoadingConnectedUsers.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/ws-connections');
+            connectedUsers.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch connected users:", error);
+            connectedUsers.value = [];
+        } finally {
+            isLoadingConnectedUsers.value = false;
+        }
+    }
+
     async function broadcastMessage(message) {
         await apiClient.post('/api/admin/broadcast', { message });
     }
@@ -259,7 +275,7 @@ export const useAdminStore = defineStore('admin', () => {
         tasksStore.addTask(response.data);
         return response.data;
     }
-
+    
         async function fetchSystemStatus() {
         isLoadingSystemStatus.value = true;
         try {
@@ -590,7 +606,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact,
         createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, importFunFacts,
         exportCategory, importCategoryFromFile,
-
+        connectedUsers, isLoadingConnectedUsers, fetchConnectedUsers,
 
         startApp,
         stopApp,

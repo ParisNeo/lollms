@@ -1,15 +1,20 @@
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import apiClient from '../../services/api';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
 import SystemStatus from './SystemStatus.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
+import UserAvatar from '../ui/Cards/UserAvatar.vue';
+import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 
 const stats = ref(null);
 const isLoading = ref(true);
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
+
+const connectedUsers = computed(() => adminStore.connectedUsers);
+const isLoadingConnectedUsers = computed(() => adminStore.isLoadingConnectedUsers);
 
 const statItems = ref([
   { key: 'total_users', label: 'Total Users', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z' },
@@ -24,7 +29,8 @@ async function fetchDashboardData() {
     try {
         const [statsResponse] = await Promise.all([
             apiClient.get('/api/admin/stats'),
-            adminStore.fetchSystemStatus()
+            adminStore.fetchSystemStatus(),
+            adminStore.fetchConnectedUsers()
         ]);
         stats.value = statsResponse.data;
     } catch (error) {
@@ -47,12 +53,12 @@ async function handlePurge() {
   }
 }
 
-
 onMounted(fetchDashboardData);
 </script>
 
 <template>
-        <div class="space-y-12">
+    <div class="space-y-12">
+        <div class="space-y-6">
             <div class="flex items-center justify-between">
                 <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
                     Application Overview
@@ -101,6 +107,37 @@ onMounted(fetchDashboardData);
             <div v-else class="text-center p-10 bg-white dark:bg-gray-800 rounded-lg shadow">
                 <p class="text-gray-500">Could not load dashboard data.</p>
             </div>
+        </div>
+
+        <div class="space-y-6">
+            <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
+                Live Connections
+            </h3>
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-5">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <h4 class="font-semibold text-gray-800 dark:text-gray-100">Currently Connected Users</h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Users with an active WebSocket connection.
+                        </p>
+                    </div>
+                    <span v-if="!isLoadingConnectedUsers" class="text-lg font-bold text-gray-700 dark:text-gray-200">{{ connectedUsers.length }}</span>
+                </div>
+
+                <div v-if="isLoadingConnectedUsers" class="text-center py-4">
+                    <p class="text-gray-500">Loading connected users...</p>
+                </div>
+                <div v-else-if="connectedUsers.length === 0" class="text-center py-4 text-gray-500">
+                    No users are currently connected.
+                </div>
+                <ul v-else class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    <li v-for="user in connectedUsers" :key="user.id" class="flex items-center space-x-3 p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <UserAvatar :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
+                        <span class="font-medium text-sm truncate" :title="user.username">{{ user.username }}</span>
+                    </li>
+                </ul>
+            </div>
+        </div>
 
         <div class="space-y-6">
             <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">

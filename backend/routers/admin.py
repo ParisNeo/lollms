@@ -97,6 +97,14 @@ admin_router = APIRouter(prefix="/api/admin", tags=["Administration"], dependenc
 class AdminBroadcastRequest(BaseModel):
     message: str
 
+class ConnectedUser(BaseModel):
+    id: int
+    username: str
+    icon: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
     """Casts config values to their correct types based on binding description."""
     if binding_type == "llm":
@@ -224,9 +232,6 @@ def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, 
     finally:
         db_session_local.close()
 
-# ... (imports) ...
-
-# ... (existing code) ...
 def _purge_unused_temp_files_task(task: Task):
     task.log("Starting purge of unused temporary files older than 24 hours.")
     deleted_count = 0
@@ -273,7 +278,6 @@ def _purge_unused_temp_files_task(task: Task):
 
     task.set_progress(100)
     return {"message": f"Purge complete. Scanned {total_scanned} files and deleted {deleted_count}."}
-
 
 # --- Zoo Cache Refresh Endpoint ---
 @admin_router.post("/refresh-zoo-cache", response_model=TaskInfo, status_code=202)
@@ -698,6 +702,18 @@ async def delete_model_alias(binding_id: int, payload: ModelAliasDelete, db: Ses
 
 # --- Existing Admin Endpoints ---
 
+@admin_router.get("/ws-connections", response_model=List[ConnectedUser])
+async def get_websocket_connections(db: Session = Depends(get_db)):
+    """
+    Returns a list of users currently connected via WebSocket.
+    """
+    connected_user_ids = list(manager.active_connections.keys())
+    if not connected_user_ids:
+        return []
+    
+    connected_users_db = db.query(DBUser).filter(DBUser.id.in_(connected_user_ids)).all()
+    return connected_users_db
+
 @admin_router.get("/stats", response_model=AdminDashboardStats)
 async def get_dashboard_stats(db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
@@ -746,7 +762,6 @@ async def email_users(
         args=(payload.user_ids, payload.subject, payload.body, payload.background_color, payload.send_as_text),
         description=f"Sending email with subject: '{payload.subject}'",
         owner_username=current_admin.username
-
     )
     return _to_task_info(db_task)
 
