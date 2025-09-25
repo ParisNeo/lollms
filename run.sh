@@ -1,11 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-# ====================================================================
+# ===============================================================
 #
 #   Simplified LOLLMs - Installer & Runner for Linux/macOS (TTY-safe)
 #
-# ====================================================================
+# ===============================================================
 
 VENV_DIR="venv"
 REQUIREMENTS_FILE="requirements.txt"
@@ -100,6 +100,37 @@ if [ "$IS_TTY" -eq 1 ] && [ ! -f ".env" ] && [ -f ".env.example" ]; then
   print_success "'.env' file created. Edit it for custom configurations."
 fi
 
+# --- Parse optional host/port arguments ---
+HOST_VAL=""
+PORT_VAL=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --host)
+      if [[ -n "${2-}" && ! "$2" =~ ^-- ]]; then
+        HOST_VAL="$2"
+        shift 2
+      else
+        print_error "Missing value for --host"
+        exit 1
+      fi
+      ;;
+    --port)
+      if [[ -n "${2-}" && ! "$2" =~ ^-- ]]; then
+        PORT_VAL="$2"
+        shift 2
+      else
+        print_error "Missing value for --port"
+        exit 1
+      fi
+      ;;
+    *)
+      print_error "Unknown option: $1"
+      exit 1
+      ;;
+  esac
+done
+
 # --- Paths ---
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHONPATH_VALUE="$PROJECT_DIR"
@@ -110,27 +141,24 @@ if [ ! -x "$UVICORN_BIN" ]; then
   exit 1
 fi
 
-# --- Determine port (prefer .env SERVER_PORT if present) ---
-PORT_TO_USE="9642"
-if [[ -f "$PROJECT_DIR/.env" ]]; then
-  PORT_FROM_ENV="$(grep -E '^\s*SERVER_PORT\s*=' "$PROJECT_DIR/.env" \
-    | cut -d '=' -f2- \
-    | tr -d " '\"" \
-    | xargs || true)"
-  if [[ -n "${PORT_FROM_ENV:-}" ]]; then
-    PORT_TO_USE="$PORT_FROM_ENV"
-  fi
-fi
-
-# --- Start Server (always foreground, service-safe) ---
+# --- Start Server (foreground, service‑safe) ---
 print_header "Starting Simplified LOLLMs"
 export PYTHONPATH="$PYTHONPATH_VALUE"
 export PYTHONUNBUFFERED=1
 
-print_info "Starting Uvicorn server on http://0.0.0.0:${PORT_TO_USE}"
+print_info "Launching Uvicorn server"
 if [ "$IS_TTY" -eq 1 ]; then
   print_info "Press Ctrl+C to stop the server."
 fi
 echo
 
-exec "$UVICORN_BIN" "$APP_MODULE" --host "0.0.0.0" --port "$PORT_TO_USE"
+# Build command array, adding host/port only if supplied
+CMD=("$UVICORN_BIN" "$APP_MODULE")
+if [[ -n "$HOST_VAL" ]]; then
+  CMD+=(--host "$HOST_VAL")
+fi
+if [[ -n "$PORT_VAL" ]]; then
+  CMD+=(--port "$PORT_VAL")
+fi
+
+exec "${CMD[@]}"
