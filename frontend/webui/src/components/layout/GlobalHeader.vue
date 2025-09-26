@@ -19,6 +19,7 @@ import IconEye from '../../assets/icons/IconEye.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconDataZone from '../../assets/icons/IconDataZone.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconServer from '../../assets/icons/IconServer.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();

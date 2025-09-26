@@ -1,6 +1,6 @@
 // frontend/webui/src/stores/discussions.js
 import { defineStore, storeToRefs } from 'pinia';
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import apiClient from '../services/api'; // Import apiClient
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
@@ -53,6 +53,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             activeAiTasks.value = newActiveTasks;
         }
     }
+
+    // --- WATCHER for task updates ---
+    watch(tasks, (newTasks) => {
+        const activeTrackedTaskIds = Object.values(activeAiTasks.value).map(t => t.taskId).filter(Boolean);
+        if (activeTrackedTaskIds.length === 0) return;
+
+        for (const discussionId in activeAiTasks.value) {
+            const trackedTask = activeAiTasks.value[discussionId];
+            if (trackedTask && trackedTask.taskId) {
+                const correspondingTaskInStore = newTasks.find(t => t.id === trackedTask.taskId);
+                if (correspondingTaskInStore) {
+                    const isFinished = ['completed', 'failed', 'cancelled'].includes(correspondingTaskInStore.status);
+                    if (isFinished) {
+                        if (correspondingTaskInStore.status === 'completed' && trackedTask.type === 'import_url') {
+                            getActions().fetchArtefacts(discussionId);
+                        }
+                        _clearActiveAiTask(discussionId);
+                    }
+                } else {
+                    // The task is no longer in the main list, it was probably cleared.
+                    _clearActiveAiTask(discussionId);
+                }
+            }
+        }
+    }, { deep: true });
 
     // --- COMPUTED ---
     const activeDiscussion = computed(() => {
@@ -122,35 +147,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     Object.assign(_actions, useDiscussionGroups(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionMessages(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionSharing(composableState, composableStores, getActions));
-
-    // --- EVENT-BASED HANDLER FOR TASK COMPLETIONS ---
-    function handleTaskCompletion(completedTask) {
-        console.log("Handling task completion in discussions store:", completedTask);
-        if (!completedTask || !completedTask.id) return;
-
-        // Find if this task was tracked for a specific discussion
-        for (const discussionId in activeAiTasks.value) {
-            const trackedTask = activeAiTasks.value[discussionId];
-            if (trackedTask && trackedTask.taskId === completedTask.id) {
-                if (completedTask.status === 'completed') {
-                    if (trackedTask.type === 'import_url') {
-                        _actions.fetchArtefacts(discussionId);
-                    }
-                    if (trackedTask.type === 'memorize') {
-                        // The memory store should probably handle its own refresh
-                    }
-                    if (trackedTask.type === 'summarize' || trackedTask.type === 'generate_image') {
-                        _actions.refreshDataZones(discussionId);
-                    }
-                }
-                _clearActiveAiTask(discussionId);
-                return; // Found the task, no need to check others
-            }
-        }
-    }
-
-    // Register the event listener directly in the store setup
-    on('task:completed', handleTaskCompletion);
 
     function $reset() {
         discussions.value = {};

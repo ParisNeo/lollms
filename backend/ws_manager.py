@@ -12,7 +12,7 @@ logger = logging.getLogger("uvicorn.info")
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[int, WebSocket] = {}
+        self.active_connections: Dict[int, Set[WebSocket]] = {}
         self.admin_user_ids: Set[int] = set()
         self._loop: asyncio.AbstractEventLoop = None
 
@@ -21,13 +21,17 @@ class ConnectionManager:
 
     async def connect(self, user_id: int, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections[user_id] = websocket
-        logger.info(f"User {user_id} connected via WebSocket. Total connections: {len(self.active_connections)}")
+        if user_id not in self.active_connections:
+            self.active_connections[user_id] = set()
+        self.active_connections[user_id].add(websocket)
+        logger.info(f"User {user_id} connected via WebSocket. Total connections for user: {len(self.active_connections[user_id])}")
 
-    def disconnect(self, user_id: int):
+    def disconnect(self, user_id: int, websocket: WebSocket):
         if user_id in self.active_connections:
-            del self.active_connections[user_id]
-            logger.info(f"User {user_id} disconnected from WebSocket. Total connections: {len(self.active_connections)}")
+            self.active_connections[user_id].discard(websocket)
+            if not self.active_connections[user_id]:
+                del self.active_connections[user_id]
+            logger.info(f"User {user_id} disconnected one WebSocket. Connections remaining for user: {len(self.active_connections.get(user_id, set()))}")
 
     def register_admin(self, user_id: int):
         self.admin_user_ids.add(user_id)
@@ -39,23 +43,33 @@ class ConnectionManager:
 
     async def send_personal_message(self, message_data: dict, user_id: int):
         if user_id in self.active_connections:
-            websocket = self.active_connections[user_id]
-            try:
-                await websocket.send_json(message_data)
-            except Exception as e:
-                logger.error(f"Failed to send WebSocket message to user {user_id}: {e}")
-                self.disconnect(user_id)
+            sockets_to_remove = set()
+            # Iterate over a copy of the set to allow modification during iteration
+            for websocket in list(self.active_connections[user_id]):
+                try:
+                    await websocket.send_json(message_data)
+                except Exception as e:
+                    logger.error(f"Failed to send WebSocket message to user {user_id} on a connection: {e}")
+                    sockets_to_remove.add(websocket)
+            
+            # Clean up disconnected sockets for this user
+            for websocket in sockets_to_remove:
+                self.disconnect(user_id, websocket)
 
     async def broadcast(self, message_data: dict):
-        disconnected_users = []
-        for user_id, websocket in list(self.active_connections.items()):
-            try:
-                await websocket.send_json(message_data)
-            except Exception:
-                disconnected_users.append(user_id)
+        users_to_cleanup = {}
+        for user_id, sockets in list(self.active_connections.items()):
+            for websocket in list(sockets):
+                try:
+                    await websocket.send_json(message_data)
+                except Exception:
+                    if user_id not in users_to_cleanup:
+                        users_to_cleanup[user_id] = set()
+                    users_to_cleanup[user_id].add(websocket)
         
-        for user_id in disconnected_users:
-            self.disconnect(user_id)
+        for user_id, sockets_to_remove in users_to_cleanup.items():
+            for websocket in sockets_to_remove:
+                self.disconnect(user_id, websocket)
 
     async def broadcast_to_admins(self, message_data: dict):
         connected_admins = [uid for uid in self.admin_user_ids if uid in self.active_connections]
