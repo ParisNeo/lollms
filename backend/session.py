@@ -43,6 +43,7 @@ user_sessions: Dict[str, Dict[str, Any]] = {}
 def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
     return db.query(DBUser).filter(DBUser.username == username).first()
 
+
 async def get_current_db_user_from_token(
     token: str = Depends(oauth2_scheme), 
     db: Session = Depends(get_db)
@@ -125,6 +126,20 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                     for alias_key, user_key in param_map.items():
                         if alias_key in alias_info and alias_info[alias_key] is not None:
                             effective_llm_params[user_key] = alias_info[alias_key]
+                    
+                    if alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
+                        locked_ctx_size = alias_info['ctx_size']
+                        effective_llm_params["llm_ctx_size"] = locked_ctx_size
+                        if db_user.llm_ctx_size != locked_ctx_size:
+                            print(f"INFO: Overriding and updating user '{username}' context size from {db_user.llm_ctx_size} to locked value {locked_ctx_size}.")
+                            db_user.llm_ctx_size = locked_ctx_size
+                            try:
+                                db.commit()
+                                db.refresh(db_user)
+                            except Exception as e:
+                                print(f"ERROR: Could not permanently update user context size. Error: {e}")
+                                db.rollback()
+
         
         lc = get_user_lollms_client(username)
         ai_name_for_user = getattr(lc, "ai_name", "assistant")

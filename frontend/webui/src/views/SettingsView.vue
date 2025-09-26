@@ -1,4 +1,3 @@
-<!-- frontend/webui/src/views/SettingsView.vue -->
 <script setup>
 import { computed, markRaw, defineAsyncComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -21,7 +20,6 @@ const router = useRouter();
 
 const components = {
   general: defineAsyncComponent(() => import('../components/settings/GeneralSettings.vue')),
-  bindings: defineAsyncComponent(() => import('../components/settings/BindingsSettings.vue')),
   llm: defineAsyncComponent(() => import('../components/settings/LLMSettings.vue')),
   tti: defineAsyncComponent(() => import('../components/settings/TTISettings.vue')),
   rag: defineAsyncComponent(() => import('../components/settings/RAGSettings.vue')),
@@ -36,7 +34,6 @@ const components = {
 const sections = [
   { id: 'account', name: 'Account', icon: markRaw(IconUserCircle) },
   { id: 'general', name: 'General', icon: markRaw(IconCog) },
-  { id: 'bindings', name: 'Model Bindings', icon: markRaw(IconLink) },
   { id: 'llm', name: 'LLM Parameters', icon: markRaw(IconCpuChip) },
   { id: 'tti', name: 'TTI Parameters', icon: markRaw(IconPhoto) },
   { id: 'rag', name: 'RAG Parameters', icon: markRaw(IconDatabase) },

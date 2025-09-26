@@ -80,7 +80,7 @@
                 <ToolbarButton @click="$emit('import')" title="Import from .md" icon="upload" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Import...</span></ToolbarButton>
                 <ToolbarButton @click="$emit('export', 'md')" title="Export as .md" icon="download" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Export as MD</span></ToolbarButton>
                 <DropdownSubmenu v-if="exportFormats.length > 0" title="Export As..." icon="arrow-down-tray" collection="ui">
-                    <ToolbarButton v-for="format in exportFormats" :key="format.value" @click="$emit('export', format.value)" :button-class="toolbarMenuItemClass">
+                    <ToolbarButton v-for="format in exportFormats" :key="format.value" @click="$emit('export', format.value)" :button-class="toolbarMenuItemClass" icon="file-text" collection="ui">
                         <span class="ml-2">{{ format.label }}</span>
                     </ToolbarButton>
                 </DropdownSubmenu>

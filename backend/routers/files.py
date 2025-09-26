@@ -60,8 +60,6 @@ async def export_as_markdown(
     }
     return Response(content=content, media_type='text/markdown', headers=headers)
 
-files_router = APIRouter()
-
 # Assume 'settings' and 'ContentExportRequest' and trace_exception exist in your module
 
 def md2_to_html(md_text: str) -> str:
