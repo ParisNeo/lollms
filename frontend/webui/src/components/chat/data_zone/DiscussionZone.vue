@@ -12,6 +12,7 @@ import CodeMirrorEditor from '../../ui/CodeMirrorComponent/index.vue';
 import ArtefactZone from './ArtefactZone.vue'; // NEW: Import the dedicated component
 import DropdownMenu from '../../ui/DropdownMenu/DropdownMenu.vue';
 import DropdownSubmenu from '../../ui/DropdownMenu/DropdownSubmenu.vue';
+import apiClient from '../../../services/api';
 
 // Icons
 import IconCopy from '../../../assets/icons/IconCopy.vue';
@@ -58,6 +59,7 @@ const dataZonePromptTextareaRef = ref(null);
 const discussionHistory = ref([]);
 const discussionHistoryIndex = ref(-1);
 let discussionHistoryDebounceTimer = null;
+let saveDebounceTimer = null;
 const userPromptSearchTerm = ref('');
 const zooPromptSearchTerm = ref('');
 
@@ -67,6 +69,21 @@ const discussionDataZone = computed({
     set: (newVal) => {
         if (activeDiscussion.value) {
             discussionsStore.setDiscussionDataZoneContent(activeDiscussion.value.id, newVal);
+
+            // Debounced save to backend
+            clearTimeout(saveDebounceTimer);
+            saveDebounceTimer = setTimeout(() => {
+                if (activeDiscussion.value) { // Re-check in case discussion changed
+                    apiClient.put(`/api/discussions/${activeDiscussion.value.id}/data_zone`, { content: newVal })
+                        .then(() => {
+                            console.log("Data zone auto-saved.");
+                        })
+                        .catch(err => {
+                            console.error("Failed to save data zone content:", err);
+                            uiStore.addNotification('Failed to auto-save data zone.', 'error');
+                        });
+                }
+            }, 1500); // 1.5-second debounce
         }
     }
 });
@@ -223,11 +240,13 @@ async function handleRedoDiscussion() {
     isProgrammaticChange.value = false;
 }
 
-watch(discussionDataZone, (newVal) => {
-    if (!isProgrammaticChange.value) {
+watch(discussionDataZone, (newVal, oldVal) => {
+    // We only want to record user-initiated changes, not programmatic ones like undo/redo
+    if (!isProgrammaticChange.value && newVal !== oldVal) {
         recordHistory(newVal);
     }
-});
+}, { flush: 'post' });
+
 
 watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
     if (newDiscussion && (!oldDiscussion || newDiscussion.id !== oldDiscussion.id)) {

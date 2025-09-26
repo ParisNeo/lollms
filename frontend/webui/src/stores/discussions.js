@@ -1,6 +1,6 @@
 // frontend/webui/src/stores/discussions.js
 import { defineStore, storeToRefs } from 'pinia';
-import { ref, computed, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted } from 'vue';
 import apiClient from '../services/api'; // Import apiClient
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
@@ -25,7 +25,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const dataStore = useDataStore();
     const authStore = useAuthStore();
     const { tasks } = storeToRefs(tasksStore);
-    const { emit } = useEventBus();
+    const { on, off, emit } = useEventBus();
 
     // --- STATE ---
     const discussions = ref({});
@@ -123,21 +123,34 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     Object.assign(_actions, useDiscussionMessages(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionSharing(composableState, composableStores, getActions));
 
-    // --- WATCHERS ---
-    watch(tasks, (currentTasks) => {
-        if (Object.keys(activeAiTasks.value).length === 0) return;
+    // --- EVENT-BASED HANDLER FOR TASK COMPLETIONS ---
+    function handleTaskCompletion(completedTask) {
+        console.log("Handling task completion in discussions store:", completedTask);
+        if (!completedTask || !completedTask.id) return;
+
+        // Find if this task was tracked for a specific discussion
         for (const discussionId in activeAiTasks.value) {
             const trackedTask = activeAiTasks.value[discussionId];
-            if (trackedTask) {
-                const updatedTask = currentTasks.find(t => t.id === trackedTask.taskId);
-                if (updatedTask && ['completed', 'failed', 'cancelled'].includes(updatedTask.status)) {
-                    if (trackedTask.type === 'import_url' && updatedTask.status === 'completed') _actions.fetchArtefacts(discussionId);
-                    if (trackedTask.type === 'memorize' && updatedTask.status === 'completed' && updatedTask.result) { /* ... */ }
-                    _clearActiveAiTask(discussionId);
+            if (trackedTask && trackedTask.taskId === completedTask.id) {
+                if (completedTask.status === 'completed') {
+                    if (trackedTask.type === 'import_url') {
+                        _actions.fetchArtefacts(discussionId);
+                    }
+                    if (trackedTask.type === 'memorize') {
+                        // The memory store should probably handle its own refresh
+                    }
+                    if (trackedTask.type === 'summarize' || trackedTask.type === 'generate_image') {
+                        _actions.refreshDataZones(discussionId);
+                    }
                 }
+                _clearActiveAiTask(discussionId);
+                return; // Found the task, no need to check others
             }
         }
-    }, { deep: true });
+    }
+
+    // Register the event listener directly in the store setup
+    on('task:completed', handleTaskCompletion);
 
     function $reset() {
         discussions.value = {};

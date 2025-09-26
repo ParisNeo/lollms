@@ -310,11 +310,18 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
     discussion.loaded_artefacts = [] # Unload all artefacts after processing
     discussion.commit()
     
+    all_images_info = discussion.get_discussion_images()
     task.set_progress(100)
     task.set_description("Processing complete and saved.")
     task.log("Processing complete, saved, and artefacts unloaded.")
     
-    return {"discussion_id": discussion_id, "new_content": summary, "zone": "discussion"}
+    return {
+        "discussion_id": discussion_id, 
+        "new_content": summary, 
+        "zone": "discussion",
+        "discussion_images": [img_info['data'] for img_info in all_images_info],
+        "active_discussion_images": [img_info['active'] for img_info in all_images_info]
+    }
 
 def _memorize_ltm_task(task: Task, username: str, discussion_id: str):
     task.log("Starting long-term memory memorization task...")

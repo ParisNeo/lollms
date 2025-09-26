@@ -74,8 +74,9 @@ class Task:
         if db_task.owner_user_id:
             manager.send_personal_message_sync(payload, db_task.owner_user_id)
         
-        if db_task.owner_user_id or len(manager.admin_user_ids) > 0:
-            manager.broadcast_to_admins_sync(payload)
+        # Always attempt to broadcast to admins. Each worker's listener will
+        # check if it has any admins connected.
+        manager.broadcast_to_admins_sync(payload)
 
         if db_task.status == TaskStatus.COMPLETED and db_task.result:
             result_data = None
@@ -96,7 +97,9 @@ class Task:
                             "data": {
                                 "discussion_id": zone_info.get("discussion_id"),
                                 "zone": zone_info.get("zone"),
-                                "new_content": zone_info.get("new_content")
+                                "new_content": zone_info.get("new_content"),
+                                "discussion_images": zone_info.get("discussion_images"),
+                                "active_discussion_images": zone_info.get("active_discussion_images")
                             }
                         }
                         if db_task.owner_user_id:
@@ -258,8 +261,8 @@ class TaskManager:
             if new_db_task.owner_user_id:
                 manager.send_personal_message_sync(payload, new_db_task.owner_user_id)
             
-            if new_db_task.owner_user_id or len(manager.admin_user_ids) > 0:
-                manager.broadcast_to_admins_sync(payload)
+            # Always attempt to broadcast to admins.
+            manager.broadcast_to_admins_sync(payload)
 
             db.expunge(new_db_task)
 

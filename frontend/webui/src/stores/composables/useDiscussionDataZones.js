@@ -138,22 +138,30 @@ export function useDiscussionDataZones(state, stores, getActions) {
         }
     }
 
-    async function handleDataZoneUpdate({ discussion_id, zone, new_content }) {
+    async function handleDataZoneUpdate({ discussion_id, zone, new_content, discussion_images, active_discussion_images }) {
         if (zone === 'discussion') {
             const discussion = discussions.value[discussion_id];
             if (discussion) {
-                // Force reactivity by creating a new object
-                discussions.value[discussion_id] = {
+                const updatedDiscussion = {
                     ...discussion,
                     discussion_data_zone: new_content
                 };
+
+                if (discussion_images !== undefined) {
+                    updatedDiscussion.discussion_images = discussion_images;
+                }
+                if (active_discussion_images !== undefined) {
+                    updatedDiscussion.active_discussion_images = active_discussion_images;
+                }
+                
+                discussions.value[discussion_id] = updatedDiscussion;
                 
                 uiStore.addNotification('Data zone has been updated by AI.', 'success');
                 
                 if (discussion_id === currentDiscussionId.value) {
                     emit('discussion_zone:processed');
-                    // The backend task clears loaded artefacts, so we need to refresh the list
-                    getActions().fetchArtefacts(discussion_id);
+                    await getActions().fetchArtefacts(discussion_id);
+                    await getActions().fetchContextStatus(discussion_id);
                 }
             }
         } else if (zone === 'memory') {

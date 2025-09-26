@@ -41,19 +41,19 @@ export const useTasksStore = defineStore('tasks', () => {
 
     function addTask(taskData) {
         const index = tasks.value.findIndex(t => t.id === taskData.id);
-        const oldTask = index !== -1 ? { ...tasks.value[index] } : null;
+        const oldTask = index !== -1 ? tasks.value[index] : null;
+
+        const wasActive = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending');
+        const isNowFinished = ['completed', 'failed', 'cancelled'].includes(taskData.status);
 
         if (index !== -1) {
-            tasks.value[index] = taskData;
+            // Use spread to ensure reactivity on object properties
+            tasks.value[index] = { ...tasks.value[index], ...taskData };
         } else {
             tasks.value.unshift(taskData);
         }
 
-        const justFinished = oldTask && 
-                             (oldTask.status === 'running' || oldTask.status === 'pending') && 
-                             ['completed', 'failed', 'cancelled'].includes(taskData.status);
-
-        if (justFinished) {
+        if (wasActive && isNowFinished) {
             emit('task:completed', taskData);
         }
     }

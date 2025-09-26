@@ -10,13 +10,15 @@ from typing import List, Optional, Dict
 
 try:
     import pipmaster as pm
-    pm.ensure_packages(['pandas', 'openpyxl', 'python-docx', 'python-pptx', 'PyMuPDF'])
+    pm.ensure_packages(['pandas', 'openpyxl', 'python-docx', 'python-pptx', 'PyMuPDF', 'docx2python'])
     from docx import Document as DocxDocument
     from pptx import Presentation
     import pandas as pd
     import fitz
+    from docx2python import docx2python
 except ImportError:
     pd = None
+    docx2python = None
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Form, status
 from sqlalchemy.orm import Session
 from ascii_colors import trace_exception
@@ -107,14 +109,14 @@ def build_artefacts_router(router: APIRouter):
                     pdf_doc.close()
 
                 elif extension == ".docx":
-                    with io.BytesIO(content_bytes) as docx_io:
-                        doc = DocxDocument(docx_io)
-                        content = "\n".join([p.text for p in doc.paragraphs])
-                        if extract_images:
-                            for rel in doc.part._rels.values():
-                                if "image" in rel.target_ref:
-                                    image_part = rel.target_part
-                                    image_bytes = image_part.blob
+                    if docx2python is None:
+                        content = "Error: docx2python library is not installed, so tables cannot be extracted."
+                    else:
+                        with io.BytesIO(content_bytes) as docx_io:
+                            result = docx2python(docx_io)
+                            content = result.text
+                            if extract_images and result.images:
+                                for image_bytes in result.images.values():
                                     images.append(base64.b64encode(image_bytes).decode("utf-8"))
 
                 elif extension == ".xlsx" or "spreadsheetml" in file.content_type:

@@ -11,9 +11,9 @@
             </DropdownMenu>
 
             <DropdownMenu title="Headings" icon="hash" :button-class="toolbarButtonBaseClass" collection="ui">
-                <ToolbarButton @click="$emit('format', 'h1')" title="Heading 1" :button-class="toolbarMenuItemClass" class="font-semibold text-lg">Heading 1</ToolbarButton>
-                <ToolbarButton @click="$emit('format', 'h2')" title="Heading 2" :button-class="toolbarMenuItemClass" class="font-semibold text-base">Heading 2</ToolbarButton>
-                <ToolbarButton @click="$emit('format', 'h3')" title="Heading 3" :button-class="toolbarMenuItemClass" class="font-semibold text-sm">Heading 3</ToolbarButton>
+                <button @click="$emit('format', 'h1')" title="Heading 1" :class="[toolbarMenuItemClass, 'font-semibold text-lg']">Heading 1</button>
+                <button @click="$emit('format', 'h2')" title="Heading 2" :class="[toolbarMenuItemClass, 'font-semibold text-base']">Heading 2</button>
+                <button @click="$emit('format', 'h3')" title="Heading 3" :class="[toolbarMenuItemClass, 'font-semibold text-sm']">Heading 3</button>
             </DropdownMenu>
 
             <DropdownMenu title="Lists" icon="list" :button-class="toolbarButtonBaseClass" collection="ui">
@@ -161,4 +161,4 @@ const getButtonTitle = (type) => {
 .mode-button.inactive {
     @apply bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-300/50 dark:hover:bg-gray-700/50;
 }
-</style>
+</style>    
