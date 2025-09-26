@@ -79,11 +79,9 @@ export const useAuthStore = defineStore('auth', () => {
     // --- WebSocket Connection Management ---
     function connectWebSocket() {
         if (!token.value) {
-            console.log("[WebSocket] Connection skipped: no token.");
             return;
         }
         if (ws.value && (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING)) {
-            console.log("[WebSocket] Connection already open or connecting.");
             return;
         }
 
@@ -91,12 +89,10 @@ export const useAuthStore = defineStore('auth', () => {
         const host = import.meta.env.DEV ? 'localhost:9642' : window.location.host;
         const wsUrl = `${protocol}//${host}/ws/dm/${token.value}`;
         
-        console.log(`[WebSocket] Attempting to connect to ${wsUrl}...`);
         ws.value = new WebSocket(wsUrl);
 
         ws.value.onopen = () => {
             wsConnected.value = true;
-            console.log("[WebSocket] Connection established successfully.");
             clearTimeout(reconnectTimeout);
         };
 
@@ -113,19 +109,14 @@ export const useAuthStore = defineStore('auth', () => {
             const discussionsStore = useDiscussionsStore();
 
             switch (data.type) {
-                case 'new_dm':
-                    socialStore.handleNewDm(data.data);
-                    break;
-                case 'new_comment':
-                    socialStore.handleNewComment(data.data);
-                    break;
+                case 'new_dm': socialStore.handleNewDm(data.data); break;
+                case 'new_comment': socialStore.handleNewComment(data.data); break;
                 case 'new_shared_discussion':
                     discussionsStore.loadDiscussions();
                     uiStore.addNotification(`'${data.data.discussion_title}' was shared with you by ${data.data.from_user}.`, 'info');
                     break;
                 case 'discussion_updated':
                     if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
-                        console.log(`[WebSocket] Received update for active discussion ${data.data.discussion_id}. Refreshing messages.`);
                         uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
                         discussionsStore.refreshActiveDiscussionMessages();
                     } else {
@@ -141,35 +132,18 @@ export const useAuthStore = defineStore('auth', () => {
                     discussionsStore.loadDiscussions();
                     uiStore.addNotification(`Access to a shared discussion was revoked by ${data.data.from_user}.`, 'warning');
                     break;
-                case 'admin_broadcast':
-                    uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender);
-                    break;
-                case 'task_update':
-                    tasksStore.addTask(data.data);
-                    break;
-                case 'app_status_changed': {
-                    const { useAdminStore } = await import('./admin');
-                    useAdminStore().handleAppStatusUpdate(data.data);
-                    dataStore.handleServiceStatusUpdate(data.data);
-                    break;
-                }
+                case 'admin_broadcast': uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); break;
+                case 'task_update': tasksStore.addTask(data.data); break;
+                case 'app_status_changed': { const { useAdminStore } = await import('./admin'); useAdminStore().handleAppStatusUpdate(data.data); dataStore.handleServiceStatusUpdate(data.data); break; }
                 case 'data_zone_processed':
-                    console.log("Data zone processed event received, processing...", data.data);
-                    if (data.data.task_data) {
-                        tasksStore.addTask(data.data.task_data);
-                    }
+                    if (data.data.task_data) tasksStore.addTask(data.data.task_data);
                     discussionsStore.handleDataZoneUpdate(data.data);
                     break;
-                case 'discussion_images_updated':
-                    discussionsStore.handleDiscussionImagesUpdated(data.data);
-                    break;
-                case 'tasks_cleared':
-                    tasksStore.handleTasksCleared(data.data);
-                    break;
+                case 'discussion_images_updated': discussionsStore.handleDiscussionImagesUpdated(data.data); break;
+                case 'tasks_cleared': tasksStore.handleTasksCleared(data.data); break;
                 case 'settings_updated':
-                    uiStore.addNotification('Global settings updated by admin. Refreshing session...', 'info');
-                    await refreshUser();
-                    await fetchWelcomeInfo();
+                    uiStore.addNotification('Global settings updated. Refreshing session...', 'info');
+                    await refreshUser(); await fetchWelcomeInfo();
                     break;
                 case 'bindings_updated':
                     uiStore.addNotification('LLM bindings updated. Refreshing model list.', 'info');
@@ -181,17 +155,23 @@ export const useAuthStore = defineStore('auth', () => {
         ws.value.onclose = (event) => {
             wsConnected.value = false;
             ws.value = null;
-            if (event.code !== 1000) {
+            if (event.code !== 1000) { // 1000 is normal closure
                 reconnectTimeout = setTimeout(connectWebSocket, 5000);
             }
         };
-        ws.value.onerror = (error) => { wsConnected.value = false; ws.value?.close(); };
+        ws.value.onerror = (error) => {
+            wsConnected.value = false;
+            ws.value?.close();
+        };
     }
 
     function disconnectWebSocket() {
         wsConnected.value = false;
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
-        if (ws.value) { ws.value.close(1000, "User logout"); ws.value = null; }
+        if (ws.value) { 
+            ws.value.close(1000, "User logout"); 
+            ws.value = null; 
+        }
     }
 
     async function fetchUserAndInitialData() {

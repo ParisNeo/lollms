@@ -76,7 +76,7 @@ const discussionDataZone = computed({
                 if (activeDiscussion.value) { // Re-check in case discussion changed
                     apiClient.put(`/api/discussions/${activeDiscussion.value.id}/data_zone`, { content: newVal })
                         .then(() => {
-                            console.log("Data zone auto-saved.");
+                            // Quiet save, no notification needed
                         })
                         .catch(err => {
                             console.error("Failed to save data zone content:", err);
@@ -92,7 +92,13 @@ const discussionImages = computed(() => activeDiscussion.value?.discussion_image
 const discussionActiveImages = computed(() => activeDiscussion.value?.active_discussion_images || []);
 const isProcessing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'summarize');
 const isGeneratingImage = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'generate_image');
-const isTaskRunning = computed(() => isProcessing.value || isGeneratingImage.value);
+const isTaskRunning = computed(() => {
+    if (!activeDiscussion.value) return false;
+    const taskInfo = discussionsStore.activeAiTasks[activeDiscussion.value.id];
+    if (!taskInfo || !taskInfo.taskId) return false;
+    const task = tasks.value.find(t => t.id === taskInfo.taskId);
+    return task ? (task.status === 'running' || task.status === 'pending') : false;
+});
 
 const activeTask = computed(() => {
     if (!activeDiscussion.value) return null;
@@ -354,7 +360,9 @@ function isImageActive(index) {
 
 function handleLoadArtefactToPrompt(content) { dataZonePromptText.value = content; }
 function handleUnloadArtefactFromPrompt() { if (promptLoadedArtefacts.value.size === 0) dataZonePromptText.value = ''; }
-function handleZoneProcessed() { dataZonePromptText.value = ''; }
+function handleZoneProcessed(data) {
+    dataZonePromptText.value = '';
+}
 
 onMounted(() => {
     const savedWidth = localStorage.getItem('lollms_artefactListWidth');

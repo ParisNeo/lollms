@@ -17,7 +17,7 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
 from backend.db.models.service import MCP as DBMCP
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
+from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding
 from lollms_client import LollmsClient
 from backend.models import UserAuthDetails, TokenData
 from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM, decode_main_access_token
@@ -157,6 +157,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             data_zone=db_user.data_zone,
             lollms_model_name=user_sessions[username].get("lollms_model_name"),
             tti_binding_model_name=db_user.tti_binding_model_name,
+            tts_binding_model_name=db_user.tts_binding_model_name,
             safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
             active_personality_id=user_sessions[username].get("active_personality_id"),
             lollms_client_ai_name=ai_name_for_user,
@@ -257,7 +258,11 @@ def build_lollms_client_from_params(
     username: str, 
     binding_alias: Optional[str] = None, 
     model_name: Optional[str] = None,
-    llm_params: Optional[Dict[str, Any]] = None
+    llm_params: Optional[Dict[str, Any]] = None,
+    tti_binding_alias: Optional[str] = None,
+    tti_model_name: Optional[str] = None,
+    tts_binding_alias: Optional[str] = None,
+    tts_model_name: Optional[str] = None
 ) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
@@ -331,7 +336,7 @@ def build_lollms_client_from_params(
         llm_init_params["model_name"] = model_name_for_binding
         client_init_params = {"llm_binding_name": binding_to_use.name, "llm_binding_config": llm_init_params}    
         
-        # --- NEW: TTI Binding Integration ---
+        # --- TTI Binding Integration ---
         user_tti_model_full = user_db.tti_binding_model_name
         selected_tti_binding = None
         selected_tti_model_name = None
@@ -372,6 +377,49 @@ def build_lollms_client_from_params(
             client_init_params["tti_binding_name"] = selected_tti_binding.name
             client_init_params["tti_binding_config"] = tti_binding_config
         # --- END TTI Binding Integration ---
+        
+        # --- NEW: TTS Binding Integration ---
+        user_tts_model_full = user_db.tts_binding_model_name
+        selected_tts_binding = None
+        selected_tts_model_name = None
+        
+        if user_tts_model_full and '/' in user_tts_model_full:
+            tts_binding_alias, tts_model_name = user_tts_model_full.split('/', 1)
+            selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == tts_binding_alias, DBTTSBinding.is_active == True).first()
+            selected_tts_model_name = tts_model_name
+
+        if not selected_tts_binding:
+            selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
+            if selected_tts_binding:
+                selected_tts_model_name = selected_tts_binding.default_model_name
+        
+        if selected_tts_binding:
+            tts_binding_config = selected_tts_binding.config.copy() if selected_tts_binding.config else {}
+            
+            tts_model_aliases = selected_tts_binding.model_aliases or {}
+            tts_alias_info = tts_model_aliases.get(selected_tts_model_name)
+            
+            if tts_alias_info:
+                for key, value in tts_alias_info.items():
+                    if key not in ['title', 'description', 'icon'] and value is not None:
+                        tts_binding_config[key] = value
+                        
+            allow_tts_override = (tts_alias_info or {}).get('allow_parameters_override', True)
+            if allow_tts_override:
+                user_tts_configs = user_db.tts_models_config or {}
+                model_user_config = user_tts_configs.get(user_tts_model_full)
+                if model_user_config:
+                    for key, value in model_user_config.items():
+                        if value is not None:
+                            tts_binding_config[key] = value
+                            
+            if selected_tts_model_name:
+                tts_binding_config['model_name'] = selected_tts_model_name
+                
+            client_init_params["tts_binding_name"] = selected_tts_binding.name
+            client_init_params["tts_binding_config"] = tts_binding_config
+        # --- END TTS Binding Integration ---
+
         
         if 'servers_infos' not in session:
             session['servers_infos'] = load_mcps(username)

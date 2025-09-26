@@ -4,6 +4,7 @@ import datetime
 import threading
 import traceback
 import json
+import os
 from typing import List, Dict, Any, Callable, Optional
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.orm.attributes import flag_modified
@@ -74,54 +75,47 @@ class Task:
         if db_task.owner_user_id:
             manager.send_personal_message_sync(payload, db_task.owner_user_id)
         
-        # Always attempt to broadcast to admins. Each worker's listener will
-        # check if it has any admins connected.
         manager.broadcast_to_admins_sync(payload)
 
         if db_task.status == TaskStatus.COMPLETED and db_task.result:
             result_data = None
             if isinstance(db_task.result, str):
-                try:
-                    result_data = json.loads(db_task.result)
-                except json.JSONDecodeError:
-                    pass
+                try: result_data = json.loads(db_task.result)
+                except json.JSONDecodeError: pass
             elif isinstance(db_task.result, dict):
                 result_data = db_task.result
 
             if isinstance(result_data, dict):
                 zone_info = result_data
                 if "zone" in zone_info and "discussion_id" in zone_info:
+                    custom_payload_data = {
+                        "discussion_id": zone_info.get("discussion_id"),
+                        "zone": zone_info.get("zone"),
+                    }
                     if zone_info.get("zone") in ["discussion", "memory"]:
-                        custom_payload = {
-                            "type": "data_zone_processed",
-                            "data": {
-                                "discussion_id": zone_info.get("discussion_id"),
-                                "zone": zone_info.get("zone"),
-                                "new_content": zone_info.get("new_content"),
-                                "discussion_images": zone_info.get("discussion_images"),
-                                "active_discussion_images": zone_info.get("active_discussion_images")
-                            }
-                        }
-                        custom_payload["data"]["task_data"] = task_data
-                        if db_task.owner_user_id:
-                            manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
-                        manager.broadcast_to_admins_sync(custom_payload)
+                        custom_payload = {"type": "data_zone_processed", "data": {
+                            **custom_payload_data,
+                            "new_content": zone_info.get("new_content"),
+                            "discussion_images": zone_info.get("discussion_images"),
+                            "active_discussion_images": zone_info.get("active_discussion_images"),
+                            "task_data": task_data
+                        }}
                     elif zone_info.get("zone") == "discussion_images":
-                        custom_payload = {
-                            "type": "discussion_images_updated",
-                            "data": {
-                                "discussion_id": zone_info.get("discussion_id"),
-                                "discussion_images": zone_info.get("discussion_images", []),
-                                "active_discussion_images": zone_info.get("active_discussion_images", [])
-                            }
-                        }
+                        custom_payload = {"type": "discussion_images_updated", "data": {
+                            **custom_payload_data,
+                            "discussion_images": zone_info.get("discussion_images", []),
+                            "active_discussion_images": zone_info.get("active_discussion_images", [])
+                        }}
+                    else:
+                        custom_payload = None
+
+                    if custom_payload:
                         if db_task.owner_user_id:
                             manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
                         manager.broadcast_to_admins_sync(custom_payload)
                 
-                app_data = zone_info.get("updated_app")
-                if "updated_app" in zone_info and (app_data):
-                    app_payload = {"type": "app_status_changed", "data": app_data}
+                if "updated_app" in zone_info:
+                    app_payload = {"type": "app_status_changed", "data": zone_info["updated_app"]}
                     manager.broadcast_sync(app_payload)
 
 
@@ -129,16 +123,22 @@ class Task:
         """Safely updates the task's record in the database."""
         with self.db_lock:
             with self.db_session_factory() as db:
-                task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
-                if not task_record:
-                    return
-                
-                for key, value in kwargs.items():
-                    setattr(task_record, key, value)
-                
-                db.commit()
-                db.refresh(task_record, ['owner'])
-                self._broadcast_update(task_record)
+                try:
+                    task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
+                    if not task_record:
+                        return
+                    
+                    for key, value in kwargs.items():
+                        setattr(task_record, key, value)
+                    
+                    db.commit()
+                    db.refresh(task_record, ['owner'])
+                    self._broadcast_update(task_record)
+                except Exception as e:
+                    print(f"CRITICAL: Task {self.id} - Failed to update database: {e}")
+                    traceback.print_exc()
+                    db.rollback()
+
 
     def log(self, message: str, level: str = "INFO"):
         """Adds a log entry to the task's record."""
@@ -149,15 +149,20 @@ class Task:
         }
         with self.db_lock:
             with self.db_session_factory() as db:
-                task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
-                if task_record:
-                    if task_record.logs is None:
-                        task_record.logs = []
-                    task_record.logs.append(log_entry)
-                    flag_modified(task_record, "logs")
-                    db.commit()
-                    db.refresh(task_record, ['owner'])
-                    self._broadcast_update(task_record)
+                try:
+                    task_record = db.query(DBTask).options(joinedload(DBTask.owner)).filter(DBTask.id == self.id).first()
+                    if task_record:
+                        if task_record.logs is None:
+                            task_record.logs = []
+                        task_record.logs.append(log_entry)
+                        flag_modified(task_record, "logs")
+                        db.commit()
+                        db.refresh(task_record, ['owner'])
+                        self._broadcast_update(task_record)
+                except Exception as e:
+                    print(f"CRITICAL: Task {self.id} - Failed to write log to database: {e}")
+                    traceback.print_exc()
+                    db.rollback()
 
 
     def set_progress(self, value: int):
@@ -262,7 +267,6 @@ class TaskManager:
             if new_db_task.owner_user_id:
                 manager.send_personal_message_sync(payload, new_db_task.owner_user_id)
             
-            # Always attempt to broadcast to admins.
             manager.broadcast_to_admins_sync(payload)
 
             db.expunge(new_db_task)

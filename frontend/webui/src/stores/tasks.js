@@ -3,9 +3,11 @@ import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
+import useEventBus from '../services/eventBus';
 
 export const useTasksStore = defineStore('tasks', () => {
     const uiStore = useUiStore();
+    const { emit } = useEventBus();
 
     // --- STATE ---
     const tasks = ref([]);
@@ -39,12 +41,19 @@ export const useTasksStore = defineStore('tasks', () => {
 
     function addTask(taskData) {
         const index = tasks.value.findIndex(t => t.id === taskData.id);
-        
+        const oldTask = index !== -1 ? { ...tasks.value[index] } : null;
+
         if (index !== -1) {
-            // Use spread to ensure reactivity on object properties
             tasks.value[index] = { ...tasks.value[index], ...taskData };
         } else {
             tasks.value.unshift(taskData);
+        }
+
+        const wasActive = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending');
+        const isNowFinished = ['completed', 'failed', 'cancelled'].includes(taskData.status);
+
+        if (wasActive && isNowFinished) {
+            emit('task:completed', taskData);
         }
     }
     

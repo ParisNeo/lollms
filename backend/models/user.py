@@ -41,6 +41,8 @@ class UserCreateAdmin(UserLLMParams):
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
+    tts_binding_model_name: Optional[str] = None # NEW
+    tts_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     rag_top_k: Optional[int] = Field(None, ge=1)
@@ -66,6 +68,8 @@ class UserUpdate(BaseModel):
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
+    tts_binding_model_name: Optional[str] = None # NEW
+    tts_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     llm_ctx_size: Optional[int] = Field(None, ge=0)
@@ -172,6 +176,8 @@ class UserPublic(UserLLMParams):
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
+    tts_binding_model_name: Optional[str] = None # NEW
+    tts_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     rag_top_k: Optional[int] = None
@@ -207,6 +213,8 @@ class UserAuthDetails(UserLLMParams):
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
+    tts_binding_model_name: Optional[str] = None # NEW
+    tts_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     rag_top_k: Optional[int] = Field(None, ge=1)

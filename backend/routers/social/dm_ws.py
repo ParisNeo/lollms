@@ -1,3 +1,4 @@
+# backend/routers/social/dm_ws.py
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, status, HTTPException, Depends
 from sqlalchemy.orm import Session
 from ascii_colors import ASCIIColors
@@ -57,10 +58,10 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         if is_admin:
             manager.unregister_admin(user_id)
         if user_id is not None:
-            manager.disconnect(user_id)
+            manager.disconnect(user_id, websocket)
         try:
             # Ensure the websocket is closed if it's not already
             if websocket.client_state != 3: # WebSocketState.DISCONNECTED
                 await websocket.close(code=status.WS_1011_INTERNAL_ERROR)
         except RuntimeError:
-            pass # Connection already closed
+            pass

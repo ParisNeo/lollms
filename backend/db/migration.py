@@ -11,7 +11,7 @@ from sqlalchemy.ext.compiler import compiles
 
 from backend.config import LOLLMS_CLIENT_DEFAULTS, SERVER_CONFIG, APP_SETTINGS, SAFE_STORE_DEFAULTS, APP_DATA_DIR, USERS_DIR_NAME
 from backend.db.base import CURRENT_DB_VERSION
-from backend.db.models.config import GlobalConfig, LLMBinding, DatabaseVersion
+from backend.db.models.config import GlobalConfig, LLMBinding, TTIBinding, TTSBinding, DatabaseVersion
 from backend.db.models.service import App # Ensure App is imported
 from backend.db.models.prompt import SavedPrompt
 from backend.db.models.fun_fact import FunFactCategory, FunFact
@@ -170,6 +170,10 @@ def _bootstrap_global_settings(connection):
         "tti_model_display_mode": {
             "value": "mixed",
             "type": "string", "description": "How TTI models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
+        },
+        "tts_model_display_mode": {
+            "value": "mixed",
+            "type": "string", "description": "How TTS models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
         },
         "lock_all_context_sizes": {
             "value": False,
@@ -691,6 +695,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "is_moderator": "BOOLEAN DEFAULT 0 NOT NULL",
             "tti_binding_model_name": "VARCHAR",
             "tti_models_config": "JSON",
+            "tts_binding_model_name": "VARCHAR",
+            "tts_models_config": "JSON",
             "include_memory_date_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
             "coding_style_constraints": "TEXT",
             "programming_language_preferences": "TEXT",
@@ -1090,6 +1096,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if not inspector.has_table("fun_facts"):
         FunFact.__table__.create(connection)
         print("INFO: Created 'fun_facts' table.")
+
+    if not inspector.has_table("tts_bindings"):
+        TTSBinding.__table__.create(connection)
+        print("INFO: Created 'tts_bindings' table.")
+        connection.commit()
+
 
     # NEW: Bootstrap fun facts after tables are ensured
     if inspector.has_table("fun_fact_categories"):

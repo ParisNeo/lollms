@@ -15,9 +15,38 @@ class ConnectionManager:
         self.active_connections: Dict[int, Set[WebSocket]] = {}
         self.admin_user_ids: Set[int] = set()
         self._loop: asyncio.AbstractEventLoop = None
+        self.local_queue: asyncio.Queue = asyncio.Queue()
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
+        # Start a local consumer task for this worker's in-memory queue
+        self._loop.create_task(self._local_queue_consumer())
+
+    async def _local_queue_consumer(self):
+        """Consumes messages from the in-memory queue for this worker."""
+        logger.info(f"Worker {os.getpid()} starting local in-memory queue consumer.")
+        while True:
+            try:
+                payload = await self.local_queue.get()
+                broadcast_type = payload.get("type")
+                data = payload.get("data")
+                
+                if broadcast_type == "broadcast":
+                    await self.broadcast(data)
+                elif broadcast_type == "admins":
+                    await self.broadcast_to_admins(data)
+                elif broadcast_type == "personal":
+                    user_id = payload.get("user_id")
+                    if user_id:
+                        await self.send_personal_message(data, user_id)
+
+                self.local_queue.task_done()
+            except asyncio.CancelledError:
+                logger.info(f"Local queue consumer in worker {os.getpid()} is shutting down.")
+                break
+            except Exception as e:
+                logger.error(f"Error in local queue consumer for worker {os.getpid()}: {e}")
+                trace_exception(e)
 
     async def connect(self, user_id: int, websocket: WebSocket):
         await websocket.accept()
@@ -75,7 +104,6 @@ class ConnectionManager:
         connected_admins = [uid for uid in self.admin_user_ids if uid in self.active_connections]
         if not connected_admins:
             return
-
         for user_id in connected_admins:
             await self.send_personal_message(message_data, user_id)
 
@@ -87,23 +115,40 @@ class ConnectionManager:
             db.add(db_message)
             db.commit()
         except Exception as e:
-            logger.error(f"Failed to put message on DB broadcast queue: {e}")
+            logger.error(f"Failed to put message on DB broadcast queue in worker {os.getpid()}: {e}")
             if db:
                 db.rollback()
         finally:
             if db:
                 db.close()
-
+    
     def broadcast_sync(self, message_data: dict):
         payload = {"type": "broadcast", "data": message_data}
         self._put_on_db_queue(payload)
 
     def send_personal_message_sync(self, message_data: dict, user_id: int):
-        payload = {"type": "personal", "user_id": user_id, "data": message_data}
-        self._put_on_db_queue(payload)
+        # NEW: Smart broadcast logic
+        if self._loop and user_id in self.active_connections:
+            # User is connected to this worker, use fast in-memory queue
+            payload = {"type": "personal", "user_id": user_id, "data": message_data}
+            self._loop.call_soon_threadsafe(self.local_queue.put_nowait, payload)
+        else:
+            # User is not on this worker, use DB queue for another worker to pick up
+            payload = {"type": "personal", "user_id": user_id, "data": message_data}
+            self._put_on_db_queue(payload)
 
     def broadcast_to_admins_sync(self, message_data: dict):
+        # NEW: Smart broadcast logic for admins
         payload = {"type": "admins", "data": message_data}
+        
+        # Check if any admins are connected locally
+        is_any_admin_local = any(admin_id in self.active_connections for admin_id in self.admin_user_ids)
+
+        if self._loop and is_any_admin_local:
+             # At least one admin is on this worker, use fast in-memory queue
+            self._loop.call_soon_threadsafe(self.local_queue.put_nowait, payload)
+        
+        # Always use DB queue as well, in case admins are on other workers
         self._put_on_db_queue(payload)
 
 manager = ConnectionManager()
@@ -127,10 +172,12 @@ async def listen_for_broadcasts():
                             if broadcast_type == "broadcast":
                                 await manager.broadcast(data)
                             elif broadcast_type == "admins":
+                                # This worker only sends to admins connected to it
                                 await manager.broadcast_to_admins(data)
                             elif broadcast_type == "personal":
                                 user_id = payload.get("user_id")
-                                if user_id:
+                                # This worker only sends if the specific user is connected to it
+                                if user_id and user_id in manager.active_connections:
                                     await manager.send_personal_message(data, user_id)
                             
                             last_id_processed = message.id
@@ -143,7 +190,7 @@ async def listen_for_broadcasts():
                 if db:
                     db.close()
             
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             logger.info("Broadcast listener task cancelled.")
             break
