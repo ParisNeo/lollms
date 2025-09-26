@@ -102,6 +102,7 @@ class Task:
                                 "active_discussion_images": zone_info.get("active_discussion_images")
                             }
                         }
+                        custom_payload["data"]["task_data"] = task_data
                         if db_task.owner_user_id:
                             manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
                         manager.broadcast_to_admins_sync(custom_payload)

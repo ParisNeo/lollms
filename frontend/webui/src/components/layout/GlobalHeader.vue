@@ -28,6 +28,7 @@ const route = useRoute();
 const router = useRouter();
 
 const user = computed(() => authStore.user);
+const wsConnected = computed(() => authStore.wsConnected);
 const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
 const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages'];
 const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
@@ -329,6 +330,11 @@ function handleEditPersonality(personality, event) {
 
     <!-- Right Side: Action Buttons -->
     <div class="flex items-center space-x-1 sm:space-x-2">
+      <div 
+        class="w-3 h-3 rounded-full transition-colors flex-shrink-0"
+        :class="wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'"
+        :title="wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected. Attempting to reconnect...'"
+      ></div>
       <ThemeToggle />
       <NotificationBell v-if="user && user.user_ui_level >= 2" />
       <TasksManagerButton />      
