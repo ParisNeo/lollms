@@ -14,6 +14,7 @@ const UserTable = defineAsyncComponent(() => import('./UserTable.vue'));
 const GlobalSettings = defineAsyncComponent(() => import('./GlobalSettings.vue'));
 const LLMBindingsSettings = defineAsyncComponent(() => import('./bindings/LLMBindingsSettings.vue'));
 const TTIBindingsSettings = defineAsyncComponent(() => import('./bindings/TTIBindingsSettings.vue'));
+const TTSBindingsSettings = defineAsyncComponent(() => import('./bindings/TTSBindingsSettings.vue'));
 const AiBotSettings = defineAsyncComponent(() => import('./AiBotSettings.vue'));
 const ServicesSettings = defineAsyncComponent(() => import('../settings/ServicesSettings.vue'));
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
@@ -35,6 +36,7 @@ const tabs = [
     { id: 'https', component: HttpsSettings },
     { id: 'llm_bindings', component: LLMBindingsSettings },
     { id: 'tti_bindings', component: TTIBindingsSettings },
+    { id: 'tts_bindings', component: TTSBindingsSettings },
     { id: 'builders', component: BuildersSettings },
     { id: 'ai_bot', component: AiBotSettings },
     { id: 'services', component: ServicesSettings },

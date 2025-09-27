@@ -1,13 +1,15 @@
+# backend/routers/lollms_config.py
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Form
 from sqlalchemy.orm import Session
-from typing import List
 from lollms_client import LollmsClient
 from ascii_colors import trace_exception
+import json
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
-from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
-from backend.session import get_current_active_user, get_user_lollms_client, user_sessions
+from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding
+from backend.session import get_current_active_user, get_user_lollms_client, user_sessions, build_lollms_client_from_params
 from backend.models import UserLLMParams, ModelInfo, UserAuthDetails
 from backend.settings import settings
 
@@ -25,7 +27,7 @@ async def get_lollms_models(
     for binding in active_bindings:
         try:
             lc = get_user_lollms_client(current_user.username, binding.alias)
-            models_from_binding = lc.listModels()
+            models_from_binding = lc.list_models()
             
             raw_model_names = []
             if isinstance(models_from_binding, list):
@@ -36,6 +38,11 @@ async def get_lollms_models(
                     if model_id: raw_model_names.append(model_id)
 
             model_aliases = binding.model_aliases or {}
+            if isinstance(model_aliases, str):
+                try:
+                    model_aliases = json.loads(model_aliases)
+                except Exception:
+                    model_aliases = {}
 
             for model_name in raw_model_names:
                 alias_data = model_aliases.get(model_name)
@@ -81,15 +88,12 @@ async def get_lollms_tti_models(
 
     for binding in active_tti_bindings:
         try:
-            lc = LollmsClient(
-                tti_binding_name=binding.name,
-                tti_binding_config={**binding.config, "model_name": binding.default_model_name}
-            )
+            lc = build_lollms_client_from_params(current_user.username, tti_binding_alias=binding.alias)
             if not lc.tti:
                 print(f"WARNING: Could not build TTI instance for binding '{binding.alias}'. Skipping.")
                 continue
 
-            models_from_binding = lc.tti.listModels()
+            models_from_binding = lc.tti.list_models()
             
             raw_model_names = []
             if isinstance(models_from_binding, list):
@@ -98,6 +102,11 @@ async def get_lollms_tti_models(
                     if model_id: raw_model_names.append(model_id)
             
             model_aliases = binding.model_aliases or {}
+            if isinstance(model_aliases, str):
+                try:
+                    model_aliases = json.loads(model_aliases)
+                except Exception:
+                    model_aliases = {}
 
             for model_name in raw_model_names:
                 alias_data = model_aliases.get(model_name)
@@ -137,7 +146,7 @@ async def set_user_lollms_model(model_name: str = Form(...), current_user: UserA
     if not db_user_record:
         raise HTTPException(status_code=404, detail="User not found.")
     user_sessions[current_user.username]["lollms_model_name"] = model_name
-    user_sessions[current_user.username]["lollms_clients"] = {}
+    user_sessions[current_user.username]["lollms_clients_cache"] = {}
     db_user_record.lollms_model_name = model_name
     try:
         db.commit()
@@ -170,6 +179,61 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
             raise
     if session_updated:
         user_sessions[current_user.username]["llm_params"] = {k: v for k, v in session_llm_params.items() if v is not None}
-        user_sessions[current_user.username]["lollms_clients"] = {}
+        user_sessions[current_user.username]["lollms_clients_cache"] = {}
         return {"message": "LLM parameters updated. Client will re-initialize."}
     return {"message": "No changes to LLM parameters."}
+
+
+@lollms_config_router.get("/tts-models", response_model=List[ModelInfo])
+async def get_tts_models(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    all_models = []
+    active_bindings = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).all()
+    model_display_mode = settings.get("tts_model_display_mode", "mixed")
+    
+    for binding in active_bindings:
+        model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except Exception:
+                model_aliases = {}
+        try:
+            # CORRECTED: Use the correct parameter name for TTS
+            lc = build_lollms_client_from_params(current_user.username, tts_binding_alias=binding.alias)
+            if not lc.tts: continue
+            
+            models = lc.tts.list_models()
+            
+            if isinstance(models, list):
+                for item in models:
+                    model_id = item if isinstance(item, str) else (item.get("id") or item.get("model_name"))
+                    if model_id:
+                        alias_data = model_aliases.get(model_id)
+                        
+                        if model_display_mode == 'aliased' and not alias_data:
+                            continue
+
+                        model_info = {
+                            "id": f"{binding.alias}/{model_id}",
+                            "name": model_id,
+                            "alias": alias_data
+                        }
+
+                        if model_display_mode == 'original':
+                            model_info["name"] = f"{binding.alias}/{model_id}"
+                        elif alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
+                            model_info["name"] = alias_data.get('title', model_id)
+                        else: # mixed mode, no alias
+                            model_info["name"] = f"{binding.alias}/{model_id}"
+
+                        all_models.append(model_info)
+        except Exception as e:
+            print(f"WARNING: Could not fetch TTS models from binding '{binding.alias}': {e}")
+            trace_exception(e)
+            continue
+            
+    unique_models = {m["id"]: m for m in all_models}
+    return sorted(list(unique_models.values()), key=lambda x: x['name'])

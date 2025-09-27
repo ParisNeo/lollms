@@ -1,18 +1,22 @@
+# backend/ws_manager.py
 import asyncio
 from typing import Dict, Set, Any
 from fastapi import WebSocket
 import json
 import logging
 import os
+import uuid
 from ascii_colors import trace_exception
 from .db import session as db_session_module
 from .db.models.broadcast import BroadcastMessage
+from .db.models.connections import WebSocketConnection
+from .session import user_sessions
 
 logger = logging.getLogger("uvicorn.info")
 
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: Dict[int, Set[WebSocket]] = {}
+        self.active_connections: Dict[int, Dict[str, WebSocket]] = {} # {user_id: {session_id: websocket}}
         self.admin_user_ids: Set[int] = set()
         self._loop: asyncio.AbstractEventLoop = None
         self.local_queue: asyncio.Queue = asyncio.Queue()
@@ -50,17 +54,48 @@ class ConnectionManager:
 
     async def connect(self, user_id: int, websocket: WebSocket):
         await websocket.accept()
+        session_id = str(uuid.uuid4())
+        websocket.session_id = session_id  # Attach session_id to the websocket object
+        
         if user_id not in self.active_connections:
-            self.active_connections[user_id] = set()
-        self.active_connections[user_id].add(websocket)
-        logger.info(f"User {user_id} connected via WebSocket. Total connections for user: {len(self.active_connections[user_id])}")
+            self.active_connections[user_id] = {}
+        self.active_connections[user_id][session_id] = websocket
+
+        # --- DB UPDATE ---
+        db = None
+        try:
+            db = db_session_module.SessionLocal()
+            new_connection = WebSocketConnection(user_id=user_id, session_id=session_id)
+            db.add(new_connection)
+            db.commit()
+            logger.info(f"User {user_id} connected via WebSocket (session: {session_id[:8]}). DB record created.")
+        except Exception as e:
+            logger.error(f"Failed to create DB record for WebSocket connection: {e}")
+            if db: db.rollback()
+        finally:
+            if db: db.close()
 
     def disconnect(self, user_id: int, websocket: WebSocket):
-        if user_id in self.active_connections:
-            self.active_connections[user_id].discard(websocket)
+        session_id = getattr(websocket, 'session_id', None)
+        
+        if user_id in self.active_connections and session_id in self.active_connections[user_id]:
+            del self.active_connections[user_id][session_id]
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
-            logger.info(f"User {user_id} disconnected one WebSocket. Connections remaining for user: {len(self.active_connections.get(user_id, set()))}")
+        
+        # --- DB UPDATE ---
+        if session_id:
+            db = None
+            try:
+                db = db_session_module.SessionLocal()
+                db.query(WebSocketConnection).filter(WebSocketConnection.session_id == session_id).delete()
+                db.commit()
+                logger.info(f"User {user_id} disconnected WebSocket (session: {session_id[:8]}). DB record removed.")
+            except Exception as e:
+                logger.error(f"Failed to remove DB record for WebSocket connection: {e}")
+                if db: db.rollback()
+            finally:
+                if db: db.close()
 
     def register_admin(self, user_id: int):
         self.admin_user_ids.add(user_id)
@@ -73,8 +108,8 @@ class ConnectionManager:
     async def send_personal_message(self, message_data: dict, user_id: int):
         if user_id in self.active_connections:
             sockets_to_remove = set()
-            # Iterate over a copy of the set to allow modification during iteration
-            for websocket in list(self.active_connections[user_id]):
+            # Iterate over a copy of the values to allow modification during iteration
+            for websocket in list(self.active_connections[user_id].values()):
                 try:
                     await websocket.send_json(message_data)
                 except Exception as e:
@@ -87,8 +122,8 @@ class ConnectionManager:
 
     async def broadcast(self, message_data: dict):
         users_to_cleanup = {}
-        for user_id, sockets in list(self.active_connections.items()):
-            for websocket in list(sockets):
+        for user_id, sockets_dict in list(self.active_connections.items()):
+            for websocket in list(sockets_dict.values()):
                 try:
                     await websocket.send_json(message_data)
                 except Exception:
@@ -127,28 +162,23 @@ class ConnectionManager:
         self._put_on_db_queue(payload)
 
     def send_personal_message_sync(self, message_data: dict, user_id: int):
-        # NEW: Smart broadcast logic
         if self._loop and user_id in self.active_connections:
-            # User is connected to this worker, use fast in-memory queue
             payload = {"type": "personal", "user_id": user_id, "data": message_data}
             self._loop.call_soon_threadsafe(self.local_queue.put_nowait, payload)
         else:
-            # User is not on this worker, use DB queue for another worker to pick up
             payload = {"type": "personal", "user_id": user_id, "data": message_data}
             self._put_on_db_queue(payload)
 
     def broadcast_to_admins_sync(self, message_data: dict):
-        # NEW: Smart broadcast logic for admins
         payload = {"type": "admins", "data": message_data}
-        
-        # Check if any admins are connected locally
         is_any_admin_local = any(admin_id in self.active_connections for admin_id in self.admin_user_ids)
-
         if self._loop and is_any_admin_local:
-             # At least one admin is on this worker, use fast in-memory queue
             self._loop.call_soon_threadsafe(self.local_queue.put_nowait, payload)
-        
-        # Always use DB queue as well, in case admins are on other workers
+        self._put_on_db_queue(payload)
+
+    def broadcast_internal_event_sync(self, event_type: str, data: dict):
+        """Puts an internal event on the DB queue for all workers to process."""
+        payload = {"type": event_type, "data": data}
         self._put_on_db_queue(payload)
 
 manager = ConnectionManager()
@@ -169,14 +199,18 @@ async def listen_for_broadcasts():
                             broadcast_type = payload.get("type")
                             data = payload.get("data")
                             
-                            if broadcast_type == "broadcast":
+                            if broadcast_type == "user_cache_invalidate":
+                                username_to_invalidate = data.get("username")
+                                if username_to_invalidate and username_to_invalidate in user_sessions:
+                                    logger.info(f"Worker {os.getpid()} invalidating LollmsClient cache for user: {username_to_invalidate}")
+                                    if "lollms_clients_cache" in user_sessions[username_to_invalidate]:
+                                        user_sessions[username_to_invalidate]["lollms_clients_cache"] = {}
+                            elif broadcast_type == "broadcast":
                                 await manager.broadcast(data)
                             elif broadcast_type == "admins":
-                                # This worker only sends to admins connected to it
                                 await manager.broadcast_to_admins(data)
                             elif broadcast_type == "personal":
                                 user_id = payload.get("user_id")
-                                # This worker only sends if the specific user is connected to it
                                 if user_id and user_id in manager.active_connections:
                                     await manager.send_personal_message(data, user_id)
                             

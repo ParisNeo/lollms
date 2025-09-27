@@ -38,6 +38,8 @@ import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
+import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
+import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 
 const props = defineProps({
   message: {
@@ -86,7 +88,7 @@ const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const dataStore = useDataStore();
-const { currentModelVisionSupport } = storeToRefs(discussionsStore);
+const { currentModelVisionSupport, currentPlayingAudio } = storeToRefs(discussionsStore);
 
 const isEventsCollapsed = ref(true);
 const isEditing = ref(false);
@@ -100,6 +102,8 @@ const editImageInput = ref(null);
 
 const areActionsDisabled = computed(() => discussionsStore.generationInProgress);
 const user = computed(() => authStore.user);
+const isPlayingThisMessage = computed(() => currentPlayingAudio.value.messageId === props.message.id);
+const isTtsActive = computed(() => !!user.value?.tts_binding_model_name);
 
 const isCurrentUser = computed(() => props.message.sender_type === 'user' && props.message.sender === authStore.user?.username);
 const isOtherUser = computed(() => props.message.sender_type === 'user' && props.message.sender !== authStore.user?.username);
@@ -136,6 +140,17 @@ function handleExport(format) {
         messageId: props.message.id,
         format: format,
     });
+}
+
+// NEW TTS Handler
+function handleSpeak() {
+    if (isPlayingThisMessage.value) {
+        discussionsStore.stopTTS();
+    } else {
+        // Strip out code blocks and other markdown for cleaner speech
+        const textToSpeak = props.message.content.replace(/```[\s\S]*?```/g, 'Code block.').replace(/<think>[\s\S]*?<\/think>/g, '');
+        discussionsStore.generateAndPlayTTS(props.message.id, textToSpeak);
+    }
 }
 
 
@@ -586,6 +601,10 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                     </div>
                     <div v-if="!isEditing" class="flex-shrink-0 flex items-center gap-1">
                         <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button v-if="isTtsActive && isAi" @click="handleSpeak" :title="isPlayingThisMessage ? 'Stop' : 'Speak'" class="action-btn">
+                                <IconStopCircle v-if="isPlayingThisMessage" class="w-4 h-4 text-red-500" />
+                                <IconSpeakerWave v-else class="w-4 h-4" />
+                            </button>
                             <DropdownMenu v-if="exportFormats.length > 0" title="Export" icon="ticket" button-class="action-btn">
                                 <button v-for="format in exportFormats" :key="format.value" @click="handleExport(format.value)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
                                     {{ format.label }}

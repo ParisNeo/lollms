@@ -19,13 +19,15 @@ from sqlalchemy.exc import IntegrityError
 from lollms_client import LollmsClient
 from lollms_client.lollms_llm_binding import get_available_bindings
 from lollms_client.lollms_tti_binding import get_available_bindings as get_available_tti_bindings
+from lollms_client.lollms_tts_binding import get_available_bindings as get_available_tts_bindings
 from backend.ws_manager import manager
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
-from backend.db.models.config import GlobalConfig as DBGlobalConfig, LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
+from backend.db.models.config import GlobalConfig as DBGlobalConfig, LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.fun_fact import FunFact as DBFunFact, FunFactCategory as DBFunFactCategory
+from backend.db.models.connections import WebSocketConnection
 from backend.security import get_password_hash as hash_password
 
 from ascii_colors import trace_exception, ASCIIColors
@@ -47,12 +49,6 @@ from backend.models import (
     AdminDashboardStats,
     EnhanceEmailRequest,
     EnhancedEmailResponse,
-    LLMBindingCreate,
-    LLMBindingUpdate,
-    LLMBindingPublicAdmin,
-    TTIBindingCreate,
-    TTIBindingUpdate,
-    TTIBindingPublicAdmin,
     TaskInfo,
     SystemUsageStats,
     GPUInfo,
@@ -60,10 +56,6 @@ from backend.models import (
     PromptCreate,
     PromptPublic,
     PromptUpdate,
-    ModelAliasUpdate,
-    TtiModelAliasUpdate,
-    ModelAliasDelete,
-    BindingModel,
     ModelNamePayload,
     FunFactCategoryCreate,
     FunFactCategoryPublic,
@@ -75,6 +67,22 @@ from backend.models import (
     FunFactExport,
     FunFactCategoryExport,
     FunFactCategoryImport
+)
+from backend.models.admin import (
+    LLMBindingCreate,
+    LLMBindingUpdate,
+    LLMBindingPublicAdmin,
+    TTIBindingCreate,
+    TTIBindingUpdate,
+    TTIBindingPublicAdmin,
+    TTSBindingCreate,
+    TTSBindingUpdate,
+    TTSBindingPublicAdmin,
+    ModelAliasUpdate,
+    TtiModelAliasUpdate,
+    TtsModelAliasUpdate,
+    ModelAliasDelete,
+    BindingModel,
 )
 from backend.session import (
     get_user_data_root,
@@ -109,14 +117,16 @@ def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_t
     """Casts config values to their correct types based on binding description."""
     if binding_type == "llm":
         available_bindings = get_available_bindings()
-    else: # tti
+    elif binding_type == "tti":
         available_bindings = get_available_tti_bindings()
+    else: # tts
+        available_bindings = get_available_tts_bindings()
         
     binding_desc = next((b for b in available_bindings if b.get("binding_name") == binding_name), None)
     
-    # Use model_parameters for TTI if they exist, otherwise fallback to input_parameters
+    # Use model_parameters for TTI/TTS if they exist, otherwise fallback to input_parameters
     parameters_key = "input_parameters"
-    if binding_type == "tti" and binding_desc and "model_parameters" in binding_desc:
+    if binding_type in ["tti", "tts"] and binding_desc and "model_parameters" in binding_desc:
         parameters_key = "model_parameters"
 
     if not binding_desc or parameters_key not in binding_desc:
@@ -440,10 +450,10 @@ async def update_binding(binding_id: int, update_data: LLMBindingUpdate, db: Ses
     try:
         db.commit()
         db.refresh(binding_to_update)
-        # Invalidate cached clients
+        # Invalidate cached clients for all users as a binding has changed
         for session in user_sessions.values():
-            if "lollms_clients" in session and binding_to_update.alias in session["lollms_clients"]:
-                del session["lollms_clients"][binding_to_update.alias]
+            if "lollms_clients_cache" in session:
+                session["lollms_clients_cache"] = {}
         await manager.broadcast({"type": "bindings_updated"})
         return binding_to_update
     except Exception as e:
@@ -562,7 +572,7 @@ async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db))
         if not lc.tti:
             ASCIIColors.error("Could not build a tti instance from the configuration. make sure you have set all configuration parameters correctly")
             raise Exception("Could not build a tti instance from the configuration. make sure you have set all configuration parameters correctly")
-        raw_models = lc.tti.listModels()
+        raw_models = lc.tti.list_models()
         
         models_list = []
         if isinstance(raw_models, list):
@@ -572,6 +582,11 @@ async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db))
                     models_list.append(model_id)
         
         model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except (json.JSONDecodeError, TypeError):
+                model_aliases = {}
         
         result = []
         for model_name in sorted(models_list):
@@ -593,8 +608,7 @@ async def update_tti_model_alias(binding_id: int, payload: TtiModelAliasUpdate, 
     if binding.model_aliases is None:
         binding.model_aliases = {}
     
-    # Directly assign the dictionary from the payload.
-    binding.model_aliases[payload.original_model_name] = payload.alias
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
     
     db.commit()
@@ -615,6 +629,173 @@ async def delete_tti_model_alias(binding_id: int, payload: ModelAliasDelete, db:
     db.refresh(binding)
     return binding
 
+# --- TTS Bindings Management Endpoints ---
+
+@admin_router.get("/tts-bindings/available_types", response_model=List[Dict])
+async def get_available_tts_binding_types():
+    try:
+        return get_available_tts_bindings()
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to get available TTS binding types: {e}")
+
+@admin_router.get("/tts-bindings", response_model=List[TTSBindingPublicAdmin])
+async def get_all_tts_bindings(db: Session = Depends(get_db)):
+    return db.query(DBTTSBinding).all()
+
+@admin_router.post("/tts-bindings", response_model=TTSBindingPublicAdmin, status_code=201)
+async def create_tts_binding(binding_data: TTSBindingCreate, db: Session = Depends(get_db)):
+    if db.query(DBTTSBinding).filter(DBTTSBinding.alias == binding_data.alias).first():
+        raise HTTPException(status_code=400, detail="A TTS binding with this alias already exists.")
+    
+    if binding_data.config:
+        binding_data.config = _process_binding_config(binding_data.name, binding_data.config, "tts")
+
+    new_binding = DBTTSBinding(**binding_data.model_dump())
+    try:
+        db.add(new_binding)
+        db.commit()
+        db.refresh(new_binding)
+        return new_binding
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="A TTS binding with this alias already exists.")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@admin_router.put("/tts-bindings/{binding_id}", response_model=TTSBindingPublicAdmin)
+async def update_tts_binding(binding_id: int, update_data: TTSBindingUpdate, db: Session = Depends(get_db)):
+    binding_to_update = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding_to_update:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+    
+    if update_data.alias and update_data.alias != binding_to_update.alias:
+        if db.query(DBTTSBinding).filter(DBTTSBinding.alias == update_data.alias).first():
+            raise HTTPException(status_code=400, detail="A TTS binding with the new alias already exists.")
+
+    update_dict = update_data.model_dump(exclude_unset=True)
+
+    if 'config' in update_dict and update_dict['config'] is not None:
+        binding_name = update_dict.get('name', binding_to_update.name)
+        update_dict['config'] = _process_binding_config(binding_name, update_dict['config'], "tts")
+
+    for key, value in update_dict.items():
+        setattr(binding_to_update, key, value)
+    
+    try:
+        db.commit()
+        db.refresh(binding_to_update)
+        return binding_to_update
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@admin_router.delete("/tts-bindings/{binding_id}", response_model=Dict[str, str])
+async def delete_tts_binding(binding_id: int, db: Session = Depends(get_db)):
+    binding_to_delete = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding_to_delete:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+    
+    try:
+        db.delete(binding_to_delete)
+        db.commit()
+        return {"message": "TTS Binding deleted successfully."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@admin_router.get("/tts-bindings/{binding_id}/models", response_model=List[BindingModel])
+async def get_tts_binding_models(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+    
+    try:
+        client_params = {
+            "tts_binding_name": binding.name,
+            "tts_binding_config": {
+                **binding.config,
+                "model_name": binding.default_model_name
+            }
+        }
+        lc = LollmsClient(**client_params)
+        if not lc.tts:
+            raise Exception("Could not build a tts instance from the configuration.")
+        raw_models = lc.tts.list_models()
+        
+        models_list = []
+        if isinstance(raw_models, list):
+            for item in raw_models:
+                model_id = item if isinstance(item, str) else item.get("model_name")
+                if model_id:
+                    models_list.append(model_id)
+        
+        model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except (json.JSONDecodeError, TypeError):
+                model_aliases = {}
+        
+        result = []
+        for model_name in sorted(models_list):
+            result.append(BindingModel(
+                original_model_name=model_name,
+                alias=model_aliases.get(model_name)
+            ))
+        return result
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Could not fetch models from TTS binding '{binding.alias}': {e}")
+
+@admin_router.put("/tts-bindings/{binding_id}/alias", response_model=TTSBindingPublicAdmin)
+async def update_tts_model_alias(binding_id: int, payload: TtsModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+    
+    if binding.model_aliases is None:
+        binding.model_aliases = {}
+    
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    return binding
+
+@admin_router.put("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
+async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    if binding.model_aliases is None:
+        binding.model_aliases = {}
+    
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    await manager.broadcast({"type": "bindings_updated"})
+    return binding
+
+@admin_router.delete("/tts-bindings/{binding_id}/alias", response_model=TTSBindingPublicAdmin)
+async def delete_tts_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+        
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    return binding
+
 # --- NEW: Model Alias Endpoints ---
 
 @admin_router.get("/bindings/{binding_id}/models", response_model=List[BindingModel])
@@ -625,7 +806,7 @@ async def get_binding_models(binding_id: int, current_admin: UserAuthDetails = D
     
     try:
         lc = get_user_lollms_client(current_admin.username, binding.alias)
-        raw_models = lc.listModels()
+        raw_models = lc.list_models()
         
         models_list = []
         if isinstance(raw_models, list):
@@ -636,6 +817,11 @@ async def get_binding_models(binding_id: int, current_admin: UserAuthDetails = D
                 if model_id: models_list.append(model_id)
         
         model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except (json.JSONDecodeError, TypeError):
+                model_aliases = {}
         
         result = []
         for model_name in sorted(models_list):
@@ -667,23 +853,6 @@ async def get_model_context_size(binding_id: int, payload: ModelNamePayload, cur
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Could not fetch context size from binding '{binding.alias}': {e}")
 
-@admin_router.put("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
-async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Session = Depends(get_db)):
-    binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
-    if not binding:
-        raise HTTPException(status_code=404, detail="Binding not found.")
-    
-    if binding.model_aliases is None:
-        binding.model_aliases = {}
-    
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
-    flag_modified(binding, "model_aliases")
-    
-    db.commit()
-    db.refresh(binding)
-    await manager.broadcast({"type": "bindings_updated"})
-    return binding
-
 @admin_router.delete("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
 async def delete_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
@@ -705,14 +874,20 @@ async def delete_model_alias(binding_id: int, payload: ModelAliasDelete, db: Ses
 @admin_router.get("/ws-connections", response_model=List[ConnectedUser])
 async def get_websocket_connections(db: Session = Depends(get_db)):
     """
-    Returns a list of users currently connected via WebSocket.
+    Returns a list of users currently connected via WebSocket, queried from the database
+    for a globally accurate view across all workers.
     """
-    connected_user_ids = list(manager.active_connections.keys())
-    if not connected_user_ids:
+    # Query distinct user IDs from the connections table
+    connected_user_ids = db.query(WebSocketConnection.user_id).distinct().all()
+    user_ids = [uid for uid, in connected_user_ids]
+
+    if not user_ids:
         return []
-    
-    connected_users_db = db.query(DBUser).filter(DBUser.id.in_(connected_user_ids)).all()
+
+    # Fetch user details for the connected user IDs
+    connected_users_db = db.query(DBUser).filter(DBUser.id.in_(user_ids)).all()
     return connected_users_db
+
 
 @admin_router.get("/stats", response_model=AdminDashboardStats)
 async def get_dashboard_stats(db: Session = Depends(get_db)):
@@ -858,7 +1033,7 @@ async def get_available_models(current_admin: UserAuthDetails = Depends(get_curr
         try:
             # We get a client instance specifically for this binding to list its models
             lc = get_user_lollms_client(current_admin.username, binding.alias)
-            models = lc.listModels()
+            models = lc.list_models()
             
             if isinstance(models, list):
                 for item in models:
@@ -1076,7 +1251,7 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
         db.refresh(user_to_update)
         
         if user_to_update.username in user_sessions:
-            user_sessions[user_to_update.username]["lollms_clients"] = {}
+            user_sessions[user_to_update.username]["lollms_clients_cache"] = {}
         
         return user_to_update
     except Exception as e:
@@ -1112,7 +1287,7 @@ async def admin_batch_update_user_settings(
 
         for username in updated_usernames:
             if username in user_sessions:
-                user_sessions[username]["lollms_clients"] = {}
+                user_sessions[username]["lollms_clients_cache"] = {}
                 print(f"INFO: Invalidated LLM client cache for user '{username}' due to batch settings update.")
 
         return {"message": f"Successfully updated settings for {len(users_to_update)} users."}

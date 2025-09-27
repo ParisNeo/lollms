@@ -45,6 +45,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const promptInsertionText = ref('');
     const promptLoadedArtefacts = ref(new Set());
     const activeDiscussionParticipants = ref({});
+    const currentPlayingAudio = ref({ messageId: null, audio: null });
 
     function _clearActiveAiTask(discussionId) {
         if (activeAiTasks.value[discussionId]) {
@@ -148,6 +149,40 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     Object.assign(_actions, useDiscussionMessages(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionSharing(composableState, composableStores, getActions));
 
+    async function generateAndPlayTTS(messageId, text) {
+        if (currentPlayingAudio.value.audio) {
+            currentPlayingAudio.value.audio.pause();
+            currentPlayingAudio.value = { messageId: null, audio: null };
+        }
+
+        try {
+            const response = await apiClient.post('/api/discussions/generate_tts', 
+                { text },
+                { responseType: 'blob' }
+            );
+            const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            currentPlayingAudio.value = { messageId, audio };
+            audio.play();
+            audio.onended = () => {
+                if (currentPlayingAudio.value.messageId === messageId) {
+                    currentPlayingAudio.value = { messageId: null, audio: null };
+                }
+            };
+        } catch (error) {
+            uiStore.addNotification('Failed to generate speech.', 'error');
+            console.error("TTS generation failed:", error);
+        }
+    }
+
+    function stopTTS() {
+        if (currentPlayingAudio.value.audio) {
+            currentPlayingAudio.value.audio.pause();
+            currentPlayingAudio.value = { messageId: null, audio: null };
+        }
+    }
+
     function $reset() {
         discussions.value = {};
         discussionGroups.value = [];
@@ -166,6 +201,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         promptInsertionText.value = '';
         promptLoadedArtefacts.value = new Set();
         activeDiscussionParticipants.value = {};
+        if (currentPlayingAudio.value.audio) {
+            currentPlayingAudio.value.audio.pause();
+        }
+        currentPlayingAudio.value = { messageId: null, audio: null };
     }
 
     // --- FINAL RETURN ---
@@ -176,11 +215,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         titleGenerationInProgressId, activeDiscussionContextStatus,
         activeAiTasks, activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens,
         promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
+        currentPlayingAudio,
         // Computed
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,
         // Actions
         ..._actions,
+        generateAndPlayTTS,
+        stopTTS,
         $reset,
     };
 });

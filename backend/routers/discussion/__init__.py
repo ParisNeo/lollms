@@ -38,6 +38,7 @@ from backend.routers.discussion.message import build_message_router
 from backend.routers.discussion.rag import build_rag_router
 from backend.routers.discussion.generation.llm import build_llm_generation_router
 from backend.routers.discussion.generation.tti import build_tti_generation_router
+from backend.routers.discussion.generation.tts import build_tts_router
 from backend.routers.discussion.sharing import build_discussion_sharing_router
 from backend.routers.discussion.utils import build_utils_router
 from backend.db.models.discussion import SharedDiscussionLink
@@ -55,6 +56,7 @@ def build_discussions_router():
     build_message_router(router)
     build_llm_generation_router(router)
     build_tti_generation_router(router)
+    build_tts_router(router)
     build_discussion_sharing_router(router)
     build_utils_router(router)
 

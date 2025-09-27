@@ -52,7 +52,17 @@
                                 <textarea id="alias-description" v-model="form.description" rows="3" class="input-field" placeholder="A short description of the model's capabilities for users."></textarea>
                             </div>
                             
-                            <IconUploader v-model="form.icon" />
+                            <div>
+                                <label class="label">Icon</label>
+                                <div class="flex items-center gap-4">
+                                    <IconUploader v-model="form.icon" />
+                                    <button @click="generateIcon" type="button" class="btn btn-secondary flex items-center gap-2" :disabled="isGeneratingIcon">
+                                        <IconAnimateSpin v-if="isGeneratingIcon" class="w-5 h-5" />
+                                        <IconSparkles v-else class="w-5 h-5" />
+                                        <span>{{ isGeneratingIcon ? 'Generating...' : 'Generate' }}</span>
+                                    </button>
+                                </div>
+                            </div>
                             
                             <div v-if="bindingType === 'llm'" class="p-4 border rounded-lg dark:border-gray-700">
                                 <h4 class="font-medium mb-4">LLM Generation Parameters</h4>
@@ -63,7 +73,7 @@
                                             <input id="alias-ctx-size" v-model="form.ctx_size" type="number" class="input-field" placeholder="e.g., 8192">
                                             <button type="button" @click="fetchCtxSize" class="btn btn-secondary p-2" title="Auto-detect max context size from binding" :disabled="isFetchingCtxSize">
                                                 <IconAnimateSpin v-if="isFetchingCtxSize" class="w-5 h-5" />
-                                                <IconRefresh v-else class="w-5 h-5"/>
+                                                <IconSparkles v-else class="w-5 h-5"/>
                                             </button>
                                         </div>
                                     </div>
@@ -75,9 +85,9 @@
                                 </div>
                             </div>
                             
-                            <!-- TTI Model Parameters -->
-                            <div v-if="bindingType === 'tti' && modelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700">
-                                <h4 class="font-medium mb-4">TTI Generation Parameters</h4>
+                            <!-- TTI/TTS Model Parameters -->
+                            <div v-if="['tti', 'tts'].includes(bindingType) && modelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700">
+                                <h4 class="font-medium mb-4">{{ bindingType.toUpperCase() }} Generation Parameters</h4>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div v-for="param in modelParameters" :key="param.name">
                                         <label :for="`param-${param.name}`" class="label text-xs">{{ param.title || param.name.replace(/_/g, ' ') }}</label>
@@ -173,15 +183,17 @@
 import { ref, watch, computed, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
+import { useDataStore } from '../../stores/data';
 import { storeToRefs } from 'pinia';
 import GenericModal from './GenericModal.vue';
 import IconUploader from '../ui/IconUploader.vue';
-import IconRefresh from '../../assets/icons/IconRefresh.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
-const { globalSettings, availableBindingTypes, availableTtiBindingTypes } = storeToRefs(adminStore);
+const dataStore = useDataStore();
+const { globalSettings, availableBindingTypes, availableTtiBindingTypes, availableTtsBindingTypes } = storeToRefs(adminStore);
 
 const modalData = computed(() => uiStore.modalData('manageModels'));
 const binding = computed(() => modalData.value?.binding);
@@ -192,6 +204,7 @@ const isSaving = ref(false);
 const isSettingBindingDefault = ref(false);
 const isSettingGlobalDefault = ref(false);
 const isFetchingCtxSize = ref(false);
+const isGeneratingIcon = ref(false);
 
 const models = ref([]);
 const selectedModel = ref(null);
@@ -238,10 +251,18 @@ async function fetchModels() {
     if (!binding.value) { isLoading.value = false; models.value = []; return; }
     isLoading.value = true;
     try {
-        if (bindingType.value === 'tti') {
-            models.value = await adminStore.fetchTtiBindingModels(binding.value.id);
-        } else {
-            models.value = await adminStore.fetchBindingModels(binding.value.id);
+        switch (bindingType.value) {
+            case 'llm':
+                models.value = await adminStore.fetchBindingModels(binding.value.id);
+                break;
+            case 'tti':
+                models.value = await adminStore.fetchTtiBindingModels(binding.value.id);
+                break;
+            case 'tts':
+                models.value = await adminStore.fetchTtsBindingModels(binding.value.id);
+                break;
+            default:
+                models.value = [];
         }
     } finally {
         isLoading.value = false;
@@ -250,17 +271,17 @@ async function fetchModels() {
 
 function selectModel(model) {
     selectedModel.value = model;
-    
-    // Start with a clean slate
     const newForm = { ...getInitialFormState(), ...(model.alias || {}) };
     
-    const bindingTypes = bindingType.value === 'tti' ? availableTtiBindingTypes.value : availableBindingTypes.value;
+    let bindingTypes;
+    if (bindingType.value === 'tti') bindingTypes = availableTtiBindingTypes.value;
+    else if (bindingType.value === 'tts') bindingTypes = availableTtsBindingTypes.value;
+    else bindingTypes = availableBindingTypes.value;
+
     const bindingDesc = bindingTypes.find(b => b.binding_name === binding.value.name);
-    
     const params = bindingDesc?.model_parameters || [];
     modelParameters.value = params;
 
-    // Populate form with default values from schema if not present in alias
     params.forEach(param => {
         if (!(param.name in newForm)) {
             newForm[param.name] = param.default;
@@ -283,47 +304,53 @@ async function fetchCtxSize() {
     }
 }
 
+async function generateIcon() {
+    if (!form.value.title && !selectedModel.value.original_model_name) {
+        uiStore.addNotification('Please provide an Alias Title to generate an icon.', 'warning');
+        return;
+    }
+    isGeneratingIcon.value = true;
+    try {
+        const modelIdentifier = form.value.title || selectedModel.value.original_model_name;
+        const prompt = `a high-quality, abstract, minimalist, vector logo for an AI model named "${modelIdentifier}". Description: ${form.value.description || 'General purpose model.'}`;
+        
+        const iconB64 = await dataStore.generatePersonalityIcon(prompt);
+        
+        if (iconB64) {
+            form.value.icon = `data:image/png;base64,${iconB64}`;
+        }
+    } finally {
+        isGeneratingIcon.value = false;
+    }
+}
+
 async function saveAlias() {
     if (!selectedModel.value || !binding.value) return;
     isSaving.value = true;
     try {
         const payload = { ...form.value };
-        
-        // Sanitize numeric fields for LLM
+        let aliasPayload = {};
+
         if (bindingType.value === 'llm') {
             ['ctx_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
                 const value = payload[key];
-                if (value === '' || value === null || value === undefined || isNaN(parseFloat(value))) {
-                    payload[key] = null;
-                } else {
-                    payload[key] = Number(value);
-                }
+                payload[key] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
             });
-        }
-        
-        // Sanitize numeric fields for TTI from schema
-        if (bindingType.value === 'tti' && modelParameters.value.length > 0) {
+            aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
+            await adminStore.saveModelAlias(binding.value.id, aliasPayload);
+        } else { // For TTI and TTS
             modelParameters.value.forEach(param => {
                 if (['int', 'float'].includes(param.type)) {
                     const value = payload[param.name];
-                    if (value === '' || value === null || value === undefined || isNaN(parseFloat(value))) {
-                         payload[param.name] = null;
-                    } else {
-                         payload[param.name] = Number(value);
-                    }
+                    payload[param.name] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
                 }
             });
-        }
-        
-        const aliasPayload = {
-            original_model_name: selectedModel.value.original_model_name,
-            alias: payload
-        };
-
-        if (bindingType.value === 'tti') {
-            await adminStore.saveTtiModelAlias(binding.value.id, aliasPayload);
-        } else {
-            await adminStore.saveModelAlias(binding.value.id, aliasPayload);
+            aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
+            if (bindingType.value === 'tti') {
+                await adminStore.saveTtiModelAlias(binding.value.id, aliasPayload);
+            } else if (bindingType.value === 'tts') {
+                await adminStore.saveTtsModelAlias(binding.value.id, aliasPayload);
+            }
         }
         
         await fetchModels();
@@ -344,15 +371,14 @@ async function deleteAlias() {
     if (confirmed) {
         isSaving.value = true;
         try {
-            if (bindingType.value === 'tti') {
-                await adminStore.deleteTtiModelAlias(binding.value.id, selectedModel.value.original_model_name);
-            } else {
-                await adminStore.deleteModelAlias(binding.value.id, selectedModel.value.original_model_name);
+            switch (bindingType.value) {
+                case 'llm': await adminStore.deleteModelAlias(binding.value.id, selectedModel.value.original_model_name); break;
+                case 'tti': await adminStore.deleteTtiModelAlias(binding.value.id, selectedModel.value.original_model_name); break;
+                case 'tts': await adminStore.deleteTtsModelAlias(binding.value.id, selectedModel.value.original_model_name); break;
             }
             await fetchModels();
             const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);
-            if (updatedModel) selectModel(updatedModel);
-            else selectedModel.value = null;
+            selectModel(updatedModel || (models.value.length > 0 ? models.value[0] : null));
         } finally {
             isSaving.value = false;
         }
@@ -364,10 +390,10 @@ async function setAsBindingDefault() {
     isSettingBindingDefault.value = true;
     try {
         const payload = { default_model_name: selectedModel.value.original_model_name };
-        if (bindingType.value === 'tti') {
-            await adminStore.updateTtiBinding(binding.value.id, payload);
-        } else {
-            await adminStore.updateBinding(binding.value.id, payload);
+        switch (bindingType.value) {
+            case 'llm': await adminStore.updateBinding(binding.value.id, payload); break;
+            case 'tti': await adminStore.updateTtiBinding(binding.value.id, payload); break;
+            case 'tts': await adminStore.updateTtsBinding(binding.value.id, payload); break;
         }
         uiStore.addNotification('Binding default model updated.', 'success');
     } finally {
@@ -389,11 +415,9 @@ async function setAsGlobalDefault() {
 
 onMounted(() => {
     adminStore.fetchGlobalSettings();
-    if (bindingType.value === 'tti') {
-        adminStore.fetchAvailableTtiBindingTypes();
-    } else {
-        adminStore.fetchAvailableBindingTypes();
-    }
+    adminStore.fetchAvailableBindingTypes();
+    adminStore.fetchAvailableTtiBindingTypes();
+    adminStore.fetchAvailableTtsBindingTypes();
 });
 
 watch(binding, (newBinding) => {

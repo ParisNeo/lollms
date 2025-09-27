@@ -261,7 +261,7 @@ async def list_models(
     for binding in active_bindings:
         try:
             lc = get_user_lollms_client(user.username, binding.alias)
-            models = lc.listModels()
+            models = lc.list_models()
             if isinstance(models, list):
                 for item in models:
                     model_id = item.get("model_name") if isinstance(item, dict) else item

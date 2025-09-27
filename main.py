@@ -34,6 +34,7 @@ from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
+from backend.db.models.connections import WebSocketConnection
 from backend.security import get_password_hash as hash_password
 from backend.migration_utils import LegacyDiscussion
 from backend.session import (
@@ -124,7 +125,7 @@ def run_one_time_startup_tasks(lock: Lock):
                     print(f"Found legacy discussion folder for '{username}'. Starting migration...")
                     if username not in user_sessions:
                         user_sessions[username] = {
-                                                    "lollms_clients": {}, 
+                                                    "lollms_clients_cache": {}, 
                                                     "lollms_model_name": user.lollms_model_name,
                                                     "llm_params": {}
                                                 }
@@ -156,7 +157,7 @@ def run_one_time_startup_tasks(lock: Lock):
                         backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                         shutil.move(str(old_discussion_path), str(backup_path))
                         print(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
-                    if username in user_sessions: user_sessions[username]['lollms_clients'] = {}
+                    if username in user_sessions: user_sessions[username]['lollms_clients_cache'] = {}
                 
             except Exception as e:
                 print(f"CRITICAL ERROR during migration: {e}")
@@ -326,6 +327,24 @@ def run_one_time_startup_tasks(lock: Lock):
             if db_for_sync: db_for_sync.rollback()
         finally:
             if db_for_sync: db_for_sync.close()
+
+        # --- NEW: Clear stale WebSocket connections from DB ---
+        db_for_ws_cleanup: Optional[Session] = None
+        try:
+            db_for_ws_cleanup = next(get_db())
+            # This is a simple approach: clear all on startup.
+            # A more advanced approach might check PIDs, but this is safer for now.
+            num_deleted = db_for_ws_cleanup.query(WebSocketConnection).delete()
+            db_for_ws_cleanup.commit()
+            if num_deleted > 0:
+                ASCIIColors.yellow(f"--- Cleared {num_deleted} stale WebSocket connection entries from the database. ---")
+        except Exception as e:
+            ASCIIColors.error(f"ERROR during WebSocket connection cleanup: {e}")
+            trace_exception(e)
+            if db_for_ws_cleanup: db_for_ws_cleanup.rollback()
+        finally:
+            if db_for_ws_cleanup: db_for_ws_cleanup.close()
+        # --- END NEW ---
 
         load_cache()
         

@@ -14,6 +14,7 @@ import ThemeToggle from '../ui/ThemeToggle.vue';
 import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
@@ -39,6 +40,7 @@ const pageTitleIcon = computed(() => uiStore.pageTitleIcon);
 const modelSearchTerm = ref('');
 const personalitySearchTerm = ref('');
 const ttiModelSearchTerm = ref('');
+const ttsModelSearchTerm = ref(''); // NEW
 
 // --- Dropdown Logic ---
 const isMenuOpen = ref(false);
@@ -94,6 +96,10 @@ const activeTtiModelName = computed({
     get: () => user.value?.tti_binding_model_name,
     set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name })
 });
+const activeTtsModelName = computed({ // NEW
+    get: () => user.value?.tts_binding_model_name,
+    set: (name) => authStore.updateUserPreferences({ tts_binding_model_name: name })
+});
 
 const availablePersonalities = computed(() => {
     return [
@@ -104,6 +110,7 @@ const availablePersonalities = computed(() => {
 
 const formattedAvailableModels = computed(() => dataStore.availableLLMModelsGrouped);
 const formattedAvailableTtiModels = computed(() => dataStore.availableTtiModelsGrouped);
+const formattedAvailableTtsModels = computed(() => dataStore.availableTtsModelsGrouped); // NEW
 
 const selectedModel = computed(() => {
     if (!activeModelName.value || !formattedAvailableModels.value) return null;
@@ -130,6 +137,16 @@ const selectedTtiModel = computed(() => {
     for (const group of formattedAvailableTtiModels.value) {
         if (group.items) {
             const model = group.items.find(item => item.id === activeTtiModelName.value);
+            if (model) return model;
+        }
+    }
+    return null;
+});
+const selectedTtsModel = computed(() => { // NEW
+    if (!activeTtsModelName.value || !formattedAvailableTtsModels.value) return null;
+    for (const group of formattedAvailableTtsModels.value) {
+        if (group.items) {
+            const model = group.items.find(item => item.id === activeTtsModelName.value);
             if (model) return model;
         }
     }
@@ -177,6 +194,21 @@ const filteredAvailableTtiModels = computed(() => {
     return result;
 });
 
+const filteredAvailableTtsModels = computed(() => { // NEW
+    if (!ttsModelSearchTerm.value) return formattedAvailableTtsModels.value;
+    const term = ttsModelSearchTerm.value.toLowerCase();
+    const result = [];
+    for (const group of formattedAvailableTtsModels.value) {
+        if (group.items) {
+            const filteredItems = group.items.filter(item => item.name.toLowerCase().includes(term));
+            if (filteredItems.length > 0) {
+                result.push({ ...group, items: filteredItems });
+            }
+        }
+    }
+    return result;
+});
+
 function openModelCard(model) {
     uiStore.openModal('modelCard', { model });
 }
@@ -191,6 +223,10 @@ function selectPersonality(id) {
 
 function selectTtiModel(id) {
     activeTtiModelName.value = id;
+}
+
+function selectTtsModel(id) { // NEW
+    activeTtsModelName.value = id;
 }
 
 function handleEditPersonality(personality, event) {
@@ -220,6 +256,12 @@ function handleEditPersonality(personality, event) {
                   <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
                       <img v-if="selectedTtiModel?.icon_base64" :src="selectedTtiModel.icon_base64" class="h-full w-full rounded-md object-cover"/>
                       <IconPhoto v-else class="w-4 h-4" />
+                  </div>
+                  
+                  <!-- TTS Icon -->
+                  <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
+                      <img v-if="selectedTtsModel?.icon_base64" :src="selectedTtsModel.icon_base64" class="h-full w-full rounded-md object-cover"/>
+                      <IconMicrophone v-else class="w-4 h-4" />
                   </div>
                   
                   <!-- Personality Icon -->
@@ -286,6 +328,26 @@ function handleEditPersonality(personality, event) {
                                         <div class="flex items-center space-x-3 truncate">
                                             <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
                                             <IconPhoto v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                            <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+                        </DropdownSubmenu>
+
+                        <DropdownSubmenu title="Text-to-Speech" icon="microphone" :icon-src="selectedTtsModel?.icon_base64">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
+                                <input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search TTS models..." class="input-field-sm w-full">
+                            </div>
+                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                                <div v-if="dataStore.isLoadingTtsModels" class="text-center p-4 text-sm text-gray-500">Loading TTS models...</div>
+                                <div v-else-if="filteredAvailableTtsModels.length === 0" class="text-center p-4 text-sm text-gray-500">No TTS models found.</div>
+                                <div v-for="group in filteredAvailableTtsModels" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
+                                    <button v-for="item in group.items" :key="item.id" @click="selectTtsModel(item.id)" class="menu-item-button" :class="{'selected': activeTtsModelName === item.id}">
+                                        <div class="flex items-center space-x-3 truncate">
+                                            <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
+                                            <IconMicrophone v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
                                             <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
                                         </div>
                                     </button>

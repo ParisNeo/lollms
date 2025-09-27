@@ -54,10 +54,14 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingBindings = ref(false);
     const availableBindingTypes = ref([]);
 
-    // --- NEW: TTI State ---
     const ttiBindings = ref([]);
     const isLoadingTtiBindings = ref(false);
     const availableTtiBindingTypes = ref([]);
+
+    // --- NEW: TTS State ---
+    const ttsBindings = ref([]);
+    const isLoadingTtsBindings = ref(false);
+    const availableTtsBindingTypes = ref([]);
 
     const globalSettings = ref([]);
     const isLoadingSettings = ref(false);
@@ -436,6 +440,51 @@ export const useAdminStore = defineStore('admin', () => {
         if (index !== -1) ttiBindings.value[index] = response.data;
     }
 
+    // --- NEW: TTS Actions ---
+    async function fetchTtsBindings() {
+        isLoadingTtsBindings.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/tts-bindings');
+            ttsBindings.value = response.data;
+        } finally {
+            isLoadingTtsBindings.value = false;
+        }
+    }
+    async function fetchAvailableTtsBindingTypes() {
+        const response = await apiClient.get('/api/admin/tts-bindings/available_types');
+        availableTtsBindingTypes.value = response.data;
+    }
+    async function addTtsBinding(payload) {
+        const response = await apiClient.post('/api/admin/tts-bindings', payload);
+        ttsBindings.value.push(response.data);
+        uiStore.addNotification(`TTS Binding '${response.data.alias}' created.`, 'success');
+    }
+    async function updateTtsBinding(id, payload) {
+        const response = await apiClient.put(`/api/admin/tts-bindings/${id}`, payload);
+        const index = ttsBindings.value.findIndex(b => b.id === id);
+        if (index !== -1) ttsBindings.value[index] = response.data;
+        uiStore.addNotification(`TTS Binding '${response.data.alias}' updated.`, 'success');
+    }
+    async function deleteTtsBinding(id) {
+        await apiClient.delete(`/api/admin/tts-bindings/${id}`);
+        ttsBindings.value = ttsBindings.value.filter(b => b.id !== id);
+        uiStore.addNotification('TTS Binding deleted successfully.', 'success');
+    }
+    async function fetchTtsBindingModels(bindingId) {
+        const response = await apiClient.get(`/api/admin/tts-bindings/${bindingId}/models`);
+        return response.data;
+    }
+    async function saveTtsModelAlias(bindingId, payload) {
+        const response = await apiClient.put(`/api/admin/tts-bindings/${bindingId}/alias`, payload);
+        const index = ttsBindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) ttsBindings.value[index] = response.data;
+    }
+    async function deleteTtsModelAlias(bindingId, modelName) {
+        const response = await apiClient.delete(`/api/admin/tts-bindings/${bindingId}/alias`, { data: { original_model_name: modelName } });
+        const index = ttsBindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) ttsBindings.value[index] = response.data;
+    }
+
     async function fetchGlobalSettings() {
         isLoadingSettings.value = true;
         try {
@@ -584,6 +633,9 @@ export const useAdminStore = defineStore('admin', () => {
         ttiBindings, isLoadingTtiBindings, availableTtiBindingTypes,
         fetchTtiBindings, fetchAvailableTtiBindingTypes, addTtiBinding, updateTtiBinding, deleteTtiBinding,
         fetchTtiBindingModels, saveTtiModelAlias, deleteTtiModelAlias,
+        ttsBindings, isLoadingTtsBindings, availableTtsBindingTypes,
+        fetchTtsBindings, fetchAvailableTtsBindingTypes, addTtsBinding, updateTtsBinding, deleteTtsBinding,
+        fetchTtsBindingModels, saveTtsModelAlias, deleteTtsModelAlias,
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings, uploadWelcomeLogo, removeWelcomeLogo,
         isImporting, importOpenWebUIData,
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,

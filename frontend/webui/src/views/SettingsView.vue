@@ -14,6 +14,7 @@ import IconMcp from '../assets/icons/IconMcp.vue';
 import IconKey from '../assets/icons/IconKey.vue';
 import IconLink from '../assets/icons/IconLink.vue';
 import IconPhoto from '../assets/icons/IconPhoto.vue';
+import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -22,6 +23,7 @@ const components = {
   general: defineAsyncComponent(() => import('../components/settings/GeneralSettings.vue')),
   llm: defineAsyncComponent(() => import('../components/settings/LLMSettings.vue')),
   tti: defineAsyncComponent(() => import('../components/settings/TTISettings.vue')),
+  tts: defineAsyncComponent(() => import('../components/settings/TTSSettings.vue')),
   rag: defineAsyncComponent(() => import('../components/settings/RAGSettings.vue')),
   personalities: defineAsyncComponent(() => import('../components/settings/PersonalitiesSettings.vue')),
   prompts: defineAsyncComponent(() => import('../components/settings/PromptsSettings.vue')),
@@ -36,6 +38,7 @@ const sections = [
   { id: 'general', name: 'General', icon: markRaw(IconCog) },
   { id: 'llm', name: 'LLM Parameters', icon: markRaw(IconCpuChip) },
   { id: 'tti', name: 'TTI Parameters', icon: markRaw(IconPhoto) },
+  { id: 'tts', name: 'TTS Parameters', icon: markRaw(IconMicrophone) },
   { id: 'rag', name: 'RAG Parameters', icon: markRaw(IconDatabase) },
   { type: 'divider', label: 'Customization' },
   { id: 'personalities', name: 'Personalities', icon: markRaw(IconUserCircle) },

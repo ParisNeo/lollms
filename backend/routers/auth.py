@@ -66,7 +66,7 @@ async def login_for_access_token(
     
     if user:
         if user.hashed_password.startswith("argon2_hash:"):
-            argon2_hash = user.hashed_password.split(":", 1)[1]
+            argon2_hash = user.hashed_password.split(":", 1)
             try:
                 ph.verify(argon2_hash, form_data.password)
                 is_password_correct = True
@@ -121,7 +121,7 @@ async def login_for_access_token(
         session_llm_params = {k: v for k, v in session_llm_params.items() if v is not None}
 
         user_sessions[user.username] = {
-            "lollms_clients": {}, 
+            "lollms_clients_cache": {}, 
             "safe_store_instances": {},
             "discussions": {}, "discussion_titles": {},
             "active_vectorizer": initial_vectorizer, 
@@ -358,7 +358,8 @@ async def update_my_details(
         session["llm_params"] = {k: v for k, v in session_llm_params.items() if v is not None}
         
         if client_needs_reinit:
-            session["lollms_clients"] = {} # Invalidate all cached clients
+            session["lollms_clients_cache"] = {}  # Invalidate all cached clients
+            manager.broadcast_internal_event_sync("user_cache_invalidate", {"username": username})
     
     return get_current_active_user(db_user)
 

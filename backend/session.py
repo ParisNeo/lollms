@@ -90,7 +90,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 "put_thoughts_in_context": db_user.put_thoughts_in_context
             }
             user_sessions[username] = {
-                "lollms_clients": {}, "safe_store_instances": {}, "discussions": {},
+                "lollms_clients_cache": {}, "safe_store_instances": {}, "discussions": {},
                 "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
                 "lollms_model_name": db_user.lollms_model_name,
                 "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
@@ -245,8 +245,8 @@ def reload_lollms_client_mcp(username: str):
             del session['servers_infos']
             print(f"INFO: Invalidated MCP servers cache for user: {username}")
 
-        if "lollms_clients" in session:
-            session["lollms_clients"] = {}
+        if "lollms_clients_cache" in session:
+            session["lollms_clients_cache"] = {}
             print(f"INFO: Invalidated all lollms_client instances for user: {username}")
 
 
@@ -287,8 +287,6 @@ def build_lollms_client_from_params(
                 raise HTTPException(status_code=404, detail="No active LLM bindings are configured.")
 
         final_alias = binding_to_use.alias
-        if not model_name and final_alias in session.get("lollms_clients", {}):
-            return cast(LollmsClient, session["lollms_clients"][final_alias])
         
         model_name_for_binding = model_name
         if not model_name_for_binding:
@@ -413,8 +411,8 @@ def build_lollms_client_from_params(
                         if value is not None:
                             tts_binding_config[key] = value
                             
-            if selected_tts_model_name:
-                tts_binding_config['model_name'] = selected_tts_model_name
+            # IMPORTANT FIX: Do not pass model_name to the TTS binding constructor
+            tts_binding_config.pop('model_name', None)
                 
             client_init_params["tts_binding_name"] = selected_tts_binding.name
             client_init_params["tts_binding_config"] = tts_binding_config
@@ -429,14 +427,21 @@ def build_lollms_client_from_params(
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
 
+        cache_key = json.dumps(client_init_params, sort_keys=True)
+        session_cache = session.setdefault("lollms_clients_cache", {})
+        if cache_key in session_cache:
+            ASCIIColors.cyan(f"INFO: Returning cached LollmsClient for user '{username}'.")
+            return session_cache[cache_key]
+
         try:
+            ASCIIColors.magenta(f"INFO: Initializing LollmsClient for user '{username}' with binding '{binding_to_use.name}' and model '{model_name_for_binding}'.")
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
-            if not model_name:
-                session.setdefault("lollms_clients", {})[final_alias] = lc
+            session_cache[cache_key] = lc
+            ASCIIColors.cyan(f"INFO: Caching new LollmsClient for user '{username}'.")
             return lc
         except Exception as e:
             traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{final_alias}': {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{binding_to_use.alias}': {str(e)}")
     finally:
         db.close()
 

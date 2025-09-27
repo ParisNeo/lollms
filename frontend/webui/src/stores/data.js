@@ -11,7 +11,8 @@ export const useDataStore = defineStore('data', () => {
     const { on } = useEventBus();
 
     const availableLollmsModels = ref([]);
-    const availableTtiModels = ref([]); // NEW
+    const availableTtiModels = ref([]);
+    const availableTtsModels = ref([]); // NEW
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
     const userPersonalities = ref([]);
@@ -22,7 +23,8 @@ export const useDataStore = defineStore('data', () => {
     const userApps = ref([]);
     const systemApps = ref([]);
     const isLoadingLollmsModels = ref(false);
-    const isLoadingTtiModels = ref(false); // NEW
+    const isLoadingTtiModels = ref(false);
+    const isLoadingTtsModels = ref(false); // NEW
     const _languages = ref([]);
     const isLoadingLanguages = ref(false);
     const apiKeys = ref([]);
@@ -111,6 +113,39 @@ export const useDataStore = defineStore('data', () => {
         const grouped = availableTtiModels.value.reduce((acc, model) => {
             if (!model || typeof model.id !== 'string') {
                 console.warn("Skipping invalid TTI model entry:", model);
+                return acc;
+            }
+            
+            const [bindingAlias] = model.id.split('/');
+            if (!acc[bindingAlias]) {
+                acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
+            }
+
+            acc[bindingAlias].items.push({ 
+                id: model.id, 
+                name: model.name, // Use name from API directly
+                icon_base64: model.alias?.icon,
+                description: model.alias?.description,
+                alias: model.alias
+            });
+            return acc;
+        }, {});
+
+        Object.values(grouped).forEach(group => {
+            group.items.sort((a, b) => a.name.localeCompare(b.name));
+        });
+
+        return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
+    });
+    // NEW
+    const availableTtsModelsGrouped = computed(() => {
+        if (!Array.isArray(availableTtsModels.value) || availableTtsModels.value.length === 0) {
+            return [];
+        }
+
+        const grouped = availableTtsModels.value.reduce((acc, model) => {
+            if (!model || typeof model.id !== 'string') {
+                console.warn("Skipping invalid TTS model entry:", model);
                 return acc;
             }
             
@@ -233,7 +268,8 @@ export const useDataStore = defineStore('data', () => {
         const promptsStore = usePromptsStore();
         const promises = [
             fetchAvailableLollmsModels().catch(e => console.error("Error fetching models:", e)),
-            fetchAvailableTtiModels().catch(e => console.error("Error fetching TTI models:", e)), // NEW
+            fetchAvailableTtiModels().catch(e => console.error("Error fetching TTI models:", e)),
+            fetchAvailableTtsModels().catch(e => console.error("Error fetching TTS models:", e)), // NEW
             fetchDataStores().catch(e => console.error("Error fetching data stores:", e)),
             fetchPersonalities().catch(e => console.error("Error fetching personalities:", e)),
             fetchMcps().catch(e => console.error("Error fetching MCPs:", e)),
@@ -257,7 +293,7 @@ export const useDataStore = defineStore('data', () => {
             isLoadingLollmsModels.value = false;
         }
     }
-    // NEW
+    
     async function fetchAvailableTtiModels() {
         isLoadingTtiModels.value = true;
         try {
@@ -267,6 +303,18 @@ export const useDataStore = defineStore('data', () => {
             availableTtiModels.value = [];
         } finally {
             isLoadingTtiModels.value = false;
+        }
+    }
+    // NEW
+    async function fetchAvailableTtsModels() {
+        isLoadingTtsModels.value = true;
+        try {
+            const response = await apiClient.get('/api/config/tts-models');
+            availableTtsModels.value = Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            availableTtsModels.value = [];
+        } finally {
+            isLoadingTtsModels.value = false;
         }
     }
     async function fetchAdminAvailableLollmsModels() {
@@ -555,6 +603,7 @@ export const useDataStore = defineStore('data', () => {
     function $reset() {
         availableLollmsModels.value = [];
         availableTtiModels.value = [];
+        availableTtsModels.value = [];
         ownedDataStores.value = [];
         sharedDataStores.value = [];
         userPersonalities.value = [];
@@ -566,6 +615,7 @@ export const useDataStore = defineStore('data', () => {
         systemApps.value = [];
         isLoadingLollmsModels.value = false;
         isLoadingTtiModels.value = false;
+        isLoadingTtsModels.value = false;
         _languages.value = [];
         isLoadingLanguages.value = false;
         apiKeys.value = [];
@@ -580,8 +630,10 @@ export const useDataStore = defineStore('data', () => {
         availableRagStores, availableMcpToolsForSelector, availableLLMModelsGrouped,
         allPersonalities, getPersonalityById,
         
-        availableTtiModels, isLoadingTtiModels, availableTtiModelsGrouped, // NEW
-        fetchAvailableTtiModels, // NEW
+        availableTtiModels, isLoadingTtiModels, availableTtiModelsGrouped,
+        availableTtsModels, isLoadingTtsModels, availableTtsModelsGrouped, // NEW
+        fetchAvailableTtiModels,
+        fetchAvailableTtsModels, // NEW
 
         loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,

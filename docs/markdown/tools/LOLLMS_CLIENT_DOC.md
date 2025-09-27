@@ -210,7 +210,7 @@
 
     ```python
     # List available models for the current binding
-    models = lc.listModels()
+    models = lc.list_models()
     if isinstance(models, list) and models:
         print(f"\nAvailable models for binding '{lc.llm.get_model_info()['name']}':")
         for model_info in models[:5]: # Print first 5
@@ -301,7 +301,7 @@
         Generates text. Accepts all generation parameters, overriding defaults if provided.
         If `images` are provided, it attempts multimodal generation.
     *   `embed(text: str)`: Generates embeddings for the input text using the active binding.
-    *   `listModels() -> list`: Lists models available to the current binding.
+    *   `list_models() -> list`: Lists models available to the current binding.
     *   `generate_code(prompt: str, images: Optional[List[str]] = [], template: Optional[str] = None, language: str = "json", ... ) -> str`:
         Generates a single code block. Useful for structured output like JSON/YAML or actual code.
         `template` can guide the LLM for the structure. `language` specifies the language tag.
@@ -540,7 +540,7 @@
 
     ### Binding Architecture (`lollms_llm_binding.py`)
 
-    *   **`LollmsLLMBinding(ABC)`**: An abstract base class defining the interface all specific bindings must implement. Key abstract methods include `generate_text`, `tokenize`, `detokenize`, `embed`, `get_model_info`, `listModels`, `load_model`.
+    *   **`LollmsLLMBinding(ABC)`**: An abstract base class defining the interface all specific bindings must implement. Key abstract methods include `generate_text`, `tokenize`, `detokenize`, `embed`, `get_model_info`, `list_models`, `load_model`.
     *   **`LollmsLLMBindingManager`**: Manages the discovery and instantiation of available bindings from the `llm_bindings` directory. `LollmsClient` uses this manager to create the appropriate binding instance.
 
     ### LollmsLLMBinding (`lollms_client/llm_bindings/lollms/`)
@@ -566,12 +566,12 @@
         *   `/api/generate` (text-only)
         *   `/api/chat` (for multimodal with images, or general chat)
         *   `/api/embed`
-        *   `/api/tags` (for `listModels`)
+        *   `/api/tags` (for `list_models`)
     *   **Functionality:**
         *   `generate_text`: Uses `/api/chat` if images are provided (formatting messages with image data), otherwise uses `/api/generate`.
         *   `tokenize`/`detokenize`: Simple character-level tokenization as Ollama handles tokenization internally.
         *   `embed`: Uses Ollama's `/api/embed`.
-        *   `listModels`: Fetches model tags from `/api/tags`.
+        *   `list_models`: Fetches model tags from `/api/tags`.
 
     ### OpenAIBinding (`lollms_client/llm_bindings/openai/`)
 
@@ -582,11 +582,11 @@
     *   **Endpoints Used (via `openai` library):**
         *   `client.chat.completions.create` (for chat models, or if `completion_format` is `ELF_COMPLETION_FORMAT.Chat`, and for image input)
         *   `client.completions.create` (for older instruction-following models if `completion_format` is `ELF_COMPLETION_FORMAT.Instruct`)
-        *   `client.models.list` (for `listModels`)
+        *   `client.models.list` (for `list_models`)
     *   **Functionality:**
         *   `generate_text`: Handles text and image input (for vision-capable models). Uses chat completions for image input.
         *   `tokenize`/`detokenize`: Uses `tiktoken` based on the `model_name`.
-        *   `listModels`: Fetches models from the `/v1/models` endpoint.
+        *   `list_models`: Fetches models from the `/v1/models` endpoint.
         *   `embed`: (Placeholder in provided code, would typically use `client.embeddings.create`)
 
     ### TransformersBinding (`lollms_client/llm_bindings/transformers/`)
@@ -604,7 +604,7 @@
             *   Supports streaming via a callback.
             *   Image input is acknowledged but not deeply processed in the current implementation ("Image content not processed").
         *   `tokenize`/`detokenize`: Simple character-level, as the main tokenization happens internally via the Hugging Face tokenizer.
-        *   `embed`, `listModels`: Placeholders in the provided code.
+        *   `embed`, `list_models`: Placeholders in the provided code.
 
     ---
 

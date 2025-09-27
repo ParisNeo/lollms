@@ -17,6 +17,7 @@ from backend.db.models.prompt import SavedPrompt
 from backend.db.models.fun_fact import FunFactCategory, FunFact
 from backend.db.models.user import User
 from backend.db.models.memory import UserMemory
+from backend.db.models.connections import WebSocketConnection
 from ascii_colors import ASCIIColors, trace_exception
 
 
@@ -1100,6 +1101,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if not inspector.has_table("tts_bindings"):
         TTSBinding.__table__.create(connection)
         print("INFO: Created 'tts_bindings' table.")
+        connection.commit()
+
+    # NEW: Create websocket_connections table if it doesn't exist
+    if not inspector.has_table("websocket_connections"):
+        WebSocketConnection.__table__.create(connection)
+        print("INFO: Created 'websocket_connections' table for tracking live users.")
         connection.commit()
 
 
