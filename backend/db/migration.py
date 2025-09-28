@@ -664,6 +664,19 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         UserVoice.__table__.create(connection)
         print("INFO: Created 'user_voices' table.")
         connection.commit()
+    else: # NEW: Add columns to existing user_voices table
+        voice_columns_db = [col['name'] for col in inspector.get_columns('user_voices')]
+        new_voice_cols_defs = {
+            "speed": "FLOAT DEFAULT 1.0 NOT NULL",
+            "gain": "FLOAT DEFAULT 0.0 NOT NULL",
+            "reverb_params": "JSON"
+        }
+        for col_name, col_sql_def in new_voice_cols_defs.items():
+            if col_name not in voice_columns_db:
+                connection.execute(text(f"ALTER TABLE user_voices ADD COLUMN {col_name} {col_sql_def}"))
+                print(f"INFO: Added missing column '{col_name}' to 'user_voices' table.")
+        connection.commit()
+
 
     if inspector.has_table("users"):
         user_columns_db = [col['name'] for col in inspector.get_columns('users')]

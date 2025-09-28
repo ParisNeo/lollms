@@ -1,3 +1,4 @@
+<!-- frontend/webui/src/components/layout/UserInfo.vue -->
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
@@ -16,6 +17,7 @@ import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconSignOut from '../../assets/icons/IconSignOut.vue';
 import IconChevronUp from '../../assets/icons/IconChevronUp.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
+import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -30,6 +32,7 @@ const menuDivRef = ref(null);
 const user = computed(() => authStore.user);
 const isAdmin = computed(() => authStore.isAdmin);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
+const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
 
 const runningApps = computed(() => {
     const allServices = [...dataStore.userApps, ...dataStore.systemApps];
@@ -202,6 +205,10 @@ const vOnClickOutside = {
                             <router-link to="/settings" @click="closeMenu" class="menu-item">
                             <IconSettings class="mr-3 h-5 w-5 text-gray-500" />
                             <span>Settings</span>
+                            </router-link>
+                            <router-link v-if="isTtsConfigured" to="/voices-studio" @click="closeMenu" class="menu-item">
+                                <IconMicrophone class="mr-3 h-5 w-5 text-gray-500" />
+                                <span>Voices Studio</span>
                             </router-link>
                             <router-link v-if="isAdmin" to="/admin" @click="closeMenu" class="menu-item">
                                 <IconUserGroup class="mr-3 h-5 w-5 text-gray-500" />

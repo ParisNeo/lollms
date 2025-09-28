@@ -18,6 +18,7 @@ from fastapi import (
 from fastapi.responses import (
     JSONResponse,
 )
+from pydantic import BaseModel
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 
@@ -40,7 +41,7 @@ from backend.models import (
     SafeStoreDocumentInfo,
     TaskInfo
 )
-from backend.session import get_datastore_db_path
+from backend.session import get_datastore_db_path, build_lollms_client_from_params
 from backend.db.models.db_task import DBTask
 # safe_store is expected to be installed
 try:
@@ -60,7 +61,17 @@ from backend.session import (
 )
 from backend.task_manager import task_manager, Task
 
+# --- NEW Pydantic Models for Graph Operations ---
+class GraphGenerationRequest(BaseModel):
+    graph_type: str = "knowledge_graph"
+    model_binding: str
+    model_name: str
+    chunk_size: int = 2048
+    overlap_size: int = 256
 
+class GraphQueryRequest(BaseModel):
+    query: str
+    max_k: int = 10
 
 
 # --- Task Functions ---
@@ -100,6 +111,13 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
                 try:
                     ss.add_document(str(file_path), vectorizer_name=vectorizer_name)
                     processed_count += 1
+                    # --- NEW: Delete the file after successful processing ---
+                    try:
+                        file_path.unlink()
+                        task.log(f"Successfully processed and removed temporary file: {file_path.name}")
+                    except Exception as del_err:
+                        task.log(f"Warning: Could not delete temporary file {file_path.name}: {del_err}", level="WARNING")
+                    # --- END NEW ---
                 except Exception as e:
                     error_count += 1
                     task.log(f"Error processing {file_path.name}: {e}", level="ERROR")
@@ -138,6 +156,90 @@ def _revectorize_datastore_task(task: Task, username: str, datastore_id: str, ve
     except Exception as e:
         task.log(f"Error during revectorization: {e}", level="CRITICAL")
         traceback.print_exc()
+        raise e
+    finally:
+        db.close()
+
+def _generate_graph_task(task: Task, username: str, datastore_id: str, request_data: dict):
+    db = next(get_db())
+    ss = None
+    try:
+        ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
+        task.log("Building LLM client for graph generation.")
+        task.set_progress(5)
+        
+        llm_client = build_lollms_client_from_params(
+            username=username,
+            binding_alias=request_data.get("model_binding"),
+            model_name=request_data.get("model_name")
+        )
+
+        task.log("Starting graph generation from chunks.")
+        task.set_progress(10)
+        
+        with ss:
+            ss.generate_graph_from_chunks(
+                llm_client=llm_client,
+                graph_type=request_data.get("graph_type", "knowledge_graph"),
+                chunk_size=request_data.get("chunk_size", 2048),
+                overlap_size=request_data.get("overlap_size", 256),
+                model_name=request_data.get("model_name")
+            )
+        task.set_progress(95)
+
+        if task.cancellation_event.is_set():
+            task.log("Graph generation was cancelled (or finished before cancellation was effective).", "WARNING")
+            task.result = {"message": "Graph generation cancelled."}
+        else:
+            task.set_progress(100)
+            task.result = {"message": "Graph generation completed successfully."}
+            task.log("Graph generation finished.")
+
+    except Exception as e:
+        task.log(f"Error during graph generation: {e}", level="CRITICAL")
+        trace_exception(e)
+        raise e
+    finally:
+        db.close()
+
+def _update_graph_task(task: Task, username: str, datastore_id: str, request_data: dict):
+    db = next(get_db())
+    ss = None
+    try:
+        ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
+        task.log("Building LLM client for graph update.")
+        task.set_progress(5)
+        
+        llm_client = build_lollms_client_from_params(
+            username=username,
+            binding_alias=request_data.get("model_binding"),
+            model_name=request_data.get("model_name")
+        )
+
+        task.log("Starting graph update from chunks.")
+        task.set_progress(10)
+        
+        with ss:
+            ss.update_graph_from_chunks(
+                llm_client=llm_client,
+                graph_type=request_data.get("graph_type", "knowledge_graph"),
+                chunk_size=request_data.get("chunk_size", 2048),
+                overlap_size=request_data.get("overlap_size", 256),
+                model_name=request_data.get("model_name")
+            )
+        task.set_progress(95)
+
+        if task.cancellation_event.is_set():
+            task.log("Graph update was cancelled (or finished before cancellation was effective).", "WARNING")
+            task.result = {"message": "Graph update cancelled."}
+        else:
+            task.set_progress(100)
+            task.result = {"message": "Graph update completed successfully."}
+            task.log("Graph update finished.")
+
+    except Exception as e:
+        task.log(f"Error during graph update: {e}", level="CRITICAL")
+        trace_exception(e)
         raise e
     finally:
         db.close()
@@ -254,26 +356,27 @@ async def upload_rag_documents_to_datastore(
 
 @store_files_router.get("/files", response_model=List[SafeStoreDocumentInfo])
 async def list_rag_documents_in_datastore(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[SafeStoreDocumentInfo]:
-    if not safe_store: return []
+    if not safe_store: 
+        return []
     ss = get_safe_store_instance(current_user.username, datastore_id, db) 
     managed_docs = []
     try:
-        with ss: stored_meta = ss.list_documents()
-        ds_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
-        if not ds_record: raise HTTPException(status_code=404, detail="Datastore metadata not found in main DB.")
+        with ss: 
+            stored_meta = ss.list_documents()
         
-        expected_docs_root = get_user_datastore_root_path(ds_record.owner.username) / "safestore_docs" / datastore_id
-        expected_docs_root_resolved = expected_docs_root.resolve()
-
         for doc_meta in stored_meta:
             original_path_str = doc_meta.get("file_path")
             if original_path_str:
-                try:
-                    if Path(original_path_str).resolve().parent == expected_docs_root_resolved:
-                        managed_docs.append(SafeStoreDocumentInfo(filename=Path(original_path_str).name))
-                except Exception: pass 
-    except Exception as e: raise HTTPException(status_code=500, detail=f"Error listing RAG docs for datastore {datastore_id}: {e}")
-    managed_docs.sort(key=lambda x: x.filename); return managed_docs
+                filename = Path(original_path_str).name
+                managed_docs.append(SafeStoreDocumentInfo(filename=filename))
+
+    except Exception as e: 
+        raise HTTPException(status_code=500, detail=f"Error listing RAG docs for datastore {datastore_id}: {e}")
+    
+    unique_docs = {doc.filename: doc for doc in managed_docs}
+    sorted_unique_docs = sorted(list(unique_docs.values()), key=lambda x: x.filename)
+    
+    return sorted_unique_docs
 
 
 @store_files_router.delete("/files/{filename}") 
@@ -298,7 +401,105 @@ async def delete_rag_document_from_datastore(datastore_id: str, filename: str, c
         if file_to_delete_path.exists(): raise HTTPException(status_code=500, detail=f"Could not delete '{s_filename}' from datastore {datastore_id}: {e}")
         else: return {"message": f"Document '{s_filename}' file deleted, potential DB cleanup issue in datastore {datastore_id}."}
 
+@store_files_router.post("/graph/generate", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+async def generate_datastore_graph(
+    datastore_id: str,
+    request_data: GraphGenerationRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> TaskInfo:
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
 
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
+    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+    if not datastore_record:
+        raise HTTPException(status_code=404, detail="Datastore metadata not found in main DB.")
+
+    try:
+        db_task = task_manager.submit_task(
+            name=f"Generate Graph for: {datastore_record.name}",
+            target=_generate_graph_task,
+            args=(current_user.username, datastore_id, request_data.model_dump()),
+            description=f"Generating knowledge graph for '{datastore_record.name}'. This may take a while.",
+            owner_username=current_user.username
+        )
+        return _to_task_info(db_task)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"An error occurred during graph generation: {e}")
+
+@store_files_router.post("/graph/update", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+async def update_datastore_graph(
+    datastore_id: str,
+    request_data: GraphGenerationRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> TaskInfo:
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
+    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+    if not datastore_record:
+        raise HTTPException(status_code=404, detail="Datastore metadata not found in main DB.")
+
+    try:
+        db_task = task_manager.submit_task(
+            name=f"Update Graph for: {datastore_record.name}",
+            target=_update_graph_task,
+            args=(current_user.username, datastore_id, request_data.model_dump()),
+            description=f"Updating knowledge graph for '{datastore_record.name}'.",
+            owner_username=current_user.username
+        )
+        return _to_task_info(db_task)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"An error occurred during graph update: {e}")
+
+@store_files_router.get("/graph", response_model=Dict)
+async def get_datastore_graph(
+    datastore_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> Dict:
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    ss = get_safe_store_instance(current_user.username, datastore_id, db)
+    try:
+        with ss:
+            nodes = ss.get_nodes()
+            edges = ss.get_edges()
+            return {"nodes": nodes, "edges": edges}
+    except Exception as e:
+        trace_exception(e)
+        # Return empty graph on error, as it might just not exist yet
+        return {"nodes": [], "edges": []}
+
+
+@store_files_router.post("/graph/query", response_model=List[Dict])
+async def query_datastore_graph(
+    datastore_id: str,
+    request_data: GraphQueryRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> List[Dict]:
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    ss = get_safe_store_instance(current_user.username, datastore_id, db)
+    try:
+        with ss:
+            results = ss.query_graph(request_data.query, request_data.max_k)
+            return results
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Error querying graph: {e}")
 
 datastore_router = APIRouter(prefix="/api/datastores", tags=["RAG DataStores"])
 

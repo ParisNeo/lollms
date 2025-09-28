@@ -4,39 +4,40 @@ import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
-import { useTasksStore } from '../stores/tasks'; // NEW IMPORT
+import { useTasksStore } from '../stores/tasks';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
+import DataStoreGraphManager from '../components/datastores/DataStoreGraphManager.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
 import IconRefresh from '../assets/icons/IconRefresh.vue';
 import IconPencil from '../assets/icons/IconPencil.vue';
 import IconTrash from '../assets/icons/IconTrash.vue';
 import IconShare from '../assets/icons/IconShare.vue';
-import IconArrowPath from '../assets/icons/IconArrowPath.vue'; // Used for Re-index button
+import IconArrowPath from '../assets/icons/IconArrowPath.vue';
 import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
 import IconInfo from '../assets/icons/IconInfo.vue';
 import IconCheckCircle from '../assets/icons/IconCheckCircle.vue';
 import IconXMark from '../assets/icons/IconXMark.vue';
-import IconArrowUpTray from '../assets/icons/IconArrowUpTray.vue'; // NEW: For upload files button
-import IconCog from '../assets/icons/IconCog.vue'; // NEW: For revectorize settings button
-import IconChevronDown from '../assets/icons/IconChevronDown.vue'; // NEW: For revectorize panel toggle
+import IconArrowUpTray from '../assets/icons/IconArrowUpTray.vue';
+import IconCog from '../assets/icons/IconCog.vue';
+import IconChevronDown from '../assets/icons/IconChevronDown.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
-const tasksStore = useTasksStore(); // NEW
+const tasksStore = useTasksStore();
 const router = useRouter();
 
 const { ownedDataStores, sharedDataStores } = storeToRefs(dataStore);
-const { tasks } = storeToRefs(tasksStore); // NEW
+const { tasks } = storeToRefs(tasksStore);
 
 const selectedStoreId = ref(null);
 const newStoreName = ref('');
 const newStoreDescription = ref('');
 const isAddFormVisible = ref(false);
 const isLoadingAction = ref(null);
+const activeTab = ref('documents');
 
-// State for files management
 const filesInSelectedStore = ref([]);
 const filesLoading = ref(false);
 const selectedFilesToUpload = ref([]);
@@ -44,12 +45,12 @@ const fileInputRef = ref(null);
 const currentVectorizer = ref('');
 const availableVectorizers = ref({ in_store: [], all_possible: [] });
 
-// Local reactive refs for the specific tasks relevant to the selected datastore
 const currentUploadTask = ref(null);
 const currentRevectorizeTask = ref(null);
+const currentGraphTask = ref(null);
 
 const showAllPossibleVectorizersForSelection = ref(false);
-const showRevectorizePanel = ref(false); // NEW: Controls visibility of the revectorize section
+const showRevectorizePanel = ref(false);
 
 const allDataStores = computed(() => {
     return [...ownedDataStores.value, ...sharedDataStores.value].sort((a, b) => a.name.localeCompare(b.name));
@@ -64,13 +65,9 @@ const currentSelectedStore = computed(() => {
 });
 
 const isAnyTaskRunningForSelectedStore = computed(() => {
-    if (!currentSelectedStore.value) return false;
-    const storeName = currentSelectedStore.value.name;
-    return tasks.value.some(task =>
-        (task.name.startsWith('Add files to DataStore:') && task.name.includes(storeName) && (task.status === 'running' || task.status === 'pending')) ||
-        (task.name.startsWith('Revectorize DataStore:') && task.name.includes(storeName) && (task.status === 'running' || task.status === 'pending'))
-    );
+    return !!currentUploadTask.value || !!currentRevectorizeTask.value || !!currentGraphTask.value;
 });
+
 
 let taskPollingInterval;
 
@@ -84,11 +81,11 @@ onUnmounted(() => {
     clearInterval(taskPollingInterval);
 });
 
-// WATCHER FOR TASK STATUS UPDATES
 watch(tasks, (newTasks) => {
     if (!currentSelectedStore.value) {
         currentUploadTask.value = null;
         currentRevectorizeTask.value = null;
+        currentGraphTask.value = null;
         return;
     }
 
@@ -104,8 +101,9 @@ watch(tasks, (newTasks) => {
 
     const latestUploadTask = findLatestTask('Add files to DataStore:');
     const latestRevectorizeTask = findLatestTask('Revectorize DataStore:');
+    const latestGraphTask = findLatestTask('Generate Graph for:') || findLatestTask('Update Graph for:');
 
-    // Function to check if a task has just completed
+
     const taskJustFinished = (currentTask, latestTask) => {
         return currentTask && !latestTask && (currentTask.status === 'running' || currentTask.status === 'pending');
     };
@@ -117,11 +115,13 @@ watch(tasks, (newTasks) => {
     
     currentUploadTask.value = latestUploadTask;
     currentRevectorizeTask.value = latestRevectorizeTask;
+    currentGraphTask.value = latestGraphTask;
 
 }, { deep: true });
 
 watch(selectedStoreId, async (newId) => {
     if (newId) {
+        activeTab.value = 'documents';
         await fetchFilesInStore(newId);
         await fetchStoreVectorizers(newId);
     } else {
@@ -149,8 +149,6 @@ const canAddNewVectorizer = computed(() => {
     return !showAllPossibleVectorizersForSelection.value && hasNewOptions;
 });
 
-
-// --- General DataStore Management ---
 function selectStore(storeId) {
     selectedStoreId.value = storeId;
 }
@@ -207,7 +205,6 @@ function handleShareStore(store) {
     uiStore.openModal('shareDataStore', { store });
 }
 
-// --- File Management within Selected DataStore ---
 const dragOver = ref(false);
 
 function handleFileDrop(event) {
@@ -355,7 +352,6 @@ async function handleRevectorize() {
     }
 }
 
-// Function to check permissions
 function canReadWrite(store) {
     if (!store) return false;
     return ['owner', 'read_write', 'revectorize'].includes(store.permission_level);
@@ -436,7 +432,7 @@ function canRevectorize(store) {
             <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">The selected data store could not be loaded.</p>
         </div>
         <div v-else class="bg-white dark:bg-gray-800 rounded-lg shadow-md h-full overflow-hidden flex flex-col">
-            <div class="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+            <div class="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center flex-wrap gap-4">
                 <div>
                     <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ currentSelectedStore.name }}</h2>
                     <p class="text-sm text-gray-500 dark:text-gray-400">{{ currentSelectedStore.description || 'No description provided.' }}</p>
@@ -461,15 +457,19 @@ function canRevectorize(store) {
                     </button>
                 </div>
             </div>
-            
-            <!-- File Management Area -->
-            <div class="p-6 flex-grow overflow-y-auto space-y-8">
 
-                <!-- In-Use Vectorizers Section -->
+            <div class="border-b border-gray-200 dark:border-gray-700 px-6">
+                <nav class="-mb-px flex space-x-6" aria-label="Tabs">
+                    <button @click="activeTab = 'documents'" :class="['tab-button', activeTab === 'documents' ? 'active' : 'inactive']">Documents</button>
+                    <button @click="activeTab = 'graph'" :class="['tab-button', activeTab === 'graph' ? 'active' : 'inactive']">Graph</button>
+                </nav>
+            </div>
+            
+            <div v-show="activeTab === 'documents'" class="p-6 flex-grow overflow-y-auto space-y-8">
                 <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">
                     <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Active Vectorizers</h3>
                     <p v-if="availableVectorizers.in_store.length === 0" class="text-sm text-gray-500 dark:text-gray-400">
-                        No vectorizers are currently in use by this data store. Add documents to define one.
+                        No vectorizers are currently in use. Add documents to define one.
                     </p>
                     <ul v-else class="space-y-2">
                         <li v-for="vec in availableVectorizers.in_store" :key="vec.name" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
@@ -479,25 +479,11 @@ function canRevectorize(store) {
                     </ul>
                 </div>
 
-                <!-- Upload Files Section -->
                 <div v-if="canReadWrite(currentSelectedStore)" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">
                     <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Add Documents</h3>
-                    <div
-                        @dragover.prevent="dragOver = true"
-                        @dragleave.prevent="dragOver = false"
-                        @drop.prevent="handleFileDrop"
-                        @click="fileInputRef.click()"
-                        class="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors"
-                        :class="{
-                            'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragOver,
-                            'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500': !dragOver
-                        }"
-                    >
+                    <div @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="handleFileDrop" @click="fileInputRef.click()" class="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors" :class="{ 'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragOver, 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500': !dragOver }">
                         <input type="file" multiple ref="fileInputRef" @change="handleFileChange" class="hidden" accept="*/*">
-                        <p class="text-gray-600 dark:text-gray-300">
-                            Drag & drop files here, or <span class="text-blue-600 dark:text-blue-400 font-medium">click to browse</span>
-                        </p>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">Supported formats depend on SafeStore configuration.</p>
+                        <p class="text-gray-600 dark:text-gray-300">Drag & drop files here, or <span class="text-blue-600 dark:text-blue-400 font-medium">click to browse</span></p>
                     </div>
 
                     <div v-if="selectedFilesToUpload.length > 0">
@@ -505,126 +491,66 @@ function canRevectorize(store) {
                         <ul class="list-disc list-inside text-sm space-y-1">
                             <li v-for="(file, index) in selectedFilesToUpload" :key="index" class="flex justify-between items-center bg-gray-100 dark:bg-gray-800 p-2 rounded">
                                 <span class="truncate">{{ file.name }} ({{ (file.size / 1024 / 1024).toFixed(2) }} MB)</span>
-                                <button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700 ml-2" title="Remove">
-                                    <IconXMark class="w-4 h-4" />
-                                </button>
+                                <button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700 ml-2" title="Remove"><IconXMark class="w-4 h-4" /></button>
                             </li>
                         </ul>
                     </div>
                     
                     <div>
-                        <label for="upload-vectorizer" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Vectorizer</label>
-                        <div class="flex items-center space-x-2">
-                            <select id="upload-vectorizer" v-model="currentVectorizer" class="input-field mt-1 flex-grow" :disabled="displayedVectorizerOptions.length === 0">
+                        <label for="upload-vectorizer" class="block text-sm font-medium">Vectorizer</label>
+                        <div class="flex items-center space-x-2 mt-1">
+                            <select id="upload-vectorizer" v-model="currentVectorizer" class="input-field flex-grow" :disabled="displayedVectorizerOptions.length === 0">
                                 <option value="">Select a vectorizer</option>
                                 <option v-for="vec in displayedVectorizerOptions" :key="vec.name" :value="vec.name">{{ vec.method_name }}</option>
                             </select>
-                            <button v-if="canAddNewVectorizer" @click="toggleVectorizerSelectionMode" type="button" class="btn btn-secondary btn-sm">
-                                + Add New
-                            </button>
-                             <button v-else-if="showAllPossibleVectorizersForSelection && availableVectorizers.in_store.length > 0" @click="toggleVectorizerSelectionMode" type="button" class="btn btn-secondary btn-sm">
-                                Show Active
-                            </button>
+                            <button v-if="canAddNewVectorizer" @click="toggleVectorizerSelectionMode" type="button" class="btn btn-secondary btn-sm">+ Add New</button>
+                             <button v-else-if="showAllPossibleVectorizersForSelection && availableVectorizers.in_store.length > 0" @click="toggleVectorizerSelectionMode" type="button" class="btn btn-secondary btn-sm">Show Active</button>
                         </div>
-                        <p v-if="displayedVectorizerOptions.length === 0" class="mt-1 text-xs text-yellow-600 dark:text-yellow-400 flex items-center gap-1">
-                            <IconInfo class="w-3 h-3"/> No vectorizers available. Ensure 'safe_store' is fully installed.
-                        </p>
                     </div>
 
                     <div class="flex justify-between items-center">
-                        <div v-if="currentUploadTask" class="flex flex-col items-start space-y-1 text-blue-600 dark:text-blue-400 flex-grow">
-                            <div class="flex items-center space-x-2">
-                                <IconAnimateSpin class="w-5 h-5" />
-                                <span>Uploading: {{ currentUploadTask.progress }}%</span>
-                            </div>
-                            <div v-if="currentUploadTask.file_name" class="text-xs text-gray-500 dark:text-gray-400 ml-7">
-                                <span>Processing file {{ currentUploadTask.file_name }}</span>
-                                <span v-if="currentUploadTask.total_files"> (1 of {{ currentUploadTask.total_files }})</span>
-                            </div>
-                            <div class="w-full h-1.5 bg-gray-200 rounded-full dark:bg-gray-600 mt-2">
-                                <div class="h-1.5 bg-blue-500 rounded-full" :style="{ width: currentUploadTask.progress + '%' }"></div>
-                            </div>
-                        </div>
-                        <button @click="handleUploadFiles" class="btn btn-primary ml-auto" :disabled="currentUploadTask || selectedFilesToUpload.length === 0 || !currentVectorizer || isAnyTaskRunningForSelectedStore">
-                            <IconArrowUpTray class="w-5 h-5 mr-2" />
-                            {{ currentUploadTask ? 'Adding...' : 'Add Selected Files' }}
+                        <div v-if="currentUploadTask" class="flex flex-col items-start w-full"> ... </div>
+                        <button @click="handleUploadFiles" class="btn btn-primary ml-auto" :disabled="isAnyTaskRunningForSelectedStore || selectedFilesToUpload.length === 0 || !currentVectorizer">
+                            <IconArrowUpTray class="w-5 h-5 mr-2" /> Add Selected Files
                         </button>
                     </div>
                 </div>
 
-                <!-- Re-vectorize Section Header and Toggle Button -->
                 <div v-if="canRevectorize(currentSelectedStore)" class="flex justify-between items-center">
-                    <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Re-Index / Revectorize</h3>
+                    <h3 class="text-xl font-semibold">Re-Index / Revectorize</h3>
                     <button @click="showRevectorizePanel = !showRevectorizePanel" class="btn btn-secondary btn-sm">
-                        <IconCog class="w-4 h-4 mr-2" />
-                        <span>Re-index Settings</span>
-                        <IconChevronDown class="w-4 h-4 ml-2 transition-transform" :class="{'rotate-180': showRevectorizePanel}" />
+                        <IconCog class="w-4 h-4 mr-2" /> Re-index Settings <IconChevronDown class="w-4 h-4 ml-2 transition-transform" :class="{'rotate-180': showRevectorizePanel}" />
                     </button>
                 </div>
 
-                <!-- Re-vectorize Panel Content (Conditional) -->
-                <transition
-                    enter-active-class="transition ease-out duration-200"
-                    enter-from-class="opacity-0 -translate-y-2"
-                    enter-to-class="opacity-100 translate-y-0"
-                    leave-active-class="transition ease-in duration-150"
-                    leave-from-class="opacity-100 translate-y-0"
-                    leave-to-class="opacity-0 -translate-y-2"
-                >
+                <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0 -translate-y-2" enter-to-class="opacity-100 translate-y-0" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 -translate-y-2">
                     <div v-if="canRevectorize(currentSelectedStore) && showRevectorizePanel" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">
-                        <p class="text-sm text-gray-500 dark:text-gray-400">
-                            Change or update the vectorization method for all existing documents in this store.
-                        </p>
-                        <div>
-                            <label for="revectorize-vectorizer" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Vectorizer</label>
-                            <div class="flex items-center space-x-2">
-                                <select id="revectorize-vectorizer" v-model="currentVectorizer" class="input-field mt-1 flex-grow" :disabled="displayedVectorizerOptions.length === 0">
-                                    <option value="">Select a vectorizer</option>
-                                    <option v-for="vec in displayedVectorizerOptions" :key="vec.name" :value="vec.name">{{ vec.method_name }}</option>
-                                </select>
-                                 <button v-if="canAddNewVectorizer" @click="toggleVectorizerSelectionMode" type="button" class="btn btn-secondary btn-sm">
-                                    + Add New
-                                </button>
-                                <button v-else-if="showAllPossibleVectorizersForSelection && availableVectorizers.in_store.length > 0" @click="toggleVectorizerSelectionMode" type="button" class="btn btn-secondary btn-sm">
-                                    Show Active
-                                </button>
-                            </div>
-                        </div>
                         <div class="flex justify-between items-center">
-                            <div v-if="currentRevectorizeTask" class="flex flex-col items-start space-y-1 text-blue-600 dark:text-blue-400 flex-grow">
-                                <div class="flex items-center space-x-2">
-                                    <IconAnimateSpin class="w-5 h-5" />
-                                    <span>Revectorizing... ({{ currentRevectorizeTask.progress }}%)</span>
-                                </div>
-                                <div class="w-full h-1.5 bg-gray-200 rounded-full dark:bg-gray-600 mt-2">
-                                    <div class="h-1.5 bg-blue-500 rounded-full" :style="{ width: currentRevectorizeTask.progress + '%' }"></div>
-                                </div>
-                            </div>
-                            <button @click="handleRevectorize" class="btn btn-secondary ml-auto" :disabled="currentRevectorizeTask || !currentVectorizer || isAnyTaskRunningForSelectedStore">
-                                <IconArrowPath class="w-4 h-4 mr-2" /> {{ currentRevectorizeTask ? 'Reindexing...' : 'Re-index Now' }}
+                            <div v-if="currentRevectorizeTask"> ... </div>
+                            <button @click="handleRevectorize" class="btn btn-secondary ml-auto" :disabled="isAnyTaskRunningForSelectedStore || !currentVectorizer">
+                                <IconArrowPath class="w-4 h-4 mr-2" /> Re-index Now
                             </button>
                         </div>
                     </div>
                 </transition>
 
-                <!-- Files List Section -->
                 <div>
-                    <h3 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Indexed Documents ({{ filesInSelectedStore.length }})</h3>
-                    <div v-if="filesLoading" class="text-center py-10">
-                        <p class="text-gray-500 dark:text-gray-400">Loading documents...</p>
-                    </div>
-                    <div v-else-if="filesInSelectedStore.length === 0" class="text-center py-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                        <p class="text-gray-500 dark:text-gray-400">No documents indexed in this store yet.</p>
-                    </div>
+                    <h3 class="text-xl font-semibold mb-4">Indexed Documents ({{ filesInSelectedStore.length }})</h3>
+                    <div v-if="filesLoading" class="text-center py-10"><p>Loading documents...</p></div>
+                    <div v-else-if="filesInSelectedStore.length === 0" class="text-center py-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p>No documents indexed.</p></div>
                     <ul v-else class="divide-y divide-gray-200 dark:divide-gray-700">
                         <li v-for="file in filesInSelectedStore" :key="file.filename" class="py-3 flex items-center justify-between">
-                            <span class="text-sm font-medium text-gray-900 dark:text-white truncate flex-grow mr-4">{{ file.filename }}</span>
+                            <span class="text-sm font-medium truncate flex-grow mr-4">{{ file.filename }}</span>
                             <button v-if="canReadWrite(currentSelectedStore)" @click="handleDeleteFile(file.filename)" class="btn btn-danger btn-sm p-1.5" :disabled="isLoadingAction === `delete_file_${file.filename}`">
                                 <IconTrash class="w-4 h-4" />
                             </button>
                         </li>
                     </ul>
                 </div>
+            </div>
+
+            <div v-if="activeTab === 'graph'" class="p-6 flex-grow overflow-y-auto">
+                <DataStoreGraphManager :store="currentSelectedStore" :task="currentGraphTask" />
             </div>
         </div>
     </template>
@@ -633,7 +559,7 @@ function canRevectorize(store) {
 
 <style scoped>
 .tab-button {
-    @apply px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors;
+    @apply px-1 py-4 text-sm font-medium border-b-2;
 }
 .tab-button.active {
     @apply border-blue-500 text-blue-600 dark:text-blue-400;

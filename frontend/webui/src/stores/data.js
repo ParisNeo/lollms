@@ -418,6 +418,35 @@ export const useDataStore = defineStore('data', () => {
         await apiClient.delete(`/api/store/${storeId}/files/${encodeURIComponent(filename)}`);
         uiStore.addNotification(`File '${filename}' deleted.`, 'success');
     }
+
+    async function generateDataStoreGraph({ storeId, graphData }) {
+        const uiStore = useUiStore();
+        const tasksStore = useTasksStore();
+        const response = await apiClient.post(`/api/store/${storeId}/graph/generate`, graphData);
+        const task = response.data;
+        uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
+        tasksStore.addTask(task);
+    }
+
+    async function updateDataStoreGraph({ storeId, graphData }) {
+        const uiStore = useUiStore();
+        const tasksStore = useTasksStore();
+        const response = await apiClient.post(`/api/store/${storeId}/graph/update`, graphData);
+        const task = response.data;
+        uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
+        tasksStore.addTask(task);
+    }
+
+    async function fetchDataStoreGraph(storeId) {
+        const response = await apiClient.get(`/api/store/${storeId}/graph`);
+        return response.data;
+    }
+
+    async function queryDataStoreGraph({ storeId, query, max_k }) {
+        const response = await apiClient.post(`/api/store/${storeId}/graph/query`, { query, max_k });
+        return response.data;
+    }
+
     async function fetchPersonalities() {
          try {
             const [ownedRes, publicRes] = await Promise.all([
@@ -639,7 +668,12 @@ export const useDataStore = defineStore('data', () => {
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,
         revokeShare, getSharedWithList, revectorizeStore,
         fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,
-        deleteFileFromStore, fetchPersonalities, addPersonality,
+        deleteFileFromStore, 
+        generateDataStoreGraph,
+        updateDataStoreGraph,
+        fetchDataStoreGraph,
+        queryDataStoreGraph,
+        fetchPersonalities, addPersonality,
         updatePersonality, deletePersonality, generatePersonalityFromPrompt, enhancePersonalityPrompt,
         generatePersonalityIcon,
         fetchMcps, addMcp, updateMcp, deleteMcp,

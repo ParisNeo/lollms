@@ -70,6 +70,11 @@ const routes = [
     name: 'SsoLogin',
     component: SsoLoginView,
   },
+  { 
+    path: '/voices-studio', 
+    name: 'VoicesStudio', 
+    component: () => import('../views/VoicesStudioView.vue'), meta: { requiresAuth: true } 
+  },
 ];
 
 const router = createRouter({
