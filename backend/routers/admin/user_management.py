@@ -117,23 +117,26 @@ async def admin_get_all_users(
     
     users_for_panel = []
     for user, is_online, task_count, api_key_count, connection_count in results:
-        user_data = {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "icon": user.icon,
-            "is_admin": user.is_admin or False,
-            "is_moderator": user.is_moderator or False,
-            "is_active": user.is_active,
-            "created_at": user.created_at,
-            "last_activity_at": user.last_activity_at,
-            "is_online": is_online,
-            "connection_count": connection_count,
-            "api_key_count": api_key_count,
-            "task_count": task_count,
-            "generation_count": 0  # Placeholder, logic to be added
-        }
-        users_for_panel.append(UserForAdminPanel.model_validate(user_data))
+        try:
+            user_data = {
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "icon": user.icon,
+                "is_admin": user.is_admin or False,
+                "is_moderator": user.is_moderator or False,
+                "is_active": user.is_active,
+                "created_at": user.created_at,
+                "last_activity_at": user.last_activity_at,
+                "is_online": is_online,
+                "connection_count": connection_count,
+                "api_key_count": api_key_count,
+                "task_count": task_count,
+                "generation_count": 0  # Placeholder, logic to be added
+            }
+            users_for_panel.append(UserForAdminPanel.model_validate(user_data))
+        except Exception as e:
+            trace_exception(e)
         
     return users_for_panel
 

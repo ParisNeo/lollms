@@ -45,6 +45,7 @@ class UserCreateAdmin(UserLLMParams):
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
+    active_voice_id: Optional[str] = None
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
     rag_n_hops: Optional[int] = Field(None, ge=1)
@@ -72,6 +73,7 @@ class UserUpdate(BaseModel):
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
+    active_voice_id: Optional[str] = None
     llm_ctx_size: Optional[int] = Field(None, ge=0)
     llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
     llm_top_k: Optional[int] = Field(None, ge=1)
@@ -180,6 +182,7 @@ class UserPublic(UserLLMParams):
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
+    active_voice_id: Optional[str] = None
     rag_top_k: Optional[int] = None
     max_rag_len: Optional[int] = None
     rag_n_hops: Optional[int] = None
@@ -217,6 +220,7 @@ class UserAuthDetails(UserLLMParams):
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
+    active_voice_id: Optional[str] = None
     rag_top_k: Optional[int] = Field(None, ge=1)
     max_rag_len: Optional[int] = Field(None, ge=1)
     rag_n_hops: Optional[int] = Field(None, ge=1)

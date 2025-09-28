@@ -1,4 +1,4 @@
-<!-- [CREATE] frontend/webui/src/components/chat/AudioPlayer.vue -->
+<!-- [UPDATE] frontend/webui/src/components/chat/AudioPlayer.vue -->
 <script setup>
 import { computed } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';

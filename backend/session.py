@@ -29,6 +29,7 @@ from backend.config import (
     DISCUSSION_ASSETS_DIR_NAME,
     DM_ASSETS_DIR_NAME,
     DATASTORES_DIR_NAME,
+    VOICES_DIR_NAME
 )
 from backend.settings import settings
 from backend.security import create_access_token
@@ -160,6 +161,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             tts_binding_model_name=db_user.tts_binding_model_name,
             safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
             active_personality_id=user_sessions[username].get("active_personality_id"),
+            active_voice_id=db_user.active_voice_id,
             lollms_client_ai_name=ai_name_for_user,
             **effective_llm_params,
             rag_top_k=db_user.rag_top_k, max_rag_len=db_user.max_rag_len, rag_n_hops=db_user.rag_n_hops,
@@ -515,6 +517,7 @@ def get_user_data_root(username: str) -> Path:
     safe_username = secure_filename(username)
     path = APP_DATA_DIR / USERS_DIR_NAME / safe_username
     path.mkdir(parents=True, exist_ok=True)
+    (path / VOICES_DIR_NAME).mkdir(exist_ok=True)
     return path
 
 def get_user_discussion_path(username: str) -> Path:

@@ -14,6 +14,7 @@ from backend.db.models.discussion import SharedDiscussionLink
 from backend.db.models.memory import UserMemory
 from backend.db.models.discussion_group import DiscussionGroup
 from backend.db.models.connections import WebSocketConnection
+from backend.db.models.voice import UserVoice
 
 class User(Base):
     __tablename__ = "users"
@@ -65,6 +66,7 @@ class User(Base):
     tts_models_config = Column(JSON, nullable=True)
     safe_store_vectorizer = Column(String, nullable=True)
     active_personality_id = Column(String, ForeignKey("personalities.id", name="fk_user_active_personality", ondelete="SET NULL"), nullable=True)
+    active_voice_id = Column(String, ForeignKey("user_voices.id", ondelete="SET NULL"), nullable=True)
     llm_ctx_size = Column(Integer, nullable=True)
     llm_temperature = Column(Float, nullable=True)
     llm_top_k = Column(Integer, nullable=True)
@@ -93,6 +95,10 @@ class User(Base):
     received_shared_datastores_links = relationship("SharedDataStoreLink", foreign_keys="[SharedDataStoreLink.shared_with_user_id]", back_populates="shared_with_user", cascade="all, delete-orphan")
     owned_personalities = relationship("Personality", foreign_keys="[Personality.owner_user_id]", back_populates="owner", cascade="all, delete-orphan")
     active_personality = relationship("Personality", foreign_keys=[active_personality_id])
+    
+    voices = relationship("UserVoice", back_populates="owner", cascade="all, delete-orphan", foreign_keys="[UserVoice.owner_user_id]")
+    active_voice = relationship("UserVoice", foreign_keys=[active_voice_id])
+
     personal_mcps = relationship("MCP", back_populates="owner", cascade="all, delete-orphan")
     personal_apps = relationship("App", back_populates="owner", cascade="all, delete-orphan")
     
@@ -101,7 +107,7 @@ class User(Base):
 
     connections = relationship("WebSocketConnection", back_populates="user", cascade="all, delete-orphan")
 
-    __table_args__ = (CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'), UniqueConstraint('email', name='uq_user_email'),)
+    __table__args__ = (CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'), UniqueConstraint('email', name='uq_user_email'),)
     
     def verify_password(self, plain_password):
         return pwd_context.verify(plain_password, self.hashed_password)

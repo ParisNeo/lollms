@@ -80,3 +80,4 @@ ScrapeMaster
 
 markdown2
 aioredis
+pydub

@@ -659,6 +659,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print(f"INFO: Added missing column '{col_name}' to 'personalities' table.")
         connection.commit()
 
+    if not inspector.has_table("user_voices"):
+        from backend.db.models.voice import UserVoice
+        UserVoice.__table__.create(connection)
+        print("INFO: Created 'user_voices' table.")
+        connection.commit()
+
     if inspector.has_table("users"):
         user_columns_db = [col['name'] for col in inspector.get_columns('users')]
         
@@ -698,6 +704,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "tti_models_config": "JSON",
             "tts_binding_model_name": "VARCHAR",
             "tts_models_config": "JSON",
+            "active_voice_id": "VARCHAR REFERENCES user_voices(id) ON DELETE SET NULL",
             "include_memory_date_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
             "coding_style_constraints": "TEXT",
             "programming_language_preferences": "TEXT",

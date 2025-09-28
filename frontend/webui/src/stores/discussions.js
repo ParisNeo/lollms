@@ -191,7 +191,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             currentPlayingAudio.value = { messageId: null, audio: null };
         }
     }
-
+    
     function $reset() {
         discussions.value = {};
         discussionGroups.value = [];
