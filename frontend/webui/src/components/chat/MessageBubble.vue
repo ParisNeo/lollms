@@ -39,7 +39,7 @@ import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
-import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const props = defineProps({
   message: {
@@ -88,7 +88,7 @@ const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const dataStore = useDataStore();
-const { currentModelVisionSupport, currentPlayingAudio } = storeToRefs(discussionsStore);
+const { currentModelVisionSupport, ttsState, currentPlayingAudio } = storeToRefs(discussionsStore);
 
 const isEventsCollapsed = ref(true);
 const isEditing = ref(false);
@@ -99,11 +99,12 @@ const isSourcesVisible = ref(false);
 const editedImages = ref([]);
 const newImageFiles = ref([]);
 const editImageInput = ref(null);
+const audioPlayerRef = ref(null);
 
 const areActionsDisabled = computed(() => discussionsStore.generationInProgress);
 const user = computed(() => authStore.user);
-const isPlayingThisMessage = computed(() => currentPlayingAudio.value.messageId === props.message.id);
 const isTtsActive = computed(() => !!user.value?.tts_binding_model_name);
+const messageTtsState = computed(() => ttsState.value[props.message.id] || {});
 
 const isCurrentUser = computed(() => props.message.sender_type === 'user' && props.message.sender === authStore.user?.username);
 const isOtherUser = computed(() => props.message.sender_type === 'user' && props.message.sender !== authStore.user?.username);
@@ -142,14 +143,12 @@ function handleExport(format) {
     });
 }
 
-// NEW TTS Handler
 function handleSpeak() {
-    if (isPlayingThisMessage.value) {
-        discussionsStore.stopTTS();
-    } else {
-        // Strip out code blocks and other markdown for cleaner speech
+    if (messageTtsState.value.audioUrl) {
+        // This case is handled by the audio element's play button
+    } else if (!messageTtsState.value.isLoading) {
         const textToSpeak = props.message.content.replace(/```[\s\S]*?```/g, 'Code block.').replace(/<think>[\s\S]*?<\/think>/g, '');
-        discussionsStore.generateAndPlayTTS(props.message.id, textToSpeak);
+        discussionsStore.generateTTSForMessage(props.message.id, textToSpeak);
     }
 }
 
@@ -519,6 +518,26 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                     </div>
                 </div>
 
+                 <!-- NEW: TTS Player -->
+                 <div v-if="isAi && isTtsActive && (messageTtsState.audioUrl || messageTtsState.isLoading)" class="mt-3">
+                    <div v-if="messageTtsState.isLoading" class="flex items-center gap-2 text-sm text-gray-500">
+                        <IconAnimateSpin class="w-4 h-4 animate-spin" />
+                        <span>Generating audio...</span>
+                    </div>
+                    <div v-else-if="messageTtsState.error" class="text-sm text-red-500">{{ messageTtsState.error }}</div>
+                    <audio
+                        v-else-if="messageTtsState.audioUrl"
+                        ref="audioPlayerRef"
+                        :src="messageTtsState.audioUrl"
+                        controls
+                        class="w-full h-10"
+                        @play="discussionsStore.playAudio(message.id, $event.target)"
+                        @pause="discussionsStore.onAudioPausedOrEnded(message.id)"
+                        @ended="discussionsStore.onAudioPausedOrEnded(message.id)"
+                    ></audio>
+                </div>
+
+
                 <!-- Sources -->
                 <div v-if="hasSources" class="mt-2 border-t border-gray-200 dark:border-gray-700/50 pt-2">
                     <button @click="isSourcesVisible = !isSourcesVisible" class="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none w-full">
@@ -601,8 +620,8 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                     </div>
                     <div v-if="!isEditing" class="flex-shrink-0 flex items-center gap-1">
                         <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button v-if="isTtsActive && isAi" @click="handleSpeak" :title="isPlayingThisMessage ? 'Stop' : 'Speak'" class="action-btn">
-                                <IconStopCircle v-if="isPlayingThisMessage" class="w-4 h-4 text-red-500" />
+                            <button v-if="isTtsActive && isAi" @click="handleSpeak" :title="messageTtsState.isLoading ? 'Generating...' : 'Speak'" class="action-btn" :disabled="messageTtsState.isLoading">
+                                <IconAnimateSpin v-if="messageTtsState.isLoading" class="w-4 h-4 animate-spin" />
                                 <IconSpeakerWave v-else class="w-4 h-4" />
                             </button>
                             <DropdownMenu v-if="exportFormats.length > 0" title="Export" icon="ticket" button-class="action-btn">

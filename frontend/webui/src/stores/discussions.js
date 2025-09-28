@@ -45,6 +45,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const promptInsertionText = ref('');
     const promptLoadedArtefacts = ref(new Set());
     const activeDiscussionParticipants = ref({});
+    const ttsState = ref({}); // NEW: { [messageId]: { isLoading: boolean, audioUrl: string|null, error: string|null } }
     const currentPlayingAudio = ref({ messageId: null, audio: null });
 
     function _clearActiveAiTask(discussionId) {
@@ -149,12 +150,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     Object.assign(_actions, useDiscussionMessages(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionSharing(composableState, composableStores, getActions));
 
-    async function generateAndPlayTTS(messageId, text) {
-        if (currentPlayingAudio.value.audio) {
-            currentPlayingAudio.value.audio.pause();
-            currentPlayingAudio.value = { messageId: null, audio: null };
-        }
-
+    async function generateTTSForMessage(messageId, text) {
+        if (ttsState.value[messageId]?.isLoading) return;
+    
+        ttsState.value = { ...ttsState.value, [messageId]: { isLoading: true, audioUrl: null, error: null } };
+    
         try {
             const response = await apiClient.post('/api/discussions/generate_tts', 
                 { text },
@@ -162,21 +162,30 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             );
             const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
             const audioUrl = URL.createObjectURL(audioBlob);
-            const audio = new Audio(audioUrl);
-            currentPlayingAudio.value = { messageId, audio };
-            audio.play();
-            audio.onended = () => {
-                if (currentPlayingAudio.value.messageId === messageId) {
-                    currentPlayingAudio.value = { messageId: null, audio: null };
-                }
-            };
+            
+            ttsState.value[messageId] = { isLoading: false, audioUrl: audioUrl, error: null };
         } catch (error) {
             uiStore.addNotification('Failed to generate speech.', 'error');
             console.error("TTS generation failed:", error);
+            ttsState.value[messageId] = { isLoading: false, audioUrl: null, error: 'Failed to generate audio.' };
         }
     }
-
-    function stopTTS() {
+    
+    function playAudio(messageId, audioElement) {
+        if (currentPlayingAudio.value.audio && currentPlayingAudio.value.audio !== audioElement) {
+            currentPlayingAudio.value.audio.pause();
+        }
+        currentPlayingAudio.value = { messageId, audio: audioElement };
+        // The play action is initiated by the user on the element itself.
+    }
+    
+    function onAudioPausedOrEnded(messageId) {
+        if (currentPlayingAudio.value.messageId === messageId) {
+            currentPlayingAudio.value = { messageId: null, audio: null };
+        }
+    }
+    
+    function stopCurrentAudio() {
         if (currentPlayingAudio.value.audio) {
             currentPlayingAudio.value.audio.pause();
             currentPlayingAudio.value = { messageId: null, audio: null };
@@ -205,6 +214,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             currentPlayingAudio.value.audio.pause();
         }
         currentPlayingAudio.value = { messageId: null, audio: null };
+        ttsState.value = {};
     }
 
     // --- FINAL RETURN ---
@@ -215,14 +225,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         titleGenerationInProgressId, activeDiscussionContextStatus,
         activeAiTasks, activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens,
         promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
+        ttsState,
         currentPlayingAudio,
         // Computed
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,
         // Actions
         ..._actions,
-        generateAndPlayTTS,
-        stopTTS,
+        generateTTSForMessage,
+        playAudio,
+        onAudioPausedOrEnded,
+        stopCurrentAudio,
         $reset,
     };
 });
