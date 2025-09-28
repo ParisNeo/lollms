@@ -430,14 +430,14 @@ def build_lollms_client_from_params(
         cache_key = json.dumps(client_init_params, sort_keys=True)
         session_cache = session.setdefault("lollms_clients_cache", {})
         if cache_key in session_cache:
-            ASCIIColors.cyan(f"INFO: Returning cached LollmsClient for user '{username}'.")
+            ASCIIColors.debug(f"INFO: Returning cached LollmsClient for user '{username}'.")
             return session_cache[cache_key]
 
         try:
             ASCIIColors.magenta(f"INFO: Initializing LollmsClient for user '{username}' with binding '{binding_to_use.name}' and model '{model_name_for_binding}'.")
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
             session_cache[cache_key] = lc
-            ASCIIColors.cyan(f"INFO: Caching new LollmsClient for user '{username}'.")
+            ASCIIColors.debug(f"INFO: Caching new LollmsClient for user '{username}'.")
             return lc
         except Exception as e:
             traceback.print_exc()

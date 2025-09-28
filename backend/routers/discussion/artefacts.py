@@ -9,8 +9,6 @@ from pathlib import Path
 from typing import List, Optional, Dict
 
 try:
-    import pipmaster as pm
-    pm.ensure_packages(['pandas', 'openpyxl', 'python-docx', 'python-pptx', 'PyMuPDF', 'docx2python'])
     from docx import Document as DocxDocument
     from pptx import Presentation
     import pandas as pd
@@ -34,7 +32,6 @@ from ...tasks.discussion_tasks import _import_artefact_from_url_task, _to_task_i
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 # .msg handling
 try:
-    pm.ensure_packages("extract-msg")
     import extract_msg  # pip install extract-msg
 except ImportError:
     extract_msg = None

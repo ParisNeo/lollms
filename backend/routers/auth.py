@@ -12,8 +12,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import or_
 from PIL import Image
-import pipmaster as pm
-pm.ensure_packages(["argon2-cffi"])
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from jose import JWTError, jwt

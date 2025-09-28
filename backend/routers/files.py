@@ -9,9 +9,6 @@ from typing import List, Dict
 import fitz  # PyMuPDF
 import io, re, os, tempfile, base64
 from typing import Dict
-import pipmaster as pm
-pm.ensure_packages(["docx2python", "mdtopptx", "markdown_pdf"])
-
 import markdown2  # pip install markdown2
 from bs4 import BeautifulSoup  # pip install beautifulsoup4
 from docx import Document as DocxDocument  # pip install python-docx

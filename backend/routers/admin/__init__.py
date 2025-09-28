@@ -1,0 +1,24 @@
+# backend/routers/admin/__init__.py
+from fastapi import APIRouter, Depends
+
+from backend.session import get_current_admin_user
+from .bindings_management import bindings_management_router
+from .content_management import content_management_router
+from .settings_management import settings_management_router
+from .system_management import system_management_router
+from .user_management import user_management_router
+
+# This is the main router that will be imported by the main application.
+# It aggregates all the theme-based admin routers.
+admin_router = APIRouter(
+    prefix="/api/admin",
+    tags=["Administration"],
+    dependencies=[Depends(get_current_admin_user)]
+)
+
+# Include all the sub-routers
+admin_router.include_router(bindings_management_router)
+admin_router.include_router(content_management_router)
+admin_router.include_router(settings_management_router)
+admin_router.include_router(system_management_router)
+admin_router.include_router(user_management_router)

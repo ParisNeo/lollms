@@ -131,7 +131,6 @@ onMounted(async () => {
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900 flex flex-col">
     
-    <!-- Loading Screen -->
     <div v-if="layoutState === 'loading'" class="fixed inset-0 z- flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
         <div class="w-full max-w-lg mx-auto">
             <div class="flex justify-center mb-6">
@@ -186,7 +185,6 @@ onMounted(async () => {
     <div v-else-if="layoutState === 'guest'" class="flex flex-col flex-grow min-h-0">
         <router-view />
     </div>
-
     <!-- Modals -->
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" />
     <LoginModal v-if="activeModal === 'login'" />

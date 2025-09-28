@@ -104,6 +104,9 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingFunFacts = ref(false);
     const funFactCategories = ref([]);
     const isLoadingFunFactCategories = ref(false);
+    
+    const serverInfo = ref(null);
+    const isLoadingServerInfo = ref(false);
 
 
     const appFilters = reactive(getStoredFilters('lollms-app-filters', {
@@ -269,6 +272,16 @@ export const useAdminStore = defineStore('admin', () => {
             systemStatus.value = response.data;
         } finally {
             isLoadingSystemStatus.value = false;
+        }
+    }
+
+    async function fetchServerInfo() {
+        isLoadingServerInfo.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/server-info');
+            serverInfo.value = response.data;
+        } finally {
+            isLoadingServerInfo.value = false;
         }
     }
 
@@ -595,6 +608,13 @@ export const useAdminStore = defineStore('admin', () => {
         tasksStore.addTask(res.data);
         return res.data;
     }
+    async function generateIconForModel(prompt) {
+        const { useTasksStore } = await import('./tasks.js');
+        const tasksStore = useTasksStore();
+        const response = await apiClient.post('/api/personalities/generate_icon', { prompt });
+        tasksStore.addTask(response.data);
+        return response.data;
+    }
 
     async function fetchInstalledApps() { isLoadingInstalledApps.value = true; try { const res = await apiClient.get('/api/apps_zoo/installed'); installedApps.value = res.data; } finally { isLoadingInstalledApps.value = false; } }
     async function fetchNextAvailablePort(port = null) { const params = port ? { port } : {}; const res = await apiClient.get('/api/apps_zoo/get-next-available-port', { params }); return res.data.port; }
@@ -659,7 +679,8 @@ export const useAdminStore = defineStore('admin', () => {
         createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, importFunFacts,
         exportCategory, importCategoryFromFile,
         connectedUsers, isLoadingConnectedUsers, fetchConnectedUsers,
-
+        serverInfo, isLoadingServerInfo, fetchServerInfo,
+        generateIconForModel,
         startApp,
         stopApp,
         fetchAppLog,

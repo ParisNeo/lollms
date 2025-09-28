@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Body
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from typing import Optional, Dict
 from pydantic import BaseModel
@@ -13,7 +13,6 @@ class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = None
     model: Optional[str] = None # For bindings that support multiple models
-
 def build_tts_router(router: APIRouter):
     @router.post("/generate_tts")
     async def generate_tts(
@@ -36,20 +35,21 @@ def build_tts_router(router: APIRouter):
                     _, model_name = user_tts_model_full.split('/', 1)
                     model_to_use = model_name
 
-            audio_generator = lc.tts.text_to_speech(
+            # Generate audio bytes directly (not streaming)
+            audio_bytes = lc.tts.generate_audio(
                 text=request_data.text,
                 voice=request_data.voice,
-                model=model_to_use,
-                stream=True 
+                model=model_to_use
             )
 
-            # Ensure the generator yields bytes
-            def byte_generator():
-                for chunk in audio_generator:
-                    if isinstance(chunk, bytes):
-                        yield chunk
-            
-            return StreamingResponse(byte_generator(), media_type="audio/mpeg")
+            # Return the audio bytes as a response
+            return Response(
+                content=audio_bytes,
+                media_type="audio/wav",  # Or determine the actual format
+                headers={
+                    "Content-Disposition": "attachment; filename=generated_audio.wav"
+                }
+            )
 
         except HTTPException as e:
             raise e

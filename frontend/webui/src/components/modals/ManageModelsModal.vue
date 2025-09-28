@@ -53,13 +53,21 @@
                             </div>
                             
                             <div>
-                                <label class="label">Icon</label>
-                                <div class="flex items-center gap-4">
-                                    <IconUploader v-model="form.icon" />
-                                    <button @click="generateIcon" type="button" class="btn btn-secondary flex items-center gap-2" :disabled="isGeneratingIcon">
-                                        <IconAnimateSpin v-if="isGeneratingIcon" class="w-5 h-5" />
+                                <div v-if="isGeneratingIcon" class="p-4 text-center bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                                    <IconAnimateSpin class="w-8 h-8 mx-auto text-blue-500" />
+                                    <p class="mt-3 font-semibold">Generation in Progress...</p>
+                                    <p v-if="currentIconGenerationTask" class="text-sm text-gray-500 mt-1">{{ currentIconGenerationTask.description }}</p>
+                                    <div v-if="currentIconGenerationTask" class="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-600 mt-3">
+                                        <div class="bg-blue-600 h-2.5 rounded-full" :style="{ width: currentIconGenerationTask.progress + '%' }"></div>
+                                    </div>
+                                    <p v-if="currentIconGenerationTask" class="text-xs text-gray-500 mt-1">{{ currentIconGenerationTask.progress }}%</p>
+                                </div>
+                                <div v-else class="flex items-end gap-4">
+                                    <IconUploader v-model="form.icon" label="Icon" />
+                                    <button @click="generateIcon" type="button" class="btn btn-secondary flex items-center gap-2" :disabled="isSubmittingIconRequest">
+                                        <IconAnimateSpin v-if="isSubmittingIconRequest" class="w-5 h-5" />
                                         <IconSparkles v-else class="w-5 h-5" />
-                                        <span>{{ isGeneratingIcon ? 'Generating...' : 'Generate' }}</span>
+                                        <span>Generate</span>
                                     </button>
                                 </div>
                             </div>
@@ -184,6 +192,7 @@ import { ref, watch, computed, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
 import { useDataStore } from '../../stores/data';
+import { useTasksStore } from '../../stores/tasks';
 import { storeToRefs } from 'pinia';
 import GenericModal from './GenericModal.vue';
 import IconUploader from '../ui/IconUploader.vue';
@@ -193,7 +202,9 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
 const dataStore = useDataStore();
+const tasksStore = useTasksStore();
 const { globalSettings, availableBindingTypes, availableTtiBindingTypes, availableTtsBindingTypes } = storeToRefs(adminStore);
+const { tasks } = storeToRefs(tasksStore);
 
 const modalData = computed(() => uiStore.modalData('manageModels'));
 const binding = computed(() => modalData.value?.binding);
@@ -204,7 +215,8 @@ const isSaving = ref(false);
 const isSettingBindingDefault = ref(false);
 const isSettingGlobalDefault = ref(false);
 const isFetchingCtxSize = ref(false);
-const isGeneratingIcon = ref(false);
+const iconGenerationTaskId = ref(null);
+const isSubmittingIconRequest = ref(false);
 
 const models = ref([]);
 const selectedModel = ref(null);
@@ -227,6 +239,63 @@ const getInitialFormState = () => ({
 });
 
 const form = ref(getInitialFormState());
+
+const currentIconGenerationTask = computed(() => {
+    if (!iconGenerationTaskId.value) return null;
+    return tasks.value.find(t => t.id === iconGenerationTaskId.value);
+});
+
+const isGeneratingIcon = computed(() => {
+    if (isSubmittingIconRequest.value) return true;
+    return currentIconGenerationTask.value ? ['pending', 'running'].includes(currentIconGenerationTask.value.status) : false;
+});
+
+watch(currentIconGenerationTask, (newTask) => {
+    if (!newTask) return;
+    console.log("[ManageModelsModal] DEBUG: Watching task update:", JSON.parse(JSON.stringify(newTask)));
+
+    if (newTask.status === 'completed') {
+        let result = newTask.result;
+        console.log("[ManageModelsModal] DEBUG: Task completed. Raw result:", result);
+        
+        // Safely parse if result is a stringified JSON
+        if (result && typeof result === 'string') {
+            try {
+                result = JSON.parse(result);
+                console.log("[ManageModelsModal] DEBUG: Parsed task result:", result);
+            } catch (e) {
+                console.warn("[ManageModelsModal] Task result is a non-JSON string, trying to use as raw value:", result);
+            }
+        }
+        
+        let b64 = null;
+        if (result && typeof result === 'object' && result.icon_base64) {
+            b64 = result.icon_base64;
+            console.log("[ManageModelsModal] DEBUG: Extracted icon_base64 from object.");
+        } else if (typeof result === 'string') {
+            // Fallback for raw base64 string
+            b64 = result;
+            console.log("[ManageModelsModal] DEBUG: Using raw string as base64.");
+        }
+        
+        if (b64) {
+            // Ensure it has the correct data URI prefix
+            const finalIconValue = b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`;
+            form.value.icon = finalIconValue;
+            console.log("[ManageModelsModal] DEBUG: Setting form icon to:", finalIconValue.substring(0, 60) + "...");
+            uiStore.addNotification('Icon generated successfully!', 'success');
+        } else {
+            console.log("[ManageModelsModal] DEBUG: Icon generation completed, but no image was returned in the result.");
+            uiStore.addNotification('Icon generation completed, but no image was returned.', 'warning');
+        }
+        iconGenerationTaskId.value = null; // Reset for next generation
+    } else if (newTask.status === 'failed' || newTask.status === 'cancelled') {
+        console.log("[ManageModelsModal] DEBUG: Icon generation task failed or was cancelled.", newTask);
+        uiStore.addNotification(`Icon generation failed: ${newTask.error || 'Unknown error.'}`, 'error');
+        iconGenerationTaskId.value = null; // Reset
+    }
+});
+
 
 const filteredModels = computed(() => {
     if (!searchTerm.value) return models.value;
@@ -309,18 +378,25 @@ async function generateIcon() {
         uiStore.addNotification('Please provide an Alias Title to generate an icon.', 'warning');
         return;
     }
-    isGeneratingIcon.value = true;
+    isSubmittingIconRequest.value = true;
+    iconGenerationTaskId.value = null; 
     try {
         const modelIdentifier = form.value.title || selectedModel.value.original_model_name;
         const prompt = `a high-quality, abstract, minimalist, vector logo for an AI model named "${modelIdentifier}". Description: ${form.value.description || 'General purpose model.'}`;
         
-        const iconB64 = await dataStore.generatePersonalityIcon(prompt);
-        
-        if (iconB64) {
-            form.value.icon = `data:image/png;base64,${iconB64}`;
+        const task = await adminStore.generateIconForModel(prompt);
+        if (task && task.id) {
+            iconGenerationTaskId.value = task.id;
+            console.log(`[ManageModelsModal] DEBUG: Icon generation task submitted with ID: ${task.id}`);
+            uiStore.addNotification('Icon generation started...', 'info');
+        } else {
+            console.error("[ManageModelsModal] DEBUG: Failed to get a task ID from the backend.");
         }
+    } catch (error) {
+        console.error("[ManageModelsModal] DEBUG: Error submitting icon generation task:", error);
+        // error is handled by the global interceptor
     } finally {
-        isGeneratingIcon.value = false;
+        isSubmittingIconRequest.value = false;
     }
 }
 

@@ -55,11 +55,17 @@ python-multipart
 
 # for migrated databases 
 argon2-cffi
+
+# for documents import/export
 pypdf=6.0.0
 python-docx
 python-pptx
+mdtopptx
 docx2python
 openpyxl
+markdown_pdf
+pandas
+extract-msg
 
 psutil
 pynvml
