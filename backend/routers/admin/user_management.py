@@ -1,4 +1,4 @@
-# backend/routers/admin/user_management.py
+# [UPDATE] backend/routers/admin/user_management.py
 import json
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -81,7 +81,7 @@ async def admin_get_all_users(
     sort_order: str = Query('asc', enum=['asc', 'desc']),
     db: Session = Depends(get_db)
 ):
-    online_users_subquery = select(WebSocketConnection.user_id).distinct().subquery()
+    online_users_subquery = select(WebSocketConnection.user_id).distinct()
     
     query = db.query(
         DBUser,
@@ -111,25 +111,25 @@ async def admin_get_all_users(
     else:
         query = query.order_by(sort_column.asc())
 
-
     results = query.all()
     
     users_for_panel = []
     for user, is_online, task_count, api_key_count in results:
-        users_for_panel.append(UserForAdminPanel(
-            id=user.id,
-            username=user.username,
-            email=user.email,
-            is_admin=user.is_admin,
-            is_moderator=user.is_moderator,
-            is_active=user.is_active,
-            created_at=user.created_at,
-            last_activity_at=user.last_activity_at,
-            is_online=is_online,
-            api_key_count=api_key_count,
-            task_count=task_count,
-            generation_count=0  # Placeholder
-        ))
+        user_data = {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "is_admin": user.is_admin or False,
+            "is_moderator": user.is_moderator or False,
+            "is_active": user.is_active,
+            "created_at": user.created_at,
+            "last_activity_at": user.last_activity_at,
+            "is_online": is_online,
+            "api_key_count": api_key_count,
+            "task_count": task_count,
+            "generation_count": 0  # Placeholder, logic to be added
+        }
+        users_for_panel.append(UserForAdminPanel.model_validate(user_data))
         
     return users_for_panel
 
@@ -171,9 +171,9 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
     ).group_by(
         func.date(DBTask.created_at)
     ).all()
-    task_stats = [UserActivityStat(date=row[0], count=row[1]) for row in task_stats_raw]
+    task_stats = [UserActivityStat(date=date, count=count) for date, count in task_stats_raw]
 
-    # Get message stats
+    # Get message stats (generations)
     message_stats = []
     try:
         user_discussions_db_path = get_user_data_root(user.username) / "discussions.db"
@@ -190,7 +190,7 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
                 ).group_by(
                     func.date(dm.MessageModel.created_at)
                 ).all()
-                message_stats = [UserActivityStat(date=row[0], count=row[1]) for row in message_stats_raw]
+                message_stats = [UserActivityStat(date=date, count=count) for date, count in message_stats_raw]
             finally:
                 session.close()
     except Exception as e:

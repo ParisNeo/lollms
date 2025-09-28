@@ -1,3 +1,4 @@
+# [UPDATE] frontend/webui/src/components/modals/EmailAllUsersModal.vue
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import GenericModal from './GenericModal.vue';
@@ -9,7 +10,9 @@ import WysiwygEditor from '../ui/WysiwygEditor.vue';
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
 
-const { allUsers, isEnhancingEmail } = storeToRefs(adminStore);
+const modalProps = computed(() => uiStore.modalData('emailAllUsers'));
+
+const { isEnhancingEmail } = storeToRefs(adminStore);
 const { emailModalSubject: subject, emailModalBody: body, emailModalBackgroundColor: backgroundColor, emailModalSendAsText: sendAsText } = storeToRefs(uiStore);
 
 const customPrompt = ref('');
@@ -20,20 +23,24 @@ const historyIndex = ref(-1);
 
 const isLoading = ref(false);
 const selectedUserIds = ref([]);
+const allUsersProp = ref([]);
 const selectAll = ref(true);
 
 const canUndo = computed(() => historyIndex.value > 0);
 const canRedo = computed(() => historyIndex.value < history.value.length - 1);
 
 const eligibleUsers = computed(() => {
-    return allUsers.value.filter(u => u.is_active && u.receive_notification_emails && u.email);
+    return (allUsersProp.value || []).filter(u => u.is_active && u.email);
 });
 
-onMounted(() => {
-    if (allUsers.value.length === 0) {
-        adminStore.fetchAllUsers();
+watch(modalProps, (newProps) => {
+    if (newProps && newProps.users) {
+        allUsersProp.value = newProps.users;
+        selectedUserIds.value = newProps.users.map(u => u.id);
     }
-    selectedUserIds.value = eligibleUsers.value.map(u => u.id);
+}, { immediate: true, deep: true });
+
+onMounted(() => {
     recordHistory(); 
 });
 

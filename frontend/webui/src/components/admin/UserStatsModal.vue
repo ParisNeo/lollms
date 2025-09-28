@@ -1,3 +1,4 @@
+# [UPDATE] frontend/webui/src/components/admin/UserStatsModal.vue
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import { Line } from 'vue-chartjs';
@@ -25,6 +26,7 @@ const adminStore = useAdminStore();
 const uiStore = useUiStore();
 const stats = ref(null);
 const isLoading = ref(true);
+const chartRef = ref(null);
 
 const chartOptions = computed(() => ({
   responsive: true,
@@ -74,7 +76,6 @@ const chartData = computed(() => {
         };
     }
     
-    // Create a map of all dates in the last 30 days
     const dateMap = new Map();
     for (let i = 29; i >= 0; i--) {
         const d = new Date();
@@ -82,7 +83,6 @@ const chartData = computed(() => {
         dateMap.set(d.toISOString().split('T')[0], { tasks: 0, messages: 0 });
     }
 
-    // Populate with actual data
     stats.value.tasks_per_day.forEach(stat => {
         if (dateMap.has(stat.date)) {
             dateMap.get(stat.date).tasks = stat.count;
@@ -128,6 +128,17 @@ async function fetchStats() {
     }
 }
 
+function exportChart() {
+    if (chartRef.value && chartRef.value.chart) {
+        const link = document.createElement('a');
+        link.href = chartRef.value.chart.toBase64Image('image/png', 1);
+        link.download = `user_stats_${props.username}.png`;
+        link.click();
+    } else {
+        uiStore.addNotification('Could not export chart.', 'error');
+    }
+}
+
 watch(() => props.userId, (newId) => {
   if (newId) {
     fetchStats();
@@ -147,11 +158,16 @@ watch(() => props.userId, (newId) => {
       <div v-else>
         <p class="text-sm text-gray-500 mb-4">Showing activity for the last 30 days.</p>
         <div class="h-96">
-            <Line :data="chartData" :options="chartOptions" />
+            <Line :data="chartData" :options="chartOptions" ref="chartRef"/>
         </div>
       </div>
     </template>
     <template #footer>
+      <button @click="fetchStats" class="btn btn-secondary" :disabled="isLoading">
+        {{ isLoading ? 'Reloading...' : 'Reload Data' }}
+      </button>
+      <button @click="exportChart" class="btn btn-secondary">Export Image</button>
+      <div class="flex-grow"></div>
       <button @click="uiStore.closeModal('userStats')" class="btn btn-primary">Close</button>
     </template>
   </GenericModal>

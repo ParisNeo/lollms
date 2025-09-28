@@ -1,3 +1,4 @@
+# [UPDATE] frontend/webui/src/components/admin/UserTable.vue
 <script setup>
 import { computed, ref, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -25,6 +26,7 @@ const filterHasKeys = ref(null);
 const sortKey = ref('username');
 const sortOrder = ref('asc');
 const selectedUserForStats = ref(null);
+const selectedUserIds = ref([]);
 
 const filters = computed(() => ({
     filter_online: filterOnline.value,
@@ -41,6 +43,41 @@ const filteredUsers = computed(() => {
         (user.email && user.email.toLowerCase().includes(lowerCaseQuery))
     );
 });
+
+const areAllSelected = computed({
+    get: () => {
+        const filteredUserIds = filteredUsers.value.map(u => u.id);
+        if (filteredUserIds.length === 0) return false;
+        return selectedUserIds.value.length === filteredUserIds.length && filteredUserIds.every(id => selectedUserIds.value.includes(id));
+    },
+    set: (value) => {
+        const filteredUserIds = filteredUsers.value.map(u => u.id);
+        if (value) {
+            selectedUserIds.value = [...new Set([...selectedUserIds.value, ...filteredUserIds])];
+        } else {
+            selectedUserIds.value = selectedUserIds.value.filter(id => !filteredUserIds.includes(id));
+        }
+    }
+});
+
+
+function openEmailModal() {
+    const selectedUsers = allUsers.value.filter(u => selectedUserIds.value.includes(u.id));
+    if (selectedUsers.length === 0) {
+        uiStore.addNotification('Please select at least one user.', 'warning');
+        return;
+    }
+    uiStore.openModal('emailAllUsers', { users: selectedUsers });
+}
+
+function openCopyEmailsModal() {
+    const selectedUsers = allUsers.value.filter(u => selectedUserIds.value.includes(u.id));
+    if (selectedUsers.length === 0) {
+        uiStore.addNotification('Please select at least one user.', 'warning');
+        return;
+    }
+    uiStore.openModal('emailList', { users: selectedUsers });
+}
 
 function handleSort(key) {
     if (sortKey.value === key) {
@@ -100,7 +137,13 @@ onMounted(() => {
 <template>
     <div class="bg-white dark:bg-gray-800 shadow-sm rounded-lg overflow-hidden">
         <div class="px-4 py-5 sm:p-6 space-y-4">
-            <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">All Users</h3>
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">All Users</h3>
+                <div class="flex items-center gap-2">
+                    <button @click="openCopyEmailsModal" class="btn btn-secondary btn-sm" :disabled="selectedUserIds.length === 0">Copy Emails</button>
+                    <button @click="openEmailModal" class="btn btn-secondary btn-sm" :disabled="selectedUserIds.length === 0">Email Selected</button>
+                </div>
+            </div>
             
             <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <input 
@@ -132,6 +175,9 @@ onMounted(() => {
                 <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
                     <thead class="bg-gray-50 dark:bg-gray-700/50">
                         <tr>
+                            <th scope="col" class="px-6 py-3">
+                                <input type="checkbox" v-model="areAllSelected" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                            </th>
                             <th scope="col" class="table-header">
                                 <button @click="handleSort('username')" class="flex items-center gap-1">User <span v-if="sortKey === 'username'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
@@ -153,6 +199,9 @@ onMounted(() => {
                     </thead>
                     <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
                         <tr v-for="user in filteredUsers" :key="user.id" class="hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                            <td class="px-6 py-4">
+                                <input type="checkbox" :value="user.id" v-model="selectedUserIds" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
+                            </td>
                             <td class="table-cell">
                                 <div class="flex items-center">
                                     <UserAvatar :icon="user.icon" :username="user.username" size-class="h-8 w-8" />

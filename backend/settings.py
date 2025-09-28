@@ -22,7 +22,6 @@ class _Settings:
         if self._is_loaded:
             return
 
-        print("INFO: Loading global settings from database into cache...")
         try:
             configs = db.query(GlobalConfig).all()
             if not configs:

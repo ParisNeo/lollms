@@ -1,3 +1,4 @@
+# [UPDATE] frontend/webui/src/components/modals/EmailListModal.vue
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
@@ -9,6 +10,7 @@ const props = computed(() => uiStore.modalData('emailList'));
 const allEligibleUsers = ref([]);
 const selectedUserIds = ref([]);
 const selectAll = ref(true);
+const separator = ref(',');
 
 onMounted(() => {
     allEligibleUsers.value = props.value?.users || [];
@@ -29,15 +31,16 @@ watch(selectedUserIds, (newSelection) => {
     } else if (newSelection.length === 0) {
         selectAll.value = false;
     }
-});
+}, { deep: true });
 
 const selectedEmails = computed(() => {
     return allEligibleUsers.value
         .filter(user => selectedUserIds.value.includes(user.id))
-        .map(user => user.email);
+        .map(user => user.email)
+        .filter(Boolean); // Filter out any null/undefined emails
 });
 
-const emailsAsString = computed(() => selectedEmails.value.join(', '));
+const emailsAsString = computed(() => selectedEmails.value.join(separator.value + ' '));
 const mailtoLink = computed(() => `mailto:?bcc=${selectedEmails.value.join(',')}`);
 
 const listCopied = ref(false);
@@ -58,18 +61,12 @@ function copyEmailList() {
 <template>
     <GenericModal
         modal-name="emailList"
-        title="Manual Email List"
+        title="Copy Email List"
         @close="uiStore.closeModal('emailList')"
         maxWidthClass="max-w-2xl"
     >
         <template #body>
             <div class="p-6 space-y-4">
-                <div class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <p class="text-sm text-gray-600 dark:text-gray-300">
-                        Email sending is in <span class="font-semibold">Manual Mode</span>. Select the users you wish to contact below, then use the buttons to copy the email list or open your default email client.
-                    </p>
-                </div>
-
                 <div class="space-y-2">
                      <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300">Recipients ({{ selectedUserIds.length }} / {{ allEligibleUsers.length }})</h4>
                     <div class="relative border border-gray-200 dark:border-gray-600 rounded-md">
@@ -87,14 +84,23 @@ function copyEmailList() {
                                 </div>
                             </div>
                             <div v-else class="p-4 text-center text-sm text-gray-500">
-                                No users have opted-in to receive emails.
+                                No users to list.
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div>
-                    <label for="email-list-area" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Selected Emails</label>
+                    <div class="flex items-center justify-between mb-1">
+                        <label for="email-list-area" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Selected Emails</label>
+                        <div class="flex items-center gap-2">
+                            <label for="separator" class="text-sm">Separator:</label>
+                            <select id="separator" v-model="separator" class="input-field !py-1 !px-2 text-sm">
+                                <option value=",">Comma</option>
+                                <option value=";">Semicolon</option>
+                            </select>
+                        </div>
+                    </div>
                     <textarea
                         id="email-list-area"
                         :value="emailsAsString"

@@ -694,5 +694,6 @@ export const useAdminStore = defineStore('admin', () => {
         startApp,
         stopApp,
         fetchAppLog,
+        fetchUserStats,
     };
 });
