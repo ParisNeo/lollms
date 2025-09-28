@@ -721,6 +721,16 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             connection.execute(text("UPDATE users SET is_active = 1 WHERE is_active IS NULL"))
             print("INFO: Set 'is_active' to True for all existing users to ensure access after upgrade.")
             connection.commit()
+        # NEW: Backfill is_admin and is_moderator for old databases
+        if 'is_admin' in added_cols:
+            connection.execute(text("UPDATE users SET is_admin = 0 WHERE is_admin IS NULL"))
+            print("INFO: Backfilled 'is_admin' to False for all existing users.")
+            connection.commit()
+        if 'is_moderator' in added_cols:
+            connection.execute(text("UPDATE users SET is_moderator = 0 WHERE is_moderator IS NULL"))
+            print("INFO: Backfilled 'is_moderator' to False for all existing users.")
+            connection.commit()
+
 
         if 'put_thoughts_in_context' not in user_columns_db:
             try:

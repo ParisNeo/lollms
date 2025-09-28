@@ -312,15 +312,25 @@ export const useAdminStore = defineStore('admin', () => {
     }
 
 
-    async function fetchAllUsers() {
+    async function fetchAllUsers(filters = {}) {
         isLoadingUsers.value = true;
         try {
-            const response = await apiClient.get('/api/admin/users');
+            const response = await apiClient.get('/api/admin/users', { params: filters });
             allUsers.value = response.data;
         } finally {
             isLoadingUsers.value = false;
         }
     }
+
+    async function fetchUserStats(userId) {
+        try {
+            const response = await apiClient.get(`/api/admin/users/${userId}/stats`);
+            return response.data;
+        } catch (error) {
+            console.error(`Failed to fetch stats for user ${userId}:`, error);
+            return null;
+        }
+    }    
     
     async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) {
         const { useTasksStore } = await import('./tasks');

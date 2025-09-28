@@ -1,19 +1,40 @@
-import { createApp } from 'vue'
-import { createPinia } from 'pinia'
+import { createApp } from 'vue';
+import { createPinia } from 'pinia';
+import App from './App.vue';
+import router from './router';
+import './assets/css/main.css';
 
-import App from './App.vue'
-import router from './router'
-import './assets/css/main.css'
+// NEW: Import Chart.js components
+import {
+  Chart as ChartJS,
+  Title,
+  Tooltip,
+  Legend,
+  BarElement,
+  CategoryScale,
+  LinearScale,
+  LineElement,
+  PointElement,
+  ArcElement
+} from 'chart.js';
 
-// Create the root Vue app instance.
-const app = createApp(App)
+// NEW: Register Chart.js components
+ChartJS.register(
+  Title,
+  Tooltip,
+  Legend,
+  BarElement,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  ArcElement
+);
 
-// Install Pinia for global state management.
-app.use(createPinia())
 
-// Install Vue Router for handling navigation.
-app.use(router)
+const app = createApp(App);
 
+app.use(createPinia());
+app.use(router);
 
-// Mount the application to the <div id="app"></div> in index.html.
-app.mount('#app')
+app.mount('#app');

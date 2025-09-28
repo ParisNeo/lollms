@@ -452,24 +452,30 @@ export const useSocialStore = defineStore('social', () => {
             isLoadingConversations.value = false;
         }
     }
-    
-    async function openConversation(otherUser) {
-        const otherUserId = otherUser.id;
-        if (!activeConversations.value[otherUserId]) {
-            activeConversations.value[otherUserId] = { 
-                partner: otherUser, 
-                messages: [], 
-                isLoading: false, 
-                fullyLoaded: false, 
-                page: 0,
-                error: null
+        
+    function openConversation(partner) {
+        if (!activeConversations.value[partner.id]) {
+            activeConversations.value[partner.id] = {
+                partner: { id: partner.id, username: partner.username, icon: partner.icon },
+                messages: [],
+                isLoading: false,
+                fullyLoaded: false,
+                error: null,
+                page: 1
             };
+            fetchMessages(partner.id);
         }
-        const convo = activeConversations.value[otherUserId];
-        if (convo.messages.length > 0) return;
-        await fetchMoreMessages(otherUserId);
+        
+        const uiStore = useUiStore();
+        if (uiStore.mainView !== 'messages') {
+            uiStore.setMainView('messages');
+        }
+        
+        // This is a new part to ensure the DM window shows if we are on the messages page
+        // The MessagesView component will listen for this change.
+        activeConversationUserId.value = partner.id;
     }
-    
+
     async function fetchMoreMessages(otherUserId) {
         const convo = activeConversations.value[otherUserId];
         if (!convo || convo.isLoading || convo.fullyLoaded) return;
@@ -495,7 +501,8 @@ export const useSocialStore = defineStore('social', () => {
             isLoadingMessages.value = false;
         }
     }
-    
+
+
     function closeConversation(otherUserId) { delete activeConversations.value[otherUserId]; }
 
     async function sendDirectMessage({ receiverUserId, content }) {

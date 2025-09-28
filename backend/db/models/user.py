@@ -13,6 +13,7 @@ from backend.db.base import Base, FriendshipStatus, follows_table
 from backend.db.models.discussion import SharedDiscussionLink
 from backend.db.models.memory import UserMemory
 from backend.db.models.discussion_group import DiscussionGroup
+from backend.db.models.connections import WebSocketConnection
 
 class User(Base):
     __tablename__ = "users"
@@ -98,6 +99,8 @@ class User(Base):
     owned_shared_discussions = relationship("SharedDiscussionLink", foreign_keys=[SharedDiscussionLink.owner_user_id], back_populates="owner", cascade="all, delete-orphan")
     received_shared_discussions = relationship("SharedDiscussionLink", foreign_keys=[SharedDiscussionLink.shared_with_user_id], back_populates="shared_with_user", cascade="all, delete-orphan")
 
+    connections = relationship("WebSocketConnection", back_populates="user", cascade="all, delete-orphan")
+
     __table_args__ = (CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'), UniqueConstraint('email', name='uq_user_email'),)
     
     def verify_password(self, plain_password):
@@ -110,7 +113,7 @@ class UserStarredDiscussion(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     discussion_id = Column(String, nullable=False, index=True)
     user = relationship("User", back_populates="starred_discussions")
-    __table_args__ = (UniqueConstraint('user_id', 'discussion_id', name='uq_user_discussion_star'),)
+    __table__args__ = (UniqueConstraint('user_id', 'discussion_id', name='uq_user_discussion_star'),)
 
 class UserMessageGrade(Base):
     __tablename__ = "user_message_grades"
@@ -120,7 +123,7 @@ class UserMessageGrade(Base):
     message_id = Column(String, nullable=False, index=True)
     grade = Column(Integer, nullable=False, default=0)
     user = relationship("User", back_populates="message_grades")
-    __table_args__ = (UniqueConstraint('user_id', 'discussion_id', 'message_id', name='uq_user_message_grade'),)
+    __table__args__ = (UniqueConstraint('user_id', 'discussion_id', 'message_id', name='uq_user_message_grade'),)
 
 class Friendship(Base):
     __tablename__ = "friendships"
@@ -134,4 +137,4 @@ class Friendship(Base):
     user1 = relationship("User", foreign_keys=[user1_id], backref="sent_friend_requests_or_friendships")
     user2 = relationship("User", foreign_keys=[user2_id], backref="received_friend_requests_or_friendships")
     action_user = relationship("User", foreign_keys=[action_user_id])
-    __table_args__ = (UniqueConstraint('user1_id', 'user2_id', name='uq_friendship_pair'),)
+    __table__args__ = (UniqueConstraint('user1_id', 'user2_id', name='uq_friendship_pair'),)

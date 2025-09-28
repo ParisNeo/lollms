@@ -1,6 +1,7 @@
-# [CREATE] backend/models/admin.py
+# backend/models/admin.py
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
+import datetime
 
 class LLMBindingCreate(BaseModel):
     alias: str
@@ -111,3 +112,36 @@ class BindingModel(BaseModel):
 
 class ModelNamePayload(BaseModel):
     model_name: str
+
+class AdminDashboardStats(BaseModel):
+    total_users: int
+    active_users_24h: int
+    new_users_7d: int
+    pending_approval: int
+    pending_password_resets: int
+
+class UserActivityStat(BaseModel):
+    date: datetime.date
+    count: int
+
+class UserStats(BaseModel):
+    tasks_per_day: List[UserActivityStat]
+    messages_per_day: List[UserActivityStat]
+
+class UserForAdminPanel(BaseModel):
+    id: int
+    username: str
+    email: Optional[EmailStr] = None
+    is_admin: bool = False
+    is_moderator: bool = False
+    is_active: bool = True
+    created_at: datetime.datetime
+    last_activity_at: Optional[datetime.datetime] = None
+    
+    is_online: bool = False
+    api_key_count: int = 0
+    task_count: int = 0
+    generation_count: int = 0
+
+    class Config:
+        from_attributes = True

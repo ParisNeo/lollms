@@ -111,6 +111,9 @@ export const useAuthStore = defineStore('auth', () => {
             switch (data.type) {
                 case 'new_dm': socialStore.handleNewDm(data.data); break;
                 case 'new_comment': socialStore.handleNewComment(data.data); break;
+                case 'friend_online':
+                    uiStore.addNotification(`${data.data.username} is now online.`, 'info', 4000, false, null, data.data.icon);
+                    break;
                 case 'new_shared_discussion':
                     discussionsStore.loadDiscussions();
                     uiStore.addNotification(`'${data.data.discussion_title}' was shared with you by ${data.data.from_user}.`, 'info');

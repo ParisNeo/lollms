@@ -2,29 +2,36 @@
 import json
 import shutil
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict
-
-from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy.orm import Session
-from lollms_client import LollmsClient
+from typing import List, Dict, Optional
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
+from sqlalchemy.orm import Session, joinedload, aliased, Query as SQLAlchemyQuery
+from sqlalchemy import func, case, literal_column, exists, select
+from lollms_client import LollmsDataManager
+from pydantic import EmailStr
 
 from backend.db import get_db
-from backend.db.models.user import User as DBUser
-from backend.models import (
-    UserAuthDetails, UserCreateAdmin, UserPasswordResetAdmin, UserPublic,
-    AdminUserUpdate, BatchUsersSettingsUpdate, EmailUsersRequest, AdminDashboardStats,
-    EnhanceEmailRequest, EnhancedEmailResponse, TaskInfo
+from backend.db.models.user import User as DBUser, Friendship as DBFriendship
+from backend.db.models.connections import WebSocketConnection
+from backend.db.models.api_key import OpenAIAPIKey
+from backend.db.models.db_task import DBTask
+from backend.db.base import FriendshipStatus
+from backend.models.user import (
+    UserCreateAdmin, UserPasswordResetAdmin,
+    AdminUserUpdate, BatchUsersSettingsUpdate, EmailUsersRequest,
+    EnhanceEmailRequest, EnhancedEmailResponse, UserPublic, UserAuthDetails
 )
+from backend.models.admin import UserForAdminPanel, UserStats, UserActivityStat, AdminDashboardStats
 from backend.session import get_current_admin_user, get_user_data_root, user_sessions, get_user_lollms_client
 from backend.security import get_password_hash as hash_password, create_reset_token, send_generic_email
 from backend.settings import settings
 from backend.config import INITIAL_ADMIN_USER_CONFIG
-from backend.task_manager import task_manager, Task
+from backend.task_manager import task_manager, Task, TaskInfo
 from ascii_colors import trace_exception
 
 user_management_router = APIRouter()
 
-def _to_task_info(db_task) -> TaskInfo:
+def _to_task_info(db_task) -> "TaskInfo":
+    from backend.models.task import TaskInfo
     return TaskInfo(
         id=db_task.id, name=db_task.name, description=db_task.description,
         status=db_task.status, progress=db_task.progress,
@@ -66,9 +73,65 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
     pending_resets = db.query(DBUser).filter(DBUser.password_reset_token.isnot(None), DBUser.reset_token_expiry > now).count()
     return AdminDashboardStats(total_users=total_users, active_users_24h=active_24h, new_users_7d=new_7d, pending_approval=pending_approval, pending_password_resets=pending_resets)
 
-@user_management_router.get("/users", response_model=List[UserPublic])
-async def admin_get_all_users(db: Session = Depends(get_db)):
-    return db.query(DBUser).all()
+@user_management_router.get("/users", response_model=List[UserForAdminPanel])
+async def admin_get_all_users(
+    filter_online: Optional[bool] = Query(None),
+    filter_has_keys: Optional[bool] = Query(None),
+    sort_by: str = Query('username', enum=['username', 'email', 'last_activity_at', 'created_at', 'task_count', 'api_key_count']),
+    sort_order: str = Query('asc', enum=['asc', 'desc']),
+    db: Session = Depends(get_db)
+):
+    online_users_subquery = select(WebSocketConnection.user_id).distinct().subquery()
+    
+    query = db.query(
+        DBUser,
+        case((DBUser.id.in_(online_users_subquery), True), else_=False).label('is_online'),
+        func.count(DBTask.id).label('task_count'),
+        func.count(OpenAIAPIKey.id).label('api_key_count')
+    ).outerjoin(DBTask, DBUser.id == DBTask.owner_user_id) \
+     .outerjoin(OpenAIAPIKey, DBUser.id == OpenAIAPIKey.user_id) \
+     .group_by(DBUser.id)
+
+    if filter_online is not None:
+        if filter_online:
+            query = query.filter(DBUser.id.in_(online_users_subquery))
+        else:
+            query = query.filter(DBUser.id.notin_(online_users_subquery))
+
+    if filter_has_keys is not None:
+        if filter_has_keys:
+            query = query.filter(exists().where(OpenAIAPIKey.user_id == DBUser.id))
+        else:
+            query = query.filter(~exists().where(OpenAIAPIKey.user_id == DBUser.id))
+
+    # Sorting logic
+    sort_column = getattr(DBUser, sort_by) if hasattr(DBUser, sort_by) else literal_column(sort_by)
+    if sort_order == 'desc':
+        query = query.order_by(sort_column.desc())
+    else:
+        query = query.order_by(sort_column.asc())
+
+
+    results = query.all()
+    
+    users_for_panel = []
+    for user, is_online, task_count, api_key_count in results:
+        users_for_panel.append(UserForAdminPanel(
+            id=user.id,
+            username=user.username,
+            email=user.email,
+            is_admin=user.is_admin,
+            is_moderator=user.is_moderator,
+            is_active=user.is_active,
+            created_at=user.created_at,
+            last_activity_at=user.last_activity_at,
+            is_online=is_online,
+            api_key_count=api_key_count,
+            task_count=task_count,
+            generation_count=0  # Placeholder
+        ))
+        
+    return users_for_panel
 
 @user_management_router.post("/users", response_model=UserPublic, status_code=201)
 async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(get_db)):
@@ -90,6 +153,52 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
     db.refresh(new_user)
     return new_user
 
+@user_management_router.get("/users/{user_id}/stats", response_model=UserStats)
+async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
+    user = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+
+    # Get task stats
+    task_stats_raw = db.query(
+        func.date(DBTask.created_at),
+        func.count(DBTask.id)
+    ).filter(
+        DBTask.owner_user_id == user_id,
+        DBTask.created_at >= thirty_days_ago
+    ).group_by(
+        func.date(DBTask.created_at)
+    ).all()
+    task_stats = [UserActivityStat(date=row[0], count=row[1]) for row in task_stats_raw]
+
+    # Get message stats
+    message_stats = []
+    try:
+        user_discussions_db_path = get_user_data_root(user.username) / "discussions.db"
+        if user_discussions_db_path.exists():
+            dm = LollmsDataManager(db_path=f"sqlite:///{user_discussions_db_path.resolve()}")
+            session = dm.get_session()
+            try:
+                message_stats_raw = session.query(
+                    func.date(dm.MessageModel.created_at),
+                    func.count(dm.MessageModel.id)
+                ).filter(
+                    dm.MessageModel.sender_type == 'assistant',
+                    dm.MessageModel.created_at >= thirty_days_ago
+                ).group_by(
+                    func.date(dm.MessageModel.created_at)
+                ).all()
+                message_stats = [UserActivityStat(date=row[0], count=row[1]) for row in message_stats_raw]
+            finally:
+                session.close()
+    except Exception as e:
+        trace_exception(e)
+        # Fail gracefully if discussion DB can't be read
+        print(f"Warning: Could not read discussion database for user {user.username}: {e}")
+
+    return UserStats(tasks_per_day=task_stats, messages_per_day=message_stats)
 @user_management_router.put("/users/{user_id}", response_model=UserPublic)
 async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Session = Depends(get_db), current_admin: UserAuthDetails = Depends(get_current_admin_user)):
     user = db.query(DBUser).filter(DBUser.id == user_id).first()

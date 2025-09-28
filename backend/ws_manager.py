@@ -6,10 +6,13 @@ import json
 import logging
 import os
 import uuid
+import datetime
 from ascii_colors import trace_exception
 from .db import session as db_session_module
 from .db.models.broadcast import BroadcastMessage
 from .db.models.connections import WebSocketConnection
+from .db.models.user import User as DBUser, Friendship as DBFriendship
+from .db.base import FriendshipStatus
 from .session import user_sessions
 
 logger = logging.getLogger("uvicorn.info")
@@ -61,7 +64,6 @@ class ConnectionManager:
             self.active_connections[user_id] = {}
         self.active_connections[user_id][session_id] = websocket
 
-        # --- DB UPDATE ---
         db = None
         try:
             db = db_session_module.SessionLocal()
@@ -69,8 +71,35 @@ class ConnectionManager:
             db.add(new_connection)
             db.commit()
             logger.info(f"User {user_id} connected via WebSocket (session: {session_id[:8]}). DB record created.")
+            
+            # --- NEW: Friend Connection Notification ---
+            connecting_user = db.query(DBUser).filter(DBUser.id == user_id).first()
+            if connecting_user:
+                # Find all accepted friendships for this user
+                friendships = db.query(DBFriendship).filter(
+                    (DBFriendship.user1_id == user_id) | (DBFriendship.user2_id == user_id),
+                    DBFriendship.status == FriendshipStatus.ACCEPTED
+                ).all()
+
+                friend_ids = {f.user1_id if f.user2_id == user_id else f.user2_id for f in friendships}
+                
+                if friend_ids:
+                    notification_payload = {
+                        "type": "friend_online",
+                        "data": {
+                            "username": connecting_user.username,
+                            "icon": connecting_user.icon
+                        }
+                    }
+                    for friend_id in friend_ids:
+                        # Use the synchronous method which queues the message for delivery
+                        # This avoids awaiting in a sync context
+                        self.send_personal_message_sync(notification_payload, friend_id)
+                    logger.info(f"Queued 'friend_online' notifications for {len(friend_ids)} friends of user {user_id}.")
+            # --- END NEW ---
+
         except Exception as e:
-            logger.error(f"Failed to create DB record for WebSocket connection: {e}")
+            logger.error(f"Failed to create DB record or notify friends for WebSocket connection: {e}")
             if db: db.rollback()
         finally:
             if db: db.close()
@@ -83,16 +112,22 @@ class ConnectionManager:
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
         
-        # --- DB UPDATE ---
         if session_id:
             db = None
             try:
                 db = db_session_module.SessionLocal()
                 db.query(WebSocketConnection).filter(WebSocketConnection.session_id == session_id).delete()
+                
+                # --- NEW: Update last_activity_at on disconnect ---
+                user = db.query(DBUser).filter(DBUser.id == user_id).first()
+                if user:
+                    user.last_activity_at = datetime.datetime.now(datetime.timezone.utc)
+                # --- END NEW ---
+
                 db.commit()
-                logger.info(f"User {user_id} disconnected WebSocket (session: {session_id[:8]}). DB record removed.")
+                logger.info(f"User {user_id} disconnected WebSocket (session: {session_id[:8]}). DB record removed and activity updated.")
             except Exception as e:
-                logger.error(f"Failed to remove DB record for WebSocket connection: {e}")
+                logger.error(f"Failed to process disconnect for WebSocket connection: {e}")
                 if db: db.rollback()
             finally:
                 if db: db.close()
@@ -108,7 +143,6 @@ class ConnectionManager:
     async def send_personal_message(self, message_data: dict, user_id: int):
         if user_id in self.active_connections:
             sockets_to_remove = set()
-            # Iterate over a copy of the values to allow modification during iteration
             for websocket in list(self.active_connections[user_id].values()):
                 try:
                     await websocket.send_json(message_data)
@@ -116,7 +150,6 @@ class ConnectionManager:
                     logger.error(f"Failed to send WebSocket message to user {user_id} on a connection: {e}")
                     sockets_to_remove.add(websocket)
             
-            # Clean up disconnected sockets for this user
             for websocket in sockets_to_remove:
                 self.disconnect(user_id, websocket)
 
