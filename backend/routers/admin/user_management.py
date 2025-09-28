@@ -1,4 +1,4 @@
-# [UPDATE] backend/routers/admin/user_management.py
+# backend/routers/admin/user_management.py
 import json
 import shutil
 from datetime import datetime, timedelta, timezone
@@ -77,7 +77,7 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
 async def admin_get_all_users(
     filter_online: Optional[bool] = Query(None),
     filter_has_keys: Optional[bool] = Query(None),
-    sort_by: str = Query('username', enum=['username', 'email', 'last_activity_at', 'created_at', 'task_count', 'api_key_count']),
+    sort_by: str = Query('username', enum=['username', 'email', 'last_activity_at', 'created_at', 'task_count', 'api_key_count', 'connection_count']),
     sort_order: str = Query('asc', enum=['asc', 'desc']),
     db: Session = Depends(get_db)
 ):
@@ -86,10 +86,12 @@ async def admin_get_all_users(
     query = db.query(
         DBUser,
         case((DBUser.id.in_(online_users_subquery), True), else_=False).label('is_online'),
-        func.count(DBTask.id).label('task_count'),
-        func.count(OpenAIAPIKey.id).label('api_key_count')
+        func.count(func.distinct(DBTask.id)).label('task_count'),
+        func.count(func.distinct(OpenAIAPIKey.id)).label('api_key_count'),
+        func.count(func.distinct(WebSocketConnection.id)).label('connection_count')
     ).outerjoin(DBTask, DBUser.id == DBTask.owner_user_id) \
      .outerjoin(OpenAIAPIKey, DBUser.id == OpenAIAPIKey.user_id) \
+     .outerjoin(WebSocketConnection, DBUser.id == WebSocketConnection.user_id) \
      .group_by(DBUser.id)
 
     if filter_online is not None:
@@ -114,17 +116,19 @@ async def admin_get_all_users(
     results = query.all()
     
     users_for_panel = []
-    for user, is_online, task_count, api_key_count in results:
+    for user, is_online, task_count, api_key_count, connection_count in results:
         user_data = {
             "id": user.id,
             "username": user.username,
             "email": user.email,
+            "icon": user.icon,
             "is_admin": user.is_admin or False,
             "is_moderator": user.is_moderator or False,
             "is_active": user.is_active,
             "created_at": user.created_at,
             "last_activity_at": user.last_activity_at,
             "is_online": is_online,
+            "connection_count": connection_count,
             "api_key_count": api_key_count,
             "task_count": task_count,
             "generation_count": 0  # Placeholder, logic to be added

@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/tasks.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -62,6 +63,8 @@ export const useTasksStore = defineStore('tasks', () => {
         const currentUser = authStore.user;
         if (!currentUser) return;
 
+        // If username is null, it's a global clear for admins.
+        // If it matches the current user, it's a personal clear.
         if (data.username === null || data.username === currentUser.username) {
             tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
         }
@@ -71,7 +74,7 @@ export const useTasksStore = defineStore('tasks', () => {
     async function cancelTask(taskId) {
         try {
             const response = await apiClient.post(`/api/tasks/${taskId}/cancel`);
-            addTask(response.data);
+            addTask(response.data); // Update the task with the 'cancelled' state from the backend
             uiStore.addNotification('Task cancellation processed.', 'info');
         } catch (error) {
             // Error is handled by global interceptor

@@ -1,14 +1,16 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue';
-import apiClient from '../../services/api';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
 import SystemStatus from './SystemStatus.vue';
+import GlobalStatsChart from './GlobalStatsChart.vue'; // NEW
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
+import IconLink from '../../assets/icons/IconLink.vue';
+
 
 const stats = ref(null);
 const isLoading = ref(true);
@@ -19,6 +21,15 @@ const connectedUsers = computed(() => adminStore.connectedUsers);
 const isLoadingConnectedUsers = computed(() => adminStore.isLoadingConnectedUsers);
 const serverInfo = computed(() => adminStore.serverInfo);
 const isLoadingServerInfo = computed(() => adminStore.isLoadingServerInfo);
+const allUsers = computed(() => adminStore.allUsers);
+
+// NEW Stats for chart
+const globalGenerationStats = computed(() => adminStore.globalGenerationStats);
+const isLoadingGlobalGenerationStats = computed(() => adminStore.isLoadingGlobalGenerationStats);
+
+const connectedUsersWithDetails = computed(() => {
+    return allUsers.value.filter(u => u.is_online);
+});
 
 
 const statItems = ref([
@@ -32,19 +43,21 @@ const statItems = ref([
 async function fetchDashboardData() {
     isLoading.value = true;
     try {
-        const [statsResponse] = await Promise.all([
-            apiClient.get('/api/admin/stats'),
+        await Promise.all([
+            adminStore.fetchAllUsers(), // Fetch all users to get connection counts
+            adminStore.fetchDashboardStats(),
             adminStore.fetchSystemStatus(),
-            adminStore.fetchConnectedUsers(),
-            adminStore.fetchServerInfo()
+            adminStore.fetchServerInfo(),
+            adminStore.fetchGlobalGenerationStats() // NEW
         ]);
-        stats.value = statsResponse.data;
+        stats.value = adminStore.dashboardStats;
     } catch (error) {
         uiStore.addNotification('Could not load dashboard statistics.', 'error');
     } finally {
         isLoading.value = false;
     }
 }
+
 
 async function handlePurge() {
   const confirmed = await uiStore.showConfirmation({
@@ -115,6 +128,9 @@ onMounted(fetchDashboardData);
             </div>
         </div>
 
+        <!-- NEW: Global Stats Chart -->
+        <GlobalStatsChart :stats="globalGenerationStats" :is-loading="isLoadingGlobalGenerationStats" />
+
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div class="space-y-6">
                 <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
@@ -171,19 +187,24 @@ onMounted(fetchDashboardData);
                                 Users with an active WebSocket connection.
                             </p>
                         </div>
-                        <span v-if="!isLoadingConnectedUsers" class="text-lg font-bold text-gray-700 dark:text-gray-200">{{ connectedUsers.length }}</span>
+                        <span v-if="!isLoadingConnectedUsers" class="text-lg font-bold text-gray-700 dark:text-gray-200">{{ connectedUsersWithDetails.length }}</span>
                     </div>
 
                     <div v-if="isLoadingConnectedUsers" class="text-center py-4">
                         <p class="text-gray-500">Loading connected users...</p>
                     </div>
-                    <div v-else-if="connectedUsers.length === 0" class="text-center py-4 text-gray-500">
+                    <div v-else-if="connectedUsersWithDetails.length === 0" class="text-center py-4 text-gray-500">
                         No users are currently connected.
                     </div>
                     <ul v-else class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-                        <li v-for="user in connectedUsers" :key="user.id" class="flex items-center space-x-3 p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <li v-for="user in connectedUsersWithDetails" :key="user.id" class="flex items-center space-x-3 p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                             <UserAvatar :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
-                            <span class="font-medium text-sm truncate" :title="user.username">{{ user.username }}</span>
+                            <div class="truncate">
+                                <span class="font-medium text-sm truncate" :title="user.username">{{ user.username }}</span>
+                                <div class="flex items-center text-xs text-gray-500 dark:text-gray-400" title="Active Connections">
+                                    <IconLink class="w-3 h-3 mr-1" /> {{ user.connection_count }}
+                                </div>
+                            </div>
                         </li>
                     </ul>
                 </div>

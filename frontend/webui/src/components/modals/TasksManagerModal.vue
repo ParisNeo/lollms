@@ -1,3 +1,4 @@
+# [UPDATE] frontend/webui/src/components/modals/TasksManagerModal.vue
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -44,7 +45,13 @@ watch(sortedTasks, (newTasks) => {
     if (selectedTask.value) {
         const updatedTask = newTasks.find(t => t.id === selectedTask.value.id);
         if (updatedTask) {
-            selectedTask.value = updatedTask;
+            // Preserve the object reference if possible to avoid losing scroll position
+            // unless logs have changed.
+            if (JSON.stringify(selectedTask.value.logs) !== JSON.stringify(updatedTask.logs)) {
+                selectedTask.value = updatedTask;
+            } else {
+                Object.assign(selectedTask.value, updatedTask);
+            }
         } else {
             selectedTask.value = newTasks.length > 0 ? newTasks[0] : null;
         }
@@ -52,6 +59,7 @@ watch(sortedTasks, (newTasks) => {
         selectedTask.value = newTasks[0];
     }
 });
+
 
 // Auto-scroll logs to the bottom
 watch(() => selectedTask.value?.logs, () => {
@@ -61,16 +69,6 @@ watch(() => selectedTask.value?.logs, () => {
         }
     });
 }, { deep: true });
-
-watch(() => tasksStore.tasks, (newTasks) => {
-    if (selectedTask.value) {
-        const updatedTask = newTasks.find(t => t.id === selectedTask.value.id);
-        if (updatedTask) {
-            selectedTask.value = { ...selectedTask.value, ...updatedTask };
-        }
-    }
-}, { deep: true });
-
 
 function formatDateTime(isoString) {
     if (!isoString) return 'N/A';

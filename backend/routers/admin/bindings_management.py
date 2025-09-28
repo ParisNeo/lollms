@@ -1,4 +1,4 @@
-# backend/routers/admin/bindings_management.py
+# [UPDATE] backend/routers/admin/bindings_management.py
 import json
 from typing import List, Dict, Any, Optional
 
@@ -105,7 +105,7 @@ async def create_binding(binding_data: LLMBindingCreate, db: Session = Depends(g
         db.add(new_binding)
         db.commit()
         db.refresh(new_binding)
-        await manager.broadcast({"type": "bindings_updated"})
+        manager.broadcast_sync({"type": "bindings_updated"})
         return new_binding
     except IntegrityError:
         db.rollback()
@@ -139,7 +139,7 @@ async def update_binding(binding_id: int, update_data: LLMBindingUpdate, db: Ses
         for session in user_sessions.values():
             if "lollms_clients_cache" in session:
                 session["lollms_clients_cache"] = {}
-        await manager.broadcast({"type": "bindings_updated"})
+        manager.broadcast_sync({"type": "bindings_updated"})
         return binding_to_update
     except Exception as e:
         db.rollback()
@@ -154,7 +154,7 @@ async def delete_binding(binding_id: int, db: Session = Depends(get_db)):
     try:
         db.delete(binding_to_delete)
         db.commit()
-        await manager.broadcast({"type": "bindings_updated"})
+        manager.broadcast_sync({"type": "bindings_updated"})
         return {"message": "Binding deleted successfully."}
     except Exception as e:
         db.rollback()
@@ -417,7 +417,7 @@ async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Ses
     
     db.commit()
     db.refresh(binding)
-    await manager.broadcast({"type": "bindings_updated"})
+    manager.broadcast_sync({"type": "bindings_updated"})
     return binding
 
 @bindings_management_router.delete("/tts-bindings/{binding_id}/alias", response_model=TTSBindingPublicAdmin)
@@ -486,7 +486,7 @@ async def delete_model_alias(binding_id: int, payload: ModelAliasDelete, db: Ses
     
     db.commit()
     db.refresh(binding)
-    await manager.broadcast({"type": "bindings_updated"})
+    manager.broadcast_sync({"type": "bindings_updated"})
     return binding
 
 @bindings_management_router.get("/available-models", response_model=List[ModelInfo])

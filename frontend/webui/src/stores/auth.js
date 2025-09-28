@@ -137,6 +137,10 @@ export const useAuthStore = defineStore('auth', () => {
                     break;
                 case 'admin_broadcast': uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); break;
                 case 'task_update': tasksStore.addTask(data.data); break;
+                case 'task_end': 
+                    tasksStore.addTask(data.data);
+                    uiStore.addNotification(`Task '${data.data.name}' finished with status: ${data.data.status}.`, 'info', 5000);
+                    break;
                 case 'app_status_changed': { const { useAdminStore } = await import('./admin'); useAdminStore().handleAppStatusUpdate(data.data); dataStore.handleServiceStatusUpdate(data.data); break; }
                 case 'data_zone_processed':
                     if (data.data.task_data) tasksStore.addTask(data.data.task_data);
@@ -145,12 +149,14 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'discussion_images_updated': discussionsStore.handleDiscussionImagesUpdated(data.data); break;
                 case 'tasks_cleared': tasksStore.handleTasksCleared(data.data); break;
                 case 'settings_updated':
-                    uiStore.addNotification('Global settings updated. Refreshing session...', 'info');
+                    uiStore.addNotification('Global settings updated by an admin. Refreshing your session...', 'info', 5000);
                     await refreshUser(); await fetchWelcomeInfo();
                     break;
                 case 'bindings_updated':
-                    uiStore.addNotification('LLM bindings updated. Refreshing model list.', 'info');
+                    uiStore.addNotification('LLM bindings updated by an admin. Refreshing model list.', 'info', 5000);
                     dataStore.fetchAvailableLollmsModels();
+                    dataStore.fetchAvailableTtiModels();
+                    dataStore.fetchAvailableTtsModels();
                     break;               
             }
         };

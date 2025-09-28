@@ -1,4 +1,4 @@
-# backend/routers/admin/settings_management.py
+# [UPDATE] backend/routers/admin/settings_management.py
 import json
 import base64
 from typing import List, Dict
@@ -66,7 +66,7 @@ async def admin_update_global_settings(
         if updated_keys:
             db.commit()
             settings.refresh(db)
-            await manager.broadcast({"type": "settings_updated"})
+            manager.broadcast_sync({"type": "settings_updated"})
         
         return {"message": f"Successfully updated {len(updated_keys)} settings."}
     except Exception as e:
@@ -92,7 +92,7 @@ async def upload_custom_logo(file: UploadFile = File(...)):
             db_config.value = json.dumps(stored_data)
             db.commit()
             settings.refresh(db)
-            await manager.broadcast({"type": "settings_updated"})
+            manager.broadcast_sync({"type": "settings_updated"})
         
         return {"message": "Logo uploaded successfully.", "logo_url": logo_url}
     except Exception as e:
@@ -114,9 +114,8 @@ async def remove_custom_logo(db: Session = Depends(get_db)):
         db_config.value = json.dumps(stored_data)
         db.commit()
         settings.refresh(db)
-        await manager.broadcast({"type": "settings_updated"})
+        manager.broadcast_sync({"type": "settings_updated"})
         return {"message": "Custom logo removed successfully."}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
-

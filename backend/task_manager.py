@@ -1,3 +1,4 @@
+# [UPDATE] backend/task_manager.py
 # backend/task_manager.py
 import uuid
 import datetime
@@ -72,10 +73,20 @@ class Task:
         task_data = _serialize_task(db_task)
         payload = {"type": "task_update", "data": task_data}
         
+        # Broadcast to admins and the specific user (if any)
+        # The manager will handle sending this to all relevant connections across all workers.
+        manager.broadcast_to_admins_sync(payload)
         if db_task.owner_user_id:
             manager.send_personal_message_sync(payload, db_task.owner_user_id)
+
+        # Handle special 'result' payloads for direct UI updates
+        is_finished = db_task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
         
-        manager.broadcast_to_admins_sync(payload)
+        if is_finished:
+            end_payload = {"type": "task_end", "data": task_data}
+            if db_task.owner_user_id:
+                manager.send_personal_message_sync(end_payload, db_task.owner_user_id)
+            manager.broadcast_to_admins_sync(end_payload)
 
         if db_task.status == TaskStatus.COMPLETED and db_task.result:
             result_data = None
@@ -261,13 +272,9 @@ class TaskManager:
             db.commit()
             db.refresh(new_db_task, ['owner'])
             
-            task_data = _serialize_task(new_db_task)
-            payload = {"type": "task_update", "data": task_data}
-            
-            if new_db_task.owner_user_id:
-                manager.send_personal_message_sync(payload, new_db_task.owner_user_id)
-            
-            manager.broadcast_to_admins_sync(payload)
+            # Initial broadcast that the task has been created
+            task_instance_for_broadcast = Task(id=new_db_task.id, name=name, description=description, target=target, args=args, kwargs=kwargs, owner_username=owner_username, db_session_factory=self.db_session_factory)
+            task_instance_for_broadcast._broadcast_update(new_db_task)
 
             db.expunge(new_db_task)
 
@@ -312,11 +319,9 @@ class TaskManager:
                 db.commit()
                 db.refresh(db_task, ['owner'])
 
-                task_data = _serialize_task(db_task)
-                payload = {"type": "task_update", "data": task_data}
-                if db_task.owner_user_id:
-                    manager.send_personal_message_sync(payload, db_task.owner_user_id)
-                manager.broadcast_to_admins_sync(payload)
+                # Manually create a task instance to call the broadcast method
+                task_instance_for_broadcast = Task(id=db_task.id, name=db_task.name, description=db_task.description, target=lambda: None, args=(), kwargs={}, owner_username=db_task.owner.username if db_task.owner else None, db_session_factory=self.db_session_factory)
+                task_instance_for_broadcast._broadcast_update(db_task)
                 
                 return True
 
@@ -348,11 +353,6 @@ class TaskManager:
             db.commit()
             
             payload = {"type": "tasks_cleared", "data": {"username": username}}
-            if username:
-                 user = db.query(DBUser).filter(DBUser.username == username).first()
-                 if user:
-                    manager.send_personal_message_sync(payload, user.id)
-            else:
-                 manager.broadcast_sync(payload)
+            manager.broadcast_sync(payload)
 
 task_manager = TaskManager()

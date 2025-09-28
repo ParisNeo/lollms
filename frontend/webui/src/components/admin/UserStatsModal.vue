@@ -1,4 +1,3 @@
-# [UPDATE] frontend/webui/src/components/admin/UserStatsModal.vue
 <script setup>
 import { ref, computed, watch, onMounted } from 'vue';
 import { Line } from 'vue-chartjs';

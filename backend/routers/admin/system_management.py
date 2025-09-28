@@ -1,6 +1,8 @@
 # backend/routers/admin/system_management.py
 import sys
 import asyncio
+import statistics
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Dict
@@ -8,6 +10,8 @@ from typing import List, Optional, Dict
 import psutil
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+from sqlalchemy import func
+from lollms_client import LollmsDataManager
 
 from sqlalchemy.orm import Session, joinedload
 from backend.db import get_db
@@ -15,11 +19,13 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.service import App as DBApp
 from backend.db.models.connections import WebSocketConnection
 from backend.models import UserAuthDetails, SystemUsageStats, GPUInfo, DiskInfo, TaskInfo
+from backend.models.admin import GlobalGenerationStats, UserActivityStat
 from backend.config import PROJECT_ROOT, APP_DATA_DIR, SERVER_CONFIG, APP_VERSION, USERS_DIR_NAME, TEMP_UPLOADS_DIR_NAME
-from backend.session import get_current_admin_user
+from backend.session import get_current_admin_user, get_user_data_root
 from backend.ws_manager import manager
 from backend.task_manager import task_manager, Task
 from backend.utils import get_local_ip_addresses
+from ascii_colors import trace_exception
 
 system_management_router = APIRouter()
 
@@ -193,3 +199,61 @@ async def purge_temp_files(current_admin: UserAuthDetails = Depends(get_current_
         owner_username=current_admin.username
     )
     return _to_task_info(db_task)
+
+@system_management_router.get("/global-generation-stats", response_model=GlobalGenerationStats)
+def get_global_generation_stats(db: Session = Depends(get_db)):
+    all_users = db.query(DBUser).all()
+    thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+    
+    daily_totals = defaultdict(int)
+
+    for user in all_users:
+        discussions_db_path = get_user_data_root(user.username) / "discussions.db"
+        if discussions_db_path.exists():
+            try:
+                dm = LollmsDataManager(db_path=f"sqlite:///{discussions_db_path.resolve()}")
+                with dm.get_session() as session:
+                    results = session.query(
+                        func.date(dm.MessageModel.created_at),
+                        func.count(dm.MessageModel.id)
+                    ).filter(
+                        dm.MessageModel.sender_type == 'assistant',
+                        dm.MessageModel.created_at >= thirty_days_ago
+                    ).group_by(func.date(dm.MessageModel.created_at)).all()
+
+                    for date_str, count in results:
+                        daily_totals[date_str] += count
+            except Exception as e:
+                trace_exception(e)
+                print(f"Warning: Could not process discussions DB for user {user.username}: {e}")
+
+    # Prepare generations_per_day
+    generations_per_day_list = [
+        UserActivityStat(date=datetime.strptime(date_str, '%Y-%m-%d').date(), count=count)
+        for date_str, count in daily_totals.items()
+    ]
+    generations_per_day_list.sort(key=lambda x: x.date)
+
+    # Prepare weekday stats
+    weekday_data = defaultdict(list)
+    for stat in generations_per_day_list:
+        weekday_data[stat.date.weekday()].append(stat.count)
+
+    weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    mean_per_weekday = {}
+    variance_per_weekday = {}
+
+    for i, day_name in enumerate(weekday_names):
+        counts = weekday_data.get(i, [])
+        if len(counts) > 0:
+            mean_per_weekday[day_name] = statistics.mean(counts)
+            variance_per_weekday[day_name] = statistics.variance(counts) if len(counts) > 1 else 0.0
+        else:
+            mean_per_weekday[day_name] = 0.0
+            variance_per_weekday[day_name] = 0.0
+            
+    return GlobalGenerationStats(
+        generations_per_day=generations_per_day_list,
+        mean_per_weekday=mean_per_weekday,
+        variance_per_weekday=variance_per_weekday
+    )

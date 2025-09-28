@@ -128,10 +128,16 @@ class UserStats(BaseModel):
     tasks_per_day: List[UserActivityStat]
     messages_per_day: List[UserActivityStat]
 
+class GlobalGenerationStats(BaseModel):
+    generations_per_day: List[UserActivityStat]
+    mean_per_weekday: Dict[str, float]
+    variance_per_weekday: Dict[str, float]
+
 class UserForAdminPanel(BaseModel):
     id: int
     username: str
     email: Optional[EmailStr] = None
+    icon: Optional[str] = None
     is_admin: bool = False
     is_moderator: bool = False
     is_active: bool = True
@@ -139,6 +145,7 @@ class UserForAdminPanel(BaseModel):
     last_activity_at: Optional[datetime.datetime] = None
     
     is_online: bool = False
+    connection_count: int = 0
     api_key_count: int = 0
     task_count: int = 0
     generation_count: int = 0

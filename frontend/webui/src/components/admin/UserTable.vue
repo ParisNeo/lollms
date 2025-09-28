@@ -1,4 +1,3 @@
-# [UPDATE] frontend/webui/src/components/admin/UserTable.vue
 <script setup>
 import { computed, ref, onMounted } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -12,6 +11,7 @@ import UserStatsModal from './UserStatsModal.vue';
 // Icons
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconXCircle from '../../assets/icons/IconXCircle.vue';
+import IconLink from '../../assets/icons/IconLink.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
@@ -117,8 +117,9 @@ function openEditModal(user) {
 
 function openStatsModal(user) {
     selectedUserForStats.value = user;
-    uiStore.openModal('userStats');
+    uiStore.openModal('userStats', { userId: user.id, username: user.username });
 }
+
 
 async function handleMessageUser(user) {
     await router.push('/');
@@ -182,6 +183,9 @@ onMounted(() => {
                                 <button @click="handleSort('username')" class="flex items-center gap-1">User <span v-if="sortKey === 'username'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
                             <th scope="col" class="table-header">Status</th>
+                             <th scope="col" class="table-header">
+                                <button @click="handleSort('connection_count')" class="flex items-center gap-1">Connections<span v-if="sortKey === 'connection_count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
+                            </th>
                             <th scope="col" class="table-header">
                                 <button @click="handleSort('last_activity_at')" class="flex items-center gap-1">Last Seen <span v-if="sortKey === 'last_activity_at'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
@@ -215,6 +219,11 @@ onMounted(() => {
                                 <div class="flex items-center gap-2">
                                     <span class="w-3 h-3 rounded-full" :class="user.is_online ? 'bg-green-500' : 'bg-gray-400'" :title="user.is_online ? 'Online' : 'Offline'"></span>
                                     <span :class="user.is_active ? 'status-badge-green' : 'status-badge-red'" class="status-badge">{{ user.is_active ? 'Active' : 'Inactive' }}</span>
+                                </div>
+                            </td>
+                            <td class="table-cell text-sm text-center font-mono text-gray-500 dark:text-gray-400">
+                                <div class="flex items-center justify-center gap-1" :title="`${user.connection_count} active connections`">
+                                    <IconLink class="w-4 h-4"/> {{ user.connection_count }}
                                 </div>
                             </td>
                             <td class="table-cell text-sm text-gray-500 dark:text-gray-400">{{ formatLastSeen(user.last_activity_at) }}</td>

@@ -107,6 +107,8 @@ export const useAdminStore = defineStore('admin', () => {
     
     const serverInfo = ref(null);
     const isLoadingServerInfo = ref(false);
+    const globalGenerationStats = ref(null);
+    const isLoadingGlobalGenerationStats = ref(false);
 
 
     const appFilters = reactive(getStoredFilters('lollms-app-filters', {
@@ -331,6 +333,19 @@ export const useAdminStore = defineStore('admin', () => {
             return null;
         }
     }    
+
+    async function fetchGlobalGenerationStats() {
+        isLoadingGlobalGenerationStats.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/global-generation-stats');
+            globalGenerationStats.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch global generation stats:", error);
+            globalGenerationStats.value = null;
+        } finally {
+            isLoadingGlobalGenerationStats.value = false;
+        }
+    }
     
     async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) {
         const { useTasksStore } = await import('./tasks');
@@ -690,6 +705,7 @@ export const useAdminStore = defineStore('admin', () => {
         exportCategory, importCategoryFromFile,
         connectedUsers, isLoadingConnectedUsers, fetchConnectedUsers,
         serverInfo, isLoadingServerInfo, fetchServerInfo,
+        globalGenerationStats, isLoadingGlobalGenerationStats, fetchGlobalGenerationStats,
         generateIconForModel,
         startApp,
         stopApp,

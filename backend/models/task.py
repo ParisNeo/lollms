@@ -1,4 +1,4 @@
-# [UPDATE] backend/models/task.py
+# backend/models/task.py
 import datetime
 from typing import List, Optional, Any
 from pydantic import BaseModel
