@@ -11,6 +11,7 @@ import DataStoresView from '../views/DataStoresView.vue';
 import FriendsView from '../views/FriendsView.vue';
 import SsoLoginView from '../views/SsoLoginView.vue';
 import WelcomeView from '../views/WelcomeView.vue';
+import ImageStudioView from '../views/ImageStudioView.vue'; // NEW: Import ImageStudioView
 
 const routes = [
   {
@@ -74,6 +75,12 @@ const routes = [
     path: '/voices-studio', 
     name: 'VoicesStudio', 
     component: () => import('../views/VoicesStudioView.vue'), meta: { requiresAuth: true } 
+  },
+  {
+    path: '/image-studio', // NEW ROUTE
+    name: 'ImageStudioView',
+    component: ImageStudioView,
+    meta: { requiresAuth: true, minLevel: 3 },
   },
 ];
 

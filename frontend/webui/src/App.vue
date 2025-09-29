@@ -6,7 +6,8 @@ import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
 import { usePyodideStore } from './stores/pyodide';
 import { useTasksStore } from './stores/tasks';
-import { useDiscussionsStore } from './stores/discussions'; 
+import { useDiscussionsStore } from './stores/discussions';
+import { useImageStore } from './stores/images'; 
 import logoDefault from './assets/logo.png';
 
 // Import Layouts
@@ -71,6 +72,7 @@ const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
 const tasksStore = useTasksStore();
 const discussionsStore = useDiscussionsStore();
+const imageStore = useImageStore();
 const route = useRoute();
 
 const activeModal = computed(() => uiStore.activeModal);

@@ -1,0 +1,1 @@
+import{ap as p}from"./index-BeFsqOLE.js";function l(e,c){var i,t,o;e.accDescr&&((i=c.setAccDescription)==null||i.call(c,e.accDescr)),e.accTitle&&((t=c.setAccTitle)==null||t.call(c,e.accTitle)),e.title&&((o=c.setDiagramTitle)==null||o.call(c,e.title))}p(l,"populateCommonDb");export{l as p};

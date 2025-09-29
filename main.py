@@ -70,6 +70,7 @@ from backend.routers.zoos.prompts_zoo import prompts_zoo_router
 from backend.routers.zoos.personalities_zoo import personalities_zoo_router
 from backend.routers.discussion_groups import discussion_groups_router
 from backend.routers.voices_studio import voices_studio_router
+from backend.routers.image_studio import image_studio_router
 
 from backend.routers.tasks import tasks_router
 from backend.task_manager import task_manager
@@ -440,6 +441,8 @@ app.include_router(assets_router)
 app.include_router(build_discussions_router())
 app.include_router(discussion_groups_router)
 app.include_router(voices_studio_router)
+app.include_router(image_studio_router)
+
 
 add_ui_routes(app)
 

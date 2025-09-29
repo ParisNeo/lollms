@@ -18,6 +18,8 @@ import IconSignOut from '../../assets/icons/IconSignOut.vue';
 import IconChevronUp from '../../assets/icons/IconChevronUp.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
+
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -33,6 +35,7 @@ const user = computed(() => authStore.user);
 const isAdmin = computed(() => authStore.isAdmin);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
+const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 
 const runningApps = computed(() => {
     const allServices = [...dataStore.userApps, ...dataStore.systemApps];
@@ -209,6 +212,12 @@ const vOnClickOutside = {
                             <router-link v-if="isTtsConfigured" to="/voices-studio" @click="closeMenu" class="menu-item">
                                 <IconMicrophone class="mr-3 h-5 w-5 text-gray-500" />
                                 <span>Voices Studio</span>
+                            </router-link>
+                            <router-link v-if="isTtiConfigured" to="/image-studio" @click="isMenuOpen = false" class="menu-item-button w-full">
+                                <div class="flex items-center space-x-3 truncate">
+                                    <IconPhoto class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                    <div class="truncate text-left"><p class="font-medium truncate text-sm">Image Studio</p></div>
+                                </div>
                             </router-link>
                             <router-link v-if="isAdmin" to="/admin" @click="closeMenu" class="menu-item">
                                 <IconUserGroup class="mr-3 h-5 w-5 text-gray-500" />
