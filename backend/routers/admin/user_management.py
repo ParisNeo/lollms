@@ -2,7 +2,7 @@
 import json
 import shutil
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from sqlalchemy.orm import Session, joinedload, aliased, Query as SQLAlchemyQuery
 from sqlalchemy import func, case, literal_column, exists, select
@@ -29,6 +29,17 @@ from backend.task_manager import task_manager, Task, TaskInfo
 from ascii_colors import trace_exception
 
 user_management_router = APIRouter()
+
+def safe_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            pass
+    return datetime.utcnow()
+
 
 def _to_task_info(db_task) -> "TaskInfo":
     from backend.models.task import TaskInfo
@@ -123,21 +134,20 @@ async def admin_get_all_users(
                 "username": user.username,
                 "email": user.email,
                 "icon": user.icon,
-                "is_admin": user.is_admin or False,
-                "is_moderator": user.is_moderator or False,
+                "is_admin": getattr(user, "is_admin", False) or False,
+                "is_moderator": getattr(user, "is_moderator", False) or False,
                 "is_active": user.is_active,
-                "created_at": user.created_at,
-                "last_activity_at": user.last_activity_at,
+                "created_at": safe_datetime(user.created_at),
+                "last_activity_at": safe_datetime(user.last_activity_at),
                 "is_online": is_online,
                 "connection_count": connection_count,
                 "api_key_count": api_key_count,
                 "task_count": task_count,
-                "generation_count": 0  # Placeholder, logic to be added
+                "generation_count": 0
             }
             users_for_panel.append(UserForAdminPanel.model_validate(user_data))
         except Exception as e:
             trace_exception(e)
-        
     return users_for_panel
 
 @user_management_router.post("/users", response_model=UserPublic, status_code=201)
