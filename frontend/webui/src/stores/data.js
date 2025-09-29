@@ -447,6 +447,34 @@ export const useDataStore = defineStore('data', () => {
         return response.data;
     }
 
+    async function wipeDataStoreGraph(storeId) {
+        const response = await apiClient.delete(`/api/store/${storeId}/graph`);
+        useUiStore().addNotification(response.data.message, 'success');
+    }
+
+    async function addGraphNode({ storeId, nodeData }) {
+        const response = await apiClient.post(`/api/store/${storeId}/graph/nodes`, nodeData);
+        return response.data;
+    }
+
+    async function updateGraphNode({ storeId, nodeId, nodeData }) {
+        const response = await apiClient.put(`/api/store/${storeId}/graph/nodes/${nodeId}`, nodeData);
+        return response.data;
+    }
+
+    async function deleteGraphNode({ storeId, nodeId }) {
+        await apiClient.delete(`/api/store/${storeId}/graph/nodes/${nodeId}`);
+    }
+
+    async function addGraphEdge({ storeId, edgeData }) {
+        const response = await apiClient.post(`/api/store/${storeId}/graph/edges`, edgeData);
+        return response.data;
+    }
+
+    async function deleteGraphEdge({ storeId, edgeId }) {
+        await apiClient.delete(`/api/store/${storeId}/graph/edges/${edgeId}`);
+    }
+
     async function fetchPersonalities() {
          try {
             const [ownedRes, publicRes] = await Promise.all([
@@ -673,6 +701,12 @@ export const useDataStore = defineStore('data', () => {
         updateDataStoreGraph,
         fetchDataStoreGraph,
         queryDataStoreGraph,
+        wipeDataStoreGraph,
+        addGraphNode,
+        updateGraphNode,
+        deleteGraphNode,
+        addGraphEdge,
+        deleteGraphEdge,
         fetchPersonalities, addPersonality,
         updatePersonality, deletePersonality, generatePersonalityFromPrompt, enhancePersonalityPrompt,
         generatePersonalityIcon,

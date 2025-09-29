@@ -1,4 +1,4 @@
-<!-- [CREATE] frontend/webui/src/components/ui/AudioEditor.vue -->
+<!-- [UPDATE] frontend/webui/src/components/ui/AudioEditor.vue -->
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import WaveSurfer from 'wavesurfer.js';

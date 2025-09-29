@@ -1,7 +1,7 @@
 import shutil
 import uuid
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional, Any
 import traceback
 from ascii_colors import trace_exception
 
@@ -46,11 +46,13 @@ from backend.db.models.db_task import DBTask
 # safe_store is expected to be installed
 try:
     import safe_store
+    from safe_store import GraphStore
 except ImportError:
     print(
         "WARNING: safe_store library not found. RAG features will be disabled. Install with: pip install safe_store[all]"
     )
     safe_store = None
+    GraphStore = None
     SafeStoreLogLevel = None
 
 from backend.session import (
@@ -68,10 +70,21 @@ class GraphGenerationRequest(BaseModel):
     model_name: str
     chunk_size: int = 2048
     overlap_size: int = 256
+    ontology: Optional[str] = None
 
 class GraphQueryRequest(BaseModel):
     query: str
     max_k: int = 10
+
+class NodeData(BaseModel):
+    label: str
+    properties: Dict[str, Any] = {}
+
+class EdgeData(BaseModel):
+    source_id: int
+    target_id: int
+    label: str
+    properties: Dict[str, Any] = {}
 
 
 # --- Task Functions ---
@@ -111,13 +124,11 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
                 try:
                     ss.add_document(str(file_path), vectorizer_name=vectorizer_name)
                     processed_count += 1
-                    # --- NEW: Delete the file after successful processing ---
                     try:
                         file_path.unlink()
                         task.log(f"Successfully processed and removed temporary file: {file_path.name}")
                     except Exception as del_err:
                         task.log(f"Warning: Could not delete temporary file {file_path.name}: {del_err}", level="WARNING")
-                    # --- END NEW ---
                 except Exception as e:
                     error_count += 1
                     task.log(f"Error processing {file_path.name}: {e}", level="ERROR")
@@ -139,10 +150,6 @@ def _revectorize_datastore_task(task: Task, username: str, datastore_id: str, ve
     try:
         ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
         
-        # This is a simplified progress reporting for revectorization
-        # In a real-world scenario, safe_store's revectorize would ideally offer callbacks
-        # for more granular progress updates (e.g., per document).
-        # For now, we'll simulate progress or assume it's a single blocking step.
         task.log(f"Starting revectorization of datastore '{datastore_id}' with vectorizer '{vectorizer_name}'.")
         task.set_progress(10)
         
@@ -161,37 +168,44 @@ def _revectorize_datastore_task(task: Task, username: str, datastore_id: str, ve
         db.close()
 
 def _generate_graph_task(task: Task, username: str, datastore_id: str, request_data: dict):
+    if not GraphStore:
+        raise ImportError("GraphStore is not available.")
+    
     db = next(get_db())
-    ss = None
     try:
-        ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
-        task.log("Building LLM client for graph generation.")
-        task.set_progress(5)
-        
         llm_client = build_lollms_client_from_params(
             username=username,
             binding_alias=request_data.get("model_binding"),
             model_name=request_data.get("model_name")
         )
 
-        task.log("Starting graph generation from chunks.")
-        task.set_progress(10)
+        def llm_executor_callback(prompt: str) -> str:
+            return llm_client.generate_text(prompt, max_new_tokens=2048)
+
+        ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
+        gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
         
         with ss:
-            ss.generate_graph_from_chunks(
-                llm_client=llm_client,
-                graph_type=request_data.get("graph_type", "knowledge_graph"),
-                chunk_size=request_data.get("chunk_size", 2048),
-                overlap_size=request_data.get("overlap_size", 256),
-                model_name=request_data.get("model_name")
-            )
-        task.set_progress(95)
+            docs = ss.list_documents()
+            total_docs = len(docs)
+            task.log(f"Found {total_docs} documents to process for graph generation.")
 
+            for i, doc in enumerate(docs):
+                if task.cancellation_event.is_set():
+                    task.log("Graph generation cancelled.", level="WARNING")
+                    break
+                
+                doc_id = doc.get("doc_id")
+                doc_name = Path(doc.get("file_path", "Unknown")).name
+                task.set_file_info(file_name=doc_name, total_files=total_docs)
+                task.log(f"Building graph for document {i+1}/{total_docs}: {doc_name}")
+                
+                gs.build_graph_for_document(doc_id, guidance=request_data.get("ontology"))
+                task.set_progress(int(100 * (i + 1) / total_docs))
+        
         if task.cancellation_event.is_set():
-            task.log("Graph generation was cancelled (or finished before cancellation was effective).", "WARNING")
             task.result = {"message": "Graph generation cancelled."}
         else:
-            task.set_progress(100)
             task.result = {"message": "Graph generation completed successfully."}
             task.log("Graph generation finished.")
 
@@ -202,38 +216,39 @@ def _generate_graph_task(task: Task, username: str, datastore_id: str, request_d
     finally:
         db.close()
 
+
 def _update_graph_task(task: Task, username: str, datastore_id: str, request_data: dict):
-    db = next(get_db())
-    ss = None
-    try:
-        ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
-        task.log("Building LLM client for graph update.")
-        task.set_progress(5)
+    if not GraphStore:
+        raise ImportError("GraphStore is not available.")
         
+    db = next(get_db())
+    try:
         llm_client = build_lollms_client_from_params(
             username=username,
             binding_alias=request_data.get("model_binding"),
             model_name=request_data.get("model_name")
         )
-
-        task.log("Starting graph update from chunks.")
-        task.set_progress(10)
+        def llm_executor_callback(prompt: str) -> str:
+            return llm_client.generate_text(prompt, max_new_tokens=2048)
+        
+        ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
+        gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
         
         with ss:
-            ss.update_graph_from_chunks(
-                llm_client=llm_client,
-                graph_type=request_data.get("graph_type", "knowledge_graph"),
-                chunk_size=request_data.get("chunk_size", 2048),
-                overlap_size=request_data.get("overlap_size", 256),
-                model_name=request_data.get("model_name")
-            )
-        task.set_progress(95)
+            docs = ss.list_documents()
+            total_docs = len(docs)
+            task.log(f"Checking {total_docs} documents for graph updates.")
+
+            for i, doc in enumerate(docs):
+                if task.cancellation_event.is_set():
+                    break
+                doc_id = doc.get("doc_id")
+                gs.build_graph_for_document(doc_id, guidance=request_data.get("ontology"))
+                task.set_progress(int(100 * (i + 1) / total_docs))
 
         if task.cancellation_event.is_set():
-            task.log("Graph update was cancelled (or finished before cancellation was effective).", "WARNING")
             task.result = {"message": "Graph update cancelled."}
         else:
-            task.set_progress(100)
             task.result = {"message": "Graph update completed successfully."}
             task.log("Graph update finished.")
 
@@ -256,12 +271,10 @@ async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDe
     
     try:
         with ss:
-            # Get vectorizers already in the store's DB
             methods_in_db = ss.list_vectorization_methods()
             in_store_formatted = [{"name": m.get("method_name"), "method_name": f"{m.get('method_name')} (dim: {m.get('vector_dim', 'N/A')})"} for m in methods_in_db if m.get("method_name")]
             in_store_formatted.sort(key=lambda x: x["name"])
 
-            # Get all possible vectorizers that can be added
             possible_names = ss.list_possible_vectorizer_names()
             all_possible_formatted = []
             for name in possible_names:
@@ -467,18 +480,17 @@ async def get_datastore_graph(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> Dict:
-    if not safe_store:
-        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    if not GraphStore:
+        raise HTTPException(status_code=501, detail="GraphStore is not available.")
     
-    ss = get_safe_store_instance(current_user.username, datastore_id, db)
     try:
-        with ss:
-            nodes = ss.get_nodes()
-            edges = ss.get_edges()
-            return {"nodes": nodes, "edges": edges}
+        ss = get_safe_store_instance(current_user.username, datastore_id, db)
+        gs = GraphStore(ss, llm_executor_callback=None)
+        nodes = gs.get_all_nodes_for_visualization(limit=5000)
+        edges = gs.get_all_relationships_for_visualization(limit=10000)
+        return {"nodes": nodes, "edges": edges}
     except Exception as e:
         trace_exception(e)
-        # Return empty graph on error, as it might just not exist yet
         return {"nodes": [], "edges": []}
 
 
@@ -489,17 +501,120 @@ async def query_datastore_graph(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> List[Dict]:
-    if not safe_store:
-        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    if not GraphStore:
+        raise HTTPException(status_code=501, detail="GraphStore is not available.")
     
-    ss = get_safe_store_instance(current_user.username, datastore_id, db)
     try:
-        with ss:
-            results = ss.query_graph(request_data.query, request_data.max_k)
-            return results
+        llm_client = build_lollms_client_from_params(username=current_user.username)
+        def llm_executor_callback(prompt: str) -> str:
+            return llm_client.generate_text(prompt, max_new_tokens=2048)
+            
+        ss = get_safe_store_instance(current_user.username, datastore_id, db)
+        gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
+        results = gs.query_graph(request_data.query, output_mode="chunks_summary")
+        return results
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Error querying graph: {e}")
+    
+@store_files_router.delete("/graph", status_code=status.HTTP_200_OK)
+async def wipe_datastore_graph(
+    datastore_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if not GraphStore:
+        raise HTTPException(status_code=501, detail="GraphStore not available.")
+    
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
+        gs = GraphStore(ss)
+        gs.delete_all_graph_data()
+        return {"message": "Graph data has been successfully wiped."}
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"An error occurred while wiping the graph: {e}")
+
+@store_files_router.post("/graph/nodes", response_model=Dict)
+async def add_graph_node(
+    datastore_id: str,
+    node_data: NodeData,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+        gs = GraphStore(ss)
+        node_id = gs.add_node(node_data.label, node_data.properties)
+        return {"id": node_id, "label": node_data.label, "properties": node_data.properties}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@store_files_router.put("/graph/nodes/{node_id}", response_model=Dict)
+async def update_graph_node(
+    datastore_id: str,
+    node_id: int,
+    node_data: NodeData,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+        gs = GraphStore(ss)
+        gs.update_node(node_id, node_data.label, node_data.properties)
+        return {"id": node_id, "label": node_data.label, "properties": node_data.properties}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@store_files_router.delete("/graph/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_graph_node(
+    datastore_id: str,
+    node_id: int,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+        gs = GraphStore(ss)
+        gs.delete_node(node_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@store_files_router.post("/graph/edges", response_model=Dict)
+async def add_graph_edge(
+    datastore_id: str,
+    edge_data: EdgeData,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+        gs = GraphStore(ss)
+        edge_id = gs.add_relationship(edge_data.source_id, edge_data.target_id, edge_data.label, edge_data.properties)
+        return {"id": edge_id, **edge_data.model_dump()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@store_files_router.delete("/graph/edges/{edge_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_graph_edge(
+    datastore_id: str,
+    edge_id: int,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+        gs = GraphStore(ss)
+        gs.delete_relationship(edge_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 datastore_router = APIRouter(prefix="/api/datastores", tags=["RAG DataStores"])
 

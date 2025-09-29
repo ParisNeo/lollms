@@ -1,12 +1,12 @@
 <!-- [UPDATE] frontend/webui/src/views/VoicesStudioView.vue -->
 <script setup>
-import { ref, onMounted, computed, watch, nextTick } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useVoicesStore } from '../stores/voices';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
-import AudioEditor from '../components/ui/AudioEditor.vue'; // NEW
+import AudioEditor from '../components/ui/AudioEditor.vue';
 import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
 import IconPlayCircle from '../assets/icons/IconPlayCircle.vue';
@@ -58,12 +58,16 @@ async function handleSubmit() {
     isSubmitting.value = true;
     try {
         const formData = new FormData();
-        Object.entries(form.value).forEach(([key, value]) => {
-            if (key !== 'file' && key !== 'reverb_delay' && key !== 'reverb_attenuation') formData.append(key, value);
-        });
+        formData.append('alias', form.value.alias);
+        formData.append('language', form.value.language);
+        formData.append('pitch', form.value.pitch);
+        formData.append('speed', form.value.speed);
+        formData.append('gain', form.value.gain);
         const reverbParams = { delay: form.value.reverb_delay, attenuation: form.value.reverb_attenuation };
         formData.append('reverb_params_json', JSON.stringify(reverbParams));
-        if (form.value.file) formData.append('file', form.value.file);
+        if (form.value.file) {
+            formData.append('file', form.value.file);
+        }
 
         if (isEditMode.value) {
             if (!form.value.file) { uiStore.addNotification('To apply new audio effects, you must re-upload the original audio file.', 'warning'); isSubmitting.value = false; return; }
@@ -98,7 +102,7 @@ async function handleGenerateTestAudio(voice) {
     }
 }
 
-async function handleApplyEffects(voiceId) {
+async function handleApplyEffects(voiceId, trim = {}) {
     if (!generatedAudioData.value[voiceId]) return;
     isApplyingEffects.value[voiceId] = true;
     try {
@@ -108,31 +112,13 @@ async function handleApplyEffects(voiceId) {
             pitch: params.pitch,
             speed: params.speed,
             gain: params.gain,
-            reverb_params: { delay: params.reverb_delay, attenuation: params.reverb_attenuation }
-        });
-        if (result && result.audio_b64) {
-            generatedAudioData.value[voiceId] = { b64: result.audio_b64, url: b64toUrl(result.audio_b64) };
-            uiStore.addNotification('Effects applied.', 'success');
-        }
-    } finally {
-        isApplyingEffects.value[voiceId] = false;
-    }
-}
-
-async function handleTrim(voiceId, { start, end }) {
-    if (!generatedAudioData.value[voiceId]) return;
-    isApplyingEffects.value[voiceId] = true;
-    try {
-        const params = effectsParams.value[voiceId];
-        const result = await voicesStore.applyEffects({
-            audio_b64: generatedAudioData.value[voiceId].b64,
-            pitch: params.pitch, speed: params.speed, gain: params.gain,
             reverb_params: { delay: params.reverb_delay, attenuation: params.reverb_attenuation },
-            trim_start: start, trim_end: end
+            trim_start: trim.start,
+            trim_end: trim.end
         });
         if (result && result.audio_b64) {
             generatedAudioData.value[voiceId] = { b64: result.audio_b64, url: b64toUrl(result.audio_b64) };
-            uiStore.addNotification('Audio trimmed.', 'success');
+            uiStore.addNotification(trim.start ? 'Audio trimmed.' : 'Effects applied.', 'success');
         }
     } finally {
         isApplyingEffects.value[voiceId] = false;
@@ -210,7 +196,65 @@ onMounted(() => {
     <PageViewLayout title="Voices Studio" :title-icon="IconMicrophone">
         <template #main>
             <div class="p-4 sm:p-6 lg:p-8 space-y-8">
-                <!-- ... existing form code ... -->
+                <div v-if="!isFormVisible" class="flex justify-between items-center">
+                    <h2 class="text-2xl font-bold">Your Custom Voices</h2>
+                    <button @click="showAddForm" class="btn btn-primary">
+                        <IconPlus class="w-5 h-5 mr-2" />
+                        Add New Voice
+                    </button>
+                </div>
+
+                <!-- Add/Edit Form -->
+                <div v-if="isFormVisible" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md space-y-6">
+                    <h3 class="text-xl font-semibold">{{ isEditMode ? 'Edit Voice' : 'Add a New Voice' }}</h3>
+                    <form @submit.prevent="handleSubmit" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="alias" class="block text-sm font-medium">Alias</label>
+                                <input type="text" id="alias" v-model="form.alias" class="input-field mt-1" required>
+                            </div>
+                            <div>
+                                <label for="language" class="block text-sm font-medium">Language (e.g., en, fr, es)</label>
+                                <input type="text" id="language" v-model="form.language" class="input-field mt-1" required>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div>
+                                <label for="pitch" class="block text-sm font-medium">Pitch ({{form.pitch.toFixed(2)}})</label>
+                                <input type="range" id="pitch" v-model.number="form.pitch" class="w-full mt-1" step="0.05" min="0.5" max="2.0" required>
+                            </div>
+                             <div>
+                                <label for="speed" class="block text-sm font-medium">Speed ({{form.speed.toFixed(2)}}x)</label>
+                                <input type="range" id="speed" v-model.number="form.speed" class="w-full mt-1" step="0.05" min="0.5" max="2.0" required>
+                            </div>
+                            <div>
+                                <label for="gain" class="block text-sm font-medium">Volume/Gain ({{form.gain.toFixed(1)}} dB)</label>
+                                <input type="range" id="gain" v-model.number="form.gain" class="w-full mt-1" step="0.5" min="-20" max="20" required>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="reverb-delay" class="block text-sm font-medium">Reverb Delay ({{form.reverb_delay}}ms)</label>
+                                <input type="range" id="reverb-delay" v-model.number="form.reverb_delay" class="w-full mt-1" step="5" min="0" max="200">
+                            </div>
+                            <div>
+                                <label for="reverb-attenuation" class="block text-sm font-medium">Reverb Attenuation ({{form.reverb_attenuation.toFixed(1)}} dB)</label>
+                                <input type="range" id="reverb-attenuation" v-model.number="form.reverb_attenuation" class="w-full mt-1" step="0.5" min="0" max="20">
+                            </div>
+                        </div>
+                        <div>
+                            <label for="file" class="block text-sm font-medium">Audio File (.wav, .mp3)</label>
+                            <input type="file" id="file" @change="handleFileChange" class="input-field-file mt-1" accept="audio/wav,audio/mpeg">
+                            <p v-if="isEditMode" class="text-xs text-gray-500 mt-1">Re-upload original file to apply new audio effects.</p>
+                        </div>
+                        <div class="flex justify-end gap-3">
+                            <button type="button" @click="cancelForm" class="btn btn-secondary">Cancel</button>
+                            <button type="submit" class="btn btn-primary" :disabled="isSubmitting">{{ isSubmitting ? 'Saving...' : 'Save Voice' }}</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Voice List -->
                 <div v-if="isLoading" class="text-center p-8">Loading your voices...</div>
                 <div v-else-if="voices.length === 0 && !isFormVisible" class="text-center p-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                     <p>You haven't uploaded any custom voices yet.</p>
@@ -218,7 +262,19 @@ onMounted(() => {
                 <div v-else class="space-y-4">
                     <div v-for="voice in voices" :key="voice.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
                         <div class="flex justify-between items-start">
-                            <!-- ... existing voice info and buttons ... -->
+                            <div>
+                                <h4 class="font-bold text-lg flex items-center gap-2">
+                                    {{ voice.alias }}
+                                    <span v-if="user && user.active_voice_id === voice.id" class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300">Active</span>
+                                </h4>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">Language: {{ voice.language }}</p>
+                            </div>
+                            <div class="flex gap-2">
+                                <button v-if="user && user.active_voice_id !== voice.id" @click="handleSetActive(voice.id)" class="btn btn-secondary btn-sm">Set Active</button>
+                                <button @click="handleDuplicate(voice.id)" class="btn btn-secondary btn-sm"><IconCopy class="w-4 h-4 mr-1"/>Duplicate</button>
+                                <button @click="showEditForm(voice)" class="btn btn-secondary btn-sm">Edit</button>
+                                <button @click="handleDelete(voice)" class="btn btn-danger btn-sm">Delete</button>
+                            </div>
                         </div>
                         <div class="mt-4 pt-4 border-t dark:border-gray-700 space-y-4">
                             <h5 class="text-base font-semibold">Test & Edit Voice</h5>
@@ -235,7 +291,7 @@ onMounted(() => {
 
                             <div v-if="generatedAudioData[voice.id]" class="mt-4 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-lg space-y-4">
                                 <h6 class="font-semibold">Audio Editor</h6>
-                                <AudioEditor :audio-url="generatedAudioData[voice.id].url" @trimmed="args => handleTrim(voice.id, args)" />
+                                <AudioEditor :audio-url="generatedAudioData[voice.id].url" @trimmed="args => handleApplyEffects(voice.id, args)" />
                                 <div v-if="effectsParams[voice.id]" class="space-y-4 pt-4">
                                     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                          <div><label class="block text-xs font-medium">Pitch ({{effectsParams[voice.id].pitch.toFixed(2)}})</label><input type="range" v-model.number="effectsParams[voice.id].pitch" class="w-full" step="0.05" min="0.5" max="2.0"></div>
@@ -247,7 +303,7 @@ onMounted(() => {
                                          <div><label class="block text-xs font-medium">Reverb Attenuation ({{effectsParams[voice.id].reverb_attenuation.toFixed(1)}} dB)</label><input type="range" v-model.number="effectsParams[voice.id].reverb_attenuation" class="w-full" step="0.5" min="0" max="20"></div>
                                     </div>
                                     <div class="flex justify-end">
-                                        <button @click="handleApplyEffects(voice.id)" class="btn btn-secondary" :disabled="isApplyingEffects[voice.id]">
+                                        <button @click="handleApplyEffects(voice.id, {})" class="btn btn-secondary" :disabled="isApplyingEffects[voice.id]">
                                             <IconAnimateSpin v-if="isApplyingEffects[voice.id]" class="w-4 h-4 mr-2" />
                                             Apply Effects
                                         </button>
@@ -255,7 +311,7 @@ onMounted(() => {
                                 </div>
                                 <div class="flex justify-end gap-2 pt-4 border-t dark:border-gray-700">
                                     <button @click="handleDownload(voice.id)" class="btn btn-secondary"><IconArrowDownTray class="w-4 h-4 mr-2"/>Download</button>
-                                    <button @click="handleSaveAsNew(voice.id)" class="btn btn-primary"><IconPlus class="w-4 h-4 mr-2"/>Save as New Voice</button>
+                                    <button @click="handleSaveAsNew(voice.id)" class="btn btn-primary" :disabled="isSubmitting"><IconPlus class="w-4 h-4 mr-2"/>Save as New Voice</button>
                                 </div>
                             </div>
                         </div>

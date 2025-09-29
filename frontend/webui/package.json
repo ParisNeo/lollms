@@ -46,9 +46,11 @@
     "mermaid": "^11.11.0",
     "pinia": "2.1.7",
     "svg-pan-zoom": "3.6.2",
+    "vis-network": "^10.0.2",
     "vue": "3.5.0",
     "vue-codemirror": "6.1.1",
-    "vue-router": "4.3.2"
+    "vue-router": "4.3.2",
+    "wavesurfer.js": "^7.10.3"
   },
   "devDependencies": {
     "@tailwindcss/typography": "0.5.13",
