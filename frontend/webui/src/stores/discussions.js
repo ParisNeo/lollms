@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/discussions.js
+// [UPDATE] frontend/webui/src/stores/discussions.js
 import { defineStore, storeToRefs } from 'pinia';
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import apiClient from '../services/api'; // Import apiClient
@@ -160,7 +160,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 { text },
                 { responseType: 'blob' }
             );
-            const audioBlob = new Blob([response.data], { type: 'audio/mpeg' });
+            const audioBlob = new Blob([response.data], { type: 'audio/wav' });
             const audioUrl = URL.createObjectURL(audioBlob);
             
             ttsState.value[messageId] = { isLoading: false, audioUrl: audioUrl, error: null };

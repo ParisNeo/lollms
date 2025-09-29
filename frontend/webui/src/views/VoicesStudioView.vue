@@ -6,13 +6,15 @@ import { useVoicesStore } from '../stores/voices';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
-import AudioEditor from '../components/ui/AudioEditor.vue';
+import VoiceEditor from '../components/voices/VoiceEditor.vue';
 import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
-import IconPlayCircle from '../assets/icons/IconPlayCircle.vue';
+import IconPencil from '../assets/icons/IconPencil.vue';
+import IconTrash from '../assets/icons/IconTrash.vue';
 import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
-import IconCopy from '../assets/icons/IconCopy.vue';
-import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
+import IconCog from '../assets/icons/IconCog.vue';
+import IconChevronDown from '../assets/icons/IconChevronDown.vue';
+import IconSave from '../assets/icons/IconSave.vue';
 
 const voicesStore = useVoicesStore();
 const authStore = useAuthStore();
@@ -21,41 +23,129 @@ const uiStore = useUiStore();
 const { voices, isLoading } = storeToRefs(voicesStore);
 const { user } = storeToRefs(authStore);
 
-// Form state for creating/editing a voice
-const isFormVisible = ref(false);
-const editingVoice = ref(null);
-const form = ref({ alias: '', language: 'en', pitch: 1.0, speed: 1.0, gain: 0.0, reverb_delay: 0, reverb_attenuation: 0.0, file: null });
-const isSubmitting = ref(false);
+const selectedVoiceId = ref(null);
+const isAddFormVisible = ref(false);
+const newVoiceForm = ref({ alias: '', language: 'en', file: null });
+const isSubmittingNew = ref(false);
+const isRecording = ref(false);
+const mediaRecorder = ref(null);
+const audioChunks = ref([]);
+const recordedAudioUrl = ref(null);
+const recordedAudioBlob = ref(null);
+const isControlsCollapsed = ref(true); 
+const isSettingActive = ref(false); 
 
-// State for the testing and editing section
-const testText = ref({});
-const generatedAudioData = ref({}); // { [voiceId]: { b64: string, url: string } }
-const isTesting = ref({});
-const effectsParams = ref({}); // { [voiceId]: { pitch, speed, ... } }
-const isApplyingEffects = ref({});
+const selectedVoice = computed(() => voices.value.find(v => v.id === selectedVoiceId.value));
+const form = ref({ alias: '', language: 'en', pitch: 1.0, speed: 1.0, gain: 0.0, reverb_delay: 0, reverb_attenuation: 0.0 });
 
-const isEditMode = computed(() => !!editingVoice.value);
 
-// Helper to convert base64 to a blob URL
-function b64toUrl(b64Data) {
-    const byteCharacters = atob(b64Data);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: 'audio/wav' });
-    return URL.createObjectURL(blob);
+function showAddForm() {
+    selectedVoiceId.value = null;
+    isAddFormVisible.value = true;
+    newVoiceForm.value = { alias: '', language: 'en', file: null };
+    recordedAudioUrl.value = null;
+    recordedAudioBlob.value = null;
+    isControlsCollapsed.value = true;
 }
 
-// Form management
-function showAddForm() { isFormVisible.value = true; editingVoice.value = null; form.value = { alias: '', language: 'en', pitch: 1.0, speed: 1.0, gain: 0.0, reverb_delay: 0, reverb_attenuation: 0.0, file: null }; }
-function showEditForm(voice) { isFormVisible.value = true; editingVoice.value = { ...voice }; form.value = { alias: voice.alias, language: voice.language, pitch: voice.pitch, speed: voice.speed, gain: voice.gain, reverb_delay: voice.reverb_params?.delay || 0, reverb_attenuation: voice.reverb_params?.attenuation || 0.0, file: null }; }
-function cancelForm() { isFormVisible.value = false; editingVoice.value = null; }
-function handleFileChange(event) { form.value.file = event.target.files[0] || null; }
+function cancelAddForm() {
+    isAddFormVisible.value = false;
+    stopRecording();
+}
 
-async function handleSubmit() {
-    isSubmitting.value = true;
+function handleNewFileChange(event) {
+    newVoiceForm.value.file = event.target.files[0] || null;
+    recordedAudioUrl.value = URL.createObjectURL(newVoiceForm.value.file);
+    recordedAudioBlob.value = newVoiceForm.value.file;
+}
+
+async function startRecording() {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder.value = new MediaRecorder(stream);
+            audioChunks.value = [];
+            mediaRecorder.value.ondataavailable = event => {
+                audioChunks.value.push(event.data);
+            };
+            mediaRecorder.value.onstop = () => {
+                recordedAudioBlob.value = new Blob(audioChunks.value, { type: 'audio/wav' });
+                recordedAudioUrl.value = URL.createObjectURL(recordedAudioBlob.value);
+            };
+            mediaRecorder.value.start();
+            isRecording.value = true;
+        } catch (err) {
+            uiStore.addNotification('Microphone access denied or not available.', 'error');
+        }
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder.value && isRecording.value) {
+        mediaRecorder.value.stop();
+        isRecording.value = false;
+    }
+}
+
+async function handleAddNewVoice() {
+    isSubmittingNew.value = true;
+    try {
+        const fileToUpload = newVoiceForm.value.file || recordedAudioBlob.value;
+        if (!fileToUpload) {
+            uiStore.addNotification('An audio file or recording is required.', 'warning');
+            return;
+        }
+        const formData = new FormData();
+        formData.append('alias', newVoiceForm.value.alias);
+        formData.append('language', newVoiceForm.value.language);
+        formData.append('file', fileToUpload, "recorded_voice.wav");
+        
+        const newVoice = await voicesStore.uploadVoice(formData);
+        if (newVoice) {
+            cancelAddForm();
+            selectVoice(newVoice.id);
+        }
+
+    } finally {
+        isSubmittingNew.value = false;
+    }
+}
+
+function selectVoice(voiceId) {
+    isAddFormVisible.value = false;
+    selectedVoiceId.value = voiceId;
+}
+
+async function handleDeleteVoice(voice) {
+    const confirmed = await uiStore.showConfirmation({
+        title: `Delete Voice: ${voice.alias}`,
+        message: 'Are you sure you want to permanently delete this voice? This action cannot be undone.',
+        confirmText: 'Delete'
+    });
+    if (confirmed) {
+        await voicesStore.deleteVoice(voice.id);
+        if (selectedVoiceId.value === voice.id) {
+            selectedVoiceId.value = null;
+        }
+    }
+}
+
+// WATCHER: Update local form when a new voice is selected
+watch(selectedVoice, (newVoice) => {
+    if (newVoice) {
+        form.value = {
+            alias: newVoice.alias, language: newVoice.language,
+            pitch: newVoice.pitch, speed: newVoice.speed, gain: newVoice.gain,
+            reverb_delay: newVoice.reverb_params?.delay || 0,
+            reverb_attenuation: newVoice.reverb_params?.attenuation || 0.0,
+        };
+        isControlsCollapsed.value = false; // Open controls for the newly selected voice
+    }
+}, { immediate: true });
+
+async function handleSaveEffects() {
+    if (!selectedVoice.value) return;
+    isSubmittingNew.value = true;
     try {
         const formData = new FormData();
         formData.append('alias', form.value.alias);
@@ -65,127 +155,23 @@ async function handleSubmit() {
         formData.append('gain', form.value.gain);
         const reverbParams = { delay: form.value.reverb_delay, attenuation: form.value.reverb_attenuation };
         formData.append('reverb_params_json', JSON.stringify(reverbParams));
-        if (form.value.file) {
-            formData.append('file', form.value.file);
-        }
-
-        if (isEditMode.value) {
-            if (!form.value.file) { uiStore.addNotification('To apply new audio effects, you must re-upload the original audio file.', 'warning'); isSubmitting.value = false; return; }
-            await voicesStore.updateVoice(editingVoice.value.id, formData);
-        } else {
-            if (!form.value.file) { uiStore.addNotification('An audio file is required to create a new voice.', 'warning'); isSubmitting.value = false; return; }
-            await voicesStore.uploadVoice(formData);
-        }
-        cancelForm();
+        
+        await voicesStore.updateVoice(selectedVoiceId.value, formData);
+        uiStore.addNotification('Voice effects and metadata saved.', 'success');
     } finally {
-        isSubmitting.value = false;
+        isSubmittingNew.value = false;
     }
 }
 
-// Voice card actions
-async function handleSetActive(voiceId) { await voicesStore.setActiveVoice(voiceId); }
-async function handleDelete(voice) { const confirmed = await uiStore.showConfirmation({ title: `Delete Voice '${voice.alias}'?`, message: 'This action is permanent and cannot be undone.', confirmText: 'Delete' }); if (confirmed) await voicesStore.deleteVoice(voice.id); }
-async function handleDuplicate(voiceId) { await voicesStore.duplicateVoice(voiceId); }
-
-// Test & Edit actions
-async function handleGenerateTestAudio(voice) {
-    const text = testText.value[voice.id];
-    if (!text || !text.trim()) { uiStore.addNotification('Please enter text to test the voice.', 'warning'); return; }
-    isTesting.value[voice.id] = true;
+async function handleSetActive() {
+    if (!selectedVoiceId.value || isSettingActive.value) return;
+    isSettingActive.value = true;
     try {
-        const result = await voicesStore.testVoice({ text, voice_id: voice.id });
-        if (result && result.audio_b64) {
-            generatedAudioData.value[voice.id] = { b64: result.audio_b64, url: b64toUrl(result.audio_b64) };
-        }
+        await voicesStore.setActiveVoice(selectedVoiceId.value);
     } finally {
-        isTesting.value[voice.id] = false;
+        isSettingActive.value = false;
     }
 }
-
-async function handleApplyEffects(voiceId, trim = {}) {
-    if (!generatedAudioData.value[voiceId]) return;
-    isApplyingEffects.value[voiceId] = true;
-    try {
-        const params = effectsParams.value[voiceId];
-        const result = await voicesStore.applyEffects({
-            audio_b64: generatedAudioData.value[voiceId].b64,
-            pitch: params.pitch,
-            speed: params.speed,
-            gain: params.gain,
-            reverb_params: { delay: params.reverb_delay, attenuation: params.reverb_attenuation },
-            trim_start: trim.start,
-            trim_end: trim.end
-        });
-        if (result && result.audio_b64) {
-            generatedAudioData.value[voiceId] = { b64: result.audio_b64, url: b64toUrl(result.audio_b64) };
-            uiStore.addNotification(trim.start ? 'Audio trimmed.' : 'Effects applied.', 'success');
-        }
-    } finally {
-        isApplyingEffects.value[voiceId] = false;
-    }
-}
-
-function handleDownload(voiceId) {
-    const audioData = generatedAudioData.value[voiceId];
-    if (!audioData || !audioData.url) return;
-    const a = document.createElement('a');
-    a.href = audioData.url;
-    a.download = `edited_voice_${voiceId.substring(0, 8)}.wav`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-}
-
-async function handleSaveAsNew(voiceId) {
-    const audioData = generatedAudioData.value[voiceId];
-    if (!audioData) return;
-    const result = await uiStore.showConfirmation({
-        title: 'Save As New Voice',
-        message: 'Enter an alias for this new voice:',
-        inputType: 'text',
-        inputValue: `${voices.value.find(v => v.id === voiceId)?.alias || 'New Voice'} (edited)`,
-        confirmText: 'Save',
-    });
-    if (result.confirmed && result.value) {
-        isSubmitting.value = true;
-        try {
-            const blob = await fetch(audioData.url).then(r => r.blob());
-            const file = new File([blob], "edited_voice.wav", { type: "audio/wav" });
-            const params = effectsParams.value[voiceId];
-            
-            const formData = new FormData();
-            formData.append('alias', result.value);
-            formData.append('language', voices.value.find(v => v.id === voiceId)?.language || 'en');
-            formData.append('pitch', params.pitch);
-            formData.append('speed', params.speed);
-            formData.append('gain', params.gain);
-            const reverbParams = { delay: params.reverb_delay, attenuation: params.reverb_attenuation };
-            formData.append('reverb_params_json', JSON.stringify(reverbParams));
-            formData.append('file', file);
-            
-            await voicesStore.uploadVoice(formData);
-            generatedAudioData.value[voiceId] = null; // Clear editor
-        } finally {
-            isSubmitting.value = false;
-        }
-    }
-}
-
-
-watch(voices, (newVoices) => {
-    newVoices.forEach(voice => {
-        if (!effectsParams.value[voice.id]) {
-            effectsParams.value[voice.id] = {
-                pitch: voice.pitch, speed: voice.speed, gain: voice.gain,
-                reverb_delay: voice.reverb_params?.delay || 0,
-                reverb_attenuation: voice.reverb_params?.attenuation || 0.0
-            };
-        }
-        if(!testText.value[voice.id]){
-             testText.value[voice.id] = 'Hello, this is a test of my voice.';
-        }
-    });
-}, { deep: true, immediate: true });
 
 onMounted(() => {
     voicesStore.fetchVoices();
@@ -194,129 +180,111 @@ onMounted(() => {
 
 <template>
     <PageViewLayout title="Voices Studio" :title-icon="IconMicrophone">
-        <template #main>
-            <div class="p-4 sm:p-6 lg:p-8 space-y-8">
-                <div v-if="!isFormVisible" class="flex justify-between items-center">
-                    <h2 class="text-2xl font-bold">Your Custom Voices</h2>
-                    <button @click="showAddForm" class="btn btn-primary">
-                        <IconPlus class="w-5 h-5 mr-2" />
-                        Add New Voice
-                    </button>
+        <template #sidebar>
+            <!-- FIX: Wrap all sidebar content in a h-full flex-col min-h-0 container -->
+            <div class="h-full flex flex-col min-h-0">
+                <button @click="showAddForm" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 transition-colors flex-shrink-0">
+                    <IconPlus class="w-5 h-5 flex-shrink-0" />
+                    <span>New Voice</span>
+                </button>
+            
+                <div class="mt-4 flex-shrink-0">
+                    <h3 class="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 px-3">Your Voices</h3>
                 </div>
-
-                <!-- Add/Edit Form -->
-                <div v-if="isFormVisible" class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md space-y-6">
-                    <h3 class="text-xl font-semibold">{{ isEditMode ? 'Edit Voice' : 'Add a New Voice' }}</h3>
-                    <form @submit.prevent="handleSubmit" class="space-y-4">
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label for="alias" class="block text-sm font-medium">Alias</label>
-                                <input type="text" id="alias" v-model="form.alias" class="input-field mt-1" required>
-                            </div>
-                            <div>
-                                <label for="language" class="block text-sm font-medium">Language (e.g., en, fr, es)</label>
-                                <input type="text" id="language" v-model="form.language" class="input-field mt-1" required>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label for="pitch" class="block text-sm font-medium">Pitch ({{form.pitch.toFixed(2)}})</label>
-                                <input type="range" id="pitch" v-model.number="form.pitch" class="w-full mt-1" step="0.05" min="0.5" max="2.0" required>
-                            </div>
-                             <div>
-                                <label for="speed" class="block text-sm font-medium">Speed ({{form.speed.toFixed(2)}}x)</label>
-                                <input type="range" id="speed" v-model.number="form.speed" class="w-full mt-1" step="0.05" min="0.5" max="2.0" required>
-                            </div>
-                            <div>
-                                <label for="gain" class="block text-sm font-medium">Volume/Gain ({{form.gain.toFixed(1)}} dB)</label>
-                                <input type="range" id="gain" v-model.number="form.gain" class="w-full mt-1" step="0.5" min="-20" max="20" required>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <label for="reverb-delay" class="block text-sm font-medium">Reverb Delay ({{form.reverb_delay}}ms)</label>
-                                <input type="range" id="reverb-delay" v-model.number="form.reverb_delay" class="w-full mt-1" step="5" min="0" max="200">
-                            </div>
-                            <div>
-                                <label for="reverb-attenuation" class="block text-sm font-medium">Reverb Attenuation ({{form.reverb_attenuation.toFixed(1)}} dB)</label>
-                                <input type="range" id="reverb-attenuation" v-model.number="form.reverb_attenuation" class="w-full mt-1" step="0.5" min="0" max="20">
-                            </div>
-                        </div>
-                        <div>
-                            <label for="file" class="block text-sm font-medium">Audio File (.wav, .mp3)</label>
-                            <input type="file" id="file" @change="handleFileChange" class="input-field-file mt-1" accept="audio/wav,audio/mpeg">
-                            <p v-if="isEditMode" class="text-xs text-gray-500 mt-1">Re-upload original file to apply new audio effects.</p>
-                        </div>
-                        <div class="flex justify-end gap-3">
-                            <button type="button" @click="cancelForm" class="btn btn-secondary">Cancel</button>
-                            <button type="submit" class="btn btn-primary" :disabled="isSubmitting">{{ isSubmitting ? 'Saving...' : 'Save Voice' }}</button>
-                        </div>
-                    </form>
-                </div>
-
-                <!-- Voice List -->
-                <div v-if="isLoading" class="text-center p-8">Loading your voices...</div>
-                <div v-else-if="voices.length === 0 && !isFormVisible" class="text-center p-8 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                    <p>You haven't uploaded any custom voices yet.</p>
-                </div>
-                <div v-else class="space-y-4">
-                    <div v-for="voice in voices" :key="voice.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <h4 class="font-bold text-lg flex items-center gap-2">
+                
+                <!-- Voice List (Scrollable) -->
+                <!-- FIX: Use max-height and flex-shrink-0 for guaranteed dimensions -->
+                <div :style="{'max-height': selectedVoice ? isControlsCollapsed ? '40vh' : '15vh' : '100%'}" class="overflow-y-auto custom-scrollbar flex-shrink-0">
+                    <div v-if="isLoading" class="p-4 text-center">Loading...</div>
+                    <ul v-else class="space-y-1 mt-2">
+                        <li v-for="voice in voices" :key="voice.id">
+                            <div class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors group flex justify-between items-center"
+                                 :class="{'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300': selectedVoiceId === voice.id && !isAddFormVisible, 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700': selectedVoiceId !== voice.id || isAddFormVisible}">
+                                <button @click="selectVoice(voice.id)" class="flex-grow text-left truncate">
                                     {{ voice.alias }}
+                                </button>
+                                 <div class="flex items-center flex-shrink-0">
                                     <span v-if="user && user.active_voice_id === voice.id" class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300">Active</span>
-                                </h4>
-                                <p class="text-sm text-gray-500 dark:text-gray-400">Language: {{ voice.language }}</p>
+                                    <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity ml-2">
+                                        <button @click="selectVoice(voice.id)" title="Edit" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md"><IconPencil class="w-4 h-4" /></button>
+                                        <button @click="handleDeleteVoice(voice)" title="Delete" class="p-1 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-500 rounded-md"><IconTrash class="w-4 h-4" /></button>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="flex gap-2">
-                                <button v-if="user && user.active_voice_id !== voice.id" @click="handleSetActive(voice.id)" class="btn btn-secondary btn-sm">Set Active</button>
-                                <button @click="handleDuplicate(voice.id)" class="btn btn-secondary btn-sm"><IconCopy class="w-4 h-4 mr-1"/>Duplicate</button>
-                                <button @click="showEditForm(voice)" class="btn btn-secondary btn-sm">Edit</button>
-                                <button @click="handleDelete(voice)" class="btn btn-danger btn-sm">Delete</button>
-                            </div>
+                        </li>
+                    </ul>
+                </div>
+                
+                <!-- Controls Panel (Collapsible/Scrollable) -->
+                <div v-if="selectedVoice" class="mt-4 border-t dark:border-gray-700 pt-4 flex-grow min-h-0 flex flex-col">
+                    <button @click="isControlsCollapsed = !isControlsCollapsed" class="w-full flex items-center justify-between text-left px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">
+                        <div class="flex items-center space-x-3">
+                            <IconCog class="w-5 h-5 flex-shrink-0" />
+                            <span>Voice Controls</span>
                         </div>
-                        <div class="mt-4 pt-4 border-t dark:border-gray-700 space-y-4">
-                            <h5 class="text-base font-semibold">Test & Edit Voice</h5>
-                            <div class="space-y-2">
-                                <label :for="`test-text-${voice.id}`" class="text-sm font-medium">Test Text</label>
-                                <textarea :id="`test-text-${voice.id}`" v-model="testText[voice.id]" class="input-field w-full" rows="2" placeholder="Enter text to generate audio..."></textarea>
-                                <div class="flex justify-end">
-                                    <button @click="handleGenerateTestAudio(voice)" class="btn btn-secondary" :disabled="isTesting[voice.id]">
-                                        <IconAnimateSpin v-if="isTesting[voice.id]" class="w-5 h-5 mr-2" />
-                                        {{ isTesting[voice.id] ? 'Generating...' : 'Generate Test Audio' }}
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div v-if="generatedAudioData[voice.id]" class="mt-4 p-4 bg-gray-50 dark:bg-gray-900/50 rounded-lg space-y-4">
-                                <h6 class="font-semibold">Audio Editor</h6>
-                                <AudioEditor :audio-url="generatedAudioData[voice.id].url" @trimmed="args => handleApplyEffects(voice.id, args)" />
-                                <div v-if="effectsParams[voice.id]" class="space-y-4 pt-4">
-                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                         <div><label class="block text-xs font-medium">Pitch ({{effectsParams[voice.id].pitch.toFixed(2)}})</label><input type="range" v-model.number="effectsParams[voice.id].pitch" class="w-full" step="0.05" min="0.5" max="2.0"></div>
-                                         <div><label class="block text-xs font-medium">Speed ({{effectsParams[voice.id].speed.toFixed(2)}}x)</label><input type="range" v-model.number="effectsParams[voice.id].speed" class="w-full" step="0.05" min="0.5" max="2.0"></div>
-                                         <div><label class="block text-xs font-medium">Gain ({{effectsParams[voice.id].gain.toFixed(1)}} dB)</label><input type="range" v-model.number="effectsParams[voice.id].gain" class="w-full" step="0.5" min="-20" max="20"></div>
-                                    </div>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                         <div><label class="block text-xs font-medium">Reverb Delay ({{effectsParams[voice.id].reverb_delay}}ms)</label><input type="range" v-model.number="effectsParams[voice.id].reverb_delay" class="w-full" step="5" min="0" max="200"></div>
-                                         <div><label class="block text-xs font-medium">Reverb Attenuation ({{effectsParams[voice.id].reverb_attenuation.toFixed(1)}} dB)</label><input type="range" v-model.number="effectsParams[voice.id].reverb_attenuation" class="w-full" step="0.5" min="0" max="20"></div>
-                                    </div>
-                                    <div class="flex justify-end">
-                                        <button @click="handleApplyEffects(voice.id, {})" class="btn btn-secondary" :disabled="isApplyingEffects[voice.id]">
-                                            <IconAnimateSpin v-if="isApplyingEffects[voice.id]" class="w-4 h-4 mr-2" />
-                                            Apply Effects
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="flex justify-end gap-2 pt-4 border-t dark:border-gray-700">
-                                    <button @click="handleDownload(voice.id)" class="btn btn-secondary"><IconArrowDownTray class="w-4 h-4 mr-2"/>Download</button>
-                                    <button @click="handleSaveAsNew(voice.id)" class="btn btn-primary" :disabled="isSubmitting"><IconPlus class="w-4 h-4 mr-2"/>Save as New Voice</button>
-                                </div>
-                            </div>
+                        <IconChevronDown class="w-4 h-4 transition-transform" :class="{'rotate-180': !isControlsCollapsed}" />
+                    </button>
+                    
+                    <div v-if="!isControlsCollapsed" class="pl-3 pr-1 pt-2 overflow-y-auto custom-scrollbar flex-grow space-y-4">
+                        <div class="grid grid-cols-1 gap-4">
+                            <div><label class="block text-sm font-medium">Alias</label><input type="text" v-model="form.alias" class="input-field mt-1" required></div>
+                            <div><label class="block text-sm font-medium">Language</label><input type="text" v-model="form.language" class="input-field mt-1" required></div>
+                        </div>
+                         <div class="space-y-4">
+                            <div><label class="block text-sm font-medium">Pitch ({{form.pitch.toFixed(2)}})</label><input type="range" v-model.number="form.pitch" class="w-full" step="0.05" min="0.5" max="2.0"></div>
+                            <div><label class="block text-sm font-medium">Speed ({{form.speed.toFixed(2)}}x)</label><input type="range" v-model.number="form.speed" class="w-full" step="0.05" min="0.5" max="2.0"></div>
+                            <div><label class="block text-sm font-medium">Gain ({{form.gain.toFixed(1)}} dB)</label><input type="range" v-model.number="form.gain" class="w-full" step="0.5" min="-20" max="20"></div>
+                        </div>
+                        <div class="space-y-4">
+                            <div><label class="block text-sm font-medium">Reverb Delay ({{form.reverb_delay}}ms)</label><input type="range" v-model.number="form.reverb_delay" class="w-full" step="5" min="0" max="200"></div>
+                            <div><label class="block text-sm font-medium">Reverb Attenuation ({{form.reverb_attenuation.toFixed(1)}} dB)</label><input type="range" v-model.number="form.reverb_attenuation" class="w-full" step="0.5" min="0" max="20"></div>
+                        </div>
+                        
+                        <div class="flex flex-col gap-2">
+                             <button @click="handleSaveEffects" class="btn btn-primary w-full" :disabled="isSubmittingNew">
+                                <IconSave class="w-4 h-4 mr-2" />
+                                Save Effects & Metadata
+                            </button>
+                             <button @click="handleSetActive" class="btn btn-secondary w-full" :disabled="isSettingActive || (user && user.active_voice_id === selectedVoiceId)">
+                                <IconMicrophone class="w-4 h-4 mr-2" />
+                                {{ user && user.active_voice_id === selectedVoiceId ? 'Active Voice' : 'Set as Active' }}
+                            </button>
                         </div>
                     </div>
                 </div>
+            </div>
+        </template>
+        <template #main>
+            <div v-if="isAddFormVisible" class="p-6 h-full overflow-y-auto">
+                <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md space-y-6 max-w-3xl mx-auto">
+                    <h3 class="text-xl font-semibold">Add a New Voice</h3>
+                    <form @submit.prevent="handleAddNewVoice" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div><label for="alias-new" class="block text-sm font-medium">Alias</label><input type="text" id="alias-new" v-model="newVoiceForm.alias" class="input-field mt-1" required></div>
+                            <div><label for="language-new" class="block text-sm font-medium">Language (e.g., en, fr)</label><input type="text" id="language-new" v-model="newVoiceForm.language" class="input-field mt-1" required></div>
+                        </div>
+                        <div class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                            <h4 class="font-medium mb-3">Audio Source</h4>
+                            <div class="flex flex-col sm:flex-row items-center gap-4">
+                                <button type="button" @click="isRecording ? stopRecording() : startRecording()" class="btn btn-secondary w-full sm:w-auto" :class="{'bg-red-500 text-white hover:bg-red-600': isRecording}"><IconMicrophone class="w-5 h-5 mr-2"/>{{ isRecording ? 'Stop Recording' : 'Record from Mic' }}</button>
+                                <span class="text-sm text-gray-500">OR</span>
+                                <input type="file" id="file-new" @change="handleNewFileChange" class="input-field-file" accept="audio/wav,audio/mpeg">
+                            </div>
+                            <div v-if="isRecording" class="text-center text-red-500 font-semibold animate-pulse mt-3">Recording...</div>
+                            <div v-if="recordedAudioUrl" class="mt-4"><h5 class="text-sm font-medium mb-2">Audio Preview</h5><audio :src="recordedAudioUrl" controls class="w-full"></audio></div>
+                        </div>
+                        <div class="flex justify-end gap-3">
+                            <button type="button" @click="cancelAddForm" class="btn btn-secondary">Cancel</button>
+                            <button type="submit" class="btn btn-primary" :disabled="isSubmittingNew || isRecording">{{ isSubmittingNew ? 'Saving...' : 'Save Voice' }}</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+            <VoiceEditor v-else-if="selectedVoiceId" :key="selectedVoiceId" :voice-id="selectedVoiceId" :voice-data="form" />
+            <div v-else class="h-full flex flex-col items-center justify-center text-center p-6">
+                <IconMicrophone class="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
+                <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200">Welcome to the Voices Studio</h3>
+                <p class="mt-2 text-gray-500 dark:text-gray-400">Select a voice from the sidebar to edit, or create a new one.</p>
             </div>
         </template>
     </PageViewLayout>

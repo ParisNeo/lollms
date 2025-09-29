@@ -70,6 +70,9 @@ def build_discussions_router():
 
         discussions_from_db = dm.list_discussions()
         starred_ids = {star.discussion_id for star in db.query(UserStarredDiscussion.discussion_id).filter(UserStarredDiscussion.user_id == db_user.id).all()}
+        
+        # Get set of discussion IDs that the current user has shared
+        owned_shared_ids = {row[0] for row in db.query(SharedDiscussionLink.discussion_id).filter(SharedDiscussionLink.owner_user_id == db_user.id).distinct().all()}
 
         infos = []
         for disc_data in discussions_from_db:
@@ -93,6 +96,8 @@ def build_discussions_router():
                             discussion_images_b64.append(item)
                             active_discussion_images.append(True)
 
+                is_shared_by_me = disc_id in owned_shared_ids
+
                 info = DiscussionInfo(
                     id=disc_id,
                     title=metadata.get('title', f"Discussion {disc_id[:8]}"),
@@ -104,7 +109,10 @@ def build_discussions_router():
                     last_activity_at=disc_data.get('updated_at'),
                     discussion_images=discussion_images_b64,
                     active_discussion_images=active_discussion_images,
-                    group_id=metadata.get('group_id')
+                    group_id=metadata.get('group_id'),
+                    owner_username=None,
+                    permission_level="shared_by_me" if is_shared_by_me else None,
+                    share_id=None
                 )
                 infos.append(info)
             except Exception as e:

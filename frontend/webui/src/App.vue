@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/App.vue -->
 <script setup>
 import { computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
@@ -107,7 +108,7 @@ const layoutState = computed(() => {
     return 'guest';
 });
 
-const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages'];
+const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages','VoicesStudio'];
 const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
 
 onMounted(async () => {

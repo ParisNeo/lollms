@@ -1,3 +1,4 @@
+# [UPDATE] backend/routers/discussion/generation/tts.py
 # backend/routers/discussion/generation/tts.py
 from fastapi import APIRouter, Depends, HTTPException, Body, Response
 from sqlalchemy.orm import Session
@@ -32,8 +33,8 @@ def build_tts_router(router: APIRouter):
             if not lc.tts:
                 raise HTTPException(status_code=400, detail="Text-to-Speech (TTS) is not configured for this user.")
             
-            # --- NEW LOGIC for custom voice ---
             voice_to_use = request_data.voice
+            language_to_use = None
             db_user = db.query(DBUser).filter(DBUser.id == current_user.id).first()
             
             if db_user and db_user.active_voice_id and not voice_to_use:
@@ -43,10 +44,20 @@ def build_tts_router(router: APIRouter):
                     voice_file_path = user_voices_path / Path(active_voice.file_path)
                     if voice_file_path.exists():
                         voice_to_use = str(voice_file_path.resolve())
-                        print(f"INFO: Using active voice for user {current_user.username}: {voice_to_use}")
+                        language_to_use = active_voice.language # Prioritize voice's language
+                        print(f"INFO: Using active voice '{active_voice.alias}' with language '{language_to_use}'.")
                     else:
                         print(f"WARNING: Active voice file not found for user {current_user.username}: {voice_file_path}")
-            # --- END NEW LOGIC ---
+
+            # If language is still not set, use user's preference (unless 'auto')
+            if not language_to_use and db_user and db_user.ai_response_language and db_user.ai_response_language.lower() != "auto":
+                language_to_use = db_user.ai_response_language
+
+            # Final fallback to English if no other language is determined
+            if not language_to_use:
+                language_to_use = 'en'
+                print(f"INFO: TTS language not specified, falling back to default 'en'.")
+
 
             model_to_use = request_data.model
             if not model_to_use:
@@ -58,7 +69,8 @@ def build_tts_router(router: APIRouter):
             audio_bytes = lc.tts.generate_audio(
                 text=request_data.text,
                 voice=voice_to_use,
-                model=model_to_use
+                model=model_to_use,
+                language=language_to_use
             )
 
             return Response(

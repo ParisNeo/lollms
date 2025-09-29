@@ -1,4 +1,4 @@
-<!-- [CREATE] frontend/webui/src/components/settings/TTSSettings.vue -->
+<!-- [UPDATE] frontend/webui/src/components/settings/TTSSettings.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
@@ -9,13 +9,14 @@ import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import LanguageSelector from '../ui/LanguageSelector.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore();
 const uiStore = useUiStore();
 
 const { user } = storeToRefs(authStore);
-const { availableTtsModels, availableTtsModelsGrouped } = storeToRefs(dataStore);
+const { availableTtsModels, availableTtsModelsGrouped, userVoices } = storeToRefs(dataStore);
 
 const form = ref({});
 const isLoading = ref(false);
@@ -64,11 +65,26 @@ watch(isTtsMenuOpen, (isOpen) => {
 });
 
 const activeTtsModel = computed({
-  get: () => user.value?.tts_binding_model_name,
+  get: () => form.value.tts_binding_model_name,
   set: (name) => {
-    authStore.updateUserPreferences({ tts_binding_model_name: name });
+    form.value.tts_binding_model_name = name;
   }
 });
+
+const activeVoice = computed({
+    get: () => form.value.active_voice_id,
+    set: (id) => {
+        form.value.active_voice_id = id;
+    }
+});
+
+const aiResponseLanguage = computed({
+    get: () => form.value.ai_response_language || 'auto',
+    set: (lang) => {
+        form.value.ai_response_language = lang;
+    }
+});
+
 
 const selectedModelDetails = computed(() => {
     if (!activeTtsModel.value || availableTtsModels.value.length === 0) return null;
@@ -76,15 +92,12 @@ const selectedModelDetails = computed(() => {
 });
 
 const modelConfigurableParameters = computed(() => {
-    if (!selectedModelDetails.value?.alias) return [];
-    const metadataKeys = ['icon', 'title', 'description', 'allow_parameters_override'];
-    return Object.entries(selectedModelDetails.value.alias)
-        .filter(([key]) => !metadataKeys.includes(key))
-        .map(([key, defaultValue]) => ({
-            name: key,
-            type: typeof defaultValue === 'boolean' ? 'bool' : (typeof defaultValue === 'number' ? 'float' : 'str'),
-            default: defaultValue
-        }));
+    if (!selectedModelDetails.value?.binding_params?.parameters) {
+        return [];
+    }
+    const excludedParams = ['voice', 'language', 'model'];
+    return selectedModelDetails.value.binding_params.parameters
+        .filter(param => !excludedParams.includes(param.name));
 });
 
 const userOverrides = computed(() => {
@@ -117,53 +130,64 @@ function selectTtsModel(id) {
     isTtsMenuOpen.value = false;
 }
 
-watch(selectedModelDetails, (newModel) => {
-    if (newModel) {
+
+const populateForm = () => {
+    if (user.value) {
         const newFormState = {};
-        modelConfigurableParameters.value.forEach(param => {
-            newFormState[param.name] = userOverrides.value[param.name] ?? newModel.alias[param.name] ?? param.default;
-        });
-        form.value = newFormState;
-        pristineState = JSON.stringify(newFormState);
-        hasChanges.value = false;
-    } else {
-        form.value = {};
-        pristineState = '{}';
-        hasChanges.value = false;
-    }
-}, { immediate: true, deep: true });
-
-watch(form, (newValue) => {
-    hasChanges.value = JSON.stringify(newValue) !== pristineState;
-}, { deep: true });
-
-async function handleSave() {
-    if (!activeTtsModel.value) return;
-    isLoading.value = true;
-    try {
-        const currentConfig = user.value.tts_models_config || {};
-        const newConfigForModel = { ...(currentConfig[activeTtsModel.value] || {}), ...form.value };
-
-        if (selectedModelDetails.value?.alias) {
-            Object.keys(newConfigForModel).forEach(key => {
-                if (newConfigForModel[key] === selectedModelDetails.value.alias[key] || newConfigForModel[key] === '' || newConfigForModel[key] === null) {
-                    delete newConfigForModel[key];
-                }
+        if (selectedModelDetails.value) {
+            modelConfigurableParameters.value.forEach(param => {
+                newFormState[param.name] = userOverrides.value[param.name] ?? param.default;
             });
         }
+        form.value = {
+            ...newFormState,
+            tts_binding_model_name: user.value.tts_binding_model_name,
+            active_voice_id: user.value.active_voice_id,
+            ai_response_language: user.value.ai_response_language || 'auto'
+        };
+
+        pristineState = JSON.stringify(form.value);
+        hasChanges.value = false;
+    }
+};
+
+watch(selectedModelDetails, populateForm, { immediate: true, deep: true });
+watch(user, populateForm, { deep: true });
+
+watch(form, (newValue) => {
+    hasChanges.value = JSON.stringify(newValue) !== JSON.stringify(pristineState);
+}, { deep: true });
+
+
+async function handleSave() {
+    isLoading.value = true;
+    try {
+        const payload = {
+            tts_binding_model_name: form.value.tts_binding_model_name,
+            active_voice_id: form.value.active_voice_id,
+            ai_response_language: form.value.ai_response_language
+        };
+
+        const currentConfig = user.value.tts_models_config || {};
+        const newConfigForModel = {};
+        modelConfigurableParameters.value.forEach(param => {
+            if (form.value[param.name] !== param.default) {
+                newConfigForModel[param.name] = form.value[param.name];
+            }
+        });
         
         const updatedUserConfigs = {
             ...currentConfig,
             [activeTtsModel.value]: newConfigForModel
         };
         
-        if (Object.keys(updatedUserConfigs[activeTtsModel.value]).length === 0) {
+        if (Object.keys(updatedUserConfigs[activeTtsModel.value] || {}).length === 0) {
             delete updatedUserConfigs[activeTtsModel.value];
         }
 
-        await authStore.updateUserPreferences({ tts_models_config: updatedUserConfigs });
-        pristineState = JSON.stringify(form.value);
-        hasChanges.value = false;
+        payload.tts_models_config = updatedUserConfigs;
+
+        await authStore.updateUserPreferences(payload);
     } finally {
         isLoading.value = false;
     }
@@ -171,17 +195,20 @@ async function handleSave() {
 
 function handleResetToDefaults() {
     const newFormState = {};
-    if (selectedModelDetails.value?.alias) {
+    if (selectedModelDetails.value) {
         modelConfigurableParameters.value.forEach(param => {
-            newFormState[param.name] = selectedModelDetails.value.alias[param.name] ?? param.default;
+            newFormState[param.name] = param.default;
         });
+        form.value = { ...form.value, ...newFormState };
     }
-    form.value = newFormState;
 }
 
 onMounted(() => {
     if (dataStore.availableTtsModels.length === 0) {
         dataStore.fetchAvailableTtsModels();
+    }
+    if(dataStore.userVoices.length === 0) {
+        dataStore.fetchUserVoices();
     }
 });
 </script>
@@ -197,7 +224,7 @@ onMounted(() => {
             </p>
         </div>
 
-        <div class="space-y-6">
+        <form @submit.prevent="handleSave" class="space-y-6">
             <div>
                 <label class="block text-base font-medium mb-2">Active Speech Generation Model</label>
                 <div class="relative">
@@ -238,22 +265,44 @@ onMounted(() => {
                 </div>
             </div>
 
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label for="aiResponseLanguage" class="block text-base font-medium mb-2">AI Response Language</label>
+                    <LanguageSelector v-model="aiResponseLanguage" id="aiResponseLanguage" :include-auto="true" />
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">The language for AI text responses and speech generation. 'Auto' uses the interface language.</p>
+                </div>
+                 <div>
+                    <label for="active-voice" class="block text-base font-medium mb-2">Active Voice</label>
+                    <select id="active-voice" v-model="activeVoice" class="input-field w-full">
+                        <option :value="null">Default Voice</option>
+                        <option v-for="voice in userVoices" :key="voice.id" :value="voice.id">
+                            {{ voice.alias }} ({{ voice.language }})
+                        </option>
+                    </select>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Select a custom voice from your <router-link to="/voices-studio" class="text-blue-600 hover:underline">Voices Studio</router-link>.</p>
+                </div>
+            </div>
+
             <div v-if="activeTtsModel && selectedModelDetails && allowOverrides" class="p-4 border rounded-lg dark:border-gray-700 space-y-4">
                 <h4 class="font-medium">Configuration for: <span class="font-mono text-blue-600 dark:text-blue-400">{{ selectedModelDetails.name }}</span></h4>
                 <div v-if="modelConfigurableParameters.length === 0" class="text-sm text-gray-500">
                     This model has no parameters exposed for user configuration.
                 </div>
-                <form v-else @submit.prevent="handleSave" class="space-y-4">
+                <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div v-for="param in modelConfigurableParameters" :key="param.name">
                         <label :for="`tts-param-${param.name}`" class="block text-sm font-medium capitalize">{{ param.name.replace(/_/g, ' ') }}</label>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{param.description}}</p>
+                        <select v-if="param.options" :id="`tts-param-${param.name}`" v-model="form[param.name]" class="input-field mt-1">
+                            <option v-for="option in param.options" :key="option" :value="option">{{ option }}</option>
+                        </select>
                         <input 
-                            v-if="['str', 'int', 'float'].includes(param.type)"
+                            v-else-if="['str', 'int', 'float'].includes(param.type)"
                             :type="param.type === 'str' ? 'text' : 'number'"
                             :step="param.type === 'float' ? '0.01' : '1'"
                             :id="`tts-param-${param.name}`"
                             v-model="form[param.name]"
                             class="input-field mt-1"
-                            :placeholder="`Default: ${selectedModelDetails.alias[param.name]}`"
+                            :placeholder="`Default: ${param.default}`"
                         />
                          <div v-else-if="param.type === 'bool'" class="mt-1">
                             <button @click="form[param.name] = !form[param.name]" type="button" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
@@ -261,17 +310,19 @@ onMounted(() => {
                             </button>
                         </div>
                     </div>
-                     <div class="flex justify-end gap-3 pt-4 border-t dark:border-gray-600">
-                        <button type="button" @click="handleResetToDefaults" class="btn btn-secondary" :disabled="isLoading">Reset to Defaults</button>
-                        <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">{{ isLoading ? 'Saving...' : 'Save Changes' }}</button>
-                    </div>
-                </form>
+                </div>
+                 <div v-if="modelConfigurableParameters.length > 0" class="flex justify-end gap-3 pt-4 border-t dark:border-gray-600">
+                    <button type="button" @click="handleResetToDefaults" class="btn btn-secondary" :disabled="isLoading">Reset to Defaults</button>
+                </div>
             </div>
             <div v-else-if="activeTtsModel && selectedModelDetails && !allowOverrides" class="p-4 border border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 flex items-center gap-3">
                 <IconInfo class="w-5 h-5 flex-shrink-0" />
                 <span>An administrator has locked the parameters for this model alias. Your personal settings will be ignored.</span>
             </div>
-        </div>
+             <div class="flex justify-end pt-4 border-t dark:border-gray-600">
+                <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">{{ isLoading ? 'Saving...' : 'Save TTS Settings' }}</button>
+            </div>
+        </form>
     </div>
 </template>
 

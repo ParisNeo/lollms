@@ -115,7 +115,7 @@ export const useAuthStore = defineStore('auth', () => {
                     uiStore.addNotification(`${data.data.username} is now online.`, 'info', 4000, false, null, data.data.icon);
                     break;
                 case 'new_shared_discussion':
-                    discussionsStore.loadDiscussions();
+                    discussionsStore.fetchSharedWithMe();
                     uiStore.addNotification(`'${data.data.discussion_title}' was shared with you by ${data.data.from_user}.`, 'info');
                     break;
                 case 'discussion_updated':
@@ -128,11 +128,11 @@ export const useAuthStore = defineStore('auth', () => {
                     discussionsStore.loadDiscussions();
                     break;
                 case 'discussion_unshared':
+                    discussionsStore.fetchSharedWithMe(); // Refresh the list
                     if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
                         discussionsStore.selectDiscussion(null);
                         uiStore.setMainView('feed');
                     }
-                    discussionsStore.loadDiscussions();
                     uiStore.addNotification(`Access to a shared discussion was revoked by ${data.data.from_user}.`, 'warning');
                     break;
                 case 'admin_broadcast': uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); break;
@@ -202,6 +202,7 @@ export const useAuthStore = defineStore('auth', () => {
             loadingMessage.value = 'Loading user data...';
             await Promise.all([
                 discussionsStore.loadDiscussions(),
+                discussionsStore.fetchSharedWithMe(),
                 dataStore.loadAllInitialData()
             ]);
 

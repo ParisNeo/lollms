@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import List, Optional, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Form, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
@@ -54,16 +55,21 @@ def _process_audio_effects(input_path: Path, output_path: Path, pitch: float, sp
 
         # 3. Apply Speed Change
         if speed != 1.0:
-            sound = speedup(sound, playback_speed=speed)
-
-        # 4. Apply Pitch Shift
-        if pitch != 1.0:
+            if abs(pitch - 1.0) < 0.01:
+                sound = speedup(sound, playback_speed=speed)
+            else:
+                octaves = (pitch - 1.0) * 1.0
+                new_sample_rate = int(sound.frame_rate * (2.0 ** octaves) * speed)
+                sound = sound._spawn(sound.raw_data, overrides={'frame_rate': new_sample_rate})
+                sound = sound.set_frame_rate(sound.frame_rate)
+        elif pitch != 1.0:
             octaves = (pitch - 1.0) * 1.0
             new_sample_rate = int(sound.frame_rate * (2.0 ** octaves))
             sound = sound._spawn(sound.raw_data, overrides={'frame_rate': new_sample_rate})
             sound = sound.set_frame_rate(sound.frame_rate)
-        
-        # 5. Apply Reverb
+
+
+        # 4. Apply Reverb (simplified, as pydub lacks a proper reverb effect)
         if reverb_params and reverb_params.get("delay", 0) > 0 and reverb_params.get("attenuation", 0.0) > 0.0:
             delay_ms = reverb_params["delay"]
             attenuation_db = reverb_params["attenuation"]
@@ -79,6 +85,26 @@ def _process_audio_effects(input_path: Path, output_path: Path, pitch: float, sp
 async def get_user_voices(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
     return db.query(DBUserVoice).filter(DBUserVoice.owner_user_id == current_user.id).order_by(DBUserVoice.alias).all()
 
+@voices_studio_router.get("/{voice_id}/audio")
+async def get_voice_audio(voice_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    voice = db.query(DBUserVoice).filter(DBUserVoice.id == voice_id, DBUserVoice.owner_user_id == current_user.id).first()
+    if not voice:
+        raise HTTPException(status_code=404, detail="Voice not found.")
+    
+    user_voices_path = get_user_voices_path(current_user.username)
+    file_path = user_voices_path / voice.file_path
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Audio file not found on disk.")
+    
+    # FIX: Return raw binary content with the correct MIME type
+    try:
+        with open(file_path, "rb") as f:
+            audio_content = f.read()
+        return Response(content=audio_content, media_type="audio/wav")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read audio file: {e}")
+
+
 @voices_studio_router.post("/upload", response_model=UserVoicePublic)
 async def upload_voice(
     alias: str = Form(...),
@@ -93,12 +119,13 @@ async def upload_voice(
 ):
     user_voices_path = get_user_voices_path(current_user.username)
     
-    # Handle both regular file uploads and base64 encoded audio from the editor
-    if file.filename == 'blob' and file.content_type == 'audio/wav': # From editor
+    is_temp_file = False
+    if file.filename == 'blob' and file.content_type == 'audio/wav':
         temp_original_path = user_voices_path / f"{uuid.uuid4()}_editor_upload.wav"
         with open(temp_original_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-    else: # From file input
+        is_temp_file = True
+    else:
         if not file.content_type in ["audio/wav", "audio/mpeg", "audio/x-wav"]:
             raise HTTPException(status_code=400, detail="Invalid file type.")
         
@@ -107,6 +134,7 @@ async def upload_voice(
         temp_original_path = user_voices_path / f"{temp_id}_original{original_suffix}"
         with open(temp_original_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
+        is_temp_file = True
 
     final_filename = f"{uuid.uuid4().hex}.wav"
     final_path = user_voices_path / final_filename
@@ -117,7 +145,8 @@ async def upload_voice(
         reverb_params = {}
 
     _process_audio_effects(temp_original_path, final_path, pitch, speed, gain, reverb_params)
-    temp_original_path.unlink()
+    if is_temp_file:
+        temp_original_path.unlink()
 
     new_voice = DBUserVoice(
         owner_user_id=current_user.id, alias=alias, language=language,
@@ -136,7 +165,6 @@ async def update_voice(
     speed: float = Form(1.0),
     gain: float = Form(0.0),
     reverb_params_json: str = Form("{}"),
-    file: Optional[UploadFile] = File(None),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -145,28 +173,19 @@ async def update_voice(
         raise HTTPException(status_code=404, detail="Voice not found.")
 
     user_voices_path = get_user_voices_path(current_user.username)
+    original_file_path = user_voices_path / voice_to_update.file_path
+    
+    if not original_file_path.exists():
+        raise HTTPException(status_code=404, detail="Original audio file not found. Cannot apply effects.")
 
     try:
         reverb_params = json.loads(reverb_params_json)
     except json.JSONDecodeError:
         reverb_params = {}
-
-    if file:
-        if not file.content_type in ["audio/wav", "audio/mpeg", "audio/x-wav"]:
-            raise HTTPException(status_code=400, detail="Invalid file type for update.")
-        
-        temp_id = str(uuid.uuid4())
-        original_suffix = Path(file.filename).suffix
-        temp_original_path = user_voices_path / f"{temp_id}_original{original_suffix}"
-        
-        with open(temp_original_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        final_path = user_voices_path / voice_to_update.file_path
-        _process_audio_effects(temp_original_path, final_path, pitch, speed, gain, reverb_params)
-        temp_original_path.unlink()
-    else:
-        raise HTTPException(status_code=400, detail="To change audio effects, you must re-upload the original audio file.")
+    
+    temp_output_path = user_voices_path / f"temp_{voice_to_update.file_path}"
+    _process_audio_effects(original_file_path, temp_output_path, pitch, speed, gain, reverb_params)
+    shutil.move(str(temp_output_path), str(original_file_path))
 
     voice_to_update.alias = alias
     voice_to_update.language = language
@@ -177,6 +196,34 @@ async def update_voice(
     db.commit()
     db.refresh(voice_to_update)
     return voice_to_update
+
+@voices_studio_router.post("/{voice_id}/replace_audio", response_model=UserVoicePublic)
+async def replace_voice_audio(
+    voice_id: str,
+    file: UploadFile = File(...),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    voice_to_update = db.query(DBUserVoice).filter(DBUserVoice.id == voice_id, DBUserVoice.owner_user_id == current_user.id).first()
+    if not voice_to_update:
+        raise HTTPException(status_code=404, detail="Voice not found.")
+
+    if not file.content_type in ["audio/wav", "audio/mpeg", "audio/x-wav"]:
+        raise HTTPException(status_code=400, detail="Invalid file type.")
+
+    user_voices_path = get_user_voices_path(current_user.username)
+    target_path = user_voices_path / voice_to_update.file_path
+    
+    try:
+        with open(target_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        db.commit()
+        db.refresh(voice_to_update)
+        return voice_to_update
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to replace audio file: {e}")
 
 
 @voices_studio_router.delete("/{voice_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -248,7 +295,13 @@ async def test_voice(
             reverb_params_dict
         )
 
-        audio_bytes = lc.tts.generate_audio(text=request.text, voice=str(temp_test_file_path.resolve()))
+        language_to_use = request.language or voice.language 
+        
+        audio_bytes = lc.tts.generate_audio(
+            text=request.text, 
+            voice=str(temp_test_file_path.resolve()),
+            language=language_to_use
+        )
         
         temp_test_file_path.unlink()
 

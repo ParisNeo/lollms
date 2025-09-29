@@ -132,9 +132,14 @@ function handleClickOutside() {
         <p class="discussion-title" :title="discussion.title">
           {{ discussion.title }}
         </p>
-        <p v-if="discussion.owner_username" class="owner-info">
-          <span class="owner-badge">{{ discussion.owner_username }}</span>
-        </p>
+        <div class="flex items-center space-x-2 mt-1">
+          <p v-if="discussion.owner_username" class="owner-info">
+            <span class="owner-badge">{{ discussion.owner_username }}</span>
+          </p>
+          <p v-if="discussion.permission_level === 'shared_by_me'" class="owner-info">
+            <span class="px-2 py-0.5 text-xs rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300">Shared</span>
+          </p>
+        </div>
       </div>
     </div>
     

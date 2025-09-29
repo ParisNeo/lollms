@@ -54,13 +54,11 @@ export function useDiscussionSharing(state, stores, getActions) {
             
             sharedWithMe.value = sharedWithMe.value.filter(d => d.share_id !== shareId);
             
-            if (discussionIdToRemove) {
-                if (discussions.value[discussionIdToRemove]) {
-                    delete discussions.value[discussionIdToRemove];
-                }
-
-                if (currentDiscussionId.value === discussionIdToRemove) {
-                    getActions().selectDiscussion(null);
+            if (discussionIdToRemove && currentDiscussionId.value === discussionIdToRemove) {
+                getActions().selectDiscussion(null);
+                 // If no other discussions, go to feed
+                 if (Object.keys(discussions.value).length === 0 && sharedWithMe.value.length === 0) {
+                    uiStore.setMainView('feed');
                 }
             }
             

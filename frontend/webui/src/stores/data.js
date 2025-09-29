@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/data.js
+// [UPDATE] frontend/webui/src/stores/data.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue'; // Remove onMounted from this import list
 import apiClient from '../services/api';
@@ -13,6 +13,7 @@ export const useDataStore = defineStore('data', () => {
     const availableLollmsModels = ref([]);
     const availableTtiModels = ref([]);
     const availableTtsModels = ref([]); // NEW
+    const userVoices = ref([]); // NEW
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
     const userPersonalities = ref([]);
@@ -25,6 +26,7 @@ export const useDataStore = defineStore('data', () => {
     const isLoadingLollmsModels = ref(false);
     const isLoadingTtiModels = ref(false);
     const isLoadingTtsModels = ref(false); // NEW
+    const isLoadingUserVoices = ref(false); // NEW
     const _languages = ref([]);
     const isLoadingLanguages = ref(false);
     const apiKeys = ref([]);
@@ -196,6 +198,10 @@ export const useDataStore = defineStore('data', () => {
     // This line registers the event listener as soon as the store is created.
     // It is no longer tied to a component's lifecycle hook.
     on('task:completed', handleTaskCompletion);
+    on('user-voices-changed', () => {
+        console.log("[Data Store] Detected voice change, refetching voices.");
+        fetchUserVoices();
+    });
 
     function handleServiceStatusUpdate(serviceData) {
         const listsToUpdate = [userApps, systemApps, userMcps, systemMcps];
@@ -270,6 +276,7 @@ export const useDataStore = defineStore('data', () => {
             fetchAvailableLollmsModels().catch(e => console.error("Error fetching models:", e)),
             fetchAvailableTtiModels().catch(e => console.error("Error fetching TTI models:", e)),
             fetchAvailableTtsModels().catch(e => console.error("Error fetching TTS models:", e)), // NEW
+            fetchUserVoices().catch(e => console.error("Error fetching user voices:", e)), // NEW
             fetchDataStores().catch(e => console.error("Error fetching data stores:", e)),
             fetchPersonalities().catch(e => console.error("Error fetching personalities:", e)),
             fetchMcps().catch(e => console.error("Error fetching MCPs:", e)),
@@ -317,6 +324,19 @@ export const useDataStore = defineStore('data', () => {
             isLoadingTtsModels.value = false;
         }
     }
+    // NEW
+    async function fetchUserVoices() {
+        isLoadingUserVoices.value = true;
+        try {
+            const response = await apiClient.get('/api/voices-studio');
+            userVoices.value = Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            userVoices.value = [];
+        } finally {
+            isLoadingUserVoices.value = false;
+        }
+    }
+
     async function fetchAdminAvailableLollmsModels() {
         isLoadingLollmsModels.value = true;
         try {
@@ -661,6 +681,7 @@ export const useDataStore = defineStore('data', () => {
         availableLollmsModels.value = [];
         availableTtiModels.value = [];
         availableTtsModels.value = [];
+        userVoices.value = [];
         ownedDataStores.value = [];
         sharedDataStores.value = [];
         userPersonalities.value = [];
@@ -673,6 +694,7 @@ export const useDataStore = defineStore('data', () => {
         isLoadingLollmsModels.value = false;
         isLoadingTtiModels.value = false;
         isLoadingTtsModels.value = false;
+        isLoadingUserVoices.value = false;
         _languages.value = [];
         isLoadingLanguages.value = false;
         apiKeys.value = [];
@@ -689,6 +711,7 @@ export const useDataStore = defineStore('data', () => {
         
         availableTtiModels, isLoadingTtiModels, availableTtiModelsGrouped,
         availableTtsModels, isLoadingTtsModels, availableTtsModelsGrouped, // NEW
+        userVoices, isLoadingUserVoices, fetchUserVoices, // NEW
         fetchAvailableTtiModels,
         fetchAvailableTtsModels, // NEW
 

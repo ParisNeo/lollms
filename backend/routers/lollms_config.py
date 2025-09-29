@@ -1,16 +1,20 @@
-# backend/routers/lollms_config.py
+# [UPDATE] backend/routers/lollms_config.py
+import json
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Form
 from sqlalchemy.orm import Session
 from lollms_client import LollmsClient
 from ascii_colors import trace_exception
-import json
+from lollms_client.lollms_tti_binding import get_available_bindings as get_available_tti_bindings
+from lollms_client.lollms_tts_binding import get_available_bindings as get_available_tts_bindings
+
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding
 from backend.session import get_current_active_user, get_user_lollms_client, user_sessions, build_lollms_client_from_params
-from backend.models import UserLLMParams, ModelInfo, UserAuthDetails
+from backend.models import UserLLMParams, UserAuthDetails
+from backend.models.shared import ModelInfo
 from backend.settings import settings
 
 lollms_config_router = APIRouter(prefix="/api/config", tags=["LoLLMs Configuration"])
@@ -50,18 +54,16 @@ async def get_lollms_models(
                 if model_display_mode == 'aliased' and not alias_data:
                     continue
                 
+                display_name = f"{binding.alias}/{model_name}"
+
+                if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
+                    display_name = alias_data.get('title', model_name)
+
                 model_info = {
                     "id": f"{binding.alias}/{model_name}",
-                    "name": model_name,
+                    "name": display_name,
                     "alias": alias_data
                 }
-
-                if model_display_mode == 'original':
-                    model_info["name"] = f"{binding.alias}/{model_name}"
-                elif alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
-                    model_info["name"] = alias_data.get('title', model_name)
-                else: # mixed mode, no alias
-                    model_info["name"] = f"{binding.alias}/{model_name}"
 
                 all_models.append(model_info)
 
@@ -86,6 +88,12 @@ async def get_lollms_tti_models(
     active_tti_bindings = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).all()
     model_display_mode = settings.get("tti_model_display_mode", "mixed")
 
+    try:
+        available_binding_descs = {b['binding_name']: b for b in get_available_tti_bindings()}
+    except Exception as e:
+        trace_exception(e)
+        available_binding_descs = {}
+
     for binding in active_tti_bindings:
         try:
             lc = build_lollms_client_from_params(current_user.username, tti_binding_alias=binding.alias)
@@ -107,6 +115,8 @@ async def get_lollms_tti_models(
                     model_aliases = json.loads(model_aliases)
                 except Exception:
                     model_aliases = {}
+            
+            binding_desc = available_binding_descs.get(binding.name)
 
             for model_name in raw_model_names:
                 alias_data = model_aliases.get(model_name)
@@ -114,18 +124,30 @@ async def get_lollms_tti_models(
                 if model_display_mode == 'aliased' and not alias_data:
                     continue
 
+                display_name = f"{binding.alias}/{model_name}"
+                if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
+                    display_name = alias_data.get('title', model_name)
+
+                binding_params = {}
+                if binding_desc:
+                    all_params = []
+                    all_params.extend(binding_desc.get('input_parameters', []))
+                    all_params.extend(binding_desc.get('generate_image_parameters', []))
+                    all_params.extend(binding_desc.get('edit_image_parameters', []))
+                    seen_params = {}
+                    deduplicated_params = []
+                    for param in all_params:
+                        if param.get('name') and param['name'] not in seen_params:
+                            seen_params[param['name']] = param
+                            deduplicated_params.append(param)
+                    binding_params['parameters'] = deduplicated_params
+
                 model_info = {
                     "id": f"{binding.alias}/{model_name}",
-                    "name": model_name,
-                    "alias": alias_data
+                    "name": display_name,
+                    "alias": alias_data,
+                    "binding_params": binding_params
                 }
-
-                if model_display_mode == 'original':
-                    model_info["name"] = f"{binding.alias}/{model_name}"
-                elif alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
-                    model_info["name"] = alias_data.get('title', model_name)
-                else: # mixed mode, no alias
-                    model_info["name"] = f"{binding.alias}/{model_name}"
 
                 all_models.append(model_info)
 
@@ -193,6 +215,12 @@ async def get_tts_models(
     active_bindings = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).all()
     model_display_mode = settings.get("tts_model_display_mode", "mixed")
     
+    try:
+        available_binding_descs = {b['binding_name']: b for b in get_available_tts_bindings()}
+    except Exception as e:
+        trace_exception(e)
+        available_binding_descs = {}
+
     for binding in active_bindings:
         model_aliases = binding.model_aliases or {}
         if isinstance(model_aliases, str):
@@ -201,7 +229,6 @@ async def get_tts_models(
             except Exception:
                 model_aliases = {}
         try:
-            # CORRECTED: Use the correct parameter name for TTS
             lc = build_lollms_client_from_params(current_user.username, tts_binding_alias=binding.alias)
             if not lc.tts: continue
             
@@ -216,18 +243,25 @@ async def get_tts_models(
                         if model_display_mode == 'aliased' and not alias_data:
                             continue
 
+                        display_name = f"{binding.alias}/{model_id}"
+                        if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
+                            display_name = alias_data.get('title', model_id)
+
+                        binding_desc = available_binding_descs.get(binding.name)
+                        binding_params = {}
+                        if binding_desc:
+                            all_params = []
+                            all_params.extend(binding_desc.get('input_parameters', []))
+                            seen_params = {p['name'] for p in all_params}
+                            deduplicated_params = list(all_params)
+                            binding_params['parameters'] = deduplicated_params
+
                         model_info = {
                             "id": f"{binding.alias}/{model_id}",
-                            "name": model_id,
-                            "alias": alias_data
+                            "name": display_name,
+                            "alias": alias_data,
+                            "binding_params": binding_params
                         }
-
-                        if model_display_mode == 'original':
-                            model_info["name"] = f"{binding.alias}/{model_id}"
-                        elif alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
-                            model_info["name"] = alias_data.get('title', model_id)
-                        else: # mixed mode, no alias
-                            model_info["name"] = f"{binding.alias}/{model_id}"
 
                         all_models.append(model_info)
         except Exception as e:

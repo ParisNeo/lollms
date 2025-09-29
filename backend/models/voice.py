@@ -9,7 +9,7 @@ class ReverbParams(BaseModel):
 
 class UserVoiceBase(BaseModel):
     alias: str = Field(..., min_length=1, max_length=100)
-    language: str = Field(..., min_length=2, max_length=10)
+    language: str = Field(..., min_length=2, max_length=10) # <-- Language field
     pitch: float = Field(1.0, gt=0, le=2.0)
     speed: float = Field(1.0, gt=0, le=3.0)
     gain: float = Field(0.0, ge=-20.0, le=20.0)
@@ -32,6 +32,7 @@ class UserVoicePublic(UserVoiceBase):
 class TestTTSRequest(BaseModel):
     text: str
     voice_id: str
+    language: Optional[str] = None # <-- ADDED LANGUAGE FIELD
     pitch: Optional[float] = 1.0
     speed: Optional[float] = 1.0
     gain: Optional[float] = 0.0
