@@ -15,6 +15,7 @@ from backend.db.models.memory import UserMemory
 from backend.db.models.discussion_group import DiscussionGroup
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.voice import UserVoice
+from backend.db.models.image import UserImage
 
 class User(Base):
     __tablename__ = "users"
@@ -98,6 +99,7 @@ class User(Base):
     
     voices = relationship("UserVoice", back_populates="owner", cascade="all, delete-orphan", foreign_keys="[UserVoice.owner_user_id]")
     active_voice = relationship("UserVoice", foreign_keys=[active_voice_id])
+    images = relationship("UserImage", back_populates="owner", cascade="all, delete-orphan", foreign_keys="[UserImage.owner_user_id]")
 
     personal_mcps = relationship("MCP", back_populates="owner", cascade="all, delete-orphan")
     personal_apps = relationship("App", back_populates="owner", cascade="all, delete-orphan")

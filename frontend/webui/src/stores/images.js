@@ -1,97 +1,106 @@
-// frontend/webui/src/stores/images.js
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
-import { useTasksStore } from './tasks';
 
 export const useImageStore = defineStore('images', () => {
+    const images = ref([]);
+    const isLoading = ref(false);
+    const isGenerating = ref(false);
     const uiStore = useUiStore();
-    const tasksStore = useTasksStore();
 
-    // --- STATE ---
-    const generatedImages = ref([]);
-    const isLoadingImages = ref(false);
-    const isLoadingGeneration = ref(false);
-
-    // --- COMPUTED ---
-    // No complex computed properties needed yet, but keeping structure for future.
-
-    // --- ACTIONS ---
-
-    /**
-     * Fetches the user's previously generated images from the server.
-     */
-    async function fetchGeneratedImages() {
-        if (isLoadingImages.value) return;
-        isLoadingImages.value = true;
+    async function fetchImages() {
+        isLoading.value = true;
         try {
-            const response = await apiClient.get('/api/image-studio/generated-images');
-            generatedImages.value = Array.isArray(response.data) ? response.data : [];
+            const response = await apiClient.get('/api/image-studio');
+            images.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
-            console.error("Failed to fetch generated images:", error);
-            generatedImages.value = [];
+            console.error("Failed to fetch images:", error);
+            images.value = [];
         } finally {
-            isLoadingImages.value = false;
+            isLoading.value = false;
         }
     }
 
-    /**
-     * Initiates an image generation task on the server.
-     * @param {object} payload - The generation parameters.
-     */
     async function generateImage(payload) {
-        if (isLoadingGeneration.value) return;
-        isLoadingGeneration.value = true;
-        
+        isGenerating.value = true;
         try {
             const response = await apiClient.post('/api/image-studio/generate', payload);
-            const task = response.data;
-            tasksStore.addTask(task);
-            uiStore.addNotification('Image generation task started. Check Task Manager for progress.', 'info', 7000);
+            if (Array.isArray(response.data)) {
+                images.value.unshift(...response.data);
+            }
+            uiStore.addNotification(`${response.data?.length || 0} image(s) generated successfully!`, 'success');
         } catch (error) {
-            // Error handling is mostly done by the API interceptor
-            console.error("Image generation failed:", error);
+            // Handled globally
         } finally {
-            isLoadingGeneration.value = false;
+            isGenerating.value = false;
         }
     }
 
-    /**
-     * Deletes a previously generated image file.
-     * @param {string} fileName - The file name of the image to delete.
-     */
-    async function deleteGeneratedImage(fileName) {
+    async function editImage(payload) {
+        isGenerating.value = true;
         try {
-            await apiClient.delete(`/api/image-studio/generated-images/${fileName}`);
-            generatedImages.value = generatedImages.value.filter(img => img.file_name !== fileName);
-            uiStore.addNotification('Image deleted successfully.', 'success');
+            const response = await apiClient.post('/api/image-studio/edit', payload);
+            if (response.data) {
+                images.value.unshift(response.data);
+            }
+            uiStore.addNotification(`Image edited successfully!`, 'success');
         } catch (error) {
-            console.error("Failed to delete image:", error);
+            // Handled by global interceptor
+        } finally {
+            isGenerating.value = false;
         }
     }
-    
-    /**
-     * Resets the store state.
-     */
-    function $reset() {
-        generatedImages.value = [];
-        isLoadingImages.value = false;
-        isLoadingGeneration.value = false;
+
+    async function uploadImage(file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        isGenerating.value = true; // Use the same loader for consistency
+        try {
+            const response = await apiClient.post('/api/image-studio/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            if (response.data) {
+                images.value.unshift(response.data);
+            }
+            uiStore.addNotification('Image uploaded successfully!', 'success');
+        } catch (error) {
+            // Handled globally
+        } finally {
+            isGenerating.value = false;
+        }
+    }
+
+    async function deleteImage(imageId) {
+        try {
+            await apiClient.delete(`/api/image-studio/${imageId}`);
+            images.value = images.value.filter(img => img.id !== imageId);
+            uiStore.addNotification('Image deleted.', 'success');
+        } catch (error) {
+            // Handled globally
+        }
+    }
+
+    async function moveImageToDiscussion(imageId, discussionId) {
+        try {
+            await apiClient.post(`/api/image-studio/${imageId}/move-to-discussion`, {
+                discussion_id: discussionId
+            });
+            uiStore.addNotification('Image added to the active discussion.', 'success');
+        } catch (error) {
+            // Handled globally
+        }
     }
 
     return {
-        // State
-        generatedImages,
-        isLoadingImages,
-        isLoadingGeneration,
-        
-        // Actions
-        fetchGeneratedImages,
+        images,
+        isLoading,
+        isGenerating,
+        fetchImages,
         generateImage,
-        deleteGeneratedImage,
-        
-        // Reset
-        $reset,
+        editImage,
+        uploadImage,
+        deleteImage,
+        moveImageToDiscussion,
     };
 });

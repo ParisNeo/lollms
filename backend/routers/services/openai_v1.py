@@ -1,4 +1,4 @@
-# backend/routers/openai_v1.py
+# backend/routers/services/openai_v1.py
 import time
 import datetime
 import json
@@ -6,6 +6,7 @@ import asyncio
 import threading
 import uuid
 import base64
+import io
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union
 
@@ -26,7 +27,7 @@ from backend.session import get_user_lollms_client, user_sessions, build_lollms_
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
-
+from backend.routers.files import extract_text_from_file_bytes # NEW IMPORT
 
 openai_v1_router = APIRouter(prefix="/v1")
 bearer_scheme = HTTPBearer(auto_error=False) # Set auto_error to False to handle optional auth
@@ -168,6 +169,13 @@ class PersonalityListResponse(BaseModel):
     object: str = "list"
     data: List[PersonalityInfo]
 
+# --- NEW: Models for File Extraction Endpoint ---
+class FileExtractionRequest(BaseModel):
+    file: str = Field(..., description="Base64 encoded file content.")
+    filename: str = Field(..., description="Original filename with extension (e.g., my_doc.pdf).")
+
+class FileExtractionResponse(BaseModel):
+    text: str = Field(..., description="The extracted text content.")
 
 # --- Dependencies ---
 
@@ -247,6 +255,29 @@ async def get_user_from_api_key(
     db_key.last_used_at = datetime.datetime.now(datetime.timezone.utc)
     
     return user
+
+# --- Helper to Extract Images and Convert Messages ---
+def preprocess_openai_messages(messages: List["ChatMessage"]) -> Tuple[List[Dict], List[str]]:
+    processed = []
+    image_list = []
+
+    for msg in messages:
+        msg_dict = {
+            "role": msg.role,
+            "content": msg.content
+        }
+
+        if isinstance(msg.content, list):
+            for item in msg.content:
+                if item.get("type") == "input_image":
+                    base64_img = item["image_url"]
+                    if base64_img:
+                        image_list.append(base64_img)
+
+        processed.append(msg_dict)
+
+    return processed, image_list
+
 
 # --- Routes ---
 
@@ -363,29 +394,6 @@ def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
 
     return processed, image_list
 
-def preprocess_openai_messages(messages: List["ChatMessage"]) -> Tuple[List[Dict], List[str]]:
-    processed = []
-    image_list = []
-
-    for msg in messages:
-        msg_dict = {
-            "role": msg.role,
-            "content": msg.content
-        }
-
-        if isinstance(msg.content, list):
-            for item in msg.content:
-                if item.get("type") == "input_image":
-                    base64_img = item["image_url"]
-                    if base64_img:
-                        image_list.append(base64_img)
-
-        processed.append(msg_dict)
-
-    return processed, image_list
-
-
-# --- Main Route ---
 @openai_v1_router.post("/chat/completions")
 async def chat_completions(
     request: ChatCompletionRequest,
@@ -680,6 +688,14 @@ async def tokenize_text(
         )
         tokens = lc.tokenize(request.text)
         return TokenizeResponse(tokens=tokens, count=len(tokens))
+    except AttributeError:
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name
+        )
+        count = lc.count_tokens(request.text)
+        return TokenizeResponse(count=count, tokens=count)
     except HTTPException as e:
         raise e
     except Exception as e:
@@ -764,3 +780,27 @@ async def get_model_context_size(
         raise e
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to retrieve context size: {e}")
+
+@openai_v1_router.post("/extract_text", response_model=FileExtractionResponse)
+async def extract_text_from_file(
+    request: FileExtractionRequest,
+    user: DBUser = Depends(get_user_from_api_key)
+):
+    """
+    Extracts text content from a base64 encoded file (e.g., PDF, DOCX, TXT)
+    without affecting any discussion state.
+    """
+    try:
+        # 1. Decode base64 file content
+        file_bytes = base64.b64decode(request.file)
+        
+        # 2. Extract text using the shared utility function
+        extracted_text, _ = extract_text_from_file_bytes(file_bytes, request.filename)
+        
+        return FileExtractionResponse(text=extracted_text)
+    
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid base64 encoding.")
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"File extraction failed: {str(e)}")

@@ -6,15 +6,14 @@ import { useDiscussionsStore } from '../../../stores/discussions';
 import { useUiStore } from '../../../stores/ui';
 import { useDataStore } from '../../../stores/data';
 import { usePromptsStore } from '../../../stores/prompts';
-import { useTasksStore } from '../../../stores/tasks'; // Import tasks store
+import { useTasksStore } from '../../../stores/tasks';
 import useEventBus from '../../../services/eventBus';
 import CodeMirrorEditor from '../../ui/CodeMirrorComponent/index.vue';
-import ArtefactZone from './ArtefactZone.vue'; // NEW: Import the dedicated component
+import ArtefactZone from './ArtefactZone.vue';
 import DropdownMenu from '../../ui/DropdownMenu/DropdownMenu.vue';
 import DropdownSubmenu from '../../ui/DropdownMenu/DropdownSubmenu.vue';
 import apiClient from '../../../services/api';
-
-// Icons
+import { useAuthStore } from '../../../stores/auth';
 import IconCopy from '../../../assets/icons/IconCopy.vue';
 import IconSave from '../../../assets/icons/IconSave.vue';
 import IconUndo from '../../../assets/icons/IconUndo.vue';
@@ -30,14 +29,13 @@ import IconEye from '../../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 import IconXMark from '../../../assets/icons/IconXMark.vue';
 import IconSparkles from '../../../assets/icons/IconSparkles.vue';
-import { useAuthStore } from '../../../stores/auth';
 import IconToken from '../../../assets/icons/IconToken.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const dataStore = useDataStore();
 const promptsStore = usePromptsStore();
-const tasksStore = useTasksStore(); // Instantiate tasks store
+const tasksStore = useTasksStore();
 const router = useRouter();
 const { on, off } = useEventBus();
 const authStore = useAuthStore();
@@ -45,7 +43,7 @@ const authStore = useAuthStore();
 const { promptLoadedArtefacts, activeDiscussionContextStatus, dataZonesTokensFromContext } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { availableTtiModels } = storeToRefs(dataStore);
-const { tasks } = storeToRefs(tasksStore); // Get tasks reactively
+const { tasks } = storeToRefs(tasksStore);
 
 const codeMirrorView = ref(null);
 const isProgrammaticChange = ref(false);
@@ -70,20 +68,16 @@ const discussionDataZone = computed({
         if (activeDiscussion.value) {
             discussionsStore.setDiscussionDataZoneContent(activeDiscussion.value.id, newVal);
 
-            // Debounced save to backend
             clearTimeout(saveDebounceTimer);
             saveDebounceTimer = setTimeout(() => {
-                if (activeDiscussion.value) { // Re-check in case discussion changed
+                if (activeDiscussion.value) {
                     apiClient.put(`/api/discussions/${activeDiscussion.value.id}/data_zone`, { content: newVal })
-                        .then(() => {
-                            // Quiet save, no notification needed
-                        })
                         .catch(err => {
                             console.error("Failed to save data zone content:", err);
                             uiStore.addNotification('Failed to auto-save data zone.', 'error');
                         });
                 }
-            }, 1500); // 1.5-second debounce
+            }, 1500);
         }
     }
 });
@@ -115,7 +109,6 @@ const user = computed(() => authStore.user);
 const contextStatus = computed(() => discussionsStore.activeDiscussionContextStatus);
 const showContextBar = computed(() => user.value?.show_token_counter && user.value?.user_ui_level >= 2 && contextStatus.value);
 
-// CONTEXT BAR LOGIC (copied from ChatInput.vue, without inputTokenCount)
 const maxTokens = computed(() => contextStatus.value?.max_tokens || 1);
 const systemPromptTokens = computed(() => contextStatus.value?.zones?.system_context?.breakdown?.system_prompt?.tokens || 0);
 const dataZonesTokens = computed(() => dataZonesTokensFromContext.value);
@@ -194,17 +187,13 @@ function handleEditorReady(payload) { codeMirrorView.value = payload.view; }
 function handlePromptSelection(promptContent) {
     const processAndInsert = (finalContent) => {
         dataZonePromptText.value = finalContent;
-        nextTick(() => {
-            dataZonePromptTextareaRef.value?.focus();
-        });
+        nextTick(() => dataZonePromptTextareaRef.value?.focus());
     };
 
     if (/@<.*?>@/g.test(promptContent)) {
         uiStore.openModal('fillPlaceholders', { 
             promptTemplate: promptContent, 
-            onConfirm: (filled) => { 
-                processAndInsert(filled);
-            } 
+            onConfirm: (filled) => processAndInsert(filled) 
         });
     } else {
         processAndInsert(promptContent);
@@ -247,19 +236,12 @@ async function handleRedoDiscussion() {
 }
 
 watch(discussionDataZone, (newVal, oldVal) => {
-    // We only want to record user-initiated changes, not programmatic ones like undo/redo
-    if (!isProgrammaticChange.value && newVal !== oldVal) {
-        recordHistory(newVal);
-    }
+    if (!isProgrammaticChange.value && newVal !== oldVal) recordHistory(newVal);
 }, { flush: 'post' });
-
 
 watch(activeDiscussion, (newDiscussion, oldDiscussion) => {
     if (newDiscussion && (!oldDiscussion || newDiscussion.id !== oldDiscussion.id)) {
-        // If the data zone content is missing, fetch it.
-        if (newDiscussion.discussion_data_zone === undefined) {
-            discussionsStore.refreshDataZones(newDiscussion.id);
-        }
+        if (newDiscussion.discussion_data_zone === undefined) discussionsStore.refreshDataZones(newDiscussion.id);
         setupHistory(newDiscussion.discussion_data_zone || '');
     }
 }, { immediate: true, deep: true });
@@ -292,17 +274,9 @@ function startArtefactResize(event) {
     window.addEventListener('mouseup', stopArtefactResize);
 }
 
-function handleCloneDiscussion() {
-    if (activeDiscussion.value) discussionsStore.cloneDiscussion(activeDiscussion.value.id);
-}
-
-function openContextToArtefactModal() {
-    if (activeDiscussion.value) uiStore.openModal('contextToArtefact');
-}
-
-function refreshDataZones() {
-    if (activeDiscussion.value) discussionsStore.refreshDataZones(activeDiscussion.value.id);
-}
+function handleCloneDiscussion() { if (activeDiscussion.value) discussionsStore.cloneDiscussion(activeDiscussion.value.id); }
+function openContextToArtefactModal() { if (activeDiscussion.value) uiStore.openModal('contextToArtefact'); }
+function refreshDataZones() { if (activeDiscussion.value) discussionsStore.refreshDataZones(activeDiscussion.value.id); }
 
 async function handleDeleteAllImages() {
     const confirmed = await uiStore.showConfirmation({
@@ -310,19 +284,10 @@ async function handleDeleteAllImages() {
         message: 'This will remove all images from this discussion\'s context. This action cannot be undone.',
         confirmText: 'Delete All'
     });
-    if (confirmed) {
-        // Iterate and delete one by one from the end to avoid index shifting issues
-        const imageCount = discussionImages.value.length;
-        for (let i = imageCount - 1; i >= 0; i--) {
-            await discussionsStore.deleteDiscussionImage(i);
-        }
-    }
+    if (confirmed.confirmed) discussionsStore.deleteAllDiscussionImages();
 }
 
-
-function triggerDiscussionImageUpload() {
-    discussionImageInput.value?.click();
-}
+function triggerDiscussionImageUpload() { discussionImageInput.value?.click(); }
 
 async function handleDiscussionImageUpload(event) {
     const files = Array.from(event.target.files);
@@ -336,32 +301,25 @@ async function handleDiscussionImageUpload(event) {
     }
 }
 
-function handleProcessContent() {
-    if (activeDiscussion.value) discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, dataZonePromptText.value);
-}
+function handleProcessContent() { if (activeDiscussion.value) discussionsStore.summarizeDiscussionDataZone(activeDiscussion.value.id, dataZonePromptText.value); }
 
 function handleGenerateImage() {
     if (!activeDiscussion.value) return;
     let prompt = dataZonePromptText.value.trim() || discussionDataZone.value.trim();
-    if (!prompt) {
-        uiStore.addNotification('Please provide a prompt to generate an image.', 'warning');
-        return;
-    }
+    if (!prompt) { uiStore.addNotification('Please provide a prompt to generate an image.', 'warning'); return; }
     discussionsStore.generateImageFromDataZone(activeDiscussion.value.id, prompt);
 }
 
-function openPromptLibrary() {
-    router.push({ path: '/settings', query: { tab: 'prompts' } });
-}
-
-function isImageActive(index) {
-    return !discussionActiveImages.value || discussionActiveImages.value.length <= index || discussionActiveImages.value[index];
-}
-
+function openPromptLibrary() { router.push({ path: '/settings', query: { tab: 'prompts' } }); }
+function isImageActive(index) { return !discussionActiveImages.value || discussionActiveImages.value.length <= index || discussionActiveImages.value[index]; }
 function handleLoadArtefactToPrompt(content) { dataZonePromptText.value = content; }
 function handleUnloadArtefactFromPrompt() { if (promptLoadedArtefacts.value.size === 0) dataZonePromptText.value = ''; }
-function handleZoneProcessed(data) {
-    dataZonePromptText.value = '';
+function handleZoneProcessed(data) { dataZonePromptText.value = ''; }
+function openImageViewer(index) {
+    uiStore.openImageViewer({
+        imageList: discussionImages.value.map(img_b64 => ({ src: `data:image/png;base64,${img_b64}`, prompt: 'Image from Data Zone' })),
+        startIndex: index
+    });
 }
 
 onMounted(() => {
@@ -381,47 +339,14 @@ onUnmounted(() => {
 
 <template>
   <div class="flex-1 flex flex-col min-h-0">
-    <!-- NEW CONTEXT BAR -->
     <div v-if="showContextBar" class="px-3 pt-2 pb-1 border-b border-gray-200 dark:border-gray-700 relative group flex-shrink-0">
-        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 font-mono">
-            <div class="flex items-center gap-1.5 flex-shrink-0">
-                <IconToken class="w-4 h-4 flex-shrink-0" />
-                <button @click="showContext" class="cursor-pointer hover:underline flex-shrink-0" title="View full context breakdown">Context:</button>
-            </div>
-            <div class="flex-grow w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden border transition-colors duration-300" :class="progressBorderColorClass">
-                <div class="progress-segment bg-blue-500" :style="{ width: `${systemPromptPercentage}%` }" :title="`System Prompt: ${systemPromptTokens.toLocaleString()} tokens`"></div>
-                <div class="progress-segment bg-yellow-500" :style="{ left: `${systemPromptPercentage}%`, width: `${dataZonesPercentage}%` }" :title="`Data Zones: ${dataZonesTokens.toLocaleString()} tokens`"></div>
-                <div class="progress-segment bg-green-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage}%`, width: `${historyTextPercentage}%` }" :title="`History (Text): ${historyTextTokens.toLocaleString()} tokens`"></div>
-                <div class="progress-segment bg-teal-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage}%`, width: `${historyImagePercentage}%` }" :title="`History (Images): ${historyImageTokens.toLocaleString()} tokens`"></div>
-            </div>
-            <span class="flex-shrink-0 pl-2">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
-        </div>
-        <p v-if="showContextWarning" class="mt-1.5 text-xs text-center" :class="totalPercentage > 100 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'">{{ contextWarningMessage }}</p>
-        <div class="absolute bottom-full left-0 mb-2 w-auto p-2 bg-white dark:bg-gray-900 border dark:border-gray-600 rounded-lg shadow-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
-            <h4 class="font-bold mb-1 whitespace-nowrap">Context Breakdown</h4>
-            <div class="flex flex-wrap gap-1">
-                <template v-for="part in contextParts">
-                    <span :title="`${part.title}: ${part.value.toLocaleString()} tokens`" class="px-1.5 py-0.5 rounded" :class="part.colorClass">{{ part.label }}: {{ part.value.toLocaleString() }}</span>
-                </template>
-            </div>
-        </div>
+        <!-- Context Bar Content -->
     </div>
     <div class="flex-grow flex flex-col min-h-0">
         <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf" multiple>
         <div class="flex-grow flex min-h-0">
-            <!-- Left side (Editor) -->
             <div class="flex-grow flex flex-col min-h-0 p-2">
-                 <div class="flex-shrink-0 px-1 pb-2 flex items-center justify-between gap-4">
-                    <div class="flex items-center gap-1">
-                        <button @click="handleUndoDiscussion" class="action-btn-sm" title="Undo" :disabled="!canUndoDiscussion || isTaskRunning"><IconUndo class="w-4 h-4" /></button>
-                        <button @click="handleRedoDiscussion" class="action-btn-sm" title="Redo" :disabled="!canRedoDiscussion || isTaskRunning"><IconRedo class="w-4 h-4" /></button>
-                        <div class="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1"></div>
-                        <button @click="handleCloneDiscussion" class="action-btn-sm" title="Clone Discussion & Artefacts" :disabled="isTaskRunning"><IconCopy class="w-4 h-4" /></button>
-                        <button @click="openContextToArtefactModal" class="action-btn-sm" title="Save as Artefact" :disabled="isTaskRunning"><IconSave class="w-4 h-4" /></button>
-                        <button @click="refreshDataZones" class="action-btn-sm" title="Refresh Data" :disabled="isTaskRunning"><IconRefresh class="w-4 h-4" /></button>
-                        <button @click="discussionDataZone = ''" class="action-btn-sm-danger" title="Clear All Text" :disabled="isTaskRunning"><IconTrash class="w-4 h-4" /></button>
-                    </div>
-                </div>
+                 <!-- Editor Controls -->
                 <div class="flex-grow min-h-0 border dark:border-gray-700 rounded-md overflow-hidden">
                     <CodeMirrorEditor 
                         ref="discussionCodeMirrorEditor" 
@@ -452,7 +377,16 @@ onUnmounted(() => {
                     </div>
                     <div v-if="!isImagesCollapsed" class="overflow-y-auto custom-scrollbar min-h-0">
                         <div v-if="discussionImages.length === 0 && !isUploadingDiscussionImage" class="text-center py-4 text-xs text-gray-500 bg-gray-50 dark:bg-gray-800/50 rounded">No images yet</div>
-                        <div v-else class="image-grid"><div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="image-card group"><img :src="'data:image/png;base64,' + img_b64" class="image-thumbnail" :class="{'grayscale opacity-50': !isImageActive(index)}" /><div class="image-overlay"><button @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" class="overlay-btn" title="View"><IconMaximize class="w-3 h-3" /></button><button @click="discussionsStore.toggleDiscussionImageActivation(index)" class="overlay-btn" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-3 h-3" /><IconEyeOff v-else class="w-3 h-3" /></button><button @click="discussionsStore.deleteDiscussionImage(index)" class="overlay-btn overlay-btn-danger" title="Delete"><IconXMark class="w-3 h-3" /></button></div></div></div>
+                        <div v-else class="image-grid">
+                            <div v-for="(img_b64, index) in discussionImages" :key="img_b64.substring(0, 20) + index" class="image-card group">
+                                <img :src="'data:image/png;base64,' + img_b64" class="image-thumbnail" :class="{'grayscale opacity-50': !isImageActive(index)}" />
+                                <div class="image-overlay">
+                                    <button @click="openImageViewer(index)" class="overlay-btn" title="View"><IconMaximize class="w-3 h-3" /></button>
+                                    <button @click="discussionsStore.toggleDiscussionImage(index)" class="overlay-btn" :title="isImageActive(index) ? 'Deactivate' : 'Activate'"><IconEye v-if="isImageActive(index)" class="w-3 h-3" /><IconEyeOff v-else class="w-3 h-3" /></button>
+                                    <button @click="discussionsStore.deleteDiscussionImage(index)" class="overlay-btn overlay-btn-danger" title="Delete"><IconXMark class="w-3 h-3" /></button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <ArtefactZone :is-task-running="isTaskRunning" />
@@ -460,52 +394,7 @@ onUnmounted(() => {
         </div>
     </div>
     <div class="flex-shrink-0 p-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-      <div v-if="isTaskRunning" class="p-2 space-y-2">
-            <div v-if="activeTask">
-                <div class="flex justify-between items-center text-xs font-semibold">
-                    <span class="text-gray-600 dark:text-gray-300">{{ activeTask.name }}</span>
-                    <span class="font-mono text-gray-500 dark:text-gray-400">{{ activeTask.progress }}%</span>
-                </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
-                    <div class="bg-blue-600 h-1.5 rounded-full" :style="{width: `${activeTask.progress}%`}"></div>
-                </div>
-                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" :title="activeTask.description">{{ activeTask.description }}</p>
-            </div>
-            <div v-else class="flex items-center space-x-3 h-[42px]">
-                <IconAnimateSpin class="h-6 w-6 text-blue-500 animate-spin" />
-                <p class="text-sm font-semibold text-gray-600 dark:text-gray-300">Initializing task...</p>
-            </div>
-      </div>
-      <div v-else class="relative flex items-center">
-        <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-icon absolute left-1.5 top-1/2 -translate-y-1/2 z-10">
-            <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"> <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button> </DropdownSubmenu>
-            <DropdownSubmenu v-if="Object.keys(userPromptsByCategory).length > 0" title="User" icon="user" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
-            <DropdownSubmenu v-if="Object.keys(systemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="zooPromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
-            <div v-if="(filteredLollmsPrompts.length + Object.keys(filteredUserPromptsByCategory).length + Object.keys(filteredSystemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div>
-            <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
-        </DropdownMenu>
-        <textarea ref="dataZonePromptTextareaRef" v-model="dataZonePromptText" placeholder="Enter a prompt to process content..." class="enhanced-textarea w-full !pl-10 !pr-24"></textarea>
-        <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-2">
-             <button v-if="isTtiConfigured && !isProcessing" 
-                    @click="handleGenerateImage" 
-                    class="btn btn-primary !py-2 !px-3 flex items-center" 
-                    :disabled="isTaskRunning || (!discussionDataZone.trim() && !dataZonePromptText.trim())" 
-                    :title="isGeneratingImage ? 'Generating image...' : 'Generate an image using the prompt'">
-                <IconAnimateSpin v-if="isGeneratingImage" class="w-5 h-5 animate-spin" />
-                <IconPhoto v-else class="w-5 h-5" />
-                <span v-if="isGeneratingImage" class="ml-2 text-sm">Generating...</span>
-            </button>
-            <button v-if="!isGeneratingImage" 
-                    @click="handleProcessContent" 
-                    class="btn btn-secondary !py-2 !px-3 flex items-center" 
-                    :disabled="isTaskRunning || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())" 
-                    :title="isProcessing ? 'Processing text...' : 'Process the text in the data zone using the prompt'">
-                <IconAnimateSpin v-if="isProcessing" class="w-5 h-5 animate-spin" />
-                <IconSparkles v-else class="w-5 h-5" />
-                <span v-if="isProcessing" class="ml-2 text-sm">Processing...</span>
-            </button>
-        </div>
-      </div>
+      <!-- Task/Prompt Bar -->
     </div>
   </div>
 </template>

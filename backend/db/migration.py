@@ -18,6 +18,7 @@ from backend.db.models.fun_fact import FunFactCategory, FunFact
 from backend.db.models.user import User
 from backend.db.models.memory import UserMemory
 from backend.db.models.connections import WebSocketConnection
+from backend.db.models.image import UserImage
 from ascii_colors import ASCIIColors, trace_exception
 
 
@@ -79,6 +80,18 @@ def _bootstrap_global_settings(connection):
         "public_domain_name": {
             "value": APP_SETTINGS.get("public_domain_name", ""),
             "type": "string", "description": "Public domain or IP to use for links when server is on 0.0.0.0. If empty, auto-detects IP.", "category": "Server"
+        },
+        "data_path": {
+            "value": str(APP_DATA_DIR.resolve()),
+            "type": "string", "description": "The root directory for all application data. Requires a manual update in .env and a server restart to change.", "category": "Server"
+        },
+        "huggingface_cache_path": {
+            "value": str((APP_DATA_DIR / "huggingface_cache").resolve()),
+            "type": "string", "description": "Path for Hugging Face model cache. Requires a restart to change.", "category": "Server"
+        },
+        "backup_password": {
+            "value": "",
+            "type": "string", "description": "Password to encrypt application backups. If empty, backups will not be encrypted.", "category": "Backup"
         },
         "allow_new_registrations": {
             "value": APP_SETTINGS.get("allow_new_registrations", True),
@@ -677,6 +690,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print(f"INFO: Added missing column '{col_name}' to 'user_voices' table.")
         connection.commit()
 
+    if not inspector.has_table("user_images"):
+        from backend.db.models.image import UserImage
+        UserImage.__table__.create(connection)
+        print("INFO: Created 'user_images' table.")
+        connection.commit()
+
 
     if inspector.has_table("users"):
         user_columns_db = [col['name'] for col in inspector.get_columns('users')]
@@ -1181,7 +1200,7 @@ def _migrate_user_data_folders(connection):
         usernames = {row[0] for row in connection.execute(text("SELECT username FROM users")).fetchall()}
         
         migrated_count = 0
-        non_user_folders = {USERS_DIR_NAME, "cache", "zoo", "apps", "mcps", "custom_apps", "apps_zoo", "mcps_zoo", "prompts_zoo", "personalities_zoo"}
+        non_user_folders = {USERS_DIR_NAME, "cache", "zoo", "apps", "mcps", "custom_apps", "apps_zoo", "mcps_zoo", "prompts_zoo", "personalities_zoo", "huggingface_cache"}
         
         # Iterate over items in the root data directory
         for item in APP_DATA_DIR.iterdir():

@@ -4,27 +4,52 @@ import io
 import re
 import shutil
 import uuid
+import os
+import tempfile
+import requests
 from pathlib import Path
-from typing import List, Dict
-import fitz  # PyMuPDF
-import io, re, os, tempfile, base64
-from typing import Dict
-import markdown2  # pip install markdown2
-from bs4 import BeautifulSoup  # pip install beautifulsoup4
-from docx import Document as DocxDocument  # pip install python-docx
-from docx.shared import Pt, Inches
-from openpyxl import Workbook
-from openpyxl.utils import get_column_letter
-from pptx import Presentation  # pip install python-pptx
-from pptx.util import Inches as PptxInches, Pt as PptxPt
-from mdtopptx import parse_markdown as md_to_pptx_parse, create_ppt  # pip install mdtopptx
-from markdown_pdf import MarkdownPdf, Section  # pip install markdown-pdf
-import fitz  # PyMuPDF (indirectly used by markdown-pdf)
-import requests  # pip install requests
+from typing import List, Dict, Any, Tuple, Optional
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Form
 from fastapi.responses import FileResponse, Response
 from werkzeug.utils import secure_filename
+import markdown2 
+from bs4 import BeautifulSoup 
+from docx import Document as DocxDocument 
+from docx.shared import Pt, Inches
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+from pptx import Presentation 
+from pptx.util import Inches as PptxInches, Pt as PptxPt
+from markdown_pdf import MarkdownPdf, Section 
+
+# Try to import optional document parsing libraries
+try:
+    from docx2python import docx2python
+except ImportError:
+    docx2python = None
+try:
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+except ImportError:
+    MSO_SHAPE_TYPE = None
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+try:
+    import extract_msg
+except ImportError:
+    extract_msg = None
+try:
+    import fitz 
+except ImportError:
+    fitz = None
+try:
+    from mdtopptx import parse_markdown as md_to_pptx_parse, create_ppt
+except ImportError:
+    md_to_pptx_parse = None
+    create_ppt = None
+
 
 from backend.session import (
     get_current_active_user, get_user_temp_uploads_path
@@ -39,6 +64,155 @@ from backend.settings import settings
 files_router = APIRouter(prefix="/api/files", tags=["Files"])
 upload_router = APIRouter(prefix="/api/upload", tags=["Files"])
 assets_router = APIRouter(prefix="/assets", tags=["Files"])
+
+def _process_msg_attachment(att_bytes: bytes, att_name: str, images: List[str]) -> Optional[str]:
+    """Helper to process a single attachment from an MSG file."""
+    att_ext = Path(att_name).suffix.lower()
+    
+    if att_ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"]:
+        images.append(base64.b64encode(att_bytes).decode("utf-8"))
+        return None 
+    
+    try:
+        text_guess = att_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        try:
+            text_guess = att_bytes.decode("latin-1", errors="replace")
+        except Exception:
+            text_guess = ""
+    
+    CODE_EXTENSIONS = {
+        ".txt": "text", ".md": "markdown", ".py": "python", ".js": "javascript", ".ts": "typescript", ".html": "html", ".css": "css",
+        ".c": "c", ".cpp": "cpp", ".h": "cpp", ".hpp": "cpp", ".cs": "csharp", ".java": "java",
+        ".json": "json", ".xml": "xml", ".sh": "bash", ".vhd": "vhdl", ".v": "verilog",
+        ".rb": "ruby", ".php": "php", ".go": "go", ".rs": "rust", ".swift": "swift", ".kt": "kotlin",
+        ".yaml": "yaml", ".yml": "yaml", ".sql": "sql", ".log": "text", ".csv": "csv"
+    }
+    
+    if att_ext in CODE_EXTENSIONS:
+        lang = CODE_EXTENSIONS[att_ext]
+        return f"### Attachment: {att_name}\n\n````{lang}\n{text_guess}\n````"
+    
+    return f"- Attachment: {att_name} ({len(att_bytes)} bytes - content ignored)"
+
+
+def extract_text_from_file_bytes(file_bytes: bytes, filename: str) -> Tuple[str, List[str]]:
+    """
+    Extracts text and embedded/generated images (as base64) from file bytes.
+    Returns: (extracted_text, list_of_base64_images)
+    """
+    extension = Path(filename).suffix.lower()
+    
+    extracted_text = ""
+    images: List[str] = []
+    
+    # --- Document Type Handling ---
+    
+    if extension == ".pdf" and fitz:
+        try:
+            with fitz.open(stream=file_bytes, filetype="pdf") as pdf_doc:
+                text_parts = []
+                for page in pdf_doc:
+                    text_parts.append(page.get_text())
+                    for img_info in page.get_images(full=True):
+                        xref = img_info[0]
+                        base_image = pdf_doc.extract_image(xref)
+                        images.append(base64.b64encode(base_image["image"]).decode('utf-8'))
+                extracted_text = "\n".join(text_parts)
+        except Exception as e:
+            extracted_text = f"[Error processing PDF file: {e}. Is PyMuPDF (fitz) installed?]"
+            
+    elif extension == ".docx" and docx2python:
+        try:
+            with io.BytesIO(file_bytes) as docx_io:
+                result = docx2python(docx_io)
+                extracted_text = result.text
+                if result.images:
+                    for image_bytes in result.images.values():
+                        images.append(base64.b64encode(image_bytes).decode("utf-8"))
+        except Exception as e:
+            extracted_text = f"[Error processing DOCX file: {e}. Is docx2python installed?]"
+            
+    elif (extension == ".xlsx" or "spreadsheetml" in filename.lower()) and pd:
+        try:
+            xls = pd.read_excel(io.BytesIO(file_bytes), sheet_name=None)
+            md_parts = []
+            for sheet_name, df in xls.items():
+                md_parts.append(f"### {sheet_name}\n\n{df.to_markdown(index=False)}")
+            extracted_text = "\n\n".join(md_parts)
+        except Exception as e:
+            extracted_text = f"[Error processing XLSX file: {e}. Is pandas installed?]"
+
+    elif extension == ".pptx" and MSO_SHAPE_TYPE:
+        try:
+            with io.BytesIO(file_bytes) as pptx_io:
+                prs = Presentation(pptx_io)
+                slide_texts: List[str] = []
+                for idx, slide in enumerate(prs.slides, start=1):
+                    slide_parts: List[str] = []
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text"):
+                            txt = (shape.text or "").strip()
+                            if txt: slide_parts.append(txt)
+                        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                            images.append(base64.b64encode(shape.image.blob).decode("utf-8"))
+                    if slide_parts: slide_texts.append(f"--- Slide {idx} ---\n" + "\n".join(slide_parts))
+                extracted_text = "\n\n".join(slide_texts)
+        except Exception as e:
+            extracted_text = f"[Error processing PPTX file: {e}]"
+            
+    elif extension == ".msg" and extract_msg:
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".msg") as tf:
+                tf.write(file_bytes)
+                temp_path = tf.name
+            try:
+                msg = extract_msg.Message(temp_path)
+                header_lines = []
+                if getattr(msg, "subject", ""): header_lines.append(f"# {getattr(msg, 'subject', '')}")
+                meta = []
+                if getattr(msg, "sender", None) or getattr(msg, "from_", None): meta.append(f"From: {getattr(msg, 'sender', None) or getattr(msg, 'from_', None)}")
+                if getattr(msg, "to", ""): meta.append(f"To: {getattr(msg, 'to', '')}")
+                if getattr(msg, "date", ""): meta.append(f"Date: {getattr(msg, 'date', '')}")
+                if meta: header_lines.append("\n".join(meta))
+                header = "\n\n".join(header_lines)
+
+                msg_body = (getattr(msg, "body", "") or "").strip()
+                if not msg_body and getattr(msg, "htmlBody", None):
+                    msg_body = BeautifulSoup(getattr(msg, "htmlBody"), "html.parser").get_text()
+
+                attachment_text_parts: List[str] = [header, msg_body]
+                for att in msg.attachments:
+                    text_part = _process_msg_attachment(att.data or b"", att.longFilename or att.shortFilename or "attachment", images)
+                    if text_part: attachment_text_parts.append(text_part)
+
+                extracted_text = "\n\n".join([p for p in attachment_text_parts if p.strip()])
+
+            finally:
+                os.unlink(temp_path)
+        except Exception as e:
+            extracted_text = f"[Error processing MSG file: {e}. Is extract_msg installed?]"
+
+    # 6. Plain Text / Code
+    else:
+        try:
+            extracted_text = file_bytes.decode('utf-8')
+        except UnicodeDecodeError:
+            extracted_text = file_bytes.decode('latin-1', errors='replace')
+
+    # Add markdown code fence for recognized code files
+    CODE_EXTENSIONS = {
+        ".py", ".js", ".ts", ".html", ".css", ".c", ".cpp", ".h", ".hpp", ".cs", ".java",
+        ".json", ".xml", ".sh", ".vhd", ".v", ".rb", ".php", ".go", ".rs", ".swift", ".kt",
+        ".yaml", ".yml", ".sql", ".log", ".csv", ".txt", ".md"
+    }
+    if extension in CODE_EXTENSIONS:
+        lang = extension.strip('.').replace('c++', 'cpp').replace('c#', 'csharp')
+        if not extracted_text.startswith('```'):
+            extracted_text = f"````{lang}\n{extracted_text}\n````"
+            
+    return extracted_text, images
+
 
 @files_router.post("/export-markdown")
 async def export_as_markdown(
@@ -335,68 +509,23 @@ async def extract_and_embed_files(
 
     for file in files:
         filename = secure_filename(file.filename)
-        content_type = file.content_type
         content = await file.read()
         
         file_text = f"\n\n--- Document: {filename} ---\n"
         
         try:
-            if content_type == "application/pdf":
-                with fitz.open(stream=content, filetype="pdf") as doc:
-                    for page_num, page in enumerate(doc):
-                        file_text += f"\n--- Page {page_num + 1} ---\n"
-                        images = page.get_images(full=True)
-                        for img_index, img in enumerate(images):
-                            xref = img[0]
-                            base_image = doc.extract_image(xref)
-                            image_bytes = base_image["image"]
-                            b64_image = base64.b64encode(image_bytes).decode('utf-8')
-                            discussion.add_discussion_image(b64_image)
-                            new_image_count += 1
-                            file_text += f"![Image from {filename}, page {page_num + 1} | Image {initial_image_count + new_image_count}]\n"
-                        file_text += page.get_text("text")
-
-            elif "wordprocessingml" in str(content_type):
-                with io.BytesIO(content) as docx_file:
-                    temp_img_dir = temp_img_root / f"extract_{uuid.uuid4().hex}"
-                    temp_img_dir.mkdir(parents=True, exist_ok=True)
-                    try:
-                        docx_result = docx2python(docx_file, image_folder=str(temp_img_dir))
-                        text_with_placeholders = docx_result.text
-                        for img_name in docx_result.images:
-                            img_path = temp_img_dir / img_name
-                            if img_path.exists():
-                                with open(img_path, "rb") as f:
-                                    b64_image = base64.b64encode(f.read()).decode('utf-8')
-                                discussion.add_discussion_image(b64_image)
-                                new_image_count += 1
-                                placeholder = f"----{img_name}----"
-                                reference = f"\n![Image from {filename} | Image {initial_image_count + new_image_count}]\n"
-                                text_with_placeholders = text_with_placeholders.replace(placeholder, reference)
-                        file_text += text_with_placeholders
-                    finally:
-                        shutil.rmtree(temp_img_dir)
-
-            elif "presentationml" in str(content_type):
-                with io.BytesIO(content) as pptx_file:
-                    prs = Presentation(pptx_file)
-                    for i, slide in enumerate(prs.slides):
-                        file_text += f"\n--- Slide {i + 1} ---\n"
-                        for shape in slide.shapes:
-                            if hasattr(shape, "text") and shape.text.strip():
-                                file_text += shape.text + "\n"
-                            if hasattr(shape, "image"): # shape.shape_type == 13 (Picture)
-                                image = shape.image
-                                image_bytes = image.blob
-                                b64_image = base64.b64encode(image_bytes).decode('utf-8')
-                                discussion.add_discussion_image(b64_image)
-                                new_image_count += 1
-                                file_text += f"![Image from {filename}, slide {i+1} | Image {initial_image_count + new_image_count}]\n"
-            else:
-                try:
-                    file_text += content.decode('utf-8')
-                except UnicodeDecodeError:
-                    file_text += "[Could not decode file as text]"
+            extracted_text, images = extract_text_from_file_bytes(content, filename)
+            
+            # --- Integrate the extracted data into the discussion ---
+            file_text += extracted_text
+            
+            if images:
+                for b64_image in images:
+                    discussion.add_discussion_image(b64_image)
+                    new_image_count += 1
+                    # Append a reference tag to the text if an image was extracted
+                    file_text += f"\n![Image from {filename} | Image {initial_image_count + new_image_count}]\n"
+            # --- End Integration ---
 
             file_text += f"\n--- End Document: {filename} ---\n"
             all_extracted_text += file_text

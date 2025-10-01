@@ -213,11 +213,9 @@ const vOnClickOutside = {
                                 <IconMicrophone class="mr-3 h-5 w-5 text-gray-500" />
                                 <span>Voices Studio</span>
                             </router-link>
-                            <router-link v-if="isTtiConfigured" to="/image-studio" @click="isMenuOpen = false" class="menu-item-button w-full">
-                                <div class="flex items-center space-x-3 truncate">
-                                    <IconPhoto class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                    <div class="truncate text-left"><p class="font-medium truncate text-sm">Image Studio</p></div>
-                                </div>
+                            <router-link v-if="isTtiConfigured" to="/image-studio" @click="closeMenu" class="menu-item">
+                                <IconPhoto class="mr-3 h-5 w-5 text-gray-500" />
+                                <span>Image Studio</span>
                             </router-link>
                             <router-link v-if="isAdmin" to="/admin" @click="closeMenu" class="menu-item">
                                 <IconUserGroup class="mr-3 h-5 w-5 text-gray-500" />

@@ -31,7 +31,6 @@ def build_datazone_router(router: APIRouter):
         
         discussion.memory = "\n".join(["---"+m.title+"---\n"+m.content+"\n------" for m in owner_db_user.memories]) if owner_db_user and owner_db_user.memories else ""
         
-        # Use get_discussion_images to ensure data is in the correct format
         images_info = discussion.get_discussion_images()
         
         return DataZones(
@@ -122,26 +121,17 @@ def build_datazone_router(router: APIRouter):
                 image_bytes = await file.read()
                 try:
                     img = Image.open(io.BytesIO(image_bytes))
-                    
-                    # If it's a GIF, seek to the first frame
                     if img.format == 'GIF':
                         img.seek(0)
-
-                    # Convert to RGBA to handle various modes like P, LA, etc.
                     if img.mode not in ('RGB', 'RGBA'):
                         img = img.convert('RGBA')
-
-                    # Save to a buffer as PNG
                     with io.BytesIO() as buffer:
                         img.save(buffer, format="PNG")
                         png_image_bytes = buffer.getvalue()
-                    
                     images_b64.append(base64.b64encode(png_image_bytes).decode('utf-8'))
                 except Exception as e:
-                    # Fallback for formats PIL might not handle, or if conversion fails
                     ASCIIColors.warning(f"Pillow conversion failed: {e}. Falling back to original bytes for content type {content_type}")
                     images_b64.append(base64.b64encode(image_bytes).decode('utf-8'))
-
             elif content_type == "application/pdf":
                 pdf_bytes = await file.read()
                 pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -158,7 +148,6 @@ def build_datazone_router(router: APIRouter):
                 discussion.add_discussion_image(b64_data, source="user")
             
             discussion.commit()
-            
             all_images_info = discussion.get_discussion_images()
             
             return {
@@ -173,8 +162,7 @@ def build_datazone_router(router: APIRouter):
         finally:
             await file.close()
 
-
-    @router.put("/{discussion_id}/images/{image_index}/toggle", response_model=Dict[str, List[Any]])
+    @router.put("/{discussion_id}/images/{image_index}/toggle", response_model=DiscussionImageUpdateResponse)
     async def toggle_discussion_image(
         discussion_id: str,
         image_index: int,
@@ -187,12 +175,11 @@ def build_datazone_router(router: APIRouter):
             discussion.commit()
 
             all_images_info = discussion.get_discussion_images()
-            discussion_images_b64 = [img_info['data'] for img_info in all_images_info]
-            active_discussion_images = [img_info['active'] for img_info in all_images_info]
-            
             return {
-                "discussion_images": discussion_images_b64,
-                "active_discussion_images": active_discussion_images
+                "discussion_id": discussion_id,
+                "zone": "discussion_images",
+                "discussion_images": [img_info['data'] for img_info in all_images_info],
+                "active_discussion_images": [img_info['active'] for img_info in all_images_info]
             }
         except IndexError:
             raise HTTPException(status_code=404, detail="Image index out of bounds.")

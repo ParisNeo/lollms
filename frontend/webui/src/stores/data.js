@@ -1,10 +1,10 @@
 // [UPDATE] frontend/webui/src/stores/data.js
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue'; // Remove onMounted from this import list
+import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useAuthStore } from './auth';
 import { useUiStore } from './ui';
-import { useTasksStore } from './tasks'; // Import tasks store
+import { useTasksStore } from './tasks';
 import useEventBus from '../services/eventBus';
 
 export const useDataStore = defineStore('data', () => {
@@ -12,8 +12,8 @@ export const useDataStore = defineStore('data', () => {
 
     const availableLollmsModels = ref([]);
     const availableTtiModels = ref([]);
-    const availableTtsModels = ref([]); // NEW
-    const userVoices = ref([]); // NEW
+    const availableTtsModels = ref([]);
+    const userVoices = ref([]);
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
     const userPersonalities = ref([]);
@@ -25,8 +25,8 @@ export const useDataStore = defineStore('data', () => {
     const systemApps = ref([]);
     const isLoadingLollmsModels = ref(false);
     const isLoadingTtiModels = ref(false);
-    const isLoadingTtsModels = ref(false); // NEW
-    const isLoadingUserVoices = ref(false); // NEW
+    const isLoadingTtsModels = ref(false);
+    const isLoadingUserVoices = ref(false);
     const _languages = ref([]);
     const isLoadingLanguages = ref(false);
     const apiKeys = ref([]);
@@ -88,11 +88,9 @@ export const useDataStore = defineStore('data', () => {
                 acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
             }
 
-            // The backend now handles the display name based on the mode.
-            // We just need to map the icon.
             acc[bindingAlias].items.push({ 
                 id: model.id, 
-                name: model.name, // Use the name from the API directly
+                name: model.name,
                 icon_base64: model.alias?.icon,
                 description: model.alias?.description,
                 alias: model.alias
@@ -106,7 +104,7 @@ export const useDataStore = defineStore('data', () => {
 
         return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
     });
-    // NEW
+
     const availableTtiModelsGrouped = computed(() => {
         if (!Array.isArray(availableTtiModels.value) || availableTtiModels.value.length === 0) {
             return [];
@@ -125,7 +123,7 @@ export const useDataStore = defineStore('data', () => {
 
             acc[bindingAlias].items.push({ 
                 id: model.id, 
-                name: model.name, // Use name from API directly
+                name: model.name,
                 icon_base64: model.alias?.icon,
                 description: model.alias?.description,
                 alias: model.alias
@@ -139,7 +137,7 @@ export const useDataStore = defineStore('data', () => {
 
         return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
     });
-    // NEW
+
     const availableTtsModelsGrouped = computed(() => {
         if (!Array.isArray(availableTtsModels.value) || availableTtsModels.value.length === 0) {
             return [];
@@ -158,7 +156,7 @@ export const useDataStore = defineStore('data', () => {
 
             acc[bindingAlias].items.push({ 
                 id: model.id, 
-                name: model.name, // Use name from API directly
+                name: model.name,
                 icon_base64: model.alias?.icon,
                 description: model.alias?.description,
                 alias: model.alias
@@ -194,9 +192,7 @@ export const useDataStore = defineStore('data', () => {
             await Promise.allSettled([fetchApps(), fetchMcps()]);
         }
     }
-
-    // This line registers the event listener as soon as the store is created.
-    // It is no longer tied to a component's lifecycle hook.
+    
     on('task:completed', handleTaskCompletion);
     on('user-voices-changed', () => {
         console.log("[Data Store] Detected voice change, refetching voices.");
@@ -275,8 +271,8 @@ export const useDataStore = defineStore('data', () => {
         const promises = [
             fetchAvailableLollmsModels().catch(e => console.error("Error fetching models:", e)),
             fetchAvailableTtiModels().catch(e => console.error("Error fetching TTI models:", e)),
-            fetchAvailableTtsModels().catch(e => console.error("Error fetching TTS models:", e)), // NEW
-            fetchUserVoices().catch(e => console.error("Error fetching user voices:", e)), // NEW
+            fetchAvailableTtsModels().catch(e => console.error("Error fetching TTS models:", e)),
+            fetchUserVoices().catch(e => console.error("Error fetching user voices:", e)),
             fetchDataStores().catch(e => console.error("Error fetching data stores:", e)),
             fetchPersonalities().catch(e => console.error("Error fetching personalities:", e)),
             fetchMcps().catch(e => console.error("Error fetching MCPs:", e)),
@@ -312,7 +308,7 @@ export const useDataStore = defineStore('data', () => {
             isLoadingTtiModels.value = false;
         }
     }
-    // NEW
+
     async function fetchAvailableTtsModels() {
         isLoadingTtsModels.value = true;
         try {
@@ -324,7 +320,7 @@ export const useDataStore = defineStore('data', () => {
             isLoadingTtsModels.value = false;
         }
     }
-    // NEW
+
     async function fetchUserVoices() {
         isLoadingUserVoices.value = true;
         try {
@@ -559,7 +555,6 @@ export const useDataStore = defineStore('data', () => {
             uiStore.addNotification('Icon generated successfully!', 'success');
             return response.data.icon_base64;
         } catch (error) {
-            // Error is handled by global interceptor
             return null;
         }
     }
@@ -588,12 +583,12 @@ export const useDataStore = defineStore('data', () => {
     }
     async function addMcp(payload) {
         const response = await apiClient.post('/api/mcps', payload);
-        await fetchMcps(); // Refresh the list
+        await fetchMcps();
         useUiStore().addNotification(`MCP '${response.data.name}' created.`, 'success');
     }
     async function updateMcp(id, payload) {
         const response = await apiClient.put(`/api/mcps/${id}`, payload);
-        await fetchMcps(); // Refresh the list
+        await fetchMcps();
         useUiStore().addNotification(`MCP '${response.data.name}' updated.`, 'success');
     }
     async function deleteMcp(id) {
@@ -617,17 +612,17 @@ export const useDataStore = defineStore('data', () => {
     }
     async function addApp(payload) {
         const response = await apiClient.post('/api/apps', payload);
-        await fetchApps(); // Refresh the list
+        await fetchApps();
         useUiStore().addNotification(`App '${response.data.name}' created.`, 'success');
     }
     async function updateApp(id, payload) {
         const response = await apiClient.put(`/api/apps/${id}`, payload);
-        await fetchApps(); // Refresh the list
+        await fetchApps();
         useUiStore().addNotification(`App '${response.data.name}' updated.`, 'success');
     }
     async function deleteApp(id) {
         await apiClient.delete(`/api/apps/${id}`);
-        await fetchApps(); // Refresh the list
+        await fetchApps();
         useUiStore().addNotification('App deleted.', 'success');
     }
 
@@ -710,10 +705,10 @@ export const useDataStore = defineStore('data', () => {
         allPersonalities, getPersonalityById,
         
         availableTtiModels, isLoadingTtiModels, availableTtiModelsGrouped,
-        availableTtsModels, isLoadingTtsModels, availableTtsModelsGrouped, // NEW
-        userVoices, isLoadingUserVoices, fetchUserVoices, // NEW
+        availableTtsModels, isLoadingTtsModels, availableTtsModelsGrouped,
+        userVoices, isLoadingUserVoices, fetchUserVoices,
         fetchAvailableTtiModels,
-        fetchAvailableTtsModels, // NEW
+        fetchAvailableTtsModels,
 
         loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,

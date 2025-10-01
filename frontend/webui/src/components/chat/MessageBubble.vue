@@ -1,3 +1,4 @@
+// frontend/webui/src/components/chat/MessageBubble.vue
 <script setup>
 import { computed, ref, onMounted, watch } from 'vue';
 import { marked } from 'marked';
@@ -6,7 +7,6 @@ import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
 import { storeToRefs } from 'pinia';
-
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import StepDetail from './StepDetail.vue';
@@ -15,7 +15,6 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, keymap } from '@codemirror/view';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
-
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
@@ -31,7 +30,7 @@ import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconError from '../../assets/icons/IconError.vue';
 import IconScratchpad from '../../assets/icons/IconScratchpad.vue';
 import IconEventDefault from '../../assets/icons/IconEventDefault.vue';
-import IconCog from '../../assets/icons/IconCog.vue'; // Changed from IconStepStart
+import IconCog from '../../assets/icons/IconCog.vue';
 import IconStepEnd from '../../assets/icons/IconStepEnd.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
@@ -40,15 +39,12 @@ import IconCode from '../../assets/icons/IconCode.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconMaximize from '../../assets/icons/IconMaximize.vue';
 
 const props = defineProps({
-  message: {
-    type: Object,
-    required: true,
-  },
+  message: { type: Object, required: true },
 });
 
-// --- Markdown Parsing Logic ---
 const mathPlaceholders = new Map();
 let mathCounter = 0;
 
@@ -81,8 +77,6 @@ const parsedMarkdown = (content) => {
     const rawHtml = marked.parse(protectedContent, { gfm: true, breaks: true, mangle: false, smartypants: false });
     return unprotectHtml(rawHtml);
 };
-// --- End Markdown Parsing Logic ---
-
 
 const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
@@ -152,7 +146,6 @@ function handleSpeak() {
     }
 }
 
-
 onMounted(() => {
     if (props.message.sources && props.message.sources.length > 3) {
         isSourcesVisible.value = false;
@@ -173,7 +166,7 @@ const imagesToRender = computed(() => {
 
 const isImageActive = (index) => {
     if (!props.message.active_images || props.message.active_images.length <= index) {
-        return true; // Default to active if array is missing or out of bounds
+        return true;
     }
     return props.message.active_images[index];
 };
@@ -185,6 +178,14 @@ const toggleImage = (index) => {
         imageIndex: index
     });
 };
+
+function openImageViewer(startIndex) {
+    uiStore.openImageViewer({
+        imageList: imagesToRender.value.map(src => ({ src, prompt: 'Image from message' })),
+        startIndex
+    });
+}
+
 
 const containsCode = computed(() => {
     return props.message.content && props.message.content.includes('```');
@@ -225,7 +226,7 @@ const groupedEvents = computed(() => {
     if (!hasEvents.value) return [];
 
     const result = [];
-    const stack = []; // To handle nested steps
+    const stack = [];
 
     for (const event of props.message.events) {
         const lowerType = event.type?.toLowerCase() || '';
@@ -236,7 +237,7 @@ const groupedEvents = computed(() => {
                 startEvent: event,
                 children: [],
                 endEvent: null,
-                isInitiallyOpen: false, // Default to closed
+                isInitiallyOpen: false,
             };
             
             if (stack.length > 0) {
@@ -252,7 +253,7 @@ const groupedEvents = computed(() => {
                 const hasContent = (currentGroup.startEvent.content && String(currentGroup.startEvent.content).trim() !== '') || 
                                    (currentGroup.endEvent.content && String(currentGroup.endEvent.content).trim() !== '');
                 if (currentGroup.children.length > 0 || hasContent) {
-                    currentGroup.isInitiallyOpen = true; // Open important steps by default
+                    currentGroup.isInitiallyOpen = true;
                 }
             } else {
                 result.push(event);
@@ -277,7 +278,7 @@ function getEventIcon(type) {
 
 const branchInfo = computed(() => {
     const hasMultipleBranches = props.message.branches && props.message.branches.length > 1;
-    if (!hasMultipleBranches || props.message.sender_type !== 'user') return null; // Only show for user messages with multiple AI children
+    if (!hasMultipleBranches || props.message.sender_type !== 'user') return null;
 
     const currentMessages = discussionsStore.activeMessages;
     const currentMessageIndex = currentMessages.findIndex(m => m.id === props.message.id);
@@ -391,7 +392,7 @@ function handleCancelEdit() {
 }
 function handleEditorReady(payload) { codeMirrorView.value = payload.view; }
 function copyContent() { uiStore.copyToClipboard(props.message.content); }
-async function handleDelete() { const confirmed = await uiStore.showConfirmation({ title: 'Delete Message', message: 'This will delete the message and its entire branch.', confirmText: 'Delete' }); if (confirmed) discussionsStore.deleteMessage({ messageId: props.message.id}); }
+async function handleDelete() { const confirmed = await uiStore.showConfirmation({ title: 'Delete Message', message: 'This will delete the message and its entire branch.', confirmText: 'Delete' }); if (confirmed.confirmed) discussionsStore.deleteMessage({ messageId: props.message.id}); }
 function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.message.id, change }); }
 
 function handleExportCode() {
@@ -436,7 +437,6 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
     view.focus();
 }
 </script>
-
 <template>
     <div v-if="isSystem" class="w-full flex justify-center my-2" :data-message-id="message.id">
         <div class="system-bubble" v-html="parsedMarkdown(message.content)"></div>
@@ -467,7 +467,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                         <div v-if="imagesToRender.length > 0" class="my-2 grid gap-2" :class="[imagesToRender.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
                             <div v-for="(imgSrc, index) in imagesToRender" 
                                  :key="imgSrc"
-                                 @click.stop="uiStore.openImageViewer(imgSrc)"
+                                 @click.stop="openImageViewer(index)"
                                  class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer">
                                 <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain transition-all duration-300" :class="{'grayscale': !isImageActive(index)}" />
                                 <div class="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover/image:opacity-100 transition-opacity duration-200">

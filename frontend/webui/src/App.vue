@@ -1,4 +1,4 @@
-<!-- [UPDATE] frontend/webui/src/App.vue -->
+<!-- frontend/webui/src/App.vue -->
 <script setup>
 import { computed, onMounted } from 'vue';
 import { useRoute } from 'vue-router';
@@ -13,7 +13,7 @@ import logoDefault from './assets/logo.png';
 // Import Layouts
 import Sidebar from './components/layout/Sidebar.vue';
 import GlobalHeader from './components/layout/GlobalHeader.vue';
-import AudioPlayer from './components/chat/AudioPlayer.vue'; // NEW
+import AudioPlayer from './components/chat/AudioPlayer.vue';
 
 // Import all modals
 import LoginModal from './components/modals/LoginModal.vue';
@@ -25,7 +25,8 @@ import PersonalityEditorModal from './components/modals/PersonalityEditorModal.v
 import AdminUserEditModal from './components/modals/AdminUserEditModal.vue';
 import ForceSettingsModal from './components/modals/ForceSettingsModal.vue';
 import ConfirmationModal from './components/ui/ConfirmationModal.vue';
-import ImageViewerModal from './components/ui/ImageViewerModal.vue';
+import ImageViewerModal from './components/modals/ImageViewerModal.vue';
+import InpaintingEditorModal from './components/modals/InpaintingEditorModal.vue';
 import ArtefactEditorModal from './components/modals/ArtefactEditorModal.vue';
 import ArtefactViewerModal from './components/modals/ArtefactViewerModal.vue';
 import MemoryEditorModal from './components/modals/MemoryEditorModal.vue';
@@ -80,14 +81,13 @@ const isAuthenticating = computed(() => authStore.isAuthenticating);
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 
-// Enhanced branding from second version
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
 const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
 
 const funFactStyle = computed(() => ({
     '--fun-fact-color': funFactColor.value,
-    'backgroundColor': `${funFactColor.value}15`, // Reduced alpha for better contrast
+    'backgroundColor': `${funFactColor.value}15`,
     'borderColor': funFactColor.value,
 }));
 
@@ -95,10 +95,9 @@ const funFactTextStyle = computed(() => ({
     color: funFactColor.value
 }));
 
-// SIMPLIFIED logic to determine what to display
 const layoutState = computed(() => {
     if (activeModal.value === 'firstAdminSetup') {
-        return 'modal_only'; // Special state for first admin setup
+        return 'modal_only';
     }
     if (isAuthenticating.value) {
         return 'loading';
@@ -106,27 +105,25 @@ const layoutState = computed(() => {
     if (isAuthenticated.value) {
         return 'authenticated';
     }
-    // Any other state (e.g., failed auth, logged out) is 'guest'
     return 'guest';
 });
 
-const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages','VoicesStudio'];
+const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages','VoicesStudio', 'ImageStudio'];
 const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
 
 onMounted(async () => {
     uiStore.initializeTheme();
     await authStore.attemptInitialAuth();
     
-    // Initialize sidebar state, ensuring it's closed by default on first visit.
     const isFirstVisit = !localStorage.getItem('sidebarOpen');
     uiStore.initializeSidebarState();
-    if (isFirstVisit && window.innerWidth > 768) { // Only affect desktop
+    if (isFirstVisit && window.innerWidth > 768) {
         uiStore.closeSidebar();
     }
 
     if (isAuthenticated.value) {
         pyodideStore.initialize();
-        tasksStore.fetchTasks(); // Fetch initial tasks, WebSocket will handle updates
+        tasksStore.fetchTasks();
     }
 });
 </script>
@@ -162,15 +159,13 @@ onMounted(async () => {
         </div>
         <footer class="absolute bottom-4 w-full text-center text-xs text-gray-500 dark:text-gray-400">
             Powered by <a href="https://github.com/ParisNeo/lollms-webui" target="_blank" class="font-semibold hover:underline">LoLLMs</a> by <a href="https://github.com/ParisNeo" target="_blank" class="font-semibold hover:underline">ParisNeo</a>
-        </footer>
+        </footer>    
     </div>
 
     <!-- Authenticated App Layout -->
     <div v-else-if="layoutState === 'authenticated'" class="flex flex-col flex-grow min-h-0">
       <div class="flex flex-grow min-h-0 relative">
-        <div v-if="isHomePageLayout" 
-             class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out"
-             :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
+        <div v-if="isHomePageLayout" class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out" :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
             <Sidebar/>
         </div>
         <div v-if="isHomePageLayout && isSidebarOpen" @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/30 z-30 md:hidden"></div>
@@ -188,6 +183,7 @@ onMounted(async () => {
     <div v-else-if="layoutState === 'guest'" class="flex flex-col flex-grow min-h-0">
         <router-view />
     </div>
+
     <!-- Modals -->
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" />
     <LoginModal v-if="activeModal === 'login'" />
@@ -199,6 +195,8 @@ onMounted(async () => {
     <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <ConfirmationModal v-if="activeModal === 'confirmation'" />
+    <ImageViewerModal />
+    <InpaintingEditorModal v-if="activeModal === 'inpaintingEditor'" />
     <ArtefactEditorModal v-if="activeModal === 'artefactEditor'" />
     <ArtefactViewerModal v-if="activeModal === 'artefactViewer'" />
     <MemoryEditorModal v-if="activeModal === 'memoryEditor'" />
@@ -213,7 +211,7 @@ onMounted(async () => {
     <EmailListModal v-if="activeModal === 'emailList'" />
     <EmailUserModal v-if="activeModal === 'adminUserEmail'" />
     <InsertImageModal v-if="activeModal === 'insertImage'" />
-    <NewApiKeyModal v-if="activeModal === 'newApiKey'" />
+    <NewApiKeyModal v-if="activeModal === 'newApiKey'" /> 
     <WhatsNextModal v-if="activeModal === 'whatsNext'" />
     <AppInstallModal v-if="activeModal === 'appInstall'" />
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
@@ -238,9 +236,8 @@ onMounted(async () => {
     <DiscussionGroupModal v-if="activeModal === 'discussionGroup'" />
     <MoveDiscussionModal v-if="activeModal === 'moveDiscussion'" />
     
-    <!-- Always rendered modals/panels -->
-    <ImageViewerModal v-if="uiStore.isImageViewerOpen" />
+    <!-- Always rendered panels -->
     <NotificationPanel />
-    <AudioPlayer /> <!-- NEW -->
+    <AudioPlayer />
   </div>
 </template>

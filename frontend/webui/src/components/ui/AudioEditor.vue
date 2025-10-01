@@ -1,4 +1,23 @@
-<!-- [UPDATE] frontend/webui/src/components/ui/AudioEditor.vue -->
+<template>
+  <div class="bg-gray-100 dark:bg-gray-700/50 p-3 rounded-lg">
+    <div class="relative min-h-[100px]">
+      <div v-if="isLoading" class="absolute inset-0 flex items-center justify-center">
+        <IconAnimateSpin class="w-8 h-8 text-gray-400" />
+      </div>
+      <div ref="waveformRef"></div>
+    </div>
+    <div class="flex items-center justify-center gap-4 mt-2">
+      <button @click="handlePlayPause" class="btn btn-secondary p-2 rounded-full">
+        <IconStopCircle v-if="isPlaying" class="w-6 h-6" />
+        <IconPlayCircle v-else class="w-6 h-6" />
+      </button>
+      <button @click="handleTrim" :disabled="!region" class="btn btn-secondary p-2 rounded-full" title="Trim to selection">
+        <IconScissors class="w-6 h-6" />
+      </button>
+    </div>
+  </div>
+</template>
+
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import WaveSurfer from 'wavesurfer.js';
@@ -78,23 +97,3 @@ function handleTrim() {
   }
 }
 </script>
-
-<template>
-  <div class="bg-gray-100 dark:bg-gray-700/50 p-3 rounded-lg">
-    <div class="relative min-h-[100px]">
-      <div v-if="isLoading" class="absolute inset-0 flex items-center justify-center">
-        <IconAnimateSpin class="w-8 h-8 text-gray-400" />
-      </div>
-      <div ref="waveformRef"></div>
-    </div>
-    <div class="flex items-center justify-center gap-4 mt-2">
-      <button @click="handlePlayPause" class="btn btn-secondary p-2 rounded-full">
-        <IconStopCircle v-if="isPlaying" class="w-6 h-6" />
-        <IconPlayCircle v-else class="w-6 h-6" />
-      </button>
-      <button @click="handleTrim" :disabled="!region" class="btn btn-secondary p-2 rounded-full" title="Trim to selection">
-        <IconScissors class="w-6 h-6" />
-      </button>
-    </div>
-  </div>
-</template>

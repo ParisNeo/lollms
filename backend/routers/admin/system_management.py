@@ -25,12 +25,16 @@ from backend.session import get_current_admin_user, get_user_data_root
 from backend.ws_manager import manager
 from backend.task_manager import task_manager, Task
 from backend.utils import get_local_ip_addresses
+from backend.tasks.system_tasks import _create_backup_task # NEW IMPORT
 from ascii_colors import trace_exception
 
 system_management_router = APIRouter()
 
 class AdminBroadcastRequest(BaseModel):
     message: str
+
+class BackupRequest(BaseModel):
+    password: Optional[str] = None
 
 class ConnectedUser(BaseModel):
     id: int
@@ -257,3 +261,20 @@ def get_global_generation_stats(db: Session = Depends(get_db)):
         mean_per_weekday=mean_per_weekday,
         variance_per_weekday=variance_per_weekday
     )
+
+@system_management_router.post("/backup/create", response_model=TaskInfo, status_code=202)
+async def create_backup(
+    request: BackupRequest,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user)
+):
+    """
+    Initiates a background task to create a full application backup.
+    """
+    db_task = task_manager.submit_task(
+        name="Create Application Backup",
+        target=_create_backup_task,
+        args=(request.password,),
+        description="Creating a password-protected zip archive of the entire application.",
+        owner_username=current_admin.username
+    )
+    return _to_task_info(db_task)

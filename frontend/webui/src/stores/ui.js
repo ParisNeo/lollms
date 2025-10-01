@@ -9,8 +9,11 @@ export const useUiStore = defineStore('ui', {
     notifications: [],
     currentTheme: localStorage.getItem('lollms-theme') || 'light',
     currentLanguage: localStorage.getItem('lollms-language') || 'en',
-    isImageViewerOpen: false,
-    imageViewerSrc: '',
+    imageViewer: {
+      isOpen: false,
+      imageList: [],
+      startIndex: 0,
+    },
     confirmationOptions: {
         title: 'Are you sure?',
         message: 'This action cannot be undone.',
@@ -136,14 +139,18 @@ export const useUiStore = defineStore('ui', {
         localStorage.setItem('lollms-language', langCode);
     },
 
-    openImageViewer(src) {
-        this.imageViewerSrc = src;
-        this.isImageViewerOpen = true;
+    openImageViewer({ imageList, startIndex = 0 }) {
+        this.imageViewer.imageList = imageList;
+        this.imageViewer.startIndex = startIndex;
+        this.imageViewer.isOpen = true;
     },
 
     closeImageViewer() {
-        this.isImageViewerOpen = false;
-        this.imageViewerSrc = '';
+        this.imageViewer.isOpen = false;
+        setTimeout(() => {
+            this.imageViewer.imageList = [];
+            this.imageViewer.startIndex = 0;
+        }, 300);
     },
 
     showConfirmation(options) {
@@ -152,7 +159,7 @@ export const useUiStore = defineStore('ui', {
                 title: options.title || 'Are you sure?',
                 message: options.message || 'This action cannot be undone.',
                 confirmText: options.confirmText || 'Confirm',
-                cancelText: options.cancelText || 'Cancel', // Added this line
+                cancelText: options.cancelText || 'Cancel',
                 onConfirm: (value) => {
                     resolve({ confirmed: true, value: value });
                     this.closeModal("confirmation");
@@ -232,7 +239,6 @@ export const useUiStore = defineStore('ui', {
         if (storedState !== null) {
             this.isSidebarOpen = JSON.parse(storedState);
         } else {
-            // Default to closed on desktop, open on mobile
             this.isSidebarOpen = window.innerWidth <= 768;
         }
     },
@@ -240,7 +246,7 @@ export const useUiStore = defineStore('ui', {
     toggleDataZone() {
         this.isDataZoneVisible = !this.isDataZoneVisible;
         if (!this.isDataZoneVisible) {
-            this.isDataZoneExpanded = false; // Also shrink if hiding
+            this.isDataZoneExpanded = false;
         }
     },
 

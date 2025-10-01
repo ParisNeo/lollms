@@ -45,7 +45,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const promptInsertionText = ref('');
     const promptLoadedArtefacts = ref(new Set());
     const activeDiscussionParticipants = ref({});
-    const ttsState = ref({}); // NEW: { [messageId]: { isLoading: boolean, audioUrl: string|null, error: string|null } }
+    const ttsState = ref({});
     const currentPlayingAudio = ref({ messageId: null, audio: null });
 
     function _clearActiveAiTask(discussionId) {
@@ -74,7 +74,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                         _clearActiveAiTask(discussionId);
                     }
                 } else {
-                    // The task is no longer in the main list, it was probably cleared.
                     _clearActiveAiTask(discussionId);
                 }
             }
@@ -102,7 +101,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const activeDiscussionContainsCode = computed(() => activeMessages.value.some(msg => msg.content && msg.content.includes('```')));
     const currentModelVisionSupport = computed(() => {
         const modelId = authStore.user?.lollms_model_name;
-        if (!modelId) return true; // Default to true if no model selected
+        if (!modelId) return true;
         const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelId);
         return modelInfo?.alias?.has_vision ?? true;
     });
@@ -176,7 +175,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             currentPlayingAudio.value.audio.pause();
         }
         currentPlayingAudio.value = { messageId, audio: audioElement };
-        // The play action is initiated by the user on the element itself.
     }
     
     function onAudioPausedOrEnded(messageId) {
@@ -189,6 +187,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (currentPlayingAudio.value.audio) {
             currentPlayingAudio.value.audio.pause();
             currentPlayingAudio.value = { messageId: null, audio: null };
+        }
+    }
+
+    async function toggleDiscussionImage(imageIndex) {
+        if (!currentDiscussionId.value) return;
+        try {
+            const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/images/${imageIndex}/toggle`);
+            if (activeDiscussion.value) {
+                activeDiscussion.value.discussion_images = response.data.discussion_images;
+                activeDiscussion.value.active_discussion_images = response.data.active_discussion_images;
+            }
+            await getActions().fetchContextStatus(currentDiscussionId.value);
+        } catch (error) {
+            uiStore.addNotification('Failed to toggle image status.', 'error');
         }
     }
     
@@ -217,9 +229,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         ttsState.value = {};
     }
 
-    // --- FINAL RETURN ---
     return {
-        // State
         discussions, currentDiscussionId, messages, generationInProgress, discussionGroups,
         isLoadingDiscussions, isLoadingMessages, 
         titleGenerationInProgressId, activeDiscussionContextStatus,
@@ -227,15 +237,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
         ttsState,
         currentPlayingAudio,
-        // Computed
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,
-        // Actions
         ..._actions,
         generateTTSForMessage,
         playAudio,
         onAudioPausedOrEnded,
         stopCurrentAudio,
+        toggleDiscussionImage,
         $reset,
     };
 });

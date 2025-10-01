@@ -95,6 +95,18 @@ SERVER_CONFIG = {
 APP_DATA_DIR = PROJECT_ROOT / get_env_var("APP_DATA_DIR", "data")
 APP_DATA_DIR.mkdir(exist_ok=True, parents=True)
 
+# Hugging Face Cache Setup
+# Force disable symlinks on Windows to prevent permission errors when not running as admin.
+if os.name == 'nt':
+    os.environ['HF_HUB_ENABLE_SYMLINKS_EXPERIMENTAL'] = '0'
+
+HUGGINGFACE_CACHE_DIR = APP_DATA_DIR / get_env_var("HUGGINGFACE_CACHE_DIR", "huggingface_cache")
+HUGGINGFACE_CACHE_DIR.mkdir(exist_ok=True, parents=True)
+os.environ['HUGGING_FACE_HUB_CACHE'] = str(HUGGINGFACE_CACHE_DIR)
+os.environ['TRANSFORMERS_CACHE'] = str(HUGGINGFACE_CACHE_DIR)
+os.environ['HF_HOME'] = str(HUGGINGFACE_CACHE_DIR)
+
+
 DATABASE_URL_CONFIG_KEY = "database_url"
 APP_DB_URL = get_env_var("DATABASE_URL", f"sqlite:///{APP_DATA_DIR / 'app_main.db'}")
 SECRET_KEY = get_env_var("SECRET_KEY", "a_very_secret_key_that_should_be_changed_for_production")
@@ -134,6 +146,7 @@ DISCUSSION_ASSETS_DIR_NAME = "discussion_assets"
 DM_ASSETS_DIR_NAME = "dm_assets"
 DATASTORES_DIR_NAME = "safestores"
 VOICES_DIR_NAME = "voices"
+IMAGES_DIR_NAME = "images"
 APPS_DIR_NAME = "apps"
 MCPS_DIR_NAME = "mcps"
 CUSTOM_APPS_DIR_NAME = "custom_apps"

@@ -1,19 +1,21 @@
-# [UPDATE] backend/routers/image_studio.py
-from typing import List, Optional, Dict
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+# backend/routers/image_studio.py
+import base64
+import uuid
+from pathlib import Path
+from typing import List
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
+from werkzeug.utils import secure_filename
 
 from backend.db import get_db
-from backend.db.models.config import TTIBinding as DBTTIBinding
-from backend.models import UserAuthDetails, TaskInfo
-from backend.models.image_studio import ImageStudioGenerateRequest, ImageFilePublic # UPDATED IMPORT
-from backend.session import get_current_active_user, build_lollms_client_from_params, get_user_data_root
-from backend.task_manager import task_manager, Task
-from backend.tasks.discussion_tasks import _to_task_info
-from backend.db.models.user import User as DBUser
-from ascii_colors import trace_exception
-import datetime
-import os
+from backend.db.models.image import UserImage
+from backend.models import UserAuthDetails
+from backend.models.image import UserImagePublic, ImageGenerationRequest, MoveImageToDiscussionRequest, ImageEditRequest
+from backend.session import get_current_active_user, get_user_data_root, build_lollms_client_from_params
+from backend.config import IMAGES_DIR_NAME
+from backend.discussion import get_user_discussion
 
 image_studio_router = APIRouter(
     prefix="/api/image-studio",
@@ -21,140 +23,210 @@ image_studio_router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 
-def _image_studio_generation_task(task: Task, username: str, payload: Dict):
-    """
-    Background task to generate an image outside of a specific discussion context.
-    The task will save the generated image to the user's generated_images folder.
-    """
-    task.log("Starting Image Studio generation task...")
-    task.set_progress(5)
+def get_user_images_path(username: str) -> Path:
+    path = get_user_data_root(username) / IMAGES_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
-    with task.db_session_factory() as db:
-        user = db.query(DBUser).filter(DBUser.username == username).first()
-        if not user:
-            raise Exception(f"User '{username}' not found.")
-        
-        # 1. Determine binding and model from payload
-        tti_model_full = payload.get("model_name")
-        if not tti_model_full or '/' not in tti_model_full:
-            raise Exception("Invalid TTI model format. Must be 'binding_alias/model_name'.")
+@image_studio_router.get("", response_model=List[UserImagePublic])
+async def get_user_images(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(UserImage).filter(UserImage.owner_user_id == current_user.id).order_by(UserImage.created_at.desc()).all()
 
-        binding_alias, model_name = tti_model_full.split('/', 1)
+@image_studio_router.get("/{image_id}/file")
+async def get_image_file(
+    image_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
+    if not image_record:
+        raise HTTPException(status_code=404, detail="Image not found.")
+    
+    file_path = get_user_images_path(current_user.username) / image_record.filename
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Image file not found on disk.")
+        
+    return FileResponse(str(file_path))
 
-        # 2. Build LollmsClient with TTI binding
-        lc = build_lollms_client_from_params(
-            username=username,
-            tti_binding_alias=binding_alias,
-            tti_model_name=model_name
-        )
-        
-        if not hasattr(lc, 'tti') or not lc.tti:
-            raise Exception(f"TTI functionality is not available for binding '{binding_alias}'.")
-        
-        task.log(f"Using TTI model: {tti_model_full}")
-        task.set_progress(20)
 
-        # 3. Prepare generation parameters
-        prompt = payload.get("prompt")
-        
-        # Apply payload parameters, falling back to TTI config if necessary
-        gen_params = {
-            "size": payload.get("size", "1024x1024"),
-            "quality": payload.get("quality", "standard"),
-            "style": payload.get("style", "vivid"),
-            "steps": payload.get("steps"),
-            "sampler_name": payload.get("sampler_name"),
-            "cfg_scale": payload.get("cfg_scale"),
-            "seed": payload.get("seed"),
-        }
-        
-        # Filter out None values
-        gen_params = {k: v for k, v in gen_params.items() if v is not None}
-        
-        # 4. Generate the image
-        task.log(f"Generating image with prompt: '{prompt[:50]}...'")
-        image_bytes = lc.tti.generate_image(prompt=prompt, **gen_params)
-        task.log("Image data received from binding.")
-        task.set_progress(80)
+@image_studio_router.post("/generate", response_model=List[UserImagePublic])
+async def generate_image(
+    request: ImageGenerationRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    model_full_name = request.model or current_user.tti_binding_model_name
+    if not model_full_name or '/' not in model_full_name:
+        raise HTTPException(status_code=400, detail="A valid TTI model must be selected in your settings or provided in the request.")
 
-        if not image_bytes:
-            raise Exception("TTI binding returned empty image data.")
+    tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
+    
+    lc = build_lollms_client_from_params(
+        username=current_user.username,
+        tti_binding_alias=tti_binding_alias,
+        tti_model_name=tti_model_name
+    )
+    if not lc.tti:
+        raise HTTPException(status_code=500, detail=f"TTI binding '{tti_binding_alias}' is not available.")
 
-        # 5. Save the image to the user's generated_images folder
-        user_generated_path = get_user_data_root(username) / "generated_images"
-        user_generated_path.mkdir(parents=True, exist_ok=True)
+    user_images_path = get_user_images_path(current_user.username)
+    generated_images = []
+
+    for _ in range(request.n):
+        image_bytes = lc.tti.generate_image(prompt=request.prompt, size=request.size)
         
-        filename = f"studio_img_{task.id}.png"
-        file_path = user_generated_path / filename
-        
+        filename = f"{uuid.uuid4().hex}.png"
+        file_path = user_images_path / filename
         with open(file_path, "wb") as f:
             f.write(image_bytes)
         
-        task.log(f"Image saved to: {file_path}")
-        task.set_progress(100)
+        new_image = UserImage(
+            owner_user_id=current_user.id,
+            filename=filename,
+            prompt=request.prompt,
+            model=model_full_name
+        )
+        db.add(new_image)
+        generated_images.append(new_image)
+
+    db.commit()
+    for img in generated_images:
+        db.refresh(img)
         
-        # 6. Return path relative to the user's generated_images folder
-        return {
-            "message": "Image generated successfully.",
-            "file_name": filename,
-            "image_url": f"/api/files/generated/{filename}"
-        }
+    return generated_images
 
-
-
-@image_studio_router.post("/generate", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
-def generate_image_in_studio(
-    payload: ImageStudioGenerateRequest,
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+@image_studio_router.post("/edit", response_model=UserImagePublic)
+async def edit_image(
+    request: ImageEditRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    if not payload.model_name or '/' not in payload.model_name:
-        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
-    
-    if not payload.prompt or not payload.prompt.strip():
-        raise HTTPException(status_code=400, detail="Prompt is required for image generation.")
+    model_full_name = request.model or current_user.tti_binding_model_name
+    if not model_full_name or '/' not in model_full_name:
+        raise HTTPException(status_code=400, detail="A valid TTI model must be selected.")
 
-    db_task = task_manager.submit_task(
-        name=f"Image Studio Gen: {payload.model_name}",
-        target=_image_studio_generation_task,
-        args=(current_user.username, payload.model_dump()),
-        description=f"Generating: '{payload.prompt[:50]}...'",
-        owner_username=current_user.username
+    tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
+    
+    lc = build_lollms_client_from_params(
+        username=current_user.username,
+        tti_binding_alias=tti_binding_alias,
+        tti_model_name=tti_model_name
     )
-    return _to_task_info(db_task)
+    if not lc.tti:
+        raise HTTPException(status_code=500, detail=f"TTI binding '{tti_binding_alias}' is not available.")
 
+    user_images_path = get_user_images_path(current_user.username)
+    
+    source_images_b64 = []
+    for image_id in request.image_ids:
+        image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
+        if not image_record:
+            raise HTTPException(status_code=404, detail=f"Image with ID {image_id} not found.")
+        file_path = user_images_path / image_record.filename
+        if not file_path.is_file():
+            raise HTTPException(status_code=404, detail=f"Image file for {image_id} not found on disk.")
+        
+        with open(file_path, "rb") as f:
+            source_images_b64.append(base64.b64encode(f.read()).decode('utf-8'))
 
-@image_studio_router.get("/generated-images", response_model=List[ImageFilePublic])
-def list_user_generated_images(
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    # Call the edit_image function, now with the optional mask
+    edited_image_bytes = lc.tti.edit_image(
+        images=source_images_b64, 
+        prompt=request.prompt,
+        mask=request.mask
+    )
+
+    if not edited_image_bytes:
+        raise HTTPException(status_code=500, detail="Image generation failed.")
+
+    # Save the new image
+    new_filename = f"{uuid.uuid4().hex}.png"
+    new_file_path = user_images_path / new_filename
+    with open(new_file_path, "wb") as f:
+        f.write(edited_image_bytes)
+    
+    new_image_record = UserImage(
+        owner_user_id=current_user.id,
+        filename=new_filename,
+        prompt=f"Edited from {len(source_images_b64)} image(s): {request.prompt}",
+        model=model_full_name
+    )
+    db.add(new_image_record)
+    db.commit()
+    db.refresh(new_image_record)
+    
+    return new_image_record
+
+@image_studio_router.post("/upload", response_model=UserImagePublic)
+async def upload_image(
+    file: UploadFile = File(...),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    user_generated_path = get_user_data_root(current_user.username) / "generated_images"
-    user_generated_path.mkdir(parents=True, exist_ok=True)
-    
-    images = []
-    # Sort files by modified time, newest first
-    for file_path in sorted(user_generated_path.iterdir(), key=os.path.getmtime, reverse=True):
-        if file_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.webp']:
-            images.append({
-                "file_name": file_path.name,
-                "image_url": f"/api/files/generated/{file_path.name}",
-                "timestamp": datetime.datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
-            })
-    
-    return [ImageFilePublic.model_validate(img) for img in images]
+    user_images_path = get_user_images_path(current_user.username)
+    s_filename = secure_filename(file.filename)
+    filename = f"{uuid.uuid4().hex}_{s_filename}"
+    file_path = user_images_path / filename
 
+    with open(file_path, "wb") as buffer:
+        buffer.write(await file.read())
 
-@image_studio_router.delete("/generated-images/{file_name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user_generated_image(
-    file_name: str,
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    new_image = UserImage(
+        owner_user_id=current_user.id,
+        filename=filename,
+        prompt="Uploaded image"
+    )
+    db.add(new_image)
+    db.commit()
+    db.refresh(new_image)
+    return new_image
+
+@image_studio_router.delete("/{image_id}", status_code=204)
+async def delete_image(
+    image_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    user_generated_path = get_user_data_root(current_user.username) / "generated_images"
-    file_path = user_generated_path / file_name
+    image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
+    if not image_record:
+        raise HTTPException(status_code=404, detail="Image not found.")
     
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Image file not found.")
+    file_path = get_user_images_path(current_user.username) / image_record.filename
+    file_path.unlink(missing_ok=True)
+    
+    db.delete(image_record)
+    db.commit()
 
-    try:
-        file_path.unlink()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to delete file: {e}")
+@image_studio_router.post("/{image_id}/move-to-discussion")
+async def move_image_to_discussion(
+    image_id: str,
+    request: MoveImageToDiscussionRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
+    if not image_record:
+        raise HTTPException(status_code=404, detail="Image not found.")
+        
+    discussion = get_user_discussion(current_user.username, request.discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found.")
+        
+    file_path = get_user_images_path(current_user.username) / image_record.filename
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Image file not found on disk.")
+        
+    with open(file_path, "rb") as f:
+        image_bytes = f.read()
+    image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+    
+    discussion.add_discussion_image(image_b64, source=f"ImageStudio: {image_record.filename}")
+    discussion.commit()
+    
+    image_record.discussion_id = request.discussion_id
+    db.commit()
+    
+    return {"message": "Image successfully added to the discussion's data zone."}
