@@ -341,12 +341,46 @@ onUnmounted(() => {
   <div class="flex-1 flex flex-col min-h-0">
     <div v-if="showContextBar" class="px-3 pt-2 pb-1 border-b border-gray-200 dark:border-gray-700 relative group flex-shrink-0">
         <!-- Context Bar Content -->
+        <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 font-mono">
+            <div class="flex items-center gap-1.5 flex-shrink-0">
+                <IconToken class="w-4 h-4 flex-shrink-0" />
+                <button @click="showContext" class="cursor-pointer hover:underline flex-shrink-0" title="View full context breakdown">Context:</button>
+            </div>
+            <div class="flex-grow w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden border transition-colors duration-300" :class="progressBorderColorClass">
+                <div class="progress-segment bg-blue-500" :style="{ width: `${systemPromptPercentage}%` }" :title="`System Prompt: ${systemPromptTokens.toLocaleString()} tokens`"></div>
+                <div class="progress-segment bg-yellow-500" :style="{ left: `${systemPromptPercentage}%`, width: `${dataZonesPercentage}%` }" :title="`Data Zones: ${dataZonesTokens.toLocaleString()} tokens`"></div>
+                <div class="progress-segment bg-green-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage}%`, width: `${historyTextPercentage}%` }" :title="`History (Text): ${historyTextTokens.toLocaleString()} tokens`"></div>
+                <div class="progress-segment bg-teal-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage}%`, width: `${historyImagePercentage}%` }" :title="`History (Images): ${historyImageTokens.toLocaleString()} tokens`"></div>
+            </div>
+            <span class="flex-shrink-0 pl-2">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
+        </div>
+        <p v-if="showContextWarning" class="mt-1.5 text-xs text-center" :class="totalPercentage > 100 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'">{{ contextWarningMessage }}</p>
+        <div class="absolute bottom-full left-0 mb-2 w-auto p-2 bg-white dark:bg-gray-900 border dark:border-gray-600 rounded-lg shadow-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
+            <h4 class="font-bold mb-1 whitespace-nowrap">Context Breakdown</h4>
+            <div class="flex flex-wrap gap-1">
+                <template v-for="part in contextParts">
+                    <span :title="`${part.title}: ${part.value.toLocaleString()} tokens`" class="px-1.5 py-0.5 rounded" :class="part.colorClass">{{ part.label }}: {{ part.value.toLocaleString() }}</span>
+                </template>
+            </div>
+        </div>
     </div>
     <div class="flex-grow flex flex-col min-h-0">
         <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf" multiple>
         <div class="flex-grow flex min-h-0">
             <div class="flex-grow flex flex-col min-h-0 p-2">
-                 <!-- Editor Controls -->
+                <!-- Editor Controls -->
+                <div class="flex-shrink-0 px-1 pb-2 flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-1">
+                        <button @click="handleUndoDiscussion" class="action-btn-sm" title="Undo" :disabled="!canUndoDiscussion || isTaskRunning"><IconUndo class="w-4 h-4" /></button>
+                        <button @click="handleRedoDiscussion" class="action-btn-sm" title="Redo" :disabled="!canRedoDiscussion || isTaskRunning"><IconRedo class="w-4 h-4" /></button>
+                        <div class="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1"></div>
+                        <button @click="handleCloneDiscussion" class="action-btn-sm" title="Clone Discussion & Artefacts" :disabled="isTaskRunning"><IconCopy class="w-4 h-4" /></button>
+                        <button @click="openContextToArtefactModal" class="action-btn-sm" title="Save as Artefact" :disabled="isTaskRunning"><IconSave class="w-4 h-4" /></button>
+                        <button @click="refreshDataZones" class="action-btn-sm" title="Refresh Data" :disabled="isTaskRunning"><IconRefresh class="w-4 h-4" /></button>
+                        <button @click="discussionDataZone = ''" class="action-btn-sm-danger" title="Clear All Text" :disabled="isTaskRunning"><IconTrash class="w-4 h-4" /></button>
+                    </div>
+                </div>
+
                 <div class="flex-grow min-h-0 border dark:border-gray-700 rounded-md overflow-hidden">
                     <CodeMirrorEditor 
                         ref="discussionCodeMirrorEditor" 
@@ -394,7 +428,53 @@ onUnmounted(() => {
         </div>
     </div>
     <div class="flex-shrink-0 p-2 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-      <!-- Task/Prompt Bar -->
+        <div v-if="isTaskRunning" class="p-2 space-y-2">
+            <div v-if="activeTask">
+                <div class="flex justify-between items-center text-xs font-semibold">
+                    <span class="text-gray-600 dark:text-gray-300">{{ activeTask.name }}</span>
+                    <span class="font-mono text-gray-500 dark:text-gray-400">{{ activeTask.progress }}%</span>
+                </div>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                    <div class="bg-blue-600 h-1.5 rounded-full" :style="{width: `${activeTask.progress}%`}"></div>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" :title="activeTask.description">{{ activeTask.description }}</p>
+            </div>
+            <div v-else class="flex items-center space-x-3 h-[42px]">
+                <IconAnimateSpin class="h-6 w-6 text-blue-500 animate-spin" />
+                <p class="text-sm font-semibold text-gray-600 dark:text-gray-300">Initializing task...</p>
+            </div>
+      </div>
+      <div v-else class="relative flex items-center">
+        <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn-icon absolute left-1.5 top-1/2 -translate-y-1/2 z-10">
+            <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui"> <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><span class="truncate">{{ p.name }}</span></button> </DropdownSubmenu>
+            <DropdownSubmenu v-if="Object.keys(userPromptsByCategory).length > 0" title="User" icon="user" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
+            <DropdownSubmenu v-if="Object.keys(systemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui"> <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10"><input type="text" v-model="zooPromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm"></div> <div class="max-h-60 overflow-y-auto"> <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category"> <h3 class="category-header">{{ category }}</h3> <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm"><img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon"><span class="truncate">{{ p.name }}</span></button> </div> </div> </DropdownSubmenu>
+            <div v-if="(filteredLollmsPrompts.length + Object.keys(filteredUserPromptsByCategory).length + Object.keys(filteredSystemPromptsByZooCategory).length) > 0" class="my-1 border-t dark:border-gray-600"></div>
+            <button @click="openPromptLibrary" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
+        </DropdownMenu>
+        <textarea ref="dataZonePromptTextareaRef" v-model="dataZonePromptText" placeholder="Enter a prompt to process content..." class="enhanced-textarea w-full !pl-10 !pr-24"></textarea>
+        <div class="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-2">
+             <button v-if="isTtiConfigured && !isProcessing" 
+                    @click="handleGenerateImage" 
+                    class="btn btn-primary !py-2 !px-3 flex items-center" 
+                    :disabled="isTaskRunning || (!discussionDataZone.trim() && !dataZonePromptText.trim())" 
+                    :title="isGeneratingImage ? 'Generating image...' : 'Generate an image using the prompt'">
+                <IconAnimateSpin v-if="isGeneratingImage" class="w-5 h-5 animate-spin" />
+                <IconPhoto v-else class="w-5 h-5" />
+                <span v-if="isGeneratingImage" class="ml-2 text-sm">Generating...</span>
+            </button>
+            <button v-if="!isGeneratingImage" 
+                    @click="handleProcessContent" 
+                    class="btn btn-secondary !py-2 !px-3 flex items-center" 
+                    :disabled="isTaskRunning || (!discussionDataZone.trim() && discussionImages.length === 0 && !dataZonePromptText.trim())" 
+                    :title="isProcessing ? 'Processing text...' : 'Process the text in the data zone using the prompt'">
+                <IconAnimateSpin v-if="isProcessing" class="w-5 h-5 animate-spin" />
+                <IconSparkles v-else class="w-5 h-5" />
+                <span v-if="isProcessing" class="ml-2 text-sm">Processing...</span>
+            </button>
+        </div>
+      </div>
+
     </div>
   </div>
 </template>
