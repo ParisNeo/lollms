@@ -373,13 +373,15 @@ def _bootstrap_lollms_user(connection):
                     username, hashed_password, is_admin, is_active, is_searchable, 
                     first_login_done, receive_notification_emails, is_moderator,
                     put_thoughts_in_context, auto_title, chat_active, first_page,
-                    show_token_counter, rag_use_graph
+                    show_token_counter, rag_use_graph, tell_llm_os, share_dynamic_info_with_llm,
+                    include_memory_date_in_context
                 )
                 VALUES (
                     :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
                     :first_login_done, :receive_notification_emails, :is_moderator,
                     :put_thoughts_in_context, :auto_title, :chat_active, :first_page,
-                    :show_token_counter, :rag_use_graph
+                    :show_token_counter, :rag_use_graph, :tell_llm_os, :share_dynamic_info_with_llm,
+                    :include_memory_date_in_context
                 )
             """),
             {
@@ -396,7 +398,10 @@ def _bootstrap_lollms_user(connection):
                 "chat_active": False,
                 "first_page": "feed",
                 "show_token_counter": True,
-                "rag_use_graph": False
+                "rag_use_graph": False,
+                "tell_llm_os": False,
+                "share_dynamic_info_with_llm": False,
+                "include_memory_date_in_context": False
             }
         )
         connection.commit()
