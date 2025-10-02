@@ -158,7 +158,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             data_zone=db_user.data_zone,
             lollms_model_name=user_sessions[username].get("lollms_model_name"),
             tti_binding_model_name=db_user.tti_binding_model_name,
+            tti_models_config=db_user.tti_models_config,
             tts_binding_model_name=db_user.tts_binding_model_name,
+            tts_models_config=db_user.tts_models_config,
             safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
             active_personality_id=user_sessions[username].get("active_personality_id"),
             active_voice_id=db_user.active_voice_id,
@@ -337,14 +339,14 @@ def build_lollms_client_from_params(
         client_init_params = {"llm_binding_name": binding_to_use.name, "llm_binding_config": llm_init_params}    
         
         # --- TTI Binding Integration ---
-        user_tti_model_full = user_db.tti_binding_model_name
+        user_tti_model_full = tti_binding_alias or user_db.tti_binding_model_name
         selected_tti_binding = None
         selected_tti_model_name = None
         
         if user_tti_model_full and '/' in user_tti_model_full:
-            tti_binding_alias, tti_model_name = user_tti_model_full.split('/', 1)
-            selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == tti_binding_alias, DBTTIBinding.is_active == True).first()
-            selected_tti_model_name = tti_model_name
+            tti_binding_alias_local, tti_model_name_local = user_tti_model_full.split('/', 1)
+            selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == tti_binding_alias_local, DBTTIBinding.is_active == True).first()
+            selected_tti_model_name = tti_model_name_local
 
         if not selected_tti_binding:
             selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
@@ -379,14 +381,14 @@ def build_lollms_client_from_params(
         # --- END TTI Binding Integration ---
         
         # --- NEW: TTS Binding Integration ---
-        user_tts_model_full = user_db.tts_binding_model_name
+        user_tts_model_full = tts_binding_alias or user_db.tts_binding_model_name
         selected_tts_binding = None
         selected_tts_model_name = None
         
         if user_tts_model_full and '/' in user_tts_model_full:
-            tts_binding_alias, tts_model_name = user_tts_model_full.split('/', 1)
-            selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == tts_binding_alias, DBTTSBinding.is_active == True).first()
-            selected_tts_model_name = tts_model_name
+            tts_binding_alias_local, tts_model_name_local = user_tts_model_full.split('/', 1)
+            selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == tts_binding_alias_local, DBTTSBinding.is_active == True).first()
+            selected_tts_model_name = tts_model_name_local
 
         if not selected_tts_binding:
             selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
@@ -414,7 +416,8 @@ def build_lollms_client_from_params(
                             tts_binding_config[key] = value
                             
             # IMPORTANT FIX: Do not pass model_name to the TTS binding constructor
-            tts_binding_config.pop('model_name', None)
+            if selected_tts_model_name:
+                tts_binding_config['model_name'] = selected_tts_model_name
                 
             client_init_params["tts_binding_name"] = selected_tts_binding.name
             client_init_params["tts_binding_config"] = tts_binding_config

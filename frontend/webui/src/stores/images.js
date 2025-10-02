@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/images.js
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import apiClient from '../services/api';
@@ -7,6 +8,7 @@ export const useImageStore = defineStore('images', () => {
     const images = ref([]);
     const isLoading = ref(false);
     const isGenerating = ref(false);
+    const isEnhancing = ref(false);
     const uiStore = useUiStore();
 
     async function fetchImages() {
@@ -92,15 +94,31 @@ export const useImageStore = defineStore('images', () => {
         }
     }
 
+    async function enhanceImagePrompt(payload) {
+        isEnhancing.value = true;
+        try {
+            const response = await apiClient.post('/api/image-studio/enhance-prompt', payload);
+            uiStore.addNotification('Prompt enhanced successfully!', 'success');
+            return response.data;
+        } catch (error) {
+            // Handled globally
+            return null;
+        } finally {
+            isEnhancing.value = false;
+        }
+    }
+
     return {
         images,
         isLoading,
         isGenerating,
+        isEnhancing,
         fetchImages,
         generateImage,
         editImage,
         uploadImage,
         deleteImage,
         moveImageToDiscussion,
+        enhanceImagePrompt,
     };
 });

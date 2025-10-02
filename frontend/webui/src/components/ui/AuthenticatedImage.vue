@@ -1,4 +1,4 @@
-// frontend/webui/src/components/ui/AuthenticatedImage.vue
+<!-- frontend/webui/src/components/ui/AuthenticatedImage.vue -->
 <template>
   <div class="w-full h-full flex items-center justify-center bg-gray-200 dark:bg-gray-700">
     <div v-if="isLoading" class="w-full h-full animate-pulse bg-gray-300 dark:bg-gray-600"></div>

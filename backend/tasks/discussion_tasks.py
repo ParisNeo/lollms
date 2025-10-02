@@ -99,7 +99,7 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
     )
 
 
-def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: str):
+def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: str, negative_prompt: str, width: Optional[int], height: Optional[int], generation_params: dict):
     task.log("Starting image generation task...")
     task.set_progress(5)
 
@@ -168,7 +168,13 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         task.log("LollmsClient initialized for TTI.")
         task.set_progress(20)
 
-        image_bytes = lc.tti.generate_image(prompt=prompt)
+        image_bytes = lc.tti.generate_image(
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            width=width,
+            height=height,
+            **generation_params
+        )
         task.log("Image data received from binding.")
         task.set_progress(80)
 

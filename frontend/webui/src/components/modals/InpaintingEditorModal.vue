@@ -19,14 +19,35 @@
                             <button @click="clearCanvas" class="btn btn-danger flex-1">Clear</button>
                         </div>
                     </div>
-                    <h3 class="font-semibold pt-4 border-t dark:border-gray-600">Prompt</h3>
-                    <textarea v-model="prompt" rows="5" class="input-field w-full" placeholder="Describe what you want to generate in the masked area..."></textarea>
+                    <div class="pt-4 border-t dark:border-gray-600">
+                        <label for="inpainting-prompt" class="block text-sm font-medium mb-1">Prompt</label>
+                        <div class="relative">
+                            <textarea id="inpainting-prompt" v-model="prompt" rows="4" class="input-field w-full" placeholder="Describe what to generate..."></textarea>
+                            <button @click="handleEnhance('prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance prompt with AI" :disabled="imageStore.isEnhancing">
+                                <IconSparkles class="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                     <div>
+                        <label for="inpainting-neg-prompt" class="block text-sm font-medium mb-1">Negative Prompt</label>
+                        <div class="relative">
+                            <textarea id="inpainting-neg-prompt" v-model="negativePrompt" rows="3" class="input-field w-full" placeholder="ugly, blurry, bad anatomy..."></textarea>
+                            <button @click="handleEnhance('negative_prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance negative prompt with AI" :disabled="imageStore.isEnhancing">
+                                <IconSparkles class="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Canvas Column -->
-                <div class="md:col-span-2 relative aspect-auto" ref="canvasContainerRef">
-                    <AuthenticatedImage ref="imageRef" :src="imageUrl" @load="setupCanvas" class="absolute inset-0 w-full h-full object-contain pointer-events-none" />
-                    <canvas ref="canvasRef" class="absolute inset-0 w-full h-full cursor-crosshair"></canvas>
+                <div class="md:col-span-2 relative aspect-auto min-h-[400px]" ref="canvasContainerRef">
+                    <AuthenticatedImage ref="imageRef" :src="imageUrl" @load="onImageLoad" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 max-w-full max-h-full object-contain pointer-events-none" />
+                    <canvas ref="canvasRef" class="absolute cursor-crosshair"></canvas>
+                    <div class="absolute top-2 right-2 flex flex-col gap-2">
+                        <button @click="openImageViewer" class="p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors" title="View Full Size">
+                            <IconMaximize class="w-5 h-5"/>
+                        </button>
+                    </div>
                 </div>
             </div>
         </template>
@@ -41,12 +62,14 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useImageStore } from '../../stores/images';
 import GenericModal from './GenericModal.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconMaximize from '../../assets/icons/IconMaximize.vue';
 
 const uiStore = useUiStore();
 const imageStore = useImageStore();
@@ -60,12 +83,15 @@ const imageRef = ref(null);
 const ctx = ref(null);
 const isDrawing = ref(false);
 
-const brushSize = ref(20);
+const brushSize = ref(40);
 const tool = ref('brush');
 const prompt = ref('');
+const negativePrompt = ref('');
 
 const history = ref([]);
 const historyIndex = ref(-1);
+
+let resizeObserver = null;
 
 function setTool(newTool) {
     tool.value = newTool;
@@ -74,65 +100,80 @@ function setTool(newTool) {
     }
 }
 
+function onImageLoad() {
+    nextTick().then(() => {
+        setupCanvas();
+        if (canvasContainerRef.value) {
+            resizeObserver = new ResizeObserver(setupCanvas);
+            resizeObserver.observe(canvasContainerRef.value);
+        }
+    });
+}
+
 function setupCanvas() {
     if (!canvasRef.value || !imageRef.value?.$el) return;
     const canvas = canvasRef.value;
     const imageEl = imageRef.value.$el.querySelector('img');
-    if (!imageEl || !imageEl.complete) return;
+    if (!imageEl || !imageEl.complete || imageEl.naturalWidth === 0) return;
 
-    const container = canvasContainerRef.value;
-    const containerRatio = container.clientWidth / container.clientHeight;
-    const imageRatio = imageEl.naturalWidth / imageEl.naturalHeight;
+    const imgRect = imageEl.getBoundingClientRect();
+    const containerRect = canvasContainerRef.value.getBoundingClientRect();
+    
+    canvas.style.top = `${imgRect.top - containerRect.top}px`;
+    canvas.style.left = `${imgRect.left - containerRect.left}px`;
+    canvas.style.width = `${imgRect.width}px`;
+    canvas.style.height = `${imgRect.height}px`;
 
-    let canvasWidth, canvasHeight;
-    if (containerRatio > imageRatio) {
-        canvasHeight = container.clientHeight;
-        canvasWidth = canvasHeight * imageRatio;
-    } else {
-        canvasWidth = container.clientWidth;
-        canvasHeight = canvasWidth / imageRatio;
-    }
-
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
+    canvas.width = imageEl.naturalWidth;
+    canvas.height = imageEl.naturalHeight;
 
     ctx.value = canvas.getContext('2d');
     ctx.value.lineCap = 'round';
     ctx.value.lineJoin = 'round';
+    ctx.value.fillStyle = 'rgba(0, 0, 0, 0.7)';
 
+    canvas.removeEventListener('mousedown', startDrawing);
     canvas.addEventListener('mousedown', startDrawing);
-    canvas.addEventListener('mousemove', draw);
-    canvas.addEventListener('mouseup', stopDrawing);
-    canvas.addEventListener('mouseout', stopDrawing);
-
-    canvas.addEventListener('touchstart', startDrawing);
-    canvas.addEventListener('touchmove', draw);
-    canvas.addEventListener('touchend', stopDrawing);
+    window.removeEventListener('mousemove', draw);
+    window.addEventListener('mousemove', draw);
+    window.removeEventListener('mouseup', stopDrawing);
+    window.addEventListener('mouseup', stopDrawing);
     
     saveState();
 }
 
+
 function getEventCoordinates(event) {
     const canvas = canvasRef.value;
     const rect = canvas.getBoundingClientRect();
-    if (event.touches) {
-        return {
-            x: event.touches[0].clientX - rect.left,
-            y: event.touches[0].clientY - rect.top
-        };
-    }
+    const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+    const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+
     return {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top
+        x: (clientX - rect.left) * scaleX,
+        y: (clientY - rect.top) * scaleY
     };
 }
 
 function startDrawing(event) {
+    const canvas = canvasRef.value;
+    const rect = canvas.getBoundingClientRect();
+    const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+    const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+
+    if(clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+        return;
+    }
+
     event.preventDefault();
     isDrawing.value = true;
     const { x, y } = getEventCoordinates(event);
     ctx.value.beginPath();
     ctx.value.moveTo(x, y);
+    draw(event); // Start drawing immediately
 }
 
 function draw(event) {
@@ -140,9 +181,19 @@ function draw(event) {
     event.preventDefault();
     const { x, y } = getEventCoordinates(event);
     ctx.value.lineWidth = brushSize.value;
-    ctx.value.strokeStyle = 'black';
+    ctx.value.strokeStyle = 'rgba(0, 0, 0, 0.7)';
+
+    if (tool.value === 'eraser') {
+        ctx.value.globalCompositeOperation = 'destination-out';
+    } else {
+        ctx.value.globalCompositeOperation = 'source-over';
+    }
+    
     ctx.value.lineTo(x, y);
     ctx.value.stroke();
+    
+    ctx.value.beginPath();
+    ctx.value.moveTo(x, y);
 }
 
 function stopDrawing() {
@@ -163,6 +214,7 @@ function saveState() {
 function undo() {
     if (historyIndex.value > 0) {
         historyIndex.value--;
+        ctx.value.clearRect(0, 0, canvasRef.value.width, canvasRef.value.height);
         ctx.value.putImageData(history.value[historyIndex.value], 0, 0);
     }
 }
@@ -176,18 +228,18 @@ async function handleGenerate() {
     if (!image.value || imageStore.isGenerating) return;
 
     const maskCanvas = document.createElement('canvas');
-    const imageEl = imageRef.value.$el.querySelector('img');
-    maskCanvas.width = imageEl.naturalWidth;
-    maskCanvas.height = imageEl.naturalHeight;
+    maskCanvas.width = canvasRef.value.width;
+    maskCanvas.height = canvasRef.value.height;
     const maskCtx = maskCanvas.getContext('2d');
     
-    maskCtx.drawImage(canvasRef.value, 0, 0, maskCanvas.width, maskCanvas.height);
+    maskCtx.drawImage(canvasRef.value, 0, 0);
     
     const maskBase64 = maskCanvas.toDataURL('image/png').split(',')[1];
     
     await imageStore.editImage({
         image_ids: [image.value.id],
         prompt: prompt.value,
+        negative_prompt: negativePrompt.value,
         model: image.value.model,
         mask: maskBase64
     });
@@ -195,9 +247,44 @@ async function handleGenerate() {
     uiStore.closeModal('inpaintingEditor');
 }
 
-watch(image, () => {
-    if(image.value) {
-        prompt.value = image.value?.prompt || '';
+async function handleEnhance(type) {
+    const result = await imageStore.enhanceImagePrompt({
+        prompt: prompt.value,
+        negative_prompt: negativePrompt.value
+    });
+    if (result) {
+        if (type === 'prompt' && result.prompt) {
+            prompt.value = result.prompt;
+        }
+        if (type === 'negative_prompt' && result.negative_prompt) {
+            negativePrompt.value = result.negative_prompt;
+        }
     }
+}
+
+function openImageViewer() {
+    uiStore.openImageViewer({
+        imageList: [{ src: imageUrl.value, prompt: image.value.prompt }],
+        startIndex: 0
+    });
+}
+
+watch(image, (newImage) => {
+    if (newImage) {
+        prompt.value = newImage.prompt || '';
+        negativePrompt.value = '';
+    }
+});
+
+onMounted(() => {
+    // Initial setup is now triggered by onImageLoad
+});
+
+onUnmounted(() => {
+    if (resizeObserver && canvasContainerRef.value) {
+        resizeObserver.unobserve(canvasContainerRef.value);
+    }
+    window.removeEventListener('mousemove', draw);
+    window.removeEventListener('mouseup', stopDrawing);
 });
 </script>

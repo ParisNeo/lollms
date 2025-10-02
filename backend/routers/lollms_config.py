@@ -1,7 +1,8 @@
-# [UPDATE] backend/routers/lollms_config.py
+# backend/routers/lollms_config.py
 import json
-from typing import List
+from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Form
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from lollms_client import LollmsClient
 from ascii_colors import trace_exception
@@ -18,6 +19,12 @@ from backend.models.shared import ModelInfo
 from backend.settings import settings
 
 lollms_config_router = APIRouter(prefix="/api/config", tags=["LoLLMs Configuration"])
+
+class ModelInfo(BaseModel):
+    id: str
+    name: str
+    alias: Optional[Dict[str, Any]] = None
+    binding_params: Optional[Dict[str, List[Dict[str, Any]]]] = None
 
 @lollms_config_router.get("/lollms-models", response_model=List[ModelInfo])
 async def get_lollms_models(
@@ -130,23 +137,15 @@ async def get_lollms_tti_models(
 
                 binding_params = {}
                 if binding_desc:
-                    all_params = []
-                    all_params.extend(binding_desc.get('input_parameters', []))
-                    all_params.extend(binding_desc.get('generate_image_parameters', []))
-                    all_params.extend(binding_desc.get('edit_image_parameters', []))
-                    seen_params = {}
-                    deduplicated_params = []
-                    for param in all_params:
-                        if param.get('name') and param['name'] not in seen_params:
-                            seen_params[param['name']] = param
-                            deduplicated_params.append(param)
-                    binding_params['parameters'] = deduplicated_params
+                    binding_params['class_parameters'] = binding_desc.get('input_parameters', [])
+                    binding_params['generation_parameters'] = binding_desc.get('generate_image_parameters', [])
+                    binding_params['edit_parameters'] = binding_desc.get('edit_image_parameters', [])
 
                 model_info = {
                     "id": f"{binding.alias}/{model_name}",
                     "name": display_name,
                     "alias": alias_data,
-                    "binding_params": binding_params
+                    "binding_params": binding_params,
                 }
 
                 all_models.append(model_info)
@@ -160,7 +159,6 @@ async def get_lollms_tti_models(
         raise HTTPException(status_code=404, detail="No TTI models found from any active bindings.")
     
     models_list = sorted(all_models, key=lambda x: x['name'])
-    print(models_list)
     return models_list
 
 
@@ -252,17 +250,14 @@ async def get_tts_models(
                         binding_desc = available_binding_descs.get(binding.name)
                         binding_params = {}
                         if binding_desc:
-                            all_params = []
-                            all_params.extend(binding_desc.get('input_parameters', []))
-                            seen_params = {p['name'] for p in all_params}
-                            deduplicated_params = list(all_params)
-                            binding_params['parameters'] = deduplicated_params
+                            binding_params['class_parameters'] = binding_desc.get('input_parameters', [])
+                            binding_params['generation_parameters'] = binding_desc.get('synthesize_audio_parameters', [])
 
                         model_info = {
                             "id": f"{binding.alias}/{model_id}",
                             "name": display_name,
                             "alias": alias_data,
-                            "binding_params": binding_params
+                            "binding_params": binding_params,
                         }
 
                         all_models.append(model_info)

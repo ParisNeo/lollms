@@ -1,4 +1,4 @@
-// [UPDATE] frontend/webui/src/stores/data.js
+// frontend/webui/src/stores/data.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';

@@ -1,7 +1,7 @@
-# backend/models/image_studio.py
-import datetime
-from typing import Optional, List
+# backend/models/image.py
 from pydantic import BaseModel, Field
+from typing import Optional, List
+import datetime
 
 class UserImagePublic(BaseModel):
     id: str
@@ -9,24 +9,41 @@ class UserImagePublic(BaseModel):
     prompt: Optional[str] = None
     model: Optional[str] = None
     created_at: datetime.datetime
-    
+    discussion_id: Optional[str] = None
+
     class Config:
         from_attributes = True
 
-class UserImageUpdate(BaseModel):
-    prompt: Optional[str] = None
-
 class ImageGenerationRequest(BaseModel):
     prompt: str
+    negative_prompt: Optional[str] = ""
     model: Optional[str] = None
-    n: int = Field(default=1, ge=1, le=4)
+    n: int = Field(default=1, ge=1, le=10)
     size: Optional[str] = "1024x1024"
+    width: Optional[int] = None
+    height: Optional[int] = None
+    seed: Optional[int] = -1
+    sampler_name: Optional[str] = None
+    steps: Optional[int] = None
+    cfg_scale: Optional[float] = None
+
+class MoveImageToDiscussionRequest(BaseModel):
+    discussion_id: str
 
 class ImageEditRequest(BaseModel):
     image_ids: List[str]
     prompt: str
+    negative_prompt: Optional[str] = None
+    mask: Optional[str] = None # base64 encoded mask
     model: Optional[str] = None
-    mask: Optional[str] = None # Base64 encoded mask image
 
-class MoveImageToDiscussionRequest(BaseModel):
-    discussion_id: str
+# Added for prompt enhancement
+class ImagePromptEnhancementRequest(BaseModel):
+    prompt: str
+    negative_prompt: Optional[str] = ""
+    model: Optional[str] = None
+    target: str = "both"
+
+class ImagePromptEnhancementResponse(BaseModel):
+    prompt: Optional[str] = None
+    negative_prompt: Optional[str] = None

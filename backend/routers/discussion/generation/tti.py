@@ -67,16 +67,25 @@ def build_tti_generation_router(router: APIRouter):
     def generate_image_from_data_zone(
         discussion_id: str,
         prompt: str = Form(...),
+        negative_prompt: str = Form(""),
+        width: Optional[int] = Form(None),
+        height: Optional[int] = Form(None),
+        generation_params_json: str = Form("{}"),
         current_user: UserAuthDetails = Depends(get_current_active_user)
     ):
         discussion = get_user_discussion(current_user.username, discussion_id)
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
 
+        try:
+            generation_params = json.loads(generation_params_json)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid format for generation parameters (kwargs).")
+
         db_task = task_manager.submit_task(
             name=f"Generating image for: {discussion.metadata.get('title', 'Untitled')}",
             target=_generate_image_task,
-            args=(current_user.username, discussion_id, prompt),
+            args=(current_user.username, discussion_id, prompt, negative_prompt, width, height, generation_params),
             description=f"Generating image with prompt: '{prompt[:50]}...'",
             owner_username=current_user.username
         )
