@@ -172,6 +172,8 @@ def synchronize_filesystem_and_db(db: Session):
             # --- Step 1: Find ghost installations (filesystem folder exists, but no DB record) ---
             ASCIIColors.info("Scanning for ghost installations (files without DB entry)...")
             
+            APPS_ROOT_PATH.mkdir(exist_ok=True, parents=True)
+            MCPS_ROOT_PATH.mkdir(exist_ok=True, parents=True)
             installed_folders = {
                 'app': {f.name for f in APPS_ROOT_PATH.iterdir() if f.is_dir()},
                 'mcp': {f.name for f in MCPS_ROOT_PATH.iterdir() if f.is_dir()}
