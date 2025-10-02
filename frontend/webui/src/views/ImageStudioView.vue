@@ -35,6 +35,7 @@ const negativePrompt = ref('');
 const selectedModel = ref(null);
 const imageSize = ref('1024x1024');
 const nImages = ref(1);
+const seed = ref(-1); // New state for seed
 
 const selectedImages = ref([]);
 const isSelectionMode = computed(() => selectedImages.value.length > 0);
@@ -91,6 +92,7 @@ async function handleGenerate() {
         model: selectedModel.value,
         size: imageSize.value,
         n: nImages.value,
+        seed: seed.value, // Include seed in the payload
     });
 }
 
@@ -206,7 +208,7 @@ function goBack() {
                             </div>
                         </div>
                     </div>
-                    <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 items-end">
+                    <div class="mt-4 grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
                         <div>
                             <label for="model" class="block text-sm font-medium">Model</label>
                             <select id="model" v-model="selectedModel" class="input-field mt-1">
@@ -222,11 +224,16 @@ function goBack() {
                                 <option value="1024x1024">1024x1024</option>
                                 <option value="1792x1024">1792x1024</option>
                                 <option value="1024x1792">1024x1792</option>
+                                <option value="1024x1024">512x512</option>
                             </select>
                         </div>
                         <div>
                             <label for="n" class="block text-sm font-medium">Number of Images</label>
                             <input id="n" v-model.number="nImages" type="number" min="1" max="10" class="input-field mt-1">
+                        </div>
+                        <div>
+                            <label for="seed" class="block text-sm font-medium">Seed</label>
+                            <input id="seed" v-model.number="seed" type="number" class="input-field mt-1" placeholder="-1 for random">
                         </div>
                         <div class="flex items-center gap-2">
                              <button @click="handleEnhance('both')" class="btn btn-secondary p-2.5" :disabled="isGenerating || isEnhancing" title="Enhance both prompts with AI">
