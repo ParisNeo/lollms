@@ -8,10 +8,7 @@ FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 
 
 from backend.config import (
-    APP_SETTINGS, APP_VERSION, APP_DB_URL,
-    INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
-    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH,
-    LOLLMS_CLIENT_DEFAULTS, APP_DATA_DIR
+    APP_DB_URL, APP_DATA_DIR
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser

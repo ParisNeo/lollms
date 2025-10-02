@@ -24,8 +24,7 @@ from sqlalchemy import or_, inspect
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
-    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH,
-    LOLLMS_CLIENT_DEFAULTS, APP_DATA_DIR
+    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.base import Base
@@ -182,34 +181,7 @@ def run_one_time_startup_tasks(lock: Lock):
                 ASCIIColors.green(f"INFO: Initial admin user '{admin_username}' created successfully.")
 
             if not db_for_defaults.query(DBLLMBinding).first():
-                ASCIIColors.yellow("No LLM bindings found in the database. Creating one from config.toml.")
-                if LOLLMS_CLIENT_DEFAULTS:
-                    binding_name = LOLLMS_CLIENT_DEFAULTS.get("binding_name")
-                    if binding_name:
-                        try:
-                            config_data = LOLLMS_CLIENT_DEFAULTS.copy()
-                            name = config_data.pop("binding_name", None)
-                            default_model_name = config_data.pop("default_model_name", None)
-                            alias = name
-                            counter = 1
-                            while db_for_defaults.query(DBLLMBinding).filter(DBLLMBinding.alias == alias).first():
-                                alias = f"{name}_{counter}"
-                                counter += 1
-                            new_binding = DBLLMBinding(
-                                alias=alias, name=name, config=config_data,
-                                default_model_name=default_model_name, is_active=True
-                            )
-                            db_for_defaults.add(new_binding)
-                            db_for_defaults.commit()
-                            ASCIIColors.green(f"INFO: Successfully created initial LLM binding '{alias}' from config.toml.")
-                        except Exception as e:
-                            ASCIIColors.error(f"Failed to create initial binding: {e}")
-                            db_for_defaults.rollback()
-                            trace_exception(e) 
-                    else:
-                        ASCIIColors.warning("`binding_name` not found in [lollms_client_defaults] in config.toml. Cannot create initial binding.")
-                else:
-                    ASCIIColors.warning("[lollms_client_defaults] section is empty in config.toml. No initial binding created.")
+                ASCIIColors.yellow("No LLM bindings found in the database. Make sure you create one.")
 
         except Exception as e:
             ASCIIColors.error(f"ERROR during admin/personality/prompt setup: {e}")

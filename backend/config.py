@@ -55,7 +55,6 @@ def _migrate_toml_to_env_if_needed():
             process_section("server", "SERVER")
             process_section("app_settings", "APP")
             process_section("initial_admin_user", "INITIAL_ADMIN")
-            process_section("lollms_client_defaults", "DEFAULT")
             process_section("safe_store_defaults", "SAFESTORE")
             process_section("redis", "REDIS")
 
@@ -127,10 +126,7 @@ INITIAL_ADMIN_USER_CONFIG = {
     "password": get_env_var("INITIAL_ADMIN_PASSWORD", "admin")
 }
 
-LOLLMS_CLIENT_DEFAULTS = {
-    "binding_name": get_env_var("DEFAULT_BINDING_NAME", "llamacpp"),
-    "default_model_name": get_env_var("DEFAULT_MODEL_NAME", "llava-v1.6-mistral-7b.Q3_K_XS.gguf")
-}
+
 
 SAFE_STORE_DEFAULTS = {
     "cache_folder": get_env_var("SAFESTORE_CACHE_FOLDER", "data/cache/safestore"),

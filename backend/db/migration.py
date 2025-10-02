@@ -9,7 +9,7 @@ from sqlalchemy.exc import OperationalError, IntegrityError
 from sqlalchemy.schema import DropTable
 from sqlalchemy.ext.compiler import compiles
 
-from backend.config import LOLLMS_CLIENT_DEFAULTS, SERVER_CONFIG, APP_SETTINGS, SAFE_STORE_DEFAULTS, APP_DATA_DIR, USERS_DIR_NAME
+from backend.config import SERVER_CONFIG, APP_SETTINGS, SAFE_STORE_DEFAULTS, APP_DATA_DIR, USERS_DIR_NAME
 from backend.db.base import CURRENT_DB_VERSION
 from backend.db.models.config import GlobalConfig, LLMBinding, TTIBinding, TTSBinding, DatabaseVersion
 from backend.db.models.service import App # Ensure App is imported
