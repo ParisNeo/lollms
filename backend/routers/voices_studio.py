@@ -1,4 +1,4 @@
-# [UPDATE] backend/routers/voices_studio.py
+# backend/routers/voices_studio.py
 import shutil
 import uuid
 import io
@@ -328,7 +328,7 @@ async def apply_effects_to_audio(
 
         _process_audio_effects(
             temp_input_path, temp_output_path, request.pitch, request.speed, request.gain, 
-            request.reverb_params.model_dump(), request.trim_start, request.trim_end
+            request.reverb_params.model_dump() if request.reverb_params else None, request.trim_start, request.trim_end
         )
 
         with open(temp_output_path, "rb") as f:

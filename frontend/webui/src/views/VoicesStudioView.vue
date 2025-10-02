@@ -59,7 +59,7 @@
                     </form>
                 </div>
             </div>
-            <VoiceEditor v-else-if="selectedVoiceId" :key="selectedVoiceId" :voice-id="selectedVoiceId" :voice-data="form" />
+            <VoiceEditor v-else-if="selectedVoice" :key="selectedVoice.id" :voice-id="selectedVoice.id" :voice-data="selectedVoice" />
             <div v-else class="h-full flex flex-col items-center justify-center text-center p-6">
                 <IconMicrophone class="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
                 <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200">Welcome to the Voices Studio</h3>
@@ -99,7 +99,11 @@ const audioChunks = ref([]);
 const recordedAudioUrl = ref(null);
 const recordedAudioBlob = ref(null);
 
-const form = ref({ alias: '', language: 'en', pitch: 1.0, speed: 1.0, gain: 0.0, reverb_delay: 0, reverb_attenuation: 0.0 });
+const selectedVoice = computed(() => {
+    if (!selectedVoiceId.value) return null;
+    return voices.value.find(v => v.id === selectedVoiceId.value);
+});
+
 
 function showAddForm() {
     selectedVoiceId.value = null;

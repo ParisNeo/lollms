@@ -81,6 +81,10 @@ def _bootstrap_global_settings(connection):
             "value": APP_SETTINGS.get("public_domain_name", ""),
             "type": "string", "description": "Public domain or IP to use for links when server is on 0.0.0.0. If empty, auto-detects IP.", "category": "Server"
         },
+        "cors_origins_exceptions": {
+            "value": "",
+            "type": "string", "description": "A comma-separated list of additional origins to allow for CORS (e.g., http://localhost:8000,https://my-app.com). Requires restart.", "category": "Server"
+        },
         "data_path": {
             "value": str(APP_DATA_DIR.resolve()),
             "type": "string", "description": "The root directory for all application data. Requires a manual update in .env and a server restart to change.", "category": "Server"
