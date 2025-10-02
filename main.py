@@ -450,6 +450,9 @@ if __name__ == "__main__":
     # This block is executed only by the main process, before Uvicorn starts workers.
     init_database(APP_DB_URL)
     db = db_session_module.SessionLocal()
+    # MAIN PROCESS ONLY: run schema creation/migrations BEFORE any DB access
+    startup_lock = Lock()
+    run_one_time_startup_tasks(startup_lock)    
     try:
         # Load settings once for the main process to use for CORS, etc.
         settings.load_from_db(db)
