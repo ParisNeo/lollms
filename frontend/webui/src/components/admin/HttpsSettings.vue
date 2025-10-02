@@ -12,7 +12,8 @@ const form = ref({
     public_domain_name: '',
     https_enabled: false,
     ssl_certfile: '',
-    ssl_keyfile: ''
+    ssl_keyfile: '',
+    cors_origins_exceptions: ''
 });
 
 const isLoading = ref(false);
@@ -110,6 +111,12 @@ async function handleSave() {
                     <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Used for links to apps when the server is bound to 0.0.0.0. If empty, it will try to auto-detect the server's public IP.</p>
                 </div>
 
+                <!-- NEW CORS Field -->
+                <div>
+                    <label for="cors_exceptions" class="block text-sm font-medium">CORS Origins Exceptions</label>
+                    <textarea id="cors_exceptions" v-model="form.cors_origins_exceptions" rows="3" class="input-field mt-1" placeholder="http://localhost:8000, https://my-app.com"></textarea>
+                    <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Comma-separated list of additional origins to allow access from.</p>
+                </div>
 
                 <!-- HTTPS Toggle -->
                 <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">

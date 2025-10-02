@@ -473,6 +473,14 @@ if __name__ == "__main__":
             if https_enabled:
                 allowed_origins.append(f"https://{host}:{port}")
 
+        cors_exceptions_str = settings.get("cors_origins_exceptions", "")
+        if cors_exceptions_str:
+            exceptions = [origin.strip() for origin in cors_exceptions_str.split(',') if origin.strip()]
+            for origin in exceptions:
+                if origin not in allowed_origins:
+                    allowed_origins.append(origin)
+                    ASCIIColors.green(f"CORS: Allowing exception origin: {origin}")
+
         sso_apps = db.query(DBApp).filter(DBApp.active == True, DBApp.authentication_type == 'lollms_sso').all()
         sso_mcps = db.query(DBMCP).filter(DBMCP.active == True, DBMCP.authentication_type == 'lollms_sso').all()
         openai_apps = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.allow_openai_api_access == True).all()

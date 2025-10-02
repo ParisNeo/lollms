@@ -40,10 +40,10 @@ watch(app, async (newApp) => {
             if (fetchedSchema && Object.keys(fetchedSchema.properties || {}).length > 0) {
                 schema.value = fetchedSchema;
                 const { config, metadata } = await adminStore.fetchAppConfig(newApp.id);
-                configData.value = { ...newApp, ...config };
+                configData.value = { ...newApp, ...config, authentication_type: newApp.authentication_type || 'none' };
                 configMetadata.value = metadata;
             } else {
-                configData.value = { ...newApp };
+                configData.value = { ...newApp, authentication_type: newApp.authentication_type || 'none' };
             }
         } catch (error) {
             console.error("Failed to load app configuration:", error);
@@ -66,14 +66,19 @@ async function handleUpdate() {
         if (hasSchema.value) {
             await adminStore.updateAppConfig(app.value.id, configData.value);
         }
-        // Always update system settings if they have been touched
-        await adminStore.updateInstalledApp(app.value.id, {
+        
+        const systemSettingsPayload = {
             name: configData.value.name,
             description: configData.value.description,
             port: configData.value.port,
             autostart: configData.value.autostart,
-            allow_openai_api_access: configData.value.allow_openai_api_access
-        });
+            allow_openai_api_access: configData.value.allow_openai_api_access,
+            authentication_type: configData.value.authentication_type,
+            authentication_key: configData.value.authentication_key,
+            sso_redirect_uri: configData.value.sso_redirect_uri,
+        };
+        
+        await adminStore.updateInstalledApp(app.value.id, systemSettingsPayload);
         uiStore.closeModal('appConfig');
     } finally {
         isLoading.value = false;
@@ -111,6 +116,27 @@ async function handleUpdate() {
                          <div><label for="app-port" class="label">Port Number</label><input id="app-port" v-model.number="configData.port" type="number" min="1025" max="65535" required class="input-field mt-1" /></div>
                          <div class="toggle-container"><span class="toggle-label">Start on System Startup</span><button @click="configData.autostart = !configData.autostart" type="button" :class="[configData.autostart ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'toggle-switch']"><span :class="[configData.autostart ? 'translate-x-5' : 'translate-x-0', 'toggle-knob']"></span></button></div>
                          <div class="toggle-container"><span class="toggle-label">Allow OpenAI API Access</span><button @click="configData.allow_openai_api_access = !configData.allow_openai_api_access" type="button" :class="[configData.allow_openai_api_access ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'toggle-switch']"><span :class="[configData.allow_openai_api_access ? 'translate-x-5' : 'translate-x-0', 'toggle-knob']"></span></button></div>
+                        <div class="pt-4 mt-4 border-t dark:border-gray-600">
+                            <h4 class="font-semibold text-lg">Authentication</h4>
+                            <div>
+                                <label for="service-auth-type" class="label">Authentication Type</label>
+                                <select id="service-auth-type" v-model="configData.authentication_type" class="input-field">
+                                    <option value="none">None</option>
+                                    <option value="bearer">Bearer Token</option>
+                                    <option value="lollms_sso">LoLLMs SSO</option>
+                                </select>
+                            </div>
+                            <div v-if="configData.authentication_type === 'bearer'" class="mt-4">
+                                <label for="service-auth-key" class="label">Authentication Key</label>
+                                <input id="service-auth-key" v-model="configData.authentication_key" type="password" class="input-field" placeholder="Enter Bearer token">
+                            </div>
+                            <div v-if="configData.authentication_type === 'lollms_sso'" class="mt-4 space-y-4">
+                                <div>
+                                    <label for="sso-redirect-uri" class="label">Redirect URI</label>
+                                    <input id="sso-redirect-uri" v-model="configData.sso_redirect_uri" type="url" class="input-field" placeholder="e.g., https://myapp.com/callback">
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     
                     <div v-show="activeTab === 'app' && hasSchema" class="space-y-5">
