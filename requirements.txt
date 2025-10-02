@@ -8,9 +8,10 @@ werkzeug           # For secure_filename
 # --- Configuration & Utilities ---
 toml  # For reading config.toml
 sqlalchemy
-passlib[bcrypt]  # For password hashing (bcrypt is a common and secure scheme)
+passlib[bcrypt]==1.7.4  # For password hashing (bcrypt is a common and secure scheme)
 python-jose[cryptography] 
 python-multipart
+bcrypt==4.3.0
 
 # --- LoLLMs Client Library and Common Backends ---
 lollms-client>=1.6.1
