@@ -364,7 +364,7 @@ def _bootstrap_lollms_user(connection):
         print("INFO: Creating special AI user '@lollms'.")
         # Generate a secure, unusable password hash
         dummy_password = secrets.token_hex(32)
-        hashed_password = get_password_hash(dummy_password)
+        hashed_password = get_password_hash(dummy_password[:72])
         
         # This is a raw insert, avoiding the ORM User model to prevent potential import issues in migration scripts
         connection.execute(
