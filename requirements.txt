@@ -68,7 +68,7 @@ pandas
 extract-msg
 
 psutil
-pynvml
+nvidia-ml-py
 
 # required for uploading pdfs
 PyMuPDF
