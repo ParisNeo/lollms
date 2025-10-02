@@ -136,18 +136,31 @@ async def get_system_status():
 
     gpus_info = []
     try:
-        import pynvml
-        pynvml.nvmlInit()
-        for i in range(pynvml.nvmlDeviceGetCount()):
-            handle = pynvml.nvmlDeviceGetHandleByIndex(i)
-            info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-            gpu_name = pynvml.nvmlDeviceGetName(handle)
+        from pynvml import (
+            nvmlInit, nvmlShutdown, nvmlDeviceGetCount, nvmlDeviceGetHandleByIndex,
+            nvmlDeviceGetMemoryInfo, nvmlDeviceGetName, NVMLError
+        )
+        nvmlInit()
+        count = nvmlDeviceGetCount()
+        for i in range(count):
+            handle = nvmlDeviceGetHandleByIndex(i)
+            name = nvmlDeviceGetName(handle)
+            # nvmlDeviceGetName may return bytes on some platforms
+            gpu_name = name.decode("utf-8") if isinstance(name, (bytes, bytearray)) else str(name)
+
+            mem = nvmlDeviceGetMemoryInfo(handle)
+            total_gb = mem.total / (1024 ** 3)
+            used_gb  = mem.used  / (1024 ** 3)
+            usage_pct = (mem.used / mem.total) * 100 if mem.total > 0 else 0.0
+
             gpus_info.append(GPUInfo(
-                id=i, name=gpu_name.decode('utf-8') if isinstance(gpu_name, bytes) else gpu_name,
-                vram_total_gb=info.total / (1024**3), vram_used_gb=info.used / (1024**3),
-                vram_usage_percent=(info.used / info.total) * 100 if info.total > 0 else 0
+                id=i,
+                name=gpu_name,
+                vram_total_gb=total_gb,
+                vram_used_gb=used_gb,
+                vram_usage_percent=usage_pct
             ))
-        pynvml.nvmlShutdown()
+        nvmlShutdown()
     except (ImportError, Exception): pass
 
     return SystemUsageStats(
