@@ -159,7 +159,9 @@ async def get_lollms_tti_models(
     if not all_models:
         raise HTTPException(status_code=404, detail="No TTI models found from any active bindings.")
     
-    return sorted(all_models, key=lambda x: x['name'])
+    models_list = sorted(all_models, key=lambda x: x['name'])
+    print(models_list)
+    return models_list
 
 
 @lollms_config_router.post("/lollms-model")

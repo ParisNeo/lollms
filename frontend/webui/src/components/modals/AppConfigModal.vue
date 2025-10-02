@@ -40,10 +40,16 @@ watch(app, async (newApp) => {
             if (fetchedSchema && Object.keys(fetchedSchema.properties || {}).length > 0) {
                 schema.value = fetchedSchema;
                 const { config, metadata } = await adminStore.fetchAppConfig(newApp.id);
-                configData.value = { ...newApp, ...config, authentication_type: newApp.authentication_type || 'none' };
+                configData.value = { ...newApp, ...config };
+                if (!configData.value.authentication_type) {
+                    configData.value.authentication_type = 'none';
+                }
                 configMetadata.value = metadata;
             } else {
-                configData.value = { ...newApp, authentication_type: newApp.authentication_type || 'none' };
+                configData.value = { ...newApp };
+                if (!configData.value.authentication_type) {
+                    configData.value.authentication_type = 'none';
+                }
             }
         } catch (error) {
             console.error("Failed to load app configuration:", error);

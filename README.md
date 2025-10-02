@@ -1,145 +1,86 @@
-# LoLLMs
+# LoLLMs - v1.0.2 "Nebula"
+
 One tool to rule them all!
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Python Version](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/downloads/)
-![Version](https://img.shields.io/badge/Version-1.6.0-brightgreen) <!-- Updated Version -->
-<!-- Add build status badge if CI is set up -->
-<!-- [![Build Status](https://img.shields.io/your_ci_badge_url)](your_ci_link) -->
+[![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/downloads/)
+![Version](https://img.shields.io/badge/Version-1.7.0-brightgreen)
 
-A multi-user FastAPI backend and responsive HTML/Tailwind CSS frontend application designed to provide a chat interface powered by the [`lollms_client`](https://github.com/ParisNeo/lollms_client) library. It features integrated Retrieval-Augmented Generation (RAG) using [`safe_store`](https://github.com/ParisNeo/safe_store), MCPs, Personalities system, multimodal chat, user personalities, a friend system, direct messaging, and enhanced sharing capabilities.
+A multi-user FastAPI backend and responsive Vue/Tailwind CSS frontend application designed to provide a chat interface powered by the [`lollms_client`](https://github.com/ParisNeo/lollms_client) library. It features integrated Retrieval-Augmented Generation (RAG) using [`safe_store`](https://github.com/ParisNeo/safe_store), a versatile personality system, multimodal chat, user management, a friend system with direct messaging, and enhanced sharing capabilities.
 
 **Live Project:** [https://github.com/ParisNeo/lollms](https://github.com/ParisNeo/lollms)
 
-## Overview
-
-This project aims to provide a self-hostable, user-friendly chat interface that can connect to various Large Language Models (LLMs) supported by `lollms-client`. It features multi-user support with basic authentication, persistent discussions, RAG functionality, multimodal chat (image input), customizable user personalities, a friend system with direct messaging, administrative user management, and sharing of datastores and personalities.
-
 ## ✨ Features
 
-*   **Multi-User Support:** Secure login via Token based authentication. Each user has their own isolated data.
-*   **Persistent Discussions:** Chat histories are saved per user (SQLite3 database) and can be revisited, renamed, starred, and deleted.
+*   **Multi-User Support:** Secure token-based authentication. Each user has their own isolated data.
+*   **Simplified Installation:** Get started quickly with simple `run.sh` or `run_windows.bat` scripts.
+*   **Environment-Based Configuration:** Easy setup using a `.env` file, automatically generated from `.env.example`.
+*   **Persistent Discussions:** Chat histories are saved per user and can be revisited, renamed, starred, and deleted.
 *   **LLM Integration:** Uses `lollms-client` to interact with various LLM backends.
 *   **Streaming Responses:** AI responses are streamed for a real-time experience.
 *   **Multimodal Chat:** Upload images with text prompts for vision-capable models.
-*   **User Personalities (System Prompts):**
-    *   Create, edit, and delete custom personalities (system prompts with name, category, author, icon, etc.).
-    *   Select an active personality to guide LLM responses.
-    *   View and use public (system-provided) personalities.
-    *   Share (send a copy of) owned personalities with friends.
+*   **Advanced Personality System:** Create, edit, and delete custom personalities with unique system prompts, scripts, and data sources.
 *   **Retrieval-Augmented Generation (RAG):**
-    *   Multiple **DataStores** per user for organizing RAG documents.
-    *   Upload documents (`.txt`, `.pdf`, `.docx`, `.html`, etc.) to specific DataStores.
-    *   Toggle RAG usage per discussion, selecting a specific DataStore.
-    *   Manage DataStores (create, rename, delete) and their indexed documents.
-    *   **Share DataStores with friends** (read-only query access).
+    *   Organize documents into multiple **DataStores** per user.
+    *   Upload various file types (`.txt`, `.pdf`, `.docx`, etc.).
+    *   Toggle RAG usage per discussion and select specific DataStores.
+    *   Share DataStores with friends with configurable permissions.
 *   **Friend System & Direct Messaging (DM):**
     *   Send, accept, and reject friend requests.
-    *   View friends list and manage friendships (unfriend, block/unblock - *block/unblock WIP*).
-    *   **Send and receive direct messages** with accepted friends.
-    *   View conversation history with friends.
-*   **Configurable Settings:**
-    *   Users can set their default LLM model, RAG vectorizer, LLM generation parameters (temperature, top_k, etc.), RAG parameters, and personal profile information.
+    *   Engage in real-time direct messaging with friends.
 *   **Admin Panel:**
     *   Manage users (Add, List, Delete, Reset Password).
-    *   Initial superadmin user created from `config.toml`.
-*   **Data Export/Import:** Users can export/import their discussions, settings, and metadata.
-*   **Responsive UI:** Built with Tailwind CSS, including image previews, Markdown rendering with code highlighting (Highlight.js) and math (KaTeX).
-*   **Dark/Light Theme & Internationalization (i18n).**
-*   **SQLite Backend:** Central database for users, settings, personalities, friendships, DMs. SafeStore uses its own DBs per DataStore.
-
-## 🏗️ Architecture
-
-*   **Backend:** FastAPI (Python)
-*   **LLM Communication:** `lollms-client`
-*   **RAG/Vector Store:** `safe_store` (SQLite based per DataStore)
-*   **Main Database:** SQLAlchemy with SQLite (users, personalities, friendships, DMs, etc.)
-*   **Authentication:** HTTP Basic Auth + Passlib
-*   **Frontend:** HTML, Tailwind CSS, Vanilla JavaScript
-*   **Configuration:** TOML (`config.toml`)
-*   **Discussion Storage:** YAML files per user
-
-## 📸 Screenshots
-
-*(Add updated screenshots showing the new Friends & Messages modal, DM interface, personality editor, and sharing options)*
-
-**Login Screen:**
-`![Login Screen](placeholder_login.png)`
-
-**Main Chat UI (with Personality Selector & RAG):**
-`![Chat UI](placeholder_chat_main.png)`
-
-**Friends & Messages Modal:**
-`![Friends & Messages Modal](placeholder_friends_dm.png)`
-
-**Personality Editor Modal:**
-`![Personality Editor](placeholder_personality_editor.png)`
-
-**Settings Modal (User Profile, LLM/RAG Params):**
-`![Settings Modal](placeholder_settings_new.png)`
-
-**DataStore Management & Sharing:**
-`![DataStore Management](placeholder_datastore_manage.png)`
-
-**Admin Panel:**
-`![Admin Panel](placeholder_admin.png)`
+    *   Configure global settings and manage LLM/TTI/TTS bindings.
+*   **Data Export/Import:** Users can export/import their discussions and settings.
+*   **Responsive UI:** Built with Vue.js and Tailwind CSS, featuring Markdown rendering, code highlighting, and math rendering with KaTeX.
 
 ## 🚀 Getting Started
 
 ### Prerequisites
 
-*   Python 3.8+
-*   Git, Pip
-*   An LLM backend accessible via `lollms-client`.
+*   Python 3.10+
+*   Git
 
 ### Installation
-#### Manual installation
-1.  **Clone:**
+
+The easiest way to get started is by using the provided run scripts, which handle setup and execution.
+
+1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/ParisNeo/lollms_chat.git
-    cd lollms_chat
+    git clone https://github.com/ParisNeo/lollms-webui.git
+    cd lollms-webui
     ```
-2.  **Virtual Environment (Recommended):**
-    ```bash
-    python -m venv venv
-    # Windows: venv\Scripts\activate
-    # macOS/Linux: source venv/bin/activate
-    ```
-3.  **Install Dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-4.  **Configure `config.toml`:**
-    *   Copy `config_example.toml` to `config.toml`.
-    *   **Crucially:** Change `password` under `[initial_admin_user]`.
-    *   Set `binding_name` and `default_model_name` in `[lollms_client_defaults]`.
-    *   Review other settings.
-5.  **Run:**
-    ```bash
-    python main.py
-    ```
-#### Automatic installation
-1. ** Windows ** execute install.bat
-2. ** Linux/MazcOs ** execute install.sh
+
+2.  **Run the Installer:**
+    *   **On Windows:** Double-click `run_windows.bat`.
+    *   **On macOS or Linux:**
+        ```bash
+        chmod +x run.sh
+        ./run.sh
+        ```
+    The first time you run the script, it will create a Python virtual environment, install all required dependencies, and create a default `.env` file from `.env.example`. Subsequent runs will just start the application.
 
 ### Usage
 
-1.  **Access UI:** `http://localhost:9642`
-2.  **Login:** Use initial admin or created user credentials.
-3.  **Chat:** Create/select discussions, use RAG, upload images.
-4.  **Personalities:** Manage and select active personalities via Settings.
-5.  **Friends & DMs:** Access via user menu to manage friends and send messages.
-6.  **DataStores:** Manage RAG DataStores and share them via user menu.
-7.  **Settings:** Configure user profile, LLM/RAG parameters, active personality.
-8.  **Admin Panel:** `/admin` for user management (admins only).
+1.  **Access the UI:** Once the server is running, open your web browser and go to `http://localhost:9642` (or the host and port you configured).
+2.  **Create an Admin Account:** On the first launch, you will be prompted to create an administrator account.
+3.  **Login:** Use your newly created credentials to log in.
+4.  **Explore:**
+    *   Start a new chat.
+    *   Go to **Settings** to configure your profile and select an LLM model.
+    *   Visit the **Admin Panel** to configure LLM bindings and other global settings.
 
-## ⚙️ Configuration (`config.toml`)
+## ⚙️ Configuration (`.env` file)
 
-*   **`[app_settings]`**: `data_dir`, `database_url`.
-*   **`[initial_admin_user]`**: `username`, `password`, optional `first_name`, `email`.
-*   **`[lollms_client_defaults]`**: `binding_name`, `default_model_name`, LLM parameters, `put_thoughts_in_context`.
-*   **`[safe_store_defaults]`**: RAG chunking, `global_default_vectorizer`.
-*   **`[server]`**: `host`, `port`.
+Configuration is managed through the `.env` file in the project's root directory. When you first run the application, this file is created for you from `.env.example`.
+
+*   `SERVER_HOST` & `SERVER_PORT`: The host and port the application will run on.
+*   `DATABASE_URL`: The location of the main SQLite database file.
+*   `SECRET_KEY`: **Change this to a long, random string for production.**
+*   `ALLOW_NEW_REGISTRATIONS`: Set to `false` to disable public sign-ups.
+*   `INITIAL_ADMIN_USERNAME` & `INITIAL_ADMIN_PASSWORD`: Used on first startup if no admin exists.
+
+For detailed information on all available settings, please refer to the comments within the `.env.example` file.
 
 ## 📚 API Documentation
 
