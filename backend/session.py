@@ -287,57 +287,56 @@ def build_lollms_client_from_params(
 
         if not binding_to_use:
             binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
-            if not binding_to_use:
-                raise HTTPException(status_code=404, detail="No active LLM bindings are configured.")
+        if binding_to_use:            
+            final_alias = binding_to_use.alias
+            model_name_for_binding = model_name
+            if not model_name_for_binding:
+                selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
+                model_name_for_binding = selected_model_name if selected_binding_alias == final_alias else binding_to_use.default_model_name
 
-        final_alias = binding_to_use.alias
-        
-        model_name_for_binding = model_name
-        if not model_name_for_binding:
-            selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
-            model_name_for_binding = selected_model_name if selected_binding_alias == final_alias else binding_to_use.default_model_name
+            llm_init_params = { **binding_to_use.config }
+            
+            user_saved_params = {
+                "ctx_size": user_db.llm_ctx_size, "temperature": user_db.llm_temperature,
+                "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
+                "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
+                "put_thoughts_in_context": user_db.put_thoughts_in_context
+            }
+            user_session_params = session.get("llm_params", {})
+            
+            final_user_params = {**{k:v for k,v in user_saved_params.items() if v is not None}, **user_session_params}
+            if llm_params:
+                final_user_params.update(llm_params)
 
-        llm_init_params = { **binding_to_use.config }
-        
-        user_saved_params = {
-            "ctx_size": user_db.llm_ctx_size, "temperature": user_db.llm_temperature,
-            "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
-            "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
-            "put_thoughts_in_context": user_db.put_thoughts_in_context
-        }
-        user_session_params = session.get("llm_params", {})
-        
-        final_user_params = {**{k:v for k,v in user_saved_params.items() if v is not None}, **user_session_params}
-        if llm_params:
-            final_user_params.update(llm_params)
+            model_aliases = binding_to_use.model_aliases or {}
+            if isinstance(model_aliases,str):
+                try:
+                    model_aliases = json.loads(model_aliases)
+                except Exception as e:
+                    trace_exception(e)
+                    model_aliases= {}
+            alias_info = model_aliases.get(model_name_for_binding)
 
-        model_aliases = binding_to_use.model_aliases or {}
-        if isinstance(model_aliases,str):
-            try:
-                model_aliases = json.loads(model_aliases)
-            except Exception as e:
-                trace_exception(e)
-                model_aliases= {}
-        alias_info = model_aliases.get(model_name_for_binding)
+            if alias_info:
+                override_allowed = alias_info.get('allow_parameters_override', True)
+                alias_params = {k: v for k, v in alias_info.items() if v is not None}
 
-        if alias_info:
-            override_allowed = alias_info.get('allow_parameters_override', True)
-            alias_params = {k: v for k, v in alias_info.items() if v is not None}
-
-            if override_allowed:
-                llm_init_params.update({**alias_params, **final_user_params})
+                if override_allowed:
+                    llm_init_params.update({**alias_params, **final_user_params})
+                else:
+                    llm_init_params.update(final_user_params)
+                    llm_init_params.update(alias_params)
+                
+                if alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
+                    llm_init_params["ctx_size"] = alias_info['ctx_size']
             else:
                 llm_init_params.update(final_user_params)
-                llm_init_params.update(alias_params)
-            
-            if alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
-                llm_init_params["ctx_size"] = alias_info['ctx_size']
-        else:
-            llm_init_params.update(final_user_params)
 
-        llm_init_params["model_name"] = model_name_for_binding
-        client_init_params = {"llm_binding_name": binding_to_use.name, "llm_binding_config": llm_init_params}    
-        
+            llm_init_params["model_name"] = model_name_for_binding
+            client_init_params = {"llm_binding_name": binding_to_use.name, "llm_binding_config": llm_init_params}    
+        else:
+            client_init_params = {}    
+            
         # --- TTI Binding Integration ---
         user_tti_model_full = tti_binding_alias or user_db.tti_binding_model_name
         selected_tti_binding = None
@@ -432,14 +431,18 @@ def build_lollms_client_from_params(
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
 
-        cache_key = json.dumps(client_init_params, sort_keys=True)
+        if len(client_init_params)>0:
+            cache_key = json.dumps(client_init_params, sort_keys=True)
+        else:
+            cache_key = "{}"
+            
         session_cache = session.setdefault("lollms_clients_cache", {})
         if cache_key in session_cache:
             ASCIIColors.debug(f"INFO: Returning cached LollmsClient for user '{username}'.")
             return session_cache[cache_key]
 
         try:
-            ASCIIColors.magenta(f"INFO: Initializing LollmsClient for user '{username}' with binding '{binding_to_use.name}' and model '{model_name_for_binding}'.")
+            ASCIIColors.magenta(f"INFO: Initializing LollmsClient for user '{username}'.")
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
             session_cache[cache_key] = lc
             ASCIIColors.debug(f"INFO: Caching new LollmsClient for user '{username}'.")
