@@ -40,24 +40,35 @@ new ui:
 - OK when a task is done, it needs to update the corresponding ui
 - OK Add discussion groups
 - OK Left sidebar must be collapsible
+- OK pressing a discussion must switch to discussion view instead of feed
+- OK fix installation process
+- OK start/stop events must be collapsible, all that happens in between should be put inside in between
+- OK support for equations with /[ /] format
+- OK fix branching
+- OK the remove is not updating the discussion after removing
+- OK share discussion with friends with permission to participate to the discussion or not (read/write or READ)
+- OK email users enhance with ai not working
+- OK user folders should move to a sub folder
+- OK fix adding images
+- OK Fix uploading artefacts
+- OK export word needs to be reworked. I need to be able to export images and tables as well as good formatting
+- OK format the exported pdf
+- OK loading the artefact adds the images to the data zone!
+
 
 
 ## Discussion:
-- start/stop events must be collapsible, all that happens in between should be put inside in between
 - make the tools sections collapsible
-- support for equations with /[ /] format
 - Add the possibility to use multiple bindings at once with different configurations
 - fix the return key not sending the message
-- fix branching
 - when cancelling the generation, refresh the discussion
 - when the generation fails, refresh the discussion
-- the remove is not updating the discussion after removing
-- share discussion with friends with permission to participate to the discussion or not (read/write or READ)
 - activate optional RAG for discussion datazone
 - fix deleting a message deleting the whole sub children
+- organize the discussion elements from recent to older with optional change of organization
+- Extract discussion zone from chatview
 
 ### emailing system
-- email users enhance with ai not working
 - password reset views and fixing the lost password email problem
 
 
@@ -130,7 +141,6 @@ new ui:
 -   save document to md (in docs list)
 
 ## installer
-- fix installation process
 - add docker option
 - build docker image
 
@@ -138,19 +148,12 @@ new ui:
 - add clear models button to admin interface
 - if the model does not support image input, do not remove the image list in discussion zone, just make sure you deactivate any image in that list
 
+# Multi workers optimization
+Use REDIS instead of the polling mechanism (optional)
+
 # URGENT:
-Use REDIS instead of the polling mechanism
-user folders should move to a sub folder
-organize the discussion elements from recent to older with optional change of organization
-
-Extract discussion zone from chatview
-fix adding images
-Fix uploading artefacts
-
-export word needs to be reworked. I need to be able to export images and tables as well as good formatting
-format the exported pdf
-
 add more details about the source chunks
-loading the artefact adds the images to the data zone!
-pressing a discussion must switch to discussion view instead of feed
 add queuing for audio generation
+revamp the mermaid ui to (accept the use of parenthesis inside brackets) and support comments
+Fix the zooming and exporting of the mermaid diagram
+
