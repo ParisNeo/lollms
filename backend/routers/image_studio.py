@@ -92,7 +92,7 @@ async def generate_image(
     height = int(size[1])    
     generation_params["width"]=width
     generation_params["height"]=height
-    
+    print(generation_params)
 
     for _ in range(request.n):
         image_bytes = lc.tti.generate_image(**generation_params)
