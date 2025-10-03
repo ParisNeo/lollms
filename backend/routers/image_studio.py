@@ -87,7 +87,7 @@ async def generate_image(
     generation_params.pop('model', None)
     generation_params.pop('n', None)
     size = generation_params["size"].split("x")
-    generation_params.pop('size', None)
+    #generation_params.pop('size', None)
     width = int(size[0])
     height = int(size[1])    
     generation_params["width"]=width
