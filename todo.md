@@ -152,6 +152,7 @@ new ui:
 Use REDIS instead of the polling mechanism (optional)
 
 # URGENT:
+in sso separate the app name from the app key (generate random key for the app)
 add more details about the source chunks
 add queuing for audio generation
 revamp the mermaid ui to (accept the use of parenthesis inside brackets) and support comments
