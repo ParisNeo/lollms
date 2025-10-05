@@ -67,7 +67,8 @@ class TTSBindingPublicAdmin(TTSBindingCreate):
         from_attributes = True
 
 class ModelAlias(BaseModel):
-    name: str
+    title: Optional[str] = None
+    description: Optional[str] = None
     has_vision: bool = False
     ctx_size_locked: bool = False
     allow_parameters_override: bool = True
