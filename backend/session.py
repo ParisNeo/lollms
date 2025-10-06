@@ -340,7 +340,7 @@ def build_lollms_client_from_params(
         # --- TTI Binding Integration ---
         user_tti_model_full = tti_binding_alias or user_db.tti_binding_model_name
         selected_tti_binding = None
-        selected_tti_model_name = None
+        selected_tti_model_name = tti_model_name
         
         if user_tti_model_full and '/' in user_tti_model_full:
             tti_binding_alias_local, tti_model_name_local = user_tti_model_full.split('/', 1)

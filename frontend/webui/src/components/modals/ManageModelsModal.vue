@@ -5,7 +5,13 @@
                 <p>Error: Binding information is missing.</p>
             </div>
             <div v-else-if="isLoading" class="text-center p-8">
-                <p>Loading models...</p>
+                <div class="flex justify-center items-center gap-3">
+                    <IconAnimateSpin class="w-6 h-6 text-blue-500" />
+                    <p class="font-semibold">Loading models...</p>
+                </div>
+                <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">
+                    Please be patient. The first time a binding is loaded, it may need to download and install large files, which can take a very long time.
+                </p>
             </div>
             <div v-else class="flex gap-6 h-[70vh]">
                 <!-- Model List -->
@@ -43,7 +49,32 @@
                     <div v-else>
                         <h3 class="font-semibold mb-4">Editing Alias for: <span class="font-mono text-blue-600 dark:text-blue-400">{{ selectedModel.original_model_name }}</span></h3>
                         <form @submit.prevent="saveAlias" class="space-y-6 pb-6 border-b dark:border-gray-600">
-                             <div>
+
+                            <div>
+                                <label class="label">Icon</label>
+                                <div v-if="isGeneratingIcon" class="mt-1 p-4 text-center bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                                    <IconAnimateSpin class="w-8 h-8 mx-auto text-blue-500" />
+                                    <p class="mt-3 font-semibold">Generation in Progress...</p>
+                                </div>
+                                <div v-else class="mt-1">
+                                    <input type="file" ref="fileInput" @change="handleFileChange" class="hidden" accept="image/png, image/jpeg, image/webp">
+                                    <div class="group relative w-24 h-24 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center">
+                                        <img v-if="form.icon" :src="form.icon" alt="Model Icon" class="w-full h-full object-cover rounded-md">
+                                        <IconPhoto v-else class="w-10 h-10 text-gray-400" />
+
+                                        <div class="absolute inset-0 bg-black/60 rounded-md flex items-center justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <button @click="triggerFileUpload" type="button" title="Upload Icon" class="p-2 rounded-full bg-white/20 hover:bg-white/40 text-white">
+                                                <IconArrowUpTray class="w-6 h-6" />
+                                            </button>
+                                            <button v-if="isTtiConfigured" @click="generateIcon" type="button" title="Generate Icon with AI" class="p-2 rounded-full bg-white/20 hover:bg-white/40 text-white" :disabled="isSubmittingIconRequest">
+                                                <IconAnimateSpin v-if="isSubmittingIconRequest" class="w-6 h-6" />
+                                                <IconSparkles v-else class="w-6 h-6" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>                            
+                            <div>
                                 <label for="alias-title" class="label">Alias Title</label>
                                 <input id="alias-title" v-model="form.title" type="text" class="input-field" placeholder="e.g., Llama 3 Chat (Fast)">
                             </div>
@@ -51,27 +82,6 @@
                                 <label for="alias-description" class="label">Description</label>
                                 <textarea id="alias-description" v-model="form.description" rows="3" class="input-field" placeholder="A short description of the model's capabilities for users."></textarea>
                             </div>
-                            
-                            <div>
-                                <div v-if="isGeneratingIcon" class="p-4 text-center bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                                    <IconAnimateSpin class="w-8 h-8 mx-auto text-blue-500" />
-                                    <p class="mt-3 font-semibold">Generation in Progress...</p>
-                                    <p v-if="currentIconGenerationTask" class="text-sm text-gray-500 mt-1">{{ currentIconGenerationTask.description }}</p>
-                                    <div v-if="currentIconGenerationTask" class="w-full bg-gray-200 rounded-full h-2.5 dark:bg-gray-600 mt-3">
-                                        <div class="bg-blue-600 h-2.5 rounded-full" :style="{ width: currentIconGenerationTask.progress + '%' }"></div>
-                                    </div>
-                                    <p v-if="currentIconGenerationTask" class="text-xs text-gray-500 mt-1">{{ currentIconGenerationTask.progress }}%</p>
-                                </div>
-                                <div v-else class="flex items-end gap-4">
-                                    <IconUploader v-model="form.icon" label="Icon" />
-                                    <button @click="generateIcon" type="button" class="btn btn-secondary flex items-center gap-2" :disabled="isSubmittingIconRequest">
-                                        <IconAnimateSpin v-if="isSubmittingIconRequest" class="w-5 h-5" />
-                                        <IconSparkles v-else class="w-5 h-5" />
-                                        <span>Generate</span>
-                                    </button>
-                                </div>
-                            </div>
-                            
                             <div v-if="bindingType === 'llm'" class="p-4 border rounded-lg dark:border-gray-700">
                                 <h4 class="font-medium mb-4">LLM Generation Parameters</h4>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -198,12 +208,14 @@ import GenericModal from './GenericModal.vue';
 import IconUploader from '../ui/IconUploader.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
 
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
 const dataStore = useDataStore();
 const tasksStore = useTasksStore();
-const { globalSettings, availableBindingTypes, availableTtiBindingTypes, availableTtsBindingTypes } = storeToRefs(adminStore);
+const { globalSettings, availableBindingTypes, availableTtiBindingTypes, availableTtsBindingTypes, ttiBindings } = storeToRefs(adminStore);
 const { tasks } = storeToRefs(tasksStore);
 
 const modalData = computed(() => uiStore.modalData('manageModels'));
@@ -217,15 +229,19 @@ const isSettingGlobalDefault = ref(false);
 const isFetchingCtxSize = ref(false);
 const iconGenerationTaskId = ref(null);
 const isSubmittingIconRequest = ref(false);
+const fileInput = ref(null);
 
 const models = ref([]);
 const selectedModel = ref(null);
 const searchTerm = ref('');
 const modelParameters = ref([]);
 
+const isTtiConfigured = computed(() => ttiBindings.value && ttiBindings.value.some(b => b.is_active));
+
 const getInitialFormState = () => ({
     icon: '',
     title: '',
+    name: '', // Added name for backward compatibility and to solve the required field issue
     description: '',
     has_vision: true,
     ctx_size: null,
@@ -252,47 +268,20 @@ const isGeneratingIcon = computed(() => {
 
 watch(currentIconGenerationTask, (newTask) => {
     if (!newTask) return;
-    console.log("[ManageModelsModal] DEBUG: Watching task update:", JSON.parse(JSON.stringify(newTask)));
-
     if (newTask.status === 'completed') {
         let result = newTask.result;
-        console.log("[ManageModelsModal] DEBUG: Task completed. Raw result:", result);
-        
-        // Safely parse if result is a stringified JSON
-        if (result && typeof result === 'string') {
-            try {
-                result = JSON.parse(result);
-                console.log("[ManageModelsModal] DEBUG: Parsed task result:", result);
-            } catch (e) {
-                console.warn("[ManageModelsModal] Task result is a non-JSON string, trying to use as raw value:", result);
-            }
-        }
-        
-        let b64 = null;
-        if (result && typeof result === 'object' && result.icon_base64) {
-            b64 = result.icon_base64;
-            console.log("[ManageModelsModal] DEBUG: Extracted icon_base64 from object.");
-        } else if (typeof result === 'string') {
-            // Fallback for raw base64 string
-            b64 = result;
-            console.log("[ManageModelsModal] DEBUG: Using raw string as base64.");
-        }
-        
+        if (result && typeof result === 'string') { try { result = JSON.parse(result); } catch (e) { /* ignore*/ } }
+        let b64 = (result && typeof result === 'object' && result.icon_base64) ? result.icon_base64 : (typeof result === 'string' ? result : null);
         if (b64) {
-            // Ensure it has the correct data URI prefix
-            const finalIconValue = b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`;
-            form.value.icon = finalIconValue;
-            console.log("[ManageModelsModal] DEBUG: Setting form icon to:", finalIconValue.substring(0, 60) + "...");
+            form.value.icon = b64.startsWith('data:image') ? b64 : `data:image/png;base64,${b64}`;
             uiStore.addNotification('Icon generated successfully!', 'success');
         } else {
-            console.log("[ManageModelsModal] DEBUG: Icon generation completed, but no image was returned in the result.");
             uiStore.addNotification('Icon generation completed, but no image was returned.', 'warning');
         }
-        iconGenerationTaskId.value = null; // Reset for next generation
+        iconGenerationTaskId.value = null;
     } else if (newTask.status === 'failed' || newTask.status === 'cancelled') {
-        console.log("[ManageModelsModal] DEBUG: Icon generation task failed or was cancelled.", newTask);
         uiStore.addNotification(`Icon generation failed: ${newTask.error || 'Unknown error.'}`, 'error');
-        iconGenerationTaskId.value = null; // Reset
+        iconGenerationTaskId.value = null;
     }
 });
 
@@ -321,17 +310,10 @@ async function fetchModels() {
     isLoading.value = true;
     try {
         switch (bindingType.value) {
-            case 'llm':
-                models.value = await adminStore.fetchBindingModels(binding.value.id);
-                break;
-            case 'tti':
-                models.value = await adminStore.fetchTtiBindingModels(binding.value.id);
-                break;
-            case 'tts':
-                models.value = await adminStore.fetchTtsBindingModels(binding.value.id);
-                break;
-            default:
-                models.value = [];
+            case 'llm': models.value = await adminStore.fetchBindingModels(binding.value.id); break;
+            case 'tti': models.value = await adminStore.fetchTtiBindingModels(binding.value.id); break;
+            case 'tts': models.value = await adminStore.fetchTtsBindingModels(binding.value.id); break;
+            default: models.value = [];
         }
     } finally {
         isLoading.value = false;
@@ -341,22 +323,17 @@ async function fetchModels() {
 function selectModel(model) {
     selectedModel.value = model;
     const newForm = { ...getInitialFormState(), ...(model.alias || {}) };
-    
+    if (bindingType.value === 'llm' && !newForm.name) {
+        newForm.name = newForm.title || model.original_model_name;
+    }
     let bindingTypes;
     if (bindingType.value === 'tti') bindingTypes = availableTtiBindingTypes.value;
     else if (bindingType.value === 'tts') bindingTypes = availableTtsBindingTypes.value;
     else bindingTypes = availableBindingTypes.value;
-
     const bindingDesc = bindingTypes.find(b => b.binding_name === binding.value.name);
     const params = bindingDesc?.model_parameters || [];
     modelParameters.value = params;
-
-    params.forEach(param => {
-        if (!(param.name in newForm)) {
-            newForm[param.name] = param.default;
-        }
-    });
-
+    params.forEach(param => { if (!(param.name in newForm)) newForm[param.name] = param.default; });
     form.value = newForm;
 }
 
@@ -365,9 +342,7 @@ async function fetchCtxSize() {
     isFetchingCtxSize.value = true;
     try {
         const size = await adminStore.getModelCtxSize(binding.value.id, selectedModel.value.original_model_name);
-        if (size !== null) {
-            form.value.ctx_size = size;
-        }
+        if (size !== null) form.value.ctx_size = size;
     } finally {
         isFetchingCtxSize.value = false;
     }
@@ -383,18 +358,11 @@ async function generateIcon() {
     try {
         const modelIdentifier = form.value.title || selectedModel.value.original_model_name;
         const prompt = `a high-quality, abstract, minimalist, vector logo for an AI model named "${modelIdentifier}". Description: ${form.value.description || 'General purpose model.'}`;
-        
         const task = await adminStore.generateIconForModel(prompt);
-        if (task && task.id) {
+        if (task?.id) {
             iconGenerationTaskId.value = task.id;
-            console.log(`[ManageModelsModal] DEBUG: Icon generation task submitted with ID: ${task.id}`);
             uiStore.addNotification('Icon generation started...', 'info');
-        } else {
-            console.error("[ManageModelsModal] DEBUG: Failed to get a task ID from the backend.");
         }
-    } catch (error) {
-        console.error("[ManageModelsModal] DEBUG: Error submitting icon generation task:", error);
-        // error is handled by the global interceptor
     } finally {
         isSubmittingIconRequest.value = false;
     }
@@ -405,8 +373,8 @@ async function saveAlias() {
     isSaving.value = true;
     try {
         const payload = { ...form.value };
+        if (bindingType.value === 'llm' && payload.title) payload.name = payload.title;
         let aliasPayload = {};
-
         if (bindingType.value === 'llm') {
             ['ctx_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
                 const value = payload[key];
@@ -414,7 +382,7 @@ async function saveAlias() {
             });
             aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
             await adminStore.saveModelAlias(binding.value.id, aliasPayload);
-        } else { // For TTI and TTS
+        } else {
             modelParameters.value.forEach(param => {
                 if (['int', 'float'].includes(param.type)) {
                     const value = payload[param.name];
@@ -422,13 +390,9 @@ async function saveAlias() {
                 }
             });
             aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
-            if (bindingType.value === 'tti') {
-                await adminStore.saveTtiModelAlias(binding.value.id, aliasPayload);
-            } else if (bindingType.value === 'tts') {
-                await adminStore.saveTtsModelAlias(binding.value.id, aliasPayload);
-            }
+            if (bindingType.value === 'tti') await adminStore.saveTtiModelAlias(binding.value.id, aliasPayload);
+            else if (bindingType.value === 'tts') await adminStore.saveTtsModelAlias(binding.value.id, aliasPayload);
         }
-        
         await fetchModels();
         const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);
         if (updatedModel) selectModel(updatedModel);
@@ -439,12 +403,7 @@ async function saveAlias() {
 
 async function deleteAlias() {
     if (!selectedModel.value?.alias || !binding.value) return;
-    const confirmed = await uiStore.showConfirmation({
-        title: 'Delete Alias?',
-        message: `Are you sure you want to delete the alias for '${selectedModel.value.original_model_name}'?`,
-        confirmText: 'Delete'
-    });
-    if (confirmed) {
+    if (await uiStore.showConfirmation({ title: 'Delete Alias?', message: `Delete the alias for '${selectedModel.value.original_model_name}'?`, confirmText: 'Delete' })) {
         isSaving.value = true;
         try {
             switch (bindingType.value) {
@@ -454,7 +413,7 @@ async function deleteAlias() {
             }
             await fetchModels();
             const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);
-            selectModel(updatedModel || (models.value.length > 0 ? models.value[0] : null));
+            selectModel(updatedModel || models.value[0] || null);
         } finally {
             isSaving.value = false;
         }
@@ -489,11 +448,40 @@ async function setAsGlobalDefault() {
     }
 }
 
+function triggerFileUpload() {
+    fileInput.value.click();
+}
+
+function handleFileChange(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { uiStore.addNotification('File is too large (max 5MB).', 'error'); return; }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { uiStore.addNotification('Invalid file type. Use JPG, PNG, or WEBP.', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+            const canvas = document.createElement('canvas'), MAX_DIM = 128;
+            let { width, height } = img;
+            if (width > height) { if (width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; } }
+            else { if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; } }
+            canvas.width = width;
+            canvas.height = height;
+            canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+            form.value.icon = canvas.toDataURL('image/png');
+        };
+        img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+}
+
 onMounted(() => {
     adminStore.fetchGlobalSettings();
     adminStore.fetchAvailableBindingTypes();
     adminStore.fetchAvailableTtiBindingTypes();
     adminStore.fetchAvailableTtsBindingTypes();
+    adminStore.fetchTtiBindings();
 });
 
 watch(binding, (newBinding) => {
