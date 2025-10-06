@@ -102,7 +102,6 @@ if os.name == 'nt':
 HUGGINGFACE_CACHE_DIR = APP_DATA_DIR / get_env_var("HUGGINGFACE_CACHE_DIR", "huggingface_cache")
 HUGGINGFACE_CACHE_DIR.mkdir(exist_ok=True, parents=True)
 os.environ['HUGGING_FACE_HUB_CACHE'] = str(HUGGINGFACE_CACHE_DIR)
-os.environ['TRANSFORMERS_CACHE'] = str(HUGGINGFACE_CACHE_DIR)
 os.environ['HF_HOME'] = str(HUGGINGFACE_CACHE_DIR)
 
 

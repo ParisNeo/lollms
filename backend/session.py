@@ -373,8 +373,8 @@ def build_lollms_client_from_params(
                             tti_binding_config[key] = value
                             
             if selected_tti_model_name:
-                tti_binding_config['model_name'] = selected_tti_model_name
-                
+                tti_binding_config['model_name'] = selected_tti_model_name                
+                tti_binding_config["models_path"]= str(Path(settings.get("data_dir", "./data"))/"tti_models"/selected_tti_binding.name)
             client_init_params["tti_binding_name"] = selected_tti_binding.name
             client_init_params["tti_binding_config"] = tti_binding_config
         # --- END TTI Binding Integration ---

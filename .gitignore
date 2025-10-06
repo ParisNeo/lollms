@@ -181,3 +181,6 @@ app_main.db
 .vscode
 # zoo cache file
 zoo_cache.json
+
+# models
+models
