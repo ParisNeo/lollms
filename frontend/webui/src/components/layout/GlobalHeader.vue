@@ -40,7 +40,7 @@ const pageTitleIcon = computed(() => uiStore.pageTitleIcon);
 const modelSearchTerm = ref('');
 const personalitySearchTerm = ref('');
 const ttiModelSearchTerm = ref('');
-const ttsModelSearchTerm = ref(''); // NEW
+const ttsModelSearchTerm = ref('');
 
 // --- Dropdown Logic ---
 const isMenuOpen = ref(false);
@@ -96,7 +96,7 @@ const activeTtiModelName = computed({
     get: () => user.value?.tti_binding_model_name,
     set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name })
 });
-const activeTtsModelName = computed({ // NEW
+const activeTtsModelName = computed({
     get: () => user.value?.tts_binding_model_name,
     set: (name) => authStore.updateUserPreferences({ tts_binding_model_name: name })
 });
@@ -110,7 +110,7 @@ const availablePersonalities = computed(() => {
 
 const formattedAvailableModels = computed(() => dataStore.availableLLMModelsGrouped);
 const formattedAvailableTtiModels = computed(() => dataStore.availableTtiModelsGrouped);
-const formattedAvailableTtsModels = computed(() => dataStore.availableTtsModelsGrouped); // NEW
+const formattedAvailableTtsModels = computed(() => dataStore.availableTtsModelsGrouped);
 
 const selectedModel = computed(() => {
     if (!activeModelName.value || !formattedAvailableModels.value) return null;
@@ -142,7 +142,7 @@ const selectedTtiModel = computed(() => {
     }
     return null;
 });
-const selectedTtsModel = computed(() => { // NEW
+const selectedTtsModel = computed(() => {
     if (!activeTtsModelName.value || !formattedAvailableTtsModels.value) return null;
     for (const group of formattedAvailableTtsModels.value) {
         if (group.items) {
@@ -194,7 +194,7 @@ const filteredAvailableTtiModels = computed(() => {
     return result;
 });
 
-const filteredAvailableTtsModels = computed(() => { // NEW
+const filteredAvailableTtsModels = computed(() => {
     if (!ttsModelSearchTerm.value) return formattedAvailableTtsModels.value;
     const term = ttsModelSearchTerm.value.toLowerCase();
     const result = [];
@@ -225,7 +225,7 @@ function selectTtiModel(id) {
     activeTtiModelName.value = id;
 }
 
-function selectTtsModel(id) { // NEW
+function selectTtsModel(id) {
     activeTtsModelName.value = id;
 }
 

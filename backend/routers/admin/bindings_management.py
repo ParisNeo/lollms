@@ -185,6 +185,7 @@ async def create_tti_binding(binding_data: TTIBindingCreate, db: Session = Depen
         db.add(new_binding)
         db.commit()
         db.refresh(new_binding)
+        manager.broadcast_sync({"type": "bindings_updated"})
         return new_binding
     except IntegrityError:
         db.rollback()
@@ -215,6 +216,7 @@ async def update_tti_binding(binding_id: int, update_data: TTIBindingUpdate, db:
     try:
         db.commit()
         db.refresh(binding_to_update)
+        manager.broadcast_sync({"type": "bindings_updated"})
         return binding_to_update
     except Exception as e:
         db.rollback()
@@ -229,6 +231,7 @@ async def delete_tti_binding(binding_id: int, db: Session = Depends(get_db)):
     try:
         db.delete(binding_to_delete)
         db.commit()
+        manager.broadcast_sync({"type": "bindings_updated"})
         return {"message": "TTI Binding deleted successfully."}
     except Exception as e:
         db.rollback()
@@ -313,6 +316,7 @@ async def create_tts_binding(binding_data: TTSBindingCreate, db: Session = Depen
         db.add(new_binding)
         db.commit()
         db.refresh(new_binding)
+        manager.broadcast_sync({"type": "bindings_updated"})
         return new_binding
     except IntegrityError:
         db.rollback()
@@ -343,6 +347,7 @@ async def update_tts_binding(binding_id: int, update_data: TTSBindingUpdate, db:
     try:
         db.commit()
         db.refresh(binding_to_update)
+        manager.broadcast_sync({"type": "bindings_updated"})
         return binding_to_update
     except Exception as e:
         db.rollback()
@@ -357,6 +362,7 @@ async def delete_tts_binding(binding_id: int, db: Session = Depends(get_db)):
     try:
         db.delete(binding_to_delete)
         db.commit()
+        manager.broadcast_sync({"type": "bindings_updated"})
         return {"message": "TTS Binding deleted successfully."}
     except Exception as e:
         db.rollback()

@@ -1,4 +1,4 @@
-# backend/session.py
+# [UPDATE] backend/session.py
 import json
 import traceback
 import datetime
@@ -354,18 +354,25 @@ def build_lollms_client_from_params(
             client_init_params = {}    
             
         # --- TTI Binding Integration ---
-        user_tti_model_full = tti_binding_alias or user_db.tti_binding_model_name
         selected_tti_binding = None
         selected_tti_model_name = tti_model_name
         
-        if user_tti_model_full and '/' in user_tti_model_full:
-            tti_binding_alias_local, tti_model_name_local = user_tti_model_full.split('/', 1)
-            selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == tti_binding_alias_local, DBTTIBinding.is_active == True).first()
-            selected_tti_model_name = tti_model_name_local
+        if tti_binding_alias:
+            selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == tti_binding_alias, DBTTIBinding.is_active == True).first()
+            if selected_tti_binding and not selected_tti_model_name:
+                selected_tti_model_name = selected_tti_binding.default_model_name
+        
+        if not selected_tti_binding:
+            user_tti_model_full = user_db.tti_binding_model_name
+            if user_tti_model_full and '/' in user_tti_model_full:
+                tti_binding_alias_local, tti_model_name_local = user_tti_model_full.split('/', 1)
+                selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == tti_binding_alias_local, DBTTIBinding.is_active == True).first()
+                if not selected_tti_model_name:
+                    selected_tti_model_name = tti_model_name_local
 
         if not selected_tti_binding:
             selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
-            if selected_tti_binding:
+            if selected_tti_binding and not selected_tti_model_name:
                 selected_tti_model_name = selected_tti_binding.default_model_name
         
         if selected_tti_binding:
@@ -382,7 +389,7 @@ def build_lollms_client_from_params(
             allow_tti_override = (tti_alias_info or {}).get('allow_parameters_override', True)
             if allow_tti_override:
                 user_tti_configs = user_db.tti_models_config or {}
-                model_user_config = user_tti_configs.get(user_tti_model_full)
+                model_user_config = user_tti_configs.get(user_db.tti_binding_model_name)
                 if model_user_config:
                     for key, value in model_user_config.items():
                         if value is not None:
@@ -393,23 +400,29 @@ def build_lollms_client_from_params(
                 tti_binding_config["models_path"]= str(Path(settings.get("data_dir", "./data"))/"tti_models"/selected_tti_binding.name)
             client_init_params["tti_binding_name"] = selected_tti_binding.name
             client_init_params["tti_binding_config"] = tti_binding_config
-        # --- END TTI Binding Integration ---
         
-        # --- NEW: TTS Binding Integration ---
-        user_tts_model_full = tts_binding_alias or user_db.tts_binding_model_name
+        # --- TTS Binding Integration ---
         selected_tts_binding = None
-        selected_tts_model_name = None
+        selected_tts_model_name = tts_model_name
         
-        if user_tts_model_full and '/' in user_tts_model_full:
-            tts_binding_alias_local, tts_model_name_local = user_tts_model_full.split('/', 1)
-            selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == tts_binding_alias_local, DBTTSBinding.is_active == True).first()
-            selected_tts_model_name = tts_model_name_local
+        if tts_binding_alias:
+            selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == tts_binding_alias, DBTTSBinding.is_active == True).first()
+            if selected_tts_binding and not selected_tts_model_name:
+                selected_tts_model_name = selected_tts_binding.default_model_name
+
+        if not selected_tts_binding:
+            user_tts_model_full = user_db.tts_binding_model_name
+            if user_tts_model_full and '/' in user_tts_model_full:
+                tts_binding_alias_local, tts_model_name_local = user_tts_model_full.split('/', 1)
+                selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == tts_binding_alias_local, DBTTSBinding.is_active == True).first()
+                if not selected_tts_model_name:
+                    selected_tts_model_name = tts_model_name_local
 
         if not selected_tts_binding:
             selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
-            if selected_tts_binding:
+            if selected_tts_binding and not selected_tts_model_name:
                 selected_tts_model_name = selected_tts_binding.default_model_name
-        
+
         if selected_tts_binding:
             tts_binding_config = selected_tts_binding.config.copy() if selected_tts_binding.config else {}
             
@@ -424,13 +437,12 @@ def build_lollms_client_from_params(
             allow_tts_override = (tts_alias_info or {}).get('allow_parameters_override', True)
             if allow_tts_override:
                 user_tts_configs = user_db.tts_models_config or {}
-                model_user_config = user_tts_configs.get(user_tts_model_full)
+                model_user_config = user_tts_configs.get(user_db.tts_binding_model_name)
                 if model_user_config:
                     for key, value in model_user_config.items():
                         if value is not None:
                             tts_binding_config[key] = value
                             
-            # IMPORTANT FIX: Do not pass model_name to the TTS binding constructor
             if selected_tts_model_name:
                 tts_binding_config['model_name'] = selected_tts_model_name
                 
@@ -465,7 +477,7 @@ def build_lollms_client_from_params(
             return lc
         except Exception as e:
             traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{binding_to_use.alias}': {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{binding_to_use.alias if binding_to_use else 'N/A'}': {str(e)}")
     finally:
         db.close()
 
