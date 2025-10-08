@@ -22,6 +22,10 @@ from openpyxl.utils import get_column_letter
 from pptx import Presentation 
 from pptx.util import Inches as PptxInches, Pt as PptxPt
 from markdown_pdf import MarkdownPdf, Section 
+from docx.oxml import parse_xml
+from docx.oxml.ns import qn
+from latex2mathml.converter import convert as latex2mathml
+
 
 # Try to import optional document parsing libraries
 try:
@@ -270,6 +274,20 @@ def _download_image_to_temp(src: str) -> str:
     tf.flush(); tf.close()
     return tf.name
 
+def _insert_math(p, latex):
+    mathml = latex2mathml(latex)
+    # Replace MathML namespace for Office Math
+    omath_xml = (
+        f'<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">'
+        f'<m:oMath>'
+        f'{mathml}'
+        f'</m:oMath>'
+        f'</m:oMathPara>'
+    )
+    # Attach OMML to paragraph
+    omath_element = parse_xml(omath_xml)
+    p._p.append(omath_element)
+    
 def html_to_docx_bytes(html: str) -> bytes:
     soup = BeautifulSoup(html, "html.parser")
     doc = DocxDocument()
@@ -277,7 +295,17 @@ def html_to_docx_bytes(html: str) -> bytes:
     def add_inline_runs(p, node):
         for child in node.children:
             if isinstance(child, str):
-                p.add_run(child)
+                # Detect and handle inline math: \( ... \)
+                parts = re.split(r'(\\\(.+?\\\)|\\\[.+?\\\])', child)
+                for part in parts:
+                    if part.startswith(r'\(') and part.endswith(r'\)'):
+                        latex = part[2:-2].strip()
+                        _insert_math(p, latex)
+                    elif part.startswith(r'\[') and part.endswith(r'\]'):
+                        latex = part[2:-2].strip()
+                        _insert_math(p, latex)
+                    else:
+                        p.add_run(part)
                 continue
             tag = getattr(child, "name", "").lower()
             if tag in ("strong", "b"):
