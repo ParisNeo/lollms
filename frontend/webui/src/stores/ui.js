@@ -9,6 +9,7 @@ export const useUiStore = defineStore('ui', {
     notifications: [],
     currentTheme: localStorage.getItem('lollms-theme') || 'light',
     currentLanguage: localStorage.getItem('lollms-language') || 'en',
+    message_font_size: 14,
     imageViewer: {
       isOpen: false,
       imageList: [],

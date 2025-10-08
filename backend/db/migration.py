@@ -751,6 +751,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "programming_language_preferences": "TEXT",
             "tell_llm_os": "BOOLEAN DEFAULT 0 NOT NULL",
             "share_dynamic_info_with_llm": "BOOLEAN DEFAULT 1 NOT NULL",
+            "message_font_size": "INTEGER DEFAULT 14 NOT NULL",
         }
         
         added_cols = []

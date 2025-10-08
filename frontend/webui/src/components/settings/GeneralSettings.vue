@@ -17,7 +17,8 @@ const form = ref({
     auto_title: false,
     show_token_counter: true,
     fun_mode: false,
-    put_thoughts_in_context: false
+    put_thoughts_in_context: false,
+    message_font_size: 14, // New field
 });
 
 const isSaving = ref(false);
@@ -34,9 +35,8 @@ const uiLevels = [
 
 const homePages = [
     { value: 'feed', label: 'Social Feed' },
-    { value: 'discussions', label: 'Discussions View' },
-    { value: 'new_discussion', label: 'New Discussion' },
-    { value: 'last_discussion', label: 'Last Used Discussion' }
+    { value: 'last_discussion', label: 'Last Used Discussion' },
+    { value: 'new_discussion', label: 'New Discussion' }
 ];
 
 function populateForm() {
@@ -49,7 +49,8 @@ function populateForm() {
         auto_title: user.value.auto_title,
         show_token_counter: user.value.show_token_counter,
         fun_mode: user.value.fun_mode,
-        put_thoughts_in_context: user.value.put_thoughts_in_context
+        put_thoughts_in_context: user.value.put_thoughts_in_context,
+        message_font_size: user.value.message_font_size || 14, // New field
     };
     pristineState = JSON.stringify(form.value);
     hasChanges.value = false;
@@ -69,7 +70,6 @@ watch(form, (newValue) => {
 async function handleSave() {
     isSaving.value = true;
     try {
-        // --- FIX: Construct a payload with only the fields from this form ---
         const payload = {
             user_ui_level: form.value.user_ui_level,
             first_page: form.value.first_page,
@@ -78,9 +78,9 @@ async function handleSave() {
             show_token_counter: form.value.show_token_counter,
             fun_mode: form.value.fun_mode,
             put_thoughts_in_context: form.value.put_thoughts_in_context,
+            message_font_size: form.value.message_font_size, // New field
         };
         await authStore.updateUserPreferences(payload);
-        // After a successful save, the pristine state will be updated by the watcher on `user`
     } finally {
         isSaving.value = false;
     }
@@ -123,6 +123,16 @@ async function handleSave() {
                            <option v-for="lang in languages" :key="lang.value" :value="lang.value">{{ lang.label }}</option>
                         </select>
                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Instruct the AI to respond in a specific language.</p>
+                    </div>
+
+                    <!-- Message Font Size -->
+                    <div>
+                        <label for="fontSize" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Message Font Size</label>
+                        <div class="flex items-center gap-4 mt-1">
+                            <input type="range" id="fontSize" v-model.number="form.message_font_size" min="10" max="24" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700">
+                            <span class="font-mono text-sm w-12 text-center">{{ form.message_font_size }}px</span>
+                        </div>
+                         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Adjust the font size for chat messages.</p>
                     </div>
                 </div>
 

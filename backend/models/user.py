@@ -59,6 +59,7 @@ class UserCreateAdmin(UserLLMParams):
     programming_language_preferences: Optional[str] = None
     tell_llm_os: Optional[bool] = False
     share_dynamic_info_with_llm: Optional[bool] = True
+    message_font_size: Optional[int] = None
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100)
@@ -101,6 +102,7 @@ class UserUpdate(BaseModel):
     programming_language_preferences: Optional[str] = None
     tell_llm_os: Optional[bool] = None
     share_dynamic_info_with_llm: Optional[bool] = None
+    message_font_size: Optional[int] = None
 
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
@@ -249,6 +251,7 @@ class UserAuthDetails(UserLLMParams):
     programming_language_preferences: Optional[str] = None
     tell_llm_os: bool
     share_dynamic_info_with_llm: bool
+    message_font_size: int
 
 class RelationshipStatus(BaseModel):
     is_following: bool

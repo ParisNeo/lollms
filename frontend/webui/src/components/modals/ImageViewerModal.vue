@@ -45,15 +45,17 @@
         </div>
 
         <!-- Footer / Thumbnails -->
-        <div class="flex-shrink-0 p-4 overflow-x-auto">
-          <div class="flex justify-center gap-2">
-            <div v-for="(image, index) in imageList" :key="getImageKey(image)" @click="currentIndex = index"
-                 class="w-16 h-16 rounded-md overflow-hidden cursor-pointer flex-shrink-0 border-2 transition-colors"
-                 :class="index === currentIndex ? 'border-blue-500' : 'border-transparent hover:border-gray-400'">
-              <AuthenticatedImage v-if="isApiUrl(image.src)" :src="image.src" class="w-full h-full object-cover" />
-              <img v-else :src="image.src" class="w-full h-full object-cover" />
+        <div class="flex-shrink-0 bg-black/20 p-2">
+            <div class="overflow-x-auto py-2 custom-scrollbar">
+                <div class="flex items-center gap-3 px-2 whitespace-nowrap">
+                    <div v-for="(image, index) in imageList" :key="getImageKey(image)" @click="currentIndex = index"
+                        class="w-16 h-16 rounded-md overflow-hidden cursor-pointer flex-shrink-0 border-2 transition-colors"
+                        :class="index === currentIndex ? 'border-blue-500' : 'border-transparent hover:border-gray-400'">
+                        <AuthenticatedImage v-if="isApiUrl(image.src)" :src="image.src" class="w-full h-full object-cover" />
+                        <img v-else :src="image.src" class="w-full h-full object-cover" />
+                    </div>
+                </div>
             </div>
-          </div>
         </div>
       </div>
     </Transition>

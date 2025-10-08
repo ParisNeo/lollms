@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Dict, Optional, Any, cast
 
 from fastapi import HTTPException, Depends, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, object_session, Session as sa_Session
 from werkzeug.utils import secure_filename
 from jose import jwt, JWTError
 from ascii_colors import trace_exception, ASCIIColors
@@ -80,7 +80,14 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive.")
 
     username = db_user.username
-    db = next(get_db())
+    db = object_session(db_user)
+    db_was_created = False
+    if not db:
+        print(f"WARNING: db_user object for '{username}' was detached. Getting a new session.")
+        db = next(get_db())
+        db_user = db.merge(db_user)
+        db_was_created = True
+
     try:
         if username not in user_sessions:
             print(f"INFO: Re-initializing session for {username} on first request after server start.")
@@ -98,16 +105,22 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 "active_personality_id": db_user.active_personality_id,
             }
 
-        user_model_full = user_sessions[username].get("lollms_model_name")
+        user_model_full = db_user.lollms_model_name
+        session = user_sessions[username]
+        if session.get("lollms_model_name") != user_model_full:
+            session["lollms_model_name"] = user_model_full
+            session["lollms_clients_cache"] = {}
+            print(f"INFO: Synced session model name for '{username}' to '{user_model_full}'.")
+
         llm_settings_overridden = False
         effective_llm_params = {
-            "llm_ctx_size": user_sessions[username].get("llm_params", {}).get("ctx_size", db_user.llm_ctx_size),
-            "llm_temperature": user_sessions[username].get("llm_params", {}).get("temperature", db_user.llm_temperature),
-            "llm_top_k": user_sessions[username].get("llm_params", {}).get("top_k", db_user.llm_top_k),
-            "llm_top_p": user_sessions[username].get("llm_params", {}).get("top_p", db_user.llm_top_p),
-            "llm_repeat_penalty": user_sessions[username].get("llm_params", {}).get("repeat_penalty", db_user.llm_repeat_penalty),
-            "llm_repeat_last_n": user_sessions[username].get("llm_params", {}).get("repeat_last_n", db_user.llm_repeat_last_n),
-            "put_thoughts_in_context": user_sessions[username].get("llm_params", {}).get("put_thoughts_in_context", db_user.put_thoughts_in_context)
+            "llm_ctx_size": db_user.llm_ctx_size,
+            "llm_temperature": db_user.llm_temperature,
+            "llm_top_k": db_user.llm_top_k,
+            "llm_top_p": db_user.llm_top_p,
+            "llm_repeat_penalty": db_user.llm_repeat_penalty,
+            "llm_repeat_last_n": db_user.llm_repeat_last_n,
+            "put_thoughts_in_context": db_user.put_thoughts_in_context
         }
 
         if user_model_full and '/' in user_model_full:
@@ -121,25 +134,26 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                         trace_exception(e)
                         binding.model_aliases= {}
                 alias_info = binding.model_aliases.get(model_name)
+                
+                if alias_info and alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
+                    locked_ctx_size = alias_info['ctx_size']
+                    effective_llm_params["llm_ctx_size"] = locked_ctx_size
+                    if db_user.llm_ctx_size != locked_ctx_size:
+                        print(f"INFO: Overriding and updating user '{username}' context size from {db_user.llm_ctx_size} to locked value {locked_ctx_size}.")
+                        db_user.llm_ctx_size = locked_ctx_size
+                        try:
+                            db.commit()
+                            db.refresh(db_user)
+                        except Exception as e:
+                            print(f"ERROR: Could not permanently update user context size. Error: {e}")
+                            db.rollback()
+
                 if alias_info and not alias_info.get('allow_parameters_override', True):
                     llm_settings_overridden = True
                     param_map = {"ctx_size": "llm_ctx_size", "temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n"}
                     for alias_key, user_key in param_map.items():
                         if alias_key in alias_info and alias_info[alias_key] is not None:
                             effective_llm_params[user_key] = alias_info[alias_key]
-                    
-                    if alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
-                        locked_ctx_size = alias_info['ctx_size']
-                        effective_llm_params["llm_ctx_size"] = locked_ctx_size
-                        if db_user.llm_ctx_size != locked_ctx_size:
-                            print(f"INFO: Overriding and updating user '{username}' context size from {db_user.llm_ctx_size} to locked value {locked_ctx_size}.")
-                            db_user.llm_ctx_size = locked_ctx_size
-                            try:
-                                db.commit()
-                                db.refresh(db_user)
-                            except Exception as e:
-                                print(f"ERROR: Could not permanently update user context size. Error: {e}")
-                                db.rollback()
 
         
         lc = get_user_lollms_client(username)
@@ -183,10 +197,12 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             coding_style_constraints=db_user.coding_style_constraints,
             programming_language_preferences=db_user.programming_language_preferences,
             tell_llm_os=db_user.tell_llm_os,
-            share_dynamic_info_with_llm=db_user.share_dynamic_info_with_llm
+            share_dynamic_info_with_llm=db_user.share_dynamic_info_with_llm,
+            message_font_size=db_user.message_font_size
         )
     finally:
-        db.close()
+        if db_was_created:
+            db.close()
 
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
     if not current_user.is_admin:

@@ -71,6 +71,10 @@ export const useAuthStore = defineStore('auth', () => {
         try {
             const response = await apiClient.get('/api/auth/me');
             user.value = response.data;
+            if (user.value && user.value.message_font_size) {
+                const uiStore = useUiStore();
+                uiStore.message_font_size = user.value.message_font_size;
+            }
             console.log("[AuthStore] User details refreshed.");
         } catch (error) {
             console.error("Failed to refresh user details:", error);
@@ -190,6 +194,9 @@ export const useAuthStore = defineStore('auth', () => {
             loadingMessage.value = 'Authenticating...';
             const response = await apiClient.get('/api/auth/me');
             user.value = response.data;
+            if (user.value && user.value.message_font_size) {
+                uiStore.message_font_size = user.value.message_font_size;
+            }
             
             connectWebSocket();
             
@@ -419,6 +426,10 @@ export const useAuthStore = defineStore('auth', () => {
             const response = await apiClient.put('/api/auth/me', preferences);
             if (user.value) {
                 Object.assign(user.value, response.data);
+                if (preferences.hasOwnProperty('message_font_size')) {
+                    const uiStore = useUiStore();
+                    uiStore.message_font_size = preferences.message_font_size;
+                }
             }
             if (preferences.hasOwnProperty('include_memory_date_in_context')) {
                 const { useDiscussionsStore } = await import('./discussions');

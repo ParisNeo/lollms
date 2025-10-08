@@ -1,7 +1,8 @@
 <!-- frontend/webui/src/App.vue -->
 <script setup>
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { storeToRefs } from 'pinia';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
 import { usePyodideStore } from './stores/pyodide';
@@ -75,6 +76,7 @@ const tasksStore = useTasksStore();
 const discussionsStore = useDiscussionsStore();
 const imageStore = useImageStore();
 const route = useRoute();
+const { messageFontSize } = storeToRefs(uiStore);
 
 const activeModal = computed(() => uiStore.activeModal);
 const isAuthenticating = computed(() => authStore.isAuthenticating);
@@ -126,6 +128,12 @@ onMounted(async () => {
         tasksStore.fetchTasks();
     }
 });
+
+watch(messageFontSize, (newSize) => {
+  if (newSize && newSize > 0) {
+    document.documentElement.style.setProperty('--message-font-size', `${newSize}px`);
+  }
+}, { immediate: true });
 </script>
 
 <template>

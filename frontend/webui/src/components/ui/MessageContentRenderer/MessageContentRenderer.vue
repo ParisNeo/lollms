@@ -68,7 +68,7 @@ const messageParts = computed(() => {
   let lastIndex = 0, match;
   while ((match = thinkRegex.exec(content)) !== null) {
     if (match.index > lastIndex) parts.push({ type: 'content', content: content.substring(lastIndex, match.index) });
-    if (match[1] && match[1].trim()) parts.push({ type: 'think', content: match[1].trim() });
+    if (match && match.trim()) parts.push({ type: 'think', content: match.trim() });
     lastIndex = thinkRegex.lastIndex;
   }
   if (lastIndex < content.length) parts.push({ type: 'content', content: content.substring(lastIndex) });
@@ -91,13 +91,13 @@ const getTokens = (text) => {
         }
 
         // Construct the full title from the file path and optional version
-        const title = match[1].trim() + (match[2] || '');
+        const title = match.trim() + (match || '');
 
         allTokens.push({
             type: 'document',
             title: title,
-            content: match[3], // Content is now in capture group 3
-            raw: match[0]
+            content: match, // Content is now in capture group 3
+            raw: match
         });
 
         lastIndex = docRegex.lastIndex;
@@ -158,7 +158,10 @@ const simpleHash = str => {
 </template>
 
 <style scoped>
-.message-prose { @apply prose prose-base dark:prose-invert max-w-none break-words; }
+.message-prose {
+    @apply prose prose-base dark:prose-invert max-w-none break-words;
+    font-size: var(--message-font-size, 14px);
+}
 .think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
 details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
 .think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
