@@ -21,6 +21,7 @@ import IconSparkles from '../assets/icons/IconSparkles.vue';
 import IconMaximize from '../assets/icons/IconMaximize.vue';
 import IconArrowLeft from '../assets/icons/IconArrowLeft.vue';
 import IconRefresh from '../assets/icons/IconRefresh.vue'; // For reuse prompt
+import IconAdjustmentsHorizontal from '../assets/icons/IconAdjustmentsHorizontal.vue';
 
 const imageStore = useImageStore();
 const dataStore = useDataStore();
@@ -38,6 +39,7 @@ const imageSize = ref('1024x1024');
 const nImages = ref(1);
 const seed = ref(-1);
 const generationParams = ref({});
+const isConfigVisible = ref(false);
 
 const selectedImages = ref([]);
 const isSelectionMode = computed(() => selectedImages.value.length > 0);
@@ -47,6 +49,7 @@ const areAllSelected = computed({
         selectedImages.value = value ? images.value.map(img => img.id) : [];
     }
 });
+const isDraggingOver = ref(false);
 
 const selectedModel = computed(() => user.value?.tti_binding_model_name);
 
@@ -90,9 +93,13 @@ onMounted(() => {
     imageStore.fetchImages();
     if (dataStore.availableTtiModels.length === 0) dataStore.fetchAvailableTtiModels();
     if (Object.keys(discussionsStore.discussions).length === 0) discussionsStore.loadDiscussions();
+    window.addEventListener('paste', handlePaste);
 });
 
-onUnmounted(() => uiStore.setPageTitle({ title: '' }));
+onUnmounted(() => {
+    uiStore.setPageTitle({ title: '' });
+    window.removeEventListener('paste', handlePaste);
+});
 
 function isSelected(imageId) { return selectedImages.value.includes(imageId); }
 function toggleSelection(imageId) {
@@ -149,7 +156,10 @@ function openImageViewer(image, index) {
         startIndex: index
     });
 }
-function handleUpload(event) { if (event.target.files[0]) imageStore.uploadImage(event.target.files[0]); }
+function handleUpload(event) {
+    const files = Array.from(event.target.files);
+    if (files.length > 0) imageStore.uploadImages(files);
+}
 async function handleDeleteSelected() {
     const confirmed = await uiStore.showConfirmation({ title: `Delete ${selectedImages.value.length} Images?`, message: 'This action cannot be undone.', confirmText: 'Delete' });
     if (confirmed.confirmed) {
@@ -171,10 +181,59 @@ async function handleMoveToDiscussion() {
     }
 }
 function goBack() { router.push('/'); }
+
+function handleDragOver(event) {
+    event.preventDefault();
+    isDraggingOver.value = true;
+}
+
+function handleDragLeave(event) {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+        isDraggingOver.value = false;
+    }
+}
+
+async function handleDrop(event) {
+    event.preventDefault();
+    isDraggingOver.value = false;
+    const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
+    if (files.length > 0) {
+        await imageStore.uploadImages(files);
+    }
+}
+
+async function handlePaste(event) {
+    const items = (event.clipboardData || window.clipboardData).items;
+    if (!items) return;
+    
+    const imageFiles = [];
+    for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) {
+                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
+                imageFiles.push(new File([file], `pasted_image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`, { type: file.type }));
+            }
+        }
+    }
+    
+    if (imageFiles.length > 0) { 
+        event.preventDefault();
+        await imageStore.uploadImages(imageFiles); 
+    }
+}
 </script>
 
 <template>
-    <div class="h-full flex flex-col bg-gray-50 dark:bg-gray-900">
+    <div 
+        class="h-full flex flex-col bg-gray-50 dark:bg-gray-900 relative" 
+        @dragover.prevent="handleDragOver"
+        @dragleave.prevent="handleDragLeave"
+        @drop.prevent="handleDrop"
+    >
+        <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 rounded-lg z-20 flex items-center justify-center m-4 pointer-events-none">
+            <p class="text-2xl font-bold text-blue-600">Drop images anywhere to upload</p>
+        </div>
         <div class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-2 flex items-center">
             <button @click="goBack" class="btn btn-secondary btn-icon" title="Back to Main App">
                 <IconArrowLeft class="w-5 h-5" />
@@ -182,7 +241,9 @@ function goBack() { router.push('/'); }
         </div>
 
         <div class="flex-grow overflow-y-auto p-4 sm:p-6 flex flex-col">
-            <div class="flex-grow min-h-0 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md flex flex-col">
+            <div 
+                class="flex-grow min-h-0 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md flex flex-col"
+            >
                 <div class="flex justify-between items-center mb-4 flex-shrink-0 flex-wrap gap-2">
                     <div class="flex items-center gap-2">
                         <input type="checkbox" v-model="areAllSelected" class="h-4 w-4 rounded" title="Select All" />
@@ -195,13 +256,13 @@ function goBack() { router.push('/'); }
                     </div>
                     <label for="upload-image-btn" class="btn btn-secondary btn-sm cursor-pointer">
                         <IconArrowDownTray class="w-4 h-4 mr-2" /> Upload
-                        <input id="upload-image-btn" type="file" @change="handleUpload" class="hidden" accept="image/*">
+                        <input id="upload-image-btn" type="file" @change="handleUpload" class="hidden" accept="image/*" multiple>
                     </label>
                 </div>
 
                 <div v-if="isLoading" class="flex-grow flex items-center justify-center"><IconAnimateSpin class="w-8 h-8 text-gray-500" /></div>
                 <div v-else-if="images.length === 0" class="flex-grow flex items-center justify-center text-center text-gray-500">
-                    <div><p>No images yet.</p><p class="text-sm">Use the form below to generate some!</p></div>
+                    <div><p>No images yet.</p><p class="text-sm">Drop, paste, or use the form below to generate some!</p></div>
                 </div>
                 <div v-else class="flex-grow overflow-y-auto custom-scrollbar -m-2 p-2">
                     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
@@ -216,6 +277,9 @@ function goBack() { router.push('/'); }
                                     </div>
                                 </div>
                                 <p class="text-xs line-clamp-3" :title="image.prompt">{{ image.prompt }}</p>
+                            </div>
+                            <div v-if="isSelected(image.id)" class="absolute top-1 left-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center z-10">
+                                {{ selectedImages.indexOf(image.id) + 1 }}
                             </div>
                             <div class="absolute bottom-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <button @click.stop="reusePrompt(image)" class="p-1.5 bg-black/50 rounded-full hover:bg-black/80" title="Reuse Prompt & Settings"><IconRefresh class="w-4 h-4 text-white" /></button>
@@ -239,7 +303,8 @@ function goBack() { router.push('/'); }
                     <div class="relative mt-1"><textarea id="negative-prompt" v-model="negativePrompt" rows="3" class="input-field pr-10" placeholder="ugly, blurry, bad anatomy..."></textarea><button @click="handleEnhance('negative_prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance negative prompt with AI" :disabled="isEnhancing"><IconSparkles class="w-4 h-4" /></button></div>
                 </div>
             </div>
-            <div class="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 items-end">
+            
+            <div v-if="isConfigVisible" class="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 items-end">
                 <div v-if="!isSelectionMode">
                     <label for="n" class="block text-sm font-medium">Number</label>
                     <input id="n" v-model.number="nImages" type="number" min="1" max="10" class="input-field mt-1">
@@ -261,13 +326,19 @@ function goBack() { router.push('/'); }
                     </select>
                     <input v-else :type="param.type === 'str' ? 'text' : 'number'" :step="param.type === 'float' ? '0.1' : '1'" :id="`param-${param.name}`" v-model="generationParams[param.name]" class="input-field mt-1" :placeholder="param.default">
                 </div>
-                <div class="flex items-center gap-2 col-start-2 sm:col-start-3 md:col-start-4 lg:col-start-5">
-                     <button @click="handleEnhance('both')" class="btn btn-secondary p-2.5" :disabled="isGenerating || isEnhancing" title="Enhance both prompts"><IconSparkles class="w-5 h-5" /></button>
-                    <button @click="handleGenerateOrApply" class="btn btn-primary w-full" :disabled="isGenerating || isEnhancing">
-                        <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2" />
-                        {{ isSelectionMode ? 'Apply' : 'Generate' }}
-                    </button>
-                </div>
+            </div>
+            
+            <div class="mt-4 flex justify-end items-center gap-2">
+                <button @click="isConfigVisible = !isConfigVisible" class="btn btn-secondary p-2.5" :title="isConfigVisible ? 'Hide Settings' : 'Show Settings'">
+                    <IconAdjustmentsHorizontal class="w-5 h-5" />
+                </button>
+                <button @click="handleEnhance('both')" class="btn btn-secondary p-2.5" :disabled="isGenerating || isEnhancing" title="Enhance both prompts">
+                    <IconSparkles class="w-5 h-5" />
+                </button>
+                <button @click="handleGenerateOrApply" class="btn btn-primary flex-grow sm:flex-grow-0" :disabled="isGenerating || isEnhancing">
+                    <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2" />
+                    {{ isSelectionMode ? 'Apply' : 'Generate' }}
+                </button>
             </div>
         </div>
     </div>

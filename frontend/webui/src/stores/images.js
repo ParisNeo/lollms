@@ -54,18 +54,23 @@ export const useImageStore = defineStore('images', () => {
         }
     }
 
-    async function uploadImage(file) {
+    async function uploadImages(files) {
+        if (!Array.isArray(files) || files.length === 0) return;
+
         const formData = new FormData();
-        formData.append('file', file);
-        isGenerating.value = true; // Use the same loader for consistency
+        files.forEach(file => {
+            formData.append('files', file);
+        });
+
+        isGenerating.value = true;
         try {
             const response = await apiClient.post('/api/image-studio/upload', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
-            if (response.data) {
-                images.value.unshift(response.data);
+            if (Array.isArray(response.data) && response.data.length > 0) {
+                images.value.unshift(...response.data.reverse());
+                uiStore.addNotification(`${response.data.length} image(s) uploaded successfully!`, 'success');
             }
-            uiStore.addNotification('Image uploaded successfully!', 'success');
         } catch (error) {
             // Handled globally
         } finally {
@@ -116,7 +121,7 @@ export const useImageStore = defineStore('images', () => {
         fetchImages,
         generateImage,
         editImage,
-        uploadImage,
+        uploadImages,
         deleteImage,
         moveImageToDiscussion,
         enhanceImagePrompt,

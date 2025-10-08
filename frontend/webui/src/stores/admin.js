@@ -648,7 +648,20 @@ export const useAdminStore = defineStore('admin', () => {
     async function stopApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/stop`); tasksStore.addTask(res.data); }
     async function updateApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/update`); tasksStore.addTask(res.data); }
     async function uninstallApp(appId) { await apiClient.delete(`/api/apps_zoo/installed/${appId}`); await fetchZooApps(); await fetchZooMcps(); }
-    async function updateInstalledApp(appId, payload) { await apiClient.put(`/api/apps_zoo/installed/${appId}`, payload); await fetchZooApps(); await fetchZooMcps(); }
+    async function updateInstalledApp(appId, payload) {
+        const allItems = [...(zooApps.value.items || []), ...(zooMcps.value.items || [])];
+        const item = allItems.find(i => i.id === appId);
+        const oldAuthType = item ? item.authentication_type : 'none';
+
+        await apiClient.put(`/api/apps_zoo/installed/${appId}`, payload);
+        
+        if (payload.authentication_type === 'lollms_sso' && oldAuthType !== 'lollms_sso') {
+            uiStore.addNotification('SSO enabled for an app. A server reboot is required for this to take effect.', 'warning', 15000);
+        }
+
+        await fetchZooApps(); 
+        await fetchZooMcps(); 
+    }
     async function fetchAppLog(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/logs`); return res.data.log_content; }
     async function fetchAppConfigSchema(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config-schema`); return res.data; }
     async function fetchAppConfig(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config`); return res.data; }

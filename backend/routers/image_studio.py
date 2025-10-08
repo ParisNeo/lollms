@@ -178,29 +178,35 @@ async def edit_image(
     
     return new_image_record
 
-@image_studio_router.post("/upload", response_model=UserImagePublic)
-async def upload_image(
-    file: UploadFile = File(...),
+@image_studio_router.post("/upload", response_model=List[UserImagePublic])
+async def upload_images(
+    files: List[UploadFile] = File(...),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     user_images_path = get_user_images_path(current_user.username)
-    s_filename = secure_filename(file.filename)
-    filename = f"{uuid.uuid4().hex}_{s_filename}"
-    file_path = user_images_path / filename
+    new_images_db = []
+    for file in files:
+        s_filename = secure_filename(file.filename)
+        filename = f"{uuid.uuid4().hex}_{s_filename}"
+        file_path = user_images_path / filename
 
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
+        content = await file.read()
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
 
-    new_image = UserImage(
-        owner_user_id=current_user.id,
-        filename=filename,
-        prompt="Uploaded image"
-    )
-    db.add(new_image)
+        new_image = UserImage(
+            owner_user_id=current_user.id,
+            filename=filename,
+            prompt="Uploaded image"
+        )
+        db.add(new_image)
+        new_images_db.append(new_image)
+
     db.commit()
-    db.refresh(new_image)
-    return new_image
+    for img in new_images_db:
+        db.refresh(img)
+    return new_images_db
 
 @image_studio_router.delete("/{image_id}", status_code=204)
 async def delete_image(

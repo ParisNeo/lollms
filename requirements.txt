@@ -82,3 +82,4 @@ ScrapeMaster
 markdown2
 aioredis
 pydub
+latex2mathml
