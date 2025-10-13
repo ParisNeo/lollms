@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/admin.js
+// [UPDATE] frontend/webui/src/stores/admin.js
 import { defineStore } from 'pinia';
 import { ref, reactive, watch, onMounted } from 'vue';
 import apiClient from '../services/api';
@@ -58,10 +58,13 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingTtiBindings = ref(false);
     const availableTtiBindingTypes = ref([]);
 
-    // --- NEW: TTS State ---
     const ttsBindings = ref([]);
     const isLoadingTtsBindings = ref(false);
     const availableTtsBindingTypes = ref([]);
+
+    const ragBindings = ref([]);
+    const isLoadingRagBindings = ref(false);
+    const availableRagBindingTypes = ref([]);
 
     const globalSettings = ref([]);
     const isLoadingSettings = ref(false);
@@ -99,7 +102,6 @@ export const useAdminStore = defineStore('admin', () => {
     const connectedUsers = ref([]);
     const isLoadingConnectedUsers = ref(false);
     
-    // NEW Fun Facts State
     const funFacts = ref([]);
     const isLoadingFunFacts = ref(false);
     const funFactCategories = ref([]);
@@ -143,6 +145,8 @@ export const useAdminStore = defineStore('admin', () => {
         currentPage: 1,
         pageSize: 24
     }));
+
+    const availableRagVectorizers = ref([]);
 
 
     watch(appFilters, (newFilters) => {
@@ -396,13 +400,11 @@ export const useAdminStore = defineStore('admin', () => {
         availableBindingTypes.value = response.data;
     }
     async function addBinding(payload) {
-        // The backend has a unique constraint on alias, let it handle the error.
         const response = await apiClient.post('/api/admin/bindings', payload);
         bindings.value.push(response.data);
         uiStore.addNotification(`Binding '${response.data.alias}' created.`, 'success');
     }
     async function updateBinding(id, payload) {
-        // The backend has a unique constraint on alias, let it handle the error.
         const response = await apiClient.put(`/api/admin/bindings/${id}`, payload);
         const index = bindings.value.findIndex(b => b.id === id);
         if (index !== -1) bindings.value[index] = response.data;
@@ -433,7 +435,7 @@ export const useAdminStore = defineStore('admin', () => {
         if (index !== -1) bindings.value[index] = response.data;
     }
 
-    // --- NEW: TTI Actions ---
+    // --- TTI Actions ---
     async function fetchTtiBindings() {
         isLoadingTtiBindings.value = true;
         try {
@@ -478,7 +480,7 @@ export const useAdminStore = defineStore('admin', () => {
         if (index !== -1) ttiBindings.value[index] = response.data;
     }
 
-    // --- NEW: TTS Actions ---
+    // --- TTS Actions ---
     async function fetchTtsBindings() {
         isLoadingTtsBindings.value = true;
         try {
@@ -522,6 +524,64 @@ export const useAdminStore = defineStore('admin', () => {
         const index = ttsBindings.value.findIndex(b => b.id === bindingId);
         if (index !== -1) ttsBindings.value[index] = response.data;
     }
+
+    // --- RAG Actions ---
+    async function fetchRagBindings() {
+        isLoadingRagBindings.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/rag-bindings');
+            ragBindings.value = response.data;
+        } catch (e) {
+            ragBindings.value = [];
+            console.error("Failed to fetch RAG bindings:", e);
+        } finally {
+            isLoadingRagBindings.value = false;
+        }
+    }
+    async function fetchAvailableRagBindingTypes() {
+        try {
+            const response = await apiClient.get('/api/admin/rag-bindings/available_types');
+            availableRagBindingTypes.value = response.data;
+        } catch(e) {
+            availableRagBindingTypes.value = [];
+            console.error("Failed to fetch RAG binding types:", e);
+        }
+    }
+    async function addRagBinding(payload) {
+        const response = await apiClient.post('/api/admin/rag-bindings', payload);
+        ragBindings.value.push(response.data);
+        uiStore.addNotification(`RAG Binding '${response.data.alias}' created.`, 'success');
+    }
+    async function updateRagBinding(id, payload) {
+        const response = await apiClient.put(`/api/admin/rag-bindings/${id}`, payload);
+        const index = ragBindings.value.findIndex(b => b.id === id);
+        if (index !== -1) ragBindings.value[index] = response.data;
+        uiStore.addNotification(`RAG Binding '${response.data.alias}' updated.`, 'success');
+    }
+    async function deleteRagBinding(id) {
+        await apiClient.delete(`/api/admin/rag-bindings/${id}`);
+        ragBindings.value = ragBindings.value.filter(b => b.id !== id);
+        uiStore.addNotification('RAG Binding deleted successfully.', 'success');
+    }
+    async function fetchRagBindingModels(bindingId) {
+        const response = await apiClient.get(`/api/admin/rag-bindings/${bindingId}/models`);
+        return response.data;
+    }
+    async function saveRagModelAlias(bindingId, payload) {
+        const response = await apiClient.put(`/api/admin/rag-bindings/${bindingId}/alias`, payload);
+        const index = ragBindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) ragBindings.value[index] = response.data;
+    }
+    async function deleteRagModelAlias(bindingId, modelName) {
+        const response = await apiClient.delete(`/api/admin/rag-bindings/${bindingId}/alias`, { data: { original_model_name: modelName } });
+        const index = ragBindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) ragBindings.value[index] = response.data;
+    }
+    async function fetchRagModelsForType(vectorizerType) {
+        const response = await apiClient.get(`/api/admin/rag-bindings/models-for-type/${vectorizerType}`);
+        return response.data;
+    }
+
 
     async function fetchGlobalSettings() {
         isLoadingSettings.value = true;
@@ -683,6 +743,45 @@ export const useAdminStore = defineStore('admin', () => {
     async function importFunFacts(data) { const payload = { fun_facts: data }; const response = await apiClient.post('/api/admin/fun-facts/import', payload); await Promise.all([fetchFunFacts(), fetchFunFactCategories()]); uiStore.addNotification(`Imported ${response.data.facts_created} facts and ${response.data.categories_created} new categories.`, 'success'); }
     async function importCategoryFromFile(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/fun-facts/categories/import', formData); await Promise.all([fetchFunFacts(), fetchFunFactCategories()]); uiStore.addNotification(`Imported ${response.data.facts_created} facts for category.`, 'success'); }
 
+    async function addOrUpdateRagAlias(payload) {
+        const response = await apiClient.post('/api/admin/rag/aliases', payload);
+        const setting = globalSettings.value.find(s => s.key === 'rag_vectorizer_aliases');
+        if (setting) setting.value = response.data;
+        uiStore.addNotification(`Alias '${payload.alias_name}' saved.`, 'success');
+    }
+
+    async function deleteRagAlias(aliasName) {
+        const response = await apiClient.delete('/api/admin/rag/aliases', { data: { alias_name: aliasName } });
+        const setting = globalSettings.value.find(s => s.key === 'rag_vectorizer_aliases');
+        if (setting) setting.value = response.data;
+        uiStore.addNotification(`Alias '${aliasName}' deleted.`, 'success');
+    }
+
+    async function fetchAvailableRagVectorizers() {
+        try {
+            const response = await apiClient.get('/api/admin/rag/available-vectorizers');
+            availableRagVectorizers.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch available RAG vectorizers:", error);
+            availableRagVectorizers.value = [];
+        }
+    }
+
+    async function refreshZooCache() {
+        const { useTasksStore } = await import('./tasks.js');
+        const tasksStore = useTasksStore();
+        try {
+            const response = await apiClient.post('/api/admin/refresh-zoo-cache');
+            const task = response.data;
+            tasksStore.addTask(task);
+            return task;
+        } catch (error) {
+            uiStore.addNotification('Failed to start Zoo cache refresh.', 'error');
+            return null;
+        }
+    }
+
+
     return {
         dashboardStats, isLoadingDashboardStats, fetchDashboardStats, broadcastMessage,
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers, batchUpdateUsers,
@@ -694,6 +793,9 @@ export const useAdminStore = defineStore('admin', () => {
         ttsBindings, isLoadingTtsBindings, availableTtsBindingTypes,
         fetchTtsBindings, fetchAvailableTtsBindingTypes, addTtsBinding, updateTtsBinding, deleteTtsBinding,
         fetchTtsBindingModels, saveTtsModelAlias, deleteTtsModelAlias,
+        ragBindings, isLoadingRagBindings, availableRagBindingTypes,
+        fetchRagBindings, fetchAvailableRagBindingTypes, addRagBinding, updateRagBinding, deleteRagBinding,
+        fetchRagBindingModels, saveRagModelAlias, deleteRagModelAlias, fetchRagModelsForType,
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings, uploadWelcomeLogo, removeWelcomeLogo,
         isImporting, importOpenWebUIData,
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
@@ -724,5 +826,10 @@ export const useAdminStore = defineStore('admin', () => {
         stopApp,
         fetchAppLog,
         fetchUserStats,
+        addOrUpdateRagAlias,
+        deleteRagAlias,
+        availableRagVectorizers,
+        fetchAvailableRagVectorizers,
+        refreshZooCache
     };
 });

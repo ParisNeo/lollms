@@ -1,44 +1,44 @@
-import datetime
-from typing import Optional
-from pydantic import BaseModel, Field, constr, field_validator
-
-class SafeStoreDocumentInfo(BaseModel):
-    filename: str
+# [CREATE] backend/models/datastore.py
+from pydantic import BaseModel, Field
+from typing import Optional, Dict, Any
+from datetime import datetime
 
 class DataStoreBase(BaseModel):
-    name: constr(min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
+    name: str
+    description: Optional[str] = None
 
 class DataStoreCreate(DataStoreBase):
-    pass
+    vectorizer_name: str
+    vectorizer_config: Dict[str, Any] = Field(default_factory=dict)
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
 
 class DataStoreEdit(DataStoreBase):
-    new_name: constr(min_length=1, max_length=100)
+    pass
 
 class DataStorePublic(DataStoreBase):
     id: str
     owner_username: str
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
-    permission_level: Optional[str] = None
-    class Config:
-        from_attributes = True
-
-class SharedWithUserPublic(BaseModel):
-    user_id: int
-    username: str
-    icon: Optional[str] = None
     permission_level: str
+    vectorizer_name: str
+    vectorizer_config: Dict[str, Any]
+    chunk_size: int
+    chunk_overlap: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
 class DataStoreShareRequest(BaseModel):
-    target_username: constr(min_length=3, max_length=50)
-    permission_level: str = "read_query"
+    target_username: str
+    permission_level: str
 
-    @field_validator('permission_level')
-    def permission_level_must_be_valid(cls, value):
-        if value not in ["read_query", "read_write", "revectorize"]:
-            raise ValueError("Invalid permission level")
-        return value
+class SharedWithUserPublic(BaseModel):
+    user_id: int
+    username: str
+    icon: Optional[str]
+    permission_level: str
+
+class SafeStoreDocumentInfo(BaseModel):
+    filename: str

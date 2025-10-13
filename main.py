@@ -420,35 +420,37 @@ add_ui_routes(app)
 
 if __name__ == "__main__":
     # This block is executed only by the main process, before Uvicorn starts workers.
-    init_database(APP_DB_URL)
-    db = db_session_module.SessionLocal()
-    # MAIN PROCESS ONLY: run schema creation/migrations BEFORE any DB access
     startup_lock = Lock()
-    run_one_time_startup_tasks(startup_lock)    
+    init_database(APP_DB_URL)
+    run_one_time_startup_tasks(startup_lock)
+    
+    db = db_session_module.SessionLocal()
     try:
         # Load settings once for the main process to use for CORS, etc.
         settings.load_from_db(db)
         
-        # --- CORS Setup ---
-        host = SERVER_CONFIG.get("host")
-        port = SERVER_CONFIG.get("port")
-        https_enabled = SERVER_CONFIG.get("https_enabled")
+        # --- Use DB settings for server config ---
+        host_setting = settings.get("host", SERVER_CONFIG.get("host", "0.0.0.0"))
+        port_setting = settings.get("port", SERVER_CONFIG.get("port", 9642))
+        https_enabled = settings.get("https_enabled", False)
 
         allowed_origins = [
             "http://localhost:5173",
             "http://127.0.0.1:5173",
         ]
 
-        if host == "0.0.0.0":
-            allowed_origins.extend([f"http://localhost:{port}", f"http://127.0.0.1:{port}"])
+        if host_setting == "0.0.0.0":
+            allowed_origins.extend([f"http://localhost:{port_setting}", f"http://127.0.0.1:{port_setting}"])
             if https_enabled:
-                allowed_origins.extend([f"https://localhost:{port}", f"https://127.0.0.1:{port}"])
+                allowed_origins.extend([f"https://localhost:{port_setting}", f"https://127.0.0.1:{port_setting}"])
         else:
-            allowed_origins.append(f"http://{host}:{port}")
+            allowed_origins.append(f"http://{host_setting}:{port_setting}")
             if https_enabled:
-                allowed_origins.append(f"https://{host}:{port}")
+                allowed_origins.append(f"https://{host_setting}:{port_setting}")
 
-        cors_exceptions_str = settings.get("cors_origins_exceptions", "")
+        cors_exceptions_setting = settings.get("cors_origins_exceptions", "")
+        cors_exceptions_str = cors_exceptions_setting if isinstance(cors_exceptions_setting, str) else ""
+
         if cors_exceptions_str:
             exceptions = [origin.strip() for origin in cors_exceptions_str.split(',') if origin.strip()]
             for origin in exceptions:
@@ -487,16 +489,8 @@ if __name__ == "__main__":
     apps_dir = data_dir / "apps"
     mcp_dir.mkdir(parents=True, exist_ok=True)
     apps_dir.mkdir(parents=True, exist_ok=True)
-    host_setting = SERVER_CONFIG.get("host", "localhost")
-    port_setting = int(SERVER_CONFIG.get("port", 9642))
-    workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
-
-    # --- MAIN PROCESS ONLY SETUP ---
-    startup_lock = Lock()
-
-    run_one_time_startup_tasks(startup_lock)
     
-    # --- END MAIN PROCESS ONLY SETUP ---
+    workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
 
     ssl_params = {}
     if settings.get("https_enabled"):
@@ -554,4 +548,4 @@ if __name__ == "__main__":
     ASCIIColors.green(f"Using {workers} Workers")
     print("----------------------")
 
-    uvicorn.run("main:app", host=host_setting, port=port_setting, reload=False, workers=workers, timeout_keep_alive=600, **ssl_params)
+    uvicorn.run("main:app", host=host_setting, port=int(port_setting), reload=False, workers=workers, timeout_keep_alive=600, backlog=256, **ssl_params)

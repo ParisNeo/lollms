@@ -25,7 +25,7 @@ const props = defineProps({
 const store = useDiscussionsStore();
 const uiStore = useUiStore();
 
-const isOpen = ref(true);
+const isOpen = ref(false);
 
 const paddingLeft = computed(() => `${props.indentationLevel * 1}rem`);
 

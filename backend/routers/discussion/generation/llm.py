@@ -54,7 +54,6 @@ from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse
                             MessageUpdateWithImages, TaskInfo,
                             UnloadArtefactRequest, ArtefactCreateManual, ArtefactUpdate)
 from backend.session import (get_current_active_user,
-                             get_current_db_user_from_token,
                              get_safe_store_instance,
                              get_user_discussion_assets_path,
                              get_user_lollms_client,
@@ -100,7 +99,7 @@ def build_llm_generation_router(router: APIRouter):
                     rag_top_k = current_user.rag_top_k if current_user.rag_top_k is not None else 5
                 if rag_min_similarity_percent is None:
                     rag_min_similarity_percent = current_user.rag_min_sim_percent if current_user.rag_min_sim_percent is not None else 50
-                retrieved_chunks = ss.query(query, vectorizer_name=owner_db_user.safe_store_vectorizer, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
+                retrieved_chunks = ss.query(query, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
                 revamped_chunks=[]
                 for entry in retrieved_chunks:
                     revamped_entry = {}
@@ -155,7 +154,7 @@ def build_llm_generation_router(router: APIRouter):
                     ds = get_safe_store_instance(owner_username, ds_id, db)
                     if not ds: return f"Error: Personality datastore '{ds_id}' not found or inaccessible."
                     try:
-                        results = ds.query(query, vectorizer_name=owner_db_user.safe_store_vectorizer, top_k=owner_db_user.rag_top_k)
+                        results = ds.query(query, top_k=owner_db_user.rag_top_k)
                         return "\n".join([chunk.get("chunk_text", "") for chunk in results])
                     except Exception as e:
                         return f"Error querying personality datastore: {e}"

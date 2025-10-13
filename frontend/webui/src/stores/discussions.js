@@ -106,24 +106,45 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         return modelInfo?.alias?.has_vision ?? true;
     });
     const discussionGroupsTree = computed(() => {
+        // This computed property builds a nested tree of groups and their discussions
         const groups = JSON.parse(JSON.stringify(discussionGroups.value));
-        const map = new Map(groups.map(g => [g.id, { ...g, children: [], discussions: [] }]));
-        const tree = [];
+        const allDiscussions = sortedDiscussions.value;
+        
+        const starred = allDiscussions.filter(d => d.is_starred);
+        const nonStarredDiscussions = allDiscussions.filter(d => !d.is_starred);
 
-        Object.values(discussions.value).forEach(d => {
-            if (d.group_id && map.has(d.group_id)) {
-                map.get(d.group_id).discussions.push(d);
+        const groupsMap = new Map(groups.map(g => [g.id, { ...g, children: [], discussions: [] }]));
+        
+        nonStarredDiscussions.forEach(d => {
+            if (d.group_id && groupsMap.has(d.group_id)) {
+                groupsMap.get(d.group_id).discussions.push(d);
             }
         });
-
-        for (const group of map.values()) {
-            if (group.parent_id && map.has(group.parent_id)) {
-                map.get(group.parent_id).children.push(group);
+        
+        const tree = [];
+        for (const group of groupsMap.values()) {
+            group.discussions.sort((a,b)=>new Date(b.last_activity_at || b.created_at) - new Date(a.last_activity_at || a.created_at));
+            if (group.parent_id && groupsMap.has(group.parent_id)) {
+                groupsMap.get(group.parent_id).children.push(group);
             } else {
                 tree.push(group);
             }
         }
-        return tree.sort((a,b) => a.name.localeCompare(b.name));
+
+        // Sort children within each group
+        for (const group of groupsMap.values()) {
+            group.children.sort((a,b) => a.name.localeCompare(b.name));
+        }
+        
+        const sortedTree = tree.sort((a, b) => a.name.localeCompare(b.name));
+        
+        const ungrouped = nonStarredDiscussions.filter(d => !d.group_id);
+
+        return {
+            starred,
+            groups: sortedTree,
+            ungrouped
+        };
     });
 
     // --- ACTIONS ORCHESTRATION ---

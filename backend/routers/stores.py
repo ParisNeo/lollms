@@ -1,3 +1,4 @@
+# [UPDATE] backend/routers/stores.py
 import shutil
 import uuid
 from pathlib import Path
@@ -32,6 +33,9 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
 from backend.models import (
     UserAuthDetails,
+    TaskInfo
+)
+from backend.models.datastore import (
     DataStoreCreate,
     DataStoreEdit,
     DataStoreShareRequest,
@@ -39,10 +43,11 @@ from backend.models import (
     DataStoreBase,
     SharedWithUserPublic,
     SafeStoreDocumentInfo,
-    TaskInfo
 )
+
 from backend.session import get_datastore_db_path, build_lollms_client_from_params
 from backend.db.models.db_task import DBTask
+from backend.settings import settings
 # safe_store is expected to be installed
 try:
     import safe_store
@@ -62,6 +67,7 @@ from backend.session import (
     user_sessions
 )
 from backend.task_manager import task_manager, Task
+from backend.db.models.config import RAGBinding as DBRAGBinding
 
 # --- NEW Pydantic Models for Graph Operations ---
 class GraphGenerationRequest(BaseModel):
@@ -102,10 +108,14 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
     )
 
 
-def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_paths: List[str], vectorizer_name: str):
+def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_paths: List[str]):
     db = next(get_db())
     ss = None
     try:
+        datastore_record = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
+        if not datastore_record:
+            raise Exception(f"Datastore with ID {datastore_id} not found.")
+
         ss = get_safe_store_instance(username, datastore_id, db, permission_level="read_write")
         processed_count = 0
         error_count = 0
@@ -122,7 +132,9 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
                 task.log(f"Processing file {i+1}/{total_files}: {file_path.name}")
                 
                 try:
-                    ss.add_document(str(file_path), vectorizer_name=vectorizer_name)
+                    ss.add_document(
+                        str(file_path)
+                    )
                     processed_count += 1
                     try:
                         file_path.unlink()
@@ -139,29 +151,6 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
         task.result = {"message": f"Processing complete. Added {processed_count} files. Encountered {error_count} errors."}
 
     except Exception as e:
-        traceback.print_exc()
-        raise e
-    finally:
-        db.close()
-
-def _revectorize_datastore_task(task: Task, username: str, datastore_id: str, vectorizer_name: str):
-    db = next(get_db())
-    ss = None
-    try:
-        ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
-        
-        task.log(f"Starting revectorization of datastore '{datastore_id}' with vectorizer '{vectorizer_name}'.")
-        task.set_progress(10)
-        
-        with ss:
-            ss.revectorize(vectorizer_name)
-        
-        task.set_progress(100)
-        task.result = {"message": f"Datastore '{datastore_id}' successfully revectorized with '{vectorizer_name}'."}
-        task.log("Revectorization completed successfully.")
-
-    except Exception as e:
-        task.log(f"Error during revectorization: {e}", level="CRITICAL")
         traceback.print_exc()
         raise e
     finally:
@@ -262,91 +251,20 @@ def _update_graph_task(task: Task, username: str, datastore_id: str, request_dat
 # --- SafeStore File Management API (now per-datastore) ---
 store_files_router = APIRouter(prefix="/api/store/{datastore_id}", tags=["SafeStore RAG & File Management"])
 
-@store_files_router.get("/vectorizers", response_model=Dict[str, List[Dict[str, str]]])
-async def list_datastore_vectorizers(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, List[Dict[str, str]]]:
-    if not safe_store:
-        raise HTTPException(status_code=501, detail="SafeStore not available.")
-    
-    ss = get_safe_store_instance(current_user.username, datastore_id, db)
-    
-    try:
-        with ss:
-            methods_in_db = ss.list_vectorization_methods()
-            in_store_formatted = [{"name": m.get("method_name"), "method_name": f"{m.get('method_name')} (dim: {m.get('vector_dim', 'N/A')})"} for m in methods_in_db if m.get("method_name")]
-            in_store_formatted.sort(key=lambda x: x["name"])
-
-            possible_names = ss.list_possible_vectorizer_names()
-            all_possible_formatted = []
-            for name in possible_names:
-                display_text = name
-                if name.startswith("tfidf:"): display_text = f"{name} (TF-IDF)"
-                elif name.startswith("st:"): display_text = f"{name} (Sentence Transformer)"
-                all_possible_formatted.append({"name": name, "method_name": display_text})
-            all_possible_formatted.sort(key=lambda x: x["name"])
-
-        return {
-            "in_store": in_store_formatted,
-            "all_possible": all_possible_formatted
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error listing vectorizers: {e}")
-
-@store_files_router.post("/revectorize", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
-async def revectorize_datastore(
-    datastore_id: str,
-    vectorizer_name: str = Form(...),
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-) -> TaskInfo:
-    if not safe_store:
-        raise HTTPException(status_code=501, detail="SafeStore not available.")
-
-    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
-    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
-    if not datastore_record: raise HTTPException(status_code=404, detail="Datastore metadata not found in main DB.")
-    
-    try:
-        with ss: 
-            all_vectorizers = {m['method_name'] for m in ss.list_vectorization_methods()} | set(ss.list_possible_vectorizer_names())
-            if not (vectorizer_name in all_vectorizers or vectorizer_name.startswith("st:") or vectorizer_name.startswith("tfidf:")):
-                 raise HTTPException(status_code=400, detail=f"Vectorizer '{vectorizer_name}' not found or invalid format.")
-            
-            db_task = task_manager.submit_task(
-                name=f"Revectorize DataStore: {datastore_record.name}",
-                target=_revectorize_datastore_task,
-                args=(current_user.username, datastore_id, vectorizer_name),
-                description=f"Revectorizing all documents in '{datastore_record.name}' with '{vectorizer_name}'.",
-                owner_username=current_user.username
-            )
-            return _to_task_info(db_task)
-
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"An error occurred during revectorization: {e}")
-
 @store_files_router.post("/upload-files", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED) 
 async def upload_rag_documents_to_datastore(
     datastore_id: str,
     files: List[UploadFile] = File(...),
-    vectorizer_name: str = Form(...),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> TaskInfo:
     if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
     
-    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+    get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
     datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
     datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / datastore_id
     datastore_docs_path.mkdir(parents=True, exist_ok=True)
     
-    try:
-        with ss: all_vectorizers = {m['method_name'] for m in ss.list_vectorization_methods()} | set(ss.list_possible_vectorizer_names())
-        if not (vectorizer_name in all_vectorizers or vectorizer_name.startswith("st:") or vectorizer_name.startswith("tfidf:")):
-             raise HTTPException(status_code=400, detail=f"Vectorizer '{vectorizer_name}' not found or invalid format for datastore {datastore_id}.")
-    except Exception as e: raise HTTPException(status_code=500, detail=f"Error checking vectorizer for datastore {datastore_id}: {e}")
-
     saved_file_paths = []
     for file_upload in files:
         s_filename = secure_filename(file_upload.filename or f"upload_{uuid.uuid4().hex[:8]}")
@@ -361,8 +279,8 @@ async def upload_rag_documents_to_datastore(
     db_task = task_manager.submit_task(
         name=f"Add files to DataStore: {datastore_record.name}",
         target=_upload_rag_files_task,
-        args=(current_user.username, datastore_id, saved_file_paths, vectorizer_name),
-        description=f"Vectorizing and adding {len(files)} files to the '{datastore_record.name}' DataStore.",
+        args=(current_user.username, datastore_id, saved_file_paths),
+        description=f"Adding {len(files)} files to the '{datastore_record.name}' DataStore.",
         owner_username=current_user.username
     )
     return _to_task_info(db_task)
@@ -618,6 +536,41 @@ async def delete_graph_edge(
 
 datastore_router = APIRouter(prefix="/api/datastores", tags=["RAG DataStores"])
 
+@datastore_router.get("/available-vectorizers", response_model=List[Dict[str, Any]])
+async def list_available_vectorizers(db: Session = Depends(get_db)):
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    try:
+        rag_bindings = db.query(DBRAGBinding).filter(DBRAGBinding.is_active == True).all()
+
+        aliased_vectorizers = []
+        for binding in rag_bindings:
+            base_vectorizer_details = next((v for v in safe_store.SafeStore.list_available_vectorizers() if v['name'] == binding.name), {})
+            aliased_vectorizers.append({
+                "is_alias": True,
+                "name": binding.alias,
+                "title": binding.alias,
+                "description": f"Configured binding for '{binding.name}'",
+                "vectorizer_name": binding.name,
+                "vectorizer_config": binding.config or {},
+                "input_parameters": base_vectorizer_details.get("input_parameters", [])
+            })
+
+        restrict_to_aliases = settings.get("restrict_vectorizers_to_aliases", False)
+        
+        if restrict_to_aliases:
+            return aliased_vectorizers
+
+        full_list = safe_store.SafeStore.list_available_vectorizers()
+        for v in full_list:
+            v['is_alias'] = False
+        
+        return aliased_vectorizers + full_list
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @datastore_router.get("", response_model=List[DataStorePublic])
 async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DataStorePublic]:
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first() 
@@ -647,6 +600,10 @@ async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current
             id=ds_db.id, name=ds_db.name, description=ds_db.description,
             owner_username=current_user.username, 
             permission_level='owner',
+            vectorizer_name=ds_db.vectorizer_name,
+            vectorizer_config=ds_db.vectorizer_config or {},
+            chunk_size=ds_db.chunk_size,
+            chunk_overlap=ds_db.chunk_overlap,
             created_at=ds_db.created_at, updated_at=ds_db.updated_at
         ))
     for link, ds_db in shared_links_and_datastores_db: 
@@ -655,6 +612,10 @@ async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current
                 id=ds_db.id, name=ds_db.name, description=ds_db.description,
                 owner_username=ds_db.owner.username, 
                 permission_level=link.permission_level,
+                vectorizer_name=ds_db.vectorizer_name,
+                vectorizer_config=ds_db.vectorizer_config or {},
+                chunk_size=ds_db.chunk_size,
+                chunk_overlap=ds_db.chunk_overlap,
                 created_at=ds_db.created_at, updated_at=ds_db.updated_at
             ))
     return response_list
@@ -664,11 +625,21 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=ds_create.name).first(): 
         raise HTTPException(status_code=400, detail=f"DataStore '{ds_create.name}' already exists.")
-    new_ds_db_obj = DBDataStore(owner_user_id=user_db_record.id, name=ds_create.name, description=ds_create.description)
+    
+    new_ds_db_obj = DBDataStore(
+        owner_user_id=user_db_record.id, 
+        name=ds_create.name, 
+        description=ds_create.description,
+        vectorizer_name=ds_create.vectorizer_name,
+        vectorizer_config=ds_create.vectorizer_config,
+        chunk_size=ds_create.chunk_size if ds_create.chunk_size is not None else settings.get("default_chunk_size"),
+        chunk_overlap=ds_create.chunk_overlap if ds_create.chunk_overlap is not None else settings.get("default_chunk_overlap")
+    )
     try:
         db.add(new_ds_db_obj)
         db.commit()
         db.refresh(new_ds_db_obj)
+        # This initializes the .db file on creation
         get_safe_store_instance(current_user.username, new_ds_db_obj.id, db)
         
         data_store_public = DataStorePublic(
@@ -678,7 +649,11 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
             owner_username=current_user.username,
             created_at=new_ds_db_obj.created_at,
             updated_at=new_ds_db_obj.updated_at,
-            permission_level='owner'
+            permission_level='owner',
+            vectorizer_name=new_ds_db_obj.vectorizer_name,
+            vectorizer_config=new_ds_db_obj.vectorizer_config or {},
+            chunk_size=new_ds_db_obj.chunk_size,
+            chunk_overlap=new_ds_db_obj.chunk_overlap
         )
         return data_store_public
     except Exception as e: 
@@ -688,7 +663,7 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
 
 
 @datastore_router.put("/{datastore_id}", response_model=DataStorePublic)
-async def update_datastore(datastore_id: str, ds_update: DataStoreBase, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DBDataStore:
+async def update_datastore(datastore_id: str, ds_update: DataStoreEdit, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> DBDataStore:
     user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
     if not user_db_record: raise HTTPException(status_code=404, detail="User not found.")
     
@@ -711,7 +686,11 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreBase, current_
         return DataStorePublic(
              id=ds_db_obj.id, name=ds_db_obj.name, description=ds_db_obj.description,
              owner_username=ds_db_obj.owner.username, permission_level=permission_level,
-             created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at
+             created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at,
+             vectorizer_name=ds_db_obj.vectorizer_name,
+             vectorizer_config=ds_db_obj.vectorizer_config or {},
+             chunk_size=ds_db_obj.chunk_size,
+             chunk_overlap=ds_db_obj.chunk_overlap
         )
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error updating datastore: {e}")

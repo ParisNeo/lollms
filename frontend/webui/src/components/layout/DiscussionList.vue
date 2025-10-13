@@ -3,6 +3,7 @@ import { computed, ref } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
+import { storeToRefs } from 'pinia';
 import DiscussionItem from './DiscussionItem.vue';
 import DiscussionGroupItem from './DiscussionGroupItem.vue';
 
@@ -26,11 +27,10 @@ const store = useDiscussionsStore();
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 
-const user = computed(() => authStore.user);
-const isLoading = computed(() => store.isLoadingDiscussions);
-const hasMoreDiscussions = computed(() => store.hasMoreDiscussions);
+const { user } = storeToRefs(authStore);
+const { isLoadingDiscussions, discussionGroupsTree, sharedWithMe, sortedDiscussions } = storeToRefs(store);
+
 const activeDiscussion = computed(() => store.activeDiscussion);
-const discussionGroupsTree = computed(() => store.discussionGroupsTree);
 
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const welcomeText = computed(() => authStore.welcomeText || 'LoLLMs');
@@ -38,55 +38,50 @@ const welcomeSlogan = computed(() => authStore.welcomeSlogan || 'One tool to rul
 
 const searchTerm = ref('');
 const isSearchVisible = ref(false);
-const isStarredVisible = ref(false);
 const isSharedVisible = ref(false);
 const showToolbox = ref(false);
 const isUngroupedVisible = ref(true);
+const isStarredVisible = ref(true); // Keep starred visible by default
 
-const filteredAndSortedDiscussions = computed(() => {
-    if (!searchTerm.value) return store.sortedDiscussions;
+// Filter shared discussions based on search term
+const filteredSharedDiscussions = computed(() => {
+    if (!searchTerm.value) return sharedWithMe.value;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
-    return store.sortedDiscussions.filter(d => 
+    return sharedWithMe.value.filter(d => 
         d.title.toLowerCase().includes(lowerCaseSearch)
     );
 });
 
-const sharedDiscussions = computed(() => {
-    if (!searchTerm.value) return store.sharedWithMe;
+// The tree structure now comes directly from the store, but we need to filter it
+const filteredDiscussionTree = computed(() => {
+    if (!searchTerm.value) return discussionGroupsTree.value;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
-    return store.sharedWithMe.filter(d => 
-        d.title.toLowerCase().includes(lowerCaseSearch)
-    );
+
+    const filterDiscussions = (discussions) => discussions.filter(d => d.title.toLowerCase().includes(lowerCaseSearch));
+
+    const filterGroups = (groups) => {
+        return groups.map(group => {
+            const filteredChildren = filterGroups(group.children || []);
+            const filteredDiscussionsInGroup = filterDiscussions(group.discussions || []);
+            // A group is kept if its name matches, or if it has any matching children/discussions
+            if (group.name.toLowerCase().includes(lowerCaseSearch) || filteredChildren.length > 0 || filteredDiscussionsInGroup.length > 0) {
+                 // If name matches, we show all its contents, otherwise only filtered contents
+                if (group.name.toLowerCase().includes(lowerCaseSearch)) {
+                    return group; 
+                }
+                return { ...group, children: filteredChildren, discussions: filteredDiscussionsInGroup };
+            }
+            return null;
+        }).filter(Boolean); // Remove null entries
+    };
+
+    return {
+        starred: filterDiscussions(discussionGroupsTree.value.starred || []),
+        groups: filterGroups(discussionGroupsTree.value.groups || []),
+        ungrouped: filterDiscussions(discussionGroupsTree.value.ungrouped || [])
+    };
 });
 
-const starredDiscussions = computed(() => {
-    return filteredAndSortedDiscussions.value.filter(d => d.is_starred);
-});
-
-const ungroupedDiscussions = computed(() => {
-    return filteredAndSortedDiscussions.value.filter(d => !d.group_id && !d.is_starred);
-});
-
-const groupsWithDiscussions = computed(() => {
-    const allDiscussions = filteredAndSortedDiscussions.value;
-    const groupsMap = new Map(store.discussionGroups.map(g => [g.id, { ...g, children: [], discussions: [] }]));
-    const tree = [];
-
-    allDiscussions.forEach(d => {
-        if (d.group_id && groupsMap.has(d.group_id)) {
-            groupsMap.get(d.group_id).discussions.push(d);
-        }
-    });
-
-    for (const group of groupsMap.values()) {
-        if (group.parent_id && groupsMap.has(group.parent_id)) {
-            groupsMap.get(group.parent_id).children.push(group);
-        } else {
-            tree.push(group);
-        }
-    }
-    return tree.sort((a,b) => a.name.localeCompare(b.name));
-});
 
 function handleNewGroup() {
     uiStore.openModal('discussionGroup', { parentGroup: null });
@@ -181,67 +176,67 @@ function handleClone() {
         </div>
         
         <div ref="scrollComponent" class="flex-grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
-            <div v-if="isLoading" class="space-y-2 animate-pulse">
+            <div v-if="isLoadingDiscussions" class="space-y-2 animate-pulse">
                 <div v-for="i in 8" :key="'skel-' + i" class="loading-skeleton-flat"></div>
             </div>
             
             <div v-else class="space-y-3">
                 <!-- Shared With Me -->
-                <div v-if="sharedDiscussions.length > 0">
+                <div v-if="filteredSharedDiscussions.length > 0">
                     <button @click="isSharedVisible = !isSharedVisible" class="section-header-flat">
                         <div class="flex items-center space-x-2">
                             <span class="font-medium text-slate-700 dark:text-gray-300">Shared with me</span>
                             <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
-                                {{ sharedDiscussions.length }}
+                                {{ filteredSharedDiscussions.length }}
                             </div>
                         </div>
                         <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isSharedVisible}" />
                     </button>
                     <div v-if="isSharedVisible" class="space-y-1 mt-2">
-                        <DiscussionItem v-for="discussion in sharedDiscussions" :key="discussion.share_id" :discussion="discussion" />
+                        <DiscussionItem v-for="discussion in filteredSharedDiscussions" :key="discussion.share_id" :discussion="discussion" />
                     </div>
                 </div>
 
                 <!-- Starred Section -->
-                <div v-if="starredDiscussions.length > 0">
+                <div v-if="filteredDiscussionTree.starred && filteredDiscussionTree.starred.length > 0">
                     <button @click="isStarredVisible = !isStarredVisible" class="section-header-flat">
                         <div class="flex items-center space-x-2">
                             <span class="font-medium text-slate-700 dark:text-gray-300">Starred</span>
                             <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
-                                {{ starredDiscussions.length }}
+                                {{ filteredDiscussionTree.starred.length }}
                             </div>
                         </div>
                         <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isStarredVisible}" />
                     </button>
                     <div v-if="isStarredVisible" class="space-y-1 mt-2">
-                        <DiscussionItem v-for="discussion in starredDiscussions" :key="discussion.id" :discussion="discussion" />
+                        <DiscussionItem v-for="discussion in filteredDiscussionTree.starred" :key="discussion.id" :discussion="discussion" />
                     </div>
                 </div>
 
                 <!-- Groups Section -->
                 <DiscussionGroupItem 
-                    v-for="group in groupsWithDiscussions" 
+                    v-for="group in filteredDiscussionTree.groups" 
                     :key="group.id" 
                     :group="group" 
                 />
 
                 <!-- Ungrouped Section -->
-                <div v-if="ungroupedDiscussions.length > 0">
+                <div v-if="filteredDiscussionTree.ungrouped && filteredDiscussionTree.ungrouped.length > 0">
                     <button @click="isUngroupedVisible = !isUngroupedVisible" class="section-header-flat mt-4">
                         <div class="flex items-center space-x-2">
                             <span class="font-medium text-slate-700 dark:text-gray-300">Discussions</span>
                             <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
-                                {{ ungroupedDiscussions.length }}
+                                {{ filteredDiscussionTree.ungrouped.length }}
                             </div>
                         </div>
                         <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isUngroupedVisible}" />
                     </button>
                     <div v-if="isUngroupedVisible" class="space-y-1 mt-2">
-                        <DiscussionItem v-for="discussion in ungroupedDiscussions" :key="discussion.id" :discussion="discussion" />
+                        <DiscussionItem v-for="discussion in filteredDiscussionTree.ungrouped" :key="discussion.id" :discussion="discussion" />
                     </div>
                 </div>
 
-                <div v-if="filteredAndSortedDiscussions.length === 0 && sharedDiscussions.length === 0 && !isLoading" class="empty-state-flat">
+                <div v-if="!isLoadingDiscussions && sortedDiscussions.length === 0 && sharedWithMe.length === 0" class="empty-state-flat">
                     <p class="text-base font-medium text-slate-600 dark:text-gray-300 mb-2">
                         {{ searchTerm ? 'No matches found' : 'Start your first conversation' }}
                     </p>

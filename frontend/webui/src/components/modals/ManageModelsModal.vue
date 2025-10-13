@@ -1,3 +1,4 @@
+<!-- [REWRITE] frontend/webui/src/components/modals/ManageModelsModal.vue -->
 <template>
     <GenericModal modal-name="manageModels" :title="binding ? `Manage Models for: ${binding.alias}` : 'Manage Models'" maxWidthClass="max-w-5xl">
         <template #body>
@@ -313,6 +314,7 @@ async function fetchModels() {
             case 'llm': models.value = await adminStore.fetchBindingModels(binding.value.id); break;
             case 'tti': models.value = await adminStore.fetchTtiBindingModels(binding.value.id); break;
             case 'tts': models.value = await adminStore.fetchTtsBindingModels(binding.value.id); break;
+            case 'rag': models.value = await adminStore.fetchRagBindingModels(binding.value.id); break;
             default: models.value = [];
         }
     } finally {
@@ -329,11 +331,19 @@ function selectModel(model) {
     let bindingTypes;
     if (bindingType.value === 'tti') bindingTypes = availableTtiBindingTypes.value;
     else if (bindingType.value === 'tts') bindingTypes = availableTtsBindingTypes.value;
-    else bindingTypes = availableBindingTypes.value;
-    const bindingDesc = bindingTypes.find(b => b.binding_name === binding.value.name);
-    const params = bindingDesc?.model_parameters || [];
-    modelParameters.value = params;
-    params.forEach(param => { if (!(param.name in newForm)) newForm[param.name] = param.default; });
+    else if (bindingType.value === 'rag') bindingTypes = adminStore.availableRagBindingTypes;
+    else bindingTypes = availableBindingTypes.value; // Fallback for llm
+    
+    const bindingName = binding.value?.name;
+    if (bindingName) {
+        const bindingDesc = bindingTypes.find(b => (b.binding_name || b.name) === bindingName);
+        const params = bindingDesc?.model_parameters || bindingDesc?.input_parameters || [];
+        modelParameters.value = params;
+        params.forEach(param => { if (!(param.name in newForm)) newForm[param.name] = param.default; });
+    } else {
+        modelParameters.value = [];
+    }
+    
     form.value = newForm;
 }
 
@@ -373,9 +383,10 @@ async function saveAlias() {
     isSaving.value = true;
     try {
         const payload = { ...form.value };
-        if (bindingType.value === 'llm' && payload.title) payload.name = payload.title;
         let aliasPayload = {};
+
         if (bindingType.value === 'llm') {
+            if (payload.title) payload.name = payload.title;
             ['ctx_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
                 const value = payload[key];
                 payload[key] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
@@ -392,6 +403,7 @@ async function saveAlias() {
             aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
             if (bindingType.value === 'tti') await adminStore.saveTtiModelAlias(binding.value.id, aliasPayload);
             else if (bindingType.value === 'tts') await adminStore.saveTtsModelAlias(binding.value.id, aliasPayload);
+            else if (bindingType.value === 'rag') await adminStore.saveRagModelAlias(binding.value.id, aliasPayload);
         }
         await fetchModels();
         const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);
@@ -410,6 +422,7 @@ async function deleteAlias() {
                 case 'llm': await adminStore.deleteModelAlias(binding.value.id, selectedModel.value.original_model_name); break;
                 case 'tti': await adminStore.deleteTtiModelAlias(binding.value.id, selectedModel.value.original_model_name); break;
                 case 'tts': await adminStore.deleteTtsModelAlias(binding.value.id, selectedModel.value.original_model_name); break;
+                case 'rag': await adminStore.deleteRagModelAlias(binding.value.id, selectedModel.value.original_model_name); break;
             }
             await fetchModels();
             const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);
@@ -429,6 +442,7 @@ async function setAsBindingDefault() {
             case 'llm': await adminStore.updateBinding(binding.value.id, payload); break;
             case 'tti': await adminStore.updateTtiBinding(binding.value.id, payload); break;
             case 'tts': await adminStore.updateTtsBinding(binding.value.id, payload); break;
+            // RAG bindings do not have a default model concept
         }
         uiStore.addNotification('Binding default model updated.', 'success');
     } finally {

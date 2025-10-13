@@ -1,4 +1,4 @@
-# backend/routers/auth.py
+# [UPDATE] backend/routers/auth.py
 import traceback
 import datetime
 from datetime import timezone, timedelta
@@ -104,7 +104,8 @@ async def login_for_access_token(
         default_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
         initial_model_name = user.lollms_model_name
         if not initial_model_name and default_binding:
-            initial_model_name = f"{default_binding.alias}/{default_binding.default_model_name}"
+            if default_binding.alias and default_binding.default_model_name:
+                initial_model_name = f"{default_binding.alias}/{default_binding.default_model_name}"
 
         initial_vectorizer = user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
         

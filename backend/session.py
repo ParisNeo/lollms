@@ -163,6 +163,10 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         is_ollama_service_enabled = settings.get("ollama_service_enabled", False)
         is_ollama_require_key = settings.get("ollama_require_key", True)
         latex_builder_enabled = settings.get("latex_builder_enabled", False)
+        allow_user_chunking_config = settings.get("allow_user_chunking_config", True)
+        default_chunk_size = settings.get("default_chunk_size", 1024)
+        default_chunk_overlap = settings.get("default_chunk_overlap", 256)
+
 
         return UserAuthDetails(
             id=db_user.id, username=username, is_admin=db_user.is_admin, is_moderator=(db_user.is_admin or db_user.is_moderator), is_active=db_user.is_active,
@@ -198,12 +202,15 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             programming_language_preferences=db_user.programming_language_preferences,
             tell_llm_os=db_user.tell_llm_os,
             share_dynamic_info_with_llm=db_user.share_dynamic_info_with_llm,
-            message_font_size=db_user.message_font_size
+            message_font_size=db_user.message_font_size,
+            allow_user_chunking_config=allow_user_chunking_config,
+            default_chunk_size=default_chunk_size,
+            default_chunk_overlap=default_chunk_overlap
         )
     finally:
         if db_was_created:
             db.close()
-
+            
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator privileges required.")
@@ -533,13 +540,16 @@ def get_safe_store_instance(
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
         try:
             ss_instance = safe_store.SafeStore(
-                                                db_path=ss_db_path, 
-                                                name=datastore_record.name, 
-                                                description=datastore_record.description, 
-                                                encryption_key=SAFE_STORE_DEFAULTS["encryption_key"],
-                                                cache_folder=SAFE_STORE_DEFAULTS.get("cache_folder","data/cache/safestore")
-                                            )
-            session["safe_store_instances"][datastore_id] = ss_instance
+                db_path=ss_db_path,
+                vectorizer_name=datastore_record.vectorizer_name,
+                vectorizer_config=datastore_record.vectorizer_config or {},
+                chunk_size=datastore_record.chunk_size,
+                chunk_overlap=datastore_record.chunk_overlap,
+                expand_before=10,
+                expand_after=10,
+                chunking_strategy="token"
+            )
+            session.setdefault("safe_store_instances", {})[datastore_id] = ss_instance
         except Exception as e:
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Could not initialize SafeStore for {datastore_id}: {str(e)}")

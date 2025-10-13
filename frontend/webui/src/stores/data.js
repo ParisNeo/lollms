@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/data.js
+// [UPDATE] frontend/webui/src/stores/data.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -30,6 +30,7 @@ export const useDataStore = defineStore('data', () => {
     const _languages = ref([]);
     const isLoadingLanguages = ref(false);
     const apiKeys = ref([]);
+    const availableVectorizers = ref([]);
 
     const defaultLanguages = [
         { label: 'English', value: 'en' },
@@ -365,6 +366,7 @@ export const useDataStore = defineStore('data', () => {
         const response = await apiClient.post('/api/datastores', storeData);
         ownedDataStores.value.push(response.data);
         uiStore.addNotification('Data store created successfully.', 'success');
+        return response.data;
     }
     async function updateDataStore(storeData) {
         const uiStore = useUiStore();
@@ -395,16 +397,16 @@ export const useDataStore = defineStore('data', () => {
         const response = await apiClient.get(`/api/datastores/${storeId}/shared-with`);
         return response.data || [];
     }
-
-    async function revectorizeStore({ storeId, vectorizerName }) {
-        const uiStore = useUiStore();
-        const tasksStore = useTasksStore();
-        const formData = new FormData();
-        formData.append('vectorizer_name', vectorizerName);
-        const response = await apiClient.post(`/api/store/${storeId}/revectorize`, formData);
-        const task = response.data;
-        uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
-        tasksStore.fetchTasks();
+    
+    async function fetchAvailableVectorizers() {
+        if (availableVectorizers.value.length > 0) return;
+        try {
+            const response = await apiClient.get('/api/datastores/available-vectorizers');
+            availableVectorizers.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch available vectorizers", error);
+            availableVectorizers.value = [];
+        }
     }
 
     async function fetchStoreFiles(storeId) {
@@ -412,22 +414,13 @@ export const useDataStore = defineStore('data', () => {
         return response.data || [];
     }
 
-    async function fetchStoreVectorizers(storeId) {
-        try {
-            const response = await apiClient.get(`/api/store/${storeId}/vectorizers`);
-            return response.data || { in_store: [], all_possible: [] };
-        } catch (error) {
-            return { in_store: [], all_possible: [] };
-        }
-    }
-    
     async function uploadFilesToStore({ storeId, formData }) {
         const uiStore = useUiStore();
         const tasksStore = useTasksStore();
         const response = await apiClient.post(`/api/store/${storeId}/upload-files`, formData);
         const task = response.data;
         uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
-        tasksStore.fetchTasks();
+        tasksStore.addTask(task);
     }
     async function deleteFileFromStore({ storeId, filename }) {
         const uiStore = useUiStore();
@@ -712,8 +705,9 @@ export const useDataStore = defineStore('data', () => {
 
         loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,
-        revokeShare, getSharedWithList, revectorizeStore,
-        fetchStoreFiles, fetchStoreVectorizers, uploadFilesToStore,
+        revokeShare, getSharedWithList,
+        fetchAvailableVectorizers, availableVectorizers,
+        fetchStoreFiles, uploadFilesToStore,
         deleteFileFromStore, 
         generateDataStoreGraph,
         updateDataStoreGraph,

@@ -1,7 +1,39 @@
-# backend/models/admin.py
+# [UPDATE] backend/models/admin.py
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, EmailStr
 import datetime
+
+class RagVectorizerAlias(BaseModel):
+    vectorizer_name: str
+    vectorizer_config: Dict[str, Any] = Field(default_factory=dict)
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+class RagVectorizerAliasUpdate(BaseModel):
+    alias_name: str
+    alias_data: RagVectorizerAlias
+
+class RagVectorizerAliasDelete(BaseModel):
+    alias_name: str
+
+class RAGBindingCreate(BaseModel):
+    alias: str
+    name: str
+    config: Dict[str, Any] = Field(default_factory=dict)
+    is_active: bool = True
+
+class RAGBindingUpdate(BaseModel):
+    alias: Optional[str] = None
+    name: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+class RAGBindingPublicAdmin(RAGBindingCreate):
+    id: int
+    model_aliases: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
 
 class LLMBindingCreate(BaseModel):
     alias: str
@@ -91,6 +123,12 @@ class TtsModelAlias(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
+    
+class RagModelAlias(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    allow_parameters_override: bool = True
 
 class ModelAliasUpdate(BaseModel):
     original_model_name: str
@@ -103,6 +141,10 @@ class TtiModelAliasUpdate(BaseModel):
 class TtsModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: TtsModelAlias
+    
+class RagModelAliasUpdate(BaseModel):
+    original_model_name: str
+    alias: RagModelAlias
 
 class ModelAliasDelete(BaseModel):
     original_model_name: str

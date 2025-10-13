@@ -1,4 +1,4 @@
-# backend/models/user.py
+# [UPDATE] backend/models/user.py
 import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, constr, EmailStr
@@ -97,7 +97,7 @@ class UserUpdate(BaseModel):
     fun_mode: Optional[bool] = False
     show_token_counter: Optional[bool] = None
     is_searchable: Optional[bool] = None
-    data_zone: Optional[str] = None # THIS LINE IS THE FIX
+    data_zone: Optional[str] = None
     coding_style_constraints: Optional[str] = None
     programming_language_preferences: Optional[str] = None
     tell_llm_os: Optional[bool] = None
@@ -252,6 +252,9 @@ class UserAuthDetails(UserLLMParams):
     tell_llm_os: bool
     share_dynamic_info_with_llm: bool
     message_font_size: int
+    allow_user_chunking_config: bool = True
+    default_chunk_size: int = 1024
+    default_chunk_overlap: int = 256
 
 class RelationshipStatus(BaseModel):
     is_following: bool

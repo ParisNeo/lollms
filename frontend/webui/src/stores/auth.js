@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/auth.js
+// [UPDATE] frontend/webui/src/stores/auth.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -24,6 +24,9 @@ export const useAuthStore = defineStore('auth', () => {
     const export_to_docx_enabled = ref(false);
     const export_to_xlsx_enabled = ref(false);
     const export_to_pptx_enabled = ref(false);
+    const allow_user_chunking_config = ref(true);
+    const default_chunk_size = ref(1024);
+    const default_chunk_overlap = ref(256);
 
     // --- WebSocket State ---
     const ws = ref(null);
@@ -71,9 +74,14 @@ export const useAuthStore = defineStore('auth', () => {
         try {
             const response = await apiClient.get('/api/auth/me');
             user.value = response.data;
-            if (user.value && user.value.message_font_size) {
+            if (user.value) {
                 const uiStore = useUiStore();
-                uiStore.message_font_size = user.value.message_font_size;
+                if (user.value.message_font_size) {
+                    uiStore.message_font_size = user.value.message_font_size;
+                }
+                allow_user_chunking_config.value = user.value.allow_user_chunking_config;
+                default_chunk_size.value = user.value.default_chunk_size;
+                default_chunk_overlap.value = user.value.default_chunk_overlap;
             }
             console.log("[AuthStore] User details refreshed.");
         } catch (error) {
@@ -194,8 +202,13 @@ export const useAuthStore = defineStore('auth', () => {
             loadingMessage.value = 'Authenticating...';
             const response = await apiClient.get('/api/auth/me');
             user.value = response.data;
-            if (user.value && user.value.message_font_size) {
-                uiStore.message_font_size = user.value.message_font_size;
+            if (user.value) {
+                if (user.value.message_font_size) {
+                    uiStore.message_font_size = user.value.message_font_size;
+                }
+                allow_user_chunking_config.value = user.value.allow_user_chunking_config;
+                default_chunk_size.value = user.value.default_chunk_size;
+                default_chunk_overlap.value = user.value.default_chunk_overlap;
             }
             
             connectWebSocket();
@@ -210,6 +223,7 @@ export const useAuthStore = defineStore('auth', () => {
             await Promise.all([
                 discussionsStore.loadDiscussions(),
                 discussionsStore.fetchSharedWithMe(),
+                discussionsStore.fetchDiscussionGroups(),
                 dataStore.loadAllInitialData()
             ]);
 
@@ -225,7 +239,7 @@ export const useAuthStore = defineStore('auth', () => {
 
                 if (targetView === 'last_discussion') {
                     if (discussionsStore.sortedDiscussions.length > 0) {
-                        await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id);
+                        await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions.id);
                     } else {
                         await discussionsStore.createNewDiscussion();
                     }
@@ -517,6 +531,9 @@ export const useAuthStore = defineStore('auth', () => {
         export_to_docx_enabled,
         export_to_xlsx_enabled,
         export_to_pptx_enabled,
+        allow_user_chunking_config,
+        default_chunk_size,
+        default_chunk_overlap,
         attemptInitialAuth, login, register, logout, fetchWelcomeInfo,
         updateUserProfile, updateUserPreferences, changePassword,
         ssoLoginWithPassword, ssoAuthorizeApplication,

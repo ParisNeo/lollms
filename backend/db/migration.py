@@ -1,4 +1,4 @@
-# backend/db/migration.py
+# [UPDATE] backend/db/migration.py
 import json
 import re
 import shutil
@@ -11,7 +11,7 @@ from sqlalchemy.ext.compiler import compiles
 
 from backend.config import SERVER_CONFIG, APP_SETTINGS, SAFE_STORE_DEFAULTS, APP_DATA_DIR, USERS_DIR_NAME
 from backend.db.base import CURRENT_DB_VERSION
-from backend.db.models.config import GlobalConfig, LLMBinding, TTIBinding, TTSBinding, DatabaseVersion
+from backend.db.models.config import GlobalConfig, LLMBinding, TTIBinding, TTSBinding, DatabaseVersion, RAGBinding
 from backend.db.models.service import App # Ensure App is imported
 from backend.db.models.prompt import SavedPrompt
 from backend.db.models.fun_fact import FunFactCategory, FunFact
@@ -22,6 +22,33 @@ from backend.db.models.image import UserImage
 from ascii_colors import ASCIIColors, trace_exception
 
 
+# This custom compiler allows us to drop tables with cascade in SQLite,
+# though SQLAlchemy's default DROP TABLE handles foreign keys if they are defined correctly.
+# Keeping this for robustness in case `drop table` implicitly needs CASCADE for some reason.
+@compiles(DropTable, "sqlite")
+def _drop_table(element, compiler, **kw):
+    return "DROP TABLE %s;" % compiler.process(element.element)
+
+# NEW HELPER FUNCTIONS FOR PORT UNIQUESS DURING MIGRATION
+def _get_all_existing_app_ports(connection) -> set[int]:
+    """Retrieves all non-null ports currently used by apps in the database."""
+    # Use a direct query to avoid ORM overhead during migration and ensure we get current state
+    return {r[0] for r in connection.execute(text("SELECT port FROM apps WHERE port IS NOT NULL")).fetchall()}
+
+def _find_unique_port_for_migration(connection, preferred_port: int, already_used_in_batch: set) -> int:
+    """
+    Finds a unique port during migration by checking against DB and in-batch used ports.
+    Starts searching from preferred_port upwards.
+    """
+    all_db_used_ports_at_start = _get_all_existing_app_ports(connection)
+    
+    current_port = preferred_port if preferred_port is not None and preferred_port >= 1024 else 9601 # Ensure valid start port
+    
+    while True:
+        if current_port in already_used_in_batch or current_port in all_db_used_ports_at_start:
+            current_port += 1
+        else:
+            return current_port
 # This custom compiler allows us to drop tables with cascade in SQLite,
 # though SQLAlchemy's default DROP TABLE handles foreign keys if they are defined correctly.
 # Keeping this for robustness in case `drop table` implicitly needs CASCADE for some reason.
@@ -150,8 +177,32 @@ def _bootstrap_global_settings(connection):
             "type": "float", "description": "Default generation temperature for new users.", "category": "Defaults"
         },
         "default_safe_store_vectorizer": {
-            "value": SAFE_STORE_DEFAULTS.get("global_default_vectorizer", "st:all-MiniLM-L6-v2"),
-            "type": "string", "description": "Default vectorizer assigned to newly created users.", "category": "Defaults"
+            "value": "default_st",
+            "type": "string", "description": "Default vectorizer alias or name for newly created datastores.", "category": "RAG"
+        },
+        "restrict_vectorizers_to_aliases": {
+            "value": False,
+            "type": "boolean",
+            "description": "If enabled, users can only choose from the admin-defined RAG Bindings when creating a new Data Store.",
+            "category": "RAG"
+        },
+        "default_chunk_size": {
+            "value": 1024,
+            "type": "integer",
+            "description": "The default number of characters per text chunk for RAG indexing.",
+            "category": "RAG"
+        },
+        "default_chunk_overlap": {
+            "value": 256,
+            "type": "integer",
+            "description": "The default number of overlapping characters between adjacent text chunks.",
+            "category": "RAG"
+        },
+        "allow_user_chunking_config": {
+            "value": True,
+            "type": "boolean",
+            "description": "If enabled, users can specify their own chunk size and overlap when creating a Data Store.",
+            "category": "RAG"
         },
         "force_model_mode": {
             "value": "disabled",
@@ -192,6 +243,10 @@ def _bootstrap_global_settings(connection):
         "tts_model_display_mode": {
             "value": "mixed",
             "type": "string", "description": "How TTS models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
+        },
+        "rag_model_display_mode": {
+            "value": "mixed",
+            "type": "string", "description": "How RAG models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
         },
         "lock_all_context_sizes": {
             "value": False,
@@ -1162,6 +1217,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         print("INFO: Created 'tts_bindings' table.")
         connection.commit()
 
+    # NEW: Create rag_bindings table if it doesn't exist
+    if not inspector.has_table("rag_bindings"):
+        RAGBinding.__table__.create(connection)
+        print("INFO: Created 'rag_bindings' table.")
+        connection.commit()
+
     # NEW: Create websocket_connections table if it doesn't exist
     if not inspector.has_table("websocket_connections"):
         WebSocketConnection.__table__.create(connection)
@@ -1172,6 +1233,30 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     # NEW: Bootstrap fun facts after tables are ensured
     if inspector.has_table("fun_fact_categories"):
         _bootstrap_fun_facts(connection)
+    
+    if not inspector.has_table("datastores"):
+        from backend.db.models.datastore import DataStore, SharedDataStoreLink
+        DataStore.__table__.create(connection)
+        SharedDataStoreLink.__table__.create(connection)
+        print("INFO: Created 'datastores' and 'shared_datastore_links' tables.")
+        connection.commit()
+    else:
+        datastore_columns_db = [col['name'] for col in inspector.get_columns('datastores')]
+        if 'vectorizer_name' not in datastore_columns_db:
+            connection.execute(text("ALTER TABLE datastores ADD COLUMN vectorizer_name VARCHAR"))
+        if 'vectorizer_config' not in datastore_columns_db:
+            connection.execute(text("ALTER TABLE datastores ADD COLUMN vectorizer_config JSON"))
+        if 'chunk_size' not in datastore_columns_db:
+            connection.execute(text("ALTER TABLE datastores ADD COLUMN chunk_size INTEGER"))
+        if 'chunk_overlap' not in datastore_columns_db:
+            connection.execute(text("ALTER TABLE datastores ADD COLUMN chunk_overlap INTEGER"))
+
+        # Backfill old null values
+        connection.execute(text("UPDATE datastores SET vectorizer_name = 'st' WHERE vectorizer_name IS NULL"))
+        connection.execute(text("UPDATE datastores SET vectorizer_config = '{}' WHERE vectorizer_config IS NULL"))
+        connection.execute(text(f"UPDATE datastores SET chunk_size = {SAFE_STORE_DEFAULTS.get('default_chunk_size', 1024)} WHERE chunk_size IS NULL"))
+        connection.execute(text(f"UPDATE datastores SET chunk_overlap = {SAFE_STORE_DEFAULTS.get('default_chunk_overlap', 256)} WHERE chunk_overlap IS NULL"))
+        connection.commit()
 
 
 def check_and_update_db_version(SessionLocal):

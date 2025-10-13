@@ -82,7 +82,7 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
                 # Memory
                 memory_parts = []
                 for mem in user_db.memories:
-                    date_str = f" (Created on: {mem.created_at.strftime('%Y-%m-%d')})" if user_db.include_memory_date_in_context else ""
+                    date_str = f" (Created on: {mem.created_at.strftime('%Y-%d-%m')})" if user_db.include_memory_date_in_context else ""
                     memory_parts.append(f"--- Memory: {mem.title}{date_str} ---\n{mem.content}\n--- End Memory: {mem.title} ---")
                 discussion.memory = "\n\n".join(memory_parts)
 

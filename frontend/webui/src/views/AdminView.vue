@@ -1,3 +1,4 @@
+// [UPDATE] frontend/webui/src/views/AdminView.vue
 <script setup>
 import { computed, defineAsyncComponent, markRaw, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -25,6 +26,7 @@ import IconLollms from '../assets/icons/IconLollms.vue';
 import IconHome from '../assets/icons/IconHome.vue';
 import IconBuild from '../assets/icons/IconBuild.vue';
 import IconMicrophone from '../assets/icons/IconMicrophone.vue';
+import IconDatabase from '../assets/icons/IconDatabase.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -42,6 +44,7 @@ const components = {
   llm_bindings: defineAsyncComponent(() => import('../components/admin/bindings/LLMBindingsSettings.vue')),
   tti_bindings: defineAsyncComponent(() => import('../components/admin/bindings/TTIBindingsSettings.vue')),
   tts_bindings: defineAsyncComponent(() => import('../components/admin/bindings/TTSBindingsSettings.vue')),
+  rag_bindings: defineAsyncComponent(() => import('../components/admin/bindings/RAGBindingsSettings.vue')),
   builders: defineAsyncComponent(() => import('../components/admin/BuildersSettings.vue')),
   ai_bot: defineAsyncComponent(() => import('../components/admin/AiBotSettings.vue')),
   services: defineAsyncComponent(() => import('../components/settings/ServicesSettings.vue')),
@@ -71,6 +74,7 @@ const sections = [
   { type: 'link', id: 'llm_bindings', name: 'LLM Bindings', icon: markRaw(IconCpuChip) },
   { type: 'link', id: 'tti_bindings', name: 'TTI Bindings', icon: markRaw(IconPhoto) },
   { type: 'link', id: 'tts_bindings', name: 'TTS Bindings', icon: markRaw(IconMicrophone) },
+  { type: 'link', id: 'rag_bindings', name: 'RAG Bindings', icon: markRaw(IconDatabase) },
   { type: 'link', id: 'builders', name: 'Code Builders', icon: markRaw(IconBuild) },
   { type: 'link', id: 'ai_bot', name: 'AI Bot', icon: markRaw(IconLollms) },
   { type: 'link', id: 'services', name: 'API Services', icon: markRaw(IconServer) },
