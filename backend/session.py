@@ -538,6 +538,8 @@ def get_safe_store_instance(
     
     if datastore_id not in session.get("safe_store_instances", {}):
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
+        ASCIIColors.info(f"Recovering vectorizer:{datastore_record.vectorizer_name}")
+        ASCIIColors.info(f"Configuration:{datastore_record.vectorizer_config}")
         try:
             ss_instance = safe_store.SafeStore(
                 db_path=ss_db_path,
