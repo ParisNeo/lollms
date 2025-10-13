@@ -553,7 +553,7 @@ def get_safe_store_instance(
             )
             session.setdefault("safe_store_instances", {})[datastore_id] = ss_instance
         except Exception as e:
-            traceback.print_exc()
+            trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Could not initialize SafeStore for {datastore_id}: {str(e)}")
             
     return cast(safe_store.SafeStore, session["safe_store_instances"][datastore_id])
