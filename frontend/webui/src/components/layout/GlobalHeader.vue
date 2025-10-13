@@ -36,6 +36,7 @@ const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 
 const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
 const pageTitle = computed(() => uiStore.pageTitle);
 const pageTitleIcon = computed(() => uiStore.pageTitleIcon);
+const mainView = computed(() => uiStore.mainView);
 
 const modelSearchTerm = ref('');
 const personalitySearchTerm = ref('');
@@ -403,7 +404,7 @@ function handleEditPersonality(personality, event) {
       <TasksManagerButton />      
       <!-- Slot for view-specific actions -->
       <slot name="actions"></slot>
-      <button v-if="isHomePageLayout" @click="uiStore.toggleDataZone()" class="btn-icon" :class="{'bg-gray-200 dark:bg-gray-700': isDataZoneVisible}" title="Toggle Data Zone">
+      <button v-if="isHomePageLayout && mainView !== 'feed'" @click="uiStore.toggleDataZone()" class="btn-icon" :class="{'bg-gray-200 dark:bg-gray-700': isDataZoneVisible}" title="Toggle Data Zone">
           <IconDataZone class="w-5 h-5" />
       </button>
     </div>

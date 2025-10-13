@@ -41,7 +41,7 @@ const isSearchVisible = ref(false);
 const isSharedVisible = ref(false);
 const showToolbox = ref(false);
 const isUngroupedVisible = ref(true);
-const isStarredVisible = ref(true); // Keep starred visible by default
+const isStarredVisible = ref(false); // Keep starred visible by default
 
 // Filter shared discussions based on search term
 const filteredSharedDiscussions = computed(() => {

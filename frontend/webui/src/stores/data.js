@@ -417,7 +417,9 @@ export const useDataStore = defineStore('data', () => {
     async function uploadFilesToStore({ storeId, formData }) {
         const uiStore = useUiStore();
         const tasksStore = useTasksStore();
-        const response = await apiClient.post(`/api/store/${storeId}/upload-files`, formData);
+        const response = await apiClient.post(`/api/store/${storeId}/upload-files`, formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
         const task = response.data;
         uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
         tasksStore.addTask(task);
@@ -426,6 +428,17 @@ export const useDataStore = defineStore('data', () => {
         const uiStore = useUiStore();
         await apiClient.delete(`/api/store/${storeId}/files/${encodeURIComponent(filename)}`);
         uiStore.addNotification(`File '${filename}' deleted.`, 'success');
+    }
+
+    async function fetchDataStoreDetails(storeId) {
+        try {
+            const response = await apiClient.get(`/api/store/${storeId}/details`);
+            return response.data;
+        } catch (error) {
+            console.error(`Failed to fetch details for datastore ${storeId}:`, error);
+            useUiStore().addNotification('Could not load datastore details.', 'error');
+            return null;
+        }
     }
 
     async function generateDataStoreGraph({ storeId, graphData }) {
@@ -454,6 +467,17 @@ export const useDataStore = defineStore('data', () => {
     async function queryDataStoreGraph({ storeId, query, max_k }) {
         const response = await apiClient.post(`/api/store/${storeId}/graph/query`, { query, max_k });
         return response.data;
+    }
+
+    async function queryDataStore({ storeId, query, top_k, min_similarity_percent }) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post(`/api/store/${storeId}/query`, { query, top_k, min_similarity_percent });
+            return response.data;
+        } catch (error) {
+            // Error is handled globally
+            return [];
+        }
     }
 
     async function wipeDataStoreGraph(storeId) {
@@ -709,10 +733,12 @@ export const useDataStore = defineStore('data', () => {
         fetchAvailableVectorizers, availableVectorizers,
         fetchStoreFiles, uploadFilesToStore,
         deleteFileFromStore, 
+        fetchDataStoreDetails,
         generateDataStoreGraph,
         updateDataStoreGraph,
         fetchDataStoreGraph,
         queryDataStoreGraph,
+        queryDataStore,
         wipeDataStoreGraph,
         addGraphNode,
         updateGraphNode,

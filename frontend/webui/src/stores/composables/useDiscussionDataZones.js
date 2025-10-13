@@ -254,12 +254,38 @@ export function useDiscussionDataZones(state, stores, getActions) {
         }
     }
 
+    async function uploadAndEmbedFilesToDataZone(discussionId, files) {
+        const formData = new FormData();
+        files.forEach(file => formData.append('files', file));
+        
+        try {
+            const response = await apiClient.post(`/api/files/extract_and_embed/${discussionId}`, formData);
+            const data = response.data;
+            
+            // Update discussion state from response
+            if (state.discussions.value[discussionId]) {
+                state.discussions.value[discussionId].discussion_data_zone = data.text_content;
+                state.discussions.value[discussionId].discussion_images = data.discussion_images || [];
+                state.discussions.value[discussionId].active_discussion_images = data.active_discussion_images || [];
+            }
+            
+            // Refresh context status to update progress bar
+            await getActions().fetchContextStatus(discussionId);
+            
+            stores.uiStore.addNotification(`${files.length} file(s) processed and content added to data zone.`, 'success');
+        } catch (error) {
+            // Error is handled globally by api client interceptor
+            console.error("File embedding failed", error);
+        }
+    }
+
 
     return {
         fetchContextStatus, fetchDataZones, updateDataZone,
         summarizeDiscussionDataZone, generateImageFromDataZone, memorizeLTM,
         handleDataZoneUpdate, setDiscussionDataZoneContent, refreshDataZones,
         updateLiveTokenCount, handleDiscussionImagesUpdated,
-        updateDiscussionRagStores
+        updateDiscussionRagStores,
+        uploadAndEmbedFilesToDataZone
     };
 }

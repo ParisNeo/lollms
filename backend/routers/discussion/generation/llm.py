@@ -61,6 +61,10 @@ from backend.session import (get_current_active_user,
 from backend.task_manager import task_manager, Task
 from backend.ws_manager import manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
+from lollms_client import MSG_TYPE, LollmsPersonality
+from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
+
+from backend.db import get_db
 
 
 
@@ -257,12 +261,24 @@ def build_llm_generation_router(router: APIRouter):
                         if hasattr(msg, 'images') and msg.images:
                             full_image_refs = [ f"data:image/png;base64,{img}" for img in msg.images or []]
 
+                        msg_metadata_raw = msg.metadata
+                        if isinstance(msg_metadata_raw, str):
+                            try: msg_metadata = json.loads(msg_metadata_raw) if msg_metadata_raw else {}
+                            except json.JSONDecodeError: msg_metadata = {}
+                        else:
+                            msg_metadata = msg_metadata_raw or {}
+
+                        sources = getattr(msg, 'sources', None)
+                        if sources is None:
+                            sources = msg_metadata.get('sources')
+
                         return {
                             "id": msg.id, "sender": msg.sender, "content": msg.content,
                             "created_at": msg.created_at, "parent_message_id": msg.parent_id,
                             "discussion_id": msg.discussion_id, "metadata": msg.metadata,
                             "tokens": msg.tokens, "sender_type": msg.sender_type,
                             "binding_name": msg.binding_name, "model_name": msg.model_name,
+                            "sources": sources,
                             "image_references": full_image_refs
                         }
                     
@@ -317,7 +333,6 @@ def build_llm_generation_router(router: APIRouter):
                 yield item
 
         return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
-
     @router.post("/{discussion_id}/stop_generation", status_code=200)
     async def stop_discussion_generation(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)):
         username = current_user.username

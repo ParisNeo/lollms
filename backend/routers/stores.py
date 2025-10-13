@@ -5,6 +5,10 @@ from pathlib import Path
 from typing import List, Dict, Optional, Any
 import traceback
 from ascii_colors import trace_exception
+import os
+from pydantic import BaseModel
+from sqlalchemy.orm import joinedload
+import json
 
 # Third-Party Imports
 from fastapi import (
@@ -20,7 +24,7 @@ from fastapi.responses import (
     JSONResponse,
 )
 from pydantic import BaseModel
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 
 
@@ -52,6 +56,7 @@ from backend.settings import settings
 try:
     import safe_store
     from safe_store import GraphStore
+    import numpy as np
 except ImportError:
     print(
         "WARNING: safe_store library not found. RAG features will be disabled. Install with: pip install safe_store[all]"
@@ -59,6 +64,7 @@ except ImportError:
     safe_store = None
     GraphStore = None
     SafeStoreLogLevel = None
+    np = None
 
 from backend.session import (
     get_current_active_user,
@@ -68,8 +74,15 @@ from backend.session import (
 )
 from backend.task_manager import task_manager, Task
 from backend.db.models.config import RAGBinding as DBRAGBinding
+from backend.routers.files import extract_text_from_file_bytes
 
 # --- NEW Pydantic Models for Graph Operations ---
+class DataStoreDetails(BaseModel):
+    size_bytes: int
+    chunk_count: int
+    graph_nodes_count: int
+    graph_edges_count: int
+    
 class GraphGenerationRequest(BaseModel):
     graph_type: str = "knowledge_graph"
     model_binding: str
@@ -82,6 +95,11 @@ class GraphQueryRequest(BaseModel):
     query: str
     max_k: int = 10
 
+class DataStoreQueryRequest(BaseModel):
+    query: str
+    top_k: int = 10
+    min_similarity_percent: float = 50.0
+
 class NodeData(BaseModel):
     label: str
     properties: Dict[str, Any] = {}
@@ -92,6 +110,23 @@ class EdgeData(BaseModel):
     label: str
     properties: Dict[str, Any] = {}
 
+def _sanitize_numpy(data: Any) -> Any:
+    """Recursively convert numpy types to standard Python types."""
+    if np is None:
+        return data
+        
+    if isinstance(data, dict):
+        return {k: _sanitize_numpy(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [_sanitize_numpy(item) for item in data]
+    if isinstance(data, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64,
+                      np.uint8, np.uint16, np.uint32, np.uint64)):
+        return int(data)
+    if isinstance(data, (np.float_, np.float16, np.float32, np.float64)):
+        return float(data)
+    if isinstance(data, np.ndarray):
+        return data.tolist()
+    return data
 
 # --- Task Functions ---
 def _to_task_info(db_task: DBTask) -> TaskInfo:
@@ -108,15 +143,22 @@ def _to_task_info(db_task: DBTask) -> TaskInfo:
     )
 
 
-def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_paths: List[str]):
+def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_paths: List[str], metadata_option: str, manual_metadata_json: str):
     db = next(get_db())
-    ss = None
     try:
         datastore_record = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
         if not datastore_record:
             raise Exception(f"Datastore with ID {datastore_id} not found.")
 
         ss = get_safe_store_instance(username, datastore_id, db, permission_level="read_write")
+        
+        lc = None
+        if metadata_option == 'auto-generate':
+            from backend.session import build_lollms_client_from_params
+            lc = build_lollms_client_from_params(username=username)
+
+        manual_metadata = json.loads(manual_metadata_json) if manual_metadata_json else {}
+
         processed_count = 0
         error_count = 0
         total_files = len(file_paths)
@@ -132,8 +174,40 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
                 task.log(f"Processing file {i+1}/{total_files}: {file_path.name}")
                 
                 try:
+                    metadata = None
+                    if metadata_option == 'manual':
+                        metadata = manual_metadata.get(file_path.name)
+                        if metadata:
+                            # Convert authors string to list if it's a string
+                            if 'authors' in metadata and isinstance(metadata['authors'], str):
+                                metadata['authors'] = [author.strip() for author in metadata['authors'].split(',') if author.strip()]
+                            task.log(f"Using manual metadata: {metadata}")
+
+                    elif metadata_option == 'auto-generate' and lc:
+                        task.log(f"Generating metadata for {file_path.name}")
+                        file_bytes = file_path.read_bytes()
+                        text_content, _ = extract_text_from_file_bytes(file_bytes, file_path.name)
+
+                        if text_content.strip():
+                            metadata_prompt = "Generate short metadata for this document. Extract the title, a brief subject, and any authors mentioned. Present this as a JSON object with keys 'title', 'subject', and 'authors' (as a list of strings)."
+                            schema = {
+                                "type": "object",
+                                "properties": {
+                                    "title": {"type": "string", "description": "A concise and descriptive title for the document."},
+                                    "subject": {"type": "string", "description": "The main subject or topic of the document."},
+                                    "authors": {"type": "array", "items": {"type": "string"}, "description": "A list of authors, if any are mentioned."}
+                                },
+                                "required": ["title", "subject"]
+                            }
+                            truncated_text = text_content[:12000]
+                            metadata = lc.generate_structured_content(truncated_text, metadata_prompt, schema)
+                            task.log(f"Generated metadata: {metadata}")
+                        else:
+                            task.log(f"Skipping metadata generation for empty file {file_path.name}", "WARNING")
+
                     ss.add_document(
-                        str(file_path)
+                        str(file_path),
+                        metadata=metadata
                     )
                     processed_count += 1
                     try:
@@ -251,10 +325,60 @@ def _update_graph_task(task: Task, username: str, datastore_id: str, request_dat
 # --- SafeStore File Management API (now per-datastore) ---
 store_files_router = APIRouter(prefix="/api/store/{datastore_id}", tags=["SafeStore RAG & File Management"])
 
+@store_files_router.get("/details", response_model=DataStoreDetails)
+async def get_datastore_details(
+    datastore_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    try:
+        # This will also handle permission checks
+        ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_query")
+        
+        datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+        if not datastore_record:
+             raise HTTPException(status_code=404, detail="Datastore not found")
+
+        owner_username = datastore_record.owner.username
+
+        db_path = get_datastore_db_path(owner_username, datastore_id)
+        
+        size_bytes = 0
+        if db_path.exists():
+            size_bytes = os.path.getsize(db_path)
+        
+        chunk_count = 0
+        nodes_count = 0
+        edges_count = 0
+        with ss:
+            chunk_count = ss.db.count('chunks')
+            if GraphStore:
+                try:
+                    gs = GraphStore(ss)
+                    nodes_count = gs.count_nodes()
+                    edges_count = gs.count_relationships()
+                except Exception as graph_err:
+                    print(f"Could not get graph stats for datastore {datastore_id}: {graph_err}")
+
+        return DataStoreDetails(
+            size_bytes=size_bytes, 
+            chunk_count=chunk_count,
+            graph_nodes_count=nodes_count,
+            graph_edges_count=edges_count
+        )
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Error getting datastore details: {e}")
+
 @store_files_router.post("/upload-files", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED) 
 async def upload_rag_documents_to_datastore(
     datastore_id: str,
     files: List[UploadFile] = File(...),
+    metadata_option: str = Form("none"),
+    manual_metadata_json: str = Form("null"),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> TaskInfo:
@@ -279,7 +403,7 @@ async def upload_rag_documents_to_datastore(
     db_task = task_manager.submit_task(
         name=f"Add files to DataStore: {datastore_record.name}",
         target=_upload_rag_files_task,
-        args=(current_user.username, datastore_id, saved_file_paths),
+        args=(current_user.username, datastore_id, saved_file_paths, metadata_option, manual_metadata_json),
         description=f"Adding {len(files)} files to the '{datastore_record.name}' DataStore.",
         owner_username=current_user.username
     )
@@ -299,7 +423,7 @@ async def list_rag_documents_in_datastore(datastore_id: str, current_user: UserA
             original_path_str = doc_meta.get("file_path")
             if original_path_str:
                 filename = Path(original_path_str).name
-                managed_docs.append(SafeStoreDocumentInfo(filename=filename))
+                managed_docs.append(SafeStoreDocumentInfo(filename=filename, metadata=doc_meta.get("metadata")))
 
     except Exception as e: 
         raise HTTPException(status_code=500, detail=f"Error listing RAG docs for datastore {datastore_id}: {e}")
@@ -331,6 +455,30 @@ async def delete_rag_document_from_datastore(datastore_id: str, filename: str, c
     except Exception as e:
         if file_to_delete_path.exists(): raise HTTPException(status_code=500, detail=f"Could not delete '{s_filename}' from datastore {datastore_id}: {e}")
         else: return {"message": f"Document '{s_filename}' file deleted, potential DB cleanup issue in datastore {datastore_id}."}
+
+@store_files_router.post("/query", response_model=List[Dict])
+async def query_datastore(
+    datastore_id: str,
+    request_data: DataStoreQueryRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> List[Dict]:
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db)
+        with ss:
+            results = ss.query(
+                request_data.query, 
+                top_k=request_data.top_k, 
+                min_similarity_percent=request_data.min_similarity_percent
+            )
+        sanitized_results = _sanitize_numpy(results)
+        return sanitized_results
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Error querying datastore: {e}")
 
 @store_files_router.post("/graph/generate", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def generate_datastore_graph(
@@ -406,7 +554,11 @@ async def get_datastore_graph(
         gs = GraphStore(ss, llm_executor_callback=None)
         nodes = gs.get_all_nodes_for_visualization(limit=5000)
         edges = gs.get_all_relationships_for_visualization(limit=10000)
-        return {"nodes": nodes, "edges": edges}
+        
+        sanitized_nodes = _sanitize_numpy(nodes)
+        sanitized_edges = _sanitize_numpy(edges)
+
+        return {"nodes": sanitized_nodes, "edges": sanitized_edges}
     except Exception as e:
         trace_exception(e)
         return {"nodes": [], "edges": []}
@@ -430,7 +582,8 @@ async def query_datastore_graph(
         ss = get_safe_store_instance(current_user.username, datastore_id, db)
         gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
         results = gs.query_graph(request_data.query, output_mode="chunks_summary")
-        return results
+        sanitized_results = _sanitize_numpy(results)
+        return sanitized_results
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Error querying graph: {e}")
@@ -442,7 +595,7 @@ async def wipe_datastore_graph(
     db: Session = Depends(get_db)
 ):
     if not GraphStore:
-        raise HTTPException(status_code=501, detail="GraphStore not available.")
+        raise HTTPException(status_code=501, detail="GraphStore is not available.")
     
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
@@ -467,7 +620,7 @@ async def add_graph_node(
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
         gs = GraphStore(ss)
         node_id = gs.add_node(node_data.label, node_data.properties)
-        return {"id": node_id, "label": node_data.label, "properties": node_data.properties}
+        return _sanitize_numpy({"id": node_id, "label": node_data.label, "properties": node_data.properties})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -484,7 +637,7 @@ async def update_graph_node(
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
         gs = GraphStore(ss)
         gs.update_node(node_id, node_data.label, node_data.properties)
-        return {"id": node_id, "label": node_data.label, "properties": node_data.properties}
+        return _sanitize_numpy({"id": node_id, "label": node_data.label, "properties": node_data.properties})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -515,7 +668,7 @@ async def add_graph_edge(
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
         gs = GraphStore(ss)
         edge_id = gs.add_relationship(edge_data.source_id, edge_data.target_id, edge_data.label, edge_data.properties)
-        return {"id": edge_id, **edge_data.model_dump()}
+        return _sanitize_numpy({"id": edge_id, **edge_data.model_dump()})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

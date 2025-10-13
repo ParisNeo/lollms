@@ -202,7 +202,7 @@ const hasEvents = computed(() => props.message.events && props.message.events.le
 const hasSources = computed(() => props.message.sources && props.message.sources.length > 0);
 const sortedSources = computed(() => {
     if (!hasSources.value) return [];
-    return [...props.message.sources].sort((a, b) => (b.similarity_percent || 0) - (a.similarity_percent || 0));
+    return [...props.message.sources].sort((a, b) => (b.score || 0) - (a.score || 0));
 });
 
 const lastEventSummary = computed(() => {
@@ -548,7 +548,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                         <div v-for="source in sortedSources" :key="source.title" @click="showSourceDetails(source)" class="source-item">
                             <div class="similarity-chip" :class="getSimilarityColor(source.score)" :title="typeof source.score === 'number' ? `Similarity: ${(source.score).toFixed(1)}%` : 'Similarity: N/A'"></div>
                             <div class="truncate flex-grow" :title="source.title">{{ source.title }}</div>
-                            <div v-if="typeof source.similarity_percent === 'number'" class="font-mono text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{{ (source.score).toFixed(1) }}%</div>
+                            <div v-if="typeof source.score === 'number'" class="font-mono text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{{ (source.score).toFixed(1) }}%</div>
                         </div>
                     </div>
                 </div>

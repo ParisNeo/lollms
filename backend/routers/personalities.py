@@ -1,6 +1,4 @@
 # backend/routers/personalities.py
-
-# Standard Library Imports
 import traceback
 import json
 from typing import List, Dict, Optional
@@ -256,7 +254,9 @@ def get_personality_public_from_db(db_personality: DBPersonality, owner_username
         updated_at=db_personality.updated_at,
         is_public=db_personality.is_public,
         active_mcps=db_personality.active_mcps or [],
-        owner_username=owner_username
+        owner_username=owner_username,
+        data_source_type=db_personality.data_source_type,
+        data_source=db_personality.data_source
     )
 
 @personalities_router.post("", response_model=PersonalityPublic, status_code=201)
