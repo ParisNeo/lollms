@@ -1,11 +1,11 @@
-# backend/routers/image_studio.py
+# [UPDATE] lollms/backend/routers/image_studio.py
 import base64
 import uuid
 import json
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from werkzeug.utils import secure_filename
@@ -13,28 +13,26 @@ from ascii_colors import trace_exception
 
 from backend.db import get_db
 from backend.db.models.image import UserImage
-from backend.models import UserAuthDetails
+from backend.models import UserAuthDetails, TaskInfo
 from backend.models.image import (
     UserImagePublic, ImageGenerationRequest, MoveImageToDiscussionRequest, 
     ImageEditRequest, ImagePromptEnhancementRequest, ImagePromptEnhancementResponse
 )
 from backend.session import (
     get_current_active_user, get_user_data_root, 
-    build_lollms_client_from_params, get_user_lollms_client
+    build_lollms_client_from_params, get_user_lollms_client,
+    get_user_images_path
 )
 from backend.config import IMAGES_DIR_NAME
 from backend.discussion import get_user_discussion
+from backend.task_manager import task_manager
+from backend.tasks.discussion_tasks import _to_task_info, _image_studio_generate_task, _image_studio_edit_task
 
 image_studio_router = APIRouter(
     prefix="/api/image-studio",
     tags=["Image Studio"],
     dependencies=[Depends(get_current_active_user)]
 )
-
-def get_user_images_path(username: str) -> Path:
-    path = get_user_data_root(username) / IMAGES_DIR_NAME
-    path.mkdir(parents=True, exist_ok=True)
-    return path
 
 @image_studio_router.get("", response_model=List[UserImagePublic])
 async def get_user_images(
@@ -59,124 +57,42 @@ async def get_image_file(
         
     return FileResponse(str(file_path))
 
-
-@image_studio_router.post("/generate", response_model=List[UserImagePublic])
+@image_studio_router.post("/generate", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def generate_image(
     request: ImageGenerationRequest,
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     model_full_name = request.model or current_user.tti_binding_model_name
     if not model_full_name or '/' not in model_full_name:
         raise HTTPException(status_code=400, detail="A valid TTI model must be selected in your settings or provided in the request.")
 
-    tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
-    
-    lc = build_lollms_client_from_params(
-        username=current_user.username,
-        tti_binding_alias=tti_binding_alias,
-        tti_model_name=tti_model_name
+    db_task = task_manager.submit_task(
+        name=f"Generating {request.n} image(s): {request.prompt[:30]}...",
+        target=_image_studio_generate_task,
+        args=(current_user.username, request.model_dump()),
+        description=f"Generating {request.n} image(s) with prompt: '{request.prompt[:50]}...'",
+        owner_username=current_user.username
     )
-    if not lc.tti:
-        raise HTTPException(status_code=500, detail=f"TTI binding '{tti_binding_alias}' is not available.")
+    return _to_task_info(db_task)
 
-    user_images_path = get_user_images_path(current_user.username)
-    generated_images = []
 
-    generation_params = request.model_dump(exclude_unset=True)
-    generation_params.pop('model', None)
-    generation_params.pop('n', None)
-    size = generation_params["size"].split("x")
-    #generation_params.pop('size', None)
-    width = int(size[0])
-    height = int(size[1])    
-    generation_params["width"]=width
-    generation_params["height"]=height
-    print(generation_params)
-
-    for _ in range(request.n):
-        image_bytes = lc.tti.generate_image(**generation_params)
-        
-        filename = f"{uuid.uuid4().hex}.png"
-        file_path = user_images_path / filename
-        with open(file_path, "wb") as f:
-            f.write(image_bytes)
-        
-        new_image = UserImage(
-            owner_user_id=current_user.id,
-            filename=filename,
-            prompt=request.prompt,
-            model=model_full_name
-        )
-        db.add(new_image)
-        generated_images.append(new_image)
-
-    db.commit()
-    for img in generated_images:
-        db.refresh(img)
-        
-    return generated_images
-
-@image_studio_router.post("/edit", response_model=UserImagePublic)
+@image_studio_router.post("/edit", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def edit_image(
     request: ImageEditRequest,
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     model_full_name = request.model or current_user.tti_binding_model_name
     if not model_full_name or '/' not in model_full_name:
         raise HTTPException(status_code=400, detail="A valid TTI model must be selected.")
 
-    tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
-    
-    lc = build_lollms_client_from_params(
-        username=current_user.username,
-        tti_binding_alias=tti_binding_alias,
-        tti_model_name=tti_model_name
+    db_task = task_manager.submit_task(
+        name=f"Editing image: {request.prompt[:30]}...",
+        target=_image_studio_edit_task,
+        args=(current_user.username, request.model_dump()),
+        description=f"Editing image(s) with prompt: '{request.prompt[:50]}...'",
+        owner_username=current_user.username
     )
-    if not lc.tti:
-        raise HTTPException(status_code=500, detail=f"TTI binding '{tti_binding_alias}' is not available.")
-
-    user_images_path = get_user_images_path(current_user.username)
-    
-    source_images_b64 = []
-    for image_id in request.image_ids:
-        image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
-        if not image_record:
-            raise HTTPException(status_code=404, detail=f"Image with ID {image_id} not found.")
-        file_path = user_images_path / image_record.filename
-        if not file_path.is_file():
-            raise HTTPException(status_code=404, detail=f"Image file for {image_id} not found on disk.")
-        
-        with open(file_path, "rb") as f:
-            source_images_b64.append(base64.b64encode(f.read()).decode('utf-8'))
-
-    edited_image_bytes = lc.tti.edit_image(
-        images=source_images_b64, 
-        prompt=request.prompt,
-        negative_prompt=request.negative_prompt,
-        mask=request.mask
-    )
-
-    if not edited_image_bytes:
-        raise HTTPException(status_code=500, detail="Image generation failed.")
-
-    new_filename = f"{uuid.uuid4().hex}.png"
-    new_file_path = user_images_path / new_filename
-    with open(new_file_path, "wb") as f:
-        f.write(edited_image_bytes)
-    
-    new_image_record = UserImage(
-        owner_user_id=current_user.id,
-        filename=new_filename,
-        prompt=f"Edited from {len(source_images_b64)} image(s): {request.prompt}" + (f"\nNegative: {request.negative_prompt}" if request.negative_prompt else ""),
-        model=model_full_name
-    )
-    db.add(new_image_record)
-    db.commit()
-    db.refresh(new_image_record)
-    
-    return new_image_record
+    return _to_task_info(db_task)
 
 @image_studio_router.post("/upload", response_model=List[UserImagePublic])
 async def upload_images(
@@ -196,6 +112,7 @@ async def upload_images(
             buffer.write(content)
 
         new_image = UserImage(
+            id=str(uuid.uuid4()),
             owner_user_id=current_user.id,
             filename=filename,
             prompt="Uploaded image"

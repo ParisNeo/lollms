@@ -1,15 +1,42 @@
-// frontend/webui/src/stores/images.js
+// [UPDATE] lollms/frontend/webui/src/stores/images.js
 import { defineStore } from 'pinia';
-import { ref } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
+import { useTasksStore } from './tasks';
+import useEventBus from '../services/eventBus';
 
 export const useImageStore = defineStore('images', () => {
     const images = ref([]);
     const isLoading = ref(false);
-    const isGenerating = ref(false);
+    const isGenerating = ref(false); // Used for short submission loading state
     const isEnhancing = ref(false);
     const uiStore = useUiStore();
+    const tasksStore = useTasksStore();
+    const { on, off } = useEventBus();
+
+    function handleTaskCompletion(task) {
+        const isImageTask = task.name.startsWith('Generating') && task.name.includes('image(s)');
+        const isEditTask = task.name.startsWith('Editing image:');
+
+        if ((isImageTask || isEditTask) && task.status === 'completed' && task.result) {
+            const newItems = Array.isArray(task.result) ? task.result : [task.result];
+            if (newItems.length > 0) {
+                images.value.unshift(...newItems);
+                uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
+            }
+        } else if ((isImageTask || isEditTask) && task.status === 'failed') {
+            uiStore.addNotification('Image generation failed. Check task manager for details.', 'error');
+        }
+    }
+
+    onMounted(() => {
+        on('task:completed', handleTaskCompletion);
+    });
+
+    onUnmounted(() => {
+        off('task:completed', handleTaskCompletion);
+    });
 
     async function fetchImages() {
         isLoading.value = true;
@@ -28,12 +55,8 @@ export const useImageStore = defineStore('images', () => {
         isGenerating.value = true;
         try {
             const response = await apiClient.post('/api/image-studio/generate', payload);
-            if (Array.isArray(response.data)) {
-                images.value.unshift(...response.data);
-            }
-            uiStore.addNotification(`${response.data?.length || 0} image(s) generated successfully!`, 'success');
-        } catch (error) {
-            // Handled globally
+            tasksStore.addTask(response.data);
+            uiStore.addNotification(`Image generation started for ${payload.n} image(s). Check task manager for progress.`, 'info');
         } finally {
             isGenerating.value = false;
         }
@@ -43,12 +66,8 @@ export const useImageStore = defineStore('images', () => {
         isGenerating.value = true;
         try {
             const response = await apiClient.post('/api/image-studio/edit', payload);
-            if (response.data) {
-                images.value.unshift(response.data);
-            }
-            uiStore.addNotification(`Image edited successfully!`, 'success');
-        } catch (error) {
-            // Handled by global interceptor
+            tasksStore.addTask(response.data);
+            uiStore.addNotification('Image edit task started. Check task manager for progress.', 'info');
         } finally {
             isGenerating.value = false;
         }

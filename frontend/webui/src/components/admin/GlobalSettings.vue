@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/admin/GlobalSettings.vue -->
 <script setup>
 import { ref, watch, onMounted, computed } from 'vue';
 import { useAdminStore } from '../../stores/admin';
@@ -15,6 +16,15 @@ let pristineState = '{}';
 // State to track which JSON fields are in edit mode
 const jsonEditStates = ref({});
 
+// NEW: UI Level options for the dropdown
+const uiLevels = [
+    { value: 0, label: 'Beginner' },
+    { value: 1, label: 'Novice' },
+    { value: 2, label: 'Intermediate' },
+    { value: 3, label: 'Advanced' },
+    { value: 4, label: 'Expert' }
+];
+
 const renderedSettingsByCategory = computed(() => {
     const allSettings = adminStore.globalSettings;
     const settingsToRender = allSettings.filter(setting => 
@@ -23,12 +33,12 @@ const renderedSettingsByCategory = computed(() => {
         setting.key !== 'password_recovery_mode'
     );
     
-    // Define the order of categories
+    // UPDATE: Add 'Defaults' to the category order
     const categoryOrder = [
         'Registration',
+        'Defaults',
         'Authentication',
         'Services',
-        'Defaults',
         'Global LLM Overrides'
     ];
 
@@ -172,6 +182,14 @@ async function handleSave() {
                                 <select :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
                                     <option value="direct">Direct (instantly active)</option>
                                     <option value="admin_approval">Admin Approval</option>
+                                </select>
+                            </div>
+
+                            <!-- NEW: Special Case for default_user_ui_level -->
+                            <div v-else-if="setting.key === 'default_user_ui_level'">
+                                <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
+                                <select :id="setting.key" v-model.number="form[setting.key]" class="input-field mt-1">
+                                    <option v-for="level in uiLevels" :key="level.value" :value="level.value">{{ level.label }}</option>
                                 </select>
                             </div>
 

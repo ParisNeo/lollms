@@ -1,3 +1,4 @@
+# [UPDATE] lollms/backend/tasks/discussion_tasks.py
 # backend/tasks/discussion_tasks.py
 # backend/tasks/discussion_tasks.py
 # Standard Library Imports
@@ -59,8 +60,13 @@ from backend.session import (get_current_active_user,
                              get_safe_store_instance,
                              get_user_discussion_assets_path,
                              get_user_lollms_client,
-                             get_user_temp_uploads_path, user_sessions)
+                             get_user_temp_uploads_path, user_sessions,
+                             build_lollms_client_from_params,
+                             get_user_images_path)
 from backend.task_manager import task_manager, Task
+from backend.db.models.image import UserImage
+from backend.models.image import UserImagePublic
+
 
 # safe_store is needed for RAG callbacks
 try:
@@ -447,3 +453,133 @@ def _prune_empty_discussions_task(task: Task, username: str):
             db.rollback()
             task.log(f"A critical database error occurred during the commit phase: {e}", level="CRITICAL")
             raise e
+
+def _image_studio_generate_task(task: Task, username: str, request_data: dict):
+    task.log("Starting image studio generation task...")
+    task.set_progress(5)
+
+    with task.db_session_factory() as db:
+        user = db.query(DBUser).filter(DBUser.username == username).first()
+        if not user:
+            raise Exception(f"User '{username}' not found.")
+
+        model_full_name = request_data.get('model') or user.tti_binding_model_name
+        if not model_full_name or '/' not in model_full_name:
+            raise Exception("A valid TTI model must be selected.")
+
+        tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
+        
+        lc = build_lollms_client_from_params(
+            username=username,
+            tti_binding_alias=tti_binding_alias,
+            tti_model_name=tti_model_name
+        )
+        if not lc.tti:
+            raise Exception(f"TTI binding '{tti_binding_alias}' is not available.")
+
+        user_images_path = get_user_images_path(username)
+        generated_images_data = []
+
+        generation_params = request_data.copy()
+        generation_params.pop('model', None)
+        n_images = generation_params.pop('n', 1)
+        size_str = generation_params.pop('size', "1024x1024")
+        
+        try:
+            width_str, height_str = size_str.split('x')
+            generation_params["width"] = int(width_str)
+            generation_params["height"] = int(height_str)
+        except ValueError:
+            task.log(f"Invalid size format '{size_str}'. Using default 1024x1024.", "WARNING")
+            generation_params["width"] = 1024
+            generation_params["height"] = 1024
+
+
+        for i in range(n_images):
+            if task.cancellation_event.is_set():
+                task.log("Task cancelled by user.", "WARNING")
+                break
+            task.log(f"Generating image {i+1}/{n_images}...")
+            image_bytes = lc.tti.generate_image(**generation_params)
+            
+            filename = f"{uuid.uuid4().hex}.png"
+            file_path = user_images_path / filename
+            with open(file_path, "wb") as f:
+                f.write(image_bytes)
+            
+            new_image = UserImage(
+                id=str(uuid.uuid4()),
+                owner_user_id=user.id,
+                filename=filename,
+                prompt=request_data.get('prompt'),
+                model=model_full_name
+            )
+            db.add(new_image)
+            db.commit()
+            db.refresh(new_image)
+
+            generated_images_data.append(json.loads(UserImagePublic.from_orm(new_image).model_dump_json()))
+            
+            task.set_progress(5 + int(90 * (i + 1) / n_images))
+
+    task.log("Image generation completed.")
+    task.set_progress(100)
+    return generated_images_data
+
+def _image_studio_edit_task(task: Task, username: str, request_data: dict):
+    task.log("Starting image studio edit task...")
+    task.set_progress(5)
+    with task.db_session_factory() as db:
+        user = db.query(DBUser).filter(DBUser.username == username).first()
+        if not user: raise Exception(f"User '{username}' not found.")
+
+        model_full_name = request_data.get('model') or user.tti_binding_model_name
+        if not model_full_name or '/' not in model_full_name: raise Exception("A valid TTI model must be selected.")
+
+        tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
+        lc = build_lollms_client_from_params(username=username, tti_binding_alias=tti_binding_alias, tti_model_name=tti_model_name)
+        if not lc.tti: raise Exception(f"TTI binding '{tti_binding_alias}' is not available.")
+
+        user_images_path = get_user_images_path(username)
+        source_images_b64 = []
+        task.log("Loading source images...")
+        for image_id in request_data.get('image_ids', []):
+            image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == user.id).first()
+            if image_record:
+                file_path = user_images_path / image_record.filename
+                if file_path.is_file():
+                    with open(file_path, "rb") as f:
+                        source_images_b64.append(base64.b64encode(f.read()).decode('utf-8'))
+        
+        if not source_images_b64: raise Exception("No valid source images found for editing.")
+        task.set_progress(20)
+
+        task.log("Sending edit request to binding...")
+        edited_image_bytes = lc.tti.edit_image(
+            images=source_images_b64,
+            prompt=request_data.get('prompt', ''),
+            negative_prompt=request_data.get('negative_prompt'),
+            mask=request_data.get('mask')
+        )
+        task.set_progress(80)
+
+        if not edited_image_bytes: raise Exception("Image editing failed to return data.")
+
+        filename = f"{uuid.uuid4().hex}.png"
+        file_path = user_images_path / filename
+        with open(file_path, "wb") as f: f.write(edited_image_bytes)
+
+        new_image = UserImage(
+            id=str(uuid.uuid4()),
+            owner_user_id=user.id,
+            filename=filename,
+            prompt=f"Edited from {len(source_images_b64)} image(s): {request_data.get('prompt')}",
+            model=model_full_name
+        )
+        db.add(new_image)
+        db.commit()
+        db.refresh(new_image)
+
+        task.log("Image editing completed and saved.")
+        task.set_progress(100)
+        return json.loads(UserImagePublic.from_orm(new_image).model_dump_json())

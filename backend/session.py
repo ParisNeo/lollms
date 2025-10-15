@@ -1,4 +1,4 @@
-# [UPDATE] backend/session.py
+# [UPDATE] lollms/backend/session.py
 import json
 import traceback
 import datetime
@@ -29,7 +29,8 @@ from backend.config import (
     DISCUSSION_ASSETS_DIR_NAME,
     DM_ASSETS_DIR_NAME,
     DATASTORES_DIR_NAME,
-    VOICES_DIR_NAME
+    VOICES_DIR_NAME,
+    IMAGES_DIR_NAME
 )
 from backend.settings import settings
 from backend.security import create_access_token
@@ -89,6 +90,17 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         db_was_created = True
 
     try:
+        # Enforce Expert UI for admins
+        if db_user.is_admin and db_user.user_ui_level != 4:
+            print(f"INFO: Correcting UI level for admin user '{db_user.username}' to Expert (4).")
+            db_user.user_ui_level = 4
+            try:
+                db.commit()
+                db.refresh(db_user)
+            except Exception as e:
+                print(f"ERROR: Could not persist corrected UI level for admin '{db_user.username}'. Error: {e}")
+                db.rollback()
+        
         if username not in user_sessions:
             print(f"INFO: Re-initializing session for {username} on first request after server start.")
             session_llm_params = {
@@ -211,7 +223,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     finally:
         if db_was_created:
             db.close()
-            
+         
 def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_active_user)) -> UserAuthDetails:
     if not current_user.is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator privileges required.")
@@ -565,6 +577,11 @@ def get_user_data_root(username: str) -> Path:
     path = APP_DATA_DIR / USERS_DIR_NAME / safe_username
     path.mkdir(parents=True, exist_ok=True)
     (path / VOICES_DIR_NAME).mkdir(exist_ok=True)
+    return path
+
+def get_user_images_path(username: str) -> Path:
+    path = get_user_data_root(username) / IMAGES_DIR_NAME
+    path.mkdir(parents=True, exist_ok=True)
     return path
 
 def get_user_discussion_path(username: str) -> Path:

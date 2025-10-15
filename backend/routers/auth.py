@@ -264,7 +264,9 @@ async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(g
         safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
         llm_ctx_size=settings.get("default_llm_ctx_size"),
         llm_temperature=settings.get("default_llm_temperature"),
-        first_login_done=True
+        first_login_done=True,
+        user_ui_level=settings.get("default_user_ui_level", 0),
+        auto_title=settings.get("default_auto_title", False)
     )
 
     try:
@@ -494,6 +496,7 @@ async def create_first_admin(user_data: UserCreateAdmin, db: Session = Depends(g
         llm_ctx_size=settings.get("default_llm_ctx_size"),
         llm_temperature=settings.get("default_llm_temperature"),
         user_ui_level=4,
+        auto_title=True,
         first_login_done=False
     )
 

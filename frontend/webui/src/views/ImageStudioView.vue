@@ -1,4 +1,4 @@
-<!-- frontend/webui/src/views/ImageStudioView.vue -->
+<!-- [UPDATE] lollms/frontend/webui/src/views/ImageStudioView.vue -->
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, markRaw } from 'vue';
 import { useRouter } from 'vue-router';
@@ -7,8 +7,10 @@ import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
 import { useAuthStore } from '../stores/auth';
 import { useDiscussionsStore } from '../stores/discussions';
+import { useTasksStore } from '../stores/tasks';
 import { storeToRefs } from 'pinia';
 import AuthenticatedImage from '../components/ui/AuthenticatedImage.vue';
+import TaskProgressIndicator from '../components/ui/TaskProgressIndicator.vue';
 
 // Icons
 import IconPhoto from '../assets/icons/IconPhoto.vue';
@@ -28,10 +30,12 @@ const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
+const tasksStore = useTasksStore();
 const router = useRouter();
 
 const { images, isLoading, isGenerating, isEnhancing } = storeToRefs(imageStore);
 const { user } = storeToRefs(authStore);
+const { imageGenerationTasks, imageGenerationTasksCount } = storeToRefs(tasksStore);
 
 const prompt = ref('');
 const negativePrompt = ref('');
@@ -120,7 +124,7 @@ async function handleGenerateOrApply() {
         model: selectedModel.value,
         size: imageSize.value,
         seed: seed.value,
-        generation_params: generationParams.value,
+        ...generationParams.value
     };
 
     if (isSelectionMode.value) {
@@ -260,6 +264,21 @@ async function handlePaste(event) {
                     </label>
                 </div>
 
+                <!-- NEW: Active Tasks Section -->
+                <div v-if="imageGenerationTasksCount > 0" class="flex-shrink-0 mb-4">
+                    <h4 class="text-md font-semibold mb-2 text-gray-700 dark:text-gray-300">Generations in Progress ({{ imageGenerationTasksCount }})</h4>
+                    <div class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar p-2 bg-gray-100 dark:bg-gray-700/50 rounded-lg">
+                        <div v-for="task in imageGenerationTasks" :key="task.id" class="bg-white dark:bg-gray-800 p-2 rounded-md shadow-sm">
+                            <TaskProgressIndicator 
+                                :task="task" 
+                                show-name 
+                                @cancel="tasksStore.cancelTask(task.id)" 
+                                @view="uiStore.openModal('tasksManager', { initialTaskId: task.id })"
+                            />
+                        </div>
+                    </div>
+                </div>
+
                 <div v-if="isLoading" class="flex-grow flex items-center justify-center"><IconAnimateSpin class="w-8 h-8 text-gray-500" /></div>
                 <div v-else-if="images.length === 0" class="flex-grow flex items-center justify-center text-center text-gray-500">
                     <div><p>No images yet.</p><p class="text-sm">Drop, paste, or use the form below to generate some!</p></div>
@@ -335,7 +354,7 @@ async function handlePaste(event) {
                 <button @click="handleEnhance('both')" class="btn btn-secondary p-2.5" :disabled="isGenerating || isEnhancing" title="Enhance both prompts">
                     <IconSparkles class="w-5 h-5" />
                 </button>
-                <button @click="handleGenerateOrApply" class="btn btn-primary flex-grow sm:flex-grow-0" :disabled="isGenerating || isEnhancing">
+                <button @click="handleGenerateOrApply" class="btn btn-primary flex-grow sm:flex-grow-0" :disabled="isEnhancing">
                     <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2" />
                     {{ isSelectionMode ? 'Apply' : 'Generate' }}
                 </button>

@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/tasks.js
+// [UPDATE] lollms/frontend/webui/src/stores/tasks.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -25,6 +25,19 @@ export const useTasksStore = defineStore('tasks', () => {
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         return activeTasks.length > 0 ? activeTasks[0] : null;
     });
+
+    const imageGenerationTasks = computed(() => {
+        return tasks.value.filter(t =>
+            (t.status === 'running' || t.status === 'pending') &&
+            (
+                (t.name.startsWith('Generating') && t.name.includes('image(s)')) ||
+                t.name.startsWith('Editing image:')
+            )
+        );
+    });
+
+    const imageGenerationTasksCount = computed(() => imageGenerationTasks.value.length);
+
 
     // --- ACTIONS ---
     async function fetchTasks() {
@@ -111,6 +124,8 @@ export const useTasksStore = defineStore('tasks', () => {
         isLoadingTasks,
         activeTasksCount,
         mostRecentActiveTask,
+        imageGenerationTasks,
+        imageGenerationTasksCount,
         fetchTasks,
         addTask,
         cancelTask,
