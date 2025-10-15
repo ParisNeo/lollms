@@ -40,6 +40,7 @@ import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
+import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -402,6 +403,14 @@ function handleExportCode() {
     });
 }
 
+function handleBuildNewDiscussion(event) {
+  event.stopPropagation();
+  discussionsStore.createDiscussionFromMessage({
+    discussionId: discussionsStore.currentDiscussionId,
+    messageId: props.message.id,
+  });
+}
+
 function handleBranchOrRegenerate() {
     let messageToBranchFrom = props.message.sender_type === 'user' ? props.message : null;
     if (!messageToBranchFrom) {
@@ -633,6 +642,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                             <button :disabled="areActionsDisabled" @click="copyContent" title="Copy" class="action-btn"><IconCopy /></button>
                             <button :disabled="areActionsDisabled" @click="toggleEdit" title="Edit" class="action-btn"><IconPencil /></button>
                             <button :disabled="areActionsDisabled" @click="handleBranchOrRegenerate" :title="isCurrentUser ? 'Resend / Branch' : 'Regenerate'" class="action-btn"><IconRefresh /></button>
+                            <button :disabled="areActionsDisabled" @click="handleBuildNewDiscussion" title="Build a new discussion from here" class="action-btn"><IconGitBranch class="w-4 h-4" /></button>
                             <button :disabled="areActionsDisabled" @click="handleDelete" title="Delete" class="action-btn text-red-500 hover:bg-red-200 dark:hover:bg-red-700"><IconTrash /></button>
                         </div>
                         <div v-if="isAi" class="message-rating">

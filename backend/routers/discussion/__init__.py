@@ -30,6 +30,7 @@ from backend.models.discussion import DiscussionGroupUpdatePayload
 from backend.db.models.discussion_group import DiscussionGroup as DBDiscussionGroup
 from backend.session import (get_current_active_user,
                              get_user_discussion_assets_path,
+                             get_user_lollms_client
                             )
 from backend.routers.discussion.artefacts import build_artefacts_router
 from backend.routers.discussion.context import build_context_router
@@ -261,6 +262,105 @@ def build_discussions_router():
             active_branch_id=None,
             created_at=discussion_obj.created_at,
             last_activity_at=discussion_obj.updated_at
+        )
+
+    @router.post("/from_message", response_model=DiscussionInfo, status_code=201)
+    async def create_discussion_from_message(
+        payload: Dict[str, str],
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        source_discussion_id = payload.get("source_discussion_id")
+        source_message_id = payload.get("source_message_id")
+        if not source_discussion_id or not source_message_id:
+            raise HTTPException(status_code=400, detail="source_discussion_id and source_message_id are required.")
+
+        username = current_user.username
+        lc = get_user_lollms_client(username)
+
+        # 1. Load source discussion
+        source_discussion = get_user_discussion(username, source_discussion_id, lollms_client=lc)
+        if not source_discussion:
+            raise HTTPException(status_code=404, detail="Source discussion not found.")
+        
+        # 2. Create new discussion
+        new_discussion_id = str(uuid.uuid4())
+        new_discussion = get_user_discussion(username, new_discussion_id, create_if_missing=True, lollms_client=lc)
+        if not new_discussion:
+            raise HTTPException(status_code=500, detail="Failed to create new discussion.")
+
+        # 3. Copy metadata and assets
+        source_metadata = source_discussion.metadata or {}
+        new_discussion.metadata = source_metadata.copy()
+        
+        # Copy artefacts
+        source_artefacts = source_discussion.list_artefacts()
+        for artefact in source_artefacts:
+            new_discussion.add_artefact(**{k: v for k, v in artefact.items() if k not in ['is_loaded']})
+
+        new_discussion.images = source_discussion.get_discussion_images().copy()
+        
+        source_assets_path = get_user_discussion_assets_path(username) / source_discussion_id
+        new_assets_path = get_user_discussion_assets_path(username) / new_discussion_id
+        if source_assets_path.exists():
+            shutil.copytree(source_assets_path, new_assets_path)
+
+        # 4. Add messages to the new discussion, preserving structure
+        messages_to_copy = source_discussion.get_branch(source_message_id)
+        if not messages_to_copy:
+            raise HTTPException(status_code=404, detail="Source message not found in the discussion branch.")
+            
+        id_map = {}
+        last_new_message_id = None
+        for msg in messages_to_copy:
+            new_parent_id = id_map.get(msg.parent_id) if msg.parent_id else None
+            
+            new_msg = new_discussion.add_message(
+                sender=msg.sender,
+                content=msg.content,
+                sender_type=msg.sender_type,
+                parent_id=new_parent_id,
+                binding_name=msg.binding_name,
+                model_name=msg.model_name,
+                images=msg.images,
+                active_images=msg.active_images,
+                metadata=msg.metadata,
+                created_at=msg.created_at
+            )
+            id_map[msg.id] = new_msg.id
+            last_new_message_id = new_msg.id
+
+        # 5. Set the active branch to the end of the copied chain
+        if last_new_message_id:
+            new_discussion.switch_to_branch(last_new_message_id)
+
+        # 6. Auto-title if needed
+        db_user = db.query(DBUser).filter(DBUser.username == username).one_or_none()
+        if db_user and db_user.auto_title:
+            try:
+                new_discussion.lollms_client = lc # Ensure client is attached for LLM call
+                new_title = new_discussion.auto_title()
+            except Exception as e:
+                trace_exception(e)
+                new_title = f"Branched from {source_metadata.get('title', 'discussion')[:20]}..."
+                new_discussion.set_metadata_item('title', new_title)
+        else:
+            new_title = f"Branched from {source_metadata.get('title', 'discussion')[:20]}..."
+            new_discussion.set_metadata_item('title', new_title)
+
+        new_discussion.commit()
+
+        # 7. Return response
+        discussion_images_b64 = [img['data'] for img in new_discussion.get_discussion_images()]
+        active_discussion_images = [img['active'] for img in new_discussion.get_discussion_images()]
+
+        return DiscussionInfo(
+            id=new_discussion_id, title=new_discussion.metadata.get('title', "Untitled"),
+            is_starred=False, rag_datastore_ids=new_discussion.metadata.get('rag_datastore_ids'),
+            active_tools=new_discussion.metadata.get('active_tools', []),
+            active_branch_id=new_discussion.active_branch_id, created_at=new_discussion.created_at,
+            last_activity_at=new_discussion.updated_at, discussion_images=discussion_images_b64,
+            active_discussion_images=active_discussion_images, group_id=new_discussion.metadata.get('group_id')
         )
 
     @router.post("/{discussion_id}/clone", response_model=DiscussionInfo, status_code=201)

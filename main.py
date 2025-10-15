@@ -1,4 +1,4 @@
-# main.py
+# lollms/main.py
 import shutil
 import datetime
 from pathlib import Path
@@ -420,8 +420,44 @@ add_ui_routes(app)
 
 if __name__ == "__main__":
     # This block is executed only by the main process, before Uvicorn starts workers.
-    startup_lock = Lock()
     init_database(APP_DB_URL)
+
+    is_first_run = False
+    db_for_check = None
+    try:
+        db_for_check = db_session_module.SessionLocal()
+        # If there are no users, it's a first run where setup is needed.
+        if db_for_check.query(DBUser).count() == 0:
+            is_first_run = True
+    except Exception:
+        is_first_run = True # DB file might not exist or be uninitialized
+    finally:
+        if db_for_check:
+            db_for_check.close()
+    
+    if is_first_run:
+        wizard_script = Path(__file__).resolve().parent / "scripts" / "setup_wizard.py"
+        if wizard_script.exists():
+            print("--- First time setup: launching setup wizard ---")
+            python_executable = sys.executable
+            env = os.environ.copy()
+            # Construct PYTHONPATH to ensure the script can find backend modules
+            project_root_path = str(Path(__file__).resolve().parent)
+            current_python_path = env.get("PYTHONPATH", "")
+            new_python_path = f"{project_root_path}{os.pathsep}{current_python_path}"
+            env["PYTHONPATH"] = new_python_path
+            
+            result = subprocess.run([python_executable, str(wizard_script)], env=env)
+            
+            if result.returncode != 0:
+                print("\n" + ASCIIColors.red("[ERROR] Setup wizard failed or was cancelled. Exiting application."))
+                print("You can try running the wizard again by deleting the 'data/app_main.db' file, or configure the application manually from the UI.")
+                sys.exit(1)
+        else:
+            print(ASCIIColors.yellow("[WARNING] Setup wizard script not found. Proceeding with default setup."))
+
+
+    startup_lock = Lock()
     run_one_time_startup_tasks(startup_lock)
     
     db = db_session_module.SessionLocal()

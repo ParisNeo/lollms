@@ -100,7 +100,7 @@ export function useDiscussionCore(state, stores, getActions) {
             message: 'Are you sure you want to permanently delete this discussion and all its messages?',
             confirmText: 'Delete'
         });
-        if (!confirmed) return;
+        if (!confirmed.confirmed) return;
 
         try {
             await apiClient.delete(`/api/discussions/${discussionId}`);
@@ -125,6 +125,23 @@ export function useDiscussionCore(state, stores, getActions) {
             uiStore.addNotification('Discussion cloned successfully.', 'success');
         } catch(e) {
             // Error handled by global interceptor
+        }
+    }
+
+    async function createDiscussionFromMessage({ discussionId, messageId }) {
+        uiStore.addNotification('Creating new discussion from message...', 'info');
+        try {
+            const response = await apiClient.post('/api/discussions/from_message', {
+                source_discussion_id: discussionId,
+                source_message_id: messageId,
+            });
+            const newDiscussion = response.data;
+            discussions.value[newDiscussion.id] = newDiscussion;
+            await getActions().selectDiscussion(newDiscussion.id, null, true);
+            uiStore.addNotification('New discussion created successfully.', 'success');
+        } catch (error) {
+            // Error is handled by global interceptor, which is sufficient.
+            console.error("Failed to create discussion from message:", error);
         }
     }
 
@@ -196,6 +213,7 @@ export function useDiscussionCore(state, stores, getActions) {
         createNewDiscussion,
         deleteDiscussion,
         cloneDiscussion,
+        createDiscussionFromMessage,
         generateAutoTitle,
         toggleStarDiscussion,
         renameDiscussion,
