@@ -182,6 +182,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
             active_personality_id=user_sessions[username].get("active_personality_id"),
             active_voice_id=db_user.active_voice_id,
+            last_discussion_id=db_user.last_discussion_id,
             lollms_client_ai_name=ai_name_for_user,
             **effective_llm_params,
             rag_top_k=db_user.rag_top_k, max_rag_len=db_user.max_rag_len, rag_n_hops=db_user.rag_n_hops,
@@ -404,7 +405,7 @@ def build_lollms_client_from_params(
                             
             if selected_tti_model_name:
                 tti_binding_config['model_name'] = selected_tti_model_name                
-                tti_binding_config["models_path"]= str(Path(settings.get("data_dir", "./data"))/"tti_models"/selected_tti_binding.name)
+                tti_binding_config["models_path"]= str(Path(settings.get("data_dir","data"))/"tti_models"/selected_tti_binding.name)
             client_init_params["tti_binding_name"] = selected_tti_binding.name
             client_init_params["tti_binding_config"] = tti_binding_config
         

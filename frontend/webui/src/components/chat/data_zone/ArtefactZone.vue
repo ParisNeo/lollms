@@ -6,6 +6,7 @@ import { useDiscussionsStore } from '../../../stores/discussions';
 import { useUiStore } from '../../../stores/ui';
 
 import ArtefactCard from '../../ui/Cards/ArtefactCard.vue';
+import DropdownMenu from '../../ui/DropdownMenu/DropdownMenu.vue';
 
 // Icons
 import IconRefresh from '../../../assets/icons/IconRefresh.vue';
@@ -16,6 +17,8 @@ import IconWeb from '../../../assets/icons/ui/IconWeb.vue';
 import IconArrowUpTray from '../../../assets/icons/IconArrowUpTray.vue';
 import IconChevronRight from '../../../assets/icons/IconChevronRight.vue';
 import IconGather from '../../../assets/icons/IconGather.vue';
+import IconPencil from '../../../assets/icons/IconPencil.vue';
+import IconEllipsisVertical from '../../../assets/icons/IconEllipsisVertical.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -23,7 +26,6 @@ const router = useRouter();
 
 const { activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussionsStore);
 
-const showUrlImport = ref(false);
 const isUploadingArtefact = ref(false);
 const isArtefactsCollapsed = ref(false);
 const artefactFileInput = ref(null);
@@ -54,7 +56,7 @@ function handleRefreshArtefacts() {
 async function handleLoadAllArtefacts() {
     if (!activeDiscussion.value) return;
     const confirmed = await uiStore.showConfirmation({ title: 'Load All Artefacts?', message: `This will clear the current Discussion Data Zone and load all ${groupedArtefacts.value.length} artefact(s).`, confirmText: 'Load All' });
-    if (confirmed) discussionsStore.loadAllArtefactsToDataZone(activeDiscussion.value.id);
+    if (confirmed.confirmed) discussionsStore.loadAllArtefactsToDataZone(activeDiscussion.value.id);
 }
 
 function handleCreateArtefact() {
@@ -63,6 +65,13 @@ function handleCreateArtefact() {
 
 function triggerArtefactFileUpload() {
     artefactFileInput.value?.click();
+}
+
+function handleImportFromUrl() {
+    const url = prompt("Please enter the URL to import:");
+    if (url && activeDiscussion.value) {
+        discussionsStore.importArtefactFromUrl(activeDiscussion.value.id, url);
+    }
 }
 
 
@@ -136,11 +145,30 @@ async function handleDrop(event) {
                 <IconChevronRight class="w-4 h-4 ml-auto transition-transform" :class="{'rotate-90': !isArtefactsCollapsed}"/>
             </button>
             <div @click.stop class="flex items-center gap-1">
-                <button @click="handleRefreshArtefacts" class="action-btn-sm" title="Refresh Artefacts"> <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingArtefacts}" /> </button>
-                <button @click="handleLoadAllArtefacts" class="action-btn-sm" title="Load All Artefacts to Context"> <IconGather class="w-4 h-4" /> </button>
-                <button @click="handleCreateArtefact" class="action-btn-sm" title="Create Artefact"><IconPlus class="w-4 h-4" /></button>
-                <button @click="showUrlImport = !showUrlImport" class="action-btn-sm" :class="{'bg-gray-200 dark:bg-gray-700': showUrlImport}" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
-                <button @click="triggerArtefactFileUpload" class="action-btn-sm" title="Upload Artefact" :disabled="isUploadingArtefact"><IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 animate-spin" /><IconArrowUpTray v-else class="w-4 h-4" /></button>
+                <DropdownMenu icon="menu" buttonClass="btn-icon-flat" title="Artefact Actions">
+                    <button @click="handleRefreshArtefacts" class="menu-item">
+                        <IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isLoadingArtefacts}" />
+                        <span>Refresh Artefacts</span>
+                    </button>
+                    <button @click="handleLoadAllArtefacts" class="menu-item">
+                        <IconGather class="w-4 h-4 mr-2" />
+                        <span>Load All to Context</span>
+                    </button>
+                    <div class="menu-divider"></div>
+                    <button @click="handleCreateArtefact" class="menu-item">
+                        <IconPencil class="w-4 h-4 mr-2" />
+                        <span>Create Manual</span>
+                    </button>
+                    <button @click="handleImportFromUrl" class="menu-item">
+                        <IconWeb class="w-4 h-4 mr-2" />
+                        <span>Import from URL</span>
+                    </button>
+                    <button @click="triggerArtefactFileUpload" class="menu-item" :disabled="isUploadingArtefact">
+                        <IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 mr-2" />
+                        <IconArrowUpTray v-else class="w-4 h-4 mr-2" />
+                        <span>Upload File</span>
+                    </button>
+                </DropdownMenu>
             </div>
         </div>
         <div v-if="!isArtefactsCollapsed" class="flex-grow flex flex-col min-h-0">

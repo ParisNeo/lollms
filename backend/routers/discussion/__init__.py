@@ -234,6 +234,13 @@ def build_discussions_router():
                     created_at=msg.created_at, branch_id=branch_tip_to_load, branches=msg_branches
                 )
             )
+        try:
+            db_user.last_discussion_id = discussion_id
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"Warning: Could not update last_discussion_id for user {current_user.username}. Error: {e}")
+
         return messages_output
 
     @router.post("", response_model=DiscussionInfo, status_code=201)

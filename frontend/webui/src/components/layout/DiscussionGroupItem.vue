@@ -26,6 +26,7 @@ const store = useDiscussionsStore();
 const uiStore = useUiStore();
 
 const isOpen = ref(false);
+const isDragOver = ref(false);
 
 const paddingLeft = computed(() => `${props.indentationLevel * 1}rem`);
 
@@ -59,11 +60,69 @@ function handleNewDiscussionInGroup(event) {
   event.stopPropagation();
   store.createNewDiscussion(props.group.id);
 }
+
+function handleDragStart(event) {
+  event.stopPropagation();
+  event.currentTarget.classList.add('dragging-item');
+  event.dataTransfer.setData('application/lollms-item', JSON.stringify({type: 'group', id: props.group.id}));
+  event.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragEnd(event) {
+  event.currentTarget.classList.remove('dragging-item');
+}
+
+function handleDragOver(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  event.dataTransfer.dropEffect = 'move';
+  isDragOver.value = true;
+}
+
+function handleDragLeave(event) {
+  event.stopPropagation();
+  isDragOver.value = false;
+}
+
+async function handleDrop(event) {
+  event.stopPropagation();
+  isDragOver.value = false;
+  const data = event.dataTransfer.getData('application/lollms-item');
+  if (!data) return;
+  
+  try {
+    const { type, id } = JSON.parse(data);
+
+    if (type === 'discussion') {
+      const discussion = store.discussions[id];
+      if (discussion && discussion.group_id === props.group.id) return; // Already in this group
+      await store.moveDiscussionToGroup(id, props.group.id);
+    } else if (type === 'group') {
+      const draggedGroup = store.discussionGroups.find(g => g.id === id);
+      if (draggedGroup && draggedGroup.id !== props.group.id) {
+        await store.updateGroup(id, draggedGroup.name, props.group.id);
+      }
+    }
+  } catch(e) {
+    console.error("Drop failed:", e);
+    uiStore.addNotification("The requested move is not possible.", "error");
+  }
+}
 </script>
 
 <template>
   <div class="discussion-group">
-    <div class="discussion-group-header group" :style="{ paddingLeft }">
+    <div 
+      class="discussion-group-header group" 
+      :style="{ paddingLeft }"
+      :draggable="true"
+      @dragstart="handleDragStart"
+      @dragend="handleDragEnd"
+      @dragover.prevent="handleDragOver"
+      @dragleave="handleDragLeave"
+      @drop="handleDrop"
+      :class="{ 'bg-blue-100 dark:bg-blue-900/50 border-2 border-dashed border-blue-400': isDragOver }"
+      >
       <button @click="toggleGroup" class="flex items-center space-x-2 flex-grow min-w-0 h-full p-2 rounded-lg">
         <IconFolder class="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-gray-400" />
         <span class="font-medium text-slate-700 dark:text-gray-300 truncate">{{ group.name }}</span>
@@ -104,3 +163,9 @@ function handleNewDiscussionInGroup(event) {
     </div>
   </div>
 </template>
+
+<style scoped>
+.dragging-item {
+  opacity: 0.5;
+}
+</style>

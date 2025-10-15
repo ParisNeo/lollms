@@ -42,6 +42,20 @@ async function handleSelect() {
   }
 }
 
+function handleDragStart(event) {
+  if (props.discussion.owner_username) {
+    event.preventDefault();
+    return;
+  }
+  event.currentTarget.classList.add('dragging-item');
+  event.dataTransfer.setData('application/lollms-item', JSON.stringify({type: 'discussion', id: props.discussion.id}));
+  event.dataTransfer.effectAllowed = 'move';
+}
+
+function handleDragEnd(event) {
+  event.currentTarget.classList.remove('dragging-item');
+}
+
 function toggleMenu(event) {
   event.stopPropagation();
   showMenu.value = !showMenu.value;
@@ -116,6 +130,9 @@ function handleClickOutside() {
 
 <template>
   <div @click="handleSelect" 
+       :draggable="!discussion.owner_username"
+       @dragstart.stop="handleDragStart"
+       @dragend="handleDragEnd"
        :class="[
             'discussion-item-flat group',
             { 'selected': isSelected },
@@ -219,3 +236,9 @@ function handleClickOutside() {
     </div>
   </div>
 </template>
+
+<style scoped>
+.dragging-item {
+  opacity: 0.5;
+}
+</style>

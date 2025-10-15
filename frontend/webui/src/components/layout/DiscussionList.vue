@@ -41,7 +41,8 @@ const isSearchVisible = ref(false);
 const isSharedVisible = ref(false);
 const showToolbox = ref(false);
 const isUngroupedVisible = ref(true);
-const isStarredVisible = ref(false); // Keep starred visible by default
+const isStarredVisible = ref(false);
+const isRootDragOver = ref(false);
 
 // Filter shared discussions based on search term
 const filteredSharedDiscussions = computed(() => {
@@ -91,7 +92,32 @@ function goToFeed() {
     uiStore.setMainView('feed');
 }
 
-function handleNewDiscussion() { store.createNewDiscussion(); }
+async function handleRootDrop(event) {
+    isRootDragOver.value = false;
+    const data = event.dataTransfer.getData('application/lollms-item');
+    if (!data) return;
+    
+    try {
+        const { type, id } = JSON.parse(data);
+        if (type === 'group') {
+            const group = store.discussionGroups.find(g => g.id === id);
+            if (group && group.parent_id !== null) {
+                await store.updateGroup(id, group.name, null);
+            }
+        } else if (type === 'discussion') {
+            const discussion = store.discussions[id];
+            if(discussion && discussion.group_id !== null){
+                await store.moveDiscussionToGroup(id, null);
+            }
+        }
+    } catch (e) {
+        console.error("Root drop failed:", e);
+    }
+}
+
+function handleNewDiscussion() { 
+    store.createNewDiscussion(activeDiscussion.value?.group_id || null); 
+}
 function handleImportClick() { uiStore.openModal('import'); }
 function handleExportClick() { uiStore.openModal('export', { allDiscussions: store.sortedDiscussions }); }
 function handlePrune() { store.pruneDiscussions(); }
@@ -112,7 +138,13 @@ function handleClone() {
 </script>
 
 <template>
-    <div class="h-full flex flex-col bg-white dark:bg-gray-900 w-full flex-shrink-0">
+    <div 
+      class="h-full flex flex-col bg-white dark:bg-gray-900 w-full flex-shrink-0"
+      @dragover.prevent="isRootDragOver = true"
+      @dragleave="isRootDragOver = false"
+      @drop.prevent="handleRootDrop"
+      :class="{'bg-blue-50 dark:bg-blue-900/20': isRootDragOver}"
+    >
         
         <div class="p-4 border-b border-slate-200 dark:border-gray-700 flex-shrink-0 space-y-3">
             <div class="flex items-center justify-between">
@@ -127,7 +159,7 @@ function handleClone() {
                     </div>
                 </div>
                 <button @click="uiStore.toggleSidebar" class="btn-icon-flat hidden md:inline-flex ml-2" title="Collapse sidebar">
-                    <IconArrowLeft class="h-5 w-5" />
+                    <IconArrowLeft class="h-5 h-5" />
                 </button>
             </div>
 
@@ -140,15 +172,14 @@ function handleClone() {
                         <IconHome class="h-4 w-4" />
                     </button>
                     <button @click="handleNewGroup" class="btn-icon-flat" title="New Group">
-                        <IconFolder class="w-4 h-4" />
+                        <IconFolder class="w-4 w-4" />
                     </button>
                     <button @click="showToolbox = !showToolbox" v-if="user && user.user_ui_level >= 4" class="btn-icon-flat" :class="{ 'bg-slate-100 dark:bg-gray-700': showToolbox }" title="Toggle Toolbox">
                         <IconAdjustmentsHorizontal class="h-4 w-4" />
                     </button>
                 </div>
-                <button @click="handleNewDiscussion()" class="btn-primary-flat" title="New Discussion">
-                    <IconPlus class="h-4 w-4 mr-1 sm:mr-2" stroke-width="2.5" />
-                    <span class="hidden sm:inline">New Chat</span>
+                <button @click="handleNewDiscussion()" class="btn-primary-flat !px-2.5" title="New Discussion">
+                    <IconPlus class="h-4 w-4" stroke-width="2.5" />
                 </button>
             </div>
             

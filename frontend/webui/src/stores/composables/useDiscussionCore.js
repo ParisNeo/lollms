@@ -49,6 +49,12 @@ export function useDiscussionCore(state, stores, getActions) {
         currentDiscussionId.value = discussionId;
         
         if (discussionId) {
+            localStorage.setItem('lollms_last_discussion_id', discussionId);
+        } else {
+            localStorage.removeItem('lollms_last_discussion_id');
+        }
+        
+        if (discussionId) {
             isLoadingMessages.value = true;
             messages.value = [];
             

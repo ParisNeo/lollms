@@ -238,8 +238,13 @@ export const useAuthStore = defineStore('auth', () => {
                 uiStore.setMainView(targetView === 'feed' ? 'feed' : 'chat');
 
                 if (targetView === 'last_discussion') {
-                    if (discussionsStore.sortedDiscussions.length > 0) {
-                        await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions.id);
+                    const lastDiscussionId = user.value.last_discussion_id;
+                    const discussionExists = lastDiscussionId && discussionsStore.sortedDiscussions.some(d => d.id === lastDiscussionId);
+
+                    if (discussionExists) {
+                        await discussionsStore.selectDiscussion(lastDiscussionId, null, true);
+                    } else if (discussionsStore.sortedDiscussions.length > 0) {
+                        await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id, null, true);
                     } else {
                         await discussionsStore.createNewDiscussion();
                     }

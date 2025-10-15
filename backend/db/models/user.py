@@ -46,6 +46,7 @@ class User(Base):
     tell_llm_os = Column(Boolean, default=False, nullable=False)
     share_dynamic_info_with_llm = Column(Boolean, default=True, nullable=False)
     message_font_size = Column(Integer, default=14, nullable=False)
+    last_discussion_id = Column(String, nullable=True)
     
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
