@@ -21,8 +21,8 @@ from backend.models import (DiscussionInfo, MessageCodeExportRequest,
 from backend.discussion import get_user_discussion  
 from backend.settings import settings
 from backend.session import get_user_discussion_assets_path
-from backend.tasks.discussion_tasks import (_prune_empty_discussions_task,
-                                             _to_task_info)
+from backend.tasks.discussion_tasks import _prune_empty_discussions_task
+from backend.tasks.utils import _to_task_info
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.session import get_current_active_user, get_user_lollms_client
 from backend.task_manager import task_manager

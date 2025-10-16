@@ -28,7 +28,8 @@ from backend.session import get_current_active_user, get_user_lollms_client
 from backend.discussion import get_user_discussion
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.task_manager import task_manager
-from ...tasks.discussion_tasks import _import_artefact_from_url_task, _to_task_info
+from ...tasks.artefact_tasks import _import_artefact_from_url_task
+from ...tasks.utils import _to_task_info
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 # .msg handling
 try:
@@ -519,3 +520,4 @@ def build_artefacts_router(router: APIRouter):
             owner_username=current_user.username
         )
         return _to_task_info(task)
+    

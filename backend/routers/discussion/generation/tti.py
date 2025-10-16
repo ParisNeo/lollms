@@ -40,7 +40,8 @@ from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
 from backend.discussion import get_user_discussion, get_user_discussion_manager
-from backend.tasks.discussion_tasks import _generate_image_task, _to_task_info   
+from backend.tasks.image_generation_tasks import _generate_image_task
+from backend.tasks.utils import _to_task_info   
 from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse,
                             DataZones, DiscussionBranchSwitchRequest,
                             DiscussionDataZoneUpdate, DiscussionExportRequest,

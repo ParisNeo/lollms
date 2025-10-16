@@ -4,35 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from backend.session import get_current_active_user
 from backend.task_manager import task_manager
 from backend.models import TaskInfo, UserAuthDetails
-from backend.db.models.db_task import DBTask
+from backend.tasks.utils import _to_task_info
 
 tasks_router = APIRouter(
     prefix="/api/tasks",
     tags=["Tasks"],
     dependencies=[Depends(get_current_active_user)]
 )
-
-def _db_task_to_task_info(db_task: DBTask) -> TaskInfo:
-    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
-    if not db_task:
-        return None
-    return TaskInfo(
-        id=db_task.id,
-        name=db_task.name,
-        description=db_task.description,
-        status=db_task.status,
-        progress=db_task.progress,
-        logs=[log for log in (db_task.logs or [])],
-        result=db_task.result,
-        error=db_task.error,
-        created_at=db_task.created_at,
-        started_at=db_task.started_at,
-        updated_at=db_task.updated_at,
-        completed_at=db_task.completed_at,
-        file_name=db_task.file_name,
-        total_files=db_task.total_files,
-        owner_username=db_task.owner.username if db_task.owner else "System"
-    )
 
 @tasks_router.get("", response_model=List[TaskInfo])
 def get_all_tasks(current_user: UserAuthDetails = Depends(get_current_active_user)):
@@ -44,7 +22,7 @@ def get_all_tasks(current_user: UserAuthDetails = Depends(get_current_active_use
     else:
         tasks = task_manager.get_tasks_for_user(current_user.username)
     
-    return [_db_task_to_task_info(task) for task in tasks]
+    return [_to_task_info(task) for task in tasks]
 
 @tasks_router.get("/{task_id}", response_model=TaskInfo)
 def get_task_details(task_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)):
@@ -59,7 +37,7 @@ def get_task_details(task_id: str, current_user: UserAuthDetails = Depends(get_c
     if not current_user.is_admin and owner_username != current_user.username:
         raise HTTPException(status_code=403, detail="Not authorized to view this task.")
         
-    return _db_task_to_task_info(task)
+    return _to_task_info(task)
 
 @tasks_router.post("/{task_id}/cancel", response_model=TaskInfo)
 def cancel_task(task_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)):
@@ -83,7 +61,7 @@ def cancel_task(task_id: str, current_user: UserAuthDetails = Depends(get_curren
     if not final_task_state:
          raise HTTPException(status_code=404, detail="Task disappeared after cancellation attempt.")
 
-    return _db_task_to_task_info(final_task_state)
+    return _to_task_info(final_task_state)
 
 
 @tasks_router.post("/cancel-all", response_model=dict)

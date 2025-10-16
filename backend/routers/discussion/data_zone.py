@@ -15,7 +15,9 @@ from backend.models import UserAuthDetails, DataZones, DiscussionDataZoneUpdate,
 from backend.session import get_current_active_user
 from backend.task_manager import task_manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
-from backend.tasks.discussion_tasks import _generate_image_task, _process_data_zone_task, _memorize_ltm_task, _to_task_info
+from backend.tasks.image_generation_tasks import _generate_image_task
+from backend.tasks.discussion_tasks import _process_data_zone_task, _memorize_ltm_task
+from backend.tasks.utils import _to_task_info
 
 from backend.db.models.user import (User as DBUser)
 

@@ -52,6 +52,7 @@ from backend.models.datastore import (
 from backend.session import get_datastore_db_path, build_lollms_client_from_params
 from backend.db.models.db_task import DBTask
 from backend.settings import settings
+from backend.tasks.utils import _to_task_info
 # safe_store is expected to be installed
 try:
     import safe_store
@@ -129,20 +130,6 @@ def _sanitize_numpy(data: Any) -> Any:
     return data
 
 # --- Task Functions ---
-def _to_task_info(db_task: DBTask) -> TaskInfo:
-    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
-    if not db_task:
-        return None
-    return TaskInfo(
-        id=db_task.id, name=db_task.name, description=db_task.description,
-        status=db_task.status, progress=db_task.progress,
-        logs=[log for log in (db_task.logs or [])], result=db_task.result, error=db_task.error,
-        created_at=db_task.created_at, started_at=db_task.started_at, completed_at=db_task.completed_at,
-        file_name=db_task.file_name, total_files=db_task.total_files,
-        owner_username=db_task.owner.username if db_task.owner else "System"
-    )
-
-
 def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_paths: List[str], metadata_option: str, manual_metadata_json: str):
     db = next(get_db())
     try:

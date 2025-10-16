@@ -1,11 +1,11 @@
-# [UPDATE] lollms/backend/routers/image_studio.py
+# lollms/backend/routers/image_studio.py
 import base64
 import uuid
 import json
 from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from werkzeug.utils import secure_filename
@@ -26,7 +26,8 @@ from backend.session import (
 from backend.config import IMAGES_DIR_NAME
 from backend.discussion import get_user_discussion
 from backend.task_manager import task_manager
-from backend.tasks.discussion_tasks import _to_task_info, _image_studio_generate_task, _image_studio_edit_task
+from backend.tasks.utils import _to_task_info
+from backend.tasks.image_generation_tasks import _image_studio_generate_task, _image_studio_edit_task
 
 image_studio_router = APIRouter(
     prefix="/api/image-studio",
@@ -59,18 +60,19 @@ async def get_image_file(
 
 @image_studio_router.post("/generate", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def generate_image(
-    request: ImageGenerationRequest,
+    request: Request,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    model_full_name = request.model or current_user.tti_binding_model_name
+    request_data = await request.json()
+    model_full_name = request_data.get("model") or current_user.tti_binding_model_name
     if not model_full_name or '/' not in model_full_name:
         raise HTTPException(status_code=400, detail="A valid TTI model must be selected in your settings or provided in the request.")
 
     db_task = task_manager.submit_task(
-        name=f"Generating {request.n} image(s): {request.prompt[:30]}...",
+        name=f"Generating {request_data.get('n', 1)} image(s): {request_data.get('prompt', '')[:30]}...",
         target=_image_studio_generate_task,
-        args=(current_user.username, request.model_dump()),
-        description=f"Generating {request.n} image(s) with prompt: '{request.prompt[:50]}...'",
+        args=(current_user.username, request_data),
+        description=f"Generating {request_data.get('n', 1)} image(s) with prompt: '{request_data.get('prompt', '')[:50]}...'",
         owner_username=current_user.username
     )
     return _to_task_info(db_task)
@@ -78,18 +80,19 @@ async def generate_image(
 
 @image_studio_router.post("/edit", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def edit_image(
-    request: ImageEditRequest,
+    request: Request,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    model_full_name = request.model or current_user.tti_binding_model_name
+    request_data = await request.json()
+    model_full_name = request_data.get("model") or current_user.tti_binding_model_name
     if not model_full_name or '/' not in model_full_name:
         raise HTTPException(status_code=400, detail="A valid TTI model must be selected.")
 
     db_task = task_manager.submit_task(
-        name=f"Editing image: {request.prompt[:30]}...",
+        name=f"Editing image: {request_data.get('prompt', '')[:30]}...",
         target=_image_studio_edit_task,
-        args=(current_user.username, request.model_dump()),
-        description=f"Editing image(s) with prompt: '{request.prompt[:50]}...'",
+        args=(current_user.username, request_data),
+        description=f"Editing image(s) with prompt: '{request_data.get('prompt', '')[:50]}...'",
         owner_username=current_user.username
     )
     return _to_task_info(db_task)
