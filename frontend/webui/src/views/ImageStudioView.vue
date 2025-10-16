@@ -24,6 +24,7 @@ import IconMaximize from '../assets/icons/IconMaximize.vue';
 import IconArrowLeft from '../assets/icons/IconArrowLeft.vue';
 import IconRefresh from '../assets/icons/IconRefresh.vue'; // For reuse prompt
 import IconAdjustmentsHorizontal from '../assets/icons/IconAdjustmentsHorizontal.vue';
+import IconPlus from '../assets/icons/IconPlus.vue';
 
 const imageStore = useImageStore();
 const dataStore = useDataStore();
@@ -33,16 +34,13 @@ const discussionsStore = useDiscussionsStore();
 const tasksStore = useTasksStore();
 const router = useRouter();
 
-const { images, isLoading, isGenerating, isEnhancing } = storeToRefs(imageStore);
+const { 
+    images, isLoading, isGenerating, isEnhancing,
+    prompt, negativePrompt, imageSize, nImages, seed, generationParams 
+} = storeToRefs(imageStore);
 const { user } = storeToRefs(authStore);
 const { imageGenerationTasks, imageGenerationTasksCount } = storeToRefs(tasksStore);
 
-const prompt = ref('');
-const negativePrompt = ref('');
-const imageSize = ref('1024x1024');
-const nImages = ref(1);
-const seed = ref(-1);
-const generationParams = ref({});
 const isConfigVisible = ref(false);
 
 const selectedImages = ref([]);
@@ -146,6 +144,16 @@ async function handleEnhance(type) {
     }
 }
 
+function handleNewBlankImage() {
+    const [width, height] = imageSize.value.split('x').map(Number);
+    uiStore.openModal('inpaintingEditor', {
+        image: null,
+        width,
+        height
+    });
+}
+
+
 function reusePrompt(image) {
     prompt.value = image.prompt;
     negativePrompt.value = image.negative_prompt;
@@ -156,7 +164,7 @@ function reusePrompt(image) {
 function openInpaintingEditor(image) { uiStore.openModal('inpaintingEditor', { image }); }
 function openImageViewer(image, index) {
     uiStore.openImageViewer({
-        imageList: images.value.map(img => ({ src: `/api/image-studio/${img.id}/file`, prompt: img.prompt, model: img.model, filename: img.filename })),
+        imageList: images.value.map(img => ({ ...img, src: `/api/image-studio/${img.id}/file`})),
         startIndex: index
     });
 }
@@ -258,10 +266,15 @@ async function handlePaste(event) {
                         <button @click="handleMoveToDiscussion" class="btn btn-secondary btn-sm" title="Move to Discussion"><IconSend class="w-4 h-4" /></button>
                         <button @click="handleDeleteSelected" class="btn btn-danger btn-sm" title="Delete Selected"><IconTrash class="w-4 h-4" /></button>
                     </div>
-                    <label for="upload-image-btn" class="btn btn-secondary btn-sm cursor-pointer">
-                        <IconArrowDownTray class="w-4 h-4 mr-2" /> Upload
-                        <input id="upload-image-btn" type="file" @change="handleUpload" class="hidden" accept="image/*" multiple>
-                    </label>
+                    <div class="flex items-center gap-2">
+                        <button @click="handleNewBlankImage" class="btn btn-secondary btn-sm">
+                            <IconPlus class="w-4 h-4 mr-2" /> Create Blank Image
+                        </button>
+                        <label for="upload-image-btn" class="btn btn-secondary btn-sm cursor-pointer">
+                            <IconArrowDownTray class="w-4 h-4 mr-2" /> Upload
+                            <input id="upload-image-btn" type="file" @change="handleUpload" class="hidden" accept="image/*" multiple>
+                        </label>
+                    </div>
                 </div>
 
                 <!-- NEW: Active Tasks Section -->

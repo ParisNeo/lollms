@@ -54,6 +54,7 @@ new ui:
 - OK export word needs to be reworked. I need to be able to export images and tables as well as good formatting
 - OK format the exported pdf
 - OK loading the artefact adds the images to the data zone!
+- OK FIX inline images import
 
 
 
@@ -152,7 +153,7 @@ new ui:
 Use REDIS instead of the polling mechanism (optional)
 
 # URGENT:
-FIX inline images import
+t
 in sso separate the app name from the app key (generate random key for the app)
 add more details about the source chunks
 add queuing for audio generation

@@ -31,11 +31,19 @@ class MoveImageToDiscussionRequest(BaseModel):
     discussion_id: str
 
 class ImageEditRequest(BaseModel):
-    image_ids: List[str]
+    image_ids: Optional[List[str]] = None
+    base_image_b64: Optional[str] = None
     prompt: str
     negative_prompt: Optional[str] = None
     mask: Optional[str] = None # base64 encoded mask
     model: Optional[str] = None
+    seed: Optional[int] = -1
+    sampler_name: Optional[str] = None
+    steps: Optional[int] = None
+    cfg_scale: Optional[float] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+
 
 # Added for prompt enhancement
 class ImagePromptEnhancementRequest(BaseModel):

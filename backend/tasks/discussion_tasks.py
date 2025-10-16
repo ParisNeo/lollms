@@ -1,4 +1,3 @@
-# [UPDATE] lollms/backend/tasks/discussion_tasks.py
 # backend/tasks/discussion_tasks.py
 # backend/tasks/discussion_tasks.py
 # Standard Library Imports
@@ -542,24 +541,43 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
 
         user_images_path = get_user_images_path(username)
         source_images_b64 = []
-        task.log("Loading source images...")
-        for image_id in request_data.get('image_ids', []):
-            image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == user.id).first()
-            if image_record:
-                file_path = user_images_path / image_record.filename
-                if file_path.is_file():
-                    with open(file_path, "rb") as f:
-                        source_images_b64.append(base64.b64encode(f.read()).decode('utf-8'))
         
+        if request_data.get('base_image_b64'):
+            task.log("Using provided base64 image for editing.")
+            source_images_b64.append(request_data['base_image_b64'])
+        else:
+            task.log("Loading source images from file...")
+            image_ids = request_data.get('image_ids', [])
+            if not image_ids:
+                raise ValueError("No source image provided for editing.")
+            for image_id in image_ids:
+                image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == user.id).first()
+                if image_record:
+                    file_path = user_images_path / image_record.filename
+                    if file_path.is_file():
+                        with open(file_path, "rb") as f:
+                            source_images_b64.append(base64.b64encode(f.read()).decode('utf-8'))
+
         if not source_images_b64: raise Exception("No valid source images found for editing.")
         task.set_progress(20)
+
+        # Extract generation parameters from request_data
+        generation_params = {
+            "prompt": request_data.get('prompt', ''),
+            "negative_prompt": request_data.get('negative_prompt'),
+            "mask": request_data.get('mask'),
+            "seed": request_data.get('seed', -1),
+            "sampler_name": request_data.get('sampler_name'),
+            "steps": request_data.get('steps'),
+            "cfg_scale": request_data.get('cfg_scale'),
+            "width": request_data.get('width'),
+            "height": request_data.get('height'),
+        }
 
         task.log("Sending edit request to binding...")
         edited_image_bytes = lc.tti.edit_image(
             images=source_images_b64,
-            prompt=request_data.get('prompt', ''),
-            negative_prompt=request_data.get('negative_prompt'),
-            mask=request_data.get('mask')
+            **{k: v for k, v in generation_params.items() if v is not None} # Pass only non-null params
         )
         task.set_progress(80)
 

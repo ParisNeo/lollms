@@ -1,4 +1,4 @@
-# backend/routers/discussion/sharing.py
+# [UPDATE] backend/routers/discussion/sharing.py
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
@@ -80,7 +80,7 @@ def build_discussion_sharing_router(router: APIRouter):
         try:
             db.add(new_link)
             db.commit()
-            await manager.send_personal_message(
+            manager.send_personal_message_sync(
                 {"type": "new_shared_discussion", "data": {"from_user": current_user.username, "discussion_title": new_link.discussion_title}},
                 target_user_db.id
             )
@@ -111,7 +111,7 @@ def build_discussion_sharing_router(router: APIRouter):
         target_user_id = link_to_delete.shared_with_user_id
         db.delete(link_to_delete)
         db.commit()
-        await manager.send_personal_message(
+        manager.send_personal_message_sync(
             {"type": "discussion_unshared", "data": {"discussion_id": discussion_id, "from_user": current_user.username}},
             target_user_id
         )
@@ -138,7 +138,7 @@ def build_discussion_sharing_router(router: APIRouter):
         db.delete(link_to_delete)
         db.commit()
 
-        await manager.send_personal_message(
+        manager.send_personal_message_sync(
             {"type": "discussion_unsubscribed", "data": {"discussion_title": discussion_title, "unsubscribed_user": current_user.username, "owner_username": owner_username}},
             owner_id
         )

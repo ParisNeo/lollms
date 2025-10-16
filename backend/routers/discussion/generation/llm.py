@@ -1,3 +1,4 @@
+# [UPDATE] backend/routers/discussion/generation/llm.py
 # backend/routers/discussion/generation/llm.py
 # Standard Library Imports
 import base64
@@ -176,7 +177,7 @@ def build_llm_generation_router(router: APIRouter):
         )
         
 
-        main_loop = asyncio.get_event_loop()
+        main_loop = asyncio.get_running_loop()
         stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
         stop_event = threading.Event()
         user_sessions.setdefault(current_user.username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event

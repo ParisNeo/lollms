@@ -15,6 +15,15 @@ export const useImageStore = defineStore('images', () => {
     const tasksStore = useTasksStore();
     const { on, off } = useEventBus();
 
+    // --- NEW: Persistent State for Image Studio ---
+    const prompt = ref('');
+    const negativePrompt = ref('');
+    const imageSize = ref('1024x1024');
+    const nImages = ref(1);
+    const seed = ref(-1);
+    const generationParams = ref({});
+
+
     function handleTaskCompletion(task) {
         const isImageTask = task.name.startsWith('Generating') && task.name.includes('image(s)');
         const isEditTask = task.name.startsWith('Editing image:');
@@ -137,6 +146,14 @@ export const useImageStore = defineStore('images', () => {
         isLoading,
         isGenerating,
         isEnhancing,
+        // Persistent state
+        prompt,
+        negativePrompt,
+        imageSize,
+        nImages,
+        seed,
+        generationParams,
+        // Actions
         fetchImages,
         generateImage,
         editImage,
