@@ -224,7 +224,7 @@ const vOnClickOutside = {
                             <div class="my-1 border-t dark:border-gray-600"></div>
                             <router-link to="/datastores" @click="closeMenu" class="menu-item">
                                 <IconDatabase class="mr-3 h-5 w-5 text-gray-500" />
-                                <span>Data Stores</span>
+                                <span>Data Studio</span>
                             </router-link>
                             <button v-if="runningApps.length > 0" @click="activeSubMenu = 'apps'" class="menu-item justify-between">
                             <div class="flex items-center">
