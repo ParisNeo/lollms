@@ -70,9 +70,9 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
         images=discussion_images_b64,
         contextual_prompt=prompt_to_use,
         system_prompt=processed_user_data_zone,
-        context_fill_percentage = 0.75,
+        context_fill_percentage = 1,
         overlap_tokens= 0,
-        expected_generation_tokens = int(lc.llm.default_ctx_size/4),
+        expected_generation_tokens = int(lc.llm.default_ctx_size/6),
         max_scratchpad_tokens = int(lc.llm.default_ctx_size/4),  # NEW: Hard limit for scratchpad
         scratchpad_compression_threshold = int(60*lc.llm.default_ctx_size/64),  # NEW: When to compress
         streaming_callback=summary_callback
