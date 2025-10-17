@@ -279,6 +279,7 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
         # Ensure the model name is set in the final config
         binding_config['model_name'] = tti_model_name
 
+        print(f"binding_config: {binding_config}")
         # ------------------------------------------------------------------
         # 5️⃣ Initialise the Lollms client with the resolved config
         # ------------------------------------------------------------------
