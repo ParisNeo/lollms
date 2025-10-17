@@ -57,14 +57,20 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
     lc = get_user_lollms_client(username)
     task.log(f"Processing:")
     task.log(f"content: {discussion.discussion_data_zone[:1000] if discussion.discussion_data_zone else 'No text'}")
-    task.log(f"prompt: {prompt_to_use}")
+    task.log(f"prompt: {prompt_to_use[:1000]}")
     task.log(f"Nb images: {len(discussion_images_b64) if discussion_images_b64 else 0}")
     
+    
     summary = lc.long_context_processing(
-        discussion.discussion_data_zone,
+        text_to_process = discussion.discussion_data_zone,
         images=discussion_images_b64,
         contextual_prompt=prompt_to_use,
         system_prompt=processed_user_data_zone,
+        context_fill_percentage = 0.75,
+        overlap_tokens= 0,
+        expected_generation_tokens = int(lc.llm.default_ctx_size/4),
+        max_scratchpad_tokens = int(lc.llm.default_ctx_size/4),  # NEW: Hard limit for scratchpad
+        scratchpad_compression_threshold = int(60*lc.llm.default_ctx_size/64),  # NEW: When to compress
         streaming_callback=summary_callback
     )
     
