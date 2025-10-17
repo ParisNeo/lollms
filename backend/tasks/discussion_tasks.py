@@ -42,6 +42,9 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
     
     def summary_callback(message: str, msg_type: Any, params: Optional[Dict] = None):
         """Callback to update the task in real-time."""
+        if task.cancellation_event.is_set():
+            task.log("Cancellation requested, stopping generation.", level="WARNING")
+            return False
         task.log(message)
         task.set_description(message)
         if params and 'progress' in params:

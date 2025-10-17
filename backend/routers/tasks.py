@@ -1,6 +1,6 @@
 # backend/routers/tasks.py
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.session import get_current_active_user
 from backend.task_manager import task_manager
 from backend.models import TaskInfo, UserAuthDetails
@@ -13,12 +13,21 @@ tasks_router = APIRouter(
 )
 
 @tasks_router.get("", response_model=List[TaskInfo])
-def get_all_tasks(current_user: UserAuthDetails = Depends(get_current_active_user)):
+def get_all_tasks(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    owner_filter: Optional[str] = Query("all", enum=["all", "me", "others"])
+):
     """
-    Retrieves background tasks. Admins get all tasks, regular users get only their own.
+    Retrieves background tasks. Admins can filter tasks, regular users get only their own.
     """
     if current_user.is_admin:
-        tasks = task_manager.get_all_tasks()
+        all_db_tasks = task_manager.get_all_tasks()
+        if owner_filter == "me":
+            tasks = [t for t in all_db_tasks if t.owner and t.owner.username == current_user.username]
+        elif owner_filter == "others":
+            tasks = [t for t in all_db_tasks if not t.owner or t.owner.username != current_user.username]
+        else: # 'all'
+            tasks = all_db_tasks
     else:
         tasks = task_manager.get_tasks_for_user(current_user.username)
     

@@ -1,4 +1,4 @@
-// [UPDATE] lollms/frontend/webui/src/stores/tasks.js
+// frontend/webui/src/stores/tasks.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -13,6 +13,7 @@ export const useTasksStore = defineStore('tasks', () => {
     // --- STATE ---
     const tasks = ref([]);
     const isLoadingTasks = ref(false);
+    const isClearingTasks = ref(false);
 
     // --- COMPUTED ---
     const activeTasksCount = computed(() => {
@@ -40,10 +41,15 @@ export const useTasksStore = defineStore('tasks', () => {
 
 
     // --- ACTIONS ---
-    async function fetchTasks() {
+    async function fetchTasks(ownerFilter = 'all') {
         isLoadingTasks.value = true;
         try {
-            const response = await apiClient.get('/api/tasks');
+            const authStore = useAuthStore();
+            const params = {};
+            if (authStore.isAdmin) {
+                params.owner_filter = ownerFilter;
+            }
+            const response = await apiClient.get('/api/tasks', { params });
             tasks.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             console.error("Failed to fetch tasks:", error);
@@ -105,23 +111,43 @@ export const useTasksStore = defineStore('tasks', () => {
     }
 
     async function clearCompletedTasks() {
+        if (isClearingTasks.value) return;
+        isClearingTasks.value = true;
         try {
             const response = await apiClient.post('/api/tasks/clear-completed');
             uiStore.addNotification(response.data.message || 'Completed tasks cleared.', 'success');
-            // No need to fetch, websocket event will handle it
+            
+            // Perform local update for immediate UI feedback
+            const authStore = useAuthStore();
+            if (authStore.isAdmin) {
+                // Admin clears all completed tasks
+                tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
+            } else {
+                // Regular user clears only their own completed tasks
+                const username = authStore.user?.username;
+                tasks.value = tasks.value.filter(task => {
+                    const isCompleted = ['completed', 'failed', 'cancelled'].includes(task.status);
+                    if (!isCompleted) return true; // Keep active tasks
+                    return task.owner_username !== username;
+                });
+            }
         } catch (error) {
             // Error is handled by global interceptor
+        } finally {
+            isClearingTasks.value = false;
         }
     }
     
     function $reset() {
         tasks.value = [];
         isLoadingTasks.value = false;
+        isClearingTasks.value = false;
     }
 
     return {
         tasks,
         isLoadingTasks,
+        isClearingTasks,
         activeTasksCount,
         mostRecentActiveTask,
         imageGenerationTasks,
