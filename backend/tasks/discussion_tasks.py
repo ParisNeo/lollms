@@ -59,6 +59,7 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
     task.log(f"content: {discussion.discussion_data_zone[:1000] if discussion.discussion_data_zone else 'No text'}")
     task.log(f"prompt: {prompt_to_use[:1000]}")
     task.log(f"Nb images: {len(discussion_images_b64) if discussion_images_b64 else 0}")
+    task.log(f"Context size: {lc.llm.default_ctx_size}")
     
     
     summary = lc.long_context_processing(
