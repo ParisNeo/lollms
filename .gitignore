@@ -184,3 +184,6 @@ zoo_cache.json
 
 # models
 models
+
+# lollms vscoder discussions
+.lollms
