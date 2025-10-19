@@ -1,3 +1,4 @@
+<!-- frontend/webui/src/components/layout/GlobalHeader.vue -->
 <script setup>
 import { computed, ref, provide, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -32,11 +33,15 @@ const router = useRouter();
 const user = computed(() => authStore.user);
 const wsConnected = computed(() => authStore.wsConnected);
 const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
-const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages'];
-const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
 const pageTitle = computed(() => uiStore.pageTitle);
 const pageTitleIcon = computed(() => uiStore.pageTitleIcon);
 const mainView = computed(() => uiStore.mainView);
+
+const showDataZoneButton = computed(() => {
+    // Only show this button on the main 'Home' route when the view is 'chat'
+    return route.name === 'Home' && mainView.value === 'chat';
+});
+
 
 const modelSearchTerm = ref('');
 const personalitySearchTerm = ref('');
@@ -243,7 +248,7 @@ function handleEditPersonality(personality, event) {
 <template>
   <header class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-2 sm:p-3 flex items-center justify-between shadow-sm z-10">
     <!-- Center: Model Selectors (Home) or Page Title (Other Views) -->
-    <div v-if="isHomePageLayout && user && user.user_ui_level >= 2" class="hidden md:flex items-center gap-2 flex-1 min-w-0 justify-center px-4">
+    <div v-if="route.name === 'Home' && user && user.user_ui_level >= 2" class="hidden md:flex items-center gap-2 flex-1 min-w-0 justify-center px-4">
       <div class="relative">
         <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" class="toolbox-select flex items-center gap-2 max-w-sm !p-1">
               <div class="flex items-center flex-shrink-0">
@@ -403,8 +408,8 @@ function handleEditPersonality(personality, event) {
       <NotificationBell v-if="user && user.user_ui_level >= 2" />
       <TasksManagerButton />      
       <!-- Slot for view-specific actions -->
-      <slot name="actions"></slot>
-      <button v-if="isHomePageLayout && mainView !== 'feed'" @click="uiStore.toggleDataZone()" class="btn-icon" :class="{'bg-gray-200 dark:bg-gray-700': isDataZoneVisible}" title="Toggle Data Zone">
+      <div id="global-header-actions-target" class="flex items-center gap-2"></div>
+      <button v-if="showDataZoneButton" @click="uiStore.toggleDataZone()" class="btn-icon" :class="{'bg-gray-200 dark:bg-gray-700': isDataZoneVisible}" title="Toggle Data Zone">
           <IconDataZone class="w-5 h-5" />
       </button>
     </div>

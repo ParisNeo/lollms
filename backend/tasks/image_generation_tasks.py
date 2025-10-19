@@ -183,7 +183,9 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
                 owner_user_id=user.id,
                 filename=filename,
                 prompt=request_data.get('prompt'),
-                model=model_full_name
+                model=model_full_name,
+                width=generation_params.get("width"),
+                height=generation_params.get("height")
             )
             db.add(new_image)
             db.commit()
@@ -363,7 +365,9 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
             owner_user_id=user.id,
             filename=filename,
             prompt=f"Edited from {len(source_images_b64)} image(s): {request_data.get('prompt')}",
-            model=model_full_name
+            model=model_full_name,
+            width=request_data.get("width"),
+            height=request_data.get("height")
         )
         db.add(new_image)
         db.commit()

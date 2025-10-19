@@ -27,7 +27,6 @@ import AdminUserEditModal from './components/modals/AdminUserEditModal.vue';
 import ForceSettingsModal from './components/modals/ForceSettingsModal.vue';
 import ConfirmationModal from './components/ui/ConfirmationModal.vue';
 import ImageViewerModal from './components/modals/ImageViewerModal.vue';
-import InpaintingEditorModal from './components/modals/InpaintingEditorModal.vue';
 import ArtefactEditorModal from './components/modals/ArtefactEditorModal.vue';
 import ArtefactViewerModal from './components/modals/ArtefactViewerModal.vue';
 import MemoryEditorModal from './components/modals/MemoryEditorModal.vue';
@@ -76,7 +75,7 @@ const tasksStore = useTasksStore();
 const discussionsStore = useDiscussionsStore();
 const imageStore = useImageStore();
 const route = useRoute();
-const { messageFontSize } = storeToRefs(uiStore);
+const { message_font_size } = storeToRefs(uiStore);
 
 const activeModal = computed(() => uiStore.activeModal);
 const isAuthenticating = computed(() => authStore.isAuthenticating);
@@ -98,9 +97,6 @@ const funFactTextStyle = computed(() => ({
 }));
 
 const layoutState = computed(() => {
-    if (activeModal.value === 'firstAdminSetup') {
-        return 'modal_only';
-    }
     if (isAuthenticating.value) {
         return 'loading';
     }
@@ -110,8 +106,23 @@ const layoutState = computed(() => {
     return 'guest';
 });
 
-const pageLayoutRoutes = ['Settings', 'Admin', 'DataStores', 'Friends', 'Help', 'Profile', 'Messages','VoicesStudio', 'ImageStudio'];
-const isHomePageLayout = computed(() => !pageLayoutRoutes.includes(route.name));
+const showMainSidebar = computed(() => {
+    if (!isAuthenticated.value) return false;
+    // Views that have their own full-screen layouts and do not need the main sidebar
+    const noMainSidebarPaths = [
+        '/settings',
+        '/admin',
+        '/datastores',
+        '/friends',
+        '/help',
+        '/profile',
+        '/messages',
+        '/voices-studio',
+        '/image-studio' // This covers both /image-studio and /image-studio/edit/...
+    ];
+    return !noMainSidebarPaths.some(path => route.path.startsWith(path));
+});
+
 
 onMounted(async () => {
     uiStore.initializeTheme();
@@ -129,7 +140,7 @@ onMounted(async () => {
     }
 });
 
-watch(messageFontSize, (newSize) => {
+watch(message_font_size, (newSize) => {
   if (newSize && newSize > 0) {
     document.documentElement.style.setProperty('--message-font-size', `${newSize}px`);
   }
@@ -173,10 +184,10 @@ watch(messageFontSize, (newSize) => {
     <!-- Authenticated App Layout -->
     <div v-else-if="layoutState === 'authenticated'" class="flex flex-col flex-grow min-h-0">
       <div class="flex flex-grow min-h-0 relative">
-        <div v-if="isHomePageLayout" class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out" :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
+        <div v-if="showMainSidebar" class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out" :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
             <Sidebar/>
         </div>
-        <div v-if="isHomePageLayout && isSidebarOpen" @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/30 z-30 md:hidden"></div>
+        <div v-if="showMainSidebar && isSidebarOpen" @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/30 z-30 md:hidden"></div>
 
         <div class="flex-1 flex flex-col overflow-hidden">
           <GlobalHeader />
@@ -204,10 +215,10 @@ watch(messageFontSize, (newSize) => {
     <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
     <ConfirmationModal v-if="activeModal === 'confirmation'" />
     <ImageViewerModal />
-    <InpaintingEditorModal v-if="activeModal === 'inpaintingEditor'" />
     <ArtefactEditorModal v-if="activeModal === 'artefactEditor'" />
     <ArtefactViewerModal v-if="activeModal === 'artefactViewer'" />
     <MemoryEditorModal v-if="activeModal === 'memoryEditor'" />
+    <NotificationPanel />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
     <EditDataStoreModal v-if="activeModal === 'editDataStore'" />
     <ExportModal v-if="activeModal === 'export'" />

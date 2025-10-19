@@ -10,6 +10,8 @@ class UserImagePublic(BaseModel):
     model: Optional[str] = None
     created_at: datetime.datetime
     discussion_id: Optional[str] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
 
     class Config:
         from_attributes = True
@@ -55,3 +57,13 @@ class ImagePromptEnhancementRequest(BaseModel):
 class ImagePromptEnhancementResponse(BaseModel):
     prompt: Optional[str] = None
     negative_prompt: Optional[str] = None
+
+
+class SaveCanvasRequest(BaseModel):
+    base_image_b64: Optional[str] = None
+    drawing_b64: Optional[str] = None
+    prompt: str
+    model: Optional[str] = None
+    width: int
+    height: int
+    bg_color: str = "#FFFFFF"

@@ -3,7 +3,9 @@ import base64
 import uuid
 import json
 from pathlib import Path
-from typing import List
+from typing import List, Optional
+from PIL import Image
+import io
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request
 from fastapi.responses import FileResponse
@@ -16,7 +18,8 @@ from backend.db.models.image import UserImage
 from backend.models import UserAuthDetails, TaskInfo
 from backend.models.image import (
     UserImagePublic, ImageGenerationRequest, MoveImageToDiscussionRequest, 
-    ImageEditRequest, ImagePromptEnhancementRequest, ImagePromptEnhancementResponse
+    ImageEditRequest, ImagePromptEnhancementRequest, ImagePromptEnhancementResponse,
+    SaveCanvasRequest
 )
 from backend.session import (
     get_current_active_user, get_user_data_root, 
@@ -57,6 +60,52 @@ async def get_image_file(
         raise HTTPException(status_code=404, detail="Image file not found on disk.")
         
     return FileResponse(str(file_path))
+
+@image_studio_router.post("/save-canvas", response_model=UserImagePublic)
+async def save_canvas_as_new_image(
+    payload: SaveCanvasRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        if payload.base_image_b64:
+            base_image_bytes = base64.b64decode(payload.base_image_b64)
+            base_img = Image.open(io.BytesIO(base_image_bytes)).convert("RGBA")
+        else:
+            base_img = Image.new("RGBA", (payload.width, payload.height), payload.bg_color)
+
+        if payload.drawing_b64:
+            drawing_bytes = base64.b64decode(payload.drawing_b64)
+            drawing_img = Image.open(io.BytesIO(drawing_bytes)).convert("RGBA")
+            # Ensure drawing is the same size as the base
+            if drawing_img.size != base_img.size:
+                drawing_img = drawing_img.resize(base_img.size, Image.Resampling.LANCZOS)
+            final_img = Image.alpha_composite(base_img, drawing_img)
+        else:
+            final_img = base_img
+
+        user_images_path = get_user_images_path(current_user.username)
+        filename = f"{uuid.uuid4().hex}.png"
+        file_path = user_images_path / filename
+
+        final_img.save(file_path, "PNG")
+
+        new_image = UserImage(
+            id=str(uuid.uuid4()),
+            owner_user_id=current_user.id,
+            filename=filename,
+            prompt=payload.prompt,
+            model=payload.model
+        )
+        db.add(new_image)
+        db.commit()
+        db.refresh(new_image)
+        return new_image
+
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to save canvas: {e}")
+
 
 @image_studio_router.post("/generate", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def generate_image(

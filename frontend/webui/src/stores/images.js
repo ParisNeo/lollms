@@ -1,4 +1,4 @@
-// [UPDATE] lollms/frontend/webui/src/stores/images.js
+// frontend/webui/src/stores/images.js
 import { defineStore } from 'pinia';
 import { ref, onMounted, onUnmounted } from 'vue';
 import apiClient from '../services/api';
@@ -82,6 +82,21 @@ export const useImageStore = defineStore('images', () => {
         }
     }
 
+    async function saveCanvasAsNewImage(payload) {
+        isGenerating.value = true;
+        try {
+            const response = await apiClient.post('/api/image-studio/save-canvas', payload);
+            images.value.unshift(response.data);
+            uiStore.addNotification('Image saved successfully!', 'success');
+            return response.data;
+        } catch (error) {
+            // Error is handled globally
+            return null;
+        } finally {
+            isGenerating.value = false;
+        }
+    }
+
     async function uploadImages(files) {
         if (!Array.isArray(files) || files.length === 0) return;
 
@@ -157,6 +172,7 @@ export const useImageStore = defineStore('images', () => {
         fetchImages,
         generateImage,
         editImage,
+        saveCanvasAsNewImage,
         uploadImages,
         deleteImage,
         moveImageToDiscussion,

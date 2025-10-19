@@ -24,6 +24,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const tasksStore = useTasksStore();
     const dataStore = useDataStore();
     const authStore = useAuthStore();
+    const { user } = storeToRefs(authStore);
     const { tasks } = storeToRefs(tasksStore);
     const { on, off, emit } = useEventBus();
 
@@ -79,6 +80,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
         }
     }, { deep: true });
+
+    // NEW WATCHER: Watch for model changes to refresh context status
+    watch(() => user.value?.lollms_model_name, (newModel, oldModel) => {
+        if (newModel && newModel !== oldModel && currentDiscussionId.value) {
+            getActions().fetchContextStatus(currentDiscussionId.value);
+        }
+    });
 
     // --- COMPUTED ---
     const activeDiscussion = computed(() => {

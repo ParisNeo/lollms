@@ -11,7 +11,8 @@ import DataStoresView from '../views/DataStoresView.vue';
 import FriendsView from '../views/FriendsView.vue';
 import SsoLoginView from '../views/SsoLoginView.vue';
 import WelcomeView from '../views/WelcomeView.vue';
-import ImageStudioView from '../views/ImageStudioView.vue'; // NEW: Import ImageStudioView
+import ImageStudioView from '../views/ImageStudioView.vue';
+import ImageEditorView from '../views/ImageEditorView.vue'; // Added this line
 
 const routes = [
   {
@@ -77,9 +78,23 @@ const routes = [
     component: () => import('../views/VoicesStudioView.vue'), meta: { requiresAuth: true } 
   },
   {
-    path: '/image-studio', // NEW ROUTE
+    path: '/image-studio',
     name: 'ImageStudioView',
     component: ImageStudioView,
+    meta: { requiresAuth: true, minLevel: 3 },
+  },
+  {
+    path: '/image-studio/edit/new',
+    name: 'ImageEditorNew',
+    component: ImageEditorView,
+    props: { newImage: true },
+    meta: { requiresAuth: true, minLevel: 3 },
+  },
+  {
+    path: '/image-studio/edit/:id',
+    name: 'ImageEditorEdit',
+    component: ImageEditorView,
+    props: true,
     meta: { requiresAuth: true, minLevel: 3 },
   },
 ];

@@ -1,4 +1,4 @@
-<!-- [UPDATE] lollms/frontend/webui/src/views/ImageStudioView.vue -->
+<!-- [UPDATE] frontend/webui/src/views/ImageStudioView.vue -->
 <script setup>
 import { ref, onMounted, onUnmounted, computed, watch, markRaw } from 'vue';
 import { useRouter } from 'vue-router';
@@ -11,6 +11,7 @@ import { useTasksStore } from '../stores/tasks';
 import { storeToRefs } from 'pinia';
 import AuthenticatedImage from '../components/ui/AuthenticatedImage.vue';
 import TaskProgressIndicator from '../components/ui/TaskProgressIndicator.vue';
+import apiClient from '../services/api';
 
 // Icons
 import IconPhoto from '../assets/icons/IconPhoto.vue';
@@ -40,6 +41,7 @@ const {
 } = storeToRefs(imageStore);
 const { user } = storeToRefs(authStore);
 const { imageGenerationTasks, imageGenerationTasksCount } = storeToRefs(tasksStore);
+const { currentModelVisionSupport } = storeToRefs(discussionsStore);
 
 const isConfigVisible = ref(false);
 
@@ -137,7 +139,38 @@ async function handleEnhance(type) {
         uiStore.addNotification('Please enter a prompt to enhance.', 'warning');
         return;
     }
-    const result = await imageStore.enhanceImagePrompt({ prompt: prompt.value, negative_prompt: negativePrompt.value, target: type });
+    
+    const payload = { 
+        prompt: prompt.value, 
+        negative_prompt: negativePrompt.value, 
+        target: type,
+        model: authStore.user?.lollms_model_name
+    };
+
+    if (isSelectionMode.value && currentModelVisionSupport.value && selectedImages.value.length > 0) {
+        uiStore.addNotification('Enhancing prompt with image context...', 'info');
+        const image_b64s = [];
+        for (const imageId of selectedImages.value) {
+            try {
+                const response = await apiClient.get(`/api/image-studio/${imageId}/file`, { responseType: 'blob' });
+                const b64 = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(response.data);
+                });
+                image_b64s.push(b64);
+            } catch (error) {
+                console.error(`Failed to fetch and encode image ${imageId}`, error);
+                uiStore.addNotification(`Could not load image ${imageId} for context.`, 'warning');
+            }
+        }
+        if (image_b64s.length > 0) {
+            payload.image_b64s = image_b64s;
+        }
+    }
+    
+    const result = await imageStore.enhanceImagePrompt(payload);
     if (result) {
         if (result.prompt) prompt.value = result.prompt;
         if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
@@ -145,12 +178,7 @@ async function handleEnhance(type) {
 }
 
 function handleNewBlankImage() {
-    const [width, height] = imageSize.value.split('x').map(Number);
-    uiStore.openModal('inpaintingEditor', {
-        image: null,
-        width,
-        height
-    });
+    router.push('/image-studio/edit/new');
 }
 
 
@@ -161,7 +189,10 @@ function reusePrompt(image) {
     uiStore.addNotification('Prompt and parameters have been reused.', 'success');
 }
 
-function openInpaintingEditor(image) { uiStore.openModal('inpaintingEditor', { image }); }
+function openInpaintingEditor(image) { 
+    router.push(`/image-studio/edit/${image.id}`);
+}
+
 function openImageViewer(image, index) {
     uiStore.openImageViewer({
         imageList: images.value.map(img => ({ ...img, src: `/api/image-studio/${img.id}/file`})),
@@ -192,7 +223,6 @@ async function handleMoveToDiscussion() {
         selectedImages.value = [];
     }
 }
-function goBack() { router.push('/'); }
 
 function handleDragOver(event) {
     event.preventDefault();
@@ -237,8 +267,16 @@ async function handlePaste(event) {
 </script>
 
 <template>
+    <Teleport to="#global-header-actions-target">
+        <div class="flex items-center gap-2">
+            <button @click="handleGenerateOrApply" class="btn btn-primary" :disabled="isGenerating || isEnhancing">
+                <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2" />
+                {{ isSelectionMode ? 'Apply' : 'Generate' }}
+            </button>
+        </div>
+    </Teleport>
     <div 
-        class="h-full flex flex-col bg-gray-50 dark:bg-gray-900 relative" 
+        class="h-full flex flex-col bg-gray-50 dark:bg-gray-900" 
         @dragover.prevent="handleDragOver"
         @dragleave.prevent="handleDragLeave"
         @drop.prevent="handleDrop"
@@ -246,138 +284,138 @@ async function handlePaste(event) {
         <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 rounded-lg z-20 flex items-center justify-center m-4 pointer-events-none">
             <p class="text-2xl font-bold text-blue-600">Drop images anywhere to upload</p>
         </div>
-        <div class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-2 flex items-center">
-            <button @click="goBack" class="btn btn-secondary btn-icon" title="Back to Main App">
-                <IconArrowLeft class="w-5 h-5" />
-            </button>
-        </div>
-
-        <div class="flex-grow overflow-y-auto p-4 sm:p-6 flex flex-col">
-            <div 
-                class="flex-grow min-h-0 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md flex flex-col"
-            >
-                <div class="flex justify-between items-center mb-4 flex-shrink-0 flex-wrap gap-2">
-                    <div class="flex items-center gap-2">
-                        <input type="checkbox" v-model="areAllSelected" class="h-4 w-4 rounded" title="Select All" />
-                        <h3 class="text-lg font-semibold">Your Images ({{ images.length }})</h3>
+        
+        <div class="flex-grow min-h-0 flex">
+            <!-- Controls Sidebar -->
+            <div class="w-96 flex-shrink-0 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col">
+                <div class="flex-grow p-4 space-y-4 overflow-y-auto custom-scrollbar">
+                    <div>
+                        <label for="prompt" class="block text-sm font-medium">Prompt</label>
+                        <div class="relative mt-1"><textarea id="prompt" v-model="prompt" rows="4" class="input-field pr-10" placeholder="A photorealistic image of..."></textarea><button @click="handleEnhance('prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance prompt with AI" :disabled="isEnhancing"><IconSparkles class="w-4 h-4" /></button></div>
                     </div>
-                    <div v-if="isSelectionMode" class="flex items-center gap-2">
-                        <span class="text-sm text-gray-500">{{ selectedImages.length }} selected</span>
-                        <button @click="handleMoveToDiscussion" class="btn btn-secondary btn-sm" title="Move to Discussion"><IconSend class="w-4 h-4" /></button>
-                        <button @click="handleDeleteSelected" class="btn btn-danger btn-sm" title="Delete Selected"><IconTrash class="w-4 h-4" /></button>
+                    <div>
+                        <label for="negative-prompt" class="block text-sm font-medium">Negative Prompt</label>
+                        <div class="relative mt-1"><textarea id="negative-prompt" v-model="negativePrompt" rows="3" class="input-field pr-10" placeholder="ugly, blurry, bad anatomy..."></textarea><button @click="handleEnhance('negative_prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance negative prompt with AI" :disabled="isEnhancing"><IconSparkles class="w-4 h-4" /></button></div>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button @click="handleNewBlankImage" class="btn btn-secondary btn-sm">
-                            <IconPlus class="w-4 h-4 mr-2" /> Create Blank Image
-                        </button>
-                        <label for="upload-image-btn" class="btn btn-secondary btn-sm cursor-pointer">
-                            <IconArrowDownTray class="w-4 h-4 mr-2" /> Upload
-                            <input id="upload-image-btn" type="file" @change="handleUpload" class="hidden" accept="image/*" multiple>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- NEW: Active Tasks Section -->
-                <div v-if="imageGenerationTasksCount > 0" class="flex-shrink-0 mb-4">
-                    <h4 class="text-md font-semibold mb-2 text-gray-700 dark:text-gray-300">Generations in Progress ({{ imageGenerationTasksCount }})</h4>
-                    <div class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar p-2 bg-gray-100 dark:bg-gray-700/50 rounded-lg">
-                        <div v-for="task in imageGenerationTasks" :key="task.id" class="bg-white dark:bg-gray-800 p-2 rounded-md shadow-sm">
-                            <TaskProgressIndicator 
-                                :task="task" 
-                                show-name 
-                                @cancel="tasksStore.cancelTask(task.id)" 
-                                @view="uiStore.openModal('tasksManager', { initialTaskId: task.id })"
-                            />
+                    
+                    <div class="pt-4 border-t dark:border-gray-600">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-sm font-semibold">Generation Settings</h3>
+                            <button @click="isConfigVisible = !isConfigVisible" class="btn-icon-flat" :title="isConfigVisible ? 'Hide Settings' : 'Show Settings'">
+                                <IconAdjustmentsHorizontal class="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div v-if="isConfigVisible" class="mt-4 grid grid-cols-2 gap-4 items-end">
+                            <div v-if="!isSelectionMode">
+                                <label for="n" class="block text-sm font-medium">Number</label>
+                                <input id="n" v-model.number="nImages" type="number" min="1" max="10" class="input-field mt-1">
+                            </div>
+                            <div>
+                                <label for="size" class="block text-sm font-medium">Size</label>
+                                <select id="size" v-model="imageSize" class="input-field mt-1">
+                                    <option value="1024x1024">1024x1024 (Square 1:1)</option>
+                                    <option value="1152x896">1152x896 (Landscape ~4:3)</option>
+                                    <option value="896x1152">896x1152 (Portrait ~3:4)</option>
+                                    <option value="1216x832">1216x832 (Landscape ~3:2)</option>
+                                    <option value="832x1216">832x1216 (Portrait ~2:3)</option>
+                                    <option value="1344x768">1344x768 (Widescreen 16:9)</option>
+                                    <option value="768x1344">768x1344 (Tall 9:16)</option>
+                                    <option value="1536x640">1536x640 (Cinematic ~2.4:1)</option>
+                                    <option value="640x1536">640x1536 (Tall Cinematic ~1:2.4)</option>
+                                    <option value="512x512">512x512 (Small Square)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="seed" class="block text-sm font-medium">Seed</label>
+                                <input id="seed" v-model.number="seed" type="number" class="input-field mt-1" placeholder="-1 for random">
+                            </div>
+                            <div v-for="param in modelConfigurableParameters" :key="param.name">
+                                <label :for="`param-${param.name}`" class="block text-sm font-medium capitalize">{{ param.name.replace(/_/g, ' ') }}</label>
+                                <select v-if="param.options && param.options.length > 0" :id="`param-${param.name}`" v-model="generationParams[param.name]" class="input-field mt-1">
+                                    <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
+                                </select>
+                                <input v-else :type="param.type === 'str' ? 'text' : 'number'" :step="param.type === 'float' ? '0.1' : '1'" :id="`param-${param.name}`" v-model="generationParams[param.name]" class="input-field mt-1" :placeholder="param.default">
+                            </div>
                         </div>
                     </div>
                 </div>
-
-                <div v-if="isLoading" class="flex-grow flex items-center justify-center"><IconAnimateSpin class="w-8 h-8 text-gray-500" /></div>
-                <div v-else-if="images.length === 0" class="flex-grow flex items-center justify-center text-center text-gray-500">
-                    <div><p>No images yet.</p><p class="text-sm">Drop, paste, or use the form below to generate some!</p></div>
+                <div class="p-4 border-t dark:border-gray-700 flex-shrink-0">
+                    <router-link to="/" class="btn btn-secondary w-full flex items-center justify-center" title="Back to Main App">
+                        <IconArrowLeft class="w-5 h-5 mr-2" />
+                        <span>Back to App</span>
+                    </router-link>
                 </div>
-                <div v-else class="flex-grow overflow-y-auto custom-scrollbar -m-2 p-2">
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                        <div v-for="(image, index) in images" :key="image.id" @click="toggleSelection(image.id)" 
-                             class="relative aspect-square rounded-lg overflow-hidden group cursor-pointer border-4" 
-                             :class="isSelected(image.id) ? 'border-red-500' : 'border-transparent'">
-                            <AuthenticatedImage :src="`/api/image-studio/${image.id}/file`" class="w-full h-full object-cover transition-transform group-hover:scale-105" />
-                            <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2 text-white">
-                                <div class="flex justify-end">
-                                    <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center" :class="isSelected(image.id) ? 'bg-red-500 border-white' : 'bg-black/30 border-white/50'">
-                                        <svg v-if="isSelected(image.id)" class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
-                                    </div>
+            </div>
+
+            <!-- Image Grid -->
+            <div class="flex-grow overflow-y-auto p-4 sm:p-6 flex flex-col">
+                <div class="flex-grow min-h-0 bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md flex flex-col">
+                     <div class="flex justify-between items-center mb-4 flex-shrink-0 flex-wrap gap-2">
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" v-model="areAllSelected" class="h-4 w-4 rounded" title="Select All" />
+                            <h3 class="text-lg font-semibold">Your Images ({{ images.length }})</h3>
+                        </div>
+                        <div v-if="isSelectionMode" class="flex items-center gap-2">
+                            <span class="text-sm text-gray-500">{{ selectedImages.length }} selected</span>
+                            <button @click="handleMoveToDiscussion" class="btn btn-secondary btn-sm" title="Move to Discussion"><IconSend class="w-4 h-4" /></button>
+                            <button @click="handleDeleteSelected" class="btn btn-danger btn-sm" title="Delete Selected"><IconTrash class="w-4 h-4" /></button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button @click="handleNewBlankImage" class="btn btn-secondary btn-sm">
+                                <IconPlus class="w-4 h-4 mr-2" /> Create Blank Image
+                            </button>
+                            <label for="upload-image-btn" class="btn btn-secondary btn-sm cursor-pointer">
+                                <IconArrowDownTray class="w-4 h-4 mr-2" /> Upload
+                                <input id="upload-image-btn" type="file" @change="handleUpload" class="hidden" accept="image/*" multiple>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Active Tasks Section -->
+                    <div v-if="imageGenerationTasksCount > 0" class="flex-shrink-0 mb-4">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                            <div v-for="task in imageGenerationTasks" :key="task.id" class="relative aspect-square rounded-lg bg-gray-200 dark:bg-gray-700/50 flex flex-col items-center justify-center p-2 text-center overflow-hidden">
+                                <div class="absolute inset-0 bg-blue-500/10 animate-pulse"></div>
+                                <IconAnimateSpin class="w-8 h-8 text-blue-500 mb-2" />
+                                <p class="text-xs font-medium text-gray-600 dark:text-gray-300 truncate w-full" :title="task.name">{{ task.name }}</p>
+                                <div class="w-full bg-gray-300 dark:bg-gray-600 rounded-full h-1 mt-2">
+                                    <div class="bg-blue-500 h-1 rounded-full" :style="{ width: task.progress + '%' }"></div>
                                 </div>
-                                <p class="text-xs line-clamp-3" :title="image.prompt">{{ image.prompt }}</p>
                             </div>
-                            <div v-if="isSelected(image.id)" class="absolute top-1 left-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center z-10">
-                                {{ selectedImages.indexOf(image.id) + 1 }}
-                            </div>
-                            <div class="absolute bottom-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button @click.stop="reusePrompt(image)" class="p-1.5 bg-black/50 rounded-full hover:bg-black/80" title="Reuse Prompt & Settings"><IconRefresh class="w-4 h-4 text-white" /></button>
-                                <button @click.stop="openImageViewer(image, index)" class="p-1.5 bg-black/50 rounded-full hover:bg-black/80" title="View Full Size"><IconMaximize class="w-4 h-4 text-white" /></button>
-                                <button @click.stop="openInpaintingEditor(image)" class="p-1.5 bg-black/50 rounded-full hover:bg-black/80" title="Inpaint/Edit"><IconPencil class="w-4 h-4 text-white" /></button>
+                        </div>
+                    </div>
+
+                    <div v-if="isLoading" class="flex-grow flex items-center justify-center"><IconAnimateSpin class="w-8 h-8 text-gray-500" /></div>
+                    <div v-else-if="images.length === 0 && imageGenerationTasksCount === 0" class="flex-grow flex items-center justify-center text-center text-gray-500">
+                        <div><p>No images yet.</p><p class="text-sm">Drop, paste, or use the form to generate some!</p></div>
+                    </div>
+                    <div v-else class="flex-grow overflow-y-auto custom-scrollbar -m-2 p-2">
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                            <div v-for="(image, index) in images" :key="image.id" @click="toggleSelection(image.id)" 
+                                class="relative aspect-square rounded-lg overflow-hidden group cursor-pointer border-4" 
+                                :class="isSelected(image.id) ? 'border-red-500' : 'border-transparent'">
+                                <AuthenticatedImage :src="`/api/image-studio/${image.id}/file`" class="w-full h-full object-cover transition-transform group-hover:scale-105" />
+                                <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-2 text-white">
+                                    <div class="flex justify-end">
+                                        <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center" :class="isSelected(image.id) ? 'bg-red-500 border-white' : 'bg-black/30 border-white/50'">
+                                            <svg v-if="isSelected(image.id)" class="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg>
+                                        </div>
+                                    </div>
+                                    <p class="text-xs line-clamp-3" :title="image.prompt">{{ image.prompt }}</p>
+                                </div>
+                                <div v-if="isSelected(image.id)" class="absolute top-1 left-1 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center z-10">
+                                    {{ selectedImages.indexOf(image.id) + 1 }}
+                                </div>
+                                <div class="absolute bottom-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button @click.stop="reusePrompt(image)" class="p-1.5 bg-black/50 rounded-full hover:bg-black/80" title="Reuse Prompt & Settings"><IconRefresh class="w-4 h-4 text-white" /></button>
+                                    <button @click.stop="openImageViewer(image, index)" class="p-1.5 bg-black/50 rounded-full hover:bg-black/80" title="View Full Size"><IconMaximize class="w-4 h-4 text-white" /></button>
+                                    <button @click.stop="openInpaintingEditor(image)" class="p-1.5 bg-black/50 rounded-full hover:bg-black/80" title="Inpaint/Edit"><IconPencil class="w-4 h-4 text-white" /></button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
-        </div>
-
-        <div class="flex-shrink-0 bg-white dark:bg-gray-800 p-4 border-t dark:border-gray-700 shadow-top">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label for="prompt" class="block text-sm font-medium">Prompt</label>
-                    <div class="relative mt-1"><textarea id="prompt" v-model="prompt" rows="3" class="input-field pr-10" placeholder="A photorealistic image of..."></textarea><button @click="handleEnhance('prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance prompt with AI" :disabled="isEnhancing"><IconSparkles class="w-4 h-4" /></button></div>
-                </div>
-                <div>
-                    <label for="negative-prompt" class="block text-sm font-medium">Negative Prompt</label>
-                    <div class="relative mt-1"><textarea id="negative-prompt" v-model="negativePrompt" rows="3" class="input-field pr-10" placeholder="ugly, blurry, bad anatomy..."></textarea><button @click="handleEnhance('negative_prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance negative prompt with AI" :disabled="isEnhancing"><IconSparkles class="w-4 h-4" /></button></div>
-                </div>
-            </div>
-            
-            <div v-if="isConfigVisible" class="mt-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 items-end">
-                <div v-if="!isSelectionMode">
-                    <label for="n" class="block text-sm font-medium">Number</label>
-                    <input id="n" v-model.number="nImages" type="number" min="1" max="10" class="input-field mt-1">
-                </div>
-                <div>
-                    <label for="size" class="block text-sm font-medium">Size</label>
-                    <select id="size" v-model="imageSize" class="input-field mt-1">
-                        <option value="1024x1024">1024x1024</option><option value="1792x1024">1792x1024</option><option value="1024x1792">1024x1792</option><option value="512x512">512x512</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="seed" class="block text-sm font-medium">Seed</label>
-                    <input id="seed" v-model.number="seed" type="number" class="input-field mt-1" placeholder="-1 for random">
-                </div>
-                <div v-for="param in modelConfigurableParameters" :key="param.name">
-                    <label :for="`param-${param.name}`" class="block text-sm font-medium capitalize">{{ param.name.replace(/_/g, ' ') }}</label>
-                    <select v-if="param.options && param.options.length > 0" :id="`param-${param.name}`" v-model="generationParams[param.name]" class="input-field mt-1">
-                        <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
-                    </select>
-                    <input v-else :type="param.type === 'str' ? 'text' : 'number'" :step="param.type === 'float' ? '0.1' : '1'" :id="`param-${param.name}`" v-model="generationParams[param.name]" class="input-field mt-1" :placeholder="param.default">
-                </div>
-            </div>
-            
-            <div class="mt-4 flex justify-end items-center gap-2">
-                <button @click="isConfigVisible = !isConfigVisible" class="btn btn-secondary p-2.5" :title="isConfigVisible ? 'Hide Settings' : 'Show Settings'">
-                    <IconAdjustmentsHorizontal class="w-5 h-5" />
-                </button>
-                <button @click="handleEnhance('both')" class="btn btn-secondary p-2.5" :disabled="isGenerating || isEnhancing" title="Enhance both prompts">
-                    <IconSparkles class="w-5 h-5" />
-                </button>
-                <button @click="handleGenerateOrApply" class="btn btn-primary flex-grow sm:flex-grow-0" :disabled="isEnhancing">
-                    <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2" />
-                    {{ isSelectionMode ? 'Apply' : 'Generate' }}
-                </button>
             </div>
         </div>
     </div>
 </template>
-
-<style scoped>
-.shadow-top {
-    box-shadow: 0 -4px 6px -1px rgb(0 0 0 / 0.1), 0 -2px 4px -2px rgb(0 0 0 / 0.1);
-}
-</style>

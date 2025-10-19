@@ -22,6 +22,7 @@ export const useSocialStore = defineStore('social', () => {
     const isLoadingComments = ref({});
     const conversations = ref([]);
     const activeConversations = ref({});
+    const activeConversationUserId = ref(null);
     const isLoadingConversations = ref(false);
     const isLoadingMessages = ref(false);
     const socket = ref(null);
@@ -595,6 +596,7 @@ export const useSocialStore = defineStore('social', () => {
         isLoadingComments.value = {};
         conversations.value = [];
         activeConversations.value = {};
+        activeConversationUserId.value = null;
         isLoadingConversations.value = false;
         isLoadingMessages.value = false;
         socket.value = null;
@@ -617,6 +619,7 @@ export const useSocialStore = defineStore('social', () => {
         isLoadingComments,
         conversations,
         activeConversations,
+        activeConversationUserId,
         isLoadingConversations,
         isLoadingMessages,
         socket,
