@@ -113,7 +113,7 @@ async function handleDrop(event) {
 <template>
   <div class="discussion-group">
     <div 
-      class="discussion-group-header group" 
+      class="discussion-group-header group flex items-center justify-between p-2 rounded-lg transition-colors hover:bg-gray-100/50 dark:hover:bg-gray-800/50" 
       :style="{ paddingLeft }"
       :draggable="true"
       @dragstart="handleDragStart"
@@ -121,16 +121,16 @@ async function handleDrop(event) {
       @dragover.prevent="handleDragOver"
       @dragleave="handleDragLeave"
       @drop="handleDrop"
-      :class="{ 'bg-blue-100 dark:bg-blue-900/50 border-2 border-dashed border-blue-400': isDragOver }"
+      :class="{ 'bg-slate-100 dark:bg-slate-800/50 border-2 border-dashed border-slate-400': isDragOver }"
       >
-      <button @click="toggleGroup" class="flex items-center space-x-2 flex-grow min-w-0 h-full p-2 rounded-lg">
+      <button @click="toggleGroup" class="flex items-center space-x-2 flex-grow min-w-0 h-full text-left">
         <IconFolder class="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-gray-400" />
         <span class="font-medium text-slate-700 dark:text-gray-300 truncate">{{ group.name }}</span>
-        <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
+        <div class="px-1.5 py-0.5 bg-slate-200 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
           {{ group.discussions.length }}
         </div>
       </button>
-      <div class="flex items-center flex-shrink-0 mr-2">
+      <div class="flex items-center flex-shrink-0">
         <div @click.stop class="opacity-0 group-hover:opacity-100 transition-opacity">
           <DropdownMenu icon="menu" buttonClass="btn-icon-flat p-1" title="Group actions">
             <button @click="handleNewSubgroup" class="menu-item"><IconFolder class="h-4 w-4" /><span>New Subgroup</span></button>
