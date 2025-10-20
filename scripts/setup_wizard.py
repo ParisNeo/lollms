@@ -10,7 +10,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 try:
-    from backend.db.session import SessionLocal, init_database, engine as db_engine
+    from backend.db import session as db_session_module
     from backend.db.base import Base
     from backend.db.models.config import LLMBinding, TTIBinding, TTSBinding
     from backend.db.models.user import User
@@ -40,9 +40,9 @@ def print_header(text):
     print(f"\n{ASCIIColors.magenta('--- ' + text + ' ---')}")
 
 def get_db_session():
-    init_database(APP_DB_URL)
-    Base.metadata.create_all(bind=db_engine)
-    return SessionLocal()
+    db_session_module.init_database(APP_DB_URL)
+    Base.metadata.create_all(bind=db_session_module.engine)
+    return db_session_module.SessionLocal()
 
 def check_command(command):
     try:
