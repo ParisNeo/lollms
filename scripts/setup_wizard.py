@@ -10,7 +10,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 
 try:
-    from backend.db.session import SessionLocal, init_database
+    from backend.db.session import SessionLocal, init_database, engine as db_engine
     from backend.db.base import Base
     from backend.db.models.config import LLMBinding, TTIBinding, TTSBinding
     from backend.db.models.user import User
@@ -41,8 +41,7 @@ def print_header(text):
 
 def get_db_session():
     init_database(APP_DB_URL)
-    engine = SessionLocal.kw['bind']
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=db_engine)
     return SessionLocal()
 
 def check_command(command):
