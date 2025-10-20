@@ -123,6 +123,10 @@ def _build_cache_for_type(db: Session, item_type: ITEM_TYPES) -> List[Dict[str, 
                     metadata['is_legacy_scripted'] = True
                 # --- END NEW ---
 
+                # --- NEW: Detect .env.example for apps and mcps ---
+                if item_type in ['app', 'mcp']:
+                    metadata['has_dot_env_config'] = (item_folder / ".env.example").exists()
+
                 # Icon handling
                 icon_path = next((p for p in [item_folder / "icon.png", item_folder / "assets" / "logo.png"] if p.exists()), None)
                 icon_b64 = None
@@ -196,6 +200,8 @@ def refresh_repo_cache(repo_name: str, item_type: ITEM_TYPES):
                                     metadata['category'] = metadata['category'][0] if metadata['category'] else 'Uncategorized'
                                 if item_type == 'personality' and (item_folder / "scripts" / "processor.py").exists():
                                     metadata['is_legacy_scripted'] = True
+                                if item_type in ['app', 'mcp']:
+                                    metadata['has_dot_env_config'] = (item_folder / ".env.example").exists()
                                 icon_path = next((p for p in [item_folder / "icon.png", item_folder / "assets" / "logo.png"] if p.exists()), None)
                                 icon_b64 = f"data:image/png;base64,{base64.b64encode(icon_path.read_bytes()).decode('utf-8')}" if icon_path else None
                                 folder_name_rel = item_folder.relative_to(repo_path).as_posix()

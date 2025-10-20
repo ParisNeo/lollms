@@ -24,10 +24,10 @@ const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
                 <p class="mt-4 text-lg font-semibold text-gray-600 dark:text-gray-300">Loading Discussion...</p>
             </div>
             
-            <template v-else>
+            <div v-show="!isLoadingMessages" class="flex-1 flex flex-col min-h-0 h-full">
                 <MessageArea class="flex-1 overflow-y-auto" />
                 <ChatInput />
-            </template>
+            </div>
         </div>
         <DataZone v-if="isDataZoneVisible" />
     </div>

@@ -63,7 +63,6 @@ export function useDiscussionCore(state, stores, getActions) {
             try {
                 const response = await apiClient.get(`/api/discussions/${discussionId}`, { params: { branch_id: branchId } });
                 messages.value = processMessages(response.data);
-                state.emit('discussion:refreshed');
                 await getActions().fetchContextStatus(discussionId);
                 await getActions().fetchArtefacts(discussionId);
             } catch (error) {
@@ -72,6 +71,7 @@ export function useDiscussionCore(state, stores, getActions) {
                 currentDiscussionId.value = null;
             } finally {
                 isLoadingMessages.value = false;
+                state.emit('discussion:refreshed');
             }
         } else {
             messages.value = [];

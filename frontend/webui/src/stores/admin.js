@@ -726,6 +726,8 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchAppConfigSchema(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config-schema`); return res.data; }
     async function fetchAppConfig(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/config`); return res.data; }
     async function updateAppConfig(appId, configData) { await apiClient.put(`/api/apps_zoo/installed/${appId}/config`, configData); }
+    async function fetchAppEnv(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/env`); return res.data; }
+    async function updateAppEnv(appId, content) { await apiClient.put(`/api/apps_zoo/installed/${appId}/env`, { content }); uiStore.addNotification('.env file saved successfully.', 'success'); }
     async function deleteRegisteredApp(appId) { await apiClient.delete(`/api/apps/${appId}`); await fetchZooApps(); }
     async function deleteRegisteredMcp(mcpId) { await apiClient.delete(`/api/mcps/${mcpId}`); await fetchZooMcps(); }
 
@@ -809,8 +811,9 @@ export const useAdminStore = defineStore('admin', () => {
         personalityZooRepositories, isLoadingPersonalityZooRepositories, fetchPersonalityZooRepositories, addPersonalityZooRepository, deletePersonalityZooRepository, pullPersonalityZooRepository,
         zooPersonalities, isLoadingZooPersonalities, fetchZooPersonalities, installZooPersonality, fetchPersonalityReadme,
         createSystemPrompt, updateSystemPrompt, deleteSystemPrompt, generateSystemPrompt, updateSystemPromptFromZoo,
-        installedApps, isLoadingInstalledApps, fetchInstalledApps, startApp, stopApp, uninstallApp, fetchNextAvailablePort,
-        updateInstalledApp, fetchAppLog, fetchAppConfigSchema, fetchAppConfig, updateAppConfig, updateApp,
+        installedApps, isLoadingInstalledApps, fetchInstalledApps, fetchNextAvailablePort,
+        startApp, stopApp, uninstallApp, updateInstalledApp, fetchAppLog, fetchAppConfigSchema, fetchAppConfig, updateAppConfig, updateApp,
+        fetchAppEnv, updateAppEnv,
         purgeUnusedUploads, systemStatus, isLoadingSystemStatus, fetchSystemStatus,
         syncInstallations, purgeBrokenInstallation, fixBrokenInstallation, handleTaskCompletion,
         handleAppStatusUpdate, deleteRegisteredApp, deleteRegisteredMcp,

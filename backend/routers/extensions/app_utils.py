@@ -57,9 +57,11 @@ def serialize_app_to_public(app: DBApp, db: Session) -> dict:
             url_to_return += '/mcp'
 
     has_config_schema = False
+    has_dot_env_config = False
     try:
         item_path = get_installed_app_path(db, app.id)
         has_config_schema = (item_path / 'config.schema.json').exists()
+        has_dot_env_config = (item_path / '.env').exists() or (item_path / '.env.example').exists()
     except Exception:
         pass
 
@@ -71,6 +73,7 @@ def serialize_app_to_public(app: DBApp, db: Session) -> dict:
     public_model.url = url_to_return
     public_model.item_type = item_type
     public_model.has_config_schema = has_config_schema
+    public_model.has_dot_env_config = has_dot_env_config
 
     # Return as a JSON-compatible dictionary
     return public_model.model_dump(mode='json')
@@ -770,6 +773,14 @@ def install_item_task(task: Task, repository: str, folder_name: str, port: int, 
             
             shutil.copytree(source_item_path, dest_app_path, dirs_exist_ok=True)
             task.set_progress(20)
+
+            # Create .env from .env.example if it exists
+            env_example_path = dest_app_path / ".env.example"
+            if env_example_path.exists():
+                env_path = dest_app_path / ".env"
+                if not env_path.exists():
+                    shutil.copy(env_example_path, env_path)
+                    task.log(f"Created .env file from .env.example for '{item_name}'.")
 
             server_py_path = dest_app_path / "server.py"
             if not server_py_path.exists() and 'run_command' not in item_info:

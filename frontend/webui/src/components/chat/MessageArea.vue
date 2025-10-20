@@ -6,6 +6,7 @@ import useEventBus from '../../services/eventBus';
 import { useFloating, offset, flip, shift } from '@floating-ui/vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconArrowDown from '../../assets/icons/IconArrowDown.vue';
 
 const discussionsStore = useDiscussionsStore();
 const activeMessages = computed(() => discussionsStore.activeMessages);
@@ -14,12 +15,15 @@ const hasMoreMessages = computed(() => discussionsStore.hasMoreMessages);
 const isLoadingMessages = computed(() => discussionsStore.isLoadingMessages);
 
 const messageContainer = ref(null);
+const messagesListRef = ref(null);
 const loadMoreTrigger = ref(null);
 const isNearBottom = ref(true);
-let observer;
+const newMessagesWhileScrolledUp = ref(false);
+
+let intersectionObserver;
+let resizeObserver;
 const { on, off } = useEventBus();
 
-// NEW: State for the custom "Add Message" dropdown
 const isAddMenuOpen = ref(false);
 const addButtonRef = ref(null);
 const addMenuRef = ref(null);
@@ -33,6 +37,7 @@ const scrollToBottom = (smooth = true) => {
     const el = messageContainer.value;
     if (el) {
       el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+      newMessagesWhileScrolledUp.value = false;
     }
   });
 };
@@ -40,12 +45,15 @@ const scrollToBottom = (smooth = true) => {
 const handleScroll = () => {
     const el = messageContainer.value;
     if (el) {
-        const threshold = 50; 
+        const threshold = 100;
+        const wasNearBottom = isNearBottom.value;
         isNearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+        if (!wasNearBottom && isNearBottom.value) {
+            newMessagesWhileScrolledUp.value = false;
+        }
     }
 };
 
-// NEW: Click outside handler for the new dropdown
 function handleClickOutside(event) {
     if (addButtonRef.value && !addButtonRef.value.contains(event.target) &&
         addMenuRef.value && !addMenuRef.value.contains(event.target)) {
@@ -55,7 +63,8 @@ function handleClickOutside(event) {
 
 onMounted(() => {
     messageContainer.value?.addEventListener('scroll', handleScroll);
-    observer = new IntersectionObserver((entries) => {
+
+    intersectionObserver = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && hasMoreMessages.value && !isLoadingMessages.value) {
             const el = messageContainer.value;
             const oldScrollHeight = el.scrollHeight;
@@ -66,14 +75,31 @@ onMounted(() => {
             });
         }
     }, { root: messageContainer.value, threshold: 0.1 });
-    if (loadMoreTrigger.value) observer.observe(loadMoreTrigger.value);
+    if (loadMoreTrigger.value) intersectionObserver.observe(loadMoreTrigger.value);
+
+    if (messagesListRef.value?.$el) {
+        resizeObserver = new ResizeObserver(() => {
+            if (isNearBottom.value) {
+                scrollToBottom(true);
+            } else {
+                newMessagesWhileScrolledUp.value = true;
+            }
+        });
+        resizeObserver.observe(messagesListRef.value.$el);
+    }
+
     document.addEventListener('mousedown', handleClickOutside);
-    on('discussion:refreshed', () => scrollToBottom(false));
+    on('discussion:refreshed', () => {
+      isNearBottom.value = true;
+      newMessagesWhileScrolledUp.value = false;
+      scrollToBottom(false);
+    });
 });
 
 onUnmounted(() => {
     messageContainer.value?.removeEventListener('scroll', handleScroll);
-    if(observer && loadMoreTrigger.value) observer.unobserve(loadMoreTrigger.value);
+    if(intersectionObserver && loadMoreTrigger.value) intersectionObserver.unobserve(loadMoreTrigger.value);
+    if (resizeObserver && messagesListRef.value?.$el) resizeObserver.unobserve(messagesListRef.value.$el);
     document.removeEventListener('mousedown', handleClickOutside);
     off('discussion:refreshed');
 });
@@ -81,15 +107,10 @@ onUnmounted(() => {
 watch(currentDiscussionId, (newId) => {
     if (newId) {
         isNearBottom.value = true;
+        newMessagesWhileScrolledUp.value = false;
         scrollToBottom(false);
     }
-});
-
-watch(activeMessages, (newMessages, oldMessages) => {
-    if (newMessages.length > oldMessages.length && isNearBottom.value) {
-        scrollToBottom(true);
-    }
-}, { deep: true });
+}, { immediate: true });
 
 const formatDateSeparator = (dateStr) => {
     const date = new Date(dateStr);
@@ -128,7 +149,7 @@ function addManualMessage(sender_type) {
       <div ref="loadMoreTrigger" v-if="hasMoreMessages" class="p-4 text-center">
           <svg class="animate-spin h-6 w-6 text-gray-400 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
       </div>
-      <TransitionGroup name="list" tag="div" class="relative flex flex-col pb-40">
+      <TransitionGroup ref="messagesListRef" name="list" tag="div" class="relative flex flex-col pb-40">
         <template v-for="(message, index) in activeMessages" :key="message.id">
           <div v-if="shouldShowDateSeparator(index)" class="date-separator">
               <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
@@ -170,6 +191,23 @@ function addManualMessage(sender_type) {
             </Teleport>
         </div>
       </div>
+    </div>
+    <!-- Scroll to Bottom Button -->
+    <div class="absolute bottom-44 right-8 z-10">
+        <transition
+            enter-active-class="transition-opacity ease-out duration-300"
+            enter-from-class="opacity-0"
+            enter-to-class="opacity-100"
+            leave-active-class="transition-opacity ease-in duration-200"
+            leave-from-class="opacity-100"
+            leave-to-class="opacity-0"
+        >
+            <button v-if="!isNearBottom && newMessagesWhileScrolledUp" @click="scrollToBottom(true)"
+                    class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                <IconArrowDown class="w-5 h-5" />
+                <span>New messages</span>
+            </button>
+        </transition>
     </div>
   </div>
 </template>

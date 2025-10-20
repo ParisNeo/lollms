@@ -45,6 +45,9 @@ class BrokenItemPayload(BaseModel):
     item_type: str
     folder_name: str
 
+class EnvUpdateRequest(BaseModel):
+    content: str
+
 def _refresh_zoo_cache_task(task: Task):
     """Wrapper function to run the zoo cache build as a background task."""
     task.log("Starting Zoo cache refresh.")
@@ -201,6 +204,8 @@ def get_available_zoo_apps(
                 item_path = get_installed_app_path(db, app.id)
                 if (item_path / 'config.schema.json').exists():
                     item_data_from_db['has_config_schema'] = True
+                if (item_path / '.env').exists() or (item_path / '.env.example').exists():
+                    item_data_from_db['has_dot_env_config'] = True
             except Exception as e:
                 print(f"Could not check schema for {app.name}: {e}")
 
@@ -223,7 +228,8 @@ def get_available_zoo_apps(
                 'item_type': 'app',
                 'repository': 'Broken',
                 **metadata, 
-                'folder_name': folder
+                'folder_name': folder,
+                'has_dot_env_config': (APPS_ROOT_PATH / folder / ".env").exists() or (APPS_ROOT_PATH / folder / ".env.example").exists()
             }
 
     final_list = []
@@ -325,6 +331,8 @@ def get_installed_apps(db: Session = Depends(get_db)):
         item_path = get_installed_app_path(db, item.id)
         if (item_path / 'config.schema.json').exists():
             public_item.has_config_schema = True
+        if (item_path / '.env').exists() or (item_path / '.env.example').exists():
+            public_item.has_dot_env_config = True
 
         response_items.append(public_item)
 
@@ -458,6 +466,31 @@ def update_app_config(app_id: str, config: Dict[str, Any], db: Session = Depends
         yaml.dump(config, f)
         
     return AppActionResponse(success=True, message="Configuration saved.")
+
+@apps_zoo_router.get("/installed/{app_id}/env", response_class=PlainTextResponse)
+def get_app_env(app_id: str, db: Session = Depends(get_db)):
+    app_path = get_installed_app_path(db, app_id)
+    env_file = app_path / ".env"
+    
+    if not env_file.exists():
+        env_example_file = app_path / ".env.example"
+        if env_example_file.exists():
+            shutil.copy(env_example_file, env_file)
+        else:
+            raise HTTPException(404, ".env file not found for this app, and no .env.example to create it from.")
+
+    env_content = env_file.read_text(encoding='utf-8')
+    return PlainTextResponse(content=env_content)
+
+@apps_zoo_router.put("/installed/{app_id}/env", response_model=AppActionResponse)
+def update_app_env(app_id: str, payload: EnvUpdateRequest = Body(...), db: Session = Depends(get_db)):
+    app_path = get_installed_app_path(db, app_id)
+    env_file = app_path / ".env"
+    
+    with open(env_file, 'w', encoding='utf-8') as f:
+        f.write(payload.content)
+        
+    return AppActionResponse(success=True, message=".env file updated successfully.")
 
 
 @apps_zoo_router.post("/installed/{app_id}/start", response_model=TaskInfo, status_code=202)

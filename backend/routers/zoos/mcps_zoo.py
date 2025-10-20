@@ -149,7 +149,8 @@ def get_available_zoo_mcps(
                 'description': f"Manually registered MCP at {mcp.url}",
                 'author': mcp.owner.username if mcp.owner else "System", 'version': 'N/A',
                 'category': 'Registered', 'tags': [], 'status': 'stopped',
-                'port': None, 'autostart': False, 'item_type': 'mcp', 'repository': 'Registered'
+                'port': None, 'autostart': False, 'item_type': 'mcp', 'repository': 'Registered',
+                'has_dot_env_config': False
             }
             all_items_map[key] = item_data_from_db
             processed_keys.add(key)
@@ -176,6 +177,8 @@ def get_available_zoo_mcps(
                 item_path = get_installed_app_path(db, mcp.id)
                 if (item_path / 'config.schema.json').exists():
                     item_data_from_db['has_config_schema'] = True
+                if (item_path / '.env').exists() or (item_path / '.env.example').exists():
+                    item_data_from_db['has_dot_env_config'] = True
             except Exception as e:
                 print(f"Could not check schema for {mcp.name}: {e}")
 
@@ -195,7 +198,8 @@ def get_available_zoo_mcps(
             if desc_path.exists():
                 with open(desc_path, 'r', encoding='utf-8') as f: metadata.update(yaml.safe_load(f) or {})
             all_items_map[key] = {
-                'is_broken': True, 'item_type': 'mcp', 'repository': 'Broken', **metadata, 'folder_name': folder
+                'is_broken': True, 'item_type': 'mcp', 'repository': 'Broken', **metadata, 'folder_name': folder,
+                'has_dot_env_config': (MCPS_ROOT_PATH / folder / ".env").exists() or (MCPS_ROOT_PATH / folder / ".env.example").exists()
             }
 
     final_list = []

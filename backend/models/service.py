@@ -256,6 +256,7 @@ class ZooAppInfo(BaseModel):
     url: Optional[str] = None
     autostart: bool = False
     has_config_schema: bool = False # ADDED THIS LINE
+    has_dot_env_config: bool = False
     
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
     def coerce_to_string(cls, v):
@@ -299,6 +300,7 @@ class ZooMCPInfo(BaseModel):
     url: Optional[str] = None
     autostart: bool = False
     has_config_schema: bool = False # ADDED THIS LINE
+    has_dot_env_config: bool = False
 
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
     def coerce_to_string(cls, v):
@@ -430,6 +432,7 @@ class AppPublic(AppBase):
     update_available: bool = False
     repo_version: Optional[str] = None
     has_config_schema: bool = False # ADDED THIS LINE
+    has_dot_env_config: bool = False
     item_type: Optional[str] = 'app'
 
     class Config:

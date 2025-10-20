@@ -47,6 +47,7 @@ import WhatsNextModal from './components/modals/WhatsNextModal.vue';
 import AppInstallModal from './components/modals/AppInstallModal.vue';
 import AppDetailsModal from './components/modals/AppDetailsModal.vue';
 import AppConfigModal from './components/modals/AppConfigModal.vue';
+import AppEnvConfigModal from './components/modals/AppEnvConfigModal.vue';
 import AppLogModal from './components/modals/AppLogModal.vue';
 import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue';
 import GeneratePersonalityModal from './components/modals/GeneratePersonalityModal.vue';
@@ -235,6 +236,7 @@ watch(message_font_size, (newSize) => {
     <AppInstallModal v-if="activeModal === 'appInstall'" />
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
     <AppConfigModal v-if="activeModal === 'appConfig'" />
+    <AppEnvConfigModal v-if="activeModal === 'appEnvConfig'" />
     <AppLogModal v-if="activeModal === 'appLog'" />
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
     <TasksManagerModal v-if="activeModal === 'tasksManager'" />
