@@ -19,6 +19,8 @@ class UserImage(Base):
     filename = Column(String, nullable=False)
     prompt = Column(Text, nullable=True)
     model = Column(String, nullable=True)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     

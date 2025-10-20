@@ -5,6 +5,7 @@ import { useTasksStore } from '../../stores/tasks';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import GenericModal from './GenericModal.vue';
+import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
@@ -165,7 +166,7 @@ function copyLogs() {
                             <IconXMark class="w-4 h-4 mr-1" /> Cancel All ({{ activeTasksCount }})
                         </button>
                         <button @click="tasksStore.clearCompletedTasks" class="btn btn-danger btn-sm" :disabled="isClearingTasks">
-                            <IconAnimateSpin v-if="isClearingTasks" class="w-4 h-4 mr-1" />
+                            <IconAnimateSpin v-if="isClearingTasks" class="w-4 h-4 mr-1 animate-spin" />
                             <IconTrash v-else class="w-4 h-4 mr-1" />
                             Clear Completed
                         </button>
@@ -211,31 +212,67 @@ function copyLogs() {
                     </div>
 
                     <div class="md:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow-sm flex flex-col h-full overflow-hidden">
-                        <div v-if="!selectedTask" class="h-full flex items-center justify-center text-center p-4"><p class="text-gray-500">Select a task to view its details and logs.</p></div>
+                        <div v-if="!selectedTask" class="h-full flex items-center justify-center text-center p-4">
+                            <p class="text-gray-500">Select a task to view its details and logs.</p>
+                        </div>
                         <div v-else class="flex flex-col h-full">
+                            <!-- Header -->
                             <div class="p-4 border-b dark:border-gray-700 flex-shrink-0">
-                                <h3 class="font-semibold truncate">{{ selectedTask.name }}</h3>
+                                <h3 class="font-semibold truncate" :title="selectedTask.name">{{ selectedTask.name }}</h3>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 flex items-center">ID: <code class="ml-1 mr-2">{{ selectedTask.id }}</code><button @click="uiStore.copyToClipboard(selectedTask.id)" class="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600"><IconCopy class="w-3 h-3" /></button></div>
                             </div>
-                            <div class="p-4 space-y-3 text-sm flex-shrink-0">
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
-                                    <div class="flex items-center"><strong>Status:</strong> <component v-if="getStatusInfo(selectedTask.status).icon" :is="getStatusInfo(selectedTask.status).icon" class="w-4 h-4 ml-2" :class="getStatusInfo(selectedTask.status).color" /> <span class="ml-1">{{ getStatusInfo(selectedTask.status).text }}</span></div>
-                                    <p><strong>Owner:</strong> {{ selectedTask.owner_username || 'System' }}</p>
-                                    <p><strong>Created:</strong> {{ formatDateTime(selectedTask.created_at) }}</p>
-                                    <p><strong>Started:</strong> {{ formatDateTime(selectedTask.started_at) }}</p>
+                            
+                            <!-- Body (Details + Logs) -->
+                            <div class="flex-grow min-h-0 flex flex-col p-4 space-y-4 overflow-y-auto">
+                                <!-- Status & Metadata -->
+                                <div class="space-y-3 text-sm flex-shrink-0">
+                                    <div class="p-3 rounded-lg flex items-center" :class="{ 'bg-blue-50 dark:bg-blue-900/20': selectedTask.status === 'running' || selectedTask.status === 'pending', 'bg-green-50 dark:bg-green-900/20': selectedTask.status === 'completed', 'bg-red-50 dark:bg-red-900/20': selectedTask.status === 'failed', 'bg-yellow-50 dark:bg-yellow-900/20': selectedTask.status === 'cancelled' }">
+                                        <div class="flex-shrink-0 mr-4">
+                                            <IconError v-if="selectedTask.status==='failed'" class="w-8 h-8 text-red-400"/>
+                                            <IconCheckCircle v-else-if="selectedTask.status==='completed'" class="w-8 h-8 text-green-400"/>
+                                            <IconXMark v-else-if="selectedTask.status==='cancelled'" class="w-8 h-8 text-yellow-400"/>
+                                            <IconAnimateSpin v-else class="w-8 h-8 text-blue-400 animate-spin"/>
+                                        </div>
+                                        <div class="flex-grow">
+                                            <span class="font-semibold">Status:</span> {{ getStatusInfo(selectedTask.status).text }}
+                                        </div>
+                                        <button v-if="(selectedTask.status === 'running' || selectedTask.status === 'pending') && (authStore.isAdmin || selectedTask.owner_username === authStore.user.username)" @click="tasksStore.cancelTask(selectedTask.id)" class="btn btn-warning btn-sm">
+                                            <IconStopCircle class="w-4 h-4 mr-1" />Cancel Task
+                                        </button>
+                                    </div>
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
+                                        <p><strong>Owner:</strong> {{ selectedTask.owner_username || 'System' }}</p>
+                                        <p><strong>Created:</strong> {{ formatDateTime(selectedTask.created_at) }}</p>
+                                        <p><strong>Started:</strong> {{ formatDateTime(selectedTask.started_at) }}</p>
+                                        <p><strong>Completed:</strong> {{ formatDateTime(selectedTask.completed_at) }}</p>
+                                    </div>
+                                    
+                                    <details v-if="selectedTask.error" class="info-details error" open>
+                                        <summary>Error Details</summary>
+                                        <pre>{{ selectedTask.error }}</pre>
+                                    </details>
+                                    <details v-if="selectedTask.result" class="info-details success">
+                                        <summary>Result Data</summary>
+                                        <pre>{{ JSON.stringify(selectedTask.result, null, 2) }}</pre>
+                                    </details>
                                 </div>
-                                <div v-if="(selectedTask.status === 'running' || selectedTask.status === 'pending') && (authStore.isAdmin || selectedTask.owner_username === authStore.user.username)" class="flex justify-end pt-2"><button @click="tasksStore.cancelTask(selectedTask.id)" class="btn btn-warning btn-sm"><IconStopCircle class="w-4 h-4 mr-1" />Cancel Task</button></div>
-                                <details v-if="selectedTask.error" class="info-details error"><summary>Error Details</summary><pre>{{ selectedTask.error }}</pre></details>
-                                <details v-if="selectedTask.result" class="info-details success"><summary>Result Data</summary><pre>{{ JSON.stringify(selectedTask.result, null, 2) }}</pre></details>
-                            </div>
-                            <div class="flex-grow p-4 border-t dark:border-gray-700 overflow-hidden flex flex-col">
-                                <h4 class="font-semibold mb-2 flex-shrink-0 flex items-center justify-between"><span>Logs</span><button @click="copyLogs" class="btn btn-secondary btn-sm"><IconCopy class="w-4 h-4" /></button></h4>
-                                <div ref="logsContainer" class="flex-grow bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-y-auto font-mono text-xs">
-                                   <div v-for="(log, index) in selectedTask.logs" :key="index" class="log-entry" :class="getLogLevelClass(log.level)">
-                                       <span class="log-timestamp">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
-                                       <component :is="getLogLevelIcon(log.level)" class="log-icon" />
-                                       <span class="log-message">{{ log.message }}</span>
-                                   </div>
+
+                                <!-- Logs -->
+                                <div class="flex-grow min-h-0 flex flex-col pt-4 border-t dark:border-gray-700">
+                                    <h4 class="font-semibold mb-2 flex-shrink-0 flex items-center justify-between">
+                                        <span>Logs</span>
+                                        <button @click="copyLogs" class="btn btn-secondary btn-sm"><IconCopy class="w-4 h-4" /> Copy Logs</button>
+                                    </h4>
+                                    <div ref="logsContainer" class="flex-grow bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-y-auto text-xs">
+                                        <div v-for="(log, index) in selectedTask.logs" :key="index" class="log-entry" :class="getLogLevelClass(log.level)">
+                                            <span class="log-timestamp font-mono">{{ new Date(log.timestamp).toLocaleTimeString([], { hour12: false }) }}</span>
+                                            <component :is="getLogLevelIcon(log.level)" class="log-icon" />
+                                            <div class="log-message-wrapper">
+                                                <MessageContentRenderer :content="log.message" class="log-message prose dark:prose-invert prose-sm max-w-none"/>
+                                            </div>
+                                        </div>
+                                        <div v-if="!selectedTask.logs || selectedTask.logs.length === 0" class="text-gray-400 italic">No logs for this task yet.</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -255,8 +292,22 @@ function copyLogs() {
 .info-details pre { @apply whitespace-pre-wrap font-mono text-xs mt-1 p-2 bg-gray-100 dark:bg-gray-900 rounded; }
 .info-details.error pre { @apply text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20; }
 .info-details.success pre { @apply text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-900/20; }
-.log-entry { @apply flex items-start gap-2; }
-.log-timestamp { @apply text-gray-400 select-none flex-shrink-0; }
-.log-icon { @apply w-4 h-4 mt-0.5 flex-shrink-0; }
-.log-message { @apply flex-grow; }
+.log-entry {
+    @apply flex items-start gap-2 py-0.5;
+}
+.log-timestamp {
+    @apply text-gray-400 select-none flex-shrink-0 w-20;
+}
+.log-icon {
+    @apply w-4 h-4 mt-0.5 flex-shrink-0;
+}
+.log-message-wrapper {
+    @apply flex-grow min-w-0;
+}
+.log-message :deep(p),
+.log-message :deep(ul),
+.log-message :deep(ol),
+.log-message :deep(pre) {
+    @apply my-0;
+}
 </style>

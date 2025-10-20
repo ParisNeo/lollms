@@ -422,18 +422,11 @@ if __name__ == "__main__":
     # This block is executed only by the main process, before Uvicorn starts workers.
     init_database(APP_DB_URL)
 
-    is_first_run = False
-    db_for_check = None
-    try:
-        db_for_check = db_session_module.SessionLocal()
-        # If there are no users, it's a first run where setup is needed.
-        if db_for_check.query(DBUser).count() == 0:
-            is_first_run = True
-    except Exception:
-        is_first_run = True # DB file might not exist or be uninitialized
-    finally:
-        if db_for_check:
-            db_for_check.close()
+    # Determine if it's a first run by checking for the DB file's existence.
+    # This is more robust than querying a table that might not have the latest schema.
+    db_path_str = APP_DB_URL.replace("sqlite:///", "")
+    db_path = Path(db_path_str)
+    is_first_run = not db_path.exists()
     
     if is_first_run:
         wizard_script = Path(__file__).resolve().parent / "scripts" / "setup_wizard.py"

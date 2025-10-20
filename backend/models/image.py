@@ -1,3 +1,4 @@
+# [UPDATE] backend/models/image.py
 # backend/models/image.py
 from pydantic import BaseModel, Field
 from typing import Optional, List
@@ -53,6 +54,7 @@ class ImagePromptEnhancementRequest(BaseModel):
     negative_prompt: Optional[str] = ""
     model: Optional[str] = None
     target: str = "both"
+    instructions: Optional[str] = None
 
 class ImagePromptEnhancementResponse(BaseModel):
     prompt: Optional[str] = None

@@ -6,7 +6,7 @@
                 <IconSave class="w-5 h-5 mr-2" /> Save As New Image
             </button>
             <button @click="handleGenerate" class="btn btn-primary" :disabled="imageStore.isGenerating || !prompt.trim()">
-                <IconAnimateSpin v-if="imageStore.isGenerating" class="w-5 h-5 mr-2" />
+                <IconAnimateSpin v-if="imageStore.isGenerating" class="w-5 h-5 mr-2 animate-spin" />
                 Apply
             </button>
         </div>
@@ -22,19 +22,36 @@
                         <div>
                             <div class="flex justify-between items-center mb-1">
                                 <label for="inpainting-prompt" class="block text-sm font-medium">Prompt</label>
-                                <button v-if="originalImage" @click="reuseOriginalPrompt" class="btn btn-secondary btn-xs" title="Reuse original image prompt and settings">Reuse Prompt</button>
+                                <div class="flex gap-1">
+                                    <button v-if="originalImage" @click="reuseOriginalPrompt" class="btn btn-secondary btn-xs" title="Reuse original image prompt and settings">Reuse</button>
+                                    <button @click="handleEnhance('prompt')" class="btn-icon-xs" title="Enhance prompt with AI" :disabled="imageStore.isEnhancing"><IconSparkles class="w-4 h-4" /></button>
+                                </div>
                             </div>
-                            <div class="relative">
-                                <textarea id="inpainting-prompt" v-model="prompt" rows="3" class="input-field w-full" placeholder="Describe the edit..."></textarea>
-                                <button @click="handleEnhance('prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance prompt with AI" :disabled="imageStore.isEnhancing"><IconSparkles class="w-4 h-4" /></button>
+                            <div class="relative min-h-[72px]">
+                                <div v-if="enhancingTarget === 'prompt' || enhancingTarget === 'both'" class="absolute inset-0 bg-gray-100 dark:bg-gray-700/50 rounded-md flex items-center justify-center">
+                                    <IconAnimateSpin class="w-6 h-6 text-gray-500 animate-spin" />
+                                </div>
+                                <textarea v-else id="inpainting-prompt" v-model="prompt" rows="3" class="input-field w-full" placeholder="Describe the edit..."></textarea>
                             </div>
                         </div>
                         <div>
-                            <label for="inpainting-neg-prompt" class="block text-sm font-medium mb-1">Negative Prompt</label>
-                            <div class="relative">
-                                <textarea id="inpainting-neg-prompt" v-model="negativePrompt" rows="2" class="input-field w-full" placeholder="ugly, blurry, bad anatomy..."></textarea>
-                                <button @click="handleEnhance('negative_prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance negative prompt with AI" :disabled="imageStore.isEnhancing"><IconSparkles class="w-4 h-4" /></button>
+                            <div class="flex justify-between items-center mb-1">
+                                <label for="inpainting-neg-prompt" class="block text-sm font-medium">Negative Prompt</label>
+                                <button @click="handleEnhance('negative_prompt')" class="btn-icon-xs" title="Enhance negative prompt with AI" :disabled="imageStore.isEnhancing"><IconSparkles class="w-4 h-4" /></button>
                             </div>
+                            <div class="relative min-h-[48px]">
+                                <div v-if="enhancingTarget === 'negative_prompt' || enhancingTarget === 'both'" class="absolute inset-0 bg-gray-100 dark:bg-gray-700/50 rounded-md flex items-center justify-center">
+                                    <IconAnimateSpin class="w-6 h-6 text-gray-500 animate-spin" />
+                                </div>
+                                <textarea v-else id="inpainting-neg-prompt" v-model="negativePrompt" rows="2" class="input-field w-full" placeholder="ugly, blurry, bad anatomy..."></textarea>
+                            </div>
+                        </div>
+                        <div>
+                            <label for="enhancement-instructions" class="block text-sm font-medium mb-1">Enhancement Instructions</label>
+                            <textarea id="enhancement-instructions" v-model="enhancementInstructions" rows="2" class="input-field w-full" placeholder="Optional: Guide the AI... e.g., 'make it more cinematic'"></textarea>
+                            <button @click="handleEnhance('both')" class="btn btn-secondary w-full mt-2" :disabled="imageStore.isEnhancing">
+                                <IconSparkles class="w-4 h-4 mr-2" /> Enhance Both Prompts
+                            </button>
                         </div>
                     </div>
 
@@ -114,7 +131,7 @@
                 </div>
                 <div class="p-4 border-t dark:border-gray-700 flex-shrink-0 space-y-2">
                     <button @click="handleGenerate" class="btn btn-primary w-full" :disabled="imageStore.isGenerating || !prompt.trim()">
-                        <IconAnimateSpin v-if="imageStore.isGenerating" class="w-5 h-5 mr-2" />
+                        <IconAnimateSpin v-if="imageStore.isGenerating" class="w-5 h-5 mr-2 animate-spin" />
                         Apply
                     </button>
                     <router-link to="/image-studio" class="btn btn-secondary w-full flex items-center justify-center" title="Back to Image Studio">
@@ -213,6 +230,8 @@ const colorPalette = ['#FFFFFF', '#000000', '#FF0000', '#00FF00', '#0000FF', '#F
 const seed = ref(-1);
 const generationParams = ref({});
 const isConfigVisible = ref(false);
+const enhancingTarget = ref(null);
+const enhancementInstructions = ref('');
 
 const history = ref([]);
 const historyIndex = ref(-1);
@@ -386,17 +405,17 @@ async function getBaseImageB64() {
         const blob = await response.blob();
         return new Promise((resolve) => {
             const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result.split(',')[1]);
+            reader.onloadend = () => resolve(reader.result.split(','));
             reader.readAsDataURL(blob);
         });
     }
-    return imageUrl.value ? imageUrl.value.split(',')[1] : null;
+    return imageUrl.value ? imageUrl.value.split(',') : null;
 }
 
 async function handleSaveAs() {
     const payload = {
         base_image_b64: await getBaseImageB64(),
-        drawing_b64: isCanvasEmpty(drawingCanvasRef.value) ? null : drawingCanvasRef.value.toDataURL('image/png').split(',')[1],
+        drawing_b64: isCanvasEmpty(drawingCanvasRef.value) ? null : drawingCanvasRef.value.toDataURL('image/png').split(','),
         prompt: prompt.value,
         model: selectedModel.value,
         width: internalImage.value?.width || newCanvas.value.width,
@@ -416,7 +435,7 @@ async function handleGenerate() {
         prompt: prompt.value,
         negative_prompt: negativePrompt.value,
         model: selectedModel.value,
-        mask: isMaskEmpty ? null : canvasRef.value.toDataURL('image/png').split(',')[1],
+        mask: isMaskEmpty ? null : canvasRef.value.toDataURL('image/png').split(','),
         seed: seed.value,
         ...generationParams.value,
         image_ids: [internalImage.value.id],
@@ -428,8 +447,26 @@ async function handleGenerate() {
 
 async function handleEnhance(type) {
     if (type !== 'negative_prompt' && !prompt.value.trim()) { uiStore.addNotification('Please enter a prompt to enhance.', 'warning'); return; }
-    const result = await imageStore.enhanceImagePrompt({ prompt: prompt.value, negative_prompt: negativePrompt.value, target: type });
-    if (result) { if (result.prompt) prompt.value = result.prompt; if (result.negative_prompt) negativePrompt.value = result.negative_prompt; }
+    
+    enhancingTarget.value = type;
+    
+    const payload = {
+        prompt: prompt.value,
+        negative_prompt: negativePrompt.value,
+        target: type,
+        model: authStore.user?.lollms_model_name,
+        instructions: enhancementInstructions.value,
+    };
+
+    try {
+        const result = await imageStore.enhanceImagePrompt(payload);
+        if (result) {
+            if (result.prompt) prompt.value = result.prompt;
+            if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
+        }
+    } finally {
+        enhancingTarget.value = null;
+    }
 }
 
 function openImageViewer() { uiStore.openImageViewer({ imageList: [{ src: imageUrl.value, prompt: internalImage.value.prompt }], startIndex: 0 }); }

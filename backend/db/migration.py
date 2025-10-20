@@ -1,4 +1,5 @@
 # [UPDATE] backend/db/migration.py
+# [UPDATE] backend/db/migration.py
 import json
 import re
 import shutil
@@ -223,6 +224,22 @@ def _bootstrap_global_settings(connection):
         "force_model_name": {
             "value": "",
             "type": "string", "description": "The model name to force on all users. (e.g., 'ollama/llama3').", "category": "Global LLM Overrides"
+        },
+        "force_tti_model_mode": {
+            "value": "disabled",
+            "type": "string", "description": "Global TTI model override mode: 'disabled', 'force_once' (sets user pref), 'force_always' (overrides session).", "category": "Global TTI Overrides"
+        },
+        "force_tti_model_name": {
+            "value": "",
+            "type": "string", "description": "The TTI model name to force on all users. (e.g., 'diffusers/stable-diffusion-v1-5').", "category": "Global TTI Overrides"
+        },
+        "force_iti_model_mode": {
+            "value": "disabled",
+            "type": "string", "description": "Global Image Editing model override mode: 'disabled', 'force_once' (sets user pref), 'force_always' (overrides session).", "category": "Global ITI Overrides"
+        },
+        "force_iti_model_name": {
+            "value": "",
+            "type": "string", "description": "The Image Editing model name to force on all users. (e.g., 'diffusers/instruct-pix2pix').", "category": "Global ITI Overrides"
         },
         "force_context_size": {
             "value": 4096,
@@ -771,6 +788,15 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         UserImage.__table__.create(connection)
         print("INFO: Created 'user_images' table.")
         connection.commit()
+    else:
+        image_columns_db = [col['name'] for col in inspector.get_columns('user_images')]
+        if 'width' not in image_columns_db:
+            connection.execute(text("ALTER TABLE user_images ADD COLUMN width INTEGER"))
+            print("INFO: Added 'width' column to 'user_images' table.")
+        if 'height' not in image_columns_db:
+            connection.execute(text("ALTER TABLE user_images ADD COLUMN height INTEGER"))
+            print("INFO: Added 'height' column to 'user_images' table.")
+        connection.commit()
 
 
     if inspector.has_table("users"):
@@ -809,6 +835,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "data_zone": "TEXT", "memory": "TEXT",
             "is_moderator": "BOOLEAN DEFAULT 0 NOT NULL",
             "tti_binding_model_name": "VARCHAR",
+            "iti_binding_model_name": "VARCHAR",
             "tti_models_config": "JSON",
             "tts_binding_model_name": "VARCHAR",
             "tts_models_config": "JSON",
@@ -820,6 +847,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "share_dynamic_info_with_llm": "BOOLEAN DEFAULT 1 NOT NULL",
             "message_font_size": "INTEGER DEFAULT 14 NOT NULL",
             "last_discussion_id": "VARCHAR",
+            "image_studio_prompt": "TEXT",
+            "image_studio_negative_prompt": "TEXT",
+            "image_studio_image_size": "VARCHAR DEFAULT '1024x1024'",
+            "image_studio_n_images": "INTEGER DEFAULT 1",
+            "image_studio_seed": "INTEGER DEFAULT -1",
+            "image_studio_generation_params": "JSON",
         }
         
         added_cols = []

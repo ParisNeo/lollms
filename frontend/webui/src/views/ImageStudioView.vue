@@ -36,7 +36,7 @@ const tasksStore = useTasksStore();
 const router = useRouter();
 
 const { 
-    images, isLoading, isGenerating, isEnhancing,
+    images, isLoading, isGenerating,
     prompt, negativePrompt, imageSize, nImages, seed, generationParams 
 } = storeToRefs(imageStore);
 const { user } = storeToRefs(authStore);
@@ -44,6 +44,8 @@ const { imageGenerationTasks, imageGenerationTasksCount } = storeToRefs(tasksSto
 const { currentModelVisionSupport } = storeToRefs(discussionsStore);
 
 const isConfigVisible = ref(false);
+const enhancingTarget = ref(null); // 'prompt', 'negative_prompt', 'both', or null
+const enhancementInstructions = ref('');
 
 const selectedImages = ref([]);
 const isSelectionMode = computed(() => selectedImages.value.length > 0);
@@ -84,10 +86,11 @@ function parseOptions(options) {
 }
 
 watch(selectedModelDetails, (details) => {
-    generationParams.value = {};
     if (details) {
         modelConfigurableParameters.value.forEach(param => {
-            generationParams.value[param.name] = param.default;
+            if (!(param.name in generationParams.value)) {
+                 generationParams.value[param.name] = param.default;
+            }
         });
     }
 }, { immediate: true, deep: true });
@@ -122,15 +125,24 @@ async function handleGenerateOrApply() {
         prompt: prompt.value,
         negative_prompt: negativePrompt.value,
         model: selectedModel.value,
-        size: imageSize.value,
         seed: seed.value,
         ...generationParams.value
     };
 
     if (isSelectionMode.value) {
-        await imageStore.editImage({ ...commonPayload, image_ids: selectedImages.value });
+        const [width, height] = imageSize.value.split('x').map(Number);
+        await imageStore.editImage({ 
+            ...commonPayload, 
+            image_ids: selectedImages.value,
+            width: width,
+            height: height
+        });
     } else {
-        await imageStore.generateImage({ ...commonPayload, n: nImages.value });
+        await imageStore.generateImage({ 
+            ...commonPayload, 
+            size: imageSize.value,
+            n: nImages.value 
+        });
     }
 }
 
@@ -140,11 +152,14 @@ async function handleEnhance(type) {
         return;
     }
     
+    enhancingTarget.value = type;
+
     const payload = { 
         prompt: prompt.value, 
         negative_prompt: negativePrompt.value, 
         target: type,
-        model: authStore.user?.lollms_model_name
+        model: authStore.user?.lollms_model_name,
+        instructions: enhancementInstructions.value,
     };
 
     if (isSelectionMode.value && currentModelVisionSupport.value && selectedImages.value.length > 0) {
@@ -155,7 +170,7 @@ async function handleEnhance(type) {
                 const response = await apiClient.get(`/api/image-studio/${imageId}/file`, { responseType: 'blob' });
                 const b64 = await new Promise((resolve, reject) => {
                     const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                    reader.onloadend = () => resolve(reader.result.split(','));
                     reader.onerror = reject;
                     reader.readAsDataURL(response.data);
                 });
@@ -170,10 +185,14 @@ async function handleEnhance(type) {
         }
     }
     
-    const result = await imageStore.enhanceImagePrompt(payload);
-    if (result) {
-        if (result.prompt) prompt.value = result.prompt;
-        if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
+    try {
+        const result = await imageStore.enhanceImagePrompt(payload);
+        if (result) {
+            if (result.prompt) prompt.value = result.prompt;
+            if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
+        }
+    } finally {
+        enhancingTarget.value = null;
     }
 }
 
@@ -253,7 +272,7 @@ async function handlePaste(event) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
             const file = item.getAsFile();
             if (file) {
-                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
+                const extension = (file.type.split('/') || 'png').toLowerCase().replace('jpeg', 'jpg');
                 imageFiles.push(new File([file], `pasted_image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`, { type: file.type }));
             }
         }
@@ -270,7 +289,7 @@ async function handlePaste(event) {
     <Teleport to="#global-header-actions-target">
         <div class="flex items-center gap-2">
             <button @click="handleGenerateOrApply" class="btn btn-primary" :disabled="isGenerating || isEnhancing">
-                <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2" />
+                <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2 animate-spin" />
                 {{ isSelectionMode ? 'Apply' : 'Generate' }}
             </button>
         </div>
@@ -376,7 +395,7 @@ async function handlePaste(event) {
                         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                             <div v-for="task in imageGenerationTasks" :key="task.id" class="relative aspect-square rounded-lg bg-gray-200 dark:bg-gray-700/50 flex flex-col items-center justify-center p-2 text-center overflow-hidden">
                                 <div class="absolute inset-0 bg-blue-500/10 animate-pulse"></div>
-                                <IconAnimateSpin class="w-8 h-8 text-blue-500 mb-2" />
+                                <IconAnimateSpin class="w-8 h-8 text-blue-500 mb-2 animate-spin" />
                                 <p class="text-xs font-medium text-gray-600 dark:text-gray-300 truncate w-full" :title="task.name">{{ task.name }}</p>
                                 <div class="w-full bg-gray-300 dark:bg-gray-600 rounded-full h-1 mt-2">
                                     <div class="bg-blue-500 h-1 rounded-full" :style="{ width: task.progress + '%' }"></div>
@@ -385,7 +404,7 @@ async function handlePaste(event) {
                         </div>
                     </div>
 
-                    <div v-if="isLoading" class="flex-grow flex items-center justify-center"><IconAnimateSpin class="w-8 h-8 text-gray-500" /></div>
+                    <div v-if="isLoading" class="flex-grow flex items-center justify-center"><IconAnimateSpin class="w-8 h-8 text-gray-500 animate-spin" /></div>
                     <div v-else-if="images.length === 0 && imageGenerationTasksCount === 0" class="flex-grow flex items-center justify-center text-center text-gray-500">
                         <div><p>No images yet.</p><p class="text-sm">Drop, paste, or use the form to generate some!</p></div>
                     </div>

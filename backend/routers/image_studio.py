@@ -1,3 +1,4 @@
+# [UPDATE] lollms/backend/routers/image_studio.py
 # lollms/backend/routers/image_studio.py
 import base64
 import uuid
@@ -243,6 +244,9 @@ async def enhance_image_prompt(
 
         system_prompt = "You are an expert image generation prompt engineer.\n"
         user_prompt_parts = []
+        
+        if request.instructions and request.instructions.strip():
+            system_prompt += f"- Follow these user instructions when enhancing: {request.instructions.strip()}\n"
 
         if request.target in ['prompt', 'both']:
             system_prompt += "- Enhance the positive prompt by adding descriptive details, cinematic keywords, and stylistic elements.\n"

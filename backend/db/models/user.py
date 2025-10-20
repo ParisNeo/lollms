@@ -48,6 +48,14 @@ class User(Base):
     message_font_size = Column(Integer, default=14, nullable=False)
     last_discussion_id = Column(String, nullable=True)
     
+    # NEW FIELDS for Image Studio
+    image_studio_prompt = Column(Text, nullable=True)
+    image_studio_negative_prompt = Column(Text, nullable=True)
+    image_studio_image_size = Column(String, default="1024x1024")
+    image_studio_n_images = Column(Integer, default=1)
+    image_studio_seed = Column(Integer, default=-1)
+    image_studio_generation_params = Column(JSON, nullable=True)
+    
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
     following = relationship(
@@ -64,6 +72,7 @@ class User(Base):
 
     lollms_model_name = Column(String, nullable=True)
     tti_binding_model_name = Column(String, nullable=True)
+    iti_binding_model_name = Column(String, nullable=True)
     tti_models_config = Column(JSON, nullable=True)
     tts_binding_model_name = Column(String, nullable=True)
     tts_models_config = Column(JSON, nullable=True)

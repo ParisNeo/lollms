@@ -1,4 +1,4 @@
-<!-- frontend/webui/src/components/layout/GlobalHeader.vue -->
+<!-- [UPDATE] frontend/webui/src/components/layout/GlobalHeader.vue -->
 <script setup>
 import { computed, ref, provide, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -102,6 +102,10 @@ const activeTtiModelName = computed({
     get: () => user.value?.tti_binding_model_name,
     set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name })
 });
+const activeItiModelName = computed({
+    get: () => user.value?.iti_binding_model_name,
+    set: (name) => authStore.updateUserPreferences({ iti_binding_model_name: name })
+});
 const activeTtsModelName = computed({
     get: () => user.value?.tts_binding_model_name,
     set: (name) => authStore.updateUserPreferences({ tts_binding_model_name: name })
@@ -143,6 +147,16 @@ const selectedTtiModel = computed(() => {
     for (const group of formattedAvailableTtiModels.value) {
         if (group.items) {
             const model = group.items.find(item => item.id === activeTtiModelName.value);
+            if (model) return model;
+        }
+    }
+    return null;
+});
+const selectedItiModel = computed(() => {
+    if (!activeItiModelName.value || !formattedAvailableTtiModels.value) return null;
+    for (const group of formattedAvailableTtiModels.value) {
+        if (group.items) {
+            const model = group.items.find(item => item.id === activeItiModelName.value);
             if (model) return model;
         }
     }
@@ -231,6 +245,10 @@ function selectTtiModel(id) {
     activeTtiModelName.value = id;
 }
 
+function selectItiModel(id) {
+    activeItiModelName.value = id;
+}
+
 function selectTtsModel(id) {
     activeTtsModelName.value = id;
 }
@@ -254,19 +272,25 @@ function handleEditPersonality(personality, event) {
               <div class="flex items-center flex-shrink-0">
                   <!-- LLM Icon -->
                   <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md">
-                      <img v-if="selectedModel?.icon_base64" :src="selectedModel.icon_base64" class="h-full w-full rounded-md object-cover"/>
+                      <img v-if="selectedModel?.alias?.icon" :src="selectedModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
                       <IconCpuChip v-else class="w-4 h-4" />
                   </div>
                   
                   <!-- TTI Icon -->
-                  <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
-                      <img v-if="selectedTtiModel?.icon_base64" :src="selectedTtiModel.icon_base64" class="h-full w-full rounded-md object-cover"/>
+                  <div v-if="!user.tti_model_forced" class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
+                      <img v-if="selectedTtiModel?.alias?.icon" :src="selectedTtiModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
                       <IconPhoto v-else class="w-4 h-4" />
+                  </div>
+                  
+                  <!-- ITI Icon -->
+                  <div v-if="!user.iti_model_forced" class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
+                      <img v-if="selectedItiModel?.alias?.icon" :src="selectedItiModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
+                      <IconPencil v-else class="w-4 h-4" />
                   </div>
                   
                   <!-- TTS Icon -->
                   <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
-                      <img v-if="selectedTtsModel?.icon_base64" :src="selectedTtsModel.icon_base64" class="h-full w-full rounded-md object-cover"/>
+                      <img v-if="selectedTtsModel?.alias?.icon" :src="selectedTtsModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
                       <IconMicrophone v-else class="w-4 h-4" />
                   </div>
                   
@@ -298,7 +322,7 @@ function handleEditPersonality(personality, event) {
                         :style="floatingStyles" 
                         v-on-click-outside="() => { isMenuOpen = false; isSubmenuActive = false; }"
                         class="z-50 w-64 origin-top-left rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1 flex flex-col max-h-[80vh]">
-                        <DropdownSubmenu title="LLM Model" icon="cpu-chip" :icon-src="selectedModel?.icon_base64">
+                        <DropdownSubmenu title="LLM Model" icon="cpu-chip" :icon-src="selectedModel?.alias?.icon">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full">
                             </div>
@@ -308,7 +332,7 @@ function handleEditPersonality(personality, event) {
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
                                     <button v-for="item in group.items" :key="item.id" @click="selectModel(item.id)" class="menu-item-button" :class="{'selected': activeModelName === item.id}">
                                         <div class="flex items-center space-x-3 truncate">
-                                            <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
+                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
                                             <IconCpuChip v-else class="w-6 h-6 p-0.5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
                                             <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
                                         </div>
@@ -321,7 +345,7 @@ function handleEditPersonality(personality, event) {
                             </div>
                         </DropdownSubmenu>
 
-                        <DropdownSubmenu title="Text-to-Image" icon="photo" :icon-src="selectedTtiModel?.icon_base64">
+                        <DropdownSubmenu v-if="!user.tti_model_forced" title="Text-to-Image" icon="photo" :icon-src="selectedTtiModel?.alias?.icon">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search TTI models..." class="input-field-sm w-full">
                             </div>
@@ -332,7 +356,7 @@ function handleEditPersonality(personality, event) {
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
                                     <button v-for="item in group.items" :key="item.id" @click="selectTtiModel(item.id)" class="menu-item-button" :class="{'selected': activeTtiModelName === item.id}">
                                         <div class="flex items-center space-x-3 truncate">
-                                            <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
+                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
                                             <IconPhoto v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
                                             <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
                                         </div>
@@ -340,8 +364,28 @@ function handleEditPersonality(personality, event) {
                                 </div>
                             </div>
                         </DropdownSubmenu>
+                        
+                        <DropdownSubmenu v-if="!user.iti_model_forced" title="Image Editing" icon="pencil" :icon-src="selectedItiModel?.alias?.icon">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
+                                <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search Image models..." class="input-field-sm w-full">
+                            </div>
+                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                                <div v-if="dataStore.isLoadingTtiModels" class="text-center p-4 text-sm text-gray-500">Loading models...</div>
+                                <div v-else-if="filteredAvailableTtiModels.length === 0" class="text-center p-4 text-sm text-gray-500">No models found.</div>
+                                <div v-for="group in filteredAvailableTtiModels" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
+                                    <button v-for="item in group.items" :key="item.id" @click="selectItiModel(item.id)" class="menu-item-button" :class="{'selected': activeItiModelName === item.id}">
+                                        <div class="flex items-center space-x-3 truncate">
+                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
+                                            <IconPencil v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                            <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
+                                        </div>
+                                    </button>
+                                </div>
+                            </div>
+                        </DropdownSubmenu>
 
-                        <DropdownSubmenu title="Text-to-Speech" icon="microphone" :icon-src="selectedTtsModel?.icon_base64">
+                        <DropdownSubmenu title="Text-to-Speech" icon="microphone" :icon-src="selectedTtsModel?.alias?.icon">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search TTS models..." class="input-field-sm w-full">
                             </div>
@@ -352,7 +396,7 @@ function handleEditPersonality(personality, event) {
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
                                     <button v-for="item in group.items" :key="item.id" @click="selectTtsModel(item.id)" class="menu-item-button" :class="{'selected': activeTtsModelName === item.id}">
                                         <div class="flex items-center space-x-3 truncate">
-                                            <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
+                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
                                             <IconMicrophone v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
                                             <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
                                         </div>

@@ -1,9 +1,10 @@
-// frontend/webui/src/stores/images.js
+// [UPDATE] frontend/webui/src/stores/images.js
 import { defineStore } from 'pinia';
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, watch } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useTasksStore } from './tasks';
+import { useAuthStore } from './auth';
 import useEventBus from '../services/eventBus';
 
 export const useImageStore = defineStore('images', () => {
@@ -13,25 +14,69 @@ export const useImageStore = defineStore('images', () => {
     const isEnhancing = ref(false);
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
+    const authStore = useAuthStore();
     const { on, off } = useEventBus();
 
-    // --- NEW: Persistent State for Image Studio ---
+    // --- State for Image Studio ---
     const prompt = ref('');
     const negativePrompt = ref('');
     const imageSize = ref('1024x1024');
     const nImages = ref(1);
     const seed = ref(-1);
     const generationParams = ref({});
+    
+    let saveDebounceTimer = null;
 
+    // Watch for user object to become available and initialize state
+    watch(() => authStore.user, (newUser) => {
+        if (newUser) {
+            prompt.value = newUser.image_studio_prompt || '';
+            negativePrompt.value = newUser.image_studio_negative_prompt || '';
+            imageSize.value = newUser.image_studio_image_size || '1024x1024';
+            nImages.value = newUser.image_studio_n_images || 1;
+            seed.value = newUser.image_studio_seed ?? -1;
+            generationParams.value = newUser.image_studio_generation_params || {};
+        }
+    }, { immediate: true });
+
+    // Watch for changes to persist them
+    watch([prompt, negativePrompt, imageSize, nImages, seed, generationParams], () => {
+        if (!authStore.isAuthenticated) return;
+        
+        clearTimeout(saveDebounceTimer);
+        saveDebounceTimer = setTimeout(() => {
+            const payload = {
+                image_studio_prompt: prompt.value,
+                image_studio_negative_prompt: negativePrompt.value,
+                image_studio_image_size: imageSize.value,
+                image_studio_n_images: nImages.value,
+                image_studio_seed: seed.value,
+                image_studio_generation_params: generationParams.value,
+            };
+            authStore.updateUserPreferences(payload);
+        }, 1500); // Debounce for 1.5 seconds
+    }, { deep: true });
 
     function handleTaskCompletion(task) {
         const isImageTask = task.name.startsWith('Generating') && task.name.includes('image(s)');
         const isEditTask = task.name.startsWith('Editing image:');
 
         if ((isImageTask || isEditTask) && task.status === 'completed' && task.result) {
-            const newItems = Array.isArray(task.result) ? task.result : [task.result];
-            if (newItems.length > 0) {
-                images.value.unshift(...newItems);
+            let parsedResult;
+            try {
+                // The result is already a JSON object from the backend task, no need to parse if it's not a string
+                parsedResult = typeof task.result === 'string' ? JSON.parse(task.result) : task.result;
+            } catch (e) {
+                console.error("Failed to parse task result JSON:", e);
+                uiStore.addNotification('Failed to process image generation result.', 'error');
+                return;
+            }
+
+            const newItems = Array.isArray(parsedResult) ? parsedResult : [parsedResult];
+            
+            if (newItems.length > 0 && newItems[0]) {
+                // Using a new array assignment for more robust reactivity
+                images.value = [...newItems, ...images.value];
                 uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
             }
         } else if ((isImageTask || isEditTask) && task.status === 'failed') {

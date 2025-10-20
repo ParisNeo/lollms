@@ -219,6 +219,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
+    function handleDiscussionImagesUpdated(data) {
+        if (activeDiscussion.value && activeDiscussion.value.id === data.discussion_id) {
+            activeDiscussion.value.discussion_images = data.discussion_images;
+            activeDiscussion.value.active_discussion_images = data.active_discussion_images;
+            uiStore.addNotification('Image generation complete!', 'success');
+        }
+    }
+
     async function toggleDiscussionImage(imageIndex) {
         if (!currentDiscussionId.value) return;
         try {
@@ -273,6 +281,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         playAudio,
         onAudioPausedOrEnded,
         stopCurrentAudio,
+        handleDiscussionImagesUpdated,
         toggleDiscussionImage,
         $reset,
     };

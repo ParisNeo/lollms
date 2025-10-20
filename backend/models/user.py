@@ -1,4 +1,5 @@
 # [UPDATE] backend/models/user.py
+# [UPDATE] backend/models/user.py
 import datetime
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field, constr, EmailStr
@@ -40,6 +41,7 @@ class UserCreateAdmin(UserLLMParams):
     receive_notification_emails: bool = True
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
+    iti_binding_model_name: Optional[str] = None
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
     tts_binding_model_name: Optional[str] = None # NEW
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
@@ -69,6 +71,7 @@ class UserUpdate(BaseModel):
     receive_notification_emails: Optional[bool] = None
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
+    iti_binding_model_name: Optional[str] = None
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
     tts_binding_model_name: Optional[str] = None # NEW
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
@@ -103,6 +106,12 @@ class UserUpdate(BaseModel):
     tell_llm_os: Optional[bool] = None
     share_dynamic_info_with_llm: Optional[bool] = None
     message_font_size: Optional[int] = None
+    image_studio_prompt: Optional[str] = None
+    image_studio_negative_prompt: Optional[str] = None
+    image_studio_image_size: Optional[str] = None
+    image_studio_n_images: Optional[int] = None
+    image_studio_seed: Optional[int] = None
+    image_studio_generation_params: Optional[Dict[str, Any]] = None
 
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
@@ -179,6 +188,7 @@ class UserPublic(UserLLMParams):
     reset_token_expiry: Optional[datetime.datetime] = None
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None # NEW
+    iti_binding_model_name: Optional[str] = None
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
     tts_binding_model_name: Optional[str] = None # NEW
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
@@ -216,7 +226,8 @@ class UserAuthDetails(UserLLMParams):
     receive_notification_emails: bool
     is_searchable: bool
     lollms_model_name: Optional[str] = None
-    tti_binding_model_name: Optional[str] = None # NEW
+    tti_binding_model_name: Optional[str] = None
+    iti_binding_model_name: Optional[str] = None
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
     tts_binding_model_name: Optional[str] = None # NEW
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
@@ -246,6 +257,8 @@ class UserAuthDetails(UserLLMParams):
     memory: Optional[str] = None
     include_memory_date_in_context: bool # NEW
     llm_settings_overridden: bool = False
+    tti_model_forced: bool = False
+    iti_model_forced: bool = False
     latex_builder_enabled: bool = False
     coding_style_constraints: Optional[str] = None
     programming_language_preferences: Optional[str] = None
@@ -255,6 +268,12 @@ class UserAuthDetails(UserLLMParams):
     allow_user_chunking_config: bool = True
     default_chunk_size: int = 1024
     default_chunk_overlap: int = 256
+    image_studio_prompt: Optional[str] = None
+    image_studio_negative_prompt: Optional[str] = None
+    image_studio_image_size: Optional[str] = None
+    image_studio_n_images: Optional[int] = None
+    image_studio_seed: Optional[int] = None
+    image_studio_generation_params: Optional[Dict[str, Any]] = None
 
 class RelationshipStatus(BaseModel):
     is_following: bool

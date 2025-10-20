@@ -1,4 +1,5 @@
 # [UPDATE] lollms/backend/session.py
+# [UPDATE] lollms/backend/session.py
 import json
 import traceback
 import datetime
@@ -100,6 +101,40 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             except Exception as e:
                 print(f"ERROR: Could not persist corrected UI level for admin '{db_user.username}'. Error: {e}")
                 db.rollback()
+
+        # --- Handle force_once for TTI model ---
+        force_tti_mode = settings.get("force_tti_model_mode", "disabled")
+        force_tti_name = settings.get("force_tti_model_name")
+        tti_model_forced = (force_tti_mode == "force_always" and force_tti_name)
+
+        if tti_model_forced:
+            db_user.tti_binding_model_name = force_tti_name
+        elif force_tti_mode == "force_once" and force_tti_name and db_user.tti_binding_model_name != force_tti_name:
+            print(f"INFO: Forcing TTI model for user '{db_user.username}' to '{force_tti_name}'.")
+            db_user.tti_binding_model_name = force_tti_name
+            try:
+                db.commit()
+                db.refresh(db_user)
+            except Exception as e:
+                print(f"ERROR: Could not persist forced TTI model for user '{db_user.username}'. Error: {e}")
+                db.rollback()
+
+        # --- Handle force_once for ITI model ---
+        force_iti_mode = settings.get("force_iti_model_mode", "disabled")
+        force_iti_name = settings.get("force_iti_model_name")
+        iti_model_forced = (force_iti_mode == "force_always" and force_iti_name)
+
+        if iti_model_forced:
+            db_user.iti_binding_model_name = force_iti_name
+        elif force_iti_mode == "force_once" and force_iti_name and db_user.iti_binding_model_name != force_iti_name:
+            print(f"INFO: Forcing ITI model for user '{db_user.username}' to '{force_iti_name}'.")
+            db_user.iti_binding_model_name = force_iti_name
+            try:
+                db.commit()
+                db.refresh(db_user)
+            except Exception as e:
+                print(f"ERROR: Could not persist forced ITI model for user '{db_user.username}'. Error: {e}")
+                db.rollback()
         
         if username not in user_sessions:
             print(f"INFO: Re-initializing session for {username} on first request after server start.")
@@ -188,6 +223,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             data_zone=db_user.data_zone,
             lollms_model_name=user_sessions[username].get("lollms_model_name"),
             tti_binding_model_name=db_user.tti_binding_model_name,
+            iti_binding_model_name=db_user.iti_binding_model_name,
             tti_models_config=db_user.tti_models_config,
             tts_binding_model_name=db_user.tts_binding_model_name,
             tts_models_config=db_user.tts_models_config,
@@ -209,6 +245,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             ollama_require_key=is_ollama_require_key,
             include_memory_date_in_context=db_user.include_memory_date_in_context,
             llm_settings_overridden=llm_settings_overridden,
+            tti_model_forced=tti_model_forced,
+            iti_model_forced=iti_model_forced,
             latex_builder_enabled=latex_builder_enabled,
             # NEW FIELDS
             coding_style_constraints=db_user.coding_style_constraints,
@@ -218,7 +256,13 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             message_font_size=db_user.message_font_size,
             allow_user_chunking_config=allow_user_chunking_config,
             default_chunk_size=default_chunk_size,
-            default_chunk_overlap=default_chunk_overlap
+            default_chunk_overlap=default_chunk_overlap,
+            image_studio_prompt=db_user.image_studio_prompt,
+            image_studio_negative_prompt=db_user.image_studio_negative_prompt,
+            image_studio_image_size=db_user.image_studio_image_size,
+            image_studio_n_images=db_user.image_studio_n_images,
+            image_studio_seed=db_user.image_studio_seed,
+            image_studio_generation_params=db_user.image_studio_generation_params
         )
     finally:
         if db_was_created:
@@ -374,25 +418,29 @@ def build_lollms_client_from_params(
             client_init_params = {}    
             
         # --- TTI Binding Integration ---
+        force_tti_mode = settings.get("force_tti_model_mode", "disabled")
+        force_tti_name = settings.get("force_tti_model_name")
+        effective_tti_model_full = None
+
+        if force_tti_mode == "force_always" and force_tti_name:
+            effective_tti_model_full = force_tti_name
+        elif tti_binding_alias and tti_model_name:
+            effective_tti_model_full = f"{tti_binding_alias}/{tti_model_name}"
+        elif user_db.tti_binding_model_name:
+            effective_tti_model_full = user_db.tti_binding_model_name
+        
         selected_tti_binding = None
-        selected_tti_model_name = tti_model_name
-        
-        if tti_binding_alias:
-            selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == tti_binding_alias, DBTTIBinding.is_active == True).first()
-            if selected_tti_binding and not selected_tti_model_name:
-                selected_tti_model_name = selected_tti_binding.default_model_name
-        
-        if not selected_tti_binding:
-            user_tti_model_full = user_db.tti_binding_model_name
-            if user_tti_model_full and '/' in user_tti_model_full:
-                tti_binding_alias_local, tti_model_name_local = user_tti_model_full.split('/', 1)
-                selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == tti_binding_alias_local, DBTTIBinding.is_active == True).first()
-                if not selected_tti_model_name:
-                    selected_tti_model_name = tti_model_name_local
+        selected_tti_model_name = None
+
+        if effective_tti_model_full and '/' in effective_tti_model_full:
+            effective_tti_binding_alias, effective_tti_model_name_part = effective_tti_model_full.split('/', 1)
+            selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == effective_tti_binding_alias, DBTTIBinding.is_active == True).first()
+            if selected_tti_binding:
+                selected_tti_model_name = effective_tti_model_name_part
 
         if not selected_tti_binding:
             selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
-            if selected_tti_binding and not selected_tti_model_name:
+            if selected_tti_binding:
                 selected_tti_model_name = selected_tti_binding.default_model_name
         
         if selected_tti_binding:

@@ -1,4 +1,4 @@
-# backend/tasks/image_generation_tasks.py
+# [UPDATE] backend/tasks/image_generation_tasks.py
 import base64
 import uuid
 import json
@@ -18,73 +18,23 @@ from backend.session import (
 from backend.task_manager import Task
 from backend.db.models.image import UserImage
 from backend.models.image import UserImagePublic
+from backend.settings import settings
 
 def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: str, negative_prompt: str, width: Optional[int], height: Optional[int], generation_params: dict):
     task.log("Starting image generation task...")
     task.set_progress(5)
 
-    with task.db_session_factory() as db:
-        user = db.query(DBUser).filter(DBUser.username == username).first()
-        if not user:
-            raise Exception(f"User '{username}' not found.")
-
-        user_tti_model_full = user.tti_binding_model_name
-        
-        selected_binding = None
-        selected_model_name = None
-        binding_config = {}
-
-        if user_tti_model_full and '/' in user_tti_model_full:
-            binding_alias, model_name = user_tti_model_full.split('/', 1)
-            selected_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == binding_alias, DBTTIBinding.is_active == True).first()
-            selected_model_name = model_name
-        
-        if not selected_binding:
-            task.log("User's preferred TTI model not found or not set. Falling back to the first available active TTI binding.", "WARNING")
-            selected_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
-            if selected_binding:
-                selected_model_name = selected_binding.default_model_name
-        
-        if not selected_binding:
-            raise Exception("No active TTI (Text-to-Image) binding found in system settings.")
-        
-        task.log(f"Using TTI binding: {selected_binding.alias}")
-        if selected_model_name:
-            task.log(f"Using TTI model: {selected_model_name}")
-        
-        binding_config = selected_binding.config.copy() if selected_binding.config else {}
-        
-        model_aliases = selected_binding.model_aliases or {}
-        alias_info = model_aliases.get(selected_model_name)
-        
-        if alias_info:
-            task.log(f"Applying settings from model alias '{alias_info.get('title', selected_model_name)}'.")
-            for key, value in alias_info.items():
-                if key not in ['title', 'description', 'icon'] and value is not None:
-                    binding_config[key] = value
-        
-        allow_override = (alias_info or {}).get('allow_parameters_override', True)
-        if allow_override:
-            user_configs = user.tti_models_config or {}
-            model_user_config = user_configs.get(user_tti_model_full)
-            if model_user_config:
-                task.log("Applying user-specific settings for this model.")
-                for key, value in model_user_config.items():
-                    if value is not None:
-                        binding_config[key] = value
-        else:
-            task.log("User overrides are disabled by admin for this model alias.")
-
-        if selected_model_name:
-            binding_config['model_name'] = selected_model_name
-            
-        task.set_progress(10)
-
     try:
-        lc = LollmsClient(
-            tti_binding_name=selected_binding.name,
-            tti_binding_config=binding_config
+        # This task does not receive model override from UI, so pass None to client builder
+        # The builder will automatically handle admin force settings, then user defaults.
+        lc = build_lollms_client_from_params(
+            username=username,
+            tti_binding_alias=None,
+            tti_model_name=None
         )
+        if not lc.tti:
+            raise Exception("No active TTI (Text-to-Image) binding found or configured.")
+        
         task.log("LollmsClient initialized for TTI.")
         task.set_progress(20)
 
@@ -135,11 +85,19 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
             raise Exception(f"User '{username}' not found.")
 
         model_full_name = request_data.get('model') or user.tti_binding_model_name
-        if not model_full_name or '/' not in model_full_name:
-            raise Exception("A valid TTI model must be selected.")
-
-        tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
         
+        tti_binding_alias = None
+        tti_model_name = None
+        if model_full_name and '/' in model_full_name:
+            tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
+        else:
+            # If no alias is specified, we must find the default one from the database.
+            default_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
+            if default_tti_binding:
+                tti_binding_alias = default_tti_binding.alias
+            else:
+                raise Exception("No active TTI binding found to determine a default.")
+
         lc = build_lollms_client_from_params(
             username=username,
             tti_binding_alias=tti_binding_alias,
@@ -152,6 +110,9 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
         generated_images_data = []
 
         generation_params = request_data.copy()
+        
+        # Use the determined alias and the model name from the configured client
+        effective_model_full_name = f"{tti_binding_alias}/{lc.tti.config.get('model_name')}"
         generation_params.pop('model', None)
         n_images = generation_params.pop('n', 1)
         size_str = generation_params.pop('size', "1024x1024")
@@ -183,7 +144,7 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
                 owner_user_id=user.id,
                 filename=filename,
                 prompt=request_data.get('prompt'),
-                model=model_full_name,
+                model=effective_model_full_name,
                 width=generation_params.get("width"),
                 height=generation_params.get("height")
             )
@@ -202,101 +163,42 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
 def _image_studio_edit_task(task: Task, username: str, request_data: dict):
     """
     Edit images using the selected TTI binding while respecting admin
-    configuration for parameter overrides (same logic as generation).
+    configuration for parameter overrides.
     """
     task.log("Starting image studio edit task...")
     task.set_progress(5)
 
     with task.db_session_factory() as db:
-        # ------------------------------------------------------------------
-        # 1️⃣ Retrieve user and ensure a valid model is selected
-        # ------------------------------------------------------------------
         user = db.query(DBUser).filter(DBUser.username == username).first()
         if not user:
             raise Exception(f"User '{username}' not found.")
 
-        model_full_name = request_data.get('model') or user.tti_binding_model_name
-        if not model_full_name or '/' not in model_full_name:
-            raise Exception("A valid TTI model must be selected.")
-
-        # ------------------------------------------------------------------
-        # 2️⃣ Resolve binding, model and configuration (admin + user overrides)
-        # ------------------------------------------------------------------
-        tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
-
-        # Fetch the binding record
-        selected_binding = db.query(DBTTIBinding).filter(
-            DBTTIBinding.alias == tti_binding_alias,
-            DBTTIBinding.is_active == True
-        ).first()
-
-        if not selected_binding:
-            # Fallback to first active binding (mirrors generation fallback)
-            task.log(
-                f"Binding alias '{tti_binding_alias}' not found or inactive. "
-                "Falling back to first active TTI binding.", "WARNING"
-            )
-            selected_binding = db.query(DBTTIBinding).filter(
-                DBTTIBinding.is_active == True
-            ).order_by(DBTTIBinding.id).first()
-            if not selected_binding:
-                raise Exception("No active TTI (Text-to-Image) binding found in system settings.")
-
-        # Base config from the binding
-        binding_config = selected_binding.config.copy() if selected_binding.config else {}
-
-        # ------------------------------------------------------------------
-        # 3️⃣ Apply model‑alias defaults (if any)
-        # ------------------------------------------------------------------
-        model_aliases = selected_binding.model_aliases or {}
-        alias_info = model_aliases.get(tti_model_name)
-
-        if alias_info:
-            task.log(
-                f"Applying alias defaults for model '{alias_info.get('title', tti_model_name)}'."
-            )
-            for key, value in alias_info.items():
-                if key not in ['title', 'description', 'icon'] and value is not None:
-                    binding_config[key] = value
-
-        # Determine if admin allows user overrides for this model
-        allow_override = (alias_info or {}).get('allow_parameters_override', True)
-
-        # ------------------------------------------------------------------
-        # 4️⃣ Merge user‑specific overrides when permitted
-        # ------------------------------------------------------------------
-        if allow_override:
-            user_configs = user.tti_models_config or {}
-            model_user_config = user_configs.get(model_full_name)
-            if model_user_config:
-                task.log("Applying user‑specific overrides for this model.")
-                for key, value in model_user_config.items():
-                    if value is not None:
-                        binding_config[key] = value
+        model_full_name = request_data.get('model') or user.iti_binding_model_name
+        
+        tti_binding_alias = None
+        tti_model_name = None
+        if model_full_name and '/' in model_full_name:
+            tti_binding_alias, tti_model_name = model_full_name.split('/', 1)
         else:
-            task.log(
-                "Admin has disabled parameter overrides for this model alias.", "WARNING"
-            )
+            default_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
+            if default_tti_binding:
+                tti_binding_alias = default_tti_binding.alias
+            else:
+                raise Exception("No active TTI binding found to determine a default for editing.")
 
-        # Ensure the model name is set in the final config
-        binding_config['model_name'] = tti_model_name
-
-        print(f"binding_config: {binding_config}")
-        # ------------------------------------------------------------------
-        # 5️⃣ Initialise the Lollms client with the resolved config
-        # ------------------------------------------------------------------
-        lc = LollmsClient(
-            tti_binding_name=selected_binding.name,
-            tti_binding_config=binding_config
+        lc = build_lollms_client_from_params(
+            username=username,
+            tti_binding_alias=tti_binding_alias,
+            tti_model_name=tti_model_name
         )
         if not lc.tti:
-            raise Exception(f"TTI binding '{selected_binding.name}' is not available.")
-        task.log("LollmsClient initialized for image editing.")
-        task.set_progress(20)
+            raise Exception("TTI binding is not available or could not be initialized.")
+            
+        effective_model_full_name = f"{tti_binding_alias}/{lc.tti.config.get('model_name')}"
 
-        # ------------------------------------------------------------------
-        # 6️⃣ Load source images (base64 or from stored files)
-        # ------------------------------------------------------------------
+        task.log(f"LollmsClient initialized for image editing with model {effective_model_full_name}.")
+        task.set_progress(20)
+        
         user_images_path = get_user_images_path(username)
         source_images_b64 = []
 
@@ -323,24 +225,11 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
             raise Exception("No valid source images found for editing.")
         task.set_progress(30)
 
-        # ------------------------------------------------------------------
-        # 7️⃣ Build generation parameters (respecting overrides logic)
-        # ------------------------------------------------------------------
-        # Start with any parameters supplied in the request
-        generation_params = {
-            "prompt": request_data.get('prompt', ''),
-            "negative_prompt": request_data.get('negative_prompt'),
-            "mask": request_data.get('mask'),
-            "seed": request_data.get('seed', -1),
-            "sampler_name": request_data.get('sampler_name'),
-            "steps": request_data.get('steps'),
-            "cfg_scale": request_data.get('cfg_scale'),
-            "width": request_data.get('width'),
-            "height": request_data.get('height'),
-        }
-
-        # Remove keys that are None to avoid sending unwanted defaults
-        generation_params = {k: v for k, v in generation_params.items() if v is not None}
+        generation_params = request_data.copy()
+        # Clean up keys that are not part of the edit_image signature
+        generation_params.pop('model', None)
+        generation_params.pop('image_ids', None)
+        generation_params.pop('base_image_b64', None)
 
         task.log("Sending edit request to TTI binding...")
         edited_image_bytes = lc.tti.edit_image(
@@ -352,9 +241,6 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
         if not edited_image_bytes:
             raise Exception("Image editing failed to return data.")
 
-        # ------------------------------------------------------------------
-        # 8️⃣ Persist the edited image
-        # ------------------------------------------------------------------
         filename = f"{uuid.uuid4().hex}.png"
         file_path = user_images_path / filename
         with open(file_path, "wb") as f:
@@ -365,7 +251,7 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
             owner_user_id=user.id,
             filename=filename,
             prompt=f"Edited from {len(source_images_b64)} image(s): {request_data.get('prompt')}",
-            model=model_full_name,
+            model=effective_model_full_name,
             width=request_data.get("width"),
             height=request_data.get("height")
         )
@@ -376,5 +262,4 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
         task.log("Image editing completed and saved.")
         task.set_progress(100)
 
-        # Return the newly created image data in the public schema
         return json.loads(UserImagePublic.from_orm(new_image).model_dump_json())
