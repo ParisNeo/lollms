@@ -16,7 +16,8 @@ try:
     from backend.db.models.user import User
     from backend.db.models.personality import Personality
     from backend.db.models.voice import UserVoice
-    from backend.db.models.social import Post  # Import the Post model
+    from backend.db.models.social import Post
+    from backend.db.models.api_key import OpenAIAPIKey
     from backend.security import get_password_hash
     from backend.config import INITIAL_ADMIN_USER_CONFIG, APP_DB_URL
 except ImportError as e:
