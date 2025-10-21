@@ -603,6 +603,8 @@ def get_safe_store_instance(
         ASCIIColors.info(f"Configuration:{datastore_record.vectorizer_config}")
         try:
             ss_instance = safe_store.SafeStore(
+                name=datastore_record.name,
+                description=datastore_record.description,
                 db_path=ss_db_path,
                 vectorizer_name=datastore_record.vectorizer_name,
                 vectorizer_config=datastore_record.vectorizer_config or {},
