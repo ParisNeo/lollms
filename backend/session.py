@@ -601,6 +601,7 @@ def get_safe_store_instance(
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
         ASCIIColors.info(f"Recovering vectorizer:{datastore_record.vectorizer_name}")
         ASCIIColors.info(f"Configuration:{datastore_record.vectorizer_config}")
+        ASCIIColors.info(f"Name:{datastore_record.name}")
         try:
             ss_instance = safe_store.SafeStore(
                 name=datastore_record.name,
