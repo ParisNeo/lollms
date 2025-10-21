@@ -1,5 +1,4 @@
-# [UPDATE] lollms/backend/session.py
-# [UPDATE] lollms/backend/session.py
+# lollms/backend/session.py
 import json
 import traceback
 import datetime
@@ -615,6 +614,7 @@ def get_safe_store_instance(
                 expand_after=10,
                 chunking_strategy="token"
             )
+            ss_instance.name = datastore_record.name
             session.setdefault("safe_store_instances", {})[datastore_id] = ss_instance
         except Exception as e:
             trace_exception(e)
