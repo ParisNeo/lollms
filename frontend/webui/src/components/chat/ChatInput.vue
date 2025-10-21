@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/chat/ChatInput.vue -->
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
@@ -29,6 +30,8 @@ import IconLollms from '../../assets/icons/IconLollms.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconDataZone from '../../assets/icons/IconDataZone.vue';
+import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
+import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 
 // CodeMirror imports
 import { markdown } from '@codemirror/lang-markdown';
@@ -62,6 +65,12 @@ const inputTokenCount = ref(0);
 const isTokenizingInput = ref(false);
 let tokenizeInputDebounceTimer = null;
 
+// STT State
+const isRecording = ref(false);
+const isTranscribing = ref(false);
+const mediaRecorder = ref(null);
+const audioChunks = ref([]);
+
 // UI state
 const userPromptSearchTerm = ref('');
 const zooPromptSearchTerm = ref('');
@@ -76,6 +85,7 @@ const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const availableRagStores = computed(() => dataStore.availableRagStores);
 const availableMcpTools = computed(() => dataStore.availableMcpToolsForSelector);
 const contextStatus = computed(() => discussionsStore.activeDiscussionContextStatus);
+const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
 
 // Filtered prompts
 const filteredLollmsPrompts = computed(() => {
@@ -116,6 +126,8 @@ const filteredSystemPromptsByZooCategory = computed(() => {
 const isSendDisabled = computed(() => generationInProgress.value || (messageText.value.trim() === '' && uploadedImages.value.length === 0));
 const hasActiveTools = computed(() => mcpToolSelection.value.length > 0 || ragStoreSelection.value.length > 0);
 const inputPlaceholder = computed(() => {
+    if (isRecording.value) return "Recording... Click to stop.";
+    if (isTranscribing.value) return "Transcribing...";
     if (generationInProgress.value) return "Please wait for generation to complete...";
     return isAdvancedMode.value ? "Type your message... (Ctrl+Enter to send)" : "Type your message... (Shift+Enter for advanced editor)";
 });
@@ -380,7 +392,7 @@ async function handlePaste(event) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
             const file = item.getAsFile();
             if (file) {
-                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
+                const extension = (file.type.split('/') || 'png').toLowerCase().replace('jpeg', 'jpg');
                 imageFiles.push(new File([file], `pasted_image_${Date.now()}.${extension}`, { type: file.type }));
             }
         }
@@ -421,6 +433,54 @@ function handleKeyDown(event) {
     }
 }
 
+// --- STT Logic ---
+async function startRecording() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        uiStore.addNotification('Your browser does not support audio recording.', 'error');
+        return;
+    }
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder.value = new MediaRecorder(stream);
+        audioChunks.value = [];
+        mediaRecorder.value.ondataavailable = event => {
+            audioChunks.value.push(event.data);
+        };
+        mediaRecorder.value.onstop = async () => {
+            isTranscribing.value = true;
+            const audioBlob = new Blob(audioChunks.value, { type: 'audio/wav' });
+            const transcribedText = await discussionsStore.transcribeAudio(audioBlob);
+            if (transcribedText) {
+                const currentVal = messageText.value;
+                const separator = currentVal.trim() && !currentVal.endsWith(' ') ? ' ' : '';
+                messageText.value = currentVal + separator + transcribedText;
+                focusInput();
+            }
+            isTranscribing.value = false;
+        };
+        mediaRecorder.value.start();
+        isRecording.value = true;
+    } catch (err) {
+        uiStore.addNotification('Microphone access was denied. Please allow microphone permissions in your browser settings.', 'error');
+        console.error('Microphone error:', err);
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder.value && isRecording.value) {
+        mediaRecorder.value.stop();
+        isRecording.value = false;
+    }
+}
+
+function toggleRecording() {
+    if (isRecording.value) {
+        stopRecording();
+    } else {
+        startRecording();
+    }
+}
+
 // Watchers
 watch(messageText, (newValue) => {
     clearTimeout(tokenizeInputDebounceTimer);
@@ -446,6 +506,9 @@ onMounted(() => {
 onUnmounted(() => {
     clearTimeout(tokenizeInputDebounceTimer);
     uploadedImages.value.forEach(img => { if (img.local_url) URL.revokeObjectURL(img.local_url); });
+    if (mediaRecorder.value && isRecording.value) {
+        mediaRecorder.value.stop();
+    }
 });
 </script>
 
@@ -600,7 +663,12 @@ onUnmounted(() => {
                         <textarea ref="textareaRef" v-model="messageText" @keydown="handleKeyDown" :placeholder="inputPlaceholder" rows="1" class="simple-chat-input"></textarea>
                     </div>
     
-                    <div class="flex-shrink-0 pt-1.5">
+                    <div class="flex-shrink-0 pt-1.5 flex items-center gap-2">
+                        <button v-if="isSttConfigured" @click="toggleRecording" :disabled="isTranscribing" class="btn btn-secondary chat-action-button" :class="{'!bg-red-500 text-white animate-pulse': isRecording}" :title="isRecording ? 'Stop Recording' : (isTranscribing ? 'Transcribing...' : 'Record Voice')">
+                            <IconAnimateSpin v-if="isTranscribing" class="w-5 h-5" />
+                            <IconStopCircle v-else-if="isRecording" class="w-5 h-5"/>
+                            <IconMicrophone v-else class="w-5 h-5"/>
+                        </button>
                         <button @click="handleSendMessage" :disabled="isSendDisabled" class="btn btn-primary chat-action-button" title="Send Message (Enter)">
                             <IconSend class="w-5 h-5"/>
                         </button>
@@ -641,6 +709,11 @@ onUnmounted(() => {
 
                         <!-- Right Actions -->
                         <div class="flex items-center gap-1 sm:gap-2">
+                             <button v-if="isSttConfigured" @click="toggleRecording" :disabled="isTranscribing" class="btn btn-secondary chat-action-button" :class="{'!bg-red-500 text-white animate-pulse': isRecording}" :title="isRecording ? 'Stop Recording' : (isTranscribing ? 'Transcribing...' : 'Record Voice')">
+                                <IconAnimateSpin v-if="isTranscribing" class="w-5 h-5" />
+                                <IconStopCircle v-else-if="isRecording" class="w-5 h-5"/>
+                                <IconMicrophone v-else class="w-5 h-5"/>
+                            </button>
                             <button @click="isAdvancedMode = false" class="btn btn-secondary !py-1 !px-3 flex items-center" title="Switch to Simple Input">
                                 <IconChevronDown class="w-5 h-5 mr-1" />
                                 <span>Simple</span>

@@ -1,3 +1,4 @@
+# [UPDATE] lollms/backend/session.py
 # lollms/backend/session.py
 import json
 import traceback
@@ -17,7 +18,7 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
 from backend.db.models.service import MCP as DBMCP
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding
+from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
 from lollms_client import LollmsClient
 from backend.models import UserAuthDetails, TokenData
 from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM, decode_main_access_token
@@ -226,6 +227,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             tti_models_config=db_user.tti_models_config,
             tts_binding_model_name=db_user.tts_binding_model_name,
             tts_models_config=db_user.tts_models_config,
+            stt_binding_model_name=db_user.stt_binding_model_name,
+            stt_models_config=db_user.stt_models_config,
             safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
             active_personality_id=user_sessions[username].get("active_personality_id"),
             active_voice_id=db_user.active_voice_id,
@@ -345,7 +348,9 @@ def build_lollms_client_from_params(
     tti_binding_alias: Optional[str] = None,
     tti_model_name: Optional[str] = None,
     tts_binding_alias: Optional[str] = None,
-    tts_model_name: Optional[str] = None
+    tts_model_name: Optional[str] = None,
+    stt_binding_alias: Optional[str] = None,
+    stt_model_name: Optional[str] = None
 ) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
@@ -366,6 +371,8 @@ def build_lollms_client_from_params(
 
         if not binding_to_use:
             binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+        
+        client_init_params = {}
         if binding_to_use:            
             final_alias = binding_to_use.alias
             model_name_for_binding = model_name
@@ -412,10 +419,9 @@ def build_lollms_client_from_params(
                 llm_init_params.update(final_user_params)
 
             llm_init_params["model_name"] = model_name_for_binding
-            client_init_params = {"llm_binding_name": binding_to_use.name, "llm_binding_config": llm_init_params}    
-        else:
-            client_init_params = {}    
-            
+            client_init_params["llm_binding_name"] = binding_to_use.name
+            client_init_params["llm_binding_config"] = llm_init_params    
+        
         # --- TTI Binding Integration ---
         force_tti_mode = settings.get("force_tti_model_mode", "disabled")
         force_tti_name = settings.get("force_tti_model_name")
@@ -515,8 +521,55 @@ def build_lollms_client_from_params(
                 
             client_init_params["tts_binding_name"] = selected_tts_binding.name
             client_init_params["tts_binding_config"] = tts_binding_config
-        # --- END TTS Binding Integration ---
+            
+        # --- STT Binding Integration ---
+        selected_stt_binding = None
+        selected_stt_model_name = stt_model_name
+        
+        if stt_binding_alias:
+            selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.alias == stt_binding_alias, DBSTTBinding.is_active == True).first()
+            if selected_stt_binding and not selected_stt_model_name:
+                selected_stt_model_name = selected_stt_binding.default_model_name
 
+        if not selected_stt_binding:
+            user_stt_model_full = user_db.stt_binding_model_name
+            if user_stt_model_full and '/' in user_stt_model_full:
+                stt_binding_alias_local, stt_model_name_local = user_stt_model_full.split('/', 1)
+                selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.alias == stt_binding_alias_local, DBSTTBinding.is_active == True).first()
+                if not selected_stt_model_name:
+                    selected_stt_model_name = stt_model_name_local
+
+        if not selected_stt_binding:
+            selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).order_by(DBSTTBinding.id).first()
+            if selected_stt_binding and not selected_stt_model_name:
+                selected_stt_model_name = selected_stt_binding.default_model_name
+
+        if selected_stt_binding:
+            stt_binding_config = selected_stt_binding.config.copy() if selected_stt_binding.config else {}
+            
+            stt_model_aliases = selected_stt_binding.model_aliases or {}
+            stt_alias_info = stt_model_aliases.get(selected_stt_model_name)
+            
+            if stt_alias_info:
+                for key, value in stt_alias_info.items():
+                    if key not in ['title', 'description', 'icon'] and value is not None:
+                        stt_binding_config[key] = value
+                        
+            allow_stt_override = (stt_alias_info or {}).get('allow_parameters_override', True)
+            if allow_stt_override:
+                user_stt_configs = user_db.stt_models_config or {}
+                model_user_config = user_stt_configs.get(user_db.stt_binding_model_name)
+                if model_user_config:
+                    for key, value in model_user_config.items():
+                        if value is not None:
+                            stt_binding_config[key] = value
+                            
+            if selected_stt_model_name:
+                stt_binding_config['model_name'] = selected_stt_model_name
+                
+            client_init_params["stt_binding_name"] = selected_stt_binding.name
+            client_init_params["stt_binding_config"] = stt_binding_config
+        # --- END STT Binding Integration ---
         
         if 'servers_infos' not in session:
             session['servers_infos'] = load_mcps(username)
@@ -526,10 +579,7 @@ def build_lollms_client_from_params(
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
 
-        if len(client_init_params)>0:
-            cache_key = json.dumps(client_init_params, sort_keys=True)
-        else:
-            cache_key = "{}"
+        cache_key = json.dumps(client_init_params, sort_keys=True) if client_init_params else "{}"
             
         session_cache = session.setdefault("lollms_clients_cache", {})
         if cache_key in session_cache:
@@ -544,7 +594,8 @@ def build_lollms_client_from_params(
             return lc
         except Exception as e:
             traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{binding_to_use.alias if binding_to_use else 'N/A'}': {str(e)}")
+            binding_alias_to_show = binding_to_use.alias if binding_to_use else 'N/A'
+            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{binding_alias_to_show}': {str(e)}")
     finally:
         db.close()
 

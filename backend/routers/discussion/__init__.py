@@ -40,6 +40,7 @@ from backend.routers.discussion.rag import build_rag_router
 from backend.routers.discussion.generation.llm import build_llm_generation_router
 from backend.routers.discussion.generation.tti import build_tti_generation_router
 from backend.routers.discussion.generation.tts import build_tts_router
+from backend.routers.discussion.generation.stt import build_stt_router
 from backend.routers.discussion.sharing import build_discussion_sharing_router
 from backend.routers.discussion.utils import build_utils_router
 from backend.db.models.discussion import SharedDiscussionLink
@@ -58,10 +59,12 @@ def build_discussions_router():
     build_llm_generation_router(router)
     build_tti_generation_router(router)
     build_tts_router(router)
+    build_stt_router(router) # Add this line
     build_discussion_sharing_router(router)
     build_utils_router(router)
 
-
+    build_tts_router(router)
+    build_discussion_sharing_router(router)
 
     @router.get("", response_model=List[DiscussionInfo])
     async def list_all_discussions(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DiscussionInfo]:

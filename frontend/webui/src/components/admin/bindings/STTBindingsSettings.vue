@@ -1,4 +1,4 @@
-<!-- [UPDATE] frontend/webui/src/components/admin/bindings/STTBindingsSettings.vue -->
+<!-- [CREATE] frontend/webui/src/components/admin/bindings/STTBindingsSettings.vue -->
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';

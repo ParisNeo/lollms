@@ -198,6 +198,23 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             ttsState.value[messageId] = { isLoading: false, audioUrl: null, error: 'Failed to generate audio.' };
         }
     }
+
+    async function transcribeAudio(audioBlob) {
+        const uiStore = useUiStore();
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'recording.wav');
+    
+        try {
+            const response = await apiClient.post('/api/discussions/stt', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            return response.data.text;
+        } catch (error) {
+            uiStore.addNotification('Speech-to-text transcription failed.', 'error');
+            console.error('STT Error:', error);
+            return null;
+        }
+    }
     
     function playAudio(messageId, audioElement) {
         if (currentPlayingAudio.value.audio && currentPlayingAudio.value.audio !== audioElement) {
@@ -278,6 +295,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,
         ..._actions,
         generateTTSForMessage,
+        transcribeAudio,
         playAudio,
         onAudioPausedOrEnded,
         stopCurrentAudio,
