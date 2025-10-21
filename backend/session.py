@@ -615,6 +615,7 @@ def get_safe_store_instance(
                 chunking_strategy="token"
             )
             ss_instance.name = datastore_record.name
+            ss_instance.description = datastore_record.description
             session.setdefault("safe_store_instances", {})[datastore_id] = ss_instance
         except Exception as e:
             trace_exception(e)
