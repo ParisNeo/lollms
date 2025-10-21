@@ -98,6 +98,27 @@ class TTSBindingPublicAdmin(TTSBindingCreate):
     class Config:
         from_attributes = True
 
+class STTBindingCreate(BaseModel):
+    alias: str
+    name: str
+    config: Dict[str, Any] = Field(default_factory=dict)
+    default_model_name: Optional[str] = None
+    is_active: bool = True
+
+class STTBindingUpdate(BaseModel):
+    alias: Optional[str] = None
+    name: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    default_model_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class STTBindingPublicAdmin(STTBindingCreate):
+    id: int
+    model_aliases: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
+
 class ModelAlias(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
@@ -123,6 +144,12 @@ class TtsModelAlias(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
+
+class SttModelAlias(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    allow_parameters_override: bool = True
     
 class RagModelAlias(BaseModel):
     title: Optional[str] = None
@@ -141,6 +168,10 @@ class TtiModelAliasUpdate(BaseModel):
 class TtsModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: TtsModelAlias
+
+class SttModelAliasUpdate(BaseModel):
+    original_model_name: str
+    alias: SttModelAlias
     
 class RagModelAliasUpdate(BaseModel):
     original_model_name: str

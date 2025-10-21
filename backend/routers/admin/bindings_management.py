@@ -10,16 +10,18 @@ from lollms_client import LollmsClient
 from lollms_client.lollms_llm_binding import get_available_bindings
 from lollms_client.lollms_tti_binding import get_available_bindings as get_available_tti_bindings
 from lollms_client.lollms_tts_binding import get_available_bindings as get_available_tts_bindings
+from lollms_client.lollms_stt_binding import get_available_bindings as get_available_stt_bindings
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
-from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding
+from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
 from backend.models import UserAuthDetails, ForceSettingsPayload, ModelInfo
 from backend.models.admin import (
     LLMBindingCreate, LLMBindingUpdate, LLMBindingPublicAdmin,
     TTIBindingCreate, TTIBindingUpdate, TTIBindingPublicAdmin,
     TTSBindingCreate, TTSBindingUpdate, TTSBindingPublicAdmin,
-    ModelAliasUpdate, TtiModelAliasUpdate, TtsModelAliasUpdate,
+    STTBindingCreate, STTBindingUpdate, STTBindingPublicAdmin,
+    ModelAliasUpdate, TtiModelAliasUpdate, TtsModelAliasUpdate, SttModelAliasUpdate,
     ModelAliasDelete, BindingModel, ModelNamePayload
 )
 from backend.session import (
@@ -40,13 +42,15 @@ def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_t
         available_bindings = get_available_bindings()
     elif binding_type == "tti":
         available_bindings = get_available_tti_bindings()
+    elif binding_type == "stt":
+        available_bindings = get_available_stt_bindings()
     else: # tts
         available_bindings = get_available_tts_bindings()
         
     binding_desc = next((b for b in available_bindings if b.get("binding_name") == binding_name), None)
     
     parameters_key = "input_parameters"
-    if binding_type in ["tti", "tts"] and binding_desc and "model_parameters" in binding_desc:
+    if binding_type in ["tti", "tts", "stt"] and binding_desc and "model_parameters" in binding_desc:
         parameters_key = "model_parameters"
 
     if not binding_desc or parameters_key not in binding_desc:
@@ -409,6 +413,155 @@ async def update_tts_model_alias(binding_id: int, payload: TtsModelAliasUpdate, 
     db.refresh(binding)
     return binding
 
+@bindings_management_router.delete("/tts-bindings/{binding_id}/alias", response_model=TTSBindingPublicAdmin)
+async def delete_tts_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+        
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    return binding
+
+# --------------------- STT Endpoints ---------------------
+@bindings_management_router.get("/stt-bindings/available_types", response_model=List[Dict])
+async def get_available_stt_binding_types():
+    try:
+        return get_available_stt_bindings()
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to get available STT binding types: {e}")
+
+@bindings_management_router.get("/stt-bindings", response_model=List[STTBindingPublicAdmin])
+async def get_all_stt_bindings(db: Session = Depends(get_db)):
+    return db.query(DBSTTBinding).all()
+
+@bindings_management_router.post("/stt-bindings", response_model=STTBindingPublicAdmin, status_code=201)
+async def create_stt_binding(binding_data: STTBindingCreate, db: Session = Depends(get_db)):
+    if db.query(DBSTTBinding).filter(DBSTTBinding.alias == binding_data.alias).first():
+        raise HTTPException(status_code=400, detail="An STT binding with this alias already exists.")
+    
+    if binding_data.config:
+        binding_data.config = _process_binding_config(binding_data.name, binding_data.config, "stt")
+
+    new_binding = DBSTTBinding(**binding_data.model_dump())
+    try:
+        db.add(new_binding)
+        db.commit()
+        db.refresh(new_binding)
+        manager.broadcast_sync({"type": "bindings_updated"})
+        return new_binding
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="An STT binding with this alias already exists.")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@bindings_management_router.put("/stt-bindings/{binding_id}", response_model=STTBindingPublicAdmin)
+async def update_stt_binding(binding_id: int, update_data: STTBindingUpdate, db: Session = Depends(get_db)):
+    binding_to_update = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding_to_update:
+        raise HTTPException(status_code=404, detail="STT Binding not found.")
+    
+    if update_data.alias and update_data.alias != binding_to_update.alias:
+        if db.query(DBSTTBinding).filter(DBSTTBinding.alias == update_data.alias).first():
+            raise HTTPException(status_code=400, detail="An STT binding with the new alias already exists.")
+
+    update_dict = update_data.model_dump(exclude_unset=True)
+
+    if 'config' in update_dict and update_dict['config'] is not None:
+        binding_name = update_dict.get('name', binding_to_update.name)
+        update_dict['config'] = _process_binding_config(binding_name, update_dict['config'], "stt")
+
+    for key, value in update_dict.items():
+        setattr(binding_to_update, key, value)
+    
+    try:
+        db.commit()
+        db.refresh(binding_to_update)
+        manager.broadcast_sync({"type": "bindings_updated"})
+        return binding_to_update
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@bindings_management_router.delete("/stt-bindings/{binding_id}", response_model=Dict[str, str])
+async def delete_stt_binding(binding_id: int, db: Session = Depends(get_db)):
+    binding_to_delete = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding_to_delete:
+        raise HTTPException(status_code=404, detail="STT Binding not found.")
+    
+    try:
+        db.delete(binding_to_delete)
+        db.commit()
+        manager.broadcast_sync({"type": "bindings_updated"})
+        return {"message": "STT Binding deleted successfully."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@bindings_management_router.get("/stt-bindings/{binding_id}/models", response_model=List[BindingModel])
+async def get_stt_binding_models(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="STT Binding not found.")
+    
+    try:
+        client_params = { "stt_binding_name": binding.name, "stt_binding_config": { **binding.config, "model_name": binding.default_model_name } }
+        lc = LollmsClient(**client_params)
+        if not lc.stt:
+            raise Exception("Could not build an STT instance from the configuration.")
+        raw_models = lc.stt.list_models()
+        
+        models_list = [item if isinstance(item, str) else item.get("model_name") for item in raw_models if (isinstance(item, str) or item.get("model_name"))]
+        
+        model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try: model_aliases = json.loads(model_aliases)
+            except (json.JSONDecodeError, TypeError): model_aliases = {}
+        
+        return [BindingModel(original_model_name=model_name, alias=model_aliases.get(model_name)) for model_name in sorted(models_list)]
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Could not fetch models from STT binding '{binding.alias}': {e}")
+
+@bindings_management_router.put("/stt-bindings/{binding_id}/alias", response_model=STTBindingPublicAdmin)
+async def update_stt_model_alias(binding_id: int, payload: SttModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="STT Binding not found.")
+    
+    if binding.model_aliases is None:
+        binding.model_aliases = {}
+    
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    return binding
+
+@bindings_management_router.delete("/stt-bindings/{binding_id}/alias", response_model=STTBindingPublicAdmin)
+async def delete_stt_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="STT Binding not found.")
+        
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    
+    db.commit()
+    db.refresh(binding)
+    return binding
+
+# --------------------------------------------------------
+
 @bindings_management_router.put("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
 async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Session = Depends(get_db)):
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
@@ -424,20 +577,6 @@ async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Ses
     db.commit()
     db.refresh(binding)
     manager.broadcast_sync({"type": "bindings_updated"})
-    return binding
-
-@bindings_management_router.delete("/tts-bindings/{binding_id}/alias", response_model=TTSBindingPublicAdmin)
-async def delete_tts_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
-    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
-    if not binding:
-        raise HTTPException(status_code=404, detail="TTS Binding not found.")
-        
-    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
-        del binding.model_aliases[payload.original_model_name]
-        flag_modified(binding, "model_aliases")
-    
-    db.commit()
-    db.refresh(binding)
     return binding
 
 @bindings_management_router.get("/bindings/{binding_id}/models", response_model=List[BindingModel])

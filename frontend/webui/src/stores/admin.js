@@ -62,6 +62,10 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingTtsBindings = ref(false);
     const availableTtsBindingTypes = ref([]);
 
+    const sttBindings = ref([]);
+    const isLoadingSttBindings = ref(false);
+    const availableSttBindingTypes = ref([]);
+
     const ragBindings = ref([]);
     const isLoadingRagBindings = ref(false);
     const availableRagBindingTypes = ref([]);
@@ -525,6 +529,51 @@ export const useAdminStore = defineStore('admin', () => {
         if (index !== -1) ttsBindings.value[index] = response.data;
     }
 
+    // --- STT Actions ---
+    async function fetchSttBindings() {
+        isLoadingSttBindings.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/stt-bindings');
+            sttBindings.value = response.data;
+        } finally {
+            isLoadingSttBindings.value = false;
+        }
+    }
+    async function fetchAvailableSttBindingTypes() {
+        const response = await apiClient.get('/api/admin/stt-bindings/available_types');
+        availableSttBindingTypes.value = response.data;
+    }
+    async function addSttBinding(payload) {
+        const response = await apiClient.post('/api/admin/stt-bindings', payload);
+        sttBindings.value.push(response.data);
+        uiStore.addNotification(`STT Binding '${response.data.alias}' created.`, 'success');
+    }
+    async function updateSttBinding(id, payload) {
+        const response = await apiClient.put(`/api/admin/stt-bindings/${id}`, payload);
+        const index = sttBindings.value.findIndex(b => b.id === id);
+        if (index !== -1) sttBindings.value[index] = response.data;
+        uiStore.addNotification(`STT Binding '${response.data.alias}' updated.`, 'success');
+    }
+    async function deleteSttBinding(id) {
+        await apiClient.delete(`/api/admin/stt-bindings/${id}`);
+        sttBindings.value = sttBindings.value.filter(b => b.id !== id);
+        uiStore.addNotification('STT Binding deleted successfully.', 'success');
+    }
+    async function fetchSttBindingModels(bindingId) {
+        const response = await apiClient.get(`/api/admin/stt-bindings/${bindingId}/models`);
+        return response.data;
+    }
+    async function saveSttModelAlias(bindingId, payload) {
+        const response = await apiClient.put(`/api/admin/stt-bindings/${bindingId}/alias`, payload);
+        const index = sttBindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) sttBindings.value[index] = response.data;
+    }
+    async function deleteSttModelAlias(bindingId, modelName) {
+        const response = await apiClient.delete(`/api/admin/stt-bindings/${bindingId}/alias`, { data: { original_model_name: modelName } });
+        const index = sttBindings.value.findIndex(b => b.id === bindingId);
+        if (index !== -1) sttBindings.value[index] = response.data;
+    }
+
     // --- RAG Actions ---
     async function fetchRagBindings() {
         isLoadingRagBindings.value = true;
@@ -795,6 +844,9 @@ export const useAdminStore = defineStore('admin', () => {
         ttsBindings, isLoadingTtsBindings, availableTtsBindingTypes,
         fetchTtsBindings, fetchAvailableTtsBindingTypes, addTtsBinding, updateTtsBinding, deleteTtsBinding,
         fetchTtsBindingModels, saveTtsModelAlias, deleteTtsModelAlias,
+        sttBindings, isLoadingSttBindings, availableSttBindingTypes,
+        fetchSttBindings, fetchAvailableSttBindingTypes, addSttBinding, updateSttBinding, deleteSttBinding,
+        fetchSttBindingModels, saveSttModelAlias, deleteSttModelAlias,
         ragBindings, isLoadingRagBindings, availableRagBindingTypes,
         fetchRagBindings, fetchAvailableRagBindingTypes, addRagBinding, updateRagBinding, deleteRagBinding,
         fetchRagBindingModels, saveRagModelAlias, deleteRagModelAlias, fetchRagModelsForType,

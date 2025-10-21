@@ -1,3 +1,4 @@
+# [UPDATE] backend/routers/lollms_config.py
 # backend/routers/lollms_config.py
 import json
 from typing import List, Dict, Any, Optional
@@ -8,11 +9,12 @@ from lollms_client import LollmsClient
 from ascii_colors import trace_exception
 from lollms_client.lollms_tti_binding import get_available_bindings as get_available_tti_bindings
 from lollms_client.lollms_tts_binding import get_available_bindings as get_available_tts_bindings
+from lollms_client.lollms_stt_binding import get_available_bindings as get_available_stt_bindings
 
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
-from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding
+from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
 from backend.session import get_current_active_user, get_user_lollms_client, user_sessions, build_lollms_client_from_params
 from backend.models import UserLLMParams, UserAuthDetails
 from backend.models.shared import ModelInfo
@@ -263,6 +265,71 @@ async def get_tts_models(
                         all_models.append(model_info)
         except Exception as e:
             print(f"WARNING: Could not fetch TTS models from binding '{binding.alias}': {e}")
+            trace_exception(e)
+            continue
+            
+    unique_models = {m["id"]: m for m in all_models}
+    return sorted(list(unique_models.values()), key=lambda x: x['name'])
+
+@lollms_config_router.get("/stt-models", response_model=List[ModelInfo])
+async def get_stt_models(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    all_models = []
+    active_bindings = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).all()
+    model_display_mode = settings.get("stt_model_display_mode", "mixed")
+    
+    try:
+        available_binding_descs = {b['binding_name']: b for b in get_available_stt_bindings()}
+    except Exception as e:
+        trace_exception(e)
+        available_binding_descs = {}
+
+    for binding in active_bindings:
+        model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except Exception:
+                model_aliases = {}
+        try:
+            # Note: We build a client just to list models, this might be optimizable
+            # if lollms-client offers a static way to list models for a binding.
+            lc = build_lollms_client_from_params(current_user.username, stt_binding_alias=binding.alias)
+            if not lc.stt: continue
+            
+            models = lc.stt.list_models()
+            
+            if isinstance(models, list):
+                for item in models:
+                    model_id = item if isinstance(item, str) else (item.get("id") or item.get("model_name"))
+                    if model_id:
+                        alias_data = model_aliases.get(model_id)
+                        
+                        if model_display_mode == 'aliased' and not alias_data:
+                            continue
+
+                        display_name = f"{binding.alias}/{model_id}"
+                        if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
+                            display_name = alias_data.get('title', model_id)
+
+                        binding_desc = available_binding_descs.get(binding.name)
+                        binding_params = {}
+                        if binding_desc:
+                            binding_params['class_parameters'] = binding_desc.get('input_parameters', [])
+                            binding_params['generation_parameters'] = binding_desc.get('transcribe_audio_parameters', [])
+
+                        model_info = {
+                            "id": f"{binding.alias}/{model_id}",
+                            "name": display_name,
+                            "alias": alias_data,
+                            "binding_params": binding_params,
+                        }
+
+                        all_models.append(model_info)
+        except Exception as e:
+            print(f"WARNING: Could not fetch STT models from binding '{binding.alias}': {e}")
             trace_exception(e)
             continue
             

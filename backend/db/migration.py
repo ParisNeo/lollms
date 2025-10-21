@@ -12,7 +12,7 @@ from sqlalchemy.ext.compiler import compiles
 
 from backend.config import SERVER_CONFIG, APP_SETTINGS, SAFE_STORE_DEFAULTS, APP_DATA_DIR, USERS_DIR_NAME
 from backend.db.base import CURRENT_DB_VERSION
-from backend.db.models.config import GlobalConfig, LLMBinding, TTIBinding, TTSBinding, DatabaseVersion, RAGBinding
+from backend.db.models.config import GlobalConfig, LLMBinding, TTIBinding, TTSBinding, DatabaseVersion, RAGBinding, STTBinding
 from backend.db.models.service import App # Ensure App is imported
 from backend.db.models.prompt import SavedPrompt
 from backend.db.models.fun_fact import FunFactCategory, FunFact
@@ -272,6 +272,10 @@ def _bootstrap_global_settings(connection):
         "tts_model_display_mode": {
             "value": "mixed",
             "type": "string", "description": "How TTS models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
+        },
+        "stt_model_display_mode": {
+            "value": "mixed",
+            "type": "string", "description": "How STT models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models"
         },
         "rag_model_display_mode": {
             "value": "mixed",
@@ -840,6 +844,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "tti_models_config": "JSON",
             "tts_binding_model_name": "VARCHAR",
             "tts_models_config": "JSON",
+            "stt_binding_model_name": "VARCHAR",
+            "stt_models_config": "JSON",
             "active_voice_id": "VARCHAR REFERENCES user_voices(id) ON DELETE SET NULL",
             "include_memory_date_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
             "coding_style_constraints": "TEXT",
@@ -1262,6 +1268,11 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if not inspector.has_table("tts_bindings"):
         TTSBinding.__table__.create(connection)
         print("INFO: Created 'tts_bindings' table.")
+        connection.commit()
+
+    if not inspector.has_table("stt_bindings"):
+        STTBinding.__table__.create(connection)
+        print("INFO: Created 'stt_bindings' table.")
         connection.commit()
 
     # NEW: Create rag_bindings table if it doesn't exist

@@ -169,6 +169,7 @@ export const useAuthStore = defineStore('auth', () => {
                     dataStore.fetchAvailableLollmsModels();
                     dataStore.fetchAvailableTtiModels();
                     dataStore.fetchAvailableTtsModels();
+                    dataStore.fetchAvailableSttModels();
                     break;               
             }
         };

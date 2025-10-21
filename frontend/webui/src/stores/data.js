@@ -13,6 +13,7 @@ export const useDataStore = defineStore('data', () => {
     const availableLollmsModels = ref([]);
     const availableTtiModels = ref([]);
     const availableTtsModels = ref([]);
+    const availableSttModels = ref([]);
     const userVoices = ref([]);
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
@@ -26,6 +27,7 @@ export const useDataStore = defineStore('data', () => {
     const isLoadingLollmsModels = ref(false);
     const isLoadingTtiModels = ref(false);
     const isLoadingTtsModels = ref(false);
+    const isLoadingSttModels = ref(false);
     const isLoadingUserVoices = ref(false);
     const _languages = ref([]);
     const isLoadingLanguages = ref(false);
@@ -171,6 +173,40 @@ export const useDataStore = defineStore('data', () => {
 
         return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
     });
+
+    const availableSttModelsGrouped = computed(() => {
+        if (!Array.isArray(availableSttModels.value) || availableSttModels.value.length === 0) {
+            return [];
+        }
+
+        const grouped = availableSttModels.value.reduce((acc, model) => {
+            if (!model || typeof model.id !== 'string') {
+                console.warn("Skipping invalid STT model entry:", model);
+                return acc;
+            }
+            
+            const [bindingAlias] = model.id.split('/');
+            if (!acc[bindingAlias]) {
+                acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
+            }
+
+            acc[bindingAlias].items.push({ 
+                id: model.id, 
+                name: model.name,
+                icon_base64: model.alias?.icon,
+                description: model.alias?.description,
+                alias: model.alias
+            });
+            return acc;
+        }, {});
+
+        Object.values(grouped).forEach(group => {
+            group.items.sort((a, b) => a.name.localeCompare(b.name));
+        });
+
+        return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
+    });
+
     const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
     const getPersonalityById = computed(() => {
         return (id) => allPersonalities.value.find(p => p.id === id);
@@ -273,6 +309,7 @@ export const useDataStore = defineStore('data', () => {
             fetchAvailableLollmsModels().catch(e => console.error("Error fetching models:", e)),
             fetchAvailableTtiModels().catch(e => console.error("Error fetching TTI models:", e)),
             fetchAvailableTtsModels().catch(e => console.error("Error fetching TTS models:", e)),
+            fetchAvailableSttModels().catch(e => console.error("Error fetching STT models:", e)),
             fetchUserVoices().catch(e => console.error("Error fetching user voices:", e)),
             fetchDataStores().catch(e => console.error("Error fetching data stores:", e)),
             fetchPersonalities().catch(e => console.error("Error fetching personalities:", e)),
@@ -319,6 +356,18 @@ export const useDataStore = defineStore('data', () => {
             availableTtsModels.value = [];
         } finally {
             isLoadingTtsModels.value = false;
+        }
+    }
+
+    async function fetchAvailableSttModels() {
+        isLoadingSttModels.value = true;
+        try {
+            const response = await apiClient.get('/api/config/stt-models');
+            availableSttModels.value = Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            availableSttModels.value = [];
+        } finally {
+            isLoadingSttModels.value = false;
         }
     }
 
@@ -693,6 +742,7 @@ export const useDataStore = defineStore('data', () => {
         availableLollmsModels.value = [];
         availableTtiModels.value = [];
         availableTtsModels.value = [];
+        availableSttModels.value = [];
         userVoices.value = [];
         ownedDataStores.value = [];
         sharedDataStores.value = [];
@@ -706,6 +756,7 @@ export const useDataStore = defineStore('data', () => {
         isLoadingLollmsModels.value = false;
         isLoadingTtiModels.value = false;
         isLoadingTtsModels.value = false;
+        isLoadingSttModels.value = false;
         isLoadingUserVoices.value = false;
         _languages.value = [];
         isLoadingLanguages.value = false;
@@ -723,9 +774,11 @@ export const useDataStore = defineStore('data', () => {
         
         availableTtiModels, isLoadingTtiModels, availableTtiModelsGrouped,
         availableTtsModels, isLoadingTtsModels, availableTtsModelsGrouped,
+        availableSttModels, isLoadingSttModels, availableSttModelsGrouped,
         userVoices, isLoadingUserVoices, fetchUserVoices,
         fetchAvailableTtiModels,
         fetchAvailableTtsModels,
+        fetchAvailableSttModels,
 
         loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,

@@ -45,6 +45,8 @@ class UserCreateAdmin(UserLLMParams):
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
     tts_binding_model_name: Optional[str] = None # NEW
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
+    stt_binding_model_name: Optional[str] = None
+    stt_models_config: Optional[Dict[str, Any]] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     active_voice_id: Optional[str] = None
@@ -75,6 +77,8 @@ class UserUpdate(BaseModel):
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
     tts_binding_model_name: Optional[str] = None # NEW
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
+    stt_binding_model_name: Optional[str] = None
+    stt_models_config: Optional[Dict[str, Any]] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     active_voice_id: Optional[str] = None
@@ -192,6 +196,8 @@ class UserPublic(UserLLMParams):
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
     tts_binding_model_name: Optional[str] = None # NEW
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
+    stt_binding_model_name: Optional[str] = None
+    stt_models_config: Optional[Dict[str, Any]] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     active_voice_id: Optional[str] = None
@@ -231,6 +237,8 @@ class UserAuthDetails(UserLLMParams):
     tti_models_config: Optional[Dict[str, Any]] = None # NEW
     tts_binding_model_name: Optional[str] = None # NEW
     tts_models_config: Optional[Dict[str, Any]] = None # NEW
+    stt_binding_model_name: Optional[str] = None
+    stt_models_config: Optional[Dict[str, Any]] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     active_voice_id: Optional[str] = None

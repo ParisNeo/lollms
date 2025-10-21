@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/admin/AdminPanel.vue -->
 <script setup>
 import { computed, defineAsyncComponent } from 'vue';
 
@@ -15,6 +16,8 @@ const GlobalSettings = defineAsyncComponent(() => import('./GlobalSettings.vue')
 const LLMBindingsSettings = defineAsyncComponent(() => import('./bindings/LLMBindingsSettings.vue'));
 const TTIBindingsSettings = defineAsyncComponent(() => import('./bindings/TTIBindingsSettings.vue'));
 const TTSBindingsSettings = defineAsyncComponent(() => import('./bindings/TTSBindingsSettings.vue'));
+const STTBindingsSettings = defineAsyncComponent(() => import('./bindings/STTBindingsSettings.vue'));
+const RAGBindingsSettings = defineAsyncComponent(() => import('./bindings/RAGBindingsSettings.vue'));
 const AiBotSettings = defineAsyncComponent(() => import('./AiBotSettings.vue'));
 const ServicesSettings = defineAsyncComponent(() => import('../settings/ServicesSettings.vue'));
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
@@ -27,6 +30,8 @@ const PersonalitiesManagement = defineAsyncComponent(() => import('./zoos/Person
 const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
 const BroadcastMessage = defineAsyncComponent(() => import('./BroadcastMessage.vue'));
 const BuildersSettings = defineAsyncComponent(() => import('./BuildersSettings.vue'));
+const WelcomeSettings = defineAsyncComponent(() => import('./WelcomeSettings.vue'));
+
 
 const tabs = [
     { id: 'dashboard', component: Dashboard },
@@ -37,6 +42,8 @@ const tabs = [
     { id: 'llm_bindings', component: LLMBindingsSettings },
     { id: 'tti_bindings', component: TTIBindingsSettings },
     { id: 'tts_bindings', component: TTSBindingsSettings },
+    { id: 'stt_bindings', component: STTBindingsSettings },
+    { id: 'rag_bindings', component: RAGBindingsSettings },
     { id: 'builders', component: BuildersSettings },
     { id: 'ai_bot', component: AiBotSettings },
     { id: 'services', component: ServicesSettings },
@@ -46,7 +53,8 @@ const tabs = [
     { id: 'prompts', component: PromptsManagement },
     { id: 'global_settings', component: GlobalSettings },
     { id: 'email', component: EmailSettings },
-    { id: 'import', component: ImportTools }
+    { id: 'import', component: ImportTools },
+    { id: 'welcome_settings', component: WelcomeSettings },
 ];
 
 const activeComponent = computed(() => {
