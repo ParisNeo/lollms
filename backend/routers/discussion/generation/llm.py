@@ -126,6 +126,7 @@ def build_llm_generation_router(router: APIRouter):
         use_rag = {}
         for ds_id in rag_datastore_ids:
             ss = get_safe_store_instance(owner_username, ds_id, db)
+            ASCIIColors.info(ss)
             if ss:
                 use_rag[ss.name] = {"name": ss.name, "description": ss.description, "callable": partial(query_rag_callback, ss=ss)}
 
