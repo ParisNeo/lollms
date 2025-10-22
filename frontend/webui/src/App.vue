@@ -1,4 +1,3 @@
-<!-- frontend/webui/src/App.vue -->
 <script setup>
 import { computed, onMounted, watch } from 'vue';
 import { useRoute } from 'vue-router';
@@ -77,6 +76,7 @@ const discussionsStore = useDiscussionsStore();
 const imageStore = useImageStore();
 const route = useRoute();
 const { message_font_size } = storeToRefs(uiStore);
+const { tasks } = storeToRefs(tasksStore);
 
 const activeModal = computed(() => uiStore.activeModal);
 const isAuthenticating = computed(() => authStore.isAuthenticating);
@@ -146,6 +146,21 @@ watch(message_font_size, (newSize) => {
     document.documentElement.style.setProperty('--message-font-size', `${newSize}px`);
   }
 }, { immediate: true });
+
+watch(tasks, (newTasks, oldTasks) => {
+    const oldTaskMap = new Map((oldTasks || []).map(t => [t.id, t.status]));
+    
+    for (const task of newTasks) {
+        const oldStatus = oldTaskMap.get(task.id);
+        if (oldStatus !== 'completed' && task.status === 'completed') {
+            // Task has just completed
+            if (task.name === 'Generate User Avatar') {
+                authStore.refreshUser();
+                uiStore.addNotification('Avatar generated and updated!', 'success');
+            }
+        }
+    }
+}, { deep: true });
 </script>
 
 <template>

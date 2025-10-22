@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
+import { useTasksStore } from '../../stores/tasks';
 import apiClient from '../../services/api';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
@@ -9,6 +10,7 @@ import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
+const tasksStore = useTasksStore();
 
 const user = computed(() => authStore.user);
 
@@ -36,6 +38,8 @@ const showNewPassword = ref(false);
 const isUploadingIcon = ref(false);
 const fileInput = ref(null);
 
+const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
+
 function populateProfileForm() {
     if (user.value) {
         profileForm.value.first_name = user.value.first_name || '';
@@ -58,8 +62,30 @@ watch(profileForm, (newVal) => {
 async function handleSaveProfile() {
     isProfileLoading.value = true;
     try {
-        await authStore.updateUserProfile(profileForm.value);
-        // The watcher on `user` will reset the dirty state
+        const pristine = JSON.parse(pristineProfileState);
+        const dirtyFields = {};
+        let hasChanges = false;
+        for (const key in profileForm.value) {
+            if (profileForm.value[key] !== pristine[key]) {
+                dirtyFields[key] = profileForm.value[key];
+                hasChanges = true;
+            }
+        }
+
+        if (hasChanges) {
+            const payload = { ...dirtyFields };
+            
+            if (payload.email === '') {
+                payload.email = null;
+            }
+            if (payload.birth_date === '') {
+                payload.birth_date = null;
+            }
+
+            await authStore.updateUserProfile(payload);
+        } else {
+            uiStore.addNotification("No changes to save.", "info");
+        }
     } catch (error) {
         // Error is handled by the global interceptor
     } finally {
@@ -123,6 +149,30 @@ const onIconFileChange = async (event) => {
     }
   }
 };
+
+async function handleGenerateAvatar() {
+    const { confirmed, value } = await uiStore.showConfirmation({
+        title: 'Generate New Avatar',
+        message: 'Enter an optional prompt to guide the AI. If left blank, a prompt will be generated from your profile information.',
+        confirmText: 'Generate',
+        inputType: 'textarea',
+        inputPlaceholder: 'e.g., a professional photo, pixel art style...'
+    });
+
+    if (confirmed) {
+        try {
+            const task = await authStore.generateAvatar(value || null);
+            if (task) {
+                uiStore.openModal('tasksManager', { initialTaskId: task.id });
+            } else {
+                uiStore.addNotification('Failed to start avatar generation task. Check server logs for details.', 'error');
+            }
+        } catch (error) {
+            console.error("Error during handleGenerateAvatar:", error);
+            uiStore.addNotification('An unexpected error occurred while trying to generate the avatar.', 'error');
+        }
+    }
+}
 </script>
 
 <template>
@@ -152,6 +202,14 @@ const onIconFileChange = async (event) => {
                             class="btn btn-secondary w-full"
                         >
                             {{ isUploadingIcon ? 'Uploading...' : 'Change Icon' }}
+                        </button>
+                        <button
+                            v-if="isTtiConfigured"
+                            type="button"
+                            @click="handleGenerateAvatar"
+                            class="btn btn-secondary-outline w-full"
+                        >
+                            Generate Avatar
                         </button>
                         <p class="text-xs text-center text-gray-500 dark:text-gray-400">Max 5MB (JPG, PNG, WEBP)</p>
                     </div>

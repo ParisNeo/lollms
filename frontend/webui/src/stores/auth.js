@@ -1,4 +1,3 @@
-// [UPDATE] frontend/webui/src/stores/auth.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -473,6 +472,24 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
+    async function generateAvatar(prompt) {
+        const uiStore = useUiStore();
+        const { useTasksStore } = await import('./tasks');
+        const tasksStore = useTasksStore();
+        
+        uiStore.addNotification('Starting avatar generation...', 'info');
+        try {
+            const response = await apiClient.post('/api/auth/me/generate-icon', { prompt });
+            const task = response.data;
+            tasksStore.addTask(task);
+            return task;
+        } catch (error) {
+            // The global error handler in api.js will show a notification
+            console.error("Failed to start avatar generation task:", error);
+            return null;
+        }
+    }
+
     async function fetchDataZone() {
         if (!isAuthenticated.value) return;
         try {
@@ -546,6 +563,7 @@ export const useAuthStore = defineStore('auth', () => {
         fetchScratchpad, updateScratchpad,
         fetchDataZone,
         updateDataZone,
-        refreshUser
+        refreshUser,
+        generateAvatar
     };
 });

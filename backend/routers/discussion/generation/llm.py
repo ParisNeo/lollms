@@ -297,11 +297,15 @@ def build_llm_generation_router(router: APIRouter):
                         sources = getattr(msg, 'sources', None)
                         if sources is None:
                             sources = msg_metadata.get('sources')
+                        
+                        # FIX: Make sure the metadata dictionary being returned also contains the sources
+                        if sources:
+                            msg_metadata['sources'] = sources
 
                         return {
                             "id": msg.id, "sender": msg.sender, "content": msg.content,
                             "created_at": msg.created_at, "parent_message_id": msg.parent_id,
-                            "discussion_id": msg.discussion_id, "metadata": msg.metadata,
+                            "discussion_id": msg.discussion_id, "metadata": msg_metadata,
                             "tokens": msg.tokens, "sender_type": msg.sender_type,
                             "binding_name": msg.binding_name, "model_name": msg.model_name,
                             "sources": sources,
@@ -358,7 +362,9 @@ def build_llm_generation_router(router: APIRouter):
                 if item is None: break
                 yield item
 
-        return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
+        return StreamingResponse(stream_generator(), media_type="application/x-ndjson")    
+    
+    
     @router.post("/{discussion_id}/stop_generation", status_code=200)
     async def stop_discussion_generation(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)):
         username = current_user.username

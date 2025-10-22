@@ -1,10 +1,9 @@
-# [UPDATE] backend/routers/auth.py
 import traceback
 import datetime
 from datetime import timezone, timedelta
 import base64
 import io
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Response, UploadFile, File, Form, Request
 from fastapi.security import OAuth2PasswordRequestForm
@@ -15,6 +14,7 @@ from PIL import Image
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from jose import JWTError, jwt
+from pydantic import BaseModel
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -38,15 +38,89 @@ from backend.session import (
     get_current_db_user_from_token, 
     get_user_by_username, 
     user_sessions,
+    build_lollms_client_from_params
 )
 from backend.config import SAFE_STORE_DEFAULTS
 from backend.security import get_password_hash, verify_password, create_access_token, decode_main_access_token, create_reset_token, send_password_reset_email
 from backend.settings import settings
 from backend.ws_manager import manager
+from backend.task_manager import task_manager, Task
+from ascii_colors import trace_exception
+from lollms_client import LollmsClient
+
 
 auth_router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 ph = PasswordHasher()
 
+class GenerateAvatarRequest(BaseModel):
+    prompt: Optional[str] = None
+
+def _generate_user_avatar_task_logic(task: Task, user_id: int, prompt: str, tti_binding_name: str, lollms_model_name:str):
+    db = None
+    try:
+        task.set_progress(5)
+        task.log("Initializing TTI client")
+        db = next(get_db())
+        user = db.query(DBUser).filter(DBUser.id == user_id).first()
+        if not user:
+            raise Exception("User not found")
+        username = user.username
+
+        tti_binding_alias = None
+        tti_model_name_part = None
+        if tti_binding_name and '/' in tti_binding_name:
+            tti_binding_alias, tti_model_name_part = tti_binding_name.split('/', 1)
+
+        client = build_lollms_client_from_params(
+            username=username,
+            tti_binding_alias=tti_binding_alias,
+            tti_model_name=tti_model_name_part
+        )
+        
+        if not client.tti:
+            raise Exception("TTI client could not be initialized.")
+
+        task.set_progress(20)
+        task.log("Generating image")
+        
+        def progress_callback(progress, task_data):
+            current_progress = 20 + int(progress * 0.7)
+            task.set_progress(current_progress)
+            task.set_description(task_data.get('status_text', 'Generating...'))
+
+        b64_img = client.tti.paint(prompt, negative_prompt="bad quality, ugly, deformed, text, watermark", width=256, height=256, callback=progress_callback)
+        
+        if not b64_img:
+            raise Exception("Image generation failed.")
+
+        task.set_progress(95)
+        task.log("Processing and saving icon")
+        
+        image_data = base64.b64decode(b64_img)
+        image = Image.open(io.BytesIO(image_data))
+        image.thumbnail((128, 128))
+        
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        base64_encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+        data_uri = f"data:image/png;base64,{base64_encoded_image}"
+
+        user.icon = data_uri
+        db.commit()
+
+        if username in user_sessions:
+            user_sessions[username]['icon'] = data_uri
+        
+        task.log("Avatar updated!")
+        task.set_progress(100)
+        return {"new_icon_url": data_uri}
+
+    except Exception as e:
+        trace_exception(e)
+        if db: db.rollback()
+        raise
+    finally:
+        if db: db.close()
 
 @auth_router.post("/token", response_model=Token)
 async def login_for_access_token(
@@ -199,6 +273,37 @@ async def update_my_icon(
         db.rollback()
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Could not process and save the image: {e}")
+
+@auth_router.post("/me/generate-icon", response_model=Dict[str, Any])
+async def generate_my_icon(
+    payload: GenerateAvatarRequest,
+    db_user: DBUser = Depends(get_current_db_user_from_token)
+):
+    if not db_user.tti_binding_model_name:
+        raise HTTPException(status_code=400, detail="No Text-to-Image model is configured for your account.")
+
+    user_prompt = payload.prompt
+    if not user_prompt:
+        name_parts = [db_user.first_name, db_user.family_name]
+        full_name = " ".join(part for part in name_parts if part)
+        
+        prompt_parts = ["a professional and friendly avatar icon, digital art style"]
+        if full_name:
+            prompt_parts.append(f"for a person named {full_name}")
+        if db_user.data_zone:
+            prompt_parts.append(f"whose description is: {db_user.data_zone[:200]}")
+        
+        user_prompt = ", ".join(prompt_parts) + "."
+
+    task = task_manager.submit_task(
+        target=_generate_user_avatar_task_logic,
+        name="Generate User Avatar",
+        description="AI is generating a new avatar for your profile.",
+        args=(db_user.id, user_prompt, db_user.tti_binding_model_name, db_user.lollms_model_name),
+        owner_username=db_user.username
+    )
+    return task.model_dump()
+
 
 @auth_router.get("/me/data-zone", response_model=Dict[str, str])
 async def get_my_data_zone(
