@@ -1,4 +1,4 @@
-# backend/routers/discussion/generation/llm.py
+# [UPDATE] backend/routers/discussion/generation/llm.py
 # Standard Library Imports
 import base64
 import io
@@ -14,6 +14,7 @@ import traceback
 import threading
 import asyncio
 import zipfile
+import platform
 
 # Third-Party Imports
 import fitz  # PyMuPDF
@@ -130,6 +131,31 @@ def build_llm_generation_router(router: APIRouter):
 
         db_pers = db.query(DBPersonality).filter(DBPersonality.id == owner_db_user.active_personality_id).first() if owner_db_user.active_personality_id else None
         
+        dynamic_preamble = ""
+        preamble_parts = []
+        if owner_db_user.share_dynamic_info_with_llm:
+            now = datetime.now()
+            date_str = now.strftime("%A, %B %d, %Y")
+            time_str = now.strftime("%H:%M:%S")
+            preamble_parts.append(f"- Current Date: {date_str}")
+            preamble_parts.append(f"- Current Time: {time_str}")
+            if owner_db_user.tell_llm_os:
+                preamble_parts.append(f"- User's OS: {platform.system()}")
+
+        if owner_db_user.fun_mode:
+            preamble_parts.append("- Fun Mode is active. Be humorous, witty, and engaging. Tell jokes and use emojis.")
+
+        if owner_db_user.force_ai_response_language:
+            if owner_db_user.ai_response_language and owner_db_user.ai_response_language.lower() != 'auto':
+                preamble_parts.append(f"- IMPORTANT: You must respond exclusively in the following language: {owner_db_user.ai_response_language}")
+            else:
+                preamble_parts.append("- IMPORTANT: You must respond exclusively in the same language as the user's prompt.")
+
+        if preamble_parts:
+            dynamic_preamble = "## Dynamic Information\n" + "\n".join(preamble_parts) + "\n\n"
+
+        system_prompt_text = db_pers.prompt_text if db_pers else "You are a helpful AI assistant."
+        
         user_data_zone = owner_db_user.data_zone or ""
         now = datetime.now()
         replacements = {
@@ -169,7 +195,7 @@ def build_llm_generation_router(router: APIRouter):
             author=db_pers.author if db_pers else "System",
             category=db_pers.category if db_pers else "Default",
             description=db_pers.description if db_pers else "A generic, helpful assistant.",
-            system_prompt=db_pers.prompt_text if db_pers else "You are a helpful AI assistant.",
+            system_prompt=dynamic_preamble + system_prompt_text,
             script=db_pers.script_code if db_pers else None,
             active_mcps=db_pers.active_mcps or [] if db_pers else [],
             data_source=data_source_runtime

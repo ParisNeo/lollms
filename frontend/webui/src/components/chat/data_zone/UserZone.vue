@@ -1,8 +1,10 @@
+<!-- [UPDATE] frontend/webui/src/components/chat/data_zone/UserZone.vue -->
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../../stores/auth';
 import { storeToRefs } from 'pinia';
 import IconSave from '../../../assets/icons/IconSave.vue';
+import LanguageSelector from '../../ui/LanguageSelector.vue';
 
 const authStore = useAuthStore();
 const { user } = storeToRefs(authStore);
@@ -13,6 +15,9 @@ const codingStyle = ref('');
 const langPrefs = ref('');
 const tellOS = ref(false);
 const shareDynamicInfo = ref(true);
+const funMode = ref(false);
+const aiResponseLanguage = ref('auto');
+const forceAiResponseLanguage = ref(false);
 
 const hasChanges = ref(false);
 
@@ -24,6 +29,9 @@ function updateLocalState() {
     langPrefs.value = user.value.programming_language_preferences || '';
     tellOS.value = user.value.tell_llm_os || false;
     shareDynamicInfo.value = user.value.share_dynamic_info_with_llm ?? true;
+    funMode.value = user.value.fun_mode || false;
+    aiResponseLanguage.value = user.value.ai_response_language || 'auto';
+    forceAiResponseLanguage.value = user.value.force_ai_response_language || false;
     // Use nextTick to ensure the DOM is updated before resetting hasChanges
     nextTick(() => {
         hasChanges.value = false;
@@ -35,7 +43,7 @@ function updateLocalState() {
 watch(user, updateLocalState, { immediate: true, deep: true });
 
 // Watch for changes in local form fields to enable the save button
-watch([generalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo], () => {
+watch([generalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, funMode, aiResponseLanguage, forceAiResponseLanguage], () => {
   hasChanges.value = true;
 });
 
@@ -53,7 +61,10 @@ async function handleSaveChanges() {
         coding_style_constraints: codingStyle.value,
         programming_language_preferences: langPrefs.value,
         tell_llm_os: tellOS.value,
-        share_dynamic_info_with_llm: shareDynamicInfo.value
+        share_dynamic_info_with_llm: shareDynamicInfo.value,
+        fun_mode: funMode.value,
+        ai_response_language: aiResponseLanguage.value,
+        force_ai_response_language: forceAiResponseLanguage.value
     });
     hasChanges.value = false; // Disable button after save
 }
@@ -88,7 +99,18 @@ async function handleSaveChanges() {
                 </div>
             </div>
         </div>
-
+        
+        <div class="p-3 bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg flex items-center justify-between">
+            <div class="flex-grow">
+                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Fun Mode 🎉</h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Ask the AI to be more humorous and witty.</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" v-model="funMode" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+        </div>
+        
         <!-- OS Toggle -->
         <div class="p-3 bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg flex items-center justify-between">
             <div class="flex-grow">
@@ -100,6 +122,21 @@ async function handleSaveChanges() {
                 <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
             </label>
         </div>
+
+        <!-- AI Language Setting -->
+        <div class="p-3 bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg">
+            <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">AI Response Language</h3>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="forceAiResponseLanguage" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+            <LanguageSelector v-model="aiResponseLanguage" id="aiResponseLanguage" :include-auto="true" :disabled="!forceAiResponseLanguage" />
+            <p v-if="forceAiResponseLanguage" class="mt-2 text-xs text-gray-500 dark:text-gray-400">Force the AI to respond in a specific language. 'Auto' will match the user's prompt language.</p>
+            <p v-else class="mt-2 text-xs text-gray-500 dark:text-gray-400">Language enforcement is disabled. The AI will respond based on its training and personality.</p>
+        </div>
+
 
         <!-- Text Areas for Preferences -->
         <div class="space-y-4">

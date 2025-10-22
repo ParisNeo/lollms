@@ -33,6 +33,7 @@ import IconDataZone from '../../assets/icons/IconDataZone.vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 
+
 // CodeMirror imports
 import { markdown } from '@codemirror/lang-markdown';
 import { indentUnit } from '@codemirror/language';
@@ -392,7 +393,7 @@ async function handlePaste(event) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
             const file = item.getAsFile();
             if (file) {
-                const extension = (file.type.split('/') || 'png').toLowerCase().replace('jpeg', 'jpg');
+                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
                 imageFiles.push(new File([file], `pasted_image_${Date.now()}.${extension}`, { type: file.type }));
             }
         }

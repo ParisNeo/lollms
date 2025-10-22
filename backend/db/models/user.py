@@ -101,6 +101,7 @@ class User(Base):
     chat_active = Column(Boolean, default=False, nullable=False)
     first_page = Column(String, default="feed", nullable=False)
     ai_response_language = Column(String, default="auto", nullable=True)
+    force_ai_response_language = Column(Boolean, default=False, nullable=False)
     fun_mode = Column(Boolean, default=False, nullable=True)
     show_token_counter = Column(Boolean, default=True, nullable=False)
     

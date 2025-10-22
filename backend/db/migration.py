@@ -830,6 +830,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "put_thoughts_in_context": "BOOLEAN DEFAULT 0 NOT NULL",
             "auto_title": "BOOLEAN DEFAULT 0 NOT NULL",
             "user_ui_level":"INTEGER", "ai_response_language":"VARCHAR DEFAULT 'auto'",
+            "force_ai_response_language": "BOOLEAN DEFAULT 0 NOT NULL",
             "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL",
             "chat_active": "BOOLEAN DEFAULT 0 NOT NULL",
             "first_page": "VARCHAR DEFAULT 'feed' NOT NULL",

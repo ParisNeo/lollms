@@ -64,6 +64,9 @@ class UserCreateAdmin(UserLLMParams):
     tell_llm_os: Optional[bool] = False
     share_dynamic_info_with_llm: Optional[bool] = True
     message_font_size: Optional[int] = None
+    fun_mode: Optional[bool] = False
+    ai_response_language: Optional[str] = "auto"
+    force_ai_response_language: Optional[bool] = False
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100)
@@ -101,6 +104,7 @@ class UserUpdate(BaseModel):
     chat_active: Optional[bool] = False
     first_page: Optional[str] = "feed"
     ai_response_language: Optional[str] = "auto"
+    force_ai_response_language: Optional[bool] = None
     fun_mode: Optional[bool] = False
     show_token_counter: Optional[bool] = None
     is_searchable: Optional[bool] = None
@@ -215,6 +219,9 @@ class UserPublic(UserLLMParams):
     programming_language_preferences: Optional[str] = None
     tell_llm_os: Optional[bool] = None
     share_dynamic_info_with_llm: Optional[bool] = None
+    fun_mode: Optional[bool] = None
+    ai_response_language: Optional[str] = None
+    force_ai_response_language: Optional[bool] = None
     class Config:
         from_attributes = True
 
@@ -254,6 +261,7 @@ class UserAuthDetails(UserLLMParams):
     chat_active: Optional[bool] = False
     first_page: Optional[str] = "feed"
     ai_response_language: Optional[str] = "auto"
+    force_ai_response_language: bool
     fun_mode: Optional[bool] = False
     show_token_counter: Optional[bool] = True
     openai_api_service_enabled: bool = False
