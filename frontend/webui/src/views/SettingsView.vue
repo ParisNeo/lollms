@@ -7,6 +7,7 @@ import IconUserCircle from '../assets/icons/IconUserCircle.vue';
 import IconCog from '../assets/icons/IconCog.vue';
 import IconCpuChip from '../assets/icons/IconCpuChip.vue';
 import IconPhoto from '../assets/icons/IconPhoto.vue';
+import IconSparkles from '../assets/icons/IconSparkles.vue';
 import IconSpeakerWave from '../assets/icons/IconSpeakerWave.vue';
 import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
