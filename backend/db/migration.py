@@ -1,5 +1,4 @@
 # [UPDATE] backend/db/migration.py
-# [UPDATE] backend/db/migration.py
 import json
 import re
 import shutil

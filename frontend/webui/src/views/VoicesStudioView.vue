@@ -63,7 +63,32 @@
             <div v-else class="h-full flex flex-col items-center justify-center text-center p-6">
                 <IconMicrophone class="w-16 h-16 text-gray-300 dark:text-gray-600 mb-4" />
                 <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200">Welcome to the Voices Studio</h3>
-                <p class="mt-2 text-gray-500 dark:text-gray-400">Select a voice from the sidebar to edit, or create a new one.</p>
+                <p class="mt-2 text-gray-500 dark:text-gray-400">Select a TTS voice from the sidebar to edit, create a new one, or try the STT tool below.</p>
+                
+                <div class="mt-12 w-full max-w-2xl">
+                    <div class="bg-white dark:bg-gray-800 p-6 rounded-lg shadow-md space-y-4">
+                        <h3 class="text-xl font-semibold">Speech-to-Text Studio</h3>
+                        <p class="text-sm text-gray-500">Record your voice and get a transcription.</p>
+                        <button @click="toggleSttRecording" class="btn btn-primary w-full" :disabled="isTranscribing">
+                            <template v-if="isRecordingForStt">
+                                <IconStopCircle class="w-5 h-5 mr-2" /> Stop Recording
+                            </template>
+                            <template v-else-if="isTranscribing">
+                                <IconAnimateSpin class="w-5 h-5 mr-2 animate-spin" /> Transcribing...
+                            </template>
+                            <template v-else>
+                                <IconMicrophone class="w-5 h-5 mr-2" /> Start Recording
+                            </template>
+                        </button>
+                        <div v-if="transcribedText" class="mt-4 p-4 bg-gray-100 dark:bg-gray-700 rounded-md text-left">
+                            <h4 class="font-semibold mb-2">Transcription:</h4>
+                            <p class="whitespace-pre-wrap">{{ transcribedText }}</p>
+                            <button @click="copyTranscription" class="btn btn-secondary btn-sm mt-2">
+                                <IconCopy class="w-4 h-4 mr-2" /> Copy Text
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </template>
     </PageViewLayout>
@@ -75,16 +100,21 @@ import { storeToRefs } from 'pinia';
 import { useVoicesStore } from '../stores/voices';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
+import { useDiscussionsStore } from '../stores/discussions';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import VoiceEditor from '../components/voices/VoiceEditor.vue';
 import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
 import IconPencil from '../assets/icons/IconPencil.vue';
 import IconTrash from '../assets/icons/IconTrash.vue';
+import IconStopCircle from '../assets/icons/IconStopCircle.vue';
+import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
+import IconCopy from '../assets/icons/IconCopy.vue';
 
 const voicesStore = useVoicesStore();
 const authStore = useAuthStore();
 const uiStore = useUiStore();
+const discussionsStore = useDiscussionsStore();
 
 const { voices, isLoading } = storeToRefs(voicesStore);
 const { user } = storeToRefs(authStore);
@@ -99,11 +129,16 @@ const audioChunks = ref([]);
 const recordedAudioUrl = ref(null);
 const recordedAudioBlob = ref(null);
 
+const isRecordingForStt = ref(false);
+const isTranscribing = ref(false);
+const transcribedText = ref('');
+const sttMediaRecorder = ref(null);
+const sttAudioChunks = ref([]);
+
 const selectedVoice = computed(() => {
     if (!selectedVoiceId.value) return null;
     return voices.value.find(v => v.id === selectedVoiceId.value);
 });
-
 
 function showAddForm() {
     selectedVoiceId.value = null;
@@ -187,11 +222,60 @@ async function handleDeleteVoice(voice) {
         message: 'Are you sure you want to permanently delete this voice? This action cannot be undone.',
         confirmText: 'Delete'
     });
-    if (confirmed) {
+    if (confirmed.confirmed) {
         await voicesStore.deleteVoice(voice.id);
         if (selectedVoiceId.value === voice.id) {
             selectedVoiceId.value = null;
         }
+    }
+}
+
+async function startSttRecording() {
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            sttMediaRecorder.value = new MediaRecorder(stream);
+            sttAudioChunks.value = [];
+            sttMediaRecorder.value.ondataavailable = event => {
+                sttAudioChunks.value.push(event.data);
+            };
+            sttMediaRecorder.value.onstop = async () => {
+                isTranscribing.value = true;
+                transcribedText.value = '';
+                const audioBlob = new Blob(sttAudioChunks.value, { type: 'audio/wav' });
+                try {
+                    const text = await discussionsStore.transcribeAudio(audioBlob);
+                    transcribedText.value = text;
+                } finally {
+                    isTranscribing.value = false;
+                }
+            };
+            sttMediaRecorder.value.start();
+            isRecordingForStt.value = true;
+        } catch (err) {
+            uiStore.addNotification('Microphone access denied or not available.', 'error');
+        }
+    }
+}
+
+function stopSttRecording() {
+    if (sttMediaRecorder.value && isRecordingForStt.value) {
+        sttMediaRecorder.value.stop();
+        isRecordingForStt.value = false;
+    }
+}
+
+function toggleSttRecording() {
+    if (isRecordingForStt.value) {
+        stopSttRecording();
+    } else {
+        startSttRecording();
+    }
+}
+
+function copyTranscription() {
+    if (transcribedText.value) {
+        uiStore.copyToClipboard(transcribedText.value, 'Transcription copied!');
     }
 }
 
