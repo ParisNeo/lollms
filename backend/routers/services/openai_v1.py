@@ -273,6 +273,13 @@ def preprocess_openai_messages(messages: List["ChatMessage"]) -> Tuple[List[Dict
                     base64_img = item["image_url"]
                     if base64_img:
                         image_list.append(base64_img)
+                elif item.get("type") == "image_url":
+                    base64_img = item["image_url"]
+                    if isinstance(base64_img, dict):
+                        if "url" in base64_img.keys():
+                            base64_img = base64_img["url"]
+                    if base64_img:
+                        image_list.append(base64_img)
 
         processed.append(msg_dict)
 

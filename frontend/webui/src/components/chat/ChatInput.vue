@@ -9,6 +9,7 @@ import { useAuthStore } from '../../stores/auth';
 import { usePromptsStore } from '../../stores/prompts';
 import apiClient from '../../services/api';
 import { storeToRefs } from 'pinia';
+import useEventBus from '../../services/eventBus';
 
 // UI Components
 import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
@@ -49,6 +50,7 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
 const router = useRouter();
+const { on, off } = useEventBus();
 const { dataZonesTokensFromContext, currentModelVisionSupport } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 
@@ -482,6 +484,12 @@ function toggleRecording() {
     }
 }
 
+function handleDroppedFiles(files) {
+    if (!generationInProgress.value) {
+        uploadFiles(files);
+    }
+}
+
 // Watchers
 watch(messageText, (newValue) => {
     clearTimeout(tokenizeInputDebounceTimer);
@@ -502,6 +510,7 @@ watch(activeDiscussion, () => {
 // Lifecycle
 onMounted(() => {
     promptsStore.fetchPrompts();
+    on('files-dropped-in-chat', handleDroppedFiles);
 });
 
 onUnmounted(() => {
@@ -510,6 +519,7 @@ onUnmounted(() => {
     if (mediaRecorder.value && isRecording.value) {
         mediaRecorder.value.stop();
     }
+    off('files-dropped-in-chat', handleDroppedFiles);
 });
 </script>
 
