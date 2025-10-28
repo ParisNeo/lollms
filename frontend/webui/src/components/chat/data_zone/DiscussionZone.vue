@@ -40,7 +40,7 @@ const router = useRouter();
 const { on, off } = useEventBus();
 const authStore = useAuthStore();
 
-const { promptLoadedArtefacts, activeDiscussionContextStatus, dataZonesTokensFromContext } = storeToRefs(discussionsStore);
+const { promptLoadedArtefacts, activeDiscussionContextStatus, dataZonesTokensFromContext, currentModelVisionSupport } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 const { availableTtiModels } = storeToRefs(dataStore);
 const { tasks } = storeToRefs(tasksStore);
@@ -337,9 +337,35 @@ async function handleDrop(event) {
     const files = Array.from(event.dataTransfer.files);
     if (files.length > 0 && activeDiscussion.value) {
         uiStore.addNotification(`Processing ${files.length} file(s)...`, 'info');
-        await discussionsStore.uploadAndEmbedFilesToDataZone(activeDiscussion.value.id, files);
+        
+        let extractImages = currentModelVisionSupport.value;
+        
+        const imageExtractableTypes = [
+            'application/pdf', 
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+        ];
+        const imageExtractableExtensions = ['.pdf', '.docx', '.pptx', '.msg'];
+
+        const hasImageExtractableFiles = files.some(file => {
+            const fileExtension = `.${file.name.split('.').pop()}`.toLowerCase();
+            return imageExtractableTypes.includes(file.type) || imageExtractableExtensions.includes(fileExtension);
+        });
+
+        if (currentModelVisionSupport.value && hasImageExtractableFiles) {
+            const result = await uiStore.showConfirmation({
+                title: `Extract Images?`,
+                message: 'Some of the dropped files may contain images. Do you want to extract them? This may take longer.',
+                confirmText: 'Yes, Extract Images',
+                cancelText: 'No, Text Only'
+            });
+            extractImages = result.confirmed;
+        }
+        
+        await discussionsStore.uploadAndEmbedFilesToDataZone(activeDiscussion.value.id, files, extractImages);
     }
 }
+
 
 onMounted(() => {
     const savedWidth = localStorage.getItem('lollms_artefactListWidth');

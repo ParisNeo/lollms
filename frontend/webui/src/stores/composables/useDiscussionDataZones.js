@@ -254,9 +254,10 @@ export function useDiscussionDataZones(state, stores, getActions) {
         }
     }
 
-    async function uploadAndEmbedFilesToDataZone(discussionId, files) {
+    async function uploadAndEmbedFilesToDataZone(discussionId, files, extractImages = true) {
         const formData = new FormData();
         files.forEach(file => formData.append('files', file));
+        formData.append('extract_images', extractImages);
         
         try {
             const response = await apiClient.post(`/api/files/extract_and_embed/${discussionId}`, formData);

@@ -90,8 +90,13 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     }
 
     async function exportContextAsArtefact({ discussionId, title }) {
-        await apiClient.post(`/api/discussions/${discussionId}/artefacts/export-context`, { title });
-        await fetchArtefacts(discussionId);
+        const idToUse = discussionId || currentDiscussionId.value;
+        if (!idToUse) {
+            uiStore.addNotification('Error: No discussion selected to export context from.', 'error');
+            return;
+        }
+        await apiClient.post(`/api/discussions/${idToUse}/artefacts/export-context`, { title });
+        await fetchArtefacts(idToUse);
         uiStore.addNotification(`Context saved as artefact '${title}'`, 'success');
     }
 

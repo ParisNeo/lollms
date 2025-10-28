@@ -67,6 +67,7 @@ import FunFactModal from './components/modals/FunFactModal.vue';
 import SharePersonalityModal from './components/modals/SharePersonalityModal.vue';
 import DiscussionGroupModal from './components/modals/DiscussionGroupModal.vue';
 import MoveDiscussionModal from './components/modals/MoveDiscussionModal.vue';
+import EnhancePromptModal from './components/modals/EnhancePromptModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -271,6 +272,7 @@ watch(tasks, (newTasks, oldTasks) => {
     <SharePersonalityModal v-if="activeModal === 'sharePersonality'" />
     <DiscussionGroupModal v-if="activeModal === 'discussionGroup'" />
     <MoveDiscussionModal v-if="activeModal === 'moveDiscussion'" />
+    <EnhancePromptModal v-if="activeModal === 'enhancePrompt'" />
     
     <!-- Always rendered panels -->
     <NotificationPanel />

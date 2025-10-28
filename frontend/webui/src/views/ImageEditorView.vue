@@ -24,7 +24,7 @@
                                 <label for="inpainting-prompt" class="block text-sm font-medium">Prompt</label>
                                 <div class="flex gap-1">
                                     <button v-if="originalImage" @click="reuseOriginalPrompt" class="btn btn-secondary btn-xs" title="Reuse original image prompt and settings">Reuse</button>
-                                    <button @click="handleEnhance('prompt')" class="btn-icon-xs" title="Enhance prompt with AI" :disabled="imageStore.isEnhancing"><IconSparkles class="w-4 h-4" /></button>
+                                    <button @click="openEnhanceModal('prompt')" class="btn-icon-xs" title="Enhance prompt with AI" :disabled="imageStore.isEnhancing"><IconSparkles class="w-4 h-4" /></button>
                                 </div>
                             </div>
                             <div class="relative min-h-[72px]">
@@ -37,7 +37,7 @@
                         <div>
                             <div class="flex justify-between items-center mb-1">
                                 <label for="inpainting-neg-prompt" class="block text-sm font-medium">Negative Prompt</label>
-                                <button @click="handleEnhance('negative_prompt')" class="btn-icon-xs" title="Enhance negative prompt with AI" :disabled="imageStore.isEnhancing"><IconSparkles class="w-4 h-4" /></button>
+                                <button @click="openEnhanceModal('negative_prompt')" class="btn-icon-xs" title="Enhance negative prompt with AI" :disabled="imageStore.isEnhancing"><IconSparkles class="w-4 h-4" /></button>
                             </div>
                             <div class="relative min-h-[48px]">
                                 <div v-if="enhancingTarget === 'negative_prompt' || enhancingTarget === 'both'" class="absolute inset-0 bg-gray-100 dark:bg-gray-700/50 rounded-md flex items-center justify-center">
@@ -47,9 +47,7 @@
                             </div>
                         </div>
                         <div>
-                            <label for="enhancement-instructions" class="block text-sm font-medium mb-1">Enhancement Instructions</label>
-                            <textarea id="enhancement-instructions" v-model="enhancementInstructions" rows="2" class="input-field w-full" placeholder="Optional: Guide the AI... e.g., 'make it more cinematic'"></textarea>
-                            <button @click="handleEnhance('both')" class="btn btn-secondary w-full mt-2" :disabled="imageStore.isEnhancing">
+                            <button @click="openEnhanceModal('both')" class="btn btn-secondary w-full mt-2" :disabled="imageStore.isEnhancing">
                                 <IconSparkles class="w-4 h-4 mr-2" /> Enhance Both Prompts
                             </button>
                         </div>
@@ -61,11 +59,11 @@
                         <div>
                             <label class="block text-sm font-medium">Mode</label>
                             <div class="flex gap-2 mt-1">
-                                <button @click="editorMode = 'mask'" :class="['btn btn-secondary btn-icon flex-1', { 'btn-primary': editorMode === 'mask' }]" title="Inpainting Mask">
-                                    <IconLayout class="w-5 h-5" />
-                                </button>
                                 <button @click="editorMode = 'brush'" :class="['btn btn-secondary btn-icon flex-1', { 'btn-primary': editorMode === 'brush' }]" title="Drawing Brush">
                                     <IconPencil class="w-5 h-5" />
+                                </button>
+                                <button @click="editorMode = 'mask'" :class="['btn btn-secondary btn-icon flex-1', { 'btn-primary': editorMode === 'mask' }]" title="Inpainting Mask">
+                                    <IconLayout class="w-5 h-5" />
                                 </button>
                             </div>
                         </div>
@@ -79,6 +77,13 @@
                                     <IconMinusCircle class="w-5 h-5" />
                                 </button>
                             </div>
+                        </div>
+                        <div v-if="editorMode === 'mask'">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" v-model="showMaskOnly" class="sr-only peer">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                                <span class="ml-3 text-sm font-medium">Show Mask Only</span>
+                            </label>
                         </div>
                         <div>
                             <label class="block text-sm font-medium">Brush Size: {{ brushSize }}</label>
@@ -149,9 +154,9 @@
                     @wheel="handleWheel" @mousedown="handleMouseDown" @mousemove="handleMouseMove" @mouseup="stopDragging" @mouseleave="stopDragging"
                 >
                     <div ref="transformContainerRef" :style="transformStyle">
-                        <AuthenticatedImage ref="imageRef" :src="imageUrl" @load="onImageLoad" class="absolute top-0 left-0 pointer-events-none" />
+                        <AuthenticatedImage ref="imageRef" :src="imageUrl" @load="onImageLoad" class="absolute top-0 left-0 pointer-events-none transition-opacity" :style="{ opacity: showMaskOnly && editorMode === 'mask' ? 0.2 : 1 }" />
                         <canvas ref="drawingCanvasRef" class="absolute top-0 left-0 pointer-events-none"></canvas>
-                        <canvas ref="canvasRef" class="absolute top-0 left-0 cursor-crosshair"></canvas>
+                        <canvas ref="canvasRef" class="absolute top-0 left-0" :class="showMaskOnly && editorMode === 'mask' ? 'opacity-75 bg-blue-500/10' : 'opacity-50'" style="mix-blend-mode: normal;"></canvas>
                     </div>
                      <div class="absolute top-2 right-2 flex flex-col gap-2">
                         <button @click="openImageViewer" class="p-2 bg-black/50 text-white rounded-full hover:bg-black/70 transition-colors" title="View Full Size"><IconMaximize class="w-5 h-5"/></button>
@@ -219,7 +224,8 @@ const transformContainerRef = ref(null);
 const maskCtx = ref(null);
 const drawingCtx = ref(null);
 
-const editorMode = ref('mask');
+const editorMode = ref('brush');
+const showMaskOnly = ref(false);
 const brushSize = ref(40);
 const tool = ref('brush');
 const prompt = ref('');
@@ -232,6 +238,7 @@ const generationParams = ref({});
 const isConfigVisible = ref(false);
 const enhancingTarget = ref(null);
 const enhancementInstructions = ref('');
+const enhancementMode = ref('description');
 
 const history = ref([]);
 const historyIndex = ref(-1);
@@ -251,7 +258,7 @@ const canRedo = computed(() => historyIndex.value < history.value.length - 1);
 const transformStyle = computed(() => ({
   transform: `translate(${translateX.value}px, ${translateY.value}px) scale(${scale.value})`,
   transformOrigin: 'top left',
-  cursor: isDragging.value ? 'grabbing' : 'crosshair',
+  cursor: isDragging.value ? 'grabbing' : (isDrawing.value ? 'crosshair' : 'grab'),
 }));
 
 const user = computed(() => authStore.user);
@@ -397,25 +404,10 @@ function redo() { if (canRedo.value) { historyIndex.value++; const state = histo
 function clearCanvas() { const activeCtx = editorMode.value === 'mask' ? maskCtx.value : drawingCtx.value; activeCtx.clearRect(0, 0, activeCtx.canvas.width, activeCtx.canvas.height); saveState(); }
 function isCanvasEmpty(canvas) { if (!canvas) return true; const context = canvas.getContext('2d', { willReadFrequently: true }); try { const pixelBuffer = new Uint32Array(context.getImageData(0, 0, canvas.width, canvas.height).data.buffer); return !pixelBuffer.some(color => color !== 0); } catch(e) { return false; } }
 
-async function getBaseImageB64() {
-    if (!internalImage.value || !imageRef.value) return null;
-    const imageEl = imageRef.value.$el.querySelector('img');
-    if (imageEl && imageEl.src && !imageEl.src.startsWith('data:')) {
-        const response = await fetch(imageEl.src);
-        const blob = await response.blob();
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result.split(','));
-            reader.readAsDataURL(blob);
-        });
-    }
-    return imageUrl.value ? imageUrl.value.split(',') : null;
-}
-
 async function handleSaveAs() {
     const payload = {
-        base_image_b64: await getBaseImageB64(),
-        drawing_b64: isCanvasEmpty(drawingCanvasRef.value) ? null : drawingCanvasRef.value.toDataURL('image/png').split(','),
+        base_image_b64: imageUrl.value ? imageUrl.value.split(',')[1] : null,
+        drawing_b64: isCanvasEmpty(drawingCanvasRef.value) ? null : drawingCanvasRef.value.toDataURL('image/png').split(',')[1],
         prompt: prompt.value,
         model: selectedModel.value,
         width: internalImage.value?.width || newCanvas.value.width,
@@ -429,23 +421,58 @@ async function handleSaveAs() {
 }
 
 async function handleGenerate() {
-    if (!internalImage.value || imageStore.isGenerating) return;
-    const isMaskEmpty = isCanvasEmpty(canvasRef.value);
-    const payload = {
+    if ((!internalImage.value && !props.newImage) || imageStore.isGenerating) return;
+
+    let payload = {
         prompt: prompt.value,
         negative_prompt: negativePrompt.value,
         model: selectedModel.value,
-        mask: isMaskEmpty ? null : canvasRef.value.toDataURL('image/png').split(','),
         seed: seed.value,
         ...generationParams.value,
-        image_ids: [internalImage.value.id],
-        width: internalImage.value.width,
-        height: internalImage.value.height
+        width: internalImage.value?.width || newCanvas.value.width,
+        height: internalImage.value?.height || newCanvas.value.height
     };
+
+    if (editorMode.value === 'brush' && !isCanvasEmpty(drawingCanvasRef.value)) {
+        const compositeCanvas = document.createElement('canvas');
+        compositeCanvas.width = drawingCanvasRef.value.width;
+        compositeCanvas.height = drawingCanvasRef.value.height;
+        const compositeCtx = compositeCanvas.getContext('2d');
+
+        const imageEl = imageRef.value?.$el?.querySelector('img');
+        if (imageEl && imageEl.complete && imageEl.naturalWidth > 0) {
+            compositeCtx.drawImage(imageEl, 0, 0);
+        } else {
+            compositeCtx.fillStyle = newCanvas.value.bgColor;
+            compositeCtx.fillRect(0, 0, compositeCanvas.width, compositeCanvas.height);
+        }
+        
+        compositeCtx.drawImage(drawingCanvasRef.value, 0, 0);
+        
+        payload.base_image_b64 = compositeCanvas.toDataURL('image/png').split(',')[1];
+        payload.mask = null;
+    } else {
+        const isMaskEmpty = isCanvasEmpty(canvasRef.value);
+        payload.mask = isMaskEmpty ? null : canvasRef.value.toDataURL('image/png').split(',')[1];
+        
+        if (internalImage.value && internalImage.value.id) {
+            payload.image_ids = [internalImage.value.id];
+        } else {
+            const baseCanvas = document.createElement('canvas');
+            baseCanvas.width = newCanvas.value.width;
+            baseCanvas.height = newCanvas.value.height;
+            const baseCtx = baseCanvas.getContext('2d');
+            baseCtx.fillStyle = newCanvas.value.bgColor;
+            baseCtx.fillRect(0, 0, baseCanvas.width, baseCanvas.height);
+            payload.base_image_b64 = baseCanvas.toDataURL('image/png').split(',')[1];
+        }
+    }
+    
     await imageStore.editImage(payload);
 }
 
-async function handleEnhance(type) {
+
+async function handleEnhance(type, options = {}) {
     if (type !== 'negative_prompt' && !prompt.value.trim()) { uiStore.addNotification('Please enter a prompt to enhance.', 'warning'); return; }
     
     enhancingTarget.value = type;
@@ -455,7 +482,8 @@ async function handleEnhance(type) {
         negative_prompt: negativePrompt.value,
         target: type,
         model: authStore.user?.lollms_model_name,
-        instructions: enhancementInstructions.value,
+        instructions: options.instructions || '',
+        mode: options.mode || 'description'
     };
 
     try {
@@ -467,6 +495,18 @@ async function handleEnhance(type) {
     } finally {
         enhancingTarget.value = null;
     }
+}
+
+function openEnhanceModal(target) {
+    uiStore.openModal('enhancePrompt', {
+        instructions: enhancementInstructions.value,
+        mode: enhancementMode.value,
+        onConfirm: ({ instructions, mode }) => {
+            enhancementInstructions.value = instructions;
+            enhancementMode.value = mode;
+            handleEnhance(target, { instructions, mode });
+        }
+    });
 }
 
 function openImageViewer() { uiStore.openImageViewer({ imageList: [{ src: imageUrl.value, prompt: internalImage.value.prompt }], startIndex: 0 }); }
@@ -487,7 +527,6 @@ onMounted(async () => {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         imageUrl.value = canvas.toDataURL('image/png');
         internalImage.value = { id: null, filename: 'New Drawing.png', prompt: '', model: user.value?.tti_binding_model_name || '', width: newCanvas.value.width, height: newCanvas.value.height, bgColor: newCanvas.value.bgColor };
-        editorMode.value = 'brush';
     } else {
         const foundImage = imageStore.images.find(img => img.id === props.id);
         if (foundImage) {

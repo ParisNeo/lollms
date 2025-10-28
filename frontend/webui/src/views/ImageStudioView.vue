@@ -1,295 +1,9 @@
 <!-- [UPDATE] frontend/webui/src/views/ImageStudioView.vue -->
-<script setup>
-import { ref, onMounted, onUnmounted, computed, watch, markRaw } from 'vue';
-import { useRouter } from 'vue-router';
-import { useImageStore } from '../stores/images';
-import { useDataStore } from '../stores/data';
-import { useUiStore } from '../stores/ui';
-import { useAuthStore } from '../stores/auth';
-import { useDiscussionsStore } from '../stores/discussions';
-import { useTasksStore } from '../stores/tasks';
-import { storeToRefs } from 'pinia';
-import AuthenticatedImage from '../components/ui/AuthenticatedImage.vue';
-import TaskProgressIndicator from '../components/ui/TaskProgressIndicator.vue';
-import apiClient from '../services/api';
-
-// Icons
-import IconPhoto from '../assets/icons/IconPhoto.vue';
-import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
-import IconTrash from '../assets/icons/IconTrash.vue';
-import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
-import IconSend from '../assets/icons/IconSend.vue';
-import IconPencil from '../assets/icons/IconPencil.vue';
-import IconSparkles from '../assets/icons/IconSparkles.vue';
-import IconMaximize from '../assets/icons/IconMaximize.vue';
-import IconArrowLeft from '../assets/icons/IconArrowLeft.vue';
-import IconRefresh from '../assets/icons/IconRefresh.vue'; // For reuse prompt
-import IconAdjustmentsHorizontal from '../assets/icons/IconAdjustmentsHorizontal.vue';
-import IconPlus from '../assets/icons/IconPlus.vue';
-
-const imageStore = useImageStore();
-const dataStore = useDataStore();
-const uiStore = useUiStore();
-const authStore = useAuthStore();
-const discussionsStore = useDiscussionsStore();
-const tasksStore = useTasksStore();
-const router = useRouter();
-
-const { 
-    images, isLoading, isGenerating,
-    prompt, negativePrompt, imageSize, nImages, seed, generationParams 
-} = storeToRefs(imageStore);
-const { user } = storeToRefs(authStore);
-const { imageGenerationTasks, imageGenerationTasksCount } = storeToRefs(tasksStore);
-const { currentModelVisionSupport } = storeToRefs(discussionsStore);
-
-const isConfigVisible = ref(false);
-const enhancingTarget = ref(null); // 'prompt', 'negative_prompt', 'both', or null
-const enhancementInstructions = ref('');
-
-const selectedImages = ref([]);
-const isSelectionMode = computed(() => selectedImages.value.length > 0);
-const areAllSelected = computed({
-    get: () => images.value.length > 0 && selectedImages.value.length === images.value.length,
-    set: (value) => {
-        selectedImages.value = value ? images.value.map(img => img.id) : [];
-    }
-});
-const isDraggingOver = ref(false);
-
-const selectedModel = computed(() => user.value?.tti_binding_model_name);
-
-const selectedModelDetails = computed(() => {
-    if (!selectedModel.value || dataStore.availableTtiModels.length === 0) return null;
-    return dataStore.availableTtiModels.find(m => m.id === selectedModel.value);
-});
-
-const modelConfigurableParameters = computed(() => {
-    if (!selectedModelDetails.value?.binding_params) return [];
-    
-    const params = isSelectionMode.value
-        ? (selectedModelDetails.value.binding_params.edit_parameters || [])
-        : (selectedModelDetails.value.binding_params.generation_parameters || []);
-        
-    const excluded = ['prompt', 'negative_prompt', 'image', 'mask', 'width', 'height', 'n', 'seed', 'size'];
-    return params.filter(p => !excluded.includes(p.name));
-});
-
-function parseOptions(options) {
-    if (typeof options === 'string') {
-        return options.split(',').map(o => o.trim()).filter(o => o);
-    }
-    if (Array.isArray(options)) {
-        return options.filter(o => o);
-    }
-    return [];
-}
-
-watch(selectedModelDetails, (details) => {
-    if (details) {
-        modelConfigurableParameters.value.forEach(param => {
-            if (!(param.name in generationParams.value)) {
-                 generationParams.value[param.name] = param.default;
-            }
-        });
-    }
-}, { immediate: true, deep: true });
-
-onMounted(() => {
-    uiStore.setPageTitle({ title: 'Image Studio', icon: markRaw(IconPhoto) });
-    imageStore.fetchImages();
-    if (dataStore.availableTtiModels.length === 0) dataStore.fetchAvailableTtiModels();
-    if (Object.keys(discussionsStore.discussions).length === 0) discussionsStore.loadDiscussions();
-    window.addEventListener('paste', handlePaste);
-});
-
-onUnmounted(() => {
-    uiStore.setPageTitle({ title: '' });
-    window.removeEventListener('paste', handlePaste);
-});
-
-function isSelected(imageId) { return selectedImages.value.includes(imageId); }
-function toggleSelection(imageId) {
-    const index = selectedImages.value.indexOf(imageId);
-    if (index > -1) selectedImages.value.splice(index, 1);
-    else selectedImages.value.push(imageId);
-}
-
-async function handleGenerateOrApply() {
-    if (!prompt.value.trim() || !selectedModel.value) {
-        uiStore.addNotification('A prompt and model are required.', 'warning');
-        return;
-    }
-
-    const commonPayload = {
-        prompt: prompt.value,
-        negative_prompt: negativePrompt.value,
-        model: selectedModel.value,
-        seed: seed.value,
-        ...generationParams.value
-    };
-
-    if (isSelectionMode.value) {
-        const [width, height] = imageSize.value.split('x').map(Number);
-        await imageStore.editImage({ 
-            ...commonPayload, 
-            image_ids: selectedImages.value,
-            width: width,
-            height: height
-        });
-    } else {
-        await imageStore.generateImage({ 
-            ...commonPayload, 
-            size: imageSize.value,
-            n: nImages.value 
-        });
-    }
-}
-
-async function handleEnhance(type) {
-    if (type !== 'negative_prompt' && !prompt.value.trim()) {
-        uiStore.addNotification('Please enter a prompt to enhance.', 'warning');
-        return;
-    }
-    
-    enhancingTarget.value = type;
-
-    const payload = { 
-        prompt: prompt.value, 
-        negative_prompt: negativePrompt.value, 
-        target: type,
-        model: authStore.user?.lollms_model_name,
-        instructions: enhancementInstructions.value,
-    };
-
-    if (isSelectionMode.value && currentModelVisionSupport.value && selectedImages.value.length > 0) {
-        uiStore.addNotification('Enhancing prompt with image context...', 'info');
-        const image_b64s = [];
-        for (const imageId of selectedImages.value) {
-            try {
-                const response = await apiClient.get(`/api/image-studio/${imageId}/file`, { responseType: 'blob' });
-                const b64 = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result.split(','));
-                    reader.onerror = reject;
-                    reader.readAsDataURL(response.data);
-                });
-                image_b64s.push(b64);
-            } catch (error) {
-                console.error(`Failed to fetch and encode image ${imageId}`, error);
-                uiStore.addNotification(`Could not load image ${imageId} for context.`, 'warning');
-            }
-        }
-        if (image_b64s.length > 0) {
-            payload.image_b64s = image_b64s;
-        }
-    }
-    
-    try {
-        const result = await imageStore.enhanceImagePrompt(payload);
-        if (result) {
-            if (result.prompt) prompt.value = result.prompt;
-            if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
-        }
-    } finally {
-        enhancingTarget.value = null;
-    }
-}
-
-function handleNewBlankImage() {
-    router.push('/image-studio/edit/new');
-}
-
-
-function reusePrompt(image) {
-    prompt.value = image.prompt;
-    negativePrompt.value = image.negative_prompt;
-    seed.value = image.seed;
-    uiStore.addNotification('Prompt and parameters have been reused.', 'success');
-}
-
-function openInpaintingEditor(image) { 
-    router.push(`/image-studio/edit/${image.id}`);
-}
-
-function openImageViewer(image, index) {
-    uiStore.openImageViewer({
-        imageList: images.value.map(img => ({ ...img, src: `/api/image-studio/${img.id}/file`})),
-        startIndex: index
-    });
-}
-function handleUpload(event) {
-    const files = Array.from(event.target.files);
-    if (files.length > 0) imageStore.uploadImages(files);
-}
-async function handleDeleteSelected() {
-    const confirmed = await uiStore.showConfirmation({ title: `Delete ${selectedImages.value.length} Images?`, message: 'This action cannot be undone.', confirmText: 'Delete' });
-    if (confirmed.confirmed) {
-        await Promise.all(selectedImages.value.map(id => imageStore.deleteImage(id)));
-        selectedImages.value = [];
-    }
-}
-async function handleMoveToDiscussion() {
-    if (!isSelectionMode.value) return;
-    const { confirmed, value: discussionId } = await uiStore.showConfirmation({
-        title: `Move ${selectedImages.value.length} Images to Discussion`,
-        message: 'Select a discussion:', confirmText: 'Move', inputType: 'select',
-        inputOptions: discussionsStore.sortedDiscussions.map(d => ({ text: d.title, value: d.id })),
-        inputValue: discussionsStore.currentDiscussionId
-    });
-    if (confirmed && discussionId) {
-        await Promise.all(selectedImages.value.map(id => imageStore.moveImageToDiscussion(id, discussionId)));
-        selectedImages.value = [];
-    }
-}
-
-function handleDragOver(event) {
-    event.preventDefault();
-    isDraggingOver.value = true;
-}
-
-function handleDragLeave(event) {
-    if (!event.currentTarget.contains(event.relatedTarget)) {
-        isDraggingOver.value = false;
-    }
-}
-
-async function handleDrop(event) {
-    event.preventDefault();
-    isDraggingOver.value = false;
-    const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
-    if (files.length > 0) {
-        await imageStore.uploadImages(files);
-    }
-}
-
-async function handlePaste(event) {
-    const items = (event.clipboardData || window.clipboardData).items;
-    if (!items) return;
-    
-    const imageFiles = [];
-    for (const item of items) {
-        if (item.kind === 'file' && item.type.startsWith('image/')) {
-            const file = item.getAsFile();
-            if (file) {
-                const extension = (file.type.split('/') || 'png').toLowerCase().replace('jpeg', 'jpg');
-                imageFiles.push(new File([file], `pasted_image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`, { type: file.type }));
-            }
-        }
-    }
-    
-    if (imageFiles.length > 0) { 
-        event.preventDefault();
-        await imageStore.uploadImages(imageFiles); 
-    }
-}
-</script>
-
 <template>
     <Teleport to="#global-header-actions-target">
         <div class="flex items-center gap-2">
-            <button @click="handleGenerateOrApply" class="btn btn-primary" :disabled="isGenerating || isEnhancing">
-                <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2 animate-spin" />
+            <button @click="handleGenerateOrApply" class="btn btn-primary" :disabled="isGenerating || enhancingTarget">
+                <IconAnimateSpin v-if="isGenerating || enhancingTarget" class="w-5 h-5 mr-2 animate-spin" />
                 {{ isSelectionMode ? 'Apply' : 'Generate' }}
             </button>
         </div>
@@ -309,14 +23,26 @@ async function handlePaste(event) {
             <div class="w-96 flex-shrink-0 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col">
                 <div class="flex-grow p-4 space-y-4 overflow-y-auto custom-scrollbar">
                     <div>
-                        <label for="prompt" class="block text-sm font-medium">Prompt</label>
-                        <div class="relative mt-1"><textarea id="prompt" v-model="prompt" rows="4" class="input-field pr-10" placeholder="A photorealistic image of..."></textarea><button @click="handleEnhance('prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance prompt with AI" :disabled="isEnhancing"><IconSparkles class="w-4 h-4" /></button></div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label for="prompt" class="block text-sm font-medium">Prompt</label>
+                            <button @click="openEnhanceModal('prompt')" class="btn-icon" title="Enhance prompt with AI" :disabled="enhancingTarget"><IconSparkles class="w-4 h-4" /></button>
+                        </div>
+                        <div class="relative mt-1"><textarea id="prompt" v-model="prompt" rows="4" class="input-field" placeholder="A photorealistic image of..."></textarea></div>
                     </div>
                     <div>
-                        <label for="negative-prompt" class="block text-sm font-medium">Negative Prompt</label>
-                        <div class="relative mt-1"><textarea id="negative-prompt" v-model="negativePrompt" rows="3" class="input-field pr-10" placeholder="ugly, blurry, bad anatomy..."></textarea><button @click="handleEnhance('negative_prompt')" class="absolute top-1 right-1 btn-icon" title="Enhance negative prompt with AI" :disabled="isEnhancing"><IconSparkles class="w-4 h-4" /></button></div>
+                         <div class="flex justify-between items-center mb-1">
+                            <label for="negative-prompt" class="block text-sm font-medium">Negative Prompt</label>
+                            <button @click="openEnhanceModal('negative_prompt')" class="btn-icon" title="Enhance negative prompt with AI" :disabled="enhancingTarget"><IconSparkles class="w-4 h-4" /></button>
+                        </div>
+                        <div class="relative mt-1"><textarea id="negative-prompt" v-model="negativePrompt" rows="3" class="input-field" placeholder="ugly, blurry, bad anatomy..."></textarea></div>
                     </div>
                     
+                    <div class="pt-4 border-t dark:border-gray-600 space-y-2">
+                        <button @click="openEnhanceModal('both')" class="btn btn-secondary w-full" :disabled="enhancingTarget">
+                            <IconSparkles class="w-4 h-4 mr-2" /> Enhance Both Prompts
+                        </button>
+                    </div>
+
                     <div class="pt-4 border-t dark:border-gray-600">
                         <div class="flex items-center justify-between">
                             <h3 class="text-sm font-semibold">Generation Settings</h3>
@@ -438,3 +164,303 @@ async function handlePaste(event) {
         </div>
     </div>
 </template>
+
+<script setup>
+import { ref, onMounted, onUnmounted, computed, watch, markRaw } from 'vue';
+import { useRouter } from 'vue-router';
+import { useImageStore } from '../stores/images';
+import { useDataStore } from '../stores/data';
+import { useUiStore } from '../stores/ui';
+import { useAuthStore } from '../stores/auth';
+import { useDiscussionsStore } from '../stores/discussions';
+import { useTasksStore } from '../stores/tasks';
+import { storeToRefs } from 'pinia';
+import AuthenticatedImage from '../components/ui/AuthenticatedImage.vue';
+import TaskProgressIndicator from '../components/ui/TaskProgressIndicator.vue';
+import apiClient from '../services/api';
+
+// Icons
+import IconPhoto from '../assets/icons/IconPhoto.vue';
+import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
+import IconTrash from '../assets/icons/IconTrash.vue';
+import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
+import IconSend from '../assets/icons/IconSend.vue';
+import IconPencil from '../assets/icons/IconPencil.vue';
+import IconSparkles from '../assets/icons/IconSparkles.vue';
+import IconMaximize from '../assets/icons/IconMaximize.vue';
+import IconArrowLeft from '../assets/icons/IconArrowLeft.vue';
+import IconRefresh from '../assets/icons/IconRefresh.vue'; // For reuse prompt
+import IconAdjustmentsHorizontal from '../assets/icons/IconAdjustmentsHorizontal.vue';
+import IconPlus from '../assets/icons/IconPlus.vue';
+
+const imageStore = useImageStore();
+const dataStore = useDataStore();
+const uiStore = useUiStore();
+const authStore = useAuthStore();
+const discussionsStore = useDiscussionsStore();
+const tasksStore = useTasksStore();
+const router = useRouter();
+
+const { 
+    images, isLoading, isGenerating,
+    prompt, negativePrompt, imageSize, nImages, seed, generationParams 
+} = storeToRefs(imageStore);
+const { user } = storeToRefs(authStore);
+const { imageGenerationTasks, imageGenerationTasksCount } = storeToRefs(tasksStore);
+const { currentModelVisionSupport } = storeToRefs(discussionsStore);
+
+const isConfigVisible = ref(false);
+const enhancingTarget = ref(null);
+const enhancementInstructions = ref('');
+const enhancementMode = ref('description');
+
+const selectedImages = ref([]);
+const isSelectionMode = computed(() => selectedImages.value.length > 0);
+const areAllSelected = computed({
+    get: () => images.value.length > 0 && selectedImages.value.length === images.value.length,
+    set: (value) => {
+        selectedImages.value = value ? images.value.map(img => img.id) : [];
+    }
+});
+const isDraggingOver = ref(false);
+
+const selectedModel = computed(() => user.value?.tti_binding_model_name);
+
+const selectedModelDetails = computed(() => {
+    if (!selectedModel.value || dataStore.availableTtiModels.length === 0) return null;
+    return dataStore.availableTtiModels.find(m => m.id === selectedModel.value);
+});
+
+const modelConfigurableParameters = computed(() => {
+    if (!selectedModelDetails.value?.binding_params) return [];
+    
+    const params = isSelectionMode.value
+        ? (selectedModelDetails.value.binding_params.edit_parameters || [])
+        : (selectedModelDetails.value.binding_params.generation_parameters || []);
+        
+    const excluded = ['prompt', 'negative_prompt', 'image', 'mask', 'width', 'height', 'n', 'seed', 'size'];
+    return params.filter(p => !excluded.includes(p.name));
+});
+
+function parseOptions(options) {
+    if (typeof options === 'string') {
+        return options.split(',').map(o => o.trim()).filter(o => o);
+    }
+    if (Array.isArray(options)) {
+        return options.filter(o => o);
+    }
+    return [];
+}
+
+watch(selectedModelDetails, (details) => {
+    if (details) {
+        modelConfigurableParameters.value.forEach(param => {
+            if (!(param.name in generationParams.value)) {
+                 generationParams.value[param.name] = param.default;
+            }
+        });
+    }
+}, { immediate: true, deep: true });
+
+onMounted(() => {
+    uiStore.setPageTitle({ title: 'Image Studio', icon: markRaw(IconPhoto) });
+    imageStore.fetchImages();
+    if (dataStore.availableTtiModels.length === 0) dataStore.fetchAvailableTtiModels();
+    if (Object.keys(discussionsStore.discussions).length === 0) discussionsStore.loadDiscussions();
+    window.addEventListener('paste', handlePaste);
+});
+
+onUnmounted(() => {
+    uiStore.setPageTitle({ title: '' });
+    window.removeEventListener('paste', handlePaste);
+});
+
+function isSelected(imageId) { return selectedImages.value.includes(imageId); }
+function toggleSelection(imageId) {
+    const index = selectedImages.value.indexOf(imageId);
+    if (index > -1) selectedImages.value.splice(index, 1);
+    else selectedImages.value.push(imageId);
+}
+
+async function handleGenerateOrApply() {
+    if (!prompt.value.trim() || !selectedModel.value) {
+        uiStore.addNotification('A prompt and model are required.', 'warning');
+        return;
+    }
+
+    const commonPayload = {
+        prompt: prompt.value,
+        negative_prompt: negativePrompt.value,
+        model: selectedModel.value,
+        seed: seed.value,
+        ...generationParams.value
+    };
+
+    if (isSelectionMode.value) {
+        const [width, height] = imageSize.value.split('x').map(Number);
+        await imageStore.editImage({ 
+            ...commonPayload, 
+            image_ids: selectedImages.value,
+            width: width,
+            height: height
+        });
+    } else {
+        await imageStore.generateImage({ 
+            ...commonPayload, 
+            size: imageSize.value,
+            n: nImages.value 
+        });
+    }
+}
+
+async function handleEnhance(type, options = {}) {
+    if (type !== 'negative_prompt' && !prompt.value.trim()) {
+        uiStore.addNotification('Please enter a prompt to enhance.', 'warning');
+        return;
+    }
+    
+    enhancingTarget.value = type;
+
+    const payload = { 
+        prompt: prompt.value, 
+        negative_prompt: negativePrompt.value, 
+        target: type,
+        model: authStore.user?.lollms_model_name,
+        instructions: options.instructions || '',
+        mode: options.mode || 'description'
+    };
+
+    if (isSelectionMode.value && currentModelVisionSupport.value && selectedImages.value.length > 0) {
+        uiStore.addNotification('Enhancing prompt with image context...', 'info');
+        const image_b64s = [];
+        for (const imageId of selectedImages.value) {
+            try {
+                const response = await apiClient.get(`/api/image-studio/${imageId}/file`, { responseType: 'blob' });
+                const b64 = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(response.data);
+                });
+                image_b64s.push(b64);
+            } catch (error) {
+                console.error(`Failed to fetch and encode image ${imageId}`, error);
+                uiStore.addNotification(`Could not load image ${imageId} for context.`, 'warning');
+            }
+        }
+        if (image_b64s.length > 0) {
+            payload.image_b64s = image_b64s;
+        }
+    }
+    
+    try {
+        const result = await imageStore.enhanceImagePrompt(payload);
+        if (result) {
+            if (result.prompt) prompt.value = result.prompt;
+            if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
+        }
+    } finally {
+        enhancingTarget.value = null;
+    }
+}
+
+function openEnhanceModal(target) {
+    uiStore.openModal('enhancePrompt', {
+        instructions: enhancementInstructions.value,
+        mode: enhancementMode.value,
+        onConfirm: ({ instructions, mode }) => {
+            enhancementInstructions.value = instructions;
+            enhancementMode.value = mode;
+            handleEnhance(target, { instructions, mode });
+        }
+    });
+}
+
+function handleNewBlankImage() {
+    router.push('/image-studio/edit/new');
+}
+
+
+function reusePrompt(image) {
+    prompt.value = image.prompt;
+    negativePrompt.value = image.negative_prompt;
+    seed.value = image.seed;
+    uiStore.addNotification('Prompt and parameters have been reused.', 'success');
+}
+
+function openInpaintingEditor(image) { 
+    router.push(`/image-studio/edit/${image.id}`);
+}
+
+function openImageViewer(image, index) {
+    uiStore.openImageViewer({
+        imageList: images.value.map(img => ({ ...img, src: `/api/image-studio/${img.id}/file`})),
+        startIndex: index
+    });
+}
+function handleUpload(event) {
+    const files = Array.from(event.target.files);
+    if (files.length > 0) imageStore.uploadImages(files);
+}
+async function handleDeleteSelected() {
+    const confirmed = await uiStore.showConfirmation({ title: `Delete ${selectedImages.value.length} Images?`, message: 'This action cannot be undone.', confirmText: 'Delete' });
+    if (confirmed.confirmed) {
+        await Promise.all(selectedImages.value.map(id => imageStore.deleteImage(id)));
+        selectedImages.value = [];
+    }
+}
+async function handleMoveToDiscussion() {
+    if (!isSelectionMode.value) return;
+    const { confirmed, value: discussionId } = await uiStore.showConfirmation({
+        title: `Move ${selectedImages.value.length} Images to Discussion`,
+        message: 'Select a discussion:', confirmText: 'Move', inputType: 'select',
+        inputOptions: discussionsStore.sortedDiscussions.map(d => ({ text: d.title, value: d.id })),
+        inputValue: discussionsStore.currentDiscussionId
+    });
+    if (confirmed && discussionId) {
+        await Promise.all(selectedImages.value.map(id => imageStore.moveImageToDiscussion(id, discussionId)));
+        selectedImages.value = [];
+    }
+}
+
+function handleDragOver(event) {
+    event.preventDefault();
+    isDraggingOver.value = true;
+}
+
+function handleDragLeave(event) {
+    if (!event.currentTarget.contains(event.relatedTarget)) {
+        isDraggingOver.value = false;
+    }
+}
+
+async function handleDrop(event) {
+    event.preventDefault();
+    isDraggingOver.value = false;
+    const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
+    if (files.length > 0) {
+        await imageStore.uploadImages(files);
+    }
+}
+
+async function handlePaste(event) {
+    const items = (event.clipboardData || window.clipboardData).items;
+    if (!items) return;
+    
+    const imageFiles = [];
+    for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) {
+                const extension = (file.type.split('/') || 'png').toLowerCase().replace('jpeg', 'jpg');
+                imageFiles.push(new File([file], `pasted_image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`, { type: file.type }));
+            }
+        }
+    }
+    
+    if (imageFiles.length > 0) { 
+        event.preventDefault();
+        await imageStore.uploadImages(imageFiles); 
+    }
+}
+</script>

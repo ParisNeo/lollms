@@ -55,6 +55,9 @@ class ImagePromptEnhancementRequest(BaseModel):
     model: Optional[str] = None
     target: str = "both"
     instructions: Optional[str] = None
+    image_b64s: Optional[List[str]] = None
+    mode: str = "description"
+
 
 class ImagePromptEnhancementResponse(BaseModel):
     prompt: Optional[str] = None
