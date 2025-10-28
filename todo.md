@@ -154,6 +154,8 @@ Use REDIS instead of the polling mechanism (optional)
 
 # URGENT:
 search in codemirror is not scrolling to next word
+Clear completed tasks must be allowed for users
+saving artefacts must be allowed for users
 in sso separate the app name from the app key (generate random key for the app)
 add more details about the source chunks
 add queuing for audio generation
