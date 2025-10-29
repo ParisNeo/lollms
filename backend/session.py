@@ -62,10 +62,8 @@ def ensure_bool(value, default=False):
         try:
             return value.lower() in ("true", "yes", "1")  # Case-insensitive check
         except:
-            logging.warning(f"Failed to parse string '{value}' as boolean. Using default value: {default}")
             return default
     else:
-        logging.warning(f"Value '{value}' is not a boolean or string. Using default value: {default}")
         return default
 
 def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
@@ -236,7 +234,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         is_ollama_require_key = ensure_bool(settings.get("ollama_require_key", True), True)
         latex_builder_enabled = ensure_bool(settings.get("latex_builder_enabled", False), False)
         allow_user_chunking_config = ensure_bool(settings.get("allow_user_chunking_config", True), True)
-        default_chunk_size = settings.get("default_chunk_size", 1024)
+        default_chunk_size = settings.get("default_chunk_size", 2048)
         default_chunk_overlap = settings.get("default_chunk_overlap", 256)
 
 
