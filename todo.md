@@ -155,6 +155,18 @@ Use REDIS instead of the polling mechanism (optional)
 # URGENT:
 search in codemirror is not scrolling to next word
 Clear completed tasks must be allowed for users
+admin should not be able to see generated images so when a generation tasks that is not initiated by the admin finishes, we must not have a value
+Fix registration email sending
+Make the admin able to switch the ui level for a specific user or multiple users at once.
+enhance the last seen and the join date infos
+add sort by status
+add api usage plot (by key) and total api usage for everybody
+show the ssl configs in the server information in dashboard
+fix registration to allow email validation as another possibility
+move global settings up (just under the Dashboard), fuse it with https settings, and call it server settings
+add the possibility to use ai for generating fun facts (update the add fun fact modal)
+add a type of funfacts that is updated at a steady time every day using specific rss sources to monitor news or values (stock, crypto etc..)
+make users capable of selecting the type of funfacts they allow.
 saving artefacts must be allowed for users
 in sso separate the app name from the app key (generate random key for the app)
 add more details about the source chunks

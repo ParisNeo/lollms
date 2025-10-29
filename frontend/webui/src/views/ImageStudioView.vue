@@ -106,6 +106,9 @@
                             <button @click="handleDeleteSelected" class="btn btn-danger btn-sm" title="Delete Selected"><IconTrash class="w-4 h-4" /></button>
                         </div>
                         <div class="flex items-center gap-2">
+                            <button @click="openCameraModal" class="btn btn-secondary btn-sm">
+                                <IconCamera class="w-4 h-4 mr-2" /> Take Photo
+                            </button>
                             <button @click="handleNewBlankImage" class="btn btn-secondary btn-sm">
                                 <IconPlus class="w-4 h-4 mr-2" /> Create Blank Image
                             </button>
@@ -178,6 +181,7 @@ import { storeToRefs } from 'pinia';
 import AuthenticatedImage from '../components/ui/AuthenticatedImage.vue';
 import TaskProgressIndicator from '../components/ui/TaskProgressIndicator.vue';
 import apiClient from '../services/api';
+import useEventBus from '../services/eventBus';
 
 // Icons
 import IconPhoto from '../assets/icons/IconPhoto.vue';
@@ -192,6 +196,7 @@ import IconArrowLeft from '../assets/icons/IconArrowLeft.vue';
 import IconRefresh from '../assets/icons/IconRefresh.vue'; // For reuse prompt
 import IconAdjustmentsHorizontal from '../assets/icons/IconAdjustmentsHorizontal.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
+import IconCamera from '../assets/icons/IconCamera.vue';
 
 const imageStore = useImageStore();
 const dataStore = useDataStore();
@@ -200,6 +205,7 @@ const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const tasksStore = useTasksStore();
 const router = useRouter();
+const { on, off } = useEventBus();
 
 const { 
     images, isLoading, isGenerating,
@@ -268,12 +274,23 @@ onMounted(() => {
     if (dataStore.availableTtiModels.length === 0) dataStore.fetchAvailableTtiModels();
     if (Object.keys(discussionsStore.discussions).length === 0) discussionsStore.loadDiscussions();
     window.addEventListener('paste', handlePaste);
+    on('task:completed', handleTaskCompletion);
 });
 
 onUnmounted(() => {
     uiStore.setPageTitle({ title: '' });
     window.removeEventListener('paste', handlePaste);
+    off('task:completed', handleTaskCompletion);
 });
+
+function handleTaskCompletion(task) {
+    if (!task || !task.name) return;
+    const isImageTask = (task.name.startsWith('Generating') && task.name.includes('image(s)')) || task.name.startsWith('Editing image:');
+    if (isImageTask && task.owner_username === authStore.user?.username) {
+        console.log('Image task completed for current user, refreshing image list.');
+        imageStore.fetchImages();
+    }
+}
 
 function isSelected(imageId) { return selectedImages.value.includes(imageId); }
 function toggleSelection(imageId) {
@@ -398,9 +415,14 @@ function openImageViewer(image, index) {
         startIndex: index
     });
 }
-function handleUpload(event) {
+async function handleUpload(event) {
     const files = Array.from(event.target.files);
-    if (files.length > 0) imageStore.uploadImages(files);
+    if (files.length > 0) {
+        uiStore.addNotification(`Uploading ${files.length} image(s)...`, 'info');
+        await imageStore.uploadImages(files);
+        await imageStore.fetchImages();
+        uiStore.addNotification(`Upload complete!`, 'success');
+    }
 }
 async function handleDeleteSelected() {
     const confirmed = await uiStore.showConfirmation({ title: `Delete ${selectedImages.value.length} Images?`, message: 'This action cannot be undone.', confirmText: 'Delete' });
@@ -439,7 +461,10 @@ async function handleDrop(event) {
     isDraggingOver.value = false;
     const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
     if (files.length > 0) {
+        uiStore.addNotification(`Uploading ${files.length} image(s)...`, 'info');
         await imageStore.uploadImages(files);
+        await imageStore.fetchImages();
+        uiStore.addNotification(`Upload complete!`, 'success');
     }
 }
 
@@ -452,7 +477,7 @@ async function handlePaste(event) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
             const file = item.getAsFile();
             if (file) {
-                const extension = (file.type.split('/') || 'png').toLowerCase().replace('jpeg', 'jpg');
+                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
                 imageFiles.push(new File([file], `pasted_image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`, { type: file.type }));
             }
         }
@@ -460,7 +485,14 @@ async function handlePaste(event) {
     
     if (imageFiles.length > 0) { 
         event.preventDefault();
+        uiStore.addNotification(`Pasting ${imageFiles.length} image(s)...`, 'info');
         await imageStore.uploadImages(imageFiles); 
+        await imageStore.fetchImages();
+        uiStore.addNotification(`Paste complete!`, 'success');
     }
+}
+
+function openCameraModal() {
+    uiStore.openModal('cameraCapture');
 }
 </script>

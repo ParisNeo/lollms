@@ -186,11 +186,16 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
             else:
                 raise Exception("No active TTI binding found to determine a default for editing.")
 
+        # Separate runtime params from the main payload for client configuration
+        runtime_params = {k: v for k, v in request_data.items() if k not in ['model', 'image_ids', 'base_image_b64']}
+
         lc = build_lollms_client_from_params(
             username=username,
             tti_binding_alias=tti_binding_alias,
-            tti_model_name=tti_model_name
+            tti_model_name=tti_model_name,
+            tti_params=runtime_params
         )
+
         if not lc.tti:
             raise Exception("TTI binding is not available or could not be initialized.")
             
@@ -225,16 +230,11 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
             raise Exception("No valid source images found for editing.")
         task.set_progress(30)
 
-        generation_params = request_data.copy()
-        # Clean up keys that are not part of the edit_image signature
-        generation_params.pop('model', None)
-        generation_params.pop('image_ids', None)
-        generation_params.pop('base_image_b64', None)
-
+        # The client is now pre-configured with all parameters.
+        # We only need to pass the required `images` argument to the method.
         task.log("Sending edit request to TTI binding...")
         edited_image_bytes = lc.tti.edit_image(
-            images=source_images_b64,
-            **generation_params
+            images=source_images_b64
         )
         task.set_progress(80)
 

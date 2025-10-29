@@ -68,6 +68,7 @@ import SharePersonalityModal from './components/modals/SharePersonalityModal.vue
 import DiscussionGroupModal from './components/modals/DiscussionGroupModal.vue';
 import MoveDiscussionModal from './components/modals/MoveDiscussionModal.vue';
 import EnhancePromptModal from './components/modals/EnhancePromptModal.vue';
+import CameraCaptureModal from './components/modals/CameraCaptureModal.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -273,6 +274,7 @@ watch(tasks, (newTasks, oldTasks) => {
     <DiscussionGroupModal v-if="activeModal === 'discussionGroup'" />
     <MoveDiscussionModal v-if="activeModal === 'moveDiscussion'" />
     <EnhancePromptModal v-if="activeModal === 'enhancePrompt'" />
+    <CameraCaptureModal v-if="activeModal === 'cameraCapture'" />
     
     <!-- Always rendered panels -->
     <NotificationPanel />

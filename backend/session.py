@@ -349,10 +349,13 @@ def build_lollms_client_from_params(
     llm_params: Optional[Dict[str, Any]] = None,
     tti_binding_alias: Optional[str] = None,
     tti_model_name: Optional[str] = None,
+    tti_params: Optional[Dict[str, Any]] = None,
     tts_binding_alias: Optional[str] = None,
     tts_model_name: Optional[str] = None,
+    tts_params: Optional[Dict[str, Any]] = None,
     stt_binding_alias: Optional[str] = None,
-    stt_model_name: Optional[str] = None
+    stt_model_name: Optional[str] = None,
+    stt_params: Optional[Dict[str, Any]] = None
 ) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
@@ -469,6 +472,9 @@ def build_lollms_client_from_params(
                     for key, value in model_user_config.items():
                         if value is not None:
                             tti_binding_config[key] = value
+
+            if tti_params:
+                tti_binding_config.update(tti_params)
                             
             if selected_tti_model_name:
                 tti_binding_config['model_name'] = selected_tti_model_name                
@@ -517,6 +523,9 @@ def build_lollms_client_from_params(
                     for key, value in model_user_config.items():
                         if value is not None:
                             tts_binding_config[key] = value
+
+            if tts_params:
+                tts_binding_config.update(tts_params)
                             
             if selected_tts_model_name:
                 tts_binding_config['model_name'] = selected_tts_model_name
@@ -565,6 +574,9 @@ def build_lollms_client_from_params(
                     for key, value in model_user_config.items():
                         if value is not None:
                             stt_binding_config[key] = value
+
+            if stt_params:
+                stt_binding_config.update(stt_params)
                             
             if selected_stt_model_name:
                 stt_binding_config['model_name'] = selected_stt_model_name
