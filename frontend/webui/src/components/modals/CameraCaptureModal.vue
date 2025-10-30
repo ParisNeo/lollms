@@ -2,24 +2,30 @@
     <GenericModal modal-name="cameraCapture" title="Take a Photo" max-width-class="max-w-2xl">
         <template #body>
             <div class="relative aspect-video bg-black rounded-lg overflow-hidden">
-                <video v-show="isStreaming && !capturedImage" ref="videoRef" autoplay playsinline class="w-full h-full object-contain"></video>
-                <img v-if="capturedImage" :src="capturedImage" class="w-full h-full object-contain" alt="Captured Photo Preview">
+                <!-- Video Element (always in DOM but visibility is controlled) -->
+                <video :ref="setVideoRef" autoplay playsinline class="w-full h-full object-contain transition-opacity" :class="{'opacity-100': cameraState === 'streaming', 'opacity-0': cameraState !== 'streaming'}"></video>
                 
-                <div v-if="error" class="absolute inset-0 flex items-center justify-center text-white bg-black/50 p-4">
-                    <p class="text-center">{{ error }}</p>
-                </div>
-
-                <div v-if="!isStreaming && !error" class="absolute inset-0 flex items-center justify-center text-white">
-                    <p>Starting camera...</p>
+                <!-- Captured Image Preview -->
+                <img v-if="cameraState === 'captured'" :src="capturedImage" class="absolute inset-0 w-full h-full object-contain z-10" alt="Captured Photo Preview">
+                
+                <!-- Overlay for Status Messages -->
+                <div v-if="cameraState !== 'streaming'" class="absolute inset-0 flex items-center justify-center text-white bg-black/70 p-4 z-20">
+                    <div v-if="cameraState === 'requesting'" class="text-center">
+                        <IconAnimateSpin class="w-8 h-8 mx-auto mb-2 animate-spin" />
+                        <p>Waiting for camera permission...</p>
+                        <p class="text-xs text-gray-400 mt-1">Please check for a browser pop-up.</p>
+                    </div>
+                    <p v-if="cameraState === 'error'" class="text-center">{{ error }}</p>
+                    <p v-if="cameraState === 'idle'">Initializing...</p>
                 </div>
             </div>
         </template>
         <template #footer>
             <button @click="uiStore.closeModal('cameraCapture')" class="btn btn-secondary">Cancel</button>
             <div class="flex-grow"></div>
-            <button v-if="isStreaming && !capturedImage" @click="capturePhoto" class="btn btn-primary">Take Photo</button>
-            <button v-if="capturedImage" @click="retakePhoto" class="btn btn-secondary">Retake</button>
-            <button v-if="capturedImage" @click="savePhoto" class="btn btn-primary" :disabled="isSaving">
+            <button v-if="cameraState === 'streaming'" @click="capturePhoto" class="btn btn-primary">Take Photo</button>
+            <button v-if="cameraState === 'captured'" @click="retakePhoto" class="btn btn-secondary">Retake</button>
+            <button v-if="cameraState === 'captured'" @click="savePhoto" class="btn btn-primary" :disabled="isSaving">
                 <IconAnimateSpin v-if="isSaving" class="w-5 h-5 mr-2 animate-spin" />
                 Save Photo
             </button>
@@ -39,39 +45,86 @@ const imageStore = useImageStore();
 
 const videoRef = ref(null);
 const videoStream = ref(null);
-const isStreaming = ref(false);
+const cameraState = ref('idle'); // 'idle', 'requesting', 'streaming', 'captured', 'error'
 const error = ref(null);
 const capturedImage = ref(null);
 const isSaving = ref(false);
 
+// Template ref function to ensure the element is available
+const setVideoRef = (el) => {
+    videoRef.value = el;
+};
+
+function resetState() {
+    if (videoStream.value) {
+        videoStream.value.getTracks().forEach(track => track.stop());
+    }
+    if (videoRef.value) {
+        videoRef.value.srcObject = null;
+        videoRef.value.onplaying = null;
+    }
+    videoStream.value = null;
+    cameraState.value = 'idle';
+    capturedImage.value = null;
+    error.value = null;
+    isSaving.value = false;
+}
+
 watch(() => uiStore.isModalOpen('cameraCapture'), (isOpen) => {
     if (isOpen) {
-        startCamera();
+        // The watcher on videoRef will handle calling startCamera
+        // This is a fallback in case the ref is already set from a previous open
+        if (videoRef.value) {
+            startCamera();
+        }
     } else {
-        stopCamera();
+        resetState();
     }
 });
 
-onUnmounted(() => {
-    stopCamera();
+// Watch the videoRef itself. When Vue mounts the element and assigns it,
+// this watcher will trigger, ensuring we have the element before we use it.
+watch(videoRef, (newEl) => {
+    if (newEl && uiStore.isModalOpen('cameraCapture')) {
+        startCamera();
+    }
 });
 
+
+onUnmounted(resetState);
+
 async function startCamera() {
-    isStreaming.value = false;
-    error.value = null;
-    capturedImage.value = null;
+    // Prevent starting multiple times if watchers fire rapidly
+    if (cameraState.value === 'requesting' || cameraState.value === 'streaming') {
+        return;
+    }
+
+    resetState();
+    cameraState.value = 'requesting';
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         error.value = 'Camera access is not supported by your browser.';
+        cameraState.value = 'error';
+        return;
+    }
+    
+    // This check is now reliable because it runs after the element is mounted
+    if (!videoRef.value) {
+        error.value = 'Camera component did not load correctly. Please try again.';
+        cameraState.value = 'error';
         return;
     }
 
     try {
         videoStream.value = await navigator.mediaDevices.getUserMedia({ video: true });
+        
         if (videoRef.value) {
             videoRef.value.srcObject = videoStream.value;
-            isStreaming.value = true;
+            videoRef.value.onplaying = () => {
+                cameraState.value = 'streaming';
+            };
         }
+
     } catch (err) {
         if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
             error.value = 'Camera access was denied. Please allow camera permissions in your browser settings.';
@@ -80,20 +133,13 @@ async function startCamera() {
         } else {
             error.value = 'An error occurred while accessing the camera.';
         }
+        cameraState.value = 'error';
         console.error("Camera access error:", err);
     }
 }
 
-function stopCamera() {
-    if (videoStream.value) {
-        videoStream.value.getTracks().forEach(track => track.stop());
-        videoStream.value = null;
-        isStreaming.value = false;
-    }
-}
-
 function capturePhoto() {
-    if (!videoRef.value) return;
+    if (!videoRef.value || cameraState.value !== 'streaming') return;
 
     const canvas = document.createElement('canvas');
     canvas.width = videoRef.value.videoWidth;
@@ -102,10 +148,16 @@ function capturePhoto() {
     context.drawImage(videoRef.value, 0, 0, canvas.width, canvas.height);
     
     capturedImage.value = canvas.toDataURL('image/jpeg');
+    cameraState.value = 'captured';
+    
+    // Stop the stream after capture
+    if (videoStream.value) {
+        videoStream.value.getTracks().forEach(track => track.stop());
+    }
 }
 
 function retakePhoto() {
-    capturedImage.value = null;
+    startCamera();
 }
 
 function dataURLtoBlob(dataurl) {
@@ -123,7 +175,7 @@ function dataURLtoBlob(dataurl) {
 }
 
 async function savePhoto() {
-    if (!capturedImage.value) return;
+    if (cameraState.value !== 'captured' || !capturedImage.value) return;
 
     isSaving.value = true;
     try {
@@ -131,7 +183,6 @@ async function savePhoto() {
         if (blob) {
             const file = new File([blob], `webcam_capture_${Date.now()}.jpg`, { type: 'image/jpeg' });
             await imageStore.uploadImages([file]);
-            await imageStore.fetchImages();
             uiStore.addNotification('Photo saved to gallery!', 'success');
             uiStore.closeModal('cameraCapture');
         } else {
