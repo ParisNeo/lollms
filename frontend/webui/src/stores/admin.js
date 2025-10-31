@@ -533,6 +533,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchSttBindings() {
         isLoadingSttBindings.value = true;
         try {
+            console.log("Fetching STT bindings from API...");
             const response = await apiClient.get('/api/admin/stt-bindings');
             sttBindings.value = response.data;
         } finally {
@@ -560,6 +561,7 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('STT Binding deleted successfully.', 'success');
     }
     async function fetchSttBindingModels(bindingId) {
+        console.log(`Fetching models for STT binding ID: ${bindingId}`);
         const response = await apiClient.get(`/api/admin/stt-bindings/${bindingId}/models`);
         return response.data;
     }

@@ -800,6 +800,15 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'height' not in image_columns_db:
             connection.execute(text("ALTER TABLE user_images ADD COLUMN height INTEGER"))
             print("INFO: Added 'height' column to 'user_images' table.")
+        if 'negative_prompt' not in image_columns_db:
+            connection.execute(text("ALTER TABLE user_images ADD COLUMN negative_prompt TEXT"))
+            print("INFO: Added 'negative_prompt' column to 'user_images' table.")
+        if 'seed' not in image_columns_db:
+            connection.execute(text("ALTER TABLE user_images ADD COLUMN seed INTEGER"))
+            print("INFO: Added 'seed' column to 'user_images' table.")
+        if 'generation_params' not in image_columns_db:
+            connection.execute(text("ALTER TABLE user_images ADD COLUMN generation_params JSON"))
+            print("INFO: Added 'generation_params' column to 'user_images' table.")
         connection.commit()
 
 

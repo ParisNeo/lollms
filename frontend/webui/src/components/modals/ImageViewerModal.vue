@@ -88,6 +88,7 @@
 
 <script setup>
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { useUiStore } from '../../stores/ui';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import apiClient from '../../services/api';
@@ -100,6 +101,7 @@ import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 
 const uiStore = useUiStore();
+const router = useRouter();
 const currentIndex = ref(0);
 
 // --- Pan & Zoom State ---
@@ -174,16 +176,9 @@ async function downloadImage() {
 }
 
 function handleEdit() {
-    if (!currentImage.value) return;
-    // The image object from the viewer's list should have the full data needed
-    const imageToEdit = {
-        id: currentImage.value.id,
-        filename: currentImage.value.filename,
-        prompt: currentImage.value.prompt,
-        model: currentImage.value.model
-    };
+    if (!currentImage.value || !currentImage.value.id) return;
     close();
-    uiStore.openModal('inpaintingEditor', { image: imageToEdit });
+    router.push(`/image-studio/edit/${currentImage.value.id}`);
 }
 
 

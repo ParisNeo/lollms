@@ -47,8 +47,8 @@ The easiest way to get started is by using the provided run scripts, which handl
 
 1.  **Clone the Repository:**
     ```bash
-    git clone https://github.com/ParisNeo/lollms-webui.git
-    cd lollms-webui
+    git clone https://github.com/ParisNeo/lollms.git
+    cd lollms
     ```
 
 2.  **Run the Installer:**

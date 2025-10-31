@@ -314,7 +314,9 @@ async function fetchModels() {
             case 'llm': models.value = await adminStore.fetchBindingModels(binding.value.id); break;
             case 'tti': models.value = await adminStore.fetchTtiBindingModels(binding.value.id); break;
             case 'tts': models.value = await adminStore.fetchTtsBindingModels(binding.value.id); break;
+            case 'stt': models.value = await adminStore.fetchSttBindingModels(binding.value.id); break;
             case 'rag': models.value = await adminStore.fetchRagBindingModels(binding.value.id); break;
+
             default: models.value = [];
         }
     } finally {
@@ -403,6 +405,7 @@ async function saveAlias() {
             aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
             if (bindingType.value === 'tti') await adminStore.saveTtiModelAlias(binding.value.id, aliasPayload);
             else if (bindingType.value === 'tts') await adminStore.saveTtsModelAlias(binding.value.id, aliasPayload);
+            else if (bindingType.value === 'stt') await adminStore.saveSttModelAlias(binding.value.id, aliasPayload);
             else if (bindingType.value === 'rag') await adminStore.saveRagModelAlias(binding.value.id, aliasPayload);
         }
         await fetchModels();

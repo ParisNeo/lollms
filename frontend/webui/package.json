@@ -42,6 +42,7 @@
     "emoji-picker-element": "1.26.3",
     "highlight.js": "11.9.0",
     "katex": "^0.16.22",
+    "konva": "^9.3.6",
     "lowlight": "3.3.0",
     "marked": "13.0.0",
     "mermaid": "^11.11.0",
@@ -62,3 +63,5 @@
     "vite": "^6.3.6"
   }
 }
+
+

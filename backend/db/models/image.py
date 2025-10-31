@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import (
     Column, Integer, String, Text,
     ForeignKey,
-    DateTime
+    DateTime, JSON
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -18,7 +18,10 @@ class UserImage(Base):
     
     filename = Column(String, nullable=False)
     prompt = Column(Text, nullable=True)
+    negative_prompt = Column(Text, nullable=True)
     model = Column(String, nullable=True)
+    seed = Column(Integer, nullable=True)
+    generation_params = Column(JSON, nullable=True)
     width = Column(Integer, nullable=True)
     height = Column(Integer, nullable=True)
     

@@ -88,6 +88,7 @@ watch(() => form.value.name, (newName, oldName) => {
 });
 
 onMounted(() => {
+    console.log("Fetching STT bindings and types...");
     adminStore.fetchSttBindings();
     adminStore.fetchAvailableSttBindingTypes();
     adminStore.fetchGlobalSettings();

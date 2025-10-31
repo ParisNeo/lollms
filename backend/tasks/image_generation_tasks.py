@@ -234,7 +234,8 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
         # We only need to pass the required `images` argument to the method.
         task.log("Sending edit request to TTI binding...")
         edited_image_bytes = lc.tti.edit_image(
-            images=source_images_b64
+            images=source_images_b64,
+            **runtime_params
         )
         task.set_progress(80)
 

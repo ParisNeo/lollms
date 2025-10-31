@@ -1,14 +1,17 @@
 # [UPDATE] backend/models/image.py
 # backend/models/image.py
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import datetime
 
 class UserImagePublic(BaseModel):
     id: str
     filename: str
     prompt: Optional[str] = None
+    negative_prompt: Optional[str] = None
     model: Optional[str] = None
+    seed: Optional[int] = None
+    generation_params: Optional[Dict[str, Any]] = None
     created_at: datetime.datetime
     discussion_id: Optional[str] = None
     width: Optional[int] = None
