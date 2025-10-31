@@ -254,7 +254,7 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
             id=str(uuid.uuid4()),
             owner_user_id=user.id,
             filename=filename,
-            prompt=f"Edited from {len(source_images_b64)} image(s): {request_data.get('prompt')}",
+            prompt=request_data.get('prompt'),
             negative_prompt=request_data.get('negative_prompt'),
             model=effective_model_full_name,
             width=request_data.get("width"),
