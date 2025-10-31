@@ -124,7 +124,6 @@ const isSaving = ref(false);
 const isActionInProgress = computed(() => isGenerating.value || isSaving.value);
 const activeGenerationTaskId = ref(null);
 
-// Generation Settings grouped into a reactive object
 const generationSettings = reactive({
     selectedModel: '',
     imageSize: '1024x1024',
@@ -133,7 +132,6 @@ const generationSettings = reactive({
 });
 const enhancingTarget = ref(null);
 
-// Editor state
 const stageContainerRef = ref(null);
 const customCursorRef = ref(null);
 let stage = null; let baseLayer = null; let drawLayer = null; let imageLayer = null; let transformer = null;
@@ -160,16 +158,31 @@ const customCursorStyle = computed(() => ({ width: `${toolProps.value.brushSize}
 onMounted(async () => {
     uiStore.setPageTitle({ title: 'Image Editor', icon: markRaw(IconPencil) });
     dataStore.fetchAvailableTtiModels();
+
     if (props.id && props.id !== 'new') {
         let foundImage = imageStore.images.find(img => img.id === props.id);
         if (!foundImage) { await imageStore.fetchImages(); foundImage = imageStore.images.find(img => img.id === props.id); }
         if (!foundImage) { uiStore.addNotification('Image not found.', 'error'); router.push('/image-studio'); return; }
-        originalImage.value = { ...foundImage }; prompt.value = foundImage.prompt || ''; negativePrompt.value = foundImage.negative_prompt || '';
+        
+        originalImage.value = { ...foundImage };
+        prompt.value = foundImage.prompt || '';
+        negativePrompt.value = foundImage.negative_prompt || '';
+        
         generationSettings.selectedModel = foundImage.model || user.value?.iti_binding_model_name || user.value?.tti_binding_model_name || '';
-        if(foundImage.width && foundImage.height) generationSettings.imageSize = `${foundImage.width}x${foundImage.height}`;
+        if (foundImage.width && foundImage.height) generationSettings.imageSize = `${foundImage.width}x${foundImage.height}`;
+        generationSettings.seed = foundImage.seed ?? -1;
+        generationSettings.params = { ...(foundImage.generation_params || { strength: 0.75 }) };
+        if(!generationSettings.params.strength) generationSettings.params.strength = 0.75;
+
     } else {
-        generationSettings.selectedModel = user.value?.iti_binding_model_name || user.value?.tti_binding_model_name || '';
+        prompt.value = imageStore.prompt;
+        negativePrompt.value = imageStore.negativePrompt;
+        generationSettings.selectedModel = user.value?.iti_binding_model_name || user.value?.tti_binding_model_name || imageStore.selectedModel || '';
+        generationSettings.imageSize = imageStore.imageSize;
+        generationSettings.seed = imageStore.seed;
+        generationSettings.params = { ...imageStore.generationParams };
     }
+
     await initEditor();
     window.addEventListener('resize', fitStageIntoParent);
     window.addEventListener('keydown', handleKeyDown);
@@ -210,6 +223,7 @@ async function loadImageAndSetup(imageUrl, newImageEntry = null) {
                 const baseLayerInfo = layers.value.find(l=>l.id==='base');
                 if(baseLayerInfo) baseLayerInfo.konvaNode = imgNode;
                 fitStageIntoParent();
+                URL.revokeObjectURL(localUrl); // Clean up object URL
             };
         } catch (error) { uiStore.addNotification('Failed to load base image.', 'error'); }
     } else {
@@ -247,7 +261,14 @@ function setupStageEvents() {
     stage.on('wheel', (e) => { e.evt.preventDefault(); const scaleBy = 1.05; const oldScale = stage.scaleX(); const pointer = stage.getPointerPosition(); if (!pointer) return; const mousePointTo = { x: (pointer.x - stage.x()) / oldScale, y: (pointer.y - stage.y()) / oldScale }; const newScale = e.evt.deltaY > 0 ? oldScale / scaleBy : oldScale * scaleBy; stage.scale({ x: newScale, y: newScale }); const newPos = { x: pointer.x - mousePointTo.x * newScale, y: pointer.y - mousePointTo.y * newScale }; stage.position(newPos); });
     stage.on('mouseenter', () => { if (customCursorRef.value) customCursorRef.value.style.display = 'block'; });
     stage.on('mouseleave', () => { if (customCursorRef.value) customCursorRef.value.style.display = 'none'; });
-    stage.on('mousemove', () => { if (customCursorRef.value) { const pos = stage.getPointerPosition(); if(pos) { customCursorRef.value.style.left = `${pos.x}px`; customCursorRef.value.style.top = `${pos.y}px`; } } });
+    stage.on('mousemove', (e) => {
+        if (customCursorRef.value) {
+            // The cursor has position:fixed, so it's relative to the viewport.
+            // e.evt contains the original DOM event. clientX/Y are viewport-relative coordinates.
+            customCursorRef.value.style.left = `${e.evt.clientX}px`;
+            customCursorRef.value.style.top = `${e.evt.clientY}px`;
+        }
+    });
 }
 function hexToRgba(hex, alpha) { const r = parseInt(hex.slice(1, 3), 16), g = parseInt(hex.slice(3, 5), 16), b = parseInt(hex.slice(5, 7), 16); return `rgba(${r}, ${g}, ${b}, ${alpha})`; }
 function selectNode(node) { if (!node) { transformer.nodes([]); selectedNodeId.value = null; return; } transformer.nodes([node]); selectedNodeId.value = node.id(); }

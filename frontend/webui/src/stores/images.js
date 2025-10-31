@@ -111,6 +111,7 @@ export const useImageStore = defineStore('images', () => {
             const response = await apiClient.post('/api/image-studio/generate', payload);
             tasksStore.addTask(response.data);
             uiStore.addNotification(`Image generation started for ${payload.n} image(s). Check task manager for progress.`, 'info');
+            return response.data;
         } finally {
             isGenerating.value = false;
         }
@@ -122,6 +123,7 @@ export const useImageStore = defineStore('images', () => {
             const response = await apiClient.post('/api/image-studio/edit', payload);
             tasksStore.addTask(response.data);
             uiStore.addNotification('Image edit task started. Check task manager for progress.', 'info');
+            return response.data;
         } finally {
             isGenerating.value = false;
         }

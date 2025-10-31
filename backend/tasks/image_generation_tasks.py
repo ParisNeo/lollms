@@ -144,9 +144,12 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
                 owner_user_id=user.id,
                 filename=filename,
                 prompt=request_data.get('prompt'),
+                negative_prompt=request_data.get('negative_prompt'),
                 model=effective_model_full_name,
                 width=generation_params.get("width"),
-                height=generation_params.get("height")
+                height=generation_params.get("height"),
+                seed=generation_params.get("seed"),
+                generation_params=generation_params
             )
             db.add(new_image)
             db.commit()
@@ -252,9 +255,12 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
             owner_user_id=user.id,
             filename=filename,
             prompt=f"Edited from {len(source_images_b64)} image(s): {request_data.get('prompt')}",
+            negative_prompt=request_data.get('negative_prompt'),
             model=effective_model_full_name,
             width=request_data.get("width"),
-            height=request_data.get("height")
+            height=request_data.get("height"),
+            seed=request_data.get("seed"),
+            generation_params=runtime_params
         )
         db.add(new_image)
         db.commit()
