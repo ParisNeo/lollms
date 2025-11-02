@@ -8,6 +8,8 @@ import json
 
 from backend.db import get_db
 from backend.db.models.fun_fact import FunFact, FunFactCategory
+from backend.db.models.news import NewsArticle
+from backend.models.fun_fact import WelcomeInfo
 from backend.settings import settings
 from backend.config import APP_DATA_DIR
 
@@ -15,53 +17,59 @@ from backend.config import APP_DATA_DIR
 ui_router = APIRouter()
 
 # --- Welcome Info & Fun Facts ---
-@ui_router.get("/api/welcome-info", include_in_schema=True)
+@ui_router.get("/api/welcome-info", response_model=WelcomeInfo)
 async def get_welcome_info(db: Session = Depends(get_db)):
     """
     Returns welcome text, logo, slogan, and a random fun fact for the welcome page.
     """
-    welcome_text = settings.get("welcome_text", "lollms")
-    welcome_slogan = settings.get("welcome_slogan", "One tool to rule them all")
-    welcome_logo_url = settings.get("welcome_logo_url", None)
-    latex_builder_enabled = settings.get("latex_builder_enabled", False)
-    export_to_txt_enabled = settings.get("export_to_txt_enabled", True)
-    export_to_markdown_enabled = settings.get("export_to_markdown_enabled", True)
-    export_to_html_enabled = settings.get("export_to_html_enabled", True)
-    export_to_pdf_enabled = settings.get("export_to_pdf_enabled", False)
-    export_to_docx_enabled = settings.get("export_to_docx_enabled", False)
-    export_to_xlsx_enabled = settings.get("export_to_xlsx_enabled", False)
-    export_to_pptx_enabled = settings.get("export_to_pptx_enabled", False)
+    fact_content = "Welcome to lollms!"
+    fact_color = "#3B82F6"
+    fact_category = "General"
 
-    # Fetch a random fun fact from an active category
-    fun_fact_content = "Welcome to lollms!" # Default fallback
-    fun_fact_color = "#3B82F6" # Default blue
-    fun_fact_category = None
-    try:
-        active_facts = db.query(FunFact).options(joinedload(FunFact.category)).join(FunFactCategory).filter(FunFactCategory.is_active == True).all()
-        if active_facts:
-            selected_fact = random.choice(active_facts)
-            fun_fact_content = selected_fact.content
-            fun_fact_color = selected_fact.category.color
-            fun_fact_category = selected_fact.category.name
-    except Exception as e:
-        print(f"Warning: Could not fetch a fun fact from the database. Error: {e}")
+    # Fetch from regular fun facts
+    fun_fact_query = db.query(FunFact).join(FunFactCategory).filter(FunFactCategory.is_active == True)
+    fun_fact_count = fun_fact_query.count()
+    
+    # Fetch from news-based fun facts
+    news_fun_facts_query = db.query(NewsArticle.fun_fact)
+    news_fun_facts_count = news_fun_facts_query.count()
 
-    return {
-        "welcome_text": welcome_text,
-        "welcome_slogan": welcome_slogan,
-        "welcome_logo_url": welcome_logo_url,
-        "fun_fact": fun_fact_content,
-        "fun_fact_color": fun_fact_color,
-        "fun_fact_category": fun_fact_category,
-        "latex_builder_enabled": latex_builder_enabled,
-        "export_to_txt_enabled": export_to_txt_enabled,
-        "export_to_markdown_enabled": export_to_markdown_enabled,
-        "export_to_html_enabled": export_to_html_enabled,
-        "export_to_pdf_enabled": export_to_pdf_enabled,
-        "export_to_docx_enabled": export_to_docx_enabled,
-        "export_to_xlsx_enabled": export_to_xlsx_enabled,
-        "export_to_pptx_enabled": export_to_pptx_enabled,
-    }
+    total_facts = fun_fact_count + news_fun_facts_count
+    if total_facts > 0:
+        rand_index = random.randint(0, total_facts - 1)
+        
+        if rand_index < fun_fact_count:
+            # It's a regular fun fact
+            random_fact = fun_fact_query.offset(rand_index).first()
+            if random_fact:
+                fact_content = random_fact.content
+                fact_color = random_fact.category.color
+                fact_category = random_fact.category.name
+        else:
+            # It's a news-based fun fact
+            news_index = rand_index - fun_fact_count
+            random_news_fact = news_fun_facts_query.offset(news_index).first()
+            if random_news_fact:
+                fact_content = random_news_fact.fun_fact
+                fact_color = "#F59E0B"  # A default color for news facts
+                fact_category = "News"
+
+    return WelcomeInfo(
+        welcome_text=settings.get("welcome_text", "lollms"),
+        welcome_slogan=settings.get("welcome_slogan", "One tool to rule them all"),
+        welcome_logo_url=settings.get("welcome_logo_url"),
+        fun_fact=fact_content,
+        fun_fact_color=fact_color,
+        fun_fact_category=fact_category,
+        latex_builder_enabled=settings.get("latex_builder_enabled", False),
+        export_to_txt_enabled=settings.get("export_to_txt_enabled", True),
+        export_to_markdown_enabled=settings.get("export_to_markdown_enabled", True),
+        export_to_html_enabled=settings.get("export_to_html_enabled", True),
+        export_to_pdf_enabled=settings.get("export_to_pdf_enabled", False),
+        export_to_docx_enabled=settings.get("export_to_docx_enabled", False),
+        export_to_xlsx_enabled=settings.get("export_to_xlsx_enabled", False),
+        export_to_pptx_enabled=settings.get("export_to_pptx_enabled", False),
+    )
 
 @ui_router.get("/api/fun-fact", include_in_schema=True)
 async def get_fun_fact(db: Session = Depends(get_db)):

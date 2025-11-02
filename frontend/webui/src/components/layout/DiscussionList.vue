@@ -22,6 +22,7 @@ import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconFolder from '../../assets/icons/IconFolder.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
 
 const store = useDiscussionsStore();
 const authStore = useAuthStore();
@@ -171,6 +172,9 @@ function handleClone() {
                     <button v-if="user && user.user_ui_level >= 2" @click="goToFeed" class="btn-icon-flat" title="Go to Feed">
                         <IconHome class="h-4 w-4" />
                     </button>
+                    <router-link to="/news" class="btn-icon-flat" title="News">
+                        <IconFileText class="h-4 w-4" />
+                    </router-link>
                     <button @click="handleNewGroup" class="btn-icon-flat" title="New Group">
                         <IconFolder class="w-4 w-4" />
                     </button>

@@ -80,10 +80,17 @@ LOCALS_DIR = PROJECT_ROOT / "frontend" / "webui" / "public" / "locals"
 
 # --- Configuration Loading from Environment ---
 # Server settings
+workers_count = get_env_var("SERVER_WORKERS", cpu_count(), int)
+
+# Reverting the Windows worker cap to allow multiple workers, relying on the 'spawn' fix in main.py
+# if os.name == 'nt' and workers_count > 1:
+#     print("WARNING: Capping SERVER_WORKERS to 1 on Windows to prevent WinError 10022 (Invalid argument).")
+#     workers_count = 1
+
 SERVER_CONFIG = {
     "host": get_env_var("SERVER_HOST", "0.0.0.0"),
     "port": get_env_var("SERVER_PORT", 9642, int),
-    "workers": get_env_var("SERVER_WORKERS", cpu_count(), int),
+    "workers": workers_count,
     "debug": get_env_var("SERVER_DEBUG", False, bool),
     "https_enabled": get_env_var("HTTPS_ENABLED", False, bool),
     "ssl_certfile": get_env_var("SSL_CERTFILE", ""),

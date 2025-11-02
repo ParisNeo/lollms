@@ -16,29 +16,18 @@ let pristineState = '{}';
 // State to track which JSON fields are in edit mode
 const jsonEditStates = ref({});
 
-// NEW: UI Level options for the dropdown
-const uiLevels = [
-    { value: 0, label: 'Beginner' },
-    { value: 1, label: 'Novice' },
-    { value: 2, label: 'Intermediate' },
-    { value: 3, label: 'Advanced' },
-    { value: 4, label: 'Expert' }
-];
-
 const renderedSettingsByCategory = computed(() => {
     const allSettings = adminStore.globalSettings;
     const settingsToRender = allSettings.filter(setting => 
         setting.category !== 'Email Settings' && 
         setting.category !== 'Server' &&
+        setting.category !== 'Registration' &&
+        setting.category !== 'Defaults' &&
         setting.key !== 'password_recovery_mode'
     );
     
-    // UPDATE: Add 'Defaults' to the category order
     const categoryOrder = [
-        'Registration',
-        'Defaults',
         'Authentication',
-        'Services',
         'Global LLM Overrides'
     ];
 
@@ -163,10 +152,10 @@ async function handleSave() {
     <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
         <div class="p-6 border-b border-gray-200 dark:border-gray-700">
             <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
-                Global System Settings
+                Application Settings
             </h3>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Manage application-wide settings. Changes may require users to log out and back in.
+                Manage miscellaneous application-wide settings.
             </p>
         </div>
         <form v-if="Object.keys(renderedSettingsByCategory).length" @submit.prevent="handleSave" class="p-6">
@@ -176,25 +165,8 @@ async function handleSave() {
                     <div class="space-y-8">
                         <div v-for="setting in settings" :key="setting.key">
                             
-                            <!-- Special Case: registration_mode -->
-                            <div v-if="setting.key === 'registration_mode'">
-                                <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
-                                <select :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
-                                    <option value="direct">Direct (instantly active)</option>
-                                    <option value="admin_approval">Admin Approval</option>
-                                </select>
-                            </div>
-
-                            <!-- NEW: Special Case for default_user_ui_level -->
-                            <div v-else-if="setting.key === 'default_user_ui_level'">
-                                <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
-                                <select :id="setting.key" v-model.number="form[setting.key]" class="input-field mt-1">
-                                    <option v-for="level in uiLevels" :key="level.value" :value="level.value">{{ level.label }}</option>
-                                </select>
-                            </div>
-
                             <!-- Special Case: force_model_mode -->
-                            <div v-else-if="setting.key === 'force_model_mode'">
+                            <div v-if="setting.key.includes('force_') && setting.key.includes('_mode')">
                                 <label :for="setting.key" class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ setting.description }}</label>
                                 <select :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
                                     <option value="disabled">Disabled</option>
@@ -253,7 +225,7 @@ async function handleSave() {
             <div class="mt-8 pt-5 border-t border-gray-200 dark:border-gray-700">
                 <div class="flex justify-end">
                     <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">
-                        {{ isLoading ? 'Saving...' : 'Save Global Settings' }}
+                        {{ isLoading ? 'Saving...' : 'Save Settings' }}
                     </button>
                 </div>
             </div>
@@ -262,7 +234,7 @@ async function handleSave() {
             <p class="text-gray-500">Loading settings...</p>
         </div>
         <div v-else class="p-6 text-center">
-            <p class="text-gray-500">Could not load global settings.</p>
+            <p class="text-gray-500">No application settings available.</p>
         </div>
     </div>
 </template>

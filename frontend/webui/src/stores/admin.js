@@ -1,4 +1,3 @@
-// [UPDATE] frontend/webui/src/stores/admin.js
 import { defineStore } from 'pinia';
 import { ref, reactive, watch, onMounted } from 'vue';
 import apiClient from '../services/api';
@@ -663,6 +662,17 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('Custom logo removed.', 'success');
     }
 
+    async function uploadSslFile(file, fileType) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('file_type', fileType);
+        const response = await apiClient.post('/api/admin/upload-ssl-file', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        await fetchGlobalSettings(); // Refresh settings to get new path
+        return response.data.path;
+    }
+
 
     async function importOpenWebUIData(file) {
         isImporting.value = true;
@@ -834,6 +844,21 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
+    async function triggerRssScraping() {
+        const { useTasksStore } = await import('./tasks.js');
+        const tasksStore = useTasksStore();
+        try {
+            const response = await apiClient.post('/api/admin/rss-feeds/scrape');
+            const task = response.data;
+            tasksStore.addTask(task);
+            uiStore.openModal('tasksManager', { initialTaskId: task.id });
+            return task;
+        } catch (error) {
+            uiStore.addNotification('Failed to start RSS scraping task.', 'error');
+            return null;
+        }
+    }
+
 
     return {
         dashboardStats, isLoadingDashboardStats, fetchDashboardStats, broadcastMessage,
@@ -853,6 +878,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchRagBindings, fetchAvailableRagBindingTypes, addRagBinding, updateRagBinding, deleteRagBinding,
         fetchRagBindingModels, saveRagModelAlias, deleteRagModelAlias, fetchRagModelsForType,
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings, uploadWelcomeLogo, removeWelcomeLogo,
+        uploadSslFile,
         isImporting, importOpenWebUIData,
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
         isEnhancingEmail, enhanceEmail,
@@ -887,6 +913,7 @@ export const useAdminStore = defineStore('admin', () => {
         deleteRagAlias,
         availableRagVectorizers,
         fetchAvailableRagVectorizers,
-        refreshZooCache
+        refreshZooCache,
+        triggerRssScraping
     };
 });

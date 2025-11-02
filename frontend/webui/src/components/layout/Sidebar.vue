@@ -13,6 +13,7 @@ import IconSettings from '../../assets/icons/IconSettings.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -106,6 +107,14 @@ onUnmounted(() => {
         >
           <IconHome class="w-5 h-5 text-slate-500 dark:text-gray-400" />
         </button>
+
+        <router-link
+          to="/news"
+          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors"
+          title="News"
+        >
+            <IconFileText class="w-5 h-5 text-slate-500 dark:text-gray-400" />
+        </router-link>
 
         <router-link 
           to="/help" 

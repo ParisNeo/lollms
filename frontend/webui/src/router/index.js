@@ -13,6 +13,7 @@ import SsoLoginView from '../views/SsoLoginView.vue';
 import WelcomeView from '../views/WelcomeView.vue';
 import ImageStudioView from '../views/ImageStudioView.vue';
 import ImageEditorView from '../views/ImageEditorView.vue'; // Added this line
+import NewsView from '../views/NewsView.vue';
 
 const routes = [
   {
@@ -55,6 +56,11 @@ const routes = [
     path: '/datastores',
     name: 'DataStores',
     component: DataStoresView,
+  },
+    {
+    path: '/news',
+    name: 'News',
+    component: NewsView,
   },
   {
     path: '/help',

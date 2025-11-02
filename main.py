@@ -6,7 +6,7 @@ from typing import Optional
 import os
 import subprocess
 import sys
-from multiprocessing import cpu_count, Lock
+from multiprocessing import cpu_count, Lock, set_start_method
 from urllib.parse import urlparse
 from ascii_colors import ASCIIColors, trace_exception
 import asyncio
@@ -19,7 +19,7 @@ FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, inspect
+from sqlalchemy import or_, inspect, desc
 
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
@@ -38,7 +38,8 @@ from backend.db.models.connections import WebSocketConnection
 from backend.security import get_password_hash as hash_password
 from backend.migration_utils import LegacyDiscussion
 from backend.session import (
-    get_user_data_root, get_user_discussion_path, user_sessions
+    get_user_data_root, get_user_discussion_path, user_sessions,
+    build_lollms_client_from_params
 )
 from lollms_client import LollmsDataManager
 from backend.settings import settings
@@ -77,12 +78,103 @@ from backend.ws_manager import manager, listen_for_broadcasts
 from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
+from backend.routers.news import news_router
 from backend.zoo_cache import load_cache
 
 import uvicorn
 from backend.settings import settings
 
+# --- RSS Feed Imports ---
+from apscheduler.schedulers.background import BackgroundScheduler
+import feedparser
+try:
+    from scrapemaster import ScrapeMaster
+except ImportError:
+    ScrapeMaster = None
+from backend.db.models.news import RSSFeedSource, NewsArticle
+# --- End RSS Feed Imports ---
+
 broadcast_listener_task = None
+rss_scheduler = None
+
+def process_rss_feeds():
+    """
+    The main function for the background task to fetch and process RSS feeds.
+    """
+    db = db_session_module.SessionLocal()
+    try:
+        if not settings.get("rss_feed_enabled"):
+            print("INFO: RSS feed processing is disabled in settings.")
+            return
+
+        print("--- Starting RSS Feed Check ---")
+        
+        sources = db.query(RSSFeedSource).filter(RSSFeedSource.is_active == True).all()
+        if not sources:
+            print("INFO: No active RSS feed sources found.")
+            return
+            
+        admin_user = db.query(DBUser).filter(DBUser.is_admin == True).order_by(DBUser.id).first()
+        if not admin_user:
+            print("ERROR: No admin user found to run LLM processing for RSS feeds.")
+            return
+        
+        if not ScrapeMaster:
+            print("ERROR: ScrapeMaster library is not installed. Cannot process RSS feeds.")
+            return
+            
+        lc = build_lollms_client_from_params(username=admin_user.username)
+
+        for source in sources:
+            print(f"Processing feed: {source.name} ({source.url})")
+            feed = feedparser.parse(source.url)
+            
+            for entry in feed.entries:
+                article_url = entry.link
+                article_exists = db.query(NewsArticle).filter(NewsArticle.url == article_url).first()
+                
+                if not article_exists:
+                    print(f"  - New article found: {entry.title}")
+                    try:
+                        scraper = ScrapeMaster(article_url)
+                        scraped_content = scraper.scrape_markdown()
+                        if not scraped_content or len(scraped_content) < 100:
+                            print(f"    - Scraping failed or content too short for {article_url}")
+                            continue
+                        
+                        reformat_prompt = f"Reformat the following article into a well-structured news entry, using markdown for formatting. Keep the key information and make it easy to read:\n\n{scraped_content}"
+                        reformatted_content = lc.generate_text(reformat_prompt, max_new_tokens=2048)
+
+                        fun_fact_prompt = f"Based on the following article, generate a single, short, interesting 'fun fact' style summary. The fact must be a single sentence.\n\nArticle:\n{scraped_content}"
+                        fun_fact_content = lc.generate_text(fun_fact_prompt, max_new_tokens=100).strip()
+
+                        pub_date = None
+                        if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                            pub_date = datetime.datetime.fromtimestamp(time.mktime(entry.published_parsed))
+
+                        new_article = NewsArticle(
+                            source_id=source.id,
+                            title=entry.title,
+                            url=article_url,
+                            content=reformatted_content,
+                            fun_fact=fun_fact_content,
+                            publication_date=pub_date,
+                        )
+                        db.add(new_article)
+                        db.commit()
+                        print(f"    - Processed and saved: {entry.title}")
+
+                    except Exception as e:
+                        print(f"    - ERROR processing article {entry.title}: {e}")
+                        trace_exception(e)
+                        db.rollback()
+        print("--- RSS Feed Check Finished ---")
+    except Exception as e:
+        print(f"CRITICAL ERROR in RSS feed processing task: {e}")
+        trace_exception(e)
+    finally:
+        db.close()
+
 
 def run_one_time_startup_tasks(lock: Lock):
     """
@@ -342,7 +434,7 @@ async def startup_event():
     """
     This event runs for EACH worker process created by Uvicorn.
     """
-    global broadcast_listener_task
+    global broadcast_listener_task, rss_scheduler
     
     # Each worker must initialize its own database connection pool.
     init_database(APP_DB_URL)
@@ -360,6 +452,14 @@ async def startup_event():
     
     broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
     
+    if os.getpid() == os.getppid(): # Only run scheduler in the main process
+        if settings.get("rss_feed_enabled"):
+            interval = settings.get("rss_feed_check_interval_minutes", 60)
+            rss_scheduler = BackgroundScheduler(daemon=True)
+            rss_scheduler.add_job(process_rss_feeds, 'interval', minutes=interval, next_run_time=datetime.datetime.now() + datetime.timedelta(seconds=10))
+            rss_scheduler.start()
+            print(f"INFO: RSS feed checking scheduled to run every {interval} minutes.")
+
     print(f"INFO: Worker process (PID: {os.getpid()}) started and initialized.")
 
 async def shutdown_event():
@@ -370,6 +470,9 @@ async def shutdown_event():
             await broadcast_listener_task
         except asyncio.CancelledError:
             ASCIIColors.info(f"Broadcast listener task in worker {os.getpid()} cancelled successfully.")
+    if rss_scheduler and rss_scheduler.running:
+        rss_scheduler.shutdown()
+        ASCIIColors.info("RSS feed scheduler shut down.")
 
 app = FastAPI(
     title="LoLLMs Platform", 
@@ -408,6 +511,7 @@ app.include_router(tasks_router)
 app.include_router(help_router)
 app.include_router(prompts_router)
 app.include_router(memories_router)
+app.include_router(news_router)
 app.include_router(upload_router)
 app.include_router(assets_router)
 app.include_router(build_discussions_router())
@@ -419,7 +523,18 @@ app.include_router(image_studio_router)
 add_ui_routes(app)
 
 if __name__ == "__main__":
-    # This block is executed only by the main process, before Uvicorn starts workers.
+    # Set the multiprocessing start method for Windows compatibility.
+    # This must be done inside the __name__ == "__main__" block and before any other
+    # multiprocessing-related code is executed.
+    if os.name == 'nt':
+        try:
+            set_start_method('spawn')
+        except RuntimeError as e:
+            if "context has already been set" not in str(e):
+                raise
+            else:
+                pass # If it's already been set, we can ignore the error.
+
     init_database(APP_DB_URL)
 
     # Determine if it's a first run by checking for the DB file's existence.

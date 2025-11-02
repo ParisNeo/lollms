@@ -354,6 +354,18 @@ def _bootstrap_global_settings(connection):
             "value": False, "type": "boolean",
             "description": "Allow users to export messages as PowerPoint (.pptx) files. Requires python-pptx.",
             "category": "Builders"
+        },
+        "rss_feed_enabled": {
+            "value": False,
+            "type": "boolean",
+            "description": "Enable the periodic fetching of RSS feeds to generate news and fun facts.",
+            "category": "News Feed"
+        },
+        "rss_feed_check_interval_minutes": {
+            "value": 60,
+            "type": "integer",
+            "description": "How often (in minutes) to check for new articles in the RSS feeds.",
+            "category": "News Feed"
         }
     }
 
@@ -1273,6 +1285,19 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if not inspector.has_table("fun_facts"):
         FunFact.__table__.create(connection)
         print("INFO: Created 'fun_facts' table.")
+
+    # NEW TABLES
+    if not inspector.has_table("rss_feed_sources"):
+        from backend.db.models.news import RSSFeedSource
+        RSSFeedSource.__table__.create(connection)
+        print("INFO: Created 'rss_feed_sources' table.")
+        connection.commit()
+
+    if not inspector.has_table("news_articles"):
+        from backend.db.models.news import NewsArticle
+        NewsArticle.__table__.create(connection)
+        print("INFO: Created 'news_articles' table.")
+        connection.commit()
 
     if not inspector.has_table("tts_bindings"):
         TTSBinding.__table__.create(connection)

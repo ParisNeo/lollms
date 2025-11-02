@@ -371,6 +371,13 @@ function handleEditPersonality(personality, event) {
                                 <input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                                <button @click="selectModel(null)" class="menu-item-button" :class="{'selected': !activeModelName}">
+                                    <div class="flex items-center space-x-3 truncate">
+                                        <IconCpuChip class="w-6 h-6 p-0.5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
+                                    </div>
+                                </button>
+                                <div v-if="filteredAvailableModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
                                 <div v-if="dataStore.isLoadingLollmsModels" class="text-center p-4 text-sm text-gray-500">Loading models...</div>
                                 <div v-for="group in filteredAvailableModels" :key="group.label">
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
@@ -394,6 +401,13 @@ function handleEditPersonality(personality, event) {
                                 <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search TTI models..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                                <button @click="selectTtiModel(null)" class="menu-item-button" :class="{'selected': !activeTtiModelName}">
+                                    <div class="flex items-center space-x-3 truncate">
+                                        <IconPhoto class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
+                                    </div>
+                                </button>
+                                <div v-if="filteredAvailableTtiModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
                                 <div v-if="dataStore.isLoadingTtiModels" class="text-center p-4 text-sm text-gray-500">Loading TTI models...</div>
                                 <div v-else-if="filteredAvailableTtiModels.length === 0" class="text-center p-4 text-sm text-gray-500">No TTI models found.</div>
                                 <div v-for="group in filteredAvailableTtiModels" :key="group.label">
@@ -414,6 +428,13 @@ function handleEditPersonality(personality, event) {
                                 <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search Image models..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                                <button @click="selectItiModel(null)" class="menu-item-button" :class="{'selected': !activeItiModelName}">
+                                    <div class="flex items-center space-x-3 truncate">
+                                        <IconPencil class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
+                                    </div>
+                                </button>
+                                <div v-if="filteredAvailableTtiModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
                                 <div v-if="dataStore.isLoadingTtiModels" class="text-center p-4 text-sm text-gray-500">Loading models...</div>
                                 <div v-else-if="filteredAvailableTtiModels.length === 0" class="text-center p-4 text-sm text-gray-500">No models found.</div>
                                 <div v-for="group in filteredAvailableTtiModels" :key="group.label">
@@ -434,6 +455,13 @@ function handleEditPersonality(personality, event) {
                                 <input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search TTS models..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                                <button @click="selectTtsModel(null)" class="menu-item-button" :class="{'selected': !activeTtsModelName}">
+                                    <div class="flex items-center space-x-3 truncate">
+                                        <IconMicrophone class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
+                                    </div>
+                                </button>
+                                <div v-if="filteredAvailableTtsModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
                                 <div v-if="dataStore.isLoadingTtsModels" class="text-center p-4 text-sm text-gray-500">Loading TTS models...</div>
                                 <div v-else-if="filteredAvailableTtsModels.length === 0" class="text-center p-4 text-sm text-gray-500">No TTS models found.</div>
                                 <div v-for="group in filteredAvailableTtsModels" :key="group.label">
@@ -454,6 +482,13 @@ function handleEditPersonality(personality, event) {
                                 <input type="text" v-model="sttModelSearchTerm" @click.stop placeholder="Search STT models..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                                <button @click="selectSttModel(null)" class="menu-item-button" :class="{'selected': !activeSttModelName}">
+                                    <div class="flex items-center space-x-3 truncate">
+                                        <IconMicrophone class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
+                                    </div>
+                                </button>
+                                <div v-if="filteredAvailableSttModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
                                 <div v-if="dataStore.isLoadingSttModels" class="text-center p-4 text-sm text-gray-500">Loading STT models...</div>
                                 <div v-else-if="filteredAvailableSttModels.length === 0" class="text-center p-4 text-sm text-gray-500">No STT models found.</div>
                                 <div v-for="group in filteredAvailableSttModels" :key="group.label">
@@ -474,6 +509,13 @@ function handleEditPersonality(personality, event) {
                                 <input type="text" v-model="personalitySearchTerm" @click.stop placeholder="Search personalities..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                                <button @click="selectPersonality(null)" class="menu-item-button" :class="{'selected': !activePersonalityId}">
+                                    <div class="flex items-center space-x-3 truncate">
+                                        <IconUserCircle class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
+                                    </div>
+                                </button>
+                                <div v-if="filteredAvailablePersonalities.length > 0" class="my-1 border-t dark:border-gray-600"></div>
                                 <div v-if="dataStore.isLoadingPersonalities" class="text-center p-4 text-sm text-gray-500">Loading...</div>
                                 <div v-for="group in filteredAvailablePersonalities" :key="group.label">
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>

@@ -15,7 +15,6 @@ import IconSparkles from '../assets/icons/IconSparkles.vue';
 import IconUserCircle from '../assets/icons/IconUserCircle.vue';
 import IconCpuChip from '../assets/icons/IconCpuChip.vue';
 import IconCog from '../assets/icons/IconCog.vue';
-import IconKey from '../assets/icons/IconKey.vue';
 import IconMail from '../assets/icons/IconMail.vue';
 import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
 import IconSend from '../assets/icons/IconSend.vue';
@@ -27,6 +26,7 @@ import IconHome from '../assets/icons/IconHome.vue';
 import IconBuild from '../assets/icons/IconBuild.vue';
 import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
+import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -35,37 +35,17 @@ const authStore = useAuthStore();
 const wsConnected = computed(() => authStore.wsConnected); 
 const openGroups = ref(['bindings']); // Keep the 'bindings' group open by default
 
-// Define components for dynamic loading
-const components = {
-  dashboard: defineAsyncComponent(() => import('../components/admin/Dashboard.vue')),
-  users: defineAsyncComponent(() => import('../components/admin/UserTable.vue')),
-  tasks: defineAsyncComponent(() => import('../components/admin/TaskManager.vue')),
-  broadcast: defineAsyncComponent(() => import('../components/admin/BroadcastMessage.vue')),
-  llm_bindings: defineAsyncComponent(() => import('../components/admin/bindings/LLMBindingsSettings.vue')),
-  tti_bindings: defineAsyncComponent(() => import('../components/admin/bindings/TTIBindingsSettings.vue')),
-  tts_bindings: defineAsyncComponent(() => import('../components/admin/bindings/TTSBindingsSettings.vue')),
-  stt_bindings: defineAsyncComponent(() => import('../components/admin/bindings/STTBindingsSettings.vue')),
-  rag_bindings: defineAsyncComponent(() => import('../components/admin/bindings/RAGBindingsSettings.vue')),
-  builders: defineAsyncComponent(() => import('../components/admin/BuildersSettings.vue')),
-  ai_bot: defineAsyncComponent(() => import('../components/admin/AiBotSettings.vue')),
-  services: defineAsyncComponent(() => import('../components/settings/ServicesSettings.vue')),
-  apps: defineAsyncComponent(() => import('../components/admin/zoos/AppsManagement.vue')),
-  mcps: defineAsyncComponent(() => import('../components/admin/zoos/McpsManagement.vue')),
-  personalities: defineAsyncComponent(() => import('../components/admin/zoos/PersonalitiesManagement.vue')),
-  prompts: defineAsyncComponent(() => import('../components/admin/zoos/PromptsManagement.vue')),
-  global_settings: defineAsyncComponent(() => import('../components/admin/GlobalSettings.vue')),
-  https: defineAsyncComponent(() => import('../components/admin/HttpsSettings.vue')),
-  email: defineAsyncComponent(() => import('../components/admin/EmailSettings.vue')),
-  import: defineAsyncComponent(() => import('../components/admin/ImportTools.vue')),
-  welcome_settings: defineAsyncComponent(() => import('../components/admin/WelcomeSettings.vue')),
-};
+const AdminPanel = defineAsyncComponent(() => import('../components/admin/AdminPanel.vue'));
 
 const sections = [
   { type: 'link', id: 'dashboard', name: 'Dashboard', icon: markRaw(IconDashboard) },
+  { type: 'link', id: 'server_settings', name: 'Server Settings', icon: markRaw(IconServer) },
   { type: 'divider', label: 'Management' },
   { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },
   { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
   { type: 'link', id: 'broadcast', name: 'Broadcast', icon: markRaw(IconSend) },
+  { type: 'divider', label: 'Content' },
+  { type: 'link', id: 'rss_feeds', name: 'RSS Feeds', icon: markRaw(IconGlobeAlt) },
   { type: 'divider', label: 'Zoos' },
   { type: 'link', id: 'personalities', name: 'Personalities', icon: markRaw(IconUserCircle) },
   { type: 'link', id: 'prompts', name: 'Prompts', icon: markRaw(IconSparkles) },
@@ -82,8 +62,7 @@ const sections = [
   { type: 'link', id: 'services', name: 'API Services', icon: markRaw(IconServer) },
   { type: 'divider', label: 'System & Tools' },
   { type: 'link', id: 'welcome_settings', name: 'Welcome Page', icon: markRaw(IconHome) },
-  { type: 'link', id: 'global_settings', name: 'Global Settings', icon: markRaw(IconCog) },
-  { type: 'link', id: 'https', name: 'HTTPS Settings', icon: markRaw(IconKey) },
+  { type: 'link', id: 'global_settings', name: 'Application Settings', icon: markRaw(IconCog) },
   { type: 'link', id: 'email', name: 'Email Settings', icon: markRaw(IconMail) },
   { type: 'link', id: 'import', name: 'Import Tools', icon: markRaw(IconArrowDownTray) },
 ];
@@ -93,10 +72,6 @@ const activeSectionId = computed({
     set: (sectionId) => {
         router.push({ query: { ...route.query, section: sectionId } });
     }
-});
-
-const activeComponent = computed(() => {
-    return components[activeSectionId.value] || components.dashboard;
 });
 
 function toggleGroup(groupId) {
@@ -154,16 +129,7 @@ function toggleGroup(groupId) {
         </template>
         <template #main>
             <div class="p-4 sm:p-6">
-                <Suspense>
-                    <template #default>
-                        <component :is="activeComponent" :key="activeSectionId" />
-                    </template>
-                    <template #fallback>
-                        <div class="text-center py-10">
-                            <p class="text-gray-500 dark:text-gray-400">Loading component...</p>
-                        </div>
-                    </template>
-                </Suspense>
+                <AdminPanel :active-tab="activeSectionId" />
             </div>
         </template>
     </PageViewLayout>
