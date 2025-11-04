@@ -7,21 +7,21 @@ import { storeToRefs } from 'pinia';
 const adminStore = useAdminStore();
 const dataStore = useDataStore();
 
-const { globalSettings } = storeToRefs(adminStore);
+const { globalSettings, aiBotSettings, isLoadingAiBotSettings } = storeToRefs(adminStore);
 const { availableLollmsModels, publicPersonalities } = storeToRefs(dataStore);
 
 const form = ref({
     ai_bot_enabled: false,
-    ai_bot_binding_model: '',
-    ai_bot_personality_id: '',
-    ai_bot_system_prompt: ''
+    ai_bot_system_prompt: '',
+    lollms_model_name: '',
+    active_personality_id: ''
 });
 
 const isLoading = ref(false);
 const hasChanges = ref(false);
 let pristineState = '{}';
 
-const botSettings = computed(() => {
+const botGlobalSettings = computed(() => {
     return globalSettings.value.filter(s => s.category === 'AI Bot');
 });
 
@@ -33,41 +33,55 @@ const availablePersonalitiesForSelect = computed(() => {
 });
 
 onMounted(() => {
-    if (globalSettings.value.length === 0) {
-        adminStore.fetchGlobalSettings();
-    } else {
-        populateForm();
-    }
-    if (availableLollmsModels.value.length === 0) {
-        dataStore.fetchAdminAvailableLollmsModels();
-    }
-    if (publicPersonalities.value.length === 0) {
-        dataStore.fetchPersonalities();
-    }
+    if (globalSettings.value.length === 0) adminStore.fetchGlobalSettings();
+    if (!aiBotSettings.value) adminStore.fetchAiBotSettings();
+    if (availableLollmsModels.value.length === 0) dataStore.fetchAdminAvailableLollmsModels();
+    if (publicPersonalities.value.length === 0) dataStore.fetchPersonalities();
 });
 
-watch(() => globalSettings.value, populateForm, { deep: true });
+watch([globalSettings, aiBotSettings], populateForm, { deep: true });
 
 watch(form, (newValue) => {
     hasChanges.value = JSON.stringify(newValue) !== pristineState;
 }, { deep: true });
 
 function populateForm() {
-    const newFormState = {};
-    if (botSettings.value.length > 0) {
-        botSettings.value.forEach(setting => {
+    const newFormState = { ...form.value };
+    
+    if (botGlobalSettings.value.length > 0) {
+        botGlobalSettings.value.forEach(setting => {
             newFormState[setting.key] = setting.value;
         });
-        form.value = { ...form.value, ...newFormState };
-        pristineState = JSON.stringify(form.value);
-        hasChanges.value = false;
     }
+
+    if (aiBotSettings.value) {
+        newFormState.lollms_model_name = aiBotSettings.value.lollms_model_name;
+        newFormState.active_personality_id = aiBotSettings.value.active_personality_id;
+    }
+    
+    form.value = newFormState;
+    pristineState = JSON.stringify(form.value);
+    hasChanges.value = false;
 }
 
 async function handleSave() {
     isLoading.value = true;
     try {
-        await adminStore.updateGlobalSettings({ ...form.value });
+        const globalPayload = {
+            ai_bot_enabled: form.value.ai_bot_enabled,
+            ai_bot_system_prompt: form.value.ai_bot_system_prompt,
+        };
+        
+        const botUserPayload = {
+            lollms_model_name: form.value.lollms_model_name,
+            active_personality_id: form.value.active_personality_id
+        };
+
+        await Promise.all([
+            adminStore.updateGlobalSettings(globalPayload),
+            adminStore.updateAiBotSettings(botUserPayload)
+        ]);
+
     } finally {
         isLoading.value = false;
     }
@@ -81,10 +95,11 @@ async function handleSave() {
                 AI Bot Settings
             </h3>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Configure the automated AI assistant that responds to @lollms mentions.
+                Configure the automated AI assistant that responds to @lollms mentions and performs system tasks like RSS processing.
             </p>
         </div>
-        <form v-if="Object.keys(form).length" @submit.prevent="handleSave" class="p-6">
+        <div v-if="isLoadingAiBotSettings" class="p-6 text-center">Loading settings...</div>
+        <form v-else-if="Object.keys(form).length" @submit.prevent="handleSave" class="p-6">
             <div class="space-y-8">
                 <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                     <span class="flex-grow flex flex-col">
@@ -96,24 +111,24 @@ async function handleSave() {
                     </button>
                 </div>
 
-                <div v-if="form.ai_bot_enabled" class="space-y-6 pt-6 border-t dark:border-gray-600">
+                <div class="space-y-6 pt-6 border-t dark:border-gray-600">
                     <div>
                         <label for="bot-model" class="block text-sm font-medium">Bot Model</label>
-                        <select id="bot-model" v-model="form.ai_bot_binding_model" class="input-field mt-1">
+                        <select id="bot-model" v-model="form.lollms_model_name" class="input-field mt-1">
                             <option value="">-- Select a Model --</option>
                             <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
                         </select>
-                        <p class="mt-1 text-xs text-gray-500">The model the bot will use to generate replies.</p>
+                        <p class="mt-1 text-xs text-gray-500">The model the bot will use for all system-level generations.</p>
                     </div>
                     <div>
                         <label for="bot-personality" class="block text-sm font-medium">Bot Personality</label>
-                        <select id="bot-personality" v-model="form.ai_bot_personality_id" class="input-field mt-1">
+                        <select id="bot-personality" v-model="form.active_personality_id" class="input-field mt-1">
                             <option value="">-- Use Default System Prompt --</option>
                             <option v-for="p in availablePersonalitiesForSelect" :key="p.id" :value="p.id">{{ p.name }}</option>
                         </select>
                          <p class="mt-1 text-xs text-gray-500">Select a personality to define the bot's behavior.</p>
                     </div>
-                    <div v-if="!form.ai_bot_personality_id">
+                    <div v-if="!form.active_personality_id">
                         <label for="bot-prompt" class="block text-sm font-medium">Default System Prompt</label>
                         <textarea id="bot-prompt" v-model="form.ai_bot_system_prompt" rows="6" class="input-field mt-1"></textarea>
                         <p class="mt-1 text-xs text-gray-500">The system prompt used if no personality is selected.</p>

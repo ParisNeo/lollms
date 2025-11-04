@@ -27,6 +27,7 @@ import IconBuild from '../assets/icons/IconBuild.vue';
 import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
 import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
+import IconFileText from '../assets/icons/IconFileText.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -45,7 +46,9 @@ const sections = [
   { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
   { type: 'link', id: 'broadcast', name: 'Broadcast', icon: markRaw(IconSend) },
   { type: 'divider', label: 'Content' },
+  { type: 'link', id: 'news_management', name: 'News Articles', icon: markRaw(IconFileText) },
   { type: 'link', id: 'rss_feeds', name: 'RSS Feeds', icon: markRaw(IconGlobeAlt) },
+  { type: 'link', id: 'news_feed_settings', name: 'News Feed Settings', icon: markRaw(IconCog) },
   { type: 'divider', label: 'Zoos' },
   { type: 'link', id: 'personalities', name: 'Personalities', icon: markRaw(IconUserCircle) },
   { type: 'link', id: 'prompts', name: 'Prompts', icon: markRaw(IconSparkles) },

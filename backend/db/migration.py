@@ -288,14 +288,6 @@ def _bootstrap_global_settings(connection):
             "value": False,
             "type": "boolean", "description": "Enable the @lollms AI bot to respond to mentions in the social feed.", "category": "AI Bot"
         },
-        "ai_bot_binding_model": {
-            "value": "",
-            "type": "string", "description": "The full binding/model name for the AI bot (e.g., 'ollama/llama3').", "category": "AI Bot"
-        },
-        "ai_bot_personality_id": {
-            "value": "",
-            "type": "string", "description": "The ID of the personality to use for the bot. Overrides the system prompt if set.", "category": "AI Bot"
-        },
         "ai_bot_system_prompt": {
             "value": "You are lollms, a helpful AI assistant integrated into this social platform. When a user mentions you using '@lollms', you should respond to their post helpfully and concisely. Your goal is to be a friendly and informative presence in the community.",
             "type": "text", "description": "The system prompt to use for the bot if no personality is selected.", "category": "AI Bot"

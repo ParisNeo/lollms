@@ -27,7 +27,6 @@ from backend.task_manager import Task
 
 social_router = APIRouter(prefix="/api/social", tags=["Social"])
 
-
 def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
     """
     A background task to generate and post a reply from the @lollms bot.
@@ -46,24 +45,23 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             task.log("AI Bot is disabled in settings. Aborting.", "WARNING")
             return {"status": "aborted", "reason": "AI Bot is disabled."}
             
-        ai_bot_model = settings.get("ai_bot_binding_model")
-        if not ai_bot_model:
-            task.log("CRITICAL: No model is configured for the AI Bot.", "ERROR")
+        if not lollms_bot_user.lollms_model_name:
+            task.log("CRITICAL: No model is configured for the AI Bot in the admin panel.", "ERROR")
             raise Exception("AI Bot model not configured.")
 
-        task.log(f"Bot enabled, using model: {ai_bot_model}")
+        task.log(f"Bot enabled, using model: {lollms_bot_user.lollms_model_name}")
 
         # 2. Fetch the content that triggered the mention
         post_id = None
         context_text = ""
         if mention_type == 'post':
-            post = db.query(DBPost).filter(DBPost.id == item_id).first()
+            post = db.query(DBPost).options(joinedload(DBPost.author)).filter(DBPost.id == item_id).first()
             if not post:
                 raise Exception(f"Post with ID {item_id} not found.")
             post_id = post.id
             context_text = f"User '{post.author.username}' wrote a post: {post.content}"
         elif mention_type == 'comment':
-            comment = db.query(DBComment).filter(DBComment.id == item_id).first()
+            comment = db.query(DBComment).options(joinedload(DBComment.author)).filter(DBComment.id == item_id).first()
             if not comment:
                 raise Exception(f"Comment with ID {item_id} not found.")
             post_id = comment.post_id
@@ -75,31 +73,27 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
 
         # 3. Generate the response
         task.log("Generating AI response...")
-        binding_alias=ai_bot_model.split('/')[0]
-        model_name="/".join(ai_bot_model.split('/')[1:])
         
-        target_binding_alias = binding_alias
-        if not target_binding_alias and model_name and '/' in model_name:
-            target_binding_alias = model_name.split('/', 1)[0]
-
-        if target_binding_alias:
-            binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
-
-        if not binding_to_use:
-            binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
-            if not binding_to_use:
-                raise HTTPException(status_code=404, detail="No active LLM bindings are configured.")
-
-        cfg = binding_to_use.config
-        cfg["model_name"]=model_name
-
-        lc = LollmsClient(llm_binding_name=binding_to_use.name, llm_binding_config={
-            **cfg
-        })
-
-        system_prompt = settings.get("ai_bot_system_prompt")
+        lc = build_lollms_client_from_params(username=lollms_bot_user.username)
         
-        response_text = lc.generate_text(context_text, system_prompt=system_prompt+"\n"+"** important ** You are commenting on the user's post. Make sure your comment fits the 2000 letters limit.", stream=False)
+        # Determine system prompt: personality first, then global setting
+        system_prompt = ""
+        if lollms_bot_user.active_personality_id:
+            personality = db.query(DBPersonality).filter(DBPersonality.id == lollms_bot_user.active_personality_id).first()
+            if personality:
+                system_prompt = personality.prompt_text
+                task.log(f"Using personality: '{personality.name}'")
+        
+        if not system_prompt:
+            system_prompt = settings.get("ai_bot_system_prompt")
+            task.log("Using global default system prompt.")
+        
+        response_text = lc.generate_text(
+            context_text, 
+            system_prompt=system_prompt + "\n**Important:** You are commenting on the user's post. Your response must not exceed 2000 characters.", 
+            stream=False,
+            max_new_tokens=512
+        )
         
         if not response_text or not response_text.strip():
             task.log("AI generated an empty response. Aborting.", "WARNING")
@@ -112,7 +106,7 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         new_comment = DBComment(
             post_id=post_id,
             author_id=lollms_bot_user.id,
-            content=response_text.strip()
+            content=response_text.strip()[:2000] # Enforce character limit
         )
         db.add(new_comment)
         db.commit()
@@ -122,7 +116,7 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         # 5. Broadcast the new comment to all clients
         comment_public = CommentPublic(
             id=new_comment.id,
-            content=new_comment.content[:2000],
+            content=new_comment.content,
             created_at=new_comment.created_at,
             author=AuthorPublic.from_orm(new_comment.author)
         )
@@ -135,14 +129,6 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             }
         }
         
-        new_comment = DBComment(
-            post_id=post_id,
-            author_id=lollms_bot_user.id,
-            content=new_comment.content
-        )
-        db.add(new_comment)
-        db.commit()
-        db.refresh(new_comment)
         manager.broadcast_sync(payload)
         task.log("Broadcasted new comment to clients.")
         task.set_progress(100)
@@ -158,7 +144,6 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
     finally:
         if db:
             db.close()
-
 def get_post_public(db: Session, db_post: DBPost, current_user_id: int) -> PostPublic:
     like_count = db.query(func.count(DBPostLike.user_id)).filter(DBPostLike.post_id == db_post.id).scalar() or 0
     has_liked = db.query(DBPostLike).filter(DBPostLike.post_id == db_post.id, DBPostLike.user_id == current_user_id).first() is not None

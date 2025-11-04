@@ -72,6 +72,9 @@ export const useAdminStore = defineStore('admin', () => {
     const globalSettings = ref([]);
     const isLoadingSettings = ref(false);
 
+    const aiBotSettings = ref(null); // NEW: For @lollms user settings
+    const isLoadingAiBotSettings = ref(false); // NEW
+
     const isImporting = ref(false);
     const isEnhancingEmail = ref(false);
     
@@ -110,6 +113,9 @@ export const useAdminStore = defineStore('admin', () => {
     const funFactCategories = ref([]);
     const isLoadingFunFactCategories = ref(false);
     
+    const newsArticles = ref([]);
+    const isLoadingNewsArticles = ref(false);
+
     const serverInfo = ref(null);
     const isLoadingServerInfo = ref(false);
     const globalGenerationStats = ref(null);
@@ -195,6 +201,10 @@ export const useAdminStore = defineStore('admin', () => {
             console.log(`[Admin Store] Refreshing Personalities due to task: ${task.name}`);
             const { useDataStore } = await import('./data.js');
             promises.push(useDataStore().fetchPersonalities(), fetchZooPersonalities());
+        }
+
+        if (taskName.includes('rss feed scraping')) {
+            promises.push(fetchNewsArticles());
         }
 
         if (promises.length > 0) {
@@ -648,6 +658,24 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('Global settings updated.', 'success');
     }
 
+    // --- NEW AI BOT SETTINGS ACTIONS ---
+    async function fetchAiBotSettings() {
+        isLoadingAiBotSettings.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/ai-bot-settings');
+            aiBotSettings.value = response.data;
+        } finally {
+            isLoadingAiBotSettings.value = false;
+        }
+    }
+
+    async function updateAiBotSettings(settings) {
+        const response = await apiClient.put('/api/admin/ai-bot-settings', settings);
+        aiBotSettings.value = response.data;
+        uiStore.addNotification('AI Bot user settings updated.', 'success');
+    }
+    // --- END NEW AI BOT ACTIONS ---
+
     async function uploadWelcomeLogo(file) {
         const formData = new FormData();
         formData.append('file', file);
@@ -805,6 +833,27 @@ export const useAdminStore = defineStore('admin', () => {
     async function exportCategory(categoryId, categoryName) { const response = await apiClient.get(`/api/admin/fun-facts/categories/${categoryId}/export`, { responseType: 'blob' }); const url = URL.createObjectURL(new Blob([response.data])); const a = document.createElement('a'); a.href = url; a.download = `fun_facts_${categoryName}.json`; a.click(); URL.revokeObjectURL(url); }
     async function importFunFacts(data) { const payload = { fun_facts: data }; const response = await apiClient.post('/api/admin/fun-facts/import', payload); await Promise.all([fetchFunFacts(), fetchFunFactCategories()]); uiStore.addNotification(`Imported ${response.data.facts_created} facts and ${response.data.categories_created} new categories.`, 'success'); }
     async function importCategoryFromFile(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/fun-facts/categories/import', formData); await Promise.all([fetchFunFacts(), fetchFunFactCategories()]); uiStore.addNotification(`Imported ${response.data.facts_created} facts for category.`, 'success'); }
+    
+    // --- News Article Actions ---
+    async function fetchNewsArticles() {
+        isLoadingNewsArticles.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/news-articles');
+            newsArticles.value = response.data;
+        } finally {
+            isLoadingNewsArticles.value = false;
+        }
+    }
+    async function updateNewsArticle(id, payload) {
+        await apiClient.put(`/api/admin/news-articles/${id}`, payload);
+        await fetchNewsArticles();
+        uiStore.addNotification('Article updated.', 'success');
+    }
+    async function deleteBatchNewsArticles(ids) {
+        await apiClient.post('/api/admin/news-articles/batch-delete', { article_ids: ids });
+        await fetchNewsArticles();
+        uiStore.addNotification(`${ids.length} article(s) deleted.`, 'success');
+    }
 
     async function addOrUpdateRagAlias(payload) {
         const response = await apiClient.post('/api/admin/rag/aliases', payload);
@@ -878,6 +927,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchRagBindings, fetchAvailableRagBindingTypes, addRagBinding, updateRagBinding, deleteRagBinding,
         fetchRagBindingModels, saveRagModelAlias, deleteRagModelAlias, fetchRagModelsForType,
         globalSettings, isLoadingSettings, fetchGlobalSettings, updateGlobalSettings, uploadWelcomeLogo, removeWelcomeLogo,
+        aiBotSettings, isLoadingAiBotSettings, fetchAiBotSettings, updateAiBotSettings, // NEW
         uploadSslFile,
         isImporting, importOpenWebUIData,
         adminAvailableLollmsModels, isLoadingLollmsModels, fetchAdminAvailableLollmsModels,
@@ -901,6 +951,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact,
         createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, importFunFacts,
         exportCategory, importCategoryFromFile,
+        newsArticles, isLoadingNewsArticles, fetchNewsArticles, updateNewsArticle, deleteBatchNewsArticles,
         connectedUsers, isLoadingConnectedUsers, fetchConnectedUsers,
         serverInfo, isLoadingServerInfo, fetchServerInfo,
         globalGenerationStats, isLoadingGlobalGenerationStats, fetchGlobalGenerationStats,

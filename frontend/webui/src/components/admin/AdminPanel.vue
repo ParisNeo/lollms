@@ -32,6 +32,8 @@ const BroadcastMessage = defineAsyncComponent(() => import('./BroadcastMessage.v
 const BuildersSettings = defineAsyncComponent(() => import('./BuildersSettings.vue'));
 const WelcomeSettings = defineAsyncComponent(() => import('./WelcomeSettings.vue'));
 const RssManagement = defineAsyncComponent(() => import('./RssManagement.vue'));
+const NewsFeedSettings = defineAsyncComponent(() => import('./NewsFeedSettings.vue'));
+const NewsManagement = defineAsyncComponent(() => import('./NewsManagement.vue'));
 
 
 const tabs = [
@@ -57,6 +59,8 @@ const tabs = [
     { id: 'import', component: ImportTools },
     { id: 'welcome_settings', component: WelcomeSettings },
     { id: 'rss_feeds', component: RssManagement },
+    { id: 'news_feed_settings', component: NewsFeedSettings },
+    { id: 'news_management', component: NewsManagement },
 ];
 
 const activeComponent = computed(() => {

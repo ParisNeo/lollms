@@ -301,18 +301,27 @@ def get_current_admin_user(current_user: UserAuthDetails = Depends(get_current_a
     return current_user
 
 def load_mcps(username):
-    session = user_sessions[username]
+    session = user_sessions.get(username)
+    is_temp_session = not session
+    
     servers_infos = {}
     db_for_mcp = next(get_db())
     try:
-        
         app_mcps = db_for_mcp.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.app_metadata['item_type'].as_string() == 'mcp').all()
         system_mcps = db_for_mcp.query(DBMCP).filter(DBMCP.type == 'system', DBMCP.active == True).all()
         user_db = db_for_mcp.query(DBUser).filter(DBUser.username == username).first()
         
         personal_mcps = []
+        access_token = None
+        
         if user_db:
-            session["access_token"] = create_access_token(data={"sub": user_db.username})
+            if session and not is_temp_session:
+                session["access_token"] = create_access_token(data={"sub": user_db.username})
+                access_token = session.get("access_token")
+            else:
+                # Generate a temporary token if no session exists (for background tasks)
+                access_token = create_access_token(data={"sub": user_db.username})
+            
             personal_mcps = [mcp for mcp in user_db.personal_mcps if mcp.active]
 
         all_active_mcps = app_mcps + system_mcps + personal_mcps
@@ -327,8 +336,8 @@ def load_mcps(username):
                 
                 server_info = {"server_url": mcp_full_url}
                 
-                if mcp.authentication_type == "lollms_chat_auth":
-                    server_info["auth_config"] = { "type": "bearer", "token": session.get("access_token") }
+                if mcp.authentication_type == "lollms_chat_auth" and access_token:
+                    server_info["auth_config"] = { "type": "bearer", "token": access_token }
                 elif mcp.authentication_type == "bearer":
                     server_info["auth_config"] = { "type": "bearer", "token": mcp.authentication_key }
 
@@ -381,15 +390,31 @@ def build_lollms_client_from_params(
     stt_params: Optional[Dict[str, Any]] = None
 ) -> LollmsClient:
     session = user_sessions.get(username)
+    
+    # NEW: If no session, create a temporary one for this call.
+    # This is for background tasks that need a client but don't have a user session.
+    is_temp_session = False
     if not session:
-        raise HTTPException(status_code=500, detail="User session not found, cannot build LollmsClient.")
+        is_temp_session = True
+        session = {
+            "lollms_clients_cache": {},
+            "safe_store_instances": {},
+            "discussions": {},
+            "llm_params": {},
+        }
+        print(f"INFO: No active session for '{username}'. Creating temporary client context.")
 
     db = next(get_db())
     try:
         user_db = db.query(DBUser).filter(DBUser.username == username).first()
+        if not user_db:
+             raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
+
         binding_to_use = None
         
-        user_model_full = session.get("lollms_model_name")
+        # Determine the model name from session or DB
+        user_model_full = session.get("lollms_model_name") or user_db.lollms_model_name
+
         if user_model_full:
             target_binding_alias = binding_alias
             if not target_binding_alias and '/' in user_model_full:
@@ -617,15 +642,20 @@ def build_lollms_client_from_params(
         cache_key = json.dumps(client_init_params, sort_keys=True) if client_init_params else "{}"
             
         session_cache = session.setdefault("lollms_clients_cache", {})
-        if cache_key in session_cache:
+        
+        # Don't cache for temporary sessions
+        if not is_temp_session and cache_key in session_cache:
             ASCIIColors.debug(f"INFO: Returning cached LollmsClient for user '{username}'.")
             return session_cache[cache_key]
 
         try:
             ASCIIColors.magenta(f"INFO: Initializing LollmsClient for user '{username}'.")
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
-            session_cache[cache_key] = lc
-            ASCIIColors.debug(f"INFO: Caching new LollmsClient for user '{username}'.")
+            
+            if not is_temp_session:
+                session_cache[cache_key] = lc
+                ASCIIColors.debug(f"INFO: Caching new LollmsClient for user '{username}'.")
+            
             return lc
         except Exception as e:
             traceback.print_exc()

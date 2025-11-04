@@ -86,94 +86,29 @@ from backend.settings import settings
 
 # --- RSS Feed Imports ---
 from apscheduler.schedulers.background import BackgroundScheduler
-import feedparser
-try:
-    from scrapemaster import ScrapeMaster
-except ImportError:
-    ScrapeMaster = None
-from backend.db.models.news import RSSFeedSource, NewsArticle
+from backend.tasks.news_tasks import _scrape_rss_feeds_task
 # --- End RSS Feed Imports ---
 
 broadcast_listener_task = None
 rss_scheduler = None
+startup_lock = Lock() # Moved to global scope
 
-def process_rss_feeds():
+def scheduled_rss_job():
     """
-    The main function for the background task to fetch and process RSS feeds.
+    Wrapper function to submit the RSS scraping task to the task manager.
     """
-    db = db_session_module.SessionLocal()
-    try:
-        if not settings.get("rss_feed_enabled"):
-            print("INFO: RSS feed processing is disabled in settings.")
-            return
-
-        print("--- Starting RSS Feed Check ---")
+    # Check if a scraping task is already running to avoid duplicates
+    active_tasks = task_manager.get_all_tasks()
+    if any(t.name == "Scheduled RSS Feed Scraping" and t.status in ['running', 'pending'] for t in active_tasks):
+        print("INFO: Scheduled RSS scraping skipped as a similar task is already running.")
+        return
         
-        sources = db.query(RSSFeedSource).filter(RSSFeedSource.is_active == True).all()
-        if not sources:
-            print("INFO: No active RSS feed sources found.")
-            return
-            
-        admin_user = db.query(DBUser).filter(DBUser.is_admin == True).order_by(DBUser.id).first()
-        if not admin_user:
-            print("ERROR: No admin user found to run LLM processing for RSS feeds.")
-            return
-        
-        if not ScrapeMaster:
-            print("ERROR: ScrapeMaster library is not installed. Cannot process RSS feeds.")
-            return
-            
-        lc = build_lollms_client_from_params(username=admin_user.username)
-
-        for source in sources:
-            print(f"Processing feed: {source.name} ({source.url})")
-            feed = feedparser.parse(source.url)
-            
-            for entry in feed.entries:
-                article_url = entry.link
-                article_exists = db.query(NewsArticle).filter(NewsArticle.url == article_url).first()
-                
-                if not article_exists:
-                    print(f"  - New article found: {entry.title}")
-                    try:
-                        scraper = ScrapeMaster(article_url)
-                        scraped_content = scraper.scrape_markdown()
-                        if not scraped_content or len(scraped_content) < 100:
-                            print(f"    - Scraping failed or content too short for {article_url}")
-                            continue
-                        
-                        reformat_prompt = f"Reformat the following article into a well-structured news entry, using markdown for formatting. Keep the key information and make it easy to read:\n\n{scraped_content}"
-                        reformatted_content = lc.generate_text(reformat_prompt, max_new_tokens=2048)
-
-                        fun_fact_prompt = f"Based on the following article, generate a single, short, interesting 'fun fact' style summary. The fact must be a single sentence.\n\nArticle:\n{scraped_content}"
-                        fun_fact_content = lc.generate_text(fun_fact_prompt, max_new_tokens=100).strip()
-
-                        pub_date = None
-                        if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                            pub_date = datetime.datetime.fromtimestamp(time.mktime(entry.published_parsed))
-
-                        new_article = NewsArticle(
-                            source_id=source.id,
-                            title=entry.title,
-                            url=article_url,
-                            content=reformatted_content,
-                            fun_fact=fun_fact_content,
-                            publication_date=pub_date,
-                        )
-                        db.add(new_article)
-                        db.commit()
-                        print(f"    - Processed and saved: {entry.title}")
-
-                    except Exception as e:
-                        print(f"    - ERROR processing article {entry.title}: {e}")
-                        trace_exception(e)
-                        db.rollback()
-        print("--- RSS Feed Check Finished ---")
-    except Exception as e:
-        print(f"CRITICAL ERROR in RSS feed processing task: {e}")
-        trace_exception(e)
-    finally:
-        db.close()
+    task_manager.submit_task(
+        name="Scheduled RSS Feed Scraping",
+        target=_scrape_rss_feeds_task,
+        description="Periodically fetching and processing all active RSS feeds.",
+        owner_username=None # System task
+    )
 
 
 def run_one_time_startup_tasks(lock: Lock):
@@ -434,7 +369,7 @@ async def startup_event():
     """
     This event runs for EACH worker process created by Uvicorn.
     """
-    global broadcast_listener_task, rss_scheduler
+    global broadcast_listener_task, rss_scheduler, startup_lock
     
     # Each worker must initialize its own database connection pool.
     init_database(APP_DB_URL)
@@ -452,11 +387,18 @@ async def startup_event():
     
     broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
     
-    if os.getpid() == os.getppid(): # Only run scheduler in the main process
+    # Check if this is the main process that acquired the lock.
+    # This check is a bit indirect but works for uvicorn's process model.
+    # The process that successfully ran run_one_time_startup_tasks will have the lock released.
+    # We can't directly check the lock state across processes easily, but we can assume
+    # the main process is the first one to start. This is a reasonable heuristic.
+    if os.getpid() == os.getppid() or os.getenv("WORKER_ID") == "1":
         if settings.get("rss_feed_enabled"):
             interval = settings.get("rss_feed_check_interval_minutes", 60)
             rss_scheduler = BackgroundScheduler(daemon=True)
-            rss_scheduler.add_job(process_rss_feeds, 'interval', minutes=interval, next_run_time=datetime.datetime.now() + datetime.timedelta(seconds=10))
+            # Give the app a few seconds to start before the first run
+            next_run = datetime.datetime.now() + datetime.timedelta(seconds=20)
+            rss_scheduler.add_job(scheduled_rss_job, 'interval', minutes=interval, next_run_time=next_run)
             rss_scheduler.start()
             print(f"INFO: RSS feed checking scheduled to run every {interval} minutes.")
 
@@ -565,7 +507,6 @@ if __name__ == "__main__":
             print(ASCIIColors.yellow("[WARNING] Setup wizard script not found. Proceeding with default setup."))
 
 
-    startup_lock = Lock()
     run_one_time_startup_tasks(startup_lock)
     
     db = db_session_module.SessionLocal()
