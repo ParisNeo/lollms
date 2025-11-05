@@ -4,8 +4,8 @@ from typing import Optional, List
 
 # --- Welcome View Models ---
 class WelcomeInfo(BaseModel):
-    welcome_text: str
-    welcome_slogan: str
+    welcome_text: Optional[str] = None
+    welcome_slogan: Optional[str] = None
     welcome_logo_url: Optional[str] = None
     fun_fact: str
     fun_fact_color: Optional[str] = None
