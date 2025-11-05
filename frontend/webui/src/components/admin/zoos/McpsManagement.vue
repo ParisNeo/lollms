@@ -1,4 +1,4 @@
-<!-- [UPDATE] frontend/webui/src/components/admin/zoos/McpsManagement.vue -->
+<!-- frontend/webui/src/components/admin/zoos/McpsManagement.vue -->
 <script setup>
 import { onMounted, computed, watch, ref } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -146,6 +146,11 @@ async function handleDeleteRepository(repo) { if (await uiStore.showConfirmation
 function handleInstallItem(item) { uiStore.openModal('appInstall', { app: item, type: 'mcps' }); }
 async function handleUpdateApp(app) { if (await uiStore.showConfirmation({ title: `Update '${app.name}'?`, confirmText: 'Update' })) { await adminStore.updateApp(app.id); }}
 async function handleAppAction(appId, action) { isLoadingAction.value = `${action}-${appId}`; try { if (action === 'start') await adminStore.startApp(appId); if (action === 'stop') await adminStore.stopApp(appId); } finally { isLoadingAction.value = null; } }
+async function handleRestartApp(app) {
+    if (await uiStore.showConfirmation({ title: `Restart '${app.name}'?`, message: 'The MCP will be stopped and started again.', confirmText: 'Restart' })) {
+        await adminStore.restartApp(app.id);
+    }
+}
 async function handleUninstallApp(app) { if (await uiStore.showConfirmation({ title: `Uninstall '${app.name}'?`, confirmText: 'Uninstall' })) { isLoadingAction.value = `uninstall-${app.id}`; try { await adminStore.uninstallApp(app.id); } finally { isLoadingAction.value = null; } } }
 function handleConfigureApp(mcp) {
     if (mcp.is_installed) {
@@ -227,7 +232,7 @@ async function handleRefreshCache() {
                 <div v-else-if="!itemsWithTaskStatus || itemsWithTaskStatus.length === 0" class="empty-state-card"><h4 class="font-semibold">No MCPs Found</h4></div>
                 <div v-else>
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-6">
-                        <AppCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" item-type-name="MCP" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @uninstall="handleUninstallApp(item)" @delete="handleDeleteRegisteredItem(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" @start="handleAppAction(item.id, 'start')" @stop="handleAppAction(item.id, 'stop')" @configure="handleConfigureApp(item)" @fix="handleFixItem(item)" @purge="handlePurgeItem(item)" @details="handleShowDetails" @logs="handleViewLogs(item)" @edit-env="handleEditEnv(item)"/>
+                        <AppCard v-for="item in itemsWithTaskStatus" :key="item.id || `${item.repository}/${item.folder_name}`" :app="item" :task="item.task" :is-starred="starredItems.includes(item.name)" item-type-name="MCP" @star="handleStarToggle(item.name)" @install="handleInstallItem(item)" @update="handleUpdateApp(item)" @uninstall="handleUninstallApp(item)" @delete="handleDeleteRegisteredItem(item)" @help="showItemHelp(item)" @view-task="viewTask" @cancel-install="handleCancelTask(item.task.id)" @start="handleAppAction(item.id, 'start')" @stop="handleAppAction(item.id, 'stop')" @configure="handleConfigureApp(item)" @fix="handleFixItem(item)" @purge="handlePurgeItem(item)" @details="handleShowDetails" @logs="handleViewLogs(item)" @edit-env="handleEditEnv(item)" @restart="handleRestartApp(item)"/>
                     </div>
                     <div v-if="totalPages > 1" class="flex justify-between items-center mt-6"><button @click="currentPage--" :disabled="currentPage === 1" class="btn btn-secondary">Previous</button><span class="text-sm text-gray-600 dark:text-gray-400">{{ pageInfo }}</span><button @click="currentPage++" :disabled="currentPage >= totalPages" class="btn btn-secondary">Next</button></div>
                 </div>

@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/admin.js
 import { defineStore } from 'pinia';
 import { ref, reactive, watch, onMounted } from 'vue';
 import apiClient from '../services/api';
@@ -795,6 +796,7 @@ export const useAdminStore = defineStore('admin', () => {
     
     async function startApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/start`); tasksStore.addTask(res.data); }
     async function stopApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/stop`); tasksStore.addTask(res.data); }
+    async function restartApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/restart`); tasksStore.addTask(res.data); }
     async function updateApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/update`); tasksStore.addTask(res.data); }
     async function uninstallApp(appId) { await apiClient.delete(`/api/apps_zoo/installed/${appId}`); await fetchZooApps(); await fetchZooMcps(); }
     async function updateInstalledApp(appId, payload) {
@@ -958,6 +960,7 @@ export const useAdminStore = defineStore('admin', () => {
         generateIconForModel,
         startApp,
         stopApp,
+        restartApp,
         fetchAppLog,
         fetchUserStats,
         addOrUpdateRagAlias,

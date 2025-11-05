@@ -1,4 +1,4 @@
-# backend/routers/app_utils.py
+# backend/routers/extensions/app_utils.py
 import base64
 import shutil
 import subprocess
@@ -694,6 +694,33 @@ def stop_app_task(task: Task, app_id: str):
         raise e
     finally:
         db_session.close()
+
+def restart_app_task(task: Task, app_id: str):
+    task.log("Starting app restart sequence...")
+    task.set_progress(10)
+    
+    with task.db_session_factory() as db:
+        app = db.query(DBApp).filter(DBApp.id == app_id).first()
+        if not app:
+            raise ValueError(f"App with ID {app_id} not found.")
+        task.set_description(f"Restarting app: {app.name}")
+
+    # Stop Phase
+    task.log("Executing stop sequence...")
+    stop_app_task(task, app_id)
+    task.log("Stop command issued. Waiting for process to terminate.")
+    
+    task.set_progress(50)
+    task.log("Waiting 3 seconds before starting...")
+    time.sleep(3)
+    
+    # Start Phase
+    task.log("Executing start sequence...")
+    start_result = start_app_task(task, app_id)
+    
+    task.set_progress(100)
+    task.log("App restart completed.")
+    return start_result
 
 def pull_repo_task(task: Task, repo_id: int, repo_model, root_path: Path, item_type: str):
     db_session = next(get_db())

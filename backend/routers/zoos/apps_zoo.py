@@ -1,3 +1,4 @@
+# backend/routers/zoos/apps_zoo.py
 import shutil
 import yaml
 from pathlib import Path
@@ -30,7 +31,7 @@ from backend.settings import settings
 from backend.routers.extensions.app_utils import (
     to_task_info, pull_repo_task, install_item_task, get_all_zoo_metadata, 
     get_installed_app_path, start_app_task, stop_app_task, open_log_files,
-    update_item_task, sync_installs_task
+    update_item_task, sync_installs_task, restart_app_task
 )
 from backend.utils import find_next_available_port, get_accessible_host
 from ascii_colors import trace_exception
@@ -362,6 +363,18 @@ def stop_installed_app(app_id: str, db: Session = Depends(get_db)):
     )
     return to_task_info(task)
     
+@apps_zoo_router.post("/installed/{app_id}/restart", response_model=TaskInfo, status_code=202)
+def restart_installed_app(app_id: str, db: Session = Depends(get_db)):
+    app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
+    if not app: raise HTTPException(404, "Installed app not found.")
+    
+    task = task_manager.submit_task(
+        name=f"Restart app: {app.name} ({app.id})",
+        target=restart_app_task,
+        args=(app.id,)
+    )
+    return to_task_info(task)
+
 @apps_zoo_router.post("/installed/{app_id}/update", response_model=TaskInfo, status_code=202)
 def update_installed_app_from_zoo(app_id: str, db: Session = Depends(get_db)):
     app = db.query(DBApp).filter(DBApp.id == app_id, DBApp.is_installed == True).first()
@@ -506,7 +519,7 @@ def start_app(app_id: str, current_user: UserAuthDetails = Depends(get_current_a
         description=f"Initiating startup sequence for {app.name}",
         owner_username=current_user.username
     )
-    return _to_task_info(task)
+    return to_task_info(task)
 
 @apps_zoo_router.post("/installed/{app_id}/stop", response_model=TaskInfo, status_code=202)
 def stop_app(app_id: str, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
@@ -521,7 +534,7 @@ def stop_app(app_id: str, current_user: UserAuthDetails = Depends(get_current_ad
         description=f"Initiating shutdown sequence for {app.name}",
         owner_username=current_user.username
     )
-    return _to_task_info(task)
+    return to_task_info(task)
 
 @apps_zoo_router.get("/installed/{app_id}/logs", response_model=dict)
 def get_app_log(app_id: str, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
