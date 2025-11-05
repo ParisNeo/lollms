@@ -55,12 +55,12 @@ async def get_welcome_info(db: Session = Depends(get_db)):
                 fact_category = "News"
 
     return WelcomeInfo(
-        welcome_text=settings.get("welcome_text", "lollms"),
-        welcome_slogan=settings.get("welcome_slogan", "One tool to rule them all"),
-        welcome_logo_url=settings.get("welcome_logo_url"),
-        fun_fact=fact_content,
-        fun_fact_color=fact_color,
-        fun_fact_category=fact_category,
+        welcome_text=str(settings.get("welcome_text", "lollms")),
+        welcome_slogan=str(settings.get("welcome_slogan", "One tool to rule them all")),
+        welcome_logo_url=str(settings.get("welcome_logo_url","")),
+        fun_fact=str(fact_content),
+        fun_fact_color=str(fact_color),
+        fun_fact_category=str(fact_category),
         latex_builder_enabled=settings.get("latex_builder_enabled", False),
         export_to_txt_enabled=settings.get("export_to_txt_enabled", True),
         export_to_markdown_enabled=settings.get("export_to_markdown_enabled", True),
