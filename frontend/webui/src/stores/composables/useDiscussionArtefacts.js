@@ -42,18 +42,20 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-    async function addArtefact({ discussionId, file, extractImages }) {
+async function addArtefact({ discussionId, file, extractImages }) {
         const formData = new FormData();
         formData.append('file', file);
-        console.log("extractImages:", extractImages);
-        formData.append('extract_images', extractImages.toString());
+        const extractImagesValue = extractImages ? '1' : '0';
+        formData.append('extract_images', extractImagesValue);
+        console.log(`[DEBUG] ArtefactZone Drop: Sending extract_images = ${extractImagesValue}`);
+
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
             // Handle the new, richer response object
             activeDiscussionArtefacts.value.push(response.data.new_artefact_info);
-            if (activeDiscussion.value) {
+            if (activeDiscussion.value) { // Always update from the response
                 activeDiscussion.value.discussion_images = response.data.discussion_images;
                 activeDiscussion.value.active_discussion_images = response.data.active_discussion_images;
             }

@@ -111,6 +111,9 @@ class EdgeData(BaseModel):
     label: str
     properties: Dict[str, Any] = {}
 
+class DeleteFilesRequest(BaseModel):
+    filenames: List[str]
+
 def _sanitize_numpy(data: Any) -> Any:
     """Recursively convert numpy types to standard Python types."""
     if np is None:
@@ -130,7 +133,7 @@ def _sanitize_numpy(data: Any) -> Any:
     return data
 
 # --- Task Functions ---
-def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_paths: List[str], metadata_option: str, manual_metadata_json: str):
+def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_paths: List[str], metadata_option: str, manual_metadata_json: str, vectorize_with_metadata: bool):
     db = next(get_db())
     try:
         datastore_record = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
@@ -165,9 +168,6 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
                     if metadata_option == 'manual':
                         metadata = manual_metadata.get(file_path.name)
                         if metadata:
-                            # Convert authors string to list if it's a string
-                            if 'authors' in metadata and isinstance(metadata['authors'], str):
-                                metadata['authors'] = [author.strip() for author in metadata['authors'].split(',') if author.strip()]
                             task.log(f"Using manual metadata: {metadata}")
 
                     elif metadata_option == 'auto-generate' and lc:
@@ -194,7 +194,8 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
 
                     ss.add_document(
                         str(file_path),
-                        metadata=metadata
+                        metadata=metadata,
+                        vectorize_with_metadata=vectorize_with_metadata,
                     )
                     processed_count += 1
                     try:
@@ -233,9 +234,9 @@ def _generate_graph_task(task: Task, username: str, datastore_id: str, request_d
             return llm_client.generate_text(prompt, max_new_tokens=2048)
 
         ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
-        gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
         
         with ss:
+            gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
             docs = ss.list_documents()
             total_docs = len(docs)
             task.log(f"Found {total_docs} documents to process for graph generation.")
@@ -282,9 +283,9 @@ def _update_graph_task(task: Task, username: str, datastore_id: str, request_dat
             return llm_client.generate_text(prompt, max_new_tokens=2048)
         
         ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
-        gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
         
         with ss:
+            gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
             docs = ss.list_documents()
             total_docs = len(docs)
             task.log(f"Checking {total_docs} documents for graph updates.")
@@ -366,6 +367,7 @@ async def upload_rag_documents_to_datastore(
     files: List[UploadFile] = File(...),
     metadata_option: str = Form("none"),
     manual_metadata_json: str = Form("null"),
+    vectorize_with_metadata: bool = Form(True),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> TaskInfo:
@@ -390,7 +392,7 @@ async def upload_rag_documents_to_datastore(
     db_task = task_manager.submit_task(
         name=f"Add files to DataStore: {datastore_record.name}",
         target=_upload_rag_files_task,
-        args=(current_user.username, datastore_id, saved_file_paths, metadata_option, manual_metadata_json),
+        args=(current_user.username, datastore_id, saved_file_paths, metadata_option, manual_metadata_json, vectorize_with_metadata),
         description=f"Adding {len(files)} files to the '{datastore_record.name}' DataStore.",
         owner_username=current_user.username
     )
@@ -442,6 +444,53 @@ async def delete_rag_document_from_datastore(datastore_id: str, filename: str, c
     except Exception as e:
         if file_to_delete_path.exists(): raise HTTPException(status_code=500, detail=f"Could not delete '{s_filename}' from datastore {datastore_id}: {e}")
         else: return {"message": f"Document '{s_filename}' file deleted, potential DB cleanup issue in datastore {datastore_id}."}
+
+@store_files_router.post("/files/batch-delete")
+async def batch_delete_rag_documents_from_datastore(
+    datastore_id: str, 
+    request: DeleteFilesRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user), 
+    db: Session = Depends(get_db)
+) -> Dict[str, Any]:
+    if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+    
+    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+    datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / datastore_id
+
+    deleted_count = 0
+    failed_files = []
+
+    with ss:
+        for filename in request.filenames:
+            s_filename = secure_filename(filename)
+            if not s_filename or s_filename != filename:
+                failed_files.append(filename)
+                continue
+            
+            file_to_delete_path = datastore_docs_path / s_filename
+            
+            try:
+                # This will remove embeddings from the DB.
+                # It doesn't raise an error if the document doesn't exist in the DB.
+                ss.delete_document_by_path(str(file_to_delete_path))
+
+                # If file exists on disk, delete it. If it doesn't, that's fine too.
+                if file_to_delete_path.is_file():
+                    file_to_delete_path.unlink()
+                
+                deleted_count += 1
+            except Exception as e:
+                # This will catch file permission errors etc.
+                print(f"Error during deletion of {filename}: {e}")
+                failed_files.append(filename)
+
+    return {
+        "message": f"Deleted {deleted_count} documents. Failed to delete {len(failed_files)} documents.",
+        "deleted_count": deleted_count,
+        "failed_files": failed_files
+    }
 
 @store_files_router.post("/query", response_model=List[Dict])
 async def query_datastore(
@@ -538,9 +587,10 @@ async def get_datastore_graph(
     
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db)
-        gs = GraphStore(ss, llm_executor_callback=None)
-        nodes = gs.get_all_nodes_for_visualization(limit=5000)
-        edges = gs.get_all_relationships_for_visualization(limit=10000)
+        with ss:
+            gs = GraphStore(ss, llm_executor_callback=None)
+            nodes = gs.get_all_nodes_for_visualization(limit=5000)
+            edges = gs.get_all_relationships_for_visualization(limit=10000)
         
         sanitized_nodes = _sanitize_numpy(nodes)
         sanitized_edges = _sanitize_numpy(edges)
@@ -567,8 +617,9 @@ async def query_datastore_graph(
             return llm_client.generate_text(prompt, max_new_tokens=2048)
             
         ss = get_safe_store_instance(current_user.username, datastore_id, db)
-        gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
-        results = gs.query_graph(request_data.query, output_mode="chunks_summary")
+        with ss:
+            gs = GraphStore(ss, llm_executor_callback=llm_executor_callback)
+            results = gs.query_graph(request_data.query, output_mode="chunks_summary")
         sanitized_results = _sanitize_numpy(results)
         return sanitized_results
     except Exception as e:
@@ -586,8 +637,9 @@ async def wipe_datastore_graph(
     
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
-        gs = GraphStore(ss)
-        gs.delete_all_graph_data()
+        with ss:
+            gs = GraphStore(ss)
+            gs.delete_all_graph_data()
         return {"message": "Graph data has been successfully wiped."}
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
@@ -605,8 +657,9 @@ async def add_graph_node(
     if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
-        gs = GraphStore(ss)
-        node_id = gs.add_node(node_data.label, node_data.properties)
+        with ss:
+            gs = GraphStore(ss)
+            node_id = gs.add_node(node_data.label, node_data.properties)
         return _sanitize_numpy({"id": node_id, "label": node_data.label, "properties": node_data.properties})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -622,8 +675,9 @@ async def update_graph_node(
     if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
-        gs = GraphStore(ss)
-        gs.update_node(node_id, node_data.label, node_data.properties)
+        with ss:
+            gs = GraphStore(ss)
+            gs.update_node(node_id, node_data.label, node_data.properties)
         return _sanitize_numpy({"id": node_id, "label": node_data.label, "properties": node_data.properties})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -638,8 +692,9 @@ async def delete_graph_node(
     if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
-        gs = GraphStore(ss)
-        gs.delete_node(node_id)
+        with ss:
+            gs = GraphStore(ss)
+            gs.delete_node(node_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -653,8 +708,9 @@ async def add_graph_edge(
     if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
-        gs = GraphStore(ss)
-        edge_id = gs.add_relationship(edge_data.source_id, edge_data.target_id, edge_data.label, edge_data.properties)
+        with ss:
+            gs = GraphStore(ss)
+            edge_id = gs.add_relationship(edge_data.source_id, edge_data.target_id, edge_data.label, edge_data.properties)
         return _sanitize_numpy({"id": edge_id, **edge_data.model_dump()})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -669,8 +725,9 @@ async def delete_graph_edge(
     if not GraphStore: raise HTTPException(status_code=501, detail="GraphStore not available.")
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
-        gs = GraphStore(ss)
-        gs.delete_relationship(edge_id)
+        with ss:
+            gs = GraphStore(ss)
+            gs.delete_relationship(edge_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

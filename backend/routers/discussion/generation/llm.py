@@ -108,6 +108,8 @@ def build_llm_generation_router(router: APIRouter):
                 revamped_chunks=[]
                 for entry in retrieved_chunks:
                     revamped_entry = {}
+                    if 'document_metadata' in entry:
+                        revamped_entry["metadata"] = entry['document_metadata']
                     if "file_path" in entry:
                         revamped_entry["title"]=Path(entry["file_path"]).name
                     if "chunk_text" in entry:
@@ -209,7 +211,7 @@ def build_llm_generation_router(router: APIRouter):
 
         async def stream_generator() -> AsyncGenerator[str, None]:
             all_events = []
-            def llm_callback(chunk: str, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs) -> bool:
+            def llm_callback(chunk: Any, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs) -> bool:
                 if stop_event.is_set(): return False
                 if not params: params = {}
                 
@@ -224,7 +226,8 @@ def build_llm_generation_router(router: APIRouter):
                     MSG_TYPE.MSG_TYPE_TOOL_CALL: {"type": "tool_call", "content": chunk},
                     MSG_TYPE.MSG_TYPE_SCRATCHPAD: {"type": "scratchpad", "content": chunk},
                     MSG_TYPE.MSG_TYPE_EXCEPTION: {"type": "exception", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_ERROR: {"type": "error", "content": chunk}
+                    MSG_TYPE.MSG_TYPE_ERROR: {"type": "error", "content": chunk},
+                    MSG_TYPE.MSG_TYPE_SOURCES_LIST: {"type": "sources", "content": chunk}
                 }
                 
                 payload = payload_map.get(msg_type)

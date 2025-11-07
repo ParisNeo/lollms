@@ -25,6 +25,7 @@ import IconXMark from '../assets/icons/IconXMark.vue';
 import IconArrowUpTray from '../assets/icons/IconArrowUpTray.vue';
 import IconEye from '../assets/icons/IconEye.vue';
 import IconEyeOff from '../assets/icons/IconEyeOff.vue';
+import IconMagnifyingGlass from '../assets/icons/IconMagnifyingGlass.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
@@ -47,11 +48,13 @@ const filesInSelectedStore = ref([]);
 const filesLoading = ref(false);
 const selectedFilesToUpload = ref([]);
 const fileInputRef = ref(null);
+const folderInputRef = ref(null);
 const currentUploadTask = ref(null);
 const currentGraphTask = ref(null);
 const dragOver = ref(false);
 const vectorizerModels = ref([]);
 const isLoadingVectorizerModels = ref(false);
+const selectedFilesToDelete = ref(new Set());
 
 const queryText = ref('');
 const queryTopK = ref(10);
@@ -59,9 +62,24 @@ const queryMinSim = ref(50.0);
 const queryResults = ref([]);
 const isQuerying = ref(false);
 const queryError = ref('');
+const searchInChunks = ref('');
+const searchMatches = ref([]);
+const currentMatchIndex = ref(-1);
+
 
 const metadataOption = ref('none');
 const manualMetadata = ref({});
+const vectorizeWithMetadata = ref(true);
+const manualMetadataMode = ref('per-file');
+const allFilesMetadata = ref('title: \nsubject: \nauthors: ');
+
+const allFilesSelected = computed(() => {
+    return filesInSelectedStore.value.length > 0 && selectedFilesToDelete.value.size === filesInSelectedStore.value.length;
+});
+
+const someFilesSelected = computed(() => {
+    return selectedFilesToDelete.value.size > 0 && !allFilesSelected.value;
+});
 
 const vectorizerOptions = computed(() => {
     const options = [];
@@ -90,6 +108,17 @@ const myDataStores = computed(() => ownedDataStores.value.sort((a, b) => a.name.
 const currentSelectedStore = computed(() => allDataStores.value.find(s => s.id === selectedStoreId.value));
 const isAnyTaskRunningForSelectedStore = computed(() => !!currentUploadTask.value || !!currentGraphTask.value);
 
+function highlightedChunk(text) {
+    if (!text) return '';
+    if (!searchInChunks.value || searchMatches.value.length === 0) {
+        return text;
+    }
+    const searchTerm = searchInChunks.value;
+    const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+    return text.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-700 rounded">$1</mark>');
+}
+
+
 let taskPollingInterval;
 onMounted(() => {
     dataStore.fetchDataStores();
@@ -113,6 +142,7 @@ watch(tasks, (newTasks) => {
 
 watch(selectedStoreId, (newId) => {
     isAddFormVisible.value = false;
+    selectedFilesToDelete.value.clear();
     if (newId) {
         activeTab.value = 'documents';
         fetchFilesInStore(newId);
@@ -145,6 +175,13 @@ watch(selectedVectorizerDetails, async (details) => {
         }
     }
 }, { deep: true });
+
+watch(queryResults, () => {
+    searchInChunks.value = '';
+    searchMatches.value = [];
+    currentMatchIndex.value = -1;
+});
+
 
 function selectStore(storeId) { selectedStoreId.value = storeId; }
 function handleAddStoreClick() {
@@ -182,21 +219,72 @@ async function handleAddStore() {
 }
 function handleEditStore(store) { uiStore.openModal('editDataStore', { store }); }
 async function handleDeleteStore(store) {
-    const confirmed = await uiStore.showConfirmation({ title: `Delete Data Store '${store.name}'?`, message: 'This will permanently delete the data store and all its indexed documents.', confirmText: 'Delete' });
-    if (confirmed.confirmed) {
+    const { confirmed } = await uiStore.showConfirmation({ title: `Delete Data Store '${store.name}'?`, message: 'This will permanently delete the data store and all its indexed documents.', confirmText: 'Delete' });
+    if (confirmed) {
         isLoadingAction.value = `delete_store_${store.id}`;
         try { await dataStore.deleteDataStore(store.id); if (selectedStoreId.value === store.id) selectedStoreId.value = null; } 
         finally { isLoadingAction.value = null; }
     }
 }
 function handleShareStore(store) { uiStore.openModal('shareDataStore', { store }); }
-function handleFileDrop(event) { event.preventDefault(); dragOver.value = false; addFilesToSelection(Array.from(event.dataTransfer.files)); }
+async function handleFileDrop(event) {
+    event.preventDefault();
+    dragOver.value = false;
+    
+    const items = event.dataTransfer.items;
+    const allFiles = [];
+
+    function readEntriesPromise(directoryReader) {
+        return new Promise((resolve, reject) => {
+            directoryReader.readEntries(resolve, reject);
+        });
+    }
+
+    async function getFilesInDirectory(directoryEntry) {
+        const directoryReader = directoryEntry.createReader();
+        let allEntries = [];
+        let newEntries;
+        do {
+            newEntries = await readEntriesPromise(directoryReader);
+            allEntries = allEntries.concat(newEntries);
+        } while (newEntries.length > 0);
+        return allEntries;
+    }
+
+    async function traverseEntry(entry) {
+        if (entry.isFile) {
+            await new Promise((resolve, reject) => entry.file(file => {
+                allFiles.push(file);
+                resolve();
+            }, reject));
+        } else if (entry.isDirectory) {
+            const entries = await getFilesInDirectory(entry);
+            for (const subEntry of entries) {
+                await traverseEntry(subEntry);
+            }
+        }
+    }
+
+    const traversePromises = [];
+    for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry();
+        if (entry) {
+            traversePromises.push(traverseEntry(entry));
+        }
+    }
+
+    await Promise.all(traversePromises);
+
+    if (allFiles.length > 0) {
+        addFilesToSelection(allFiles);
+    }
+}
 function handleFileChange(event) { addFilesToSelection(Array.from(event.target.files)); }
 function addFilesToSelection(newFiles) {
     for (const file of newFiles) {
         if (!selectedFilesToUpload.value.some(f => f.name === file.name && f.size === file.size)) {
             selectedFilesToUpload.value.push(file);
-            manualMetadata.value[file.name] = { title: '', subject: '', authors: '' };
+            manualMetadata.value[file.name] = 'title: \nsubject: \nauthors: ';
         } else {
             uiStore.addNotification(`File "${file.name}" is already selected.`, 'warning');
         }
@@ -213,25 +301,97 @@ async function fetchFilesInStore(storeId) { filesLoading.value = true; try { fil
 async function handleUploadFiles() {
     if (!currentSelectedStore.value || selectedFilesToUpload.value.length === 0) { uiStore.addNotification('Please select files to upload.', 'warning'); return; }
     if (isAnyTaskRunningForSelectedStore.value) { uiStore.addNotification('A task is already running for this Data Store.', 'warning'); return; }
+
     const formData = new FormData();
     selectedFilesToUpload.value.forEach(file => formData.append('files', file));
+    formData.append('metadata_option', metadataOption.value);
+    formData.append('vectorize_with_metadata', vectorizeWithMetadata.value);
+
     if (metadataOption.value === 'manual') {
-        formData.append('manual_metadata_json', JSON.stringify(manualMetadata.value));
+        let metadataPayload = {};
+        const parseKeyValueMetadata = (text) => {
+            const metadata = {};
+            if(!text) return metadata;
+            const lines = text.split('\n');
+            for (const line of lines) {
+                const parts = line.split(':');
+                if (parts.length >= 2) {
+                    const key = parts[0].trim();
+                    const value = parts.slice(1).join(':').trim();
+                    if (key) {
+                        if (['authors', 'tags', 'keywords'].includes(key.toLowerCase())) {
+                            metadata[key] = value.split(',').map(item => item.trim()).filter(Boolean);
+                        } else {
+                            metadata[key] = value;
+                        }
+                    }
+                }
+            }
+            return metadata;
+        };
+
+        try {
+            if (manualMetadataMode.value === 'all') {
+                const commonMetadata = allFilesMetadata.value.trim() ? parseKeyValueMetadata(allFilesMetadata.value) : {};
+                for (const file of selectedFilesToUpload.value) {
+                    metadataPayload[file.name] = commonMetadata;
+                }
+            } else { // 'per-file'
+                for (const file of selectedFilesToUpload.value) {
+                    const fileMetadataStr = manualMetadata.value[file.name] || '';
+                    metadataPayload[file.name] = fileMetadataStr.trim() ? parseKeyValueMetadata(fileMetadataStr) : {};
+                }
+            }
+            formData.append('manual_metadata_json', JSON.stringify(metadataPayload));
+        } catch (e) {
+            uiStore.addNotification(`Invalid metadata format. Please use 'key: value' pairs, with one entry per line.`, 'error');
+            console.error("Metadata parsing error:", e);
+            return;
+        }
     }
-    await dataStore.uploadFilesToStore({ storeId: currentSelectedStore.value.id, formData, metadataOption: metadataOption.value });
+
+    await dataStore.uploadFilesToStore({ storeId: currentSelectedStore.value.id, formData });
     selectedFilesToUpload.value = [];
     manualMetadata.value = {};
-}
-async function handleDeleteFile(filename) {
-    if (!currentSelectedStore.value || !filename) return;
-    const confirmed = await uiStore.showConfirmation({ title: `Delete '${filename}'?`, message: 'This will remove the document.', confirmText: 'Delete File' });
-    if (confirmed) {
-        isLoadingAction.value = `delete_file_${filename}`;
-        try { await dataStore.deleteFileFromStore({ storeId: currentSelectedStore.value.id, filename }); await fetchFilesInStore(currentSelectedStore.value.id); } 
-        finally { isLoadingAction.value = null; }
-    }
+    allFilesMetadata.value = 'title: \nsubject: \nauthors: ';
 }
 function canReadWrite(store) { return store && ['owner', 'read_write', 'revectorize'].includes(store.permission_level); }
+
+function toggleFileSelection(filename) {
+    if (selectedFilesToDelete.value.has(filename)) {
+        selectedFilesToDelete.value.delete(filename);
+    } else {
+        selectedFilesToDelete.value.add(filename);
+    }
+}
+
+function toggleSelectAll(event) {
+    if (event.target.checked) {
+        selectedFilesToDelete.value = new Set(filesInSelectedStore.value.map(f => f.filename));
+    } else {
+        selectedFilesToDelete.value.clear();
+    }
+}
+
+async function handleDeleteSelectedFiles() {
+    if (selectedFilesToDelete.value.size === 0) return;
+    const { confirmed } = await uiStore.showConfirmation({
+        title: `Delete ${selectedFilesToDelete.value.size} file(s)?`,
+        message: 'This will permanently remove the selected documents and their data from the data store.',
+        confirmText: 'Delete'
+    });
+    if (confirmed) {
+        isLoadingAction.value = 'delete_selected_files';
+        try {
+            const filesToDelete = Array.from(selectedFilesToDelete.value);
+            await dataStore.deleteFilesFromStore({ storeId: currentSelectedStore.value.id, filenames: filesToDelete });
+            await fetchFilesInStore(currentSelectedStore.value.id);
+            selectedFilesToDelete.value.clear();
+        } finally {
+            isLoadingAction.value = null;
+        }
+    }
+}
 
 async function handleQueryStore() {
     if (!queryText.value.trim() || !currentSelectedStore.value) return;
@@ -252,10 +412,94 @@ async function handleQueryStore() {
         isQuerying.value = false;
     }
 }
+
+function handleInChunkSearch() {
+    if (!searchInChunks.value) {
+        searchMatches.value = [];
+        currentMatchIndex.value = -1;
+        document.querySelectorAll('.current-search-highlight').forEach(el => el.classList.remove('current-search-highlight'));
+        return;
+    }
+
+    const searchTerm = searchInChunks.value;
+    const matches = [];
+    
+    queryResults.value.forEach((chunk, chunkIndex) => {
+        const text = chunk.chunk_text || '';
+        const regex = new RegExp(searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        let match;
+        while ((match = regex.exec(text)) !== null) {
+            matches.push({
+                chunkIndex,
+                matchIndexInText: match.index
+            });
+        }
+    });
+    
+    searchMatches.value = matches;
+    if (matches.length > 0) {
+        currentMatchIndex.value = 0;
+        scrollToMatch(matches[0]);
+    } else {
+        currentMatchIndex.value = -1;
+        uiStore.addNotification('No matches found in results.', 'info');
+        document.querySelectorAll('.current-search-highlight').forEach(el => el.classList.remove('current-search-highlight'));
+    }
+}
+
+function navigateMatch(direction) {
+    if (searchMatches.value.length === 0) return;
+    let newIndex = currentMatchIndex.value + direction;
+    if (newIndex < 0) newIndex = searchMatches.value.length - 1;
+    if (newIndex >= searchMatches.value.length) newIndex = 0;
+    currentMatchIndex.value = newIndex;
+    scrollToMatch(searchMatches.value[newIndex]);
+}
+
+function scrollToMatch(match) {
+    const chunkElement = document.getElementById(`chunk-${match.chunkIndex}`);
+    if (chunkElement) {
+        document.querySelectorAll('.current-search-highlight').forEach(el => el.classList.remove('current-search-highlight'));
+
+        const markElements = Array.from(chunkElement.querySelectorAll('mark'));
+        if (markElements.length > 0) {
+            let matchCounterInChunk = 0;
+            const text = queryResults.value[match.chunkIndex]?.chunk_text || '';
+            const searchTerm = searchInChunks.value;
+            const regex = new RegExp(searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+            let m;
+            let targetMarkIndex = -1;
+            let textOffset = 0;
+            
+            // This is complex because v-html does not give us direct element mapping.
+            // We have to reconstruct the positions.
+            const parts = text.split(regex);
+            let currentOffset = 0;
+            for(let i = 1; i < parts.length; i += 2) { // Iterate over matches
+                 if (currentOffset === match.matchIndexInText) {
+                    targetMarkIndex = matchCounterInChunk;
+                    break;
+                }
+                currentOffset += (parts[i-1] ? parts[i-1].length : 0) + parts[i].length;
+                matchCounterInChunk++;
+            }
+
+            if (targetMarkIndex !== -1 && markElements[targetMarkIndex]) {
+                const mark = markElements[targetMarkIndex];
+                mark.classList.add('current-search-highlight');
+                mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            } else {
+                chunkElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        } else {
+            chunkElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+    }
+}
 </script>
 
 <template>
-  <PageViewLayout title="Data Stores" :title-icon="IconDatabase">
+  <PageViewLayout title="Data Studio" :title-icon="IconDatabase">
     <template #sidebar>
         <button @click="handleAddStoreClick" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 transition-colors">
             <IconPlus class="w-5 h-5 flex-shrink-0" />
@@ -348,7 +592,13 @@ async function handleQueryStore() {
                     </div>
                     <p v-else class="text-sm text-gray-500 italic">This vectorizer requires no additional configuration.</p>
                 </div>
-                <div class="flex justify-end gap-3"><button type="button" @click="isAddFormVisible=false; selectStore(myDataStores[0]?.id)" class="btn btn-secondary">Cancel</button><button type="submit" class="btn btn-primary" :disabled="isLoadingAction === 'add_store'">{{ isLoadingAction === 'add_store' ? 'Creating...' : 'Create Data Store' }}</button></div>
+                <div class="flex justify-end gap-3">
+                    <button type="button" @click="isAddFormVisible=false; selectStore(myDataStores[0]?.id)" class="btn btn-secondary">Cancel</button>
+                    <button type="submit" class="btn btn-primary" :disabled="isLoadingAction === 'add_store'">
+                        <IconAnimateSpin v-if="isLoadingAction === 'add_store'" class="w-5 h-5 mr-2 animate-spin" />
+                        {{ isLoadingAction === 'add_store' ? 'Creating...' : 'Create Data Store' }}
+                    </button>
+                </div>
             </form>
         </div>
         <div v-else-if="!selectedStoreId" class="h-full flex items-center justify-center bg-white dark:bg-gray-800 rounded-lg shadow-sm">
@@ -379,7 +629,11 @@ async function handleQueryStore() {
                 <div class="flex items-center space-x-3 flex-shrink-0">
                     <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleShareStore(currentSelectedStore)" class="btn btn-secondary btn-sm"><IconShare class="w-4 h-4 mr-2" /> Share</button>
                     <button v-if="canReadWrite(currentSelectedStore)" @click="handleEditStore(currentSelectedStore)" class="btn btn-secondary btn-sm"><IconPencil class="w-4 h-4 mr-2" /> Edit</button>
-                    <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleDeleteStore(currentSelectedStore)" class="btn btn-danger btn-sm"><IconTrash class="w-4 h-4 mr-2" /> Delete</button>
+                    <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleDeleteStore(currentSelectedStore)" class="btn btn-danger btn-sm">
+                        <IconAnimateSpin v-if="isLoadingAction === `delete_store_${currentSelectedStore.id}`" class="w-4 h-4 mr-2 animate-spin" />
+                        <IconTrash v-else class="w-4 h-4 mr-2" />
+                        Delete
+                    </button>
                 </div>
             </div>
             <div class="border-b border-gray-200 dark:border-gray-700 px-6">
@@ -392,36 +646,79 @@ async function handleQueryStore() {
             <div v-show="activeTab === 'documents'" class="p-6 flex-grow overflow-y-auto space-y-8">
                 <div v-if="canReadWrite(currentSelectedStore)" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">
                     <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Add Documents</h3>
-                    <div class="mt-4">
-                        <label for="metadata-option" class="block text-sm font-medium">Metadata Handling</label>
-                        <select id="metadata-option" v-model="metadataOption" class="input-field mt-1">
-                            <option value="none">None</option>
-                            <option value="manual">Manual Entry</option>
-                            <option value="auto-generate">Auto-generate for each file</option>
-                        </select>
-                        <p class="text-xs text-gray-500 mt-1">Choose how to handle metadata for uploaded files.</p>
-                    </div>
-                    <div @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="handleFileDrop" @click="fileInputRef.click()" class="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors" :class="{ 'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragOver, 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500': !dragOver }">
-                        <input type="file" multiple ref="fileInputRef" @change="handleFileChange" class="hidden" accept="*/*"><p class="text-gray-600 dark:text-gray-300">Drag & drop files here, or <span class="text-blue-600 dark:text-blue-400 font-medium">click to browse</span></p>
-                    </div>
-                    <div v-if="selectedFilesToUpload.length > 0">
-                        <div v-if="metadataOption === 'manual'" class="space-y-4 mt-4">
-                            <h4 class="text-sm font-medium">Enter Metadata for Selected Files:</h4>
-                            <div v-for="(file, index) in selectedFilesToUpload" :key="index" class="p-3 border rounded-lg dark:border-gray-600 space-y-3">
-                                <p class="font-semibold text-sm truncate">{{ file.name }}</p>
-                                <div><label class="text-xs font-medium">Title</label><input type="text" v-model="manualMetadata[file.name].title" class="input-field-sm w-full mt-1"></div>
-                                <div><label class="text-xs font-medium">Subject</label><input type="text" v-model="manualMetadata[file.name].subject" class="input-field-sm w-full mt-1"></div>
-                                <div><label class="text-xs font-medium">Authors (comma-separated)</label><input type="text" v-model="manualMetadata[file.name].authors" class="input-field-sm w-full mt-1"></div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="metadata-option" class="block text-sm font-medium">Metadata Handling</label>
+                            <select id="metadata-option" v-model="metadataOption" class="input-field mt-1">
+                                <option value="none">None</option>
+                                <option value="manual">Manual Entry</option>
+                                <option value="auto-generate">Auto-generate for each file</option>
+                            </select>
+                            <p class="text-xs text-gray-500 mt-1">Choose how to handle metadata for uploaded files.</p>
+                        </div>
+                        <div class="relative flex items-start pt-7">
+                            <div class="flex h-6 items-center">
+                                <input id="vectorize-with-metadata" v-model="vectorizeWithMetadata" type="checkbox" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-600">
+                            </div>
+                            <div class="ml-3 text-sm leading-6">
+                                <label for="vectorize-with-metadata" class="font-medium text-gray-900 dark:text-gray-100">Vectorize with Metadata</label>
+                                <p class="text-gray-500 dark:text-gray-400">Include document metadata in the vectorization process for better context.</p>
                             </div>
                         </div>
-                        <div v-else>
+                    </div>
+                    <div @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="handleFileDrop" class="border-2 border-dashed rounded-lg p-6 text-center transition-colors" :class="{ 'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragOver, 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500': !dragOver }">
+                        <input type="file" multiple ref="fileInputRef" @change="handleFileChange" class="hidden" accept=".pdf,.docx,.pptx,.xlsx,.msg,.vcf,.txt,.md,.py,.js,.ts,.html,.css,.c,.cpp,.h,.hpp,.cs,.java,.json,.xml,.sh,.vhd,.v,.rb,.php,.go,.rs,.swift,.kt,.yaml,.yml,.sql,.log,.csv">
+                        <input type="file" ref="folderInputRef" @change="handleFileChange" class="hidden" webkitdirectory directory multiple>
+                        <p class="text-gray-600 dark:text-gray-300">Drag & drop files or folders here</p>
+                        <div class="mt-4 flex justify-center gap-4">
+                            <button type="button" @click="fileInputRef.click()" class="btn btn-secondary">Select File(s)</button>
+                            <button type="button" @click="folderInputRef.click()" class="btn btn-secondary">Select Folder</button>
+                        </div>
+                    </div>
+                    
+                    <div v-if="selectedFilesToUpload.length > 0">
+                        <div v-if="metadataOption === 'manual'" class="mt-4">
+                            <label class="block text-sm font-medium">Manual Metadata Mode</label>
+                            <div class="flex items-center gap-4 mt-1">
+                                <label class="flex items-center"><input type="radio" v-model="manualMetadataMode" value="per-file" class="radio-input"><span class="ml-2">Per File</span></label>
+                                <label class="flex items-center"><input type="radio" v-model="manualMetadataMode" value="all" class="radio-input"><span class="ml-2">For All Files</span></label>
+                            </div>
+                        </div>
+
+                        <div v-if="metadataOption === 'manual' && manualMetadataMode === 'all'" class="mt-4">
+                            <h4 class="text-sm font-medium mb-2">Selected Files ({{ selectedFilesToUpload.length }})</h4>
+                            <ul class="list-disc list-inside text-sm space-y-1 max-h-40 overflow-y-auto mb-4 p-2 bg-gray-100 dark:bg-gray-800 rounded-md">
+                                <li v-for="(file, index) in selectedFilesToUpload" :key="index" class="flex justify-between items-center">
+                                    <span class="truncate">{{ file.name }}</span>
+                                    <button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700 ml-2" title="Remove"><IconXMark class="w-4 h-4" /></button>
+                                </li>
+                            </ul>
+                            <label class="block text-sm font-medium">Metadata for all files (Key: Value format)</label>
+                            <textarea v-model="allFilesMetadata" rows="4" class="input-field mt-1 font-mono text-xs" placeholder="title: My Document&#10;subject: AI Research&#10;authors: John Doe, Jane Smith"></textarea>
+                        </div>
+                        
+                        <div v-else-if="metadataOption === 'manual' && manualMetadataMode === 'per-file'" class="space-y-4 mt-4 max-h-96 overflow-y-auto">
+                            <h4 class="text-sm font-medium">Enter Metadata for Each File:</h4>
+                            <div v-for="(file, index) in selectedFilesToUpload" :key="index" class="p-3 border rounded-lg dark:border-gray-600 space-y-3">
+                                <div class="flex justify-between items-start">
+                                    <p class="font-semibold text-sm truncate">{{ file.name }}</p>
+                                    <button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700" title="Remove"><IconXMark class="w-5 h-5" /></button>
+                                </div>
+                                <div><label class="text-xs font-medium">Metadata (Key: Value format)</label><textarea v-model="manualMetadata[file.name]" rows="4" class="input-field-sm w-full mt-1 font-mono text-xs" placeholder="title: ..."></textarea></div>
+                            </div>
+                        </div>
+
+                        <div v-else-if="metadataOption !== 'manual'" class="mt-4">
                             <h4 class="text-sm font-medium mb-2">Selected for Upload ({{ selectedFilesToUpload.length }})</h4>
-                            <ul class="list-disc list-inside text-sm space-y-1 max-h-40 overflow-y-auto">
-                                <li v-for="(file, index) in selectedFilesToUpload" :key="index" class="flex justify-between items-center bg-gray-100 dark:bg-gray-800 p-2 rounded"><span class="truncate">{{ file.name }} ({{ (file.size / 1024 / 1024).toFixed(2) }} MB)</span><button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700 ml-2" title="Remove"><IconXMark class="w-4 h-4" /></button></li>
+                            <ul class="space-y-1 max-h-40 overflow-y-auto">
+                                <li v-for="(file, index) in selectedFilesToUpload" :key="index" class="flex justify-between items-center bg-gray-100 dark:bg-gray-800 p-2 rounded text-sm"><span class="truncate">{{ file.name }} ({{ (file.size / 1024 / 1024).toFixed(2) }} MB)</span><button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700 ml-2" title="Remove"><IconXMark class="w-4 h-4" /></button></li>
                             </ul>
                         </div>
                     </div>
-                    <div class="flex justify-end items-center">
+                    <div v-else-if="metadataOption === 'manual'" class="mt-4 text-center text-sm text-gray-500 italic p-4 border-2 border-dashed rounded-lg dark:border-gray-600">
+                        Select files to enter their metadata manually.
+                    </div>
+                    <div class="flex justify-end items-center mt-4">
                         <button @click="handleUploadFiles" class="btn btn-primary" :disabled="isAnyTaskRunningForSelectedStore || selectedFilesToUpload.length === 0">
                             <IconArrowUpTray class="w-5 h-5 mr-2" /> Add {{ selectedFilesToUpload.length }} File(s)
                         </button>
@@ -430,20 +727,37 @@ async function handleQueryStore() {
                 <div v-if="currentUploadTask" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700"> ... </div>
                 <div>
                     <h3 class="text-xl font-semibold mb-4">Indexed Documents ({{ filesInSelectedStore.length }})</h3>
+                    <div v-if="!filesLoading && filesInSelectedStore.length > 0 && canReadWrite(currentSelectedStore)" class="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md mb-2">
+                        <div class="flex items-center">
+                            <input type="checkbox" @change="toggleSelectAll" :checked="allFilesSelected" :indeterminate="someFilesSelected" id="select-all-files-checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                            <label for="select-all-files-checkbox" class="ml-2 text-sm select-none cursor-pointer">Select All</label>
+                        </div>
+                        <button @click="handleDeleteSelectedFiles" class="btn btn-danger btn-sm" :disabled="selectedFilesToDelete.size === 0 || isLoadingAction === 'delete_selected_files'">
+                            <IconAnimateSpin v-if="isLoadingAction === 'delete_selected_files'" class="w-4 h-4 mr-2 animate-spin" />
+                            <IconTrash v-else class="w-4 h-4 mr-2" />
+                            Delete Selected ({{ selectedFilesToDelete.size }})
+                        </button>
+                    </div>
                     <div v-if="filesLoading" class="text-center py-10"><p>Loading documents...</p></div>
                     <div v-else-if="filesInSelectedStore.length === 0" class="text-center py-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p>No documents indexed.</p></div>
                     <ul v-else class="divide-y divide-gray-200 dark:divide-gray-700">
-                        <li v-for="file in filesInSelectedStore" :key="file.filename" class="py-3">
-                            <div class="flex items-center justify-between">
-                                <span class="text-sm font-medium truncate flex-grow mr-4">{{ file.filename }}</span>
-                                <button v-if="canReadWrite(currentSelectedStore)" @click="handleDeleteFile(file.filename)" class="btn btn-danger btn-sm p-1.5" :disabled="isLoadingAction === `delete_file_${file.filename}`"><IconTrash class="w-4 h-4" /></button>
+                        <li v-for="file in filesInSelectedStore" :key="file.filename" class="py-3 flex items-center">
+                            <input 
+                                v-if="canReadWrite(currentSelectedStore)"
+                                type="checkbox" 
+                                @change="toggleFileSelection(file.filename)" 
+                                :checked="selectedFilesToDelete.has(file.filename)" 
+                                class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-4 flex-shrink-0"
+                            >
+                            <div class="flex-grow min-w-0">
+                                <span class="text-sm font-medium truncate">{{ file.filename }}</span>
+                                <details v-if="file.metadata && Object.keys(file.metadata).length > 0" class="mt-2 text-xs">
+                                    <summary class="cursor-pointer text-gray-500">View Metadata</summary>
+                                    <div class="mt-1 p-2 bg-gray-100 dark:bg-gray-700/50 rounded">
+                                        <JsonRenderer :json="file.metadata" />
+                                    </div>
+                                </details>
                             </div>
-                            <details v-if="file.metadata && Object.keys(file.metadata).length > 0" class="mt-2 text-xs">
-                                <summary class="cursor-pointer text-gray-500">View Metadata</summary>
-                                <div class="mt-1 p-2 bg-gray-100 dark:bg-gray-700/50 rounded">
-                                    <JsonRenderer :json="file.metadata" />
-                                </div>
-                            </details>
                         </li>
                     </ul>
                 </div>
@@ -467,7 +781,7 @@ async function handleQueryStore() {
                             </div>
                             <div class="self-end">
                                 <button type="submit" class="btn btn-primary w-full" :disabled="isQuerying || !queryText.trim()">
-                                    <IconAnimateSpin v-if="isQuerying" class="w-5 h-5 mr-2" />
+                                    <IconAnimateSpin v-if="isQuerying" class="w-5 h-5 mr-2 animate-spin" />
                                     {{ isQuerying ? 'Querying...' : 'Query' }}
                                 </button>
                             </div>
@@ -475,9 +789,20 @@ async function handleQueryStore() {
                     </form>
                 </div>
                 <div class="flex-grow min-h-0 mt-6 border-t dark:border-gray-700 pt-6">
-                    <h4 class="text-lg font-semibold mb-4">Results ({{ queryResults.length }})</h4>
+                    <div class="flex justify-between items-center mb-4">
+                        <h4 class="text-lg font-semibold">Results ({{ queryResults.length }})</h4>
+                        <div v-if="queryResults.length > 0" class="flex items-center gap-2">
+                            <input type="text" v-model="searchInChunks" @keyup.enter="handleInChunkSearch" placeholder="Search in results..." class="input-field !py-1.5 !text-sm">
+                            <button @click="handleInChunkSearch" class="btn btn-secondary btn-sm p-2"><IconMagnifyingGlass class="w-4 h-4" /></button>
+                            <template v-if="searchMatches.length > 0">
+                                <button @click="navigateMatch(-1)" class="btn btn-secondary btn-sm p-2" title="Previous match">‹</button>
+                                <span class="text-sm text-gray-500 font-mono">{{ currentMatchIndex + 1 }} / {{ searchMatches.length }}</span>
+                                <button @click="navigateMatch(1)" class="btn btn-secondary btn-sm p-2" title="Next match">›</button>
+                            </template>
+                        </div>
+                    </div>
                     <div v-if="isQuerying" class="text-center p-6 text-gray-500">
-                        <IconAnimateSpin class="w-8 h-8 mx-auto" />
+                        <IconAnimateSpin class="w-8 h-8 mx-auto animate-spin" />
                         <p class="mt-2">Fetching results...</p>
                     </div>
                     <div v-else-if="queryError" class="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-md">
@@ -486,13 +811,16 @@ async function handleQueryStore() {
                     <div v-else-if="queryResults.length === 0" class="text-center p-6 text-gray-500">
                         No results to display. Run a query to see matching text chunks.
                     </div>
+                    <div v-else-if="searchInChunks && searchMatches.length === 0" class="text-center p-6 text-gray-500">
+                        No chunks match your search term.
+                    </div>
                     <div v-else class="space-y-4 overflow-y-auto custom-scrollbar h-full pb-10">
-                        <div v-for="(chunk, index) in queryResults" :key="index" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                        <div v-for="(chunk, index) in queryResults" :key="index" :id="`chunk-${index}`" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                             <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 mb-2">
                                 <span class="font-mono truncate" :title="chunk.file_path">.../{{ chunk.file_path.split(/[/\\]/).pop() }}</span>
                                 <span class="font-semibold" :title="`Similarity: ${chunk.similarity_percent}`">{{ chunk.similarity_percent.toFixed(2) }}%</span>
                             </div>
-                            <pre class="whitespace-pre-wrap font-sans text-sm">{{ chunk.chunk_text }}</pre>
+                            <pre class="whitespace-pre-wrap font-sans text-sm" v-html="highlightedChunk(chunk.chunk_text)"></pre>
                         </div>
                     </div>
                 </div>
@@ -505,7 +833,13 @@ async function handleQueryStore() {
   </PageViewLayout>
 </template>
 
-<style scoped>
+<style>
+.current-search-highlight {
+    background-color: #ff9632 !important;
+    color: black !important;
+    border-radius: 3px;
+    box-shadow: 0 0 5px #ff9632;
+}
 .tab-button { @apply px-1 py-4 text-sm font-medium border-b-2; }
 .tab-button.active { @apply border-blue-500 text-blue-600 dark:text-blue-400; }
 .tab-button.inactive { @apply border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-600; }

@@ -19,6 +19,7 @@ import IconChevronRight from '../../../assets/icons/IconChevronRight.vue';
 import IconGather from '../../../assets/icons/IconGather.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconEllipsisVertical from '../../../assets/icons/IconEllipsisVertical.vue';
+import IconFolder from '../../../assets/icons/IconFolder.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -29,6 +30,7 @@ const { activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussion
 const isUploadingArtefact = ref(false);
 const isArtefactsCollapsed = ref(false);
 const artefactFileInput = ref(null);
+const artefactFolderInput = ref(null);
 const isDraggingFile = ref(false);
 
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
@@ -65,6 +67,10 @@ function handleCreateArtefact() {
 
 function triggerArtefactFileUpload() {
     artefactFileInput.value?.click();
+}
+
+function triggerArtefactFolderUpload() {
+    artefactFolderInput.value?.click();
 }
 
 function handleImportFromUrl() {
@@ -119,6 +125,7 @@ async function handleArtefactFileUpload(event) {
     } finally {
         isUploadingArtefact.value = false;
         if (artefactFileInput.value) artefactFileInput.value.value = '';
+        if (artefactFolderInput.value) artefactFolderInput.value.value = '';
     }
 }
 
@@ -128,16 +135,63 @@ function handleDragLeave(event) {
 
 async function handleDrop(event) {
     isDraggingFile.value = false;
-    const files = Array.from(event.dataTransfer.files);
-    if (files.length) await handleArtefactFileUpload({ target: { files } });
+    event.preventDefault();
+    event.stopPropagation();
+    
+    const items = event.dataTransfer.items;
+    const allFiles = [];
+
+    function readEntriesPromise(directoryReader) {
+        return new Promise((resolve, reject) => {
+            directoryReader.readEntries(resolve, reject);
+        });
+    }
+
+    async function getFilesInDirectory(directoryEntry) {
+        const directoryReader = directoryEntry.createReader();
+        let allEntries = [];
+        let newEntries;
+        do {
+            newEntries = await readEntriesPromise(directoryReader);
+            allEntries = allEntries.concat(newEntries);
+        } while (newEntries.length > 0);
+        return allEntries;
+    }
+
+    async function traverseEntry(entry) {
+        if (entry.isFile) {
+            await new Promise((resolve, reject) => entry.file(file => {
+                allFiles.push(file);
+                resolve();
+            }, reject));
+        } else if (entry.isDirectory) {
+            const entries = await getFilesInDirectory(entry);
+            for (const subEntry of entries) {
+                await traverseEntry(subEntry);
+            }
+        }
+    }
+
+    const traversePromises = [];
+    for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry();
+        if (entry) {
+            traversePromises.push(traverseEntry(entry));
+        }
+    }
+
+    await Promise.all(traversePromises);
+
+    if (allFiles.length) await handleArtefactFileUpload({ target: { files: allFiles } });
 }
 </script>
 
 <template>
     <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="handleDragLeave" @drop.prevent="handleDrop" class="p-2 flex flex-col min-h-0 flex-grow relative">
-        <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
+        <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden" accept=".pdf,.docx,.pptx,.xlsx,.msg,.vcf,.txt,.md,.py,.js,.ts,.html,.css,.c,.cpp,.h,.hpp,.cs,.java,.json,.xml,.sh,.vhd,.v,.rb,.php,.go,.rs,.swift,.kt,.yaml,.yml,.sql,.log,.csv,image/png,image/jpeg,image/gif,image/webp,image/bmp,image/tiff">
+        <input type="file" ref="artefactFolderInput" @change="handleArtefactFileUpload" webkitdirectory directory multiple class="hidden">
         <div v-if="isDraggingFile" class="absolute inset-0 bg-blue-500/20 border-2 border-dashed border-blue-500 rounded-lg z-10 flex items-center justify-center">
-            <p class="font-semibold text-blue-600">Drop files to upload</p>
+            <p class="font-semibold text-blue-600">Drop files or folders to upload</p>
         </div>
         <div class="flex justify-between items-center mb-2 flex-shrink-0">
             <button @click="isArtefactsCollapsed = !isArtefactsCollapsed" class="flex items-center gap-2 text-sm font-semibold w-full text-left">
@@ -166,7 +220,12 @@ async function handleDrop(event) {
                     <button @click="triggerArtefactFileUpload" class="menu-item" :disabled="isUploadingArtefact">
                         <IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 mr-2" />
                         <IconArrowUpTray v-else class="w-4 h-4 mr-2" />
-                        <span>Upload File</span>
+                        <span>Upload File(s)</span>
+                    </button>
+                    <button @click="triggerArtefactFolderUpload" class="menu-item" :disabled="isUploadingArtefact">
+                        <IconAnimateSpin v-if="isUploadingArtefact" class="w-4 h-4 mr-2" />
+                        <IconFolder v-else class="w-4 h-4 mr-2" />
+                        <span>Upload Folder</span>
                     </button>
                 </DropdownMenu>
             </div>

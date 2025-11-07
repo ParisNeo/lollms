@@ -174,3 +174,15 @@ add queuing for audio generation
 revamp the mermaid ui to (accept the use of parenthesis inside brackets) and support comments
 Fix the zooming and exporting of the mermaid diagram
 
+
+
+Fix accents in names of databases
+add search inside the sources
+maake AI able to choose how many documents to recover
+move default data size to 2048
+add folder adding
+filter data file types
+immediate sources showing
+add the possibility to add manual metadata as text
+add the possibility to add a processor to dafe_store
+verify that msg files are supported

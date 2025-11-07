@@ -80,9 +80,6 @@ async def get_lollms_models(
             print(f"WARNING: Could not fetch models from binding '{binding.alias}': {e}")
             continue
 
-    if not all_models:
-        raise HTTPException(status_code=404, detail="No models found from any active bindings. Please contact an administrator.")
-
     return sorted(all_models, key=lambda x: x['name'])
 
 @lollms_config_router.get("/tti-models", response_model=List[ModelInfo])
@@ -157,11 +154,7 @@ async def get_lollms_tti_models(
             trace_exception(e)
             continue
 
-    if not all_models:
-        raise HTTPException(status_code=404, detail="No TTI models found from any active bindings.")
-    
-    models_list = sorted(all_models, key=lambda x: x['name'])
-    return models_list
+    return sorted(all_models, key=lambda x: x['name'])
 
 
 @lollms_config_router.post("/lollms-model")

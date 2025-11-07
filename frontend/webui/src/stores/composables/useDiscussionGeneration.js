@@ -1,9 +1,9 @@
-// frontend/webui/src/stores/composables/useDiscussionGeneration.js
+// [UPDATE] frontend/webui/src/stores/composables/useDiscussionGeneration.js
 import apiClient from '../../services/api';
 import { processSingleMessage } from './discussionProcessor'; // IMPORT the shared function
 
 export function useDiscussionGeneration(state, stores, getActions) {
-    const { discussions, currentDiscussionId, messages, generationInProgress, activePersonality, promptLoadedArtefacts, _clearActiveAiTask } = state;
+    const { discussions, currentDiscussionId, messages, generationInProgress, activePersonality, promptLoadedArtefacts, _clearActiveAiTask, generationState } = state;
     const { uiStore, authStore, dataStore } = stores;
 
     let activeGenerationAbortController = null;
@@ -29,6 +29,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
         }
 
         generationInProgress.value = true;
+        generationState.value = { status: 'starting', details: 'Waiting for first token...' };
         promptLoadedArtefacts.value.clear();
         activeGenerationAbortController = new AbortController();
         const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
@@ -57,6 +58,89 @@ export function useDiscussionGeneration(state, stores, getActions) {
         if (payload.is_resend) formData.append('is_resend', 'true');
 
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
+
+        const processStreamData = (data) => {
+            if (!messageToUpdate) return;
+            
+            // First, handle state updates based on type
+            switch (data.type) {
+                case 'chunk':
+                    if (generationState.value.status !== 'streaming') {
+                        generationState.value = { status: 'streaming', details: 'Receiving response...' };
+                    }
+                    break;
+                case 'step_start':
+                    generationState.value = { status: 'thinking', details: data.content || 'Thinking...' };
+                    break;
+                case 'tool_call':
+                    let details = 'Using tool...';
+                    try {
+                        const toolData = JSON.parse(data.content);
+                        details = `Using tool: ${toolData.function || toolData.tool_name || '...'}`;
+                    } catch(e) {}
+                    generationState.value = { status: 'thinking', details };
+                    break;
+                case 'new_title_start':
+                    state.titleGenerationInProgressId.value = currentDiscussionId.value;
+                    generationState.value = { status: 'generating_title', details: 'Generating title...' };
+                    break;
+                case 'new_title_end':
+                    state.titleGenerationInProgressId.value = null;
+                    if (state.discussions.value[currentDiscussionId.value]) {
+                        state.discussions.value[currentDiscussionId.value].title = data.new_title;
+                    }
+                    if (generationInProgress.value) {
+                        generationState.value = { status: 'thinking', details: 'Continuing generation...' };
+                    }
+                    break;
+                case 'step_end':
+                    if (generationInProgress.value) { 
+                        generationState.value = { status: 'thinking', details: 'Continuing generation...' };
+                    }
+                    break;
+            }
+
+            // Then, handle data processing for the message object
+            switch (data.type) {
+                case 'chunk':
+                    messageToUpdate.content += data.content;
+                    break;
+                case 'sources':
+                    if (!messageToUpdate.sources) messageToUpdate.sources = [];
+                    messageToUpdate.sources = data.content;
+                    // Fallthrough to events
+                case 'step_start':
+                case 'step_end':
+                case 'info':
+                case 'observation':
+                case 'thought':
+                case 'reasoning':
+                case 'tool_call':
+                case 'scratchpad':
+                case 'exception':
+                case 'error':
+                    if (!messageToUpdate.events) messageToUpdate.events = [];
+                    messageToUpdate.events.push(data);
+                    break;
+                case 'new_title_start':
+                case 'new_title_end':
+                    // Already handled state, nothing to do for message object here
+                    break;
+                case 'finalize': {
+                    const finalData = data.data;
+                    const userMsgIndex = messages.value.findIndex(m => m.id === tempUserMessage.id);
+                    if (userMsgIndex !== -1 && finalData.user_message) {
+                        messages.value.splice(userMsgIndex, 1, processSingleMessage(finalData.user_message));
+                    }
+
+                    const aiMsgIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
+                    if (aiMsgIndex !== -1 && finalData.ai_message) {
+                        messages.value.splice(aiMsgIndex, 1, processSingleMessage(finalData.ai_message));
+                    }
+                    break;
+                }
+            }
+        };
         
         try {
             const response = await fetch(`/api/discussions/${currentDiscussionId.value}/chat`, {
@@ -69,62 +153,35 @@ export function useDiscussionGeneration(state, stores, getActions) {
             
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
+            let buffer = '';
             
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
                 
-                const textChunk = decoder.decode(value, { stream: true });
-                const lines = textChunk.split('\n').filter(line => line.trim() !== '');
+                buffer += decoder.decode(value, { stream: true });
+                let newlineIndex;
+                while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+                    const line = buffer.slice(0, newlineIndex).trim();
+                    buffer = buffer.slice(newlineIndex + 1);
 
-                lines.forEach(line => {
-                    try {
-                        const data = JSON.parse(line);
-                        if (!messageToUpdate) return;
-                        
-                        switch (data.type) {
-                            case 'chunk':
-                                messageToUpdate.content += data.content;
-                                break;
-                            case 'step_start':
-                            case 'step_end':
-                            case 'info':
-                            case 'observation':
-                            case 'thought':
-                            case 'reasoning':
-                            case 'tool_call':
-                            case 'scratchpad':
-                            case 'exception':
-                            case 'error':
-                                if (!messageToUpdate.events) messageToUpdate.events = [];
-                                messageToUpdate.events.push(data);
-                                break;
-                            case 'new_title_start':
-                                state.titleGenerationInProgressId.value = currentDiscussionId.value;
-                                break;
-                            case 'new_title_end':
-                                state.titleGenerationInProgressId.value = null;
-                                if (state.discussions.value[currentDiscussionId.value]) {
-                                    state.discussions.value[currentDiscussionId.value].title = data.new_title;
-                                }
-                                break;
-                            case 'finalize': {
-                                const finalData = data.data;
-                                const userMsgIndex = messages.value.findIndex(m => m.id === tempUserMessage.id);
-                                if (userMsgIndex !== -1 && finalData.user_message) {
-                                    messages.value.splice(userMsgIndex, 1, processSingleMessage(finalData.user_message));
-                                }
-
-                                const aiMsgIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
-                                if (aiMsgIndex !== -1 && finalData.ai_message) {
-                                    messages.value.splice(aiMsgIndex, 1, processSingleMessage(finalData.ai_message));
-                                }
-                                break;
-                            }
-                        }
-                    } catch (e) { console.error("Error parsing stream line:", line, e); }
-                });
+                    if (line) {
+                        try {
+                            const data = JSON.parse(line);
+                            processStreamData(data);
+                        } catch (e) { console.error("Error parsing stream line:", line, e); }
+                    }
+                }
             }
+            if (buffer.trim()) {
+                try {
+                    const data = JSON.parse(buffer.trim());
+                    processStreamData(data);
+                } catch(e) {
+                    console.error("Error parsing final buffered line:", buffer.trim(), e);
+                }
+            }
+
         } catch (error) {
             if (error.name !== 'AbortError') {
                 uiStore.addNotification('An error occurred during generation.', 'error');
@@ -134,6 +191,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
         } finally {
             if (messageToUpdate) messageToUpdate.isStreaming = false;
             generationInProgress.value = false;
+            generationState.value = { status: 'idle', details: '' };
             activeGenerationAbortController = null;
             await getActions().fetchContextStatus(currentDiscussionId.value);
             await getActions().loadDiscussions();
@@ -146,6 +204,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
             activeGenerationAbortController = null;
         }
         generationInProgress.value = false;
+        generationState.value = { status: 'idle', details: '' };
         
         if (currentDiscussionId.value) {
             try { 

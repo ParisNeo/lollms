@@ -38,6 +38,11 @@ const sections = [
     { id: 'account', name: 'Account', icon: markRaw(IconUserCircle), component: AccountSettings },
     { id: 'general', name: 'General', icon: markRaw(IconCog), component: GeneralSettings },
     { type: 'divider' },
+    { id: 'personalities', name: 'Personalities', icon: markRaw(IconUserCircle), component: PersonalitiesSettings },
+    { id: 'prompts', name: 'Prompts', icon: markRaw(IconSparkles), component: PromptsSettings },
+    { id: 'mcps', name: 'MCPs', icon: markRaw(IconMcp), component: McpsSettings },
+    { id: 'apps', name: 'Apps', icon: markRaw(IconSquares2x2), component: AppsSettings },
+    { type: 'divider' },
     { id: 'llm', name: 'LLM', icon: markRaw(IconCpuChip), component: LLMSettings },
     { id: 'rag', name: 'RAG', icon: markRaw(IconDatabase), component: RAGSettings },
     { id: 'tti', name: 'TTI', icon: markRaw(IconPhoto), component: TTISettings },
@@ -46,11 +51,6 @@ const sections = [
     { type: 'divider' },
     { id: 'api_keys', name: 'API Keys', icon: markRaw(IconKey), component: ApiKeysSettings },
     { id: 'services', name: 'Services', icon: markRaw(IconTool), component: ServicesSettings },
-    { type: 'divider' },
-    { id: 'personalities', name: 'Personalities', icon: markRaw(IconUserCircle), component: PersonalitiesSettings },
-    { id: 'prompts', name: 'Prompts', icon: markRaw(IconSparkles), component: PromptsSettings },
-    { id: 'mcps', name: 'MCPs', icon: markRaw(IconMcp), component: McpsSettings },
-    { id: 'apps', name: 'Apps', icon: markRaw(IconSquares2x2), component: AppsSettings },
 ];
 
 const activeSectionId = computed({

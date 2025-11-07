@@ -37,6 +37,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const messages = ref([]);
     const isLoadingMessages = ref(false);
     const generationInProgress = ref(false);
+    const generationState = ref({ status: 'idle', details: '' }); // idle, starting, streaming, thinking, generating_title
     const titleGenerationInProgressId = ref(null);
     const activeDiscussionContextStatus = ref(null);
     const activeAiTasks = ref({});
@@ -165,7 +166,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         generationInProgress, titleGenerationInProgressId, activeDiscussionContextStatus, activeAiTasks,
         activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
         promptLoadedArtefacts, _clearActiveAiTask, activeDiscussion, activePersonality, emit,
-        activeDiscussionParticipants
+        activeDiscussionParticipants, generationState
     };
     const composableStores = { uiStore, authStore, dataStore, tasksStore };
 
@@ -267,6 +268,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         messages.value = [];
         isLoadingMessages.value = false;
         generationInProgress.value = false;
+        generationState.value = { status: 'idle', details: '' };
         titleGenerationInProgressId.value = null;
         activeDiscussionContextStatus.value = null;
         activeAiTasks.value = {};
@@ -290,6 +292,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         activeAiTasks, activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens,
         promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
         ttsState,
+        generationState,
         currentPlayingAudio,
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,

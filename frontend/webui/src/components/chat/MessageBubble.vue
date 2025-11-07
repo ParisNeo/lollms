@@ -41,6 +41,7 @@ import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
+import IconMagnifyingGlass from '../../assets/icons/IconMagnifyingGlass.vue';
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -228,8 +229,9 @@ const groupedEvents = computed(() => {
 
     const result = [];
     const stack = [];
+    const filteredEvents = props.message.events.filter(event => event.type !== 'sources');
 
-    for (const event of props.message.events) {
+    for (const event of filteredEvents) {
         const lowerType = event.type?.toLowerCase() || '';
 
         if (lowerType.includes('step_start')) {
@@ -425,13 +427,16 @@ function handleBranchOrRegenerate() {
 }
 
 function showSourceDetails(source) {
-    uiStore.openModal('artefactViewer', { ...source });
+    uiStore.openModal('sourceViewer', { ...source });
+}
+function openAllSourcesSearch() {
+    uiStore.openModal('allSourcesSearch', { sources: props.message.sources });
 }
 
 function getSimilarityColor(score) {
   if (score === undefined || score === null) return 'bg-gray-400 dark:bg-gray-600';
-  if (score >= 85) return 'bg-green-500';
-  if (score >= 70) return 'bg-yellow-500';
+  if (score >= 80) return 'bg-green-500';
+  if (score >= 50) return 'bg-yellow-500';
   return 'bg-red-500';
 }
 
@@ -549,10 +554,16 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
 
                 <!-- Sources -->
                 <div v-if="hasSources" class="mt-2 border-t border-gray-200 dark:border-gray-700/50 pt-2">
-                    <button @click="isSourcesVisible = !isSourcesVisible" class="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none w-full">
-                        <IconChevronRight class="toggle-icon" :class="{'rotate-90': isSourcesVisible}" />
-                        <span>Sources ({{sortedSources.length}})</span>
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <button @click="isSourcesVisible = !isSourcesVisible" class="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none">
+                            <IconChevronRight class="toggle-icon" :class="{'rotate-90': isSourcesVisible}" />
+                            <span>Sources ({{sortedSources.length}})</span>
+                        </button>
+                        <button @click="openAllSourcesSearch" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600" title="Search all sources">
+                            <IconMagnifyingGlass class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                        </button>
+                    </div>
+
                     <div v-if="isSourcesVisible" class="mt-2 space-y-2 pl-4">
                         <div v-for="source in sortedSources" :key="source.title" @click="showSourceDetails(source)" class="source-item">
                             <div class="similarity-chip" :class="getSimilarityColor(source.score)" :title="typeof source.score === 'number' ? `Similarity: ${(source.score).toFixed(1)}%` : 'Similarity: N/A'"></div>

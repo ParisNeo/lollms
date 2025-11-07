@@ -1,4 +1,3 @@
-<!-- [CREATE] frontend/webui/src/components/admin/bindings/STTBindingsSettings.vue -->
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -168,6 +167,10 @@ async function handleDelete(binding) {
     }
 }
 
+async function toggleBindingActive(binding) {
+    await adminStore.updateSttBinding(binding.id, { is_active: !binding.is_active });
+}
+
 function manageModels(binding) {
     uiStore.openModal('manageModels', { binding, bindingType: 'stt' });
 }
@@ -271,27 +274,29 @@ function getBindingTitle(name) {
             </div>
             <div v-else class="space-y-4">
                 <div v-for="binding in sttBindings" :key="binding.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md flex flex-col gap-4">
-                    <div class="flex items-start gap-4">
-                        <span class="mt-1 h-3 w-3 rounded-full flex-shrink-0" :class="binding.is_active ? 'bg-green-500' : 'bg-gray-400'" :title="binding.is_active ? 'Active' : 'Inactive'"></span>
-                        <div class="flex-grow">
-                            <div class="flex justify-between items-center">
+                    <div class="flex-grow">
+                        <div class="flex justify-between items-center">
+                            <div class="flex items-center gap-3">
                                 <h4 class="font-bold text-lg text-gray-900 dark:text-white">{{ binding.alias }}</h4>
-                                <div class="flex gap-3">
-                                    <button @click="showEditForm(binding)" class="text-sm font-medium text-blue-600 hover:underline">Edit</button>
-                                    <button @click="handleDelete(binding)" class="text-sm font-medium text-red-600 hover:underline">Delete</button>
-                                </div>
+                                <button @click.stop="toggleBindingActive(binding)" type="button" :class="[binding.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']" :title="binding.is_active ? 'Deactivate' : 'Activate'">
+                                    <span :class="[binding.is_active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                                </button>
                             </div>
-                            <p class="text-sm text-gray-500 dark:text-gray-400">{{ getBindingTitle(binding.name) }}</p>
-                            <div class="mt-2 text-xs space-y-1 text-gray-600 dark:text-gray-300">
-                                <template v-for="(value, key) in binding.config" :key="key">
-                                     <p v-if="value && key !== 'model_name'">
-                                        <span class="font-semibold capitalize">{{ key.replace(/_/g, ' ') }}:</span> 
-                                        <span v-if="key.includes('key') || key.includes('token')">********</span>
-                                        <span v-else>{{ value }}</span>
-                                     </p>
-                                </template>
-                                <p v-if="binding.default_model_name"><span class="font-semibold">Default Model:</span> {{ binding.default_model_name }}</p>
+                            <div class="flex gap-3">
+                                <button @click="showEditForm(binding)" class="text-sm font-medium text-blue-600 hover:underline">Edit</button>
+                                <button @click="handleDelete(binding)" class="text-sm font-medium text-red-600 hover:underline">Delete</button>
                             </div>
+                        </div>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">{{ getBindingTitle(binding.name) }}</p>
+                        <div class="mt-2 text-xs space-y-1 text-gray-600 dark:text-gray-300">
+                            <template v-for="(value, key) in binding.config" :key="key">
+                                 <p v-if="value && key !== 'model_name'">
+                                    <span class="font-semibold capitalize">{{ key.replace(/_/g, ' ') }}:</span> 
+                                    <span v-if="key.includes('key') || key.includes('token')">********</span>
+                                    <span v-else>{{ value }}</span>
+                                 </p>
+                            </template>
+                            <p v-if="binding.default_model_name"><span class="font-semibold">Default Model:</span> {{ binding.default_model_name }}</p>
                         </div>
                     </div>
                     <div class="border-t dark:border-gray-700 pt-3 flex justify-end">

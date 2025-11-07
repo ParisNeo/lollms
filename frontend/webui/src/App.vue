@@ -28,6 +28,8 @@ import ConfirmationModal from './components/ui/ConfirmationModal.vue';
 import ImageViewerModal from './components/modals/ImageViewerModal.vue';
 import ArtefactEditorModal from './components/modals/ArtefactEditorModal.vue';
 import ArtefactViewerModal from './components/modals/ArtefactViewerModal.vue';
+import SourceViewerModal from './components/modals/SourceViewerModal.vue';
+import AllSourcesSearchModal from './components/modals/AllSourcesSearchModal.vue';
 import MemoryEditorModal from './components/modals/MemoryEditorModal.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ShareDataStoreModal from './components/modals/ShareDataStoreModal.vue';
@@ -236,6 +238,8 @@ watch(tasks, (newTasks, oldTasks) => {
     <ImageViewerModal />
     <ArtefactEditorModal v-if="activeModal === 'artefactEditor'" />
     <ArtefactViewerModal v-if="activeModal === 'artefactViewer'" />
+    <SourceViewerModal v-if="activeModal === 'sourceViewer'" />
+    <AllSourcesSearchModal v-if="activeModal === 'allSourcesSearch'" />
     <MemoryEditorModal v-if="activeModal === 'memoryEditor'" />
     <NotificationPanel />
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />

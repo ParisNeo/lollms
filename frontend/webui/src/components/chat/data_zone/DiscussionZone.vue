@@ -334,7 +334,51 @@ function handleDragLeave(event) {
 
 async function handleDrop(event) {
     isDraggingFile.value = false;
-    const files = Array.from(event.dataTransfer.files);
+    const items = event.dataTransfer.items;
+    const allFiles = [];
+
+    function readEntriesPromise(directoryReader) {
+        return new Promise((resolve, reject) => {
+            directoryReader.readEntries(resolve, reject);
+        });
+    }
+
+    async function getFilesInDirectory(directoryEntry) {
+        const directoryReader = directoryEntry.createReader();
+        let allEntries = [];
+        let newEntries;
+        do {
+            newEntries = await readEntriesPromise(directoryReader);
+            allEntries = allEntries.concat(newEntries);
+        } while (newEntries.length > 0);
+        return allEntries;
+    }
+
+    async function traverseEntry(entry) {
+        if (entry.isFile) {
+            await new Promise((resolve, reject) => entry.file(file => {
+                allFiles.push(file);
+                resolve();
+            }, reject));
+        } else if (entry.isDirectory) {
+            const entries = await getFilesInDirectory(entry);
+            for (const subEntry of entries) {
+                await traverseEntry(subEntry);
+            }
+        }
+    }
+
+    const traversePromises = [];
+    for (let i = 0; i < items.length; i++) {
+        const entry = items[i].webkitGetAsEntry();
+        if (entry) {
+            traversePromises.push(traverseEntry(entry));
+        }
+    }
+
+    await Promise.all(traversePromises);
+    const files = allFiles;
+
     if (files.length > 0 && activeDiscussion.value) {
         uiStore.addNotification(`Processing ${files.length} file(s)...`, 'info');
         
@@ -353,13 +397,13 @@ async function handleDrop(event) {
         });
 
         if (currentModelVisionSupport.value && hasImageExtractableFiles) {
-            const result = await uiStore.showConfirmation({
+            const { confirmed } = await uiStore.showConfirmation({
                 title: `Extract Images?`,
                 message: 'Some of the dropped files may contain images. Do you want to extract them? This may take longer.',
                 confirmText: 'Yes, Extract Images',
                 cancelText: 'No, Text Only'
             });
-            extractImages = result.confirmed;
+            extractImages = confirmed;
         }
         
         await discussionsStore.uploadAndEmbedFilesToDataZone(activeDiscussion.value.id, files, extractImages);
@@ -383,10 +427,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="handleDragLeave" @drop.prevent="handleDrop" class="flex-1 flex flex-col min-h-0 relative">
-    <div v-if="isDraggingFile" class="absolute inset-0 bg-blue-500/20 border-2 border-dashed border-blue-500 rounded-lg z-10 flex items-center justify-center pointer-events-none">
-        <p class="font-semibold text-blue-600">Drop files to add to Data Zone</p>
-    </div>
+  <div class="flex-1 flex flex-col min-h-0">
     <div v-if="showContextBar" class="px-3 pt-2 pb-1 border-b border-gray-200 dark:border-gray-700 relative group flex-shrink-0">
         <!-- Context Bar Content -->
         <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 font-mono">
@@ -412,10 +453,18 @@ onUnmounted(() => {
             </div>
         </div>
     </div>
-    <div class="flex-grow flex flex-col min-h-0">
+    <div class="flex-grow flex min-h-0">
         <input type="file" ref="discussionImageInput" @change="handleDiscussionImageUpload" class="hidden" accept="image/*,application/pdf" multiple>
         <div class="flex-grow flex min-h-0">
-            <div class="flex-grow flex flex-col min-h-0 p-2">
+            <div 
+                @dragover.prevent="isDraggingFile = true" 
+                @dragleave.prevent="handleDragLeave" 
+                @drop.prevent="handleDrop"
+                class="flex-grow flex flex-col min-h-0 p-2 relative"
+            >
+                <div v-if="isDraggingFile" class="absolute inset-2 bg-blue-500/20 border-2 border-dashed border-blue-500 rounded-lg z-10 flex items-center justify-center pointer-events-none">
+                    <p class="font-semibold text-blue-600">Drop files to add to Data Zone</p>
+                </div>
                 <!-- Editor Controls -->
                 <div class="flex-shrink-0 px-1 pb-2 flex items-center justify-between gap-4">
                     <div class="flex items-center gap-1">

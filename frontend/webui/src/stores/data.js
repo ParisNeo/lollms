@@ -328,6 +328,11 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/config/lollms-models');
             availableLollmsModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
+            if (error.response && error.response.status === 404) {
+                console.log("No active LLM bindings found. This is expected if none are configured.");
+            } else {
+                console.error("Failed to fetch LLM models:", error);
+            }
             availableLollmsModels.value = [];
         } finally {
             isLoadingLollmsModels.value = false;
@@ -340,6 +345,11 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/config/tti-models');
             availableTtiModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
+            if (error.response && error.response.status === 404) {
+                console.log("No active TTI bindings found. This is expected if none are configured.");
+            } else {
+                console.error("Failed to fetch TTI models:", error);
+            }
             availableTtiModels.value = [];
         } finally {
             isLoadingTtiModels.value = false;
@@ -352,6 +362,11 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/config/tts-models');
             availableTtsModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
+            if (error.response && error.response.status === 404) {
+                console.log("No active TTS bindings found. This is expected if none are configured.");
+            } else {
+                console.error("Failed to fetch TTS models:", error);
+            }
             availableTtsModels.value = [];
         } finally {
             isLoadingTtsModels.value = false;
@@ -364,6 +379,11 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/config/stt-models');
             availableSttModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
+            if (error.response && error.response.status === 404) {
+                console.log("No active STT bindings found. This is expected if none are configured.");
+            } else {
+                console.error("Failed to fetch STT models:", error);
+            }
             availableSttModels.value = [];
         } finally {
             isLoadingSttModels.value = false;
@@ -388,6 +408,11 @@ export const useDataStore = defineStore('data', () => {
             const response = await apiClient.get('/api/admin/available-models');
             availableLollmsModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
+            if (error.response && error.response.status === 404) {
+                console.log("No active LLM bindings found for admin view. This is expected if none are configured.");
+            } else {
+                console.error("Failed to fetch LLM models for admin:", error);
+            }
             availableLollmsModels.value = [];
         } finally {
             isLoadingLollmsModels.value = false;
@@ -476,6 +501,19 @@ export const useDataStore = defineStore('data', () => {
         const uiStore = useUiStore();
         await apiClient.delete(`/api/store/${storeId}/files/${encodeURIComponent(filename)}`);
         uiStore.addNotification(`File '${filename}' deleted.`, 'success');
+    }
+    async function deleteFilesFromStore({ storeId, filenames }) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post(`/api/store/${storeId}/files/batch-delete`, { filenames });
+            if (response.data.failed_files && response.data.failed_files.length > 0) {
+                uiStore.addNotification(`${response.data.deleted_count} file(s) deleted. Failed to delete ${response.data.failed_files.length}.`, 'warning');
+            } else {
+                uiStore.addNotification(`${response.data.deleted_count} file(s) deleted successfully.`, 'success');
+            }
+        } catch (error) {
+            console.error("Batch delete failed:", error);
+        }
     }
 
     async function fetchDataStoreDetails(storeId) {
@@ -737,6 +775,21 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
+    async function extractTextFromFile(file) {
+        const uiStore = useUiStore();
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const response = await apiClient.post('/api/files/extract-text', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
+            });
+            return response.data.text_content;
+        } catch (error) {
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to extract text from file.', 'error');
+            throw error;
+        }
+    }
+
     function $reset() {
         availableLollmsModels.value = [];
         availableTtiModels.value = [];
@@ -784,7 +837,7 @@ export const useDataStore = defineStore('data', () => {
         revokeShare, getSharedWithList,
         fetchAvailableVectorizers, availableVectorizers,
         fetchStoreFiles, uploadFilesToStore,
-        deleteFileFromStore, 
+        deleteFileFromStore, deleteFilesFromStore,
         fetchDataStoreDetails,
         generateDataStoreGraph,
         updateDataStoreGraph,
@@ -812,7 +865,7 @@ export const useDataStore = defineStore('data', () => {
         deleteMultipleApiKeys, deleteSingleApiKey,
 
         handleServiceStatusUpdate,
-
+        extractTextFromFile,
         $reset
     };
 });

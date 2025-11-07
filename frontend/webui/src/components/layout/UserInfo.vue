@@ -1,4 +1,4 @@
-<!-- frontend/webui/src/components/layout/UserInfo.vue -->
+<!-- [UPDATE] frontend/webui/src/components/layout/UserInfo.vue -->
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../stores/auth';
@@ -197,49 +197,56 @@ const vOnClickOutside = {
                         leave-to-class="opacity-0 -translate-x-full"
                     >
                         <div v-if="!activeSubMenu" class="w-full py-1 h-full overflow-y-auto">
-                            <router-link to="/profile/me" @click="closeMenu" class="menu-item">
-                                <UserAvatar :icon="user.icon" :username="user.username" size-class="h-5 w-5 mr-3" />
+                            <!-- Me Section -->
+                            <router-link to="/profile/me" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <UserAvatar :icon="user.icon" :username="user.username" size-class="h-5 w-5" />
                                 <span>My Profile</span>
                             </router-link>
-                            <router-link to="/friends" @click="closeMenu" class="menu-item">
-                                <IconUserGroup class="mr-3 h-5 w-5 text-gray-500" />
+                            <router-link to="/friends" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <IconUserGroup class="h-5 w-5 text-gray-500" />
                                 <span>Friends</span>
                             </router-link>
-                            <router-link to="/settings" @click="closeMenu" class="menu-item">
-                            <IconSettings class="mr-3 h-5 w-5 text-gray-500" />
-                            <span>Settings</span>
-                            </router-link>
-                            <router-link v-if="isTtsConfigured" to="/voices-studio" @click="closeMenu" class="menu-item">
-                                <IconMicrophone class="mr-3 h-5 w-5 text-gray-500" />
+                            
+                            <!-- Studios Section -->
+                            <div class="my-1 border-t dark:border-gray-600"></div>
+                            <router-link v-if="isTtsConfigured" to="/voices-studio" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <IconMicrophone class="h-5 w-5 text-gray-500" />
                                 <span>Voices Studio</span>
                             </router-link>
-                            <router-link v-if="isTtiConfigured" to="/image-studio" @click="closeMenu" class="menu-item">
-                                <IconPhoto class="mr-3 h-5 w-5 text-gray-500" />
+                            <router-link v-if="isTtiConfigured" to="/image-studio" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <IconPhoto class="h-5 w-5 text-gray-500" />
                                 <span>Image Studio</span>
                             </router-link>
-                            <router-link v-if="isAdmin" to="/admin" @click="closeMenu" class="menu-item">
-                                <IconUserGroup class="mr-3 h-5 w-5 text-gray-500" />
-                                <span>Admin Panel</span>
-                            </router-link>
-                            <div class="my-1 border-t dark:border-gray-600"></div>
-                            <router-link to="/datastores" @click="closeMenu" class="menu-item">
-                                <IconDatabase class="mr-3 h-5 w-5 text-gray-500" />
+                            <router-link to="/datastores" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <IconDatabase class="h-5 w-5 text-gray-500" />
                                 <span>Data Studio</span>
                             </router-link>
-                            <button v-if="runningApps.length > 0" @click="activeSubMenu = 'apps'" class="menu-item justify-between">
-                            <div class="flex items-center">
-                                <IconTicket class="mr-3 h-5 w-5 text-gray-500" />
-                                <span>Running Apps</span>
-                            </div>
-                            <IconChevronRight class="h-5 w-5" />
-                            </button>
-                            <router-link to="/help" @click="closeMenu" class="menu-item">
-                                <IconBookOpen class="mr-3 h-5 w-5 text-gray-500" />
-                                <span>Help</span>
-                            </router-link>                            
+
+                            <!-- System Section -->
                             <div class="my-1 border-t dark:border-gray-600"></div>
-                            <button @click="handleLogout" class="w-full rounded-md px-4 py-2 text-left text-sm text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/50 flex items-center">
-                            <IconSignOut class="mr-3 h-5 w-5" />
+                            <router-link to="/settings" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <IconSettings class="h-5 w-5 text-gray-500" />
+                                <span>Settings</span>
+                            </router-link>
+                            <router-link v-if="isAdmin" to="/admin" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <IconUserGroup class="h-5 w-5 text-gray-500" />
+                                <span>Admin Panel</span>
+                            </router-link>
+                             <router-link to="/help" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <IconBookOpen class="h-5 w-5 text-gray-500" />
+                                <span>Help</span>
+                            </router-link>
+                            <button v-if="runningApps.length > 0" @click="activeSubMenu = 'apps'" class="menu-item flex items-center justify-between">
+                                <div class="flex items-center gap-3">
+                                    <IconTicket class="h-5 w-5 text-gray-500" />
+                                    <span>Running Apps</span>
+                                </div>
+                                <IconChevronRight class="h-5 w-5" />
+                            </button>
+                                                       
+                            <div class="my-1 border-t dark:border-gray-600"></div>
+                            <button @click="handleLogout" class="w-full rounded-md px-4 py-2 text-left text-sm text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/50 flex items-center gap-3">
+                            <IconSignOut class="h-5 w-5" />
                             <span>Sign Out</span>
                             </button>
                         </div>
@@ -254,13 +261,13 @@ const vOnClickOutside = {
                         leave-to-class="opacity-0 translate-x-full"
                     >
                         <div v-if="activeSubMenu === 'apps'" class="absolute inset-0 w-full bg-white py-1 dark:bg-gray-800 h-full overflow-y-auto">
-                            <button @click="activeSubMenu = null" class="menu-item">
-                            <IconArrowLeft class="mr-3 h-5 w-5" />
+                            <button @click="activeSubMenu = null" class="menu-item flex items-center gap-3">
+                            <IconArrowLeft class="h-5 w-5" />
                             <span>Back</span>
                             </button>
                             <div class="my-1 border-t dark:border-gray-600"></div>
-                            <a v-for="app in runningApps" :key="app.id" :href="app.url" target="_blank" rel="noopener noreferrer" class="menu-item">
-                                <UserAvatar :icon="app.icon" :username="app.name" size-class="h-5 w-5 mr-3" />
+                            <a v-for="app in runningApps" :key="app.id" :href="app.url" target="_blank" rel="noopener noreferrer" class="menu-item flex items-center gap-3">
+                                <UserAvatar :icon="app.icon" :username="app.name" size-class="h-5 w-5" />
                                 <span class="truncate">{{ app.name }}</span>
                             </a>
                         </div>

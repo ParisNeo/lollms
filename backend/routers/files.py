@@ -69,12 +69,13 @@ files_router = APIRouter(prefix="/api/files", tags=["Files"])
 upload_router = APIRouter(prefix="/api/upload", tags=["Files"])
 assets_router = APIRouter(prefix="/assets", tags=["Files"])
 
-def _process_msg_attachment(att_bytes: bytes, att_name: str, images: List[str]) -> Optional[str]:
+def _process_msg_attachment(att_bytes: bytes, att_name: str, images: List[str], extract_images: bool = True) -> Optional[str]:
     """Helper to process a single attachment from an MSG file."""
     att_ext = Path(att_name).suffix.lower()
     
     if att_ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"]:
-        images.append(base64.b64encode(att_bytes).decode("utf-8"))
+        if extract_images:
+            images.append(base64.b64encode(att_bytes).decode("utf-8"))
         return None 
     
     try:
@@ -100,7 +101,7 @@ def _process_msg_attachment(att_bytes: bytes, att_name: str, images: List[str]) 
     return f"- Attachment: {att_name} ({len(att_bytes)} bytes - content ignored)"
 
 
-def extract_text_from_file_bytes(file_bytes: bytes, filename: str) -> Tuple[str, List[str]]:
+def extract_text_from_file_bytes(file_bytes: bytes, filename: str, extract_images: bool = True) -> Tuple[str, List[str]]:
     """
     Extracts text and embedded/generated images (as base64) from file bytes.
     Returns: (extracted_text, list_of_base64_images)
@@ -118,10 +119,11 @@ def extract_text_from_file_bytes(file_bytes: bytes, filename: str) -> Tuple[str,
                 text_parts = []
                 for page in pdf_doc:
                     text_parts.append(page.get_text())
-                    for img_info in page.get_images(full=True):
-                        xref = img_info[0]
-                        base_image = pdf_doc.extract_image(xref)
-                        images.append(base64.b64encode(base_image["image"]).decode('utf-8'))
+                    if extract_images:
+                        for img_info in page.get_images(full=True):
+                            xref = img_info[0]
+                            base_image = pdf_doc.extract_image(xref)
+                            images.append(base64.b64encode(base_image["image"]).decode('utf-8'))
                 extracted_text = "\n".join(text_parts)
         except Exception as e:
             extracted_text = f"[Error processing PDF file: {e}. Is PyMuPDF (fitz) installed?]"
@@ -131,7 +133,7 @@ def extract_text_from_file_bytes(file_bytes: bytes, filename: str) -> Tuple[str,
             with io.BytesIO(file_bytes) as docx_io:
                 result = docx2python(docx_io)
                 extracted_text = result.text
-                if result.images:
+                if result.images and extract_images:
                     for image_bytes in result.images.values():
                         images.append(base64.b64encode(image_bytes).decode("utf-8"))
         except Exception as e:
@@ -158,7 +160,7 @@ def extract_text_from_file_bytes(file_bytes: bytes, filename: str) -> Tuple[str,
                         if hasattr(shape, "text"):
                             txt = (shape.text or "").strip()
                             if txt: slide_parts.append(txt)
-                        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
+                        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE and extract_images:
                             images.append(base64.b64encode(shape.image.blob).decode("utf-8"))
                     if slide_parts: slide_texts.append(f"--- Slide {idx} ---\n" + "\n".join(slide_parts))
                 extracted_text = "\n\n".join(slide_texts)
@@ -187,7 +189,7 @@ def extract_text_from_file_bytes(file_bytes: bytes, filename: str) -> Tuple[str,
 
                 attachment_text_parts: List[str] = [header, msg_body]
                 for att in msg.attachments:
-                    text_part = _process_msg_attachment(att.data or b"", att.longFilename or att.shortFilename or "attachment", images)
+                    text_part = _process_msg_attachment(att.data or b"", att.longFilename or att.shortFilename or "attachment", images, extract_images=extract_images)
                     if text_part: attachment_text_parts.append(text_part)
 
                 extracted_text = "\n\n".join([p for p in attachment_text_parts if p.strip()])
@@ -217,6 +219,21 @@ def extract_text_from_file_bytes(file_bytes: bytes, filename: str) -> Tuple[str,
             
     return extracted_text, images
 
+@files_router.post("/extract-text")
+async def extract_text_from_file(
+    file: UploadFile = File(...)
+):
+    """
+    Extracts text content from a single uploaded file.
+    Supports various formats like PDF, DOCX, TXT, etc.
+    """
+    try:
+        content_bytes = await file.read()
+        text_content, _ = extract_text_from_file_bytes(content_bytes, file.filename, extract_images=False)
+        return {"text_content": text_content}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to extract text from file: {str(e)}")
 
 @files_router.post("/export-markdown")
 async def export_as_markdown(
@@ -523,6 +540,7 @@ async def export_content(payload: ContentExportRequest):
 async def extract_and_embed_files(
     discussion_id: str,
     files: List[UploadFile] = File(...),
+    extract_images: bool = Form(True),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     discussion = get_user_discussion(current_user.username, discussion_id)
@@ -542,7 +560,7 @@ async def extract_and_embed_files(
         file_text = f"\n\n--- Document: {filename} ---\n"
         
         try:
-            extracted_text, images = extract_text_from_file_bytes(content, filename)
+            extracted_text, images = extract_text_from_file_bytes(content, filename, extract_images=extract_images)
             
             # --- Integrate the extracted data into the discussion ---
             file_text += extracted_text
@@ -559,7 +577,7 @@ async def extract_and_embed_files(
             all_extracted_text += file_text
 
         except Exception as e:
-            trace_exception(e)
+            trace_exception(e)            
             all_extracted_text += f"\n\n--- Error processing {filename}: {str(e)} ---\n\n"
 
     discussion.discussion_data_zone = all_extracted_text + (discussion.discussion_data_zone or "")

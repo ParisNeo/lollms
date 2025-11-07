@@ -33,6 +33,8 @@ import IconUser from '../../assets/icons/IconUser.vue';
 import IconDataZone from '../../assets/icons/IconDataZone.vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
+import IconThinking from '../../assets/icons/IconThinking.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
 
 // CodeMirror imports
@@ -51,7 +53,7 @@ const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
 const router = useRouter();
 const { on, off } = useEventBus();
-const { dataZonesTokensFromContext, currentModelVisionSupport } = storeToRefs(discussionsStore);
+const { dataZonesTokensFromContext, currentModelVisionSupport, generationState } = storeToRefs(discussionsStore);
 const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 
 // Component state
@@ -395,7 +397,7 @@ async function handlePaste(event) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
             const file = item.getAsFile();
             if (file) {
-                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
+                const extension = (file.type.split('/') || 'png').toLowerCase().replace('jpeg', 'jpg');
                 imageFiles.push(new File([file], `pasted_image_${Date.now()}.${extension}`, { type: file.type }));
             }
         }
@@ -574,8 +576,12 @@ onUnmounted(() => {
             <!-- Generation Progress -->
             <div v-if="generationInProgress" class="flex flex-row items-center justify-between p-2 h-[60px]">
                 <div class="flex items-center space-x-3">
-                    <IconAnimateSpin class="h-6 w-6 text-blue-500 animate-spin" />
-                    <p class="text-sm font-semibold text-gray-600 dark:text-gray-300">Working...</p>
+                    <IconAnimateSpin v-if="['starting', 'streaming'].includes(generationState.status)" class="h-6 w-6 text-blue-500 animate-spin" />
+                    <IconThinking v-else-if="generationState.status === 'thinking'" class="h-6 w-6 text-purple-500" />
+                    <IconSparkles v-else-if="generationState.status === 'generating_title'" class="h-6 w-6 text-yellow-500" />
+                    <div class="flex flex-col">
+                        <p class="text-sm font-semibold text-gray-700 dark:text-gray-200">{{ generationState.details }}</p>
+                    </div>
                 </div>
                 <button @click="discussionsStore.stopGeneration" class="btn btn-danger !py-1 !px-3">Stop Generation</button>
             </div>

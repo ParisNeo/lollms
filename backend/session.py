@@ -1,4 +1,3 @@
-# [UPDATE] lollms/backend/session.py
 # lollms/backend/session.py
 import json
 import traceback
@@ -159,6 +158,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 print(f"ERROR: Could not persist forced ITI model for user '{db_user.username}'. Error: {e}")
                 db.rollback()
         
+        # The validation of selected models against active bindings is now done in build_lollms_client_from_params
+
         if username not in user_sessions:
             print(f"INFO: Re-initializing session for {username} on first request after server start.")
             session_llm_params = {
@@ -244,7 +245,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             birth_date=db_user.birth_date, receive_notification_emails=db_user.receive_notification_emails,
             is_searchable=db_user.is_searchable, first_login_done=db_user.first_login_done,
             data_zone=db_user.data_zone,
-            lollms_model_name=user_sessions[username].get("lollms_model_name"),
+            lollms_model_name=db_user.lollms_model_name,
             tti_binding_model_name=db_user.tti_binding_model_name,
             iti_binding_model_name=db_user.iti_binding_model_name,
             tti_models_config=db_user.tti_models_config,
@@ -410,6 +411,37 @@ def build_lollms_client_from_params(
         if not user_db:
              raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
 
+        # Validate selected models against active bindings before building client
+        if user_db.lollms_model_name and '/' in user_db.lollms_model_name:
+            binding_alias_check, _ = user_db.lollms_model_name.split('/', 1)
+            is_active = db.query(DBLLMBinding.id).filter(DBLLMBinding.alias == binding_alias_check, DBLLMBinding.is_active == True).first()
+            if not is_active:
+                user_db.lollms_model_name = None
+
+        if user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name:
+            binding_alias_check, _ = user_db.tti_binding_model_name.split('/', 1)
+            is_active = db.query(DBTTIBinding.id).filter(DBTTIBinding.alias == binding_alias_check, DBTTIBinding.is_active == True).first()
+            if not is_active:
+                user_db.tti_binding_model_name = None
+
+        if user_db.iti_binding_model_name and '/' in user_db.iti_binding_model_name:
+            binding_alias_check, _ = user_db.iti_binding_model_name.split('/', 1)
+            is_active = db.query(DBTTIBinding.id).filter(DBTTIBinding.alias == binding_alias_check, DBTTIBinding.is_active == True).first()
+            if not is_active:
+                user_db.iti_binding_model_name = None
+
+        if user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name:
+            binding_alias_check, _ = user_db.tts_binding_model_name.split('/', 1)
+            is_active = db.query(DBTTSBinding.id).filter(DBTTSBinding.alias == binding_alias_check, DBTTSBinding.is_active == True).first()
+            if not is_active:
+                user_db.tts_binding_model_name = None
+                
+        if user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name:
+            binding_alias_check, _ = user_db.stt_binding_model_name.split('/', 1)
+            is_active = db.query(DBSTTBinding.id).filter(DBSTTBinding.alias == binding_alias_check, DBSTTBinding.is_active == True).first()
+            if not is_active:
+                user_db.stt_binding_model_name = None
+
         binding_to_use = None
         
         # Determine the model name from session or DB
@@ -423,8 +455,8 @@ def build_lollms_client_from_params(
             if target_binding_alias:
                 binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
 
-            if not binding_to_use:
-                binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+        if not binding_to_use:
+            binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
         
         client_init_params = {}
         if binding_to_use:            

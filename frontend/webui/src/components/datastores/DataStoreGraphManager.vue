@@ -8,6 +8,7 @@ import { storeToRefs } from 'pinia';
 import InteractiveGraphViewer from './InteractiveGraphViewer.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
+import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 
 const props = defineProps({
     store: {
@@ -30,6 +31,7 @@ const { availableLLMModelsGrouped } = storeToRefs(dataStore);
 const graphStats = ref({ nodes: 0, edges: 0 });
 const graphData = ref({ nodes: [], edges: [] });
 const isLoadingGraph = ref(false);
+const ontologyFileInput = ref(null);
 
 const generationParams = ref({
     model_binding: '',
@@ -105,7 +107,7 @@ async function handleWipeGraph() {
         message: 'This will permanently delete all nodes and edges from this datastore\'s graph. This action cannot be undone.',
         confirmText: 'Wipe Graph'
     });
-    if (confirmed) {
+    if (confirmed.confirmed) {
         try {
             await dataStore.wipeDataStoreGraph(props.store.id);
             fetchGraph();
@@ -176,7 +178,7 @@ function openEditNodeModal() {
 
 async function deleteSelectedNode() {
     if (!selectedNode.value) return;
-    const confirmed = await uiStore.showConfirmation({ title: 'Delete Node?', message: `Delete node "${selectedNode.value.label}" (ID: ${selectedNode.value.id})? This will also delete connected edges.`});
+    const { confirmed } = await uiStore.showConfirmation({ title: 'Delete Node?', message: `Delete node "${selectedNode.value.label}" (ID: ${selectedNode.value.id})? This will also delete connected edges.`});
     if (confirmed) {
         await dataStore.deleteGraphNode({ storeId: props.store.id, nodeId: selectedNode.value.id });
         fetchGraph();
@@ -185,13 +187,35 @@ async function deleteSelectedNode() {
 
 async function deleteSelectedEdge() {
     if (!selectedEdge.value) return;
-    const confirmed = await uiStore.showConfirmation({ title: 'Delete Edge?', message: `Delete edge "${selectedEdge.value.label}"?`});
+    const { confirmed } = await uiStore.showConfirmation({ title: 'Delete Edge?', message: `Delete edge "${selectedEdge.value.label}"?`});
     if (confirmed) {
         await dataStore.deleteGraphEdge({ storeId: props.store.id, edgeId: selectedEdge.value.id });
         fetchGraph();
     }
 }
 
+function handleImportOntology() {
+    ontologyFileInput.value.click();
+}
+
+async function onOntologyFileSelected(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    uiStore.addNotification('Importing ontology file...', 'info');
+    try {
+        const textContent = await dataStore.extractTextFromFile(file);
+        generationParams.value.ontology = textContent;
+        uiStore.addNotification('Ontology file imported successfully.', 'success');
+    } catch (error) {
+        // The store handles the error notification
+        console.error("Ontology import failed:", error);
+    } finally {
+        if (ontologyFileInput.value) {
+            ontologyFileInput.value.value = '';
+        }
+    }
+}
 
 onMounted(() => {
     fetchGraph();
@@ -264,8 +288,15 @@ watch(() => props.task, (newTask, oldTask) => {
                 </div>
                 <hr class="dark:border-gray-600">
                 <div>
-                    <label class="block text-sm font-medium mb-1">Ontology / Guidance</label>
+                    <div class="flex justify-between items-center mb-1">
+                        <label class="block text-sm font-medium">Ontology / Guidance</label>
+                        <button type="button" @click="handleImportOntology" class="btn btn-secondary btn-sm !py-1 !px-2 flex items-center gap-1">
+                            <IconArrowUpTray class="w-4 h-4" />
+                            Import
+                        </button>
+                    </div>
                     <textarea v-model="generationParams.ontology" rows="5" class="input-field font-mono text-xs"></textarea>
+                    <input type="file" ref="ontologyFileInput" @change="onOntologyFileSelected" class="hidden" accept=".owl,.rdf,.ttl,.jsonld,.pdf,.docx,.txt,.md,.json">
                 </div>
                  <div>
                     <label for="model-select" class="block text-sm font-medium mb-1">Model</label>

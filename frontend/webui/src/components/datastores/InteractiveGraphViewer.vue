@@ -25,50 +25,114 @@ const uiStore = useUiStore();
 const networkContainer = ref(null);
 let network = null;
 
-const options = {
-    nodes: {
-        shape: 'dot',
-        size: 16,
-        font: { color: '#fff' }
-    },
-    edges: {
-        width: 2,
-        color: { inherit: 'from' },
-        smooth: { type: 'continuous' }
-    },
-    physics: {
-        enabled: true,
-        solver: 'forceAtlas2Based',
-        forceAtlas2Based: {
-            gravitationalConstant: -26,
-            centralGravity: 0.005,
-            springLength: 230,
-            springConstant: 0.18
+const typeColorMap = {
+    'Person': '#FFD700',       // Gold
+    'Organization': '#87CEEB', // SkyBlue
+    'Location': '#90EE90',     // LightGreen
+    'Date': '#FFA07A',         // LightSalmon
+    'Product': '#20B2AA',      // LightSeaGreen
+    'Event': '#FF69B4',        // HotPink
+    'default': '#D3D3D3'       // LightGray
+};
+
+function getNodeColor(nodeType) {
+    return typeColorMap[nodeType] || typeColorMap['default'];
+}
+
+const getOptions = (theme) => {
+    const isDark = theme === 'dark';
+    return {
+        nodes: {
+            shape: 'dot',
+            size: 20,
+            font: {
+                size: 14,
+                color: isDark ? '#FFFFFF' : '#000000'
+            },
+            borderWidth: 2,
         },
-        maxVelocity: 146,
-        minVelocity: 0.1,
-        stabilization: {
+        edges: {
+            width: 1.5,
+            color: { 
+                color: isDark ? '#6B7280' : '#9CA3AF', // Static gray colors for visibility
+                highlight: '#3B82F6',
+                hover: '#60A5FA',
+            },
+            smooth: { type: 'continuous' },
+            arrows: {
+                to: { enabled: true, scaleFactor: 0.8 }
+            },
+            font: {
+                align: 'middle',
+                size: 12,
+                color: isDark ? '#E2E8F0' : '#1F2937',
+                strokeWidth: 2,
+                strokeColor: isDark ? 'rgba(17, 24, 39, 0.7)' : 'rgba(255,255,255,0.7)'
+            }
+        },
+        physics: {
             enabled: true,
-            iterations: 200,
-            fit: true
+            solver: 'forceAtlas2Based',
+            forceAtlas2Based: {
+                gravitationalConstant: -50,
+                centralGravity: 0.01,
+                springLength: 150,
+                springConstant: 0.08,
+                avoidOverlap: 0.5
+            },
+            maxVelocity: 50,
+            minVelocity: 0.1,
+            stabilization: {
+                enabled: true,
+                iterations: 200,
+                fit: true
+            }
+        },
+        interaction: {
+            hover: true,
+            tooltipDelay: 300,
+            dragNodes: true,
+            dragView: true,
+            zoomView: true
+        },
+        layout: {
+            improvedLayout: true
         }
-    },
-    interaction: {
-        hover: true,
-        tooltipDelay: 300
-    },
-    layout: {
-        improvedLayout: true
-    }
+    };
 };
 
 function initializeOrUpdateGraph() {
     if (!networkContainer.value) return;
 
     const data = {
-        nodes: props.nodes.map(n => ({ id: n.id, label: n.label, title: JSON.stringify(n.properties, null, 2) })),
-        edges: props.edges.map(e => ({ from: e.source, to: e.target, label: e.label, arrows: 'to' }))
+        nodes: props.nodes.map(n => {
+            const nodeType = n.label;
+            const nodeLabel = String(n.properties?.identifying_value || n.properties?.name || n.properties?.label || n.label);
+            const color = getNodeColor(nodeType);
+            
+            return {
+                id: n.id,
+                label: nodeLabel,
+                title: `Type: ${nodeType}\nID: ${n.id}\nProperties: ${JSON.stringify(n.properties, null, 2)}`,
+                color: {
+                    background: color,
+                    border: color,
+                    highlight: { background: color, border: '#2B7CE9' },
+                    hover: { background: color, border: '#2B7CE9' }
+                },
+                group: nodeType
+            }
+        }),
+        edges: props.edges.map(e => ({ 
+            id: e.id,
+            from: e.source, 
+            to: e.target, 
+            label: e.label,
+            properties: e.properties
+        }))
     };
+    
+    const options = getOptions(uiStore.currentTheme);
 
     if (!network) {
         network = new Network(networkContainer.value, data, options);
@@ -80,13 +144,17 @@ function initializeOrUpdateGraph() {
         });
         network.on('selectEdge', (params) => {
             if (params.edges.length > 0) {
-                const edge = props.edges.find(e => e.id === params.edges[0]);
-                 emit('edge-select', edge);
+                const edgeId = params.edges[0];
+                const edge = props.edges.find(e => e.id === edgeId);
+                if (edge) {
+                    emit('edge-select', edge);
+                }
             }
         });
         network.on('deselectNode', () => emit('deselect'));
         network.on('deselectEdge', () => emit('deselect'));
     } else {
+        network.setOptions(options);
         network.setData(data);
     }
     network.fit();
@@ -98,6 +166,12 @@ watch(() => [props.nodes, props.edges], () => {
     });
 }, { deep: true });
 
+watch(() => uiStore.currentTheme, (newTheme) => {
+    if (network) {
+        network.setOptions(getOptions(newTheme));
+    }
+});
+
 onMounted(() => {
     initializeOrUpdateGraph();
 });
@@ -108,4 +182,13 @@ onUnmounted(() => {
         network = null;
     }
 });
+
+function resetView() {
+  if (network) {
+    network.fit();
+  }
+}
+
+defineExpose({ resetView });
+
 </script>

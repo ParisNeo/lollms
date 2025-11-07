@@ -32,9 +32,8 @@ export const useAuthStore = defineStore('auth', () => {
     const wsConnected = ref(false);
     let reconnectTimeout = null;
 
-    if (token.value) {
-        apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
-    }
+    // The apiClient interceptor will now handle adding the auth header.
+    // No need to set it here directly.
 
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
@@ -323,7 +322,6 @@ export const useAuthStore = defineStore('auth', () => {
             
             token.value = response.data.access_token;
             localStorage.setItem('lollms-token', token.value);
-            apiClient.defaults.headers.common['Authorization'] = `Bearer ${token.value}`;
 
 
             uiStore.closeModal();
@@ -360,7 +358,6 @@ export const useAuthStore = defineStore('auth', () => {
         user.value = null;
         token.value = null;
         localStorage.removeItem('lollms-token');
-        apiClient.defaults.headers.common['Authorization'] = null;
         disconnectWebSocket();
     }
 
