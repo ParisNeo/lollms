@@ -117,14 +117,23 @@ def extract_text_from_file_bytes(file_bytes: bytes, filename: str, extract_image
         try:
             with fitz.open(stream=file_bytes, filetype="pdf") as pdf_doc:
                 text_parts = []
+                image_count = 0
                 for page in pdf_doc:
                     text_parts.append(page.get_text())
                     if extract_images:
-                        for img_info in page.get_images(full=True):
+                        img_list = page.get_images(full=True)
+                        image_count += len(img_list)
+                        for img_info in img_list:
                             xref = img_info[0]
                             base_image = pdf_doc.extract_image(xref)
                             images.append(base64.b64encode(base_image["image"]).decode('utf-8'))
-                extracted_text = "\n".join(text_parts)
+                extracted_text = "\n".join(text_parts).strip()
+                
+                if not extracted_text and image_count > 0:
+                    raise ValueError("This appears to be a scanned PDF with no text layer. LoLLMs cannot process it directly. Please use an OCR (Optical Character Recognition) tool to convert it to a text-based PDF or extract the text manually before uploading.")
+
+        except ValueError as e:
+             raise e
         except Exception as e:
             extracted_text = f"[Error processing PDF file: {e}. Is PyMuPDF (fitz) installed?]"
             

@@ -15,6 +15,7 @@ import threading
 import asyncio
 import zipfile
 import platform
+import time
 
 # Third-Party Imports
 import fitz  # PyMuPDF
@@ -153,6 +154,39 @@ def build_llm_generation_router(router: APIRouter):
             else:
                 preamble_parts.append("- IMPORTANT: You must respond exclusively in the same language as the user's prompt.")
 
+        if owner_db_user.image_annotation_enabled:
+            preamble_parts.append(
+                "## Image Annotation Instructions\n"
+                "When you are asked to annotate, highlight, or segment an object in an image, you MUST use the `<annotate>` tag. "
+                "The tag must contain a JSON list of annotation objects. Each object must have a `label` and a shape. "
+                "Supported shapes are `box`, `polygon`, and `point`.\n"
+                "- `box`: A list of four numbers [x_min, y_min, x_max, y_max] for a bounding box.\n"
+                "- `polygon`: A list of points, e.g., [[x1, y1], [x2, y2], ...], for irregular shapes.\n"
+                "- `point`: A list of two numbers [x, y] for a single keypoint.\n"
+                "All coordinates must be relative (from 0.0 to 1.0).\n"
+                "Optionally, include a `display` object with `border_color` (hex) and `fill_opacity` (0.0-1.0).\n"
+                "After the `<annotate>` block, you MUST provide a natural language description of your annotations.\n"
+                "Example:\n"
+                "<annotate>\n"
+                "[\n"
+                "  {\"box\": [0.25, 0.3, 0.75, 0.8], \"label\": \"cat\", \"display\": {\"border_color\": \"#FF0000\", \"fill_opacity\": 0.1}},\n"
+                "  {\"point\": [0.5, 0.5], \"label\": \"cat_nose\"},\n"
+                "  {\"polygon\": [[0.1, 0.1], [0.2, 0.1], [0.15, 0.2]], \"label\": \"cat_ear\"}\n"
+                "]\n"
+                "</annotate>\n"
+                "Here is the annotation highlighting the cat, its nose, and one ear."
+            )
+
+        if owner_db_user.image_generation_enabled:
+            preamble_parts.append(
+                "## Image Generation Instructions\n"
+                "To generate an image, write a code block with the language `generate_image` and describe the image you want to create inside it.\n"
+                "Example:\n"
+                "```generate_image\n"
+                "A majestic lion in the savannah at sunset, photorealistic style.\n"
+                "```"
+            )
+
         if preamble_parts:
             dynamic_preamble = "## Dynamic Information\n" + "\n".join(preamble_parts) + "\n\n"
 
@@ -211,34 +245,43 @@ def build_llm_generation_router(router: APIRouter):
 
         async def stream_generator() -> AsyncGenerator[str, None]:
             all_events = []
-            def llm_callback(chunk: Any, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs) -> bool:
-                if stop_event.is_set(): return False
-                if not params: params = {}
-                
-                payload_map = {
-                    MSG_TYPE.MSG_TYPE_CHUNK: {"type": "chunk", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_STEP_START: {"type": "step_start", "content": chunk, "id": params.get("id")},
-                    MSG_TYPE.MSG_TYPE_STEP_END: {"type": "step_end", "content": chunk, "id": params.get("id"), "status": "done"},
-                    MSG_TYPE.MSG_TYPE_INFO: {"type": "info", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_OBSERVATION: {"type": "observation", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT: {"type": "thought", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_REASONING: {"type": "reasoning", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_TOOL_CALL: {"type": "tool_call", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_SCRATCHPAD: {"type": "scratchpad", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_EXCEPTION: {"type": "exception", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_ERROR: {"type": "error", "content": chunk},
-                    MSG_TYPE.MSG_TYPE_SOURCES_LIST: {"type": "sources", "content": chunk}
-                }
-                
-                payload = payload_map.get(msg_type)
-                if payload:
-                    if payload['type']!="chunk":
-                        all_events.append(payload)
-                    json_compatible_payload = jsonable_encoder(payload)
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_payload) + "\n")
-                return True
-
+            
             def blocking_call():
+                start_time = time.time()
+                first_chunk_time = None
+
+                def llm_callback(chunk: Any, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs) -> bool:
+                    nonlocal first_chunk_time
+                    if stop_event.is_set(): return False
+                    
+                    if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and first_chunk_time is None:
+                        first_chunk_time = time.time()
+
+                    if not params: params = {}
+                    
+                    payload_map = {
+                        MSG_TYPE.MSG_TYPE_CHUNK: {"type": "chunk", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_STEP_START: {"type": "step_start", "content": chunk, "id": params.get("id")},
+                        MSG_TYPE.MSG_TYPE_STEP_END: {"type": "step_end", "content": chunk, "id": params.get("id"), "status": "done"},
+                        MSG_TYPE.MSG_TYPE_INFO: {"type": "info", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_OBSERVATION: {"type": "observation", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT: {"type": "thought", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_REASONING: {"type": "reasoning", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_TOOL_CALL: {"type": "tool_call", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_SCRATCHPAD: {"type": "scratchpad", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_EXCEPTION: {"type": "exception", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_ERROR: {"type": "error", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_SOURCES_LIST: {"type": "sources", "content": chunk}
+                    }
+                    
+                    payload = payload_map.get(msg_type)
+                    if payload:
+                        if payload['type']!="chunk":
+                            all_events.append(payload)
+                        json_compatible_payload = jsonable_encoder(payload)
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_payload) + "\n")
+                    return True
+
                 try:
                     images_for_message = []
                     image_server_paths = json.loads(image_server_paths_json)
@@ -279,8 +322,20 @@ def build_llm_generation_router(router: APIRouter):
                             user_icon=current_user.icon
                         )
                     
+                    end_time = time.time()
+                    
                     ai_message_obj = result.get('ai_message')
                     if ai_message_obj:
+                        ttft = (first_chunk_time - start_time) * 1000 if first_chunk_time else 0
+                        total_tokens = ai_message_obj.tokens or 0
+                        
+                        tps = 0
+                        if total_tokens > 1 and first_chunk_time and end_time > first_chunk_time:
+                            streaming_time = end_time - first_chunk_time
+                            tps = (total_tokens - 1) / streaming_time if streaming_time > 0 else 0
+
+                        ai_message_obj.set_metadata_item('ttft', round(ttft, 2), discussion_obj)
+                        ai_message_obj.set_metadata_item('tps', round(tps, 2), discussion_obj)
                         ai_message_obj.set_metadata_item('events', all_events, discussion_obj)
 
                     def lollms_message_to_output(msg):

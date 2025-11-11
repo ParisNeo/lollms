@@ -94,17 +94,25 @@ def build_artefacts_router(router: APIRouter):
                 if extension == ".pdf":
                     pdf_doc = fitz.open(stream=content_bytes, filetype="pdf")
                     text_parts = []
+                    image_count = 0
                     for page in pdf_doc:
                         text_parts.append(page.get_text())
                         if extract_images:
                             img_list = page.get_images(full=True)
+                            image_count += len(img_list)
                             for img_info in img_list:
                                 xref = img_info[0]
                                 base_image = pdf_doc.extract_image(xref)
                                 image_bytes = base_image["image"]
                                 images.append(base64.b64encode(image_bytes).decode('utf-8'))
-                    content = "\n".join(text_parts)
+                    content = "\n".join(text_parts).strip()
                     pdf_doc.close()
+                    # If the document has no text but does have images, it's likely a scanned PDF.
+                    if not content and image_count > 0:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="This appears to be a scanned PDF with no text layer. LoLLMs cannot process it directly. Please use an OCR (Optical Character Recognition) tool to convert it to a text-based PDF or extract the text manually before uploading."
+                        )
 
                 elif extension == ".docx":
                     if docx2python is None:
@@ -520,4 +528,3 @@ def build_artefacts_router(router: APIRouter):
             owner_username=current_user.username
         )
         return _to_task_info(task)
-    

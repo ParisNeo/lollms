@@ -74,38 +74,41 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = Field(None, max_length=255)
     birth_date: Optional[datetime.date] = None
     receive_notification_emails: Optional[bool] = None
+    is_searchable: Optional[bool] = None
+    data_zone: Optional[str] = None
     lollms_model_name: Optional[str] = None
-    tti_binding_model_name: Optional[str] = None # NEW
+    tti_binding_model_name: Optional[str] = None
     iti_binding_model_name: Optional[str] = None
-    tti_models_config: Optional[Dict[str, Any]] = None # NEW
-    tts_binding_model_name: Optional[str] = None # NEW
-    tts_models_config: Optional[Dict[str, Any]] = None # NEW
+    tti_models_config: Optional[Dict[str, Any]] = None
+    tts_binding_model_name: Optional[str] = None
+    tts_models_config: Optional[Dict[str, Any]] = None
     stt_binding_model_name: Optional[str] = None
     stt_models_config: Optional[Dict[str, Any]] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     active_voice_id: Optional[str] = None
-    llm_ctx_size: Optional[int] = Field(None, ge=0)
-    llm_temperature: Optional[float] = Field(None, ge=0.0, le=2.0)
-    llm_top_k: Optional[int] = Field(None, ge=1)
-    llm_top_p: Optional[float] = Field(None, ge=0.0, le=1.0)
-    llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
-    llm_repeat_last_n: Optional[int] = Field(None, ge=0)
-    put_thoughts_in_context: Optional[bool] = False
-    include_memory_date_in_context: Optional[bool] = False # NEW
-    rag_top_k: Optional[int] = Field(None, ge=1)
-    max_rag_len: Optional[int] = Field(None, ge=1)
-    rag_n_hops: Optional[int] = Field(None, ge=1)
-    rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
+    last_discussion_id: Optional[str] = None
+    llm_ctx_size: Optional[int] = None
+    llm_temperature: Optional[float] = None
+    llm_top_k: Optional[int] = None
+    llm_top_p: Optional[float] = None
+    llm_repeat_penalty: Optional[float] = None
+    llm_repeat_last_n: Optional[int] = None
+    put_thoughts_in_context: Optional[bool] = None
+    include_memory_date_in_context: Optional[bool] = None
+    rag_top_k: Optional[int] = None
+    max_rag_len: Optional[int] = None
+    rag_n_hops: Optional[int] = None
+    rag_min_sim_percent: Optional[float] = None
     rag_use_graph: Optional[bool] = None
-    rag_graph_response_type: Optional[str] = Field(None, pattern="^(graph_only|chunks_summary|full)$")
-    auto_title: Optional[bool] = False
-    user_ui_level: Optional[int] = 0
-    chat_active: Optional[bool] = False
-    first_page: Optional[str] = "feed"
-    ai_response_language: Optional[str] = "auto"
+    rag_graph_response_type: Optional[str] = None
+    auto_title: Optional[bool] = None
+    user_ui_level: Optional[int] = None
+    chat_active: Optional[bool] = None
+    first_page: Optional[str] = None
+    ai_response_language: Optional[str] = None
     force_ai_response_language: Optional[bool] = None
-    fun_mode: Optional[bool] = False
+    fun_mode: Optional[bool] = None
     show_token_counter: Optional[bool] = None
     is_searchable: Optional[bool] = None
     data_zone: Optional[str] = None
@@ -120,10 +123,11 @@ class UserUpdate(BaseModel):
     image_studio_n_images: Optional[int] = None
     image_studio_seed: Optional[int] = None
     image_studio_generation_params: Optional[Dict[str, Any]] = None
-
+    image_generation_enabled: Optional[bool] = None
+    image_annotation_enabled: Optional[bool] = None
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
-    is_active: Optional[bool] = None
+    is_active: Optional[bool] = None    
     is_moderator: Optional[bool] = None
     lollms_model_name: Optional[str] = None
     llm_ctx_size: Optional[int] = Field(None, ge=0)
@@ -225,7 +229,7 @@ class UserPublic(UserLLMParams):
     class Config:
         from_attributes = True
 
-class UserAuthDetails(UserLLMParams):
+class UserAuthDetails(UserPublic):
     id: int
     username: str
     is_admin: bool
@@ -238,58 +242,66 @@ class UserAuthDetails(UserLLMParams):
     birth_date: Optional[datetime.date] = None
     receive_notification_emails: bool
     is_searchable: bool
+    first_login_done: bool
+    data_zone: Optional[str] = None
     lollms_model_name: Optional[str] = None
     tti_binding_model_name: Optional[str] = None
     iti_binding_model_name: Optional[str] = None
-    tti_models_config: Optional[Dict[str, Any]] = None # NEW
-    tts_binding_model_name: Optional[str] = None # NEW
-    tts_models_config: Optional[Dict[str, Any]] = None # NEW
+    tti_models_config: Optional[Dict[str, Any]] = None
+    tts_binding_model_name: Optional[str] = None
+    tts_models_config: Optional[Dict[str, Any]] = None
     stt_binding_model_name: Optional[str] = None
     stt_models_config: Optional[Dict[str, Any]] = None
     safe_store_vectorizer: Optional[str] = None
     active_personality_id: Optional[str] = None
     active_voice_id: Optional[str] = None
-    rag_top_k: Optional[int] = Field(None, ge=1)
-    max_rag_len: Optional[int] = Field(None, ge=1)
-    rag_n_hops: Optional[int] = Field(None, ge=1)
-    rag_min_sim_percent: Optional[float] = Field(None, ge=0, le=100)
-    rag_use_graph: bool = False
-    rag_graph_response_type: Optional[str] = Field("chunks_summary", pattern="^(graph_only|chunks_summary|full)$")
-    lollms_client_ai_name: Optional[str] = None
-    auto_title: Optional[bool] = False
-    user_ui_level: Optional[int] = 0
-    chat_active: Optional[bool] = False
-    first_page: Optional[str] = "feed"
-    ai_response_language: Optional[str] = "auto"
+    last_discussion_id: Optional[str] = None
+    llm_ctx_size: Optional[int] = None
+    llm_temperature: Optional[float] = None
+    llm_top_k: Optional[int] = None
+    llm_top_p: Optional[float] = None
+    llm_repeat_penalty: Optional[float] = None
+    llm_repeat_last_n: Optional[int] = None
+    put_thoughts_in_context: bool
+    include_memory_date_in_context: bool
+    rag_top_k: Optional[int] = None
+    max_rag_len: Optional[int] = None
+    rag_n_hops: Optional[int] = None
+    rag_min_sim_percent: Optional[float] = None
+    rag_use_graph: Optional[bool] = None
+    rag_graph_response_type: Optional[str] = None
+    auto_title: bool
+    user_ui_level: Optional[int] = None
+    chat_active: bool
+    first_page: str
+    ai_response_language: Optional[str] = None
     force_ai_response_language: bool
-    fun_mode: Optional[bool] = False
-    show_token_counter: Optional[bool] = True
-    openai_api_service_enabled: bool = False
-    openai_api_require_key: bool = True
-    ollama_service_enabled: bool = False
-    ollama_require_key: bool = True
-    first_login_done: bool 
-    data_zone: Optional[str] = None
-    memory: Optional[str] = None
-    include_memory_date_in_context: bool # NEW
-    llm_settings_overridden: bool = False
-    tti_model_forced: bool = False
-    iti_model_forced: bool = False
-    latex_builder_enabled: bool = False
+    fun_mode: Optional[bool] = None
+    show_token_counter: bool
+    openai_api_service_enabled: bool
+    openai_api_require_key: bool
+    ollama_service_enabled: bool
+    ollama_require_key: bool
+    llm_settings_overridden: bool
+    tti_model_forced: bool
+    iti_model_forced: bool
+    latex_builder_enabled: bool
     coding_style_constraints: Optional[str] = None
     programming_language_preferences: Optional[str] = None
     tell_llm_os: bool
     share_dynamic_info_with_llm: bool
     message_font_size: int
-    allow_user_chunking_config: bool = True
-    default_chunk_size: int = 1024
-    default_chunk_overlap: int = 256
+    allow_user_chunking_config: bool
+    default_chunk_size: int
+    default_chunk_overlap: int
     image_studio_prompt: Optional[str] = None
     image_studio_negative_prompt: Optional[str] = None
     image_studio_image_size: Optional[str] = None
     image_studio_n_images: Optional[int] = None
     image_studio_seed: Optional[int] = None
     image_studio_generation_params: Optional[Dict[str, Any]] = None
+    image_generation_enabled: bool
+    image_annotation_enabled: bool
 
 class RelationshipStatus(BaseModel):
     is_following: bool
@@ -298,3 +310,8 @@ class RelationshipStatus(BaseModel):
 class UserProfileResponse(BaseModel):
     user: UserPublic
     relationship: RelationshipStatus
+
+
+class MemoryUpdate(BaseModel):
+    title: str
+    content: str

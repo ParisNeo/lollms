@@ -290,7 +290,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             image_studio_image_size=db_user.image_studio_image_size,
             image_studio_n_images=db_user.image_studio_n_images,
             image_studio_seed=db_user.image_studio_seed,
-            image_studio_generation_params=db_user.image_studio_generation_params
+            image_studio_generation_params=db_user.image_studio_generation_params,
+            image_generation_enabled=db_user.image_generation_enabled,
+            image_annotation_enabled=db_user.image_annotation_enabled
         )
     finally:
         if db_was_created:

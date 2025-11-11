@@ -60,7 +60,7 @@ def _drop_table(element, compiler, **kw):
 def _get_all_existing_app_ports(connection) -> set[int]:
     """Retrieves all non-null ports currently used by apps in the database."""
     # Use a direct query to avoid ORM overhead during migration and ensure we get current state
-    return {r[0] for r in connection.execute(text("SELECT port FROM apps WHERE port IS NOT NULL")).fetchall()}
+    return {r for r in connection.execute(text("SELECT port FROM apps WHERE port IS NOT NULL")).fetchall()}
 
 def _find_unique_port_for_migration(connection, preferred_port: int, already_used_in_batch: set) -> int:
     """
@@ -424,7 +424,7 @@ def _bootstrap_fun_facts(connection):
             
             # Insert category and get its ID
             result = connection.execute(category_insert_stmt.values(name=category_name, is_active=True, color=color))
-            category_id = result.inserted_primary_key[0]
+            category_id = result.inserted_primary_key
             
             facts_to_insert = [
                 {"content": fact_content, "category_id": category_id}
@@ -873,6 +873,9 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "image_studio_n_images": "INTEGER DEFAULT 1",
             "image_studio_seed": "INTEGER DEFAULT -1",
             "image_studio_generation_params": "JSON",
+            "image_generation_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "image_generation_system_prompt": "TEXT",
+            "image_annotation_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
         }
         
         added_cols = []
@@ -980,8 +983,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 # Assign existing memories to the primary admin (user_id=1) as a fallback.
                 admin_user = connection.execute(text("SELECT id FROM users WHERE is_admin = 1 ORDER BY id ASC LIMIT 1")).first()
                 if admin_user:
-                    connection.execute(text(f"UPDATE user_memories SET owner_user_id = {admin_user[0]} WHERE owner_user_id IS NULL"))
-                    print(f"INFO: Assigned existing orphan memories to primary admin (user_id={admin_user[0]}).")
+                    connection.execute(text(f"UPDATE user_memories SET owner_user_id = {admin_user} WHERE owner_user_id IS NULL"))
+                    print(f"INFO: Assigned existing orphan memories to primary admin (user_id={admin_user}).")
                 
                 connection.commit()
             except Exception as e:
@@ -1376,7 +1379,7 @@ def _migrate_user_data_folders(connection):
     
     try:
         # Get all usernames from the database
-        usernames = {row[0] for row in connection.execute(text("SELECT username FROM users")).fetchall()}
+        usernames = {row for row in connection.execute(text("SELECT username FROM users")).fetchall()}
         
         migrated_count = 0
         non_user_folders = {USERS_DIR_NAME, "cache", "zoo", "apps", "mcps", "custom_apps", "apps_zoo", "mcps_zoo", "prompts_zoo", "personalities_zoo", "huggingface_cache"}

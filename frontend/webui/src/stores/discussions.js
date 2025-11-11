@@ -49,6 +49,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const activeDiscussionParticipants = ref({});
     const ttsState = ref({});
     const currentPlayingAudio = ref({ messageId: null, audio: null });
+    const imageGenerationSystemPrompt = ref('');
 
     function _clearActiveAiTask(discussionId) {
         if (activeAiTasks.value[discussionId]) {
@@ -166,7 +167,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         generationInProgress, titleGenerationInProgressId, activeDiscussionContextStatus, activeAiTasks,
         activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
         promptLoadedArtefacts, _clearActiveAiTask, activeDiscussion, activePersonality, emit,
-        activeDiscussionParticipants, generationState
+        activeDiscussionParticipants, generationState, imageGenerationSystemPrompt
     };
     const composableStores = { uiStore, authStore, dataStore, tasksStore };
 
@@ -283,6 +284,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
         currentPlayingAudio.value = { messageId: null, audio: null };
         ttsState.value = {};
+        imageGenerationSystemPrompt.value = '';
     }
 
     return {
@@ -294,6 +296,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         ttsState,
         generationState,
         currentPlayingAudio,
+        imageGenerationSystemPrompt,
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,
         ..._actions,

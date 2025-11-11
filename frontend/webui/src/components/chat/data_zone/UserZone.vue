@@ -2,12 +2,15 @@
 <script setup>
 import { computed, ref, watch, nextTick } from 'vue';
 import { useAuthStore } from '../../../stores/auth';
+import { useDiscussionsStore } from '../../../stores/discussions';
 import { storeToRefs } from 'pinia';
 import IconSave from '../../../assets/icons/IconSave.vue';
 import LanguageSelector from '../../ui/LanguageSelector.vue';
 
 const authStore = useAuthStore();
+const discussionsStore = useDiscussionsStore();
 const { user } = storeToRefs(authStore);
+const { imageGenerationSystemPrompt } = storeToRefs(discussionsStore);
 
 // Local state for form fields, initialized from the store
 const generalInfo = ref('');
@@ -18,8 +21,12 @@ const shareDynamicInfo = ref(true);
 const funMode = ref(false);
 const aiResponseLanguage = ref('auto');
 const forceAiResponseLanguage = ref(false);
+const imageGenerationEnabled = ref(false);
+const imageAnnotationEnabled = ref(false);
 
 const hasChanges = ref(false);
+
+const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 
 // Function to update local state from the store
 function updateLocalState() {
@@ -32,6 +39,8 @@ function updateLocalState() {
     funMode.value = user.value.fun_mode || false;
     aiResponseLanguage.value = user.value.ai_response_language || 'auto';
     forceAiResponseLanguage.value = user.value.force_ai_response_language || false;
+    imageGenerationEnabled.value = user.value.image_generation_enabled || false;
+    imageAnnotationEnabled.value = user.value.image_annotation_enabled || false;
     // Use nextTick to ensure the DOM is updated before resetting hasChanges
     nextTick(() => {
         hasChanges.value = false;
@@ -43,7 +52,7 @@ function updateLocalState() {
 watch(user, updateLocalState, { immediate: true, deep: true });
 
 // Watch for changes in local form fields to enable the save button
-watch([generalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, funMode, aiResponseLanguage, forceAiResponseLanguage], () => {
+watch([generalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, funMode, aiResponseLanguage, forceAiResponseLanguage, imageGenerationEnabled, imageAnnotationEnabled], () => {
   hasChanges.value = true;
 });
 
@@ -64,7 +73,9 @@ async function handleSaveChanges() {
         share_dynamic_info_with_llm: shareDynamicInfo.value,
         fun_mode: funMode.value,
         ai_response_language: aiResponseLanguage.value,
-        force_ai_response_language: forceAiResponseLanguage.value
+        force_ai_response_language: forceAiResponseLanguage.value,
+        image_generation_enabled: imageGenerationEnabled.value,
+        image_annotation_enabled: imageAnnotationEnabled.value
     });
     hasChanges.value = false; // Disable button after save
 }
@@ -111,6 +122,37 @@ async function handleSaveChanges() {
             </label>
         </div>
         
+        <div class="p-3 bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg">
+            <div class="flex items-center justify-between">
+                <div class="flex-grow">
+                    <h3 class="text-sm font-semibold" :class="isTtiConfigured ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500'">Image Generation</h3>
+                    <p class="text-xs" :class="isTtiConfigured ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'">
+                        {{ isTtiConfigured ? 'Enable AI to generate images using code blocks.' : 'Select a TTI model in settings to enable.' }}
+                    </p>
+                </div>
+                <label class="relative inline-flex items-center" :class="isTtiConfigured ? 'cursor-pointer' : 'cursor-not-allowed'">
+                    <input type="checkbox" v-model="imageGenerationEnabled" class="sr-only peer" :disabled="!isTtiConfigured">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
+                </label>
+            </div>
+            <div v-if="imageGenerationEnabled && isTtiConfigured" class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
+                <label for="image-gen-prompt" class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-200">Image Generation System Prompt</label>
+                <textarea id="image-gen-prompt" v-model="imageGenerationSystemPrompt" class="styled-textarea" placeholder="e.g., All images should be in a photorealistic style, 4k, detailed."></textarea>
+                <p class="text-xs text-gray-500 mt-1">This prompt will be added to every image generation request made from within a chat message.</p>
+            </div>
+        </div>
+
+        <div class="p-3 bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg flex items-center justify-between">
+            <div class="flex-grow">
+                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Image Annotation</h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI to annotate images with bounding boxes.</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" v-model="imageAnnotationEnabled" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+            </label>
+        </div>
+
         <!-- OS Toggle -->
         <div class="p-3 bg-gray-50 dark:bg-gray-800/50 border dark:border-gray-700 rounded-lg flex items-center justify-between">
             <div class="flex-grow">

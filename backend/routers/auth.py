@@ -20,9 +20,7 @@ from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.config import LLMBinding as DBLLMBinding
-from backend.models.memory import MemoryUpdate
-from backend.models import (
-    Token,
+from backend.models.user import (
     UserCreatePublic,
     UserPublic,
     UserAuthDetails,
@@ -31,8 +29,10 @@ from backend.models import (
     ForgotPasswordRequest,
     PasswordResetRequest,
     UserCreateAdmin,
-    DataZoneUpdate
+    DataZoneUpdate,
+    MemoryUpdate
 )
+from backend.models.auth import Token
 from backend.session import (
     get_current_active_user, 
     get_current_db_user_from_token, 

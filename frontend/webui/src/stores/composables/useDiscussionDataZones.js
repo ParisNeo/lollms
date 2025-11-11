@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/composables/useDiscussionDataZones.js
+// [UPDATE] frontend/webui/src/stores/composables/useDiscussionDataZones.js
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
 
@@ -101,9 +101,13 @@ export function useDiscussionDataZones(state, stores, getActions) {
             return;
         }
         if (!discussions.value[discussionId]) return;
+        
+        const finalPrompt = state.imageGenerationSystemPrompt.value
+            ? `${state.imageGenerationSystemPrompt.value}, ${prompt}`
+            : prompt;
 
         const formData = new FormData();
-        formData.append('prompt', prompt);
+        formData.append('prompt', finalPrompt);
 
         activeAiTasks.value[discussionId] = { type: 'generate_image', taskId: null };
 

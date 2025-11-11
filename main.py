@@ -500,7 +500,7 @@ if __name__ == "__main__":
             result = subprocess.run([python_executable, str(wizard_script)], env=env)
             
             if result.returncode != 0:
-                print("\n" + ASCIIColors.red("[ERROR] Setup wizard failed or was cancelled. Exiting application."))
+                ASCIIColors.red("\n[ERROR] Setup wizard failed or was cancelled. Exiting application.")
                 print("You can try running the wizard again by deleting the 'data/app_main.db' file, or configure the application manually from the UI.")
                 sys.exit(1)
         else:

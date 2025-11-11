@@ -57,6 +57,10 @@ class User(Base):
     image_studio_seed = Column(Integer, default=-1)
     image_studio_generation_params = Column(JSON, nullable=True)
     
+    image_generation_enabled = Column(Boolean, default=False, nullable=False)
+    image_generation_system_prompt = Column(Text, nullable=True)
+    image_annotation_enabled = Column(Boolean, default=False, nullable=False)
+
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
     following = relationship(

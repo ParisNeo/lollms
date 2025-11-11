@@ -41,6 +41,26 @@ function handleDrop(event) {
         emit('files-dropped-in-chat', files);
     }
 }
+
+async function handlePaste(event) {
+    if (!currentModelVisionSupport.value) return;
+    const items = (event.clipboardData || window.clipboardData).items;
+    if (!items) return;
+    const imageFiles = [];
+    for (const item of items) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+            const file = item.getAsFile();
+            if (file) {
+                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
+                imageFiles.push(new File([file], `pasted_image_${Date.now()}.${extension}`, { type: file.type }));
+            }
+        }
+    }
+    if (imageFiles.length > 0) {
+        event.preventDefault();
+        emit('files-pasted-in-chat', imageFiles);
+    }
+}
 </script>
 
 <template>
@@ -48,6 +68,7 @@ function handleDrop(event) {
         @dragover="handleDragOver"
         @dragleave="handleDragLeave"
         @drop="handleDrop"
+        @paste="handlePaste"
     >
         <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 rounded-lg z-30 flex items-center justify-center m-4 pointer-events-none">
             <p class="text-2xl font-bold text-blue-600">Drop images to attach</p>

@@ -5,12 +5,15 @@ import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection
 import CodeBlock from './CodeBlock.vue';
 import IconThinking from '../../../assets/icons/IconThinking.vue';
 import IconFileText from '../../../assets/icons/IconFileText.vue';
+import AuthenticatedImage from '../AuthenticatedImage.vue';
+import IconArrowDownTray from '../../../assets/icons/IconArrowDownTray.vue';
 
 const props = defineProps({
   content: { type: String, default: '' },
   isStreaming: { type: Boolean, default: false },
   isUser: { type: Boolean, default: false },
-  hasImages: { type: Boolean, default: false }
+  hasImages: { type: Boolean, default: false },
+  lastUserImage: { type: String, default: null }
 });
 
 const messageContentRef = ref(null);
@@ -58,52 +61,81 @@ const parsedMarkdown = (content) => {
   return html;
 };
 
-const parsedStreamingContent = computed(() => parsedMarkdown(props.content));
+const parsedStreamingContent = computed(() => {
+    if (!props.content) return '';
+    let content = props.content;
+    const openTagIndex = content.lastIndexOf('<annotate>');
+    const closeTagIndex = content.lastIndexOf('</annotate>');
+    
+    if (openTagIndex > -1 && openTagIndex > closeTagIndex) {
+        const before = content.substring(0, openTagIndex);
+        const spinnerHtml = `<div class="flex items-center gap-2 my-4 p-3 bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg text-sm font-semibold text-blue-800 dark:text-blue-200">
+            <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            <span>Annotating image...</span>
+        </div>`;
+        return parsedMarkdown(before) + spinnerHtml;
+    }
+    
+    return parsedMarkdown(content);
+});
 
 const messageParts = computed(() => {
-  if (!props.content || props.isStreaming) return [];
-  const parts = [];
-  const content = props.content;
-  const thinkRegex = /<think>([\s\S]*?)(?:<\/think>|$)/g;
-  let lastIndex = 0, match;
-  while ((match = thinkRegex.exec(content)) !== null) {
-    if (match.index > lastIndex) parts.push({ type: 'content', content: content.substring(lastIndex, match.index) });
-    if (match[1] && match[1].trim()) parts.push({ type: 'think', content: match[1].trim() });
-    lastIndex = thinkRegex.lastIndex;
-  }
-  if (lastIndex < content.length) parts.push({ type: 'content', content: content.substring(lastIndex) });
-  return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
+    if (!props.content || props.isStreaming) return [];
+    const parts = [];
+    const content = props.content;
+    const specialBlockRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = specialBlockRegex.exec(content)) !== null) {
+        if (match.index > lastIndex) {
+            parts.push({ type: 'content', content: content.substring(lastIndex, match.index) });
+        }
+
+        if (match[1]) { // Captured a <think> block
+            const thinkContent = match[1].replace(/<think>|<\/think>/g, '').trim();
+            if (thinkContent) {
+                parts.push({ type: 'think', content: thinkContent });
+            }
+        } else if (match[2]) { // Captured an <annotate> block
+            const annotateContent = match[2].replace(/<annotate>|<\/annotate>/g, '').trim();
+            if (annotateContent) {
+                try {
+                    parts.push({ type: 'annotate', annotations: JSON.parse(annotateContent) });
+                } catch (e) {
+                    console.error("Failed to parse annotation JSON:", e);
+                    parts.push({ type: 'content', content: `[Invalid annotation data: ${annotateContent}]` });
+                }
+            }
+        }
+        
+        lastIndex = match.index + match[0].length;
+    }
+
+    if (lastIndex < content.length) {
+        parts.push({ type: 'content', content: content.substring(lastIndex) });
+    }
+
+    return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
 });
 
 const getTokens = (text) => {
     if (!text) return [];
     const allTokens = [];
-    // Regex to capture the document block, allowing for an optional version number in the start tag.
     const docRegex = /(?:^|\n)--- Document: ([\w.\s-]+?)( v\d+)? ---\r?\n([\s\S]*?)\r?\n--- End Document: \1 ---/g;
     let lastIndex = 0;
     let match;
 
     while ((match = docRegex.exec(text)) !== null) {
-        // Process text before this document block
         if (match.index > lastIndex) {
             const markdownPart = text.substring(lastIndex, match.index);
             allTokens.push(...getContentTokensWithMathProtection(markdownPart));
         }
-
-        // Construct the full title from the file path and optional version
         const title = match[1].trim() + (match[2] || '');
-
-        allTokens.push({
-            type: 'document',
-            title: title,
-            content: match[3], // Content is now in capture group 3
-            raw: match[0]
-        });
-
+        allTokens.push({ type: 'document', title: title, content: match[3], raw: match[0] });
         lastIndex = docRegex.lastIndex;
     }
 
-    // Process any remaining text after the last document block
     if (lastIndex < text.length) {
         const markdownPart = text.substring(lastIndex);
         allTokens.push(...getContentTokensWithMathProtection(markdownPart));
@@ -121,6 +153,166 @@ const simpleHash = str => {
   }
   return hash;
 };
+
+function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayWidth) {
+    if (!Array.isArray(annotations) || !ctx) return;
+
+    annotations.forEach(ann => {
+        const { box, point, polygon, class: oldLabel, label: newLabel, display } = ann;
+
+        const effectiveDisplayWidth = displayWidth > 0 ? displayWidth : naturalWidth;
+        const defaultLineWidth = Math.max(2, 2 * (naturalWidth / effectiveDisplayWidth));
+
+        const color = display?.border_color || '#FF0000';
+        const lineWidth = (display?.border_width || defaultLineWidth) * (naturalWidth / effectiveDisplayWidth);
+        const fillOpacity = display?.fill_opacity !== undefined ? display?.fill_opacity : 0.1;
+        const showBorder = display?.show_border !== false;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        ctx.fillStyle = color;
+        
+        const text = newLabel || oldLabel || 'unknown';
+        const fontSize = Math.max(12, 14 * (naturalWidth / effectiveDisplayWidth));
+        const padding = 4 * (naturalWidth / effectiveDisplayWidth);
+        ctx.font = `bold ${fontSize}px sans-serif`;
+        ctx.textBaseline = 'bottom';
+        
+        // Function to draw the label
+        const drawLabel = (x, y) => {
+            const textMetrics = ctx.measureText(text);
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y - fontSize - (padding * 2), textMetrics.width + (padding * 2), fontSize + (padding * 2));
+            ctx.fillStyle = '#FFFFFF';
+            ctx.fillText(text, x + padding, y - padding);
+        };
+
+        if (box && box.length === 4) { // Bounding Box
+            const [x1, y1, x2, y2] = box;
+            const absX = x1 * naturalWidth;
+            const absY = y1 * naturalHeight;
+            const absW = (x2 - x1) * naturalWidth;
+            const absH = (y2 - y1) * naturalHeight;
+
+            if (showBorder) {
+                ctx.strokeRect(absX, absY, absW, absH);
+            }
+            ctx.fillStyle = `${color}${Math.round(fillOpacity * 255).toString(16).padStart(2, '0')}`;
+            ctx.fillRect(absX, absY, absW, absH);
+            
+            drawLabel(absX, absY);
+
+        } else if (polygon && Array.isArray(polygon) && polygon.length > 1) { // Polygon
+            ctx.beginPath();
+            const firstPoint = polygon[0];
+            ctx.moveTo(firstPoint[0] * naturalWidth, firstPoint[1] * naturalHeight);
+            for (let i = 1; i < polygon.length; i++) {
+                ctx.lineTo(polygon[i][0] * naturalWidth, polygon[i][1] * naturalHeight);
+            }
+            ctx.closePath();
+            
+            if (showBorder) {
+                ctx.stroke();
+            }
+            ctx.fillStyle = `${color}${Math.round(fillOpacity * 255).toString(16).padStart(2, '0')}`;
+            ctx.fill();
+            
+            drawLabel(polygon[0][0] * naturalWidth, polygon[0][1] * naturalHeight);
+
+        } else if (point && point.length === 2) { // Point
+            const [x, y] = point;
+            const absX = x * naturalWidth;
+            const absY = y * naturalHeight;
+            const radius = Math.max(3, 5 * (naturalWidth / effectiveDisplayWidth));
+            
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(absX, absY, radius, 0, 2 * Math.PI);
+            ctx.fill();
+
+            drawLabel(absX + radius, absY);
+        }
+    });
+}
+
+async function downloadAnnotatedImage(annotations, event) {
+    const container = event.target.closest('.annotated-image-container');
+    const imgElement = container?.querySelector('img');
+    if (!imgElement || !annotations) return;
+
+    // Create an off-screen canvas
+    const canvas = document.createElement('canvas');
+    const { naturalWidth, naturalHeight } = imgElement;
+    canvas.width = naturalWidth;
+    canvas.height = naturalHeight;
+    const ctx = canvas.getContext('2d');
+    
+    // Draw the original image onto the canvas
+    ctx.drawImage(imgElement, 0, 0, naturalWidth, naturalHeight);
+    
+    // Use the unified drawing function
+    drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, imgElement.clientWidth);
+
+    // Trigger download
+    const link = document.createElement('a');
+    link.download = 'annotated_image.png';
+    link.href = canvas.toDataURL('image/png');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+async function onImageLoad(event, annotations) {
+    await nextTick(); // Wait for Vue to update the DOM
+
+    const img = event.target;
+    if (img.tagName !== 'IMG') return;
+
+    const container = event.currentTarget;
+    if (!container) return;
+    const canvas = container.querySelector('canvas');
+    if (!canvas || !img) return;
+    
+    // A small delay gives the browser time to render the image and report its clientWidth
+    setTimeout(() => {
+        const { naturalWidth, naturalHeight } = img;
+        const { clientWidth: containerWidth, clientHeight: containerHeight } = container;
+
+        if (naturalWidth === 0 || containerWidth === 0 || containerHeight === 0) {
+            console.warn("Image or container has no dimensions yet, cannot draw annotations.");
+            return;
+        }
+
+        canvas.width = naturalWidth;
+        canvas.height = naturalHeight;
+
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, img.clientWidth);
+
+        const imgAspectRatio = naturalWidth / naturalHeight;
+        const containerAspectRatio = containerWidth / containerHeight;
+
+        if (imgAspectRatio > containerAspectRatio) {
+            // Image is wider, letterboxed top/bottom
+            const scaledHeight = containerWidth / imgAspectRatio;
+            const verticalMargin = (containerHeight - scaledHeight) / 2;
+            canvas.style.top = `${verticalMargin}px`;
+            canvas.style.left = '0px';
+            canvas.style.width = `${containerWidth}px`;
+            canvas.style.height = `${scaledHeight}px`;
+        } else {
+            // Image is taller or same aspect ratio, pillarboxed left/right
+            const scaledWidth = containerHeight * imgAspectRatio;
+            const horizontalMargin = (containerWidth - scaledWidth) / 2;
+            canvas.style.left = `${horizontalMargin}px`;
+            canvas.style.top = '0px';
+            canvas.style.width = `${scaledWidth}px`;
+            canvas.style.height = `${containerHeight}px`;
+        }
+    }, 100);
+}
 </script>
 
 <template>
@@ -151,6 +343,18 @@ const simpleHash = str => {
             </summary>
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
           </details>
+          <template v-else-if="part.type === 'annotate'">
+            <div class="annotated-image-container relative my-4 group" @load.capture="onImageLoad($event, part.annotations)">
+                <AuthenticatedImage v-if="lastUserImage" :src="lastUserImage" />
+                <p v-else class="text-red-500 text-sm">Could not find a previous image to annotate.</p>
+                <canvas class="absolute pointer-events-none"></canvas>
+                <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button @click="downloadAnnotatedImage(part.annotations, $event)" class="p-1.5 bg-black/50 text-white rounded-full hover:bg-black/80" title="Download Annotated Image">
+                        <IconArrowDownTray class="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+          </template>
         </template>
       </template>
     </div>

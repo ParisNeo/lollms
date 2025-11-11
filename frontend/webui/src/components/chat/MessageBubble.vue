@@ -1,4 +1,3 @@
-// frontend/webui/src/components/chat/MessageBubble.vue
 <script setup>
 import { computed, ref, onMounted, watch } from 'vue';
 import { marked } from 'marked';
@@ -117,6 +116,25 @@ const senderPersonalityIcon = computed(() => {
     if (!isAi.value || !props.message.sender) return null;
     const personality = dataStore.allPersonalities.find(p => p.name === props.message.sender);
     return personality ? personality.icon_base64 : null;
+});
+
+const lastUserImage = computed(() => {
+    if (props.message.sender_type !== 'assistant' || !props.message.content.includes('<annotate>')) {
+        return null;
+    }
+    const allMessages = discussionsStore.activeMessages;
+    const currentMessageIndex = allMessages.findIndex(m => m.id === props.message.id);
+    if (currentMessageIndex === -1) return null;
+
+    // Search backwards from the current message
+    for (let i = currentMessageIndex - 1; i >= 0; i--) {
+        const msg = allMessages[i];
+        if (msg.image_references && msg.image_references.length > 0) {
+            // Return the last image from that message
+            return msg.image_references[msg.image_references.length - 1];
+        }
+    }
+    return null;
 });
 
 const exportFormats = computed(() => {
@@ -468,11 +486,21 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
 
             <!-- Main Content -->
             <div class="flex-1 min-w-0">
-                <div class="font-semibold text-sm text-gray-800 dark:text-gray-100 mb-2 flex items-center">
+                <div class="font-semibold text-sm text-gray-800 dark:text-gray-100 mb-2 flex items-center flex-wrap gap-x-2 gap-y-1">
                     <span>{{ senderName }}</span>
-                    <span v-if="isAi && (message.binding_name || message.model_name)" class="model-info ml-2">
-                        {{ message.binding_name }}{{ message.binding_name && message.model_name ? '/' : '' }}{{ message.model_name }}
-                    </span>
+                    <div v-if="isAi && (message.binding_name || message.model_name)" class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400 font-mono">
+                        <span>{{ message.binding_name }}{{ message.binding_name && message.model_name ? '/' : '' }}{{ message.model_name }}</span>
+                        
+                        <template v-if="message.metadata && (message.metadata.ttft !== undefined || message.metadata.tps !== undefined)">
+                            <span class="text-gray-300 dark:text-gray-600">|</span>
+                            <span v-if="message.metadata.ttft !== undefined" :title="`Time to First Token: ${message.metadata.ttft} ms`">
+                                TTFT: {{ message.metadata.ttft }}ms
+                            </span>
+                            <span v-if="message.metadata.tps !== undefined" :title="`Tokens per Second: ${message.metadata.tps.toFixed(2)}`">
+                                TPS: {{ message.metadata.tps.toFixed(2) }}
+                            </span>
+                        </template>
+                    </div>
                 </div>
                 
                 <!-- Content Wrapper -->
@@ -497,6 +525,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                             :is-streaming="message.isStreaming"
                             :is-user="isCurrentUser"
                             :has-images="imagesToRender.length > 0"
+                            :last-user-image="lastUserImage"
                         />
                         <div v-if="message.isStreaming && !message.content && (!imagesToRender || imagesToRender.length === 0)" class="typing-indicator">
                             <span class="dot"></span><span class="dot"></span><span class="dot"></span>

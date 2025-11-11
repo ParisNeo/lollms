@@ -243,7 +243,7 @@ export const useAuthStore = defineStore('auth', () => {
                     if (discussionExists) {
                         await discussionsStore.selectDiscussion(lastDiscussionId, null, true);
                     } else if (discussionsStore.sortedDiscussions.length > 0) {
-                        await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id, null, true);
+                        await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions.id, null, true);
                     } else {
                         await discussionsStore.createNewDiscussion();
                     }

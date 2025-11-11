@@ -397,7 +397,7 @@ async function handlePaste(event) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
             const file = item.getAsFile();
             if (file) {
-                const extension = (file.type.split('/') || 'png').toLowerCase().replace('jpeg', 'jpg');
+                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
                 imageFiles.push(new File([file], `pasted_image_${Date.now()}.${extension}`, { type: file.type }));
             }
         }
@@ -526,7 +526,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="flex-shrink-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-4 border-t dark:border-gray-700" :onpaste="currentModelVisionSupport ? handlePaste : null">
+    <div class="flex-shrink-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-4 border-t dark:border-gray-700" @paste="handlePaste">
         <div class="w-full max-w-4xl mx-auto">
             <!-- Context Bar -->
             <div v-if="showContextBar" class="px-1 pb-2 relative group">
