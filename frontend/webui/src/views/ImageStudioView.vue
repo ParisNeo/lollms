@@ -105,6 +105,9 @@
                             <button @click="handleDeleteSelected" class="btn btn-danger btn-sm" title="Delete Selected"><IconTrash class="w-4 h-4" /></button>
                         </div>
                         <div class="flex items-center gap-2">
+                            <button @click="handleRefresh" class="btn btn-secondary btn-sm">
+                                <IconRefresh class="w-4 h-4 mr-2" /> Refresh
+                            </button>
                             <button @click="openCameraModal" class="btn btn-secondary btn-sm">
                                 <IconCamera class="w-4 h-4 mr-2" /> Take Photo
                             </button>
@@ -321,8 +324,6 @@ async function handleEnhance(type, options = {}) {
         return;
     }
     
-    enhancingTarget.value = type;
-
     const payload = { 
         prompt: prompt.value, 
         negative_prompt: negativePrompt.value, 
@@ -355,15 +356,7 @@ async function handleEnhance(type, options = {}) {
         }
     }
     
-    try {
-        const result = await imageStore.enhanceImagePrompt(payload);
-        if (result) {
-            if (result.prompt) prompt.value = result.prompt;
-            if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
-        }
-    } finally {
-        enhancingTarget.value = null;
-    }
+    await imageStore.enhanceImagePrompt(payload);
 }
 
 function openEnhanceModal(target) {
@@ -473,5 +466,10 @@ async function handlePaste(event) {
 
 function openCameraModal() {
     uiStore.openModal('cameraCapture');
+}
+
+async function handleRefresh() {
+    await imageStore.fetchImages();
+    uiStore.addNotification('Image gallery refreshed.', 'success');
 }
 </script>

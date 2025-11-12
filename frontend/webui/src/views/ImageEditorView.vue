@@ -130,7 +130,6 @@ const generationSettings = reactive({
     seed: -1,
     params: { strength: 0.75 }
 });
-const enhancingTarget = ref(null);
 
 const stageContainerRef = ref(null);
 const customCursorRef = ref(null);
@@ -187,8 +186,16 @@ onMounted(async () => {
     window.addEventListener('resize', fitStageIntoParent);
     window.addEventListener('keydown', handleKeyDown);
     on('task:completed', handleTaskCompletion);
+    on('prompt:enhanced', handlePromptEnhanced);
 });
-onUnmounted(() => { uiStore.setPageTitle({ title: '' }); window.removeEventListener('resize', fitStageIntoParent); window.removeEventListener('keydown', handleKeyDown); off('task:completed', handleTaskCompletion); stage?.destroy(); });
+onUnmounted(() => { uiStore.setPageTitle({ title: '' }); window.removeEventListener('resize', fitStageIntoParent); window.removeEventListener('keydown', handleKeyDown); off('task:completed', handleTaskCompletion); off('prompt:enhanced', handlePromptEnhanced); stage?.destroy(); });
+
+function handlePromptEnhanced(result) {
+    if (result) {
+        if (result.prompt) prompt.value = result.prompt;
+        if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
+    }
+}
 
 async function initEditor() {
     await nextTick(); if (!stageContainerRef.value) return;
@@ -324,7 +331,7 @@ function handleTaskCompletion(task) {
 }
 function handleKeyDown(event) { if (event.ctrlKey && event.key.toLowerCase() === 'z') { event.preventDefault(); undo(); } }
 function undo() { if (historyIndex.value > 0) { historyIndex.value--; loadImageAndSetup(history.value[historyIndex.value]); } }
-async function openEnhanceModal(target) { uiStore.openModal('enhancePrompt', { onConfirm: async ({ instructions, mode }) => { enhancingTarget.value = target; const payload = { prompt: prompt.value, negative_prompt: negativePrompt.value, target: target, instructions, mode }; try { const result = await imageStore.enhanceImagePrompt(payload); if (result) { if (result.prompt) prompt.value = result.prompt; if (result.negative_prompt) negativePrompt.value = result.negative_prompt; } } finally { enhancingTarget.value = null; } } }); }
+function openEnhanceModal(target) { uiStore.openModal('enhancePrompt', { onConfirm: async ({ instructions, mode }) => { const payload = { prompt: prompt.value, negative_prompt: negativePrompt.value, target: target, instructions, mode }; imageStore.enhanceImagePrompt(payload); } }); }
 function openSettingsModal() { uiStore.openModal('imageEditorSettings', { settings: generationSettings }); }
 watch(activeTool, (newTool) => { if (!stage) return; const c = stage.container(); stage.draggable(newTool === 'pan'); const cursors = { brush: 'none', eraser: 'none', rect: 'crosshair', circle: 'crosshair', pan: 'grab', zoom: 'zoom-in', select: 'default' }; c.style.cursor = cursors[newTool] || 'default'; [...imageLayer.getChildren(), ...drawLayer.getChildren()].forEach(node => { if (node instanceof Konva.Stage || node instanceof Konva.Transformer) return; node.draggable(newTool === 'select' && (node.hasName('shape') || node.hasName('image_paste'))); }); if (newTool !== 'select') transformer?.nodes([]); });
 </script>

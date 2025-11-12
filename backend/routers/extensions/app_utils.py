@@ -801,13 +801,44 @@ def install_item_task(task: Task, repository: str, folder_name: str, port: int, 
             shutil.copytree(source_item_path, dest_app_path, dirs_exist_ok=True)
             task.set_progress(20)
 
-            # Create .env from .env.example if it exists
+            # Create .env from .env.example if it exists and handle API key generation
             env_example_path = dest_app_path / ".env.example"
+            env_path = dest_app_path / ".env"
             if env_example_path.exists():
-                env_path = dest_app_path / ".env"
                 if not env_path.exists():
                     shutil.copy(env_example_path, env_path)
                     task.log(f"Created .env file from .env.example for '{item_name}'.")
+
+                # Auto-generate LOLLMS_KEY if present in .env.example
+                try:
+                    with open(env_example_path, 'r', encoding='utf-8') as f:
+                        example_content = f.read()
+                    
+                    if 'LOLLMS_KEY' in example_content:
+                        task.log("Found LOLLMS_KEY in .env.example, generating a new API key...")
+                        from backend.security import generate_api_key
+                        full_key, _ = generate_api_key()
+                        
+                        with open(env_path, 'r', encoding='utf-8') as f:
+                            env_lines = f.readlines()
+                        
+                        updated = False
+                        for i, line in enumerate(env_lines):
+                            stripped_line = line.strip()
+                            if stripped_line.startswith('LOLLMS_KEY') or (stripped_line.startswith('#') and 'LOLLMS_KEY' in stripped_line):
+                                env_lines[i] = f'LOLLMS_KEY="{full_key}"\n'
+                                updated = True
+                                break
+                        
+                        if not updated:
+                            env_lines.append(f'\nLOLLMS_KEY="{full_key}"\n')
+
+                        with open(env_path, 'w', encoding='utf-8') as f:
+                            f.writelines(env_lines)
+                        task.log("Successfully generated and set LOLLMS_KEY in the .env file.")
+                except Exception as e:
+                    task.log(f"An error occurred while trying to auto-generate API key: {e}", "WARNING")
+                    trace_exception(e)
 
             server_py_path = dest_app_path / "server.py"
             if not server_py_path.exists() and 'run_command' not in item_info:

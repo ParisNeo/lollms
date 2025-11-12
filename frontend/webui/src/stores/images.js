@@ -15,7 +15,7 @@ export const useImageStore = defineStore('images', () => {
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
     const authStore = useAuthStore();
-    const { on, off } = useEventBus();
+    const { on, off, emit } = useEventBus();
 
     // --- State for Image Studio ---
     const prompt = ref('');
@@ -60,6 +60,20 @@ export const useImageStore = defineStore('images', () => {
     function handleTaskCompletion(task) {
         const isImageTask = task.name.startsWith('Generating') && task.name.includes('image(s)');
         const isEditTask = task.name.startsWith('Editing image:');
+        const isEnhanceTask = task.name.startsWith('Enhancing prompt:');
+
+        if (isEnhanceTask) {
+            if (task.status === 'completed' && task.result) {
+                if (task.result.prompt) prompt.value = task.result.prompt;
+                if (task.result.negative_prompt) negativePrompt.value = task.result.negative_prompt;
+                emit('prompt:enhanced', task.result);
+                uiStore.addNotification('Prompt enhanced successfully!', 'success');
+            } else if (task.status === 'failed') {
+                uiStore.addNotification('Prompt enhancement failed.', 'error');
+            }
+            isEnhancing.value = false;
+            return;
+        }
 
         if ((isImageTask || isEditTask) && task.status === 'completed' && task.result) {
             let parsedResult;
@@ -75,8 +89,8 @@ export const useImageStore = defineStore('images', () => {
             const newItems = Array.isArray(parsedResult) ? parsedResult : [parsedResult];
             
             if (newItems.length > 0 && newItems[0]) {
-                // Prepend new items to the existing list for better reactivity.
-                images.value = [...newItems, ...images.value];
+                const reversedNewItems = [...newItems].reverse();
+                images.value.unshift(...reversedNewItems);
                 uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
             }
         } else if ((isImageTask || isEditTask) && task.status === 'failed') {
@@ -193,13 +207,13 @@ export const useImageStore = defineStore('images', () => {
         isEnhancing.value = true;
         try {
             const response = await apiClient.post('/api/image-studio/enhance-prompt', payload);
-            uiStore.addNotification('Prompt enhanced successfully!', 'success');
+            tasksStore.addTask(response.data);
+            uiStore.addNotification('Prompt enhancement started...', 'info');
             return response.data;
         } catch (error) {
+            isEnhancing.value = false;
             // Handled globally
             return null;
-        } finally {
-            isEnhancing.value = false;
         }
     }
 
