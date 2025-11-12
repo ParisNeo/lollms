@@ -1,5 +1,4 @@
 # [UPDATE] backend/task_manager.py
-# backend/task_manager.py
 import uuid
 import datetime
 import threading
@@ -14,6 +13,7 @@ from backend.db.base import TaskStatus
 from backend.ws_manager import manager
 from backend.models.task import TaskInfo
 from backend.db.models.user import User as DBUser
+from backend.db.models.discussion import SharedDiscussionLink
 
 def _serialize_task(db_task: DBTask) -> Optional[dict]:
     """
@@ -87,47 +87,6 @@ class Task:
             if db_task.owner_user_id:
                 manager.send_personal_message_sync(end_payload, db_task.owner_user_id)
             manager.broadcast_to_admins_sync(end_payload)
-
-        if db_task.status == TaskStatus.COMPLETED and db_task.result:
-            result_data = None
-            if isinstance(db_task.result, str):
-                try: result_data = json.loads(db_task.result)
-                except json.JSONDecodeError: pass
-            elif isinstance(db_task.result, dict):
-                result_data = db_task.result
-
-            if isinstance(result_data, dict):
-                zone_info = result_data
-                if "zone" in zone_info and "discussion_id" in zone_info:
-                    custom_payload_data = {
-                        "discussion_id": zone_info.get("discussion_id"),
-                        "zone": zone_info.get("zone"),
-                    }
-                    if zone_info.get("zone") in ["discussion", "memory"]:
-                        custom_payload = {"type": "data_zone_processed", "data": {
-                            **custom_payload_data,
-                            "new_content": zone_info.get("new_content"),
-                            "discussion_images": zone_info.get("discussion_images"),
-                            "active_discussion_images": zone_info.get("active_discussion_images"),
-                            "task_data": task_data
-                        }}
-                    elif zone_info.get("zone") == "discussion_images":
-                        custom_payload = {"type": "discussion_images_updated", "data": {
-                            **custom_payload_data,
-                            "discussion_images": zone_info.get("discussion_images", []),
-                            "active_discussion_images": zone_info.get("active_discussion_images", [])
-                        }}
-                    else:
-                        custom_payload = None
-
-                    if custom_payload:
-                        if db_task.owner_user_id:
-                            manager.send_personal_message_sync(custom_payload, db_task.owner_user_id)
-                        manager.broadcast_to_admins_sync(custom_payload)
-                
-                if "updated_app" in zone_info:
-                    app_payload = {"type": "app_status_changed", "data": zone_info["updated_app"]}
-                    manager.broadcast_sync(app_payload)
 
 
     def _update_db(self, **kwargs):

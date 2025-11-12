@@ -64,7 +64,7 @@ export const useImageStore = defineStore('images', () => {
         if ((isImageTask || isEditTask) && task.status === 'completed' && task.result) {
             let parsedResult;
             try {
-                // The result is already a JSON object from the backend task, no need to parse if it's not a string
+                // The result from the backend task can be a string or an object.
                 parsedResult = typeof task.result === 'string' ? JSON.parse(task.result) : task.result;
             } catch (e) {
                 console.error("Failed to parse task result JSON:", e);
@@ -75,7 +75,7 @@ export const useImageStore = defineStore('images', () => {
             const newItems = Array.isArray(parsedResult) ? parsedResult : [parsedResult];
             
             if (newItems.length > 0 && newItems[0]) {
-                // Using a new array assignment for more robust reactivity
+                // Prepend new items to the existing list for better reactivity.
                 images.value = [...newItems, ...images.value];
                 uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
             }

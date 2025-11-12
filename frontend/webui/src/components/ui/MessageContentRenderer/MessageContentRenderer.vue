@@ -13,7 +13,8 @@ const props = defineProps({
   isStreaming: { type: Boolean, default: false },
   isUser: { type: Boolean, default: false },
   hasImages: { type: Boolean, default: false },
-  lastUserImage: { type: String, default: null }
+  lastUserImage: { type: String, default: null },
+  messageId: { type: String, default: null },
 });
 
 const messageContentRef = ref(null);
@@ -160,11 +161,10 @@ function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayW
     annotations.forEach(ann => {
         const { box, point, polygon, class: oldLabel, label: newLabel, display } = ann;
 
-        const effectiveDisplayWidth = displayWidth > 0 ? displayWidth : naturalWidth;
-        const defaultLineWidth = Math.max(2, 2 * (naturalWidth / effectiveDisplayWidth));
-
+        const scaleFactor = displayWidth > 0 ? naturalWidth / displayWidth : 1;
+        
         const color = display?.border_color || '#FF0000';
-        const lineWidth = (display?.border_width || defaultLineWidth) * (naturalWidth / effectiveDisplayWidth);
+        const lineWidth = (display?.border_width || 2) * scaleFactor;
         const fillOpacity = display?.fill_opacity !== undefined ? display?.fill_opacity : 0.1;
         const showBorder = display?.show_border !== false;
 
@@ -173,12 +173,11 @@ function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayW
         ctx.fillStyle = color;
         
         const text = newLabel || oldLabel || 'unknown';
-        const fontSize = Math.max(12, 14 * (naturalWidth / effectiveDisplayWidth));
-        const padding = 4 * (naturalWidth / effectiveDisplayWidth);
+        const fontSize = Math.max(12, 14 * scaleFactor);
+        const padding = 4 * scaleFactor;
         ctx.font = `bold ${fontSize}px sans-serif`;
         ctx.textBaseline = 'bottom';
         
-        // Function to draw the label
         const drawLabel = (x, y) => {
             const textMetrics = ctx.measureText(text);
             ctx.fillStyle = color;
@@ -194,42 +193,32 @@ function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayW
             const absW = (x2 - x1) * naturalWidth;
             const absH = (y2 - y1) * naturalHeight;
 
-            if (showBorder) {
-                ctx.strokeRect(absX, absY, absW, absH);
-            }
+            if (showBorder) ctx.strokeRect(absX, absY, absW, absH);
             ctx.fillStyle = `${color}${Math.round(fillOpacity * 255).toString(16).padStart(2, '0')}`;
             ctx.fillRect(absX, absY, absW, absH);
-            
             drawLabel(absX, absY);
 
         } else if (polygon && Array.isArray(polygon) && polygon.length > 1) { // Polygon
             ctx.beginPath();
-            const firstPoint = polygon[0];
-            ctx.moveTo(firstPoint[0] * naturalWidth, firstPoint[1] * naturalHeight);
-            for (let i = 1; i < polygon.length; i++) {
-                ctx.lineTo(polygon[i][0] * naturalWidth, polygon[i][1] * naturalHeight);
-            }
+            polygon.forEach((p, i) => {
+                if (i === 0) ctx.moveTo(p[0] * naturalWidth, p[1] * naturalHeight);
+                else ctx.lineTo(p[0] * naturalWidth, p[1] * naturalHeight);
+            });
             ctx.closePath();
-            
-            if (showBorder) {
-                ctx.stroke();
-            }
+            if (showBorder) ctx.stroke();
             ctx.fillStyle = `${color}${Math.round(fillOpacity * 255).toString(16).padStart(2, '0')}`;
             ctx.fill();
-            
             drawLabel(polygon[0][0] * naturalWidth, polygon[0][1] * naturalHeight);
 
         } else if (point && point.length === 2) { // Point
             const [x, y] = point;
             const absX = x * naturalWidth;
             const absY = y * naturalHeight;
-            const radius = Math.max(3, 5 * (naturalWidth / effectiveDisplayWidth));
-            
+            const radius = Math.max(3, 5 * scaleFactor);
             ctx.fillStyle = color;
             ctx.beginPath();
             ctx.arc(absX, absY, radius, 0, 2 * Math.PI);
             ctx.fill();
-
             drawLabel(absX + radius, absY);
         }
     });
@@ -240,20 +229,15 @@ async function downloadAnnotatedImage(annotations, event) {
     const imgElement = container?.querySelector('img');
     if (!imgElement || !annotations) return;
 
-    // Create an off-screen canvas
     const canvas = document.createElement('canvas');
     const { naturalWidth, naturalHeight } = imgElement;
     canvas.width = naturalWidth;
     canvas.height = naturalHeight;
     const ctx = canvas.getContext('2d');
     
-    // Draw the original image onto the canvas
     ctx.drawImage(imgElement, 0, 0, naturalWidth, naturalHeight);
-    
-    // Use the unified drawing function
     drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, imgElement.clientWidth);
 
-    // Trigger download
     const link = document.createElement('a');
     link.download = 'annotated_image.png';
     link.href = canvas.toDataURL('image/png');
@@ -262,30 +246,25 @@ async function downloadAnnotatedImage(annotations, event) {
     document.body.removeChild(link);
 }
 
-async function onImageLoad(event, annotations) {
-    await nextTick(); // Wait for Vue to update the DOM
-
+function onImageLoad(event, annotations) {
     const img = event.target;
-    if (img.tagName !== 'IMG') return;
+    if (!img || img.tagName !== 'IMG') return;
 
-    const container = event.currentTarget;
-    if (!container) return;
-    const canvas = container.querySelector('canvas');
-    if (!canvas || !img) return;
-    
-    // A small delay gives the browser time to render the image and report its clientWidth
-    setTimeout(() => {
+    const tryDrawing = () => {
+        const container = img.closest('.annotated-image-container');
+        if (!container) return;
+        const canvas = container.querySelector('canvas');
+        if (!canvas) return;
+
         const { naturalWidth, naturalHeight } = img;
         const { clientWidth: containerWidth, clientHeight: containerHeight } = container;
 
         if (naturalWidth === 0 || containerWidth === 0 || containerHeight === 0) {
-            console.warn("Image or container has no dimensions yet, cannot draw annotations.");
             return;
         }
 
         canvas.width = naturalWidth;
         canvas.height = naturalHeight;
-
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         
@@ -295,23 +274,16 @@ async function onImageLoad(event, annotations) {
         const containerAspectRatio = containerWidth / containerHeight;
 
         if (imgAspectRatio > containerAspectRatio) {
-            // Image is wider, letterboxed top/bottom
             const scaledHeight = containerWidth / imgAspectRatio;
             const verticalMargin = (containerHeight - scaledHeight) / 2;
-            canvas.style.top = `${verticalMargin}px`;
-            canvas.style.left = '0px';
-            canvas.style.width = `${containerWidth}px`;
-            canvas.style.height = `${scaledHeight}px`;
+            Object.assign(canvas.style, { top: `${verticalMargin}px`, left: '0px', width: `${containerWidth}px`, height: `${scaledHeight}px` });
         } else {
-            // Image is taller or same aspect ratio, pillarboxed left/right
             const scaledWidth = containerHeight * imgAspectRatio;
             const horizontalMargin = (containerWidth - scaledWidth) / 2;
-            canvas.style.left = `${horizontalMargin}px`;
-            canvas.style.top = '0px';
-            canvas.style.width = `${scaledWidth}px`;
-            canvas.style.height = `${containerHeight}px`;
+            Object.assign(canvas.style, { left: `${horizontalMargin}px`, top: '0px', width: `${scaledWidth}px`, height: `${containerHeight}px` });
         }
-    }, 100);
+    };
+    requestAnimationFrame(tryDrawing);
 }
 </script>
 
@@ -323,7 +295,7 @@ async function onImageLoad(event, annotations) {
         <template v-for="(part, index) in messageParts" :key="`part-${index}-${part.type}`">
           <template v-if="part.type === 'content'">
             <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="`token-${tokenIndex}-${token.type}-${simpleHash(token.raw)}`">
-              <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" />
+              <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
               <details v-else-if="token.type === 'document'" class="document-block my-4">
                   <summary class="document-summary">
                       <IconFileText class="w-4 h-4 text-gray-600 dark:text-gray-400 flex-shrink-0" />
@@ -344,8 +316,8 @@ async function onImageLoad(event, annotations) {
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
           </details>
           <template v-else-if="part.type === 'annotate'">
-            <div class="annotated-image-container relative my-4 group" @load.capture="onImageLoad($event, part.annotations)">
-                <AuthenticatedImage v-if="lastUserImage" :src="lastUserImage" />
+            <div class="annotated-image-container relative my-4 group">
+                <AuthenticatedImage v-if="lastUserImage" :src="lastUserImage" @load="onImageLoad($event, part.annotations)"/>
                 <p v-else class="text-red-500 text-sm">Could not find a previous image to annotate.</p>
                 <canvas class="absolute pointer-events-none"></canvas>
                 <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">

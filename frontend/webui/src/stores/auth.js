@@ -137,6 +137,9 @@ export const useAuthStore = defineStore('auth', () => {
                     }
                     discussionsStore.loadDiscussions();
                     break;
+                case 'new_message_from_task':
+                    discussionsStore.handleNewMessageFromTask(data.data);
+                    break;
                 case 'discussion_unshared':
                     discussionsStore.fetchSharedWithMe(); // Refresh the list
                     if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
@@ -147,10 +150,30 @@ export const useAuthStore = defineStore('auth', () => {
                     break;
                 case 'admin_broadcast': uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); break;
                 case 'task_update': tasksStore.addTask(data.data); break;
-                case 'task_end': 
+                case 'task_end': {
                     tasksStore.addTask(data.data);
-                    uiStore.addNotification(`Task '${data.data.name}' finished with status: ${data.data.status}.`, 'info', 5000);
+                    const task = data.data;
+
+                    if (task.status === 'completed' && task.result) {
+                        if (task.result.status === 'image_generated_in_message') {
+                            discussionsStore.handleNewMessageFromTask({
+                                discussion_id: task.result.discussion_id,
+                                message: task.result.new_message
+                            });
+                            uiStore.addNotification(`Image generated in discussion.`, 'success');
+                        } else if (task.result.zone) { // For data zone processing
+                            discussionsStore.handleDataZoneUpdate(task.result);
+                        } else if (task.name === 'Generate User Avatar' && task.result.new_icon_url) {
+                            refreshUser();
+                            uiStore.addNotification('Avatar generated and updated!', 'success');
+                        } else {
+                            uiStore.addNotification(`Task '${task.name}' finished successfully.`, 'success', 5000);
+                        }
+                    } else if (task.status !== 'completed') {
+                        uiStore.addNotification(`Task '${task.name}' finished with status: ${task.status}.`, 'info', 5000);
+                    }
                     break;
+                }
                 case 'app_status_changed': { const { useAdminStore } = await import('./admin'); useAdminStore().handleAppStatusUpdate(data.data); dataStore.handleServiceStatusUpdate(data.data); break; }
                 case 'data_zone_processed':
                     if (data.data.task_data) tasksStore.addTask(data.data.task_data);

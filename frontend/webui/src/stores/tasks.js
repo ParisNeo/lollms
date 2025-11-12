@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/tasks.js
+// [UPDATE] frontend/webui/src/stores/tasks.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -14,6 +14,7 @@ export const useTasksStore = defineStore('tasks', () => {
     const tasks = ref([]);
     const isLoadingTasks = ref(false);
     const isClearingTasks = ref(false);
+    let pollInterval = null;
 
     // --- COMPUTED ---
     const activeTasksCount = computed(() => {
@@ -137,11 +138,31 @@ export const useTasksStore = defineStore('tasks', () => {
             isClearingTasks.value = false;
         }
     }
+
+    function startPolling() {
+        if (pollInterval) return;
+        const authStore = useAuthStore();
+        const filter = authStore.isAdmin ? 'all' : 'me';
+        fetchTasks(filter);
+        pollInterval = setInterval(() => {
+            const authStore = useAuthStore();
+            const currentFilter = authStore.isAdmin ? 'all' : 'me';
+            fetchTasks(currentFilter);
+        }, 5000); // Poll every 5 seconds
+    }
+
+    function stopPolling() {
+        if (pollInterval) {
+            clearInterval(pollInterval);
+            pollInterval = null;
+        }
+    }
     
     function $reset() {
         tasks.value = [];
         isLoadingTasks.value = false;
         isClearingTasks.value = false;
+        stopPolling();
     }
 
     return {
@@ -158,6 +179,8 @@ export const useTasksStore = defineStore('tasks', () => {
         cancelAllTasks,
         clearCompletedTasks,
         handleTasksCleared,
+        startPolling,
+        stopPolling,
         $reset
     };
 });

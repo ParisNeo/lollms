@@ -1,8 +1,8 @@
-<!-- frontend/webui/src/components/ui/AuthenticatedImage.vue -->
+<!-- [UPDATE] frontend/webui/src/components/ui/AuthenticatedImage.vue -->
 <template>
   <div class="w-full h-full flex items-center justify-center bg-gray-200 dark:bg-gray-700">
     <div v-if="isLoading" class="w-full h-full animate-pulse bg-gray-300 dark:bg-gray-600"></div>
-    <img v-else-if="imageUrl && !error" :src="imageUrl" :alt="alt" @load="$emit('load')" class="w-full h-full object-contain" />
+    <img v-else-if="imageUrl && !error" :src="imageUrl" :alt="alt" @load="$emit('load', $event)" class="w-full h-full object-contain" />
     <div v-else class="text-xs text-gray-500 dark:text-gray-400 p-2 text-center">
       Image Error
     </div>
@@ -27,6 +27,13 @@ let objectUrl = null;
 
 async function fetchImage() {
   if (!props.src) return;
+
+  if (props.src.startsWith('data:image/')) {
+      imageUrl.value = props.src;
+      isLoading.value = false;
+      error.value = false;
+      return;
+  }
 
   isLoading.value = true;
   error.value = false;

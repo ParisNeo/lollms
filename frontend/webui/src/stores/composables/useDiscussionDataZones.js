@@ -95,7 +95,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
         }
     }
 
-    async function generateImageFromDataZone(discussionId, prompt) {
+    async function generateImageFromDataZone(discussionId, prompt, parentMessageId) {
         if (activeAiTasks.value[discussionId]) {
             uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId].type}) is already running.`, 'warning');
             return;
@@ -108,6 +108,9 @@ export function useDiscussionDataZones(state, stores, getActions) {
 
         const formData = new FormData();
         formData.append('prompt', finalPrompt);
+        if (parentMessageId) {
+            formData.append('parent_message_id', parentMessageId);
+        }
 
         activeAiTasks.value[discussionId] = { type: 'generate_image', taskId: null };
 

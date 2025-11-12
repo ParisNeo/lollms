@@ -526,6 +526,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                             :is-user="isCurrentUser"
                             :has-images="imagesToRender.length > 0"
                             :last-user-image="lastUserImage"
+                            :message-id="message.id"
                         />
                         <div v-if="message.isStreaming && !message.content && (!imagesToRender || imagesToRender.length === 0)" class="typing-indicator">
                             <span class="dot"></span><span class="dot"></span><span class="dot"></span>

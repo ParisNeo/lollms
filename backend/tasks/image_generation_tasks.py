@@ -4,12 +4,14 @@ import uuid
 import json
 from typing import Optional
 import traceback
+import datetime
 
 from ascii_colors import trace_exception
 from lollms_client import LollmsClient
 
 from backend.db.models.config import TTIBinding as DBTTIBinding
 from backend.db.models.user import User as DBUser
+from backend.db.models.personality import Personality as DBPersonality
 from backend.discussion import get_user_discussion
 from backend.session import (
     build_lollms_client_from_params,
@@ -20,9 +22,10 @@ from backend.db.models.image import UserImage
 from backend.models.image import UserImagePublic
 from backend.settings import settings
 
-def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: str, negative_prompt: str, width: Optional[int], height: Optional[int], generation_params: dict):
+def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: str, negative_prompt: str, width: Optional[int], height: Optional[int], generation_params: dict, parent_message_id: Optional[str] = None):
     task.log("Starting image generation task...")
     task.set_progress(5)
+    task.set_description("Initializing TTI client...")
 
     try:
         # This task does not receive model override from UI, so pass None to client builder
@@ -37,7 +40,9 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         
         task.log("LollmsClient initialized for TTI.")
         task.set_progress(20)
+        task.set_description("Generating image...")
 
+        # Removed the non-serializable callback argument
         image_bytes = lc.tti.generate_image(
             prompt=prompt,
             negative_prompt=negative_prompt,
@@ -47,6 +52,7 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         )
         task.log("Image data received from binding.")
         task.set_progress(80)
+        task.set_description("Processing and saving image...")
 
         if not image_bytes:
             raise Exception("TTI binding returned empty image data.")
@@ -56,19 +62,48 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         discussion = get_user_discussion(username, discussion_id)
         if not discussion:
             raise Exception("Discussion not found after image generation.")
-        
-        discussion.add_discussion_image(b64_image, source="generation")
+
+        with task.db_session_factory() as db:
+            user_db = db.query(DBUser).filter(DBUser.username == username).first()
+            db_pers = db.query(DBPersonality).filter(DBPersonality.id == user_db.active_personality_id).first() if user_db and user_db.active_personality_id else None
+
+        sender_name = "lollms_tti"
+        if db_pers:
+            sender_name = db_pers.name
+
+        new_message = discussion.add_message(
+            sender=sender_name,
+            content=f"Here is the generated image for the prompt:\n```\n{prompt}\n```",
+            sender_type="assistant",
+            images=[b64_image],
+            parent_id=parent_message_id
+        )
         discussion.commit()
-        task.log("Image added to discussion and saved.")
-        task.set_progress(100)
         
-        all_images_info = discussion.get_discussion_images()
+        # Serialize the new message for real-time push
+        serialized_message = {
+            "id": new_message.id,
+            "sender": new_message.sender,
+            "sender_type": new_message.sender_type,
+            "content": new_message.content,
+            "parent_message_id": new_message.parent_id,
+            "binding_name": new_message.binding_name,
+            "model_name": new_message.model_name,
+            "token_count": new_message.tokens,
+            "metadata": new_message.metadata,
+            "image_references": [f"data:image/png;base64,{img}" for img in new_message.images or []],
+            "created_at": new_message.created_at.isoformat() if new_message.created_at else datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "sources": (new_message.metadata or {}).get('sources', []),
+            "events": (new_message.metadata or {}).get('events', [])
+        }
+
+        task.log("Image added to a new message and saved.")
+        task.set_progress(100)
         
         return {
             "discussion_id": discussion_id,
-            "zone": "discussion_images",
-            "discussion_images": [img_info['data'] for img_info in all_images_info],
-            "active_discussion_images": [img_info['active'] for img_info in all_images_info]
+            "status": "image_generated_in_message",
+            "new_message": serialized_message
         }
     except Exception as e:
         task.log(f"Image generation failed: {e}", "ERROR")

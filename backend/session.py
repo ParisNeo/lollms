@@ -517,8 +517,8 @@ def build_lollms_client_from_params(
 
         if force_tti_mode == "force_always" and force_tti_name:
             effective_tti_model_full = force_tti_name
-        elif tti_binding_alias and tti_model_name:
-            effective_tti_model_full = f"{tti_binding_alias}/{tti_model_name}"
+        elif tti_binding_alias:
+            effective_tti_model_full = f"{tti_binding_alias}/{tti_model_name or ''}"
         elif user_db.tti_binding_model_name:
             effective_tti_model_full = user_db.tti_binding_model_name
         

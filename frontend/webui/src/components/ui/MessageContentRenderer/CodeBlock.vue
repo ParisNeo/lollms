@@ -18,6 +18,10 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  messageId: {
+    type: String,
+    default: null,
+  },
 });
 
 const uiStore = useUiStore();
@@ -187,7 +191,7 @@ async function generateImage() {
     executionOutput.value = `Requesting image generation...`;
     
     try {
-        await discussionsStore.generateImageFromDataZone(discussionId, props.code);
+        await discussionsStore.generateImageFromDataZone(discussionId, props.code, props.messageId);
         executionOutput.value = 'Image generation task started successfully. Check the task manager for progress.';
     } catch (e) {
         isError.value = true;

@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/composables/useDiscussionMessages.js
+// [UPDATE] frontend/webui/src/stores/composables/useDiscussionMessages.js
 import apiClient from '../../services/api';
 import { processSingleMessage, processMessages } from './discussionProcessor';
 
@@ -12,8 +12,22 @@ function fileToBase64(file) {
 }
 
 export function useDiscussionMessages(state, stores, getActions) {
-    const { messages, currentDiscussionId } = state;
+    const { messages, currentDiscussionId, discussions } = state;
     const { uiStore, authStore } = stores;
+
+    function handleNewMessageFromTask({ discussion_id, message }) {
+        if (currentDiscussionId.value === discussion_id) {
+            const processedMsg = processSingleMessage(message);
+            // Avoid duplicates if a refresh is already in flight
+            if (!messages.value.some(m => m.id === processedMsg.id)) {
+                messages.value.push(processedMsg);
+            }
+        }
+        // Also update the discussion list for last activity
+        if (discussions.value[discussion_id]) {
+            discussions.value[discussion_id].last_activity_at = message.created_at;
+        }
+    }
 
     async function refreshActiveDiscussionMessages() {
         if (!currentDiscussionId.value) return;
@@ -148,6 +162,7 @@ export function useDiscussionMessages(state, stores, getActions) {
         refreshActiveDiscussionMessages,
         toggleImageActivation, addManualMessage, saveManualMessage,
         saveMessageChanges, deleteMessage, gradeMessage,
-        uploadDiscussionImage, deleteAllDiscussionImages, deleteDiscussionImage
+        uploadDiscussionImage, deleteAllDiscussionImages, deleteDiscussionImage,
+        handleNewMessageFromTask,
     };
 }

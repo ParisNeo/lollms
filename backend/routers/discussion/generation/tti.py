@@ -71,6 +71,7 @@ def build_tti_generation_router(router: APIRouter):
         negative_prompt: str = Form(""),
         width: Optional[int] = Form(None),
         height: Optional[int] = Form(None),
+        parent_message_id: Optional[str] = Form(None),
         generation_params_json: str = Form("{}"),
         current_user: UserAuthDetails = Depends(get_current_active_user)
     ):
@@ -86,7 +87,7 @@ def build_tti_generation_router(router: APIRouter):
         db_task = task_manager.submit_task(
             name=f"Generating image for: {discussion.metadata.get('title', 'Untitled')}",
             target=_generate_image_task,
-            args=(current_user.username, discussion_id, prompt, negative_prompt, width, height, generation_params),
+            args=(current_user.username, discussion_id, prompt, negative_prompt, width, height, generation_params, parent_message_id),
             description=f"Generating image with prompt: '{prompt[:50]}...'",
             owner_username=current_user.username
         )

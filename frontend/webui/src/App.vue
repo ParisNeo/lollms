@@ -142,7 +142,7 @@ onMounted(async () => {
 
     if (isAuthenticated.value) {
         pyodideStore.initialize();
-        tasksStore.fetchTasks();
+        tasksStore.startPolling();
     }
 });
 
@@ -151,21 +151,6 @@ watch(message_font_size, (newSize) => {
     document.documentElement.style.setProperty('--message-font-size', `${newSize}px`);
   }
 }, { immediate: true });
-
-watch(tasks, (newTasks, oldTasks) => {
-    const oldTaskMap = new Map((oldTasks || []).map(t => [t.id, t.status]));
-    
-    for (const task of newTasks) {
-        const oldStatus = oldTaskMap.get(task.id);
-        if (oldStatus !== 'completed' && task.status === 'completed') {
-            // Task has just completed
-            if (task.name === 'Generate User Avatar') {
-                authStore.refreshUser();
-                uiStore.addNotification('Avatar generated and updated!', 'success');
-            }
-        }
-    }
-}, { deep: true });
 </script>
 
 <template>

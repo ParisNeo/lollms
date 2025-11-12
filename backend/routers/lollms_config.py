@@ -10,6 +10,10 @@ from ascii_colors import trace_exception
 from lollms_client.lollms_tti_binding import get_available_bindings as get_available_tti_bindings
 from lollms_client.lollms_tts_binding import get_available_bindings as get_available_tts_bindings
 from lollms_client.lollms_stt_binding import get_available_bindings as get_available_stt_bindings
+from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
+from lollms_client.lollms_tti_binding import list_binding_models as list_tti_binding_models
+from lollms_client.lollms_tts_binding import list_binding_models as list_tts_binding_models
+from lollms_client.lollms_stt_binding import list_binding_models as list_stt_binding_models
 
 
 from backend.db import get_db
@@ -30,7 +34,6 @@ class ModelInfo(BaseModel):
 
 @lollms_config_router.get("/lollms-models", response_model=List[ModelInfo])
 async def get_lollms_models(
-    current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     all_models = []
@@ -39,8 +42,7 @@ async def get_lollms_models(
 
     for binding in active_bindings:
         try:
-            lc = get_user_lollms_client(current_user.username, binding.alias)
-            models_from_binding = lc.list_models()
+            models_from_binding = list_llm_binding_models(llm_binding_name=binding.name, llm_binding_config=binding.config)
             
             raw_model_names = []
             if isinstance(models_from_binding, list):
@@ -84,7 +86,6 @@ async def get_lollms_models(
 
 @lollms_config_router.get("/tti-models", response_model=List[ModelInfo])
 async def get_lollms_tti_models(
-    current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """
@@ -102,12 +103,7 @@ async def get_lollms_tti_models(
 
     for binding in active_tti_bindings:
         try:
-            lc = build_lollms_client_from_params(current_user.username, tti_binding_alias=binding.alias)
-            if not lc.tti:
-                print(f"WARNING: Could not build TTI instance for binding '{binding.alias}'. Skipping.")
-                continue
-
-            models_from_binding = lc.tti.list_models()
+            models_from_binding = list_tti_binding_models(tti_binding_name=binding.name, tti_binding_config=binding.config)
             
             raw_model_names = []
             if isinstance(models_from_binding, list):
@@ -203,7 +199,6 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
 
 @lollms_config_router.get("/tts-models", response_model=List[ModelInfo])
 async def get_tts_models(
-    current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     all_models = []
@@ -224,10 +219,7 @@ async def get_tts_models(
             except Exception:
                 model_aliases = {}
         try:
-            lc = build_lollms_client_from_params(current_user.username, tts_binding_alias=binding.alias)
-            if not lc.tts: continue
-            
-            models = lc.tts.list_models()
+            models = list_tts_binding_models(tts_binding_name=binding.name, tts_binding_config=binding.config)
             
             if isinstance(models, list):
                 for item in models:
@@ -266,7 +258,6 @@ async def get_tts_models(
 
 @lollms_config_router.get("/stt-models", response_model=List[ModelInfo])
 async def get_stt_models(
-    current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     all_models = []
@@ -287,12 +278,7 @@ async def get_stt_models(
             except Exception:
                 model_aliases = {}
         try:
-            # Note: We build a client just to list models, this might be optimizable
-            # if lollms-client offers a static way to list models for a binding.
-            lc = build_lollms_client_from_params(current_user.username, stt_binding_alias=binding.alias)
-            if not lc.stt: continue
-            
-            models = lc.stt.list_models()
+            models = list_stt_binding_models(stt_binding_name=binding.name, stt_binding_config=binding.config)
             
             if isinstance(models, list):
                 for item in models:
