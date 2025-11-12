@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/views/ImageStudioView.vue -->
 <template>
     <Teleport to="#global-header-actions-target">
         <div class="flex items-center gap-2">
@@ -179,9 +178,7 @@ import { useDiscussionsStore } from '../stores/discussions';
 import { useTasksStore } from '../stores/tasks';
 import { storeToRefs } from 'pinia';
 import AuthenticatedImage from '../components/ui/AuthenticatedImage.vue';
-import TaskProgressIndicator from '../components/ui/TaskProgressIndicator.vue';
 import apiClient from '../services/api';
-import useEventBus from '../services/eventBus';
 
 // Icons
 import IconPhoto from '../assets/icons/IconPhoto.vue';
@@ -205,7 +202,6 @@ const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const tasksStore = useTasksStore();
 const router = useRouter();
-const { on, off } = useEventBus();
 
 const { 
     images, isLoading, isGenerating,
@@ -274,23 +270,12 @@ onMounted(() => {
     if (dataStore.availableTtiModels.length === 0) dataStore.fetchAvailableTtiModels();
     if (Object.keys(discussionsStore.discussions).length === 0) discussionsStore.loadDiscussions();
     window.addEventListener('paste', handlePaste);
-    on('task:completed', handleTaskCompletion);
 });
 
 onUnmounted(() => {
     uiStore.setPageTitle({ title: '' });
     window.removeEventListener('paste', handlePaste);
-    off('task:completed', handleTaskCompletion);
 });
-
-function handleTaskCompletion(task) {
-    if (!task || !task.name) return;
-    const isImageTask = (task.name.startsWith('Generating') && task.name.includes('image(s)')) || task.name.startsWith('Editing image:');
-    if (isImageTask && task.owner_username === authStore.user?.username) {
-        console.log('Image task completed for current user, refreshing image list.');
-        imageStore.fetchImages();
-    }
-}
 
 function isSelected(imageId) { return selectedImages.value.includes(imageId); }
 function toggleSelection(imageId) {
@@ -420,8 +405,6 @@ async function handleUpload(event) {
     if (files.length > 0) {
         uiStore.addNotification(`Uploading ${files.length} image(s)...`, 'info');
         await imageStore.uploadImages(files);
-        await imageStore.fetchImages();
-        uiStore.addNotification(`Upload complete!`, 'success');
     }
 }
 async function handleDeleteSelected() {
@@ -463,8 +446,6 @@ async function handleDrop(event) {
     if (files.length > 0) {
         uiStore.addNotification(`Uploading ${files.length} image(s)...`, 'info');
         await imageStore.uploadImages(files);
-        await imageStore.fetchImages();
-        uiStore.addNotification(`Upload complete!`, 'success');
     }
 }
 
@@ -487,8 +468,6 @@ async function handlePaste(event) {
         event.preventDefault();
         uiStore.addNotification(`Pasting ${imageFiles.length} image(s)...`, 'info');
         await imageStore.uploadImages(imageFiles); 
-        await imageStore.fetchImages();
-        uiStore.addNotification(`Paste complete!`, 'success');
     }
 }
 
