@@ -1,3 +1,4 @@
+# [UPDATE] main.py
 # lollms/main.py
 import shutil
 import datetime
@@ -63,6 +64,7 @@ from backend.routers.lollms_config import lollms_config_router
 from backend.routers.files import upload_router, assets_router, files_router
 from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
+from backend.routers.sso_client import sso_client_router
 from backend.routers.extensions.app_utils import cleanup_and_autostart_apps, synchronize_filesystem_and_db
 from backend.routers.zoos.apps_zoo import apps_zoo_router
 from backend.routers.zoos.mcps_zoo import mcps_zoo_router
@@ -445,6 +447,7 @@ app.include_router(lollms_config_router)
 app.include_router(files_router)
 app.include_router(ui_router)
 app.include_router(sso_router)
+app.include_router(sso_client_router)
 app.include_router(apps_zoo_router)
 app.include_router(mcps_zoo_router)
 app.include_router(prompts_zoo_router)

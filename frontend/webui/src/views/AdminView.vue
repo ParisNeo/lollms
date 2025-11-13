@@ -1,4 +1,4 @@
-<!-- frontend/webui/src/views/AdminView.vue -->
+<!-- [UPDATE] frontend/webui/src/views/AdminView.vue -->
 <script setup>
 import { computed, defineAsyncComponent, markRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -27,6 +27,7 @@ import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
 import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
 import IconFileText from '../assets/icons/IconFileText.vue';
+import IconKey from '../assets/icons/IconKey.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -65,6 +66,7 @@ const sections = [
   { type: 'link', id: 'welcome_settings', name: 'Welcome Page', icon: markRaw(IconHome) },
   { type: 'link', id: 'global_settings', name: 'Application Settings', icon: markRaw(IconCog) },
   { type: 'link', id: 'email', name: 'Email Settings', icon: markRaw(IconMail) },
+  { type: 'link', id: 'sso_client_settings', name: 'SSO Client', icon: markRaw(IconKey) },
   { type: 'link', id: 'import', name: 'Import Tools', icon: markRaw(IconArrowDownTray) },
 ];
 

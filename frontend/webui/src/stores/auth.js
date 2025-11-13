@@ -1,3 +1,4 @@
+// [UPDATE] frontend/webui/src/stores/auth.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -26,6 +27,7 @@ export const useAuthStore = defineStore('auth', () => {
     const allow_user_chunking_config = ref(true);
     const default_chunk_size = ref(1024);
     const default_chunk_overlap = ref(256);
+    const ssoClientConfig = ref({ enabled: false, display_name: 'Login with SSO', icon_url: '' });
 
     // --- WebSocket State ---
     const ws = ref(null);
@@ -266,7 +268,7 @@ export const useAuthStore = defineStore('auth', () => {
                     if (discussionExists) {
                         await discussionsStore.selectDiscussion(lastDiscussionId, null, true);
                     } else if (discussionsStore.sortedDiscussions.length > 0) {
-                        await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions.id, null, true);
+                        await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id, null, true);
                     } else {
                         await discussionsStore.createNewDiscussion();
                     }
@@ -308,7 +310,7 @@ export const useAuthStore = defineStore('auth', () => {
         loadingProgress.value = 0;
         loadingMessage.value = 'Waking up the hamsters...';
 
-        await fetchWelcomeInfo();
+        await Promise.all([fetchWelcomeInfo(), fetchSsoClientConfig()]);
         
         await new Promise(resolve => setTimeout(resolve, 500));
         loadingProgress.value = 10;
@@ -431,11 +433,23 @@ export const useAuthStore = defineStore('auth', () => {
             const adminStatusResponse = await apiClient.get('/api/auth/admin_status');
             const isAdminExists = adminStatusResponse.data.admin_exists;
 
+            let finalRegData = registrationData;
+            // Admin creation from wizard doesn't require email
             if (!isAdminExists) {
-                await apiClient.post('/api/auth/create_first_admin', registrationData);
+                finalRegData = {
+                    ...registrationData,
+                    is_admin: true,
+                    is_moderator: true
+                };
+            }
+
+            const endpoint = isAdminExists ? '/api/auth/register' : '/api/auth/create_first_admin';
+            
+            const response = await apiClient.post(endpoint, finalRegData);
+
+            if (!isAdminExists) {
                 await login(registrationData.username, registrationData.password);
             } else {
-                const response = await apiClient.post('/api/auth/register', registrationData);
                 const registrationMode = response.data.is_active ? 'direct' : 'admin_approval';
                 if (registrationMode === 'direct') {
                     uiStore.addNotification('Registration successful! You can now log in.', 'success');
@@ -449,6 +463,7 @@ export const useAuthStore = defineStore('auth', () => {
             throw error;
         }
     }
+
 
     async function updateUserProfile(profileData) {
         try {
@@ -562,10 +577,20 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
+    async function fetchSsoClientConfig() {
+        try {
+            const response = await apiClient.get('/api/sso-client/config');
+            ssoClientConfig.value = response.data;
+        } catch (e) {
+            ssoClientConfig.value = { enabled: false, display_name: 'Login with SSO', icon_url: '' };
+        }
+    }
+
 
     return {
         user, token, isAuthenticating, isAuthenticated, isAdmin,
         loadingMessage, loadingProgress, funFact, welcomeText, welcomeSlogan, welcome_logo_url, welcome_fun_fact_color, welcome_fun_fact_category, wsConnected,
+        ssoClientConfig,
         latex_builder_enabled,
         export_to_txt_enabled,
         export_to_markdown_enabled,
@@ -584,6 +609,7 @@ export const useAuthStore = defineStore('auth', () => {
         fetchDataZone,
         updateDataZone,
         refreshUser,
-        generateAvatar
+        generateAvatar,
+        fetchSsoClientConfig
     };
 });

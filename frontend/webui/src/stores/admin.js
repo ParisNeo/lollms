@@ -40,6 +40,26 @@ function getStoredFilters(key, defaults) {
     return defaults;
 }
 
+// Helper to cast values from the DB, especially for booleans that might be strings
+const castSettingValue = (value, type) => {
+    if (type === 'boolean') {
+        if (typeof value === 'string') {
+            return value.toLowerCase() === 'true';
+        }
+        return !!value;
+    }
+    if (type === 'integer') {
+        const intVal = parseInt(value, 10);
+        return isNaN(intVal) ? null : intVal;
+    }
+    if (type === 'float') {
+        const floatVal = parseFloat(value);
+        return isNaN(floatVal) ? null : floatVal;
+    }
+    return value;
+};
+
+
 export const useAdminStore = defineStore('admin', () => {
     const uiStore = useUiStore();
     const { on } = useEventBus();
@@ -648,7 +668,11 @@ export const useAdminStore = defineStore('admin', () => {
         isLoadingSettings.value = true;
         try {
             const response = await apiClient.get('/api/admin/settings');
-            globalSettings.value = response.data;
+            const processedSettings = response.data.map(setting => ({
+                ...setting,
+                value: castSettingValue(setting.value, setting.type)
+            }));
+            globalSettings.value = processedSettings;
         } finally {
             isLoadingSettings.value = false;
         }

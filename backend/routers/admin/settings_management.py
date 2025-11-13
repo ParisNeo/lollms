@@ -23,39 +23,42 @@ async def admin_get_global_settings(db: Session = Depends(get_db)):
     db_configs = db.query(DBGlobalConfig).order_by(DBGlobalConfig.category, DBGlobalConfig.key).all()
     response_models = []
     for config in db_configs:
-        value_to_send = None
-        type_to_send = 'unknown'
+        raw_value = None
+        detected_type = 'string'
         description_to_send = config.description
-        
+
+        # 1. Extract raw value and type from DB
         try:
-            if isinstance(config.value, str):
-                stored_data = json.loads(config.value)
-            elif isinstance(config.value, dict):
-                stored_data = config.value
-            else:
-                stored_data = {'type': 'string', 'value': config.value}   
-            # Defensive unpacking loop to handle corrupted, nested value objects
-            while isinstance(stored_data, dict) and 'value' in stored_data and isinstance(stored_data.get('value'), dict):
-                stored_data = stored_data['value']
-
+            stored_data = json.loads(config.value)
             if isinstance(stored_data, dict) and 'value' in stored_data:
-                value_to_send = stored_data.get('value')
-                type_to_send = stored_data.get('type', 'string')
+                raw_value = stored_data.get('value')
+                detected_type = stored_data.get('type', 'string')
             else:
-                value_to_send = stored_data
-                if isinstance(value_to_send, bool): type_to_send = 'boolean'
-                elif isinstance(value_to_send, int): type_to_send = 'integer'
-                elif isinstance(value_to_send, float): type_to_send = 'float'
-                else: type_to_send = 'string'
+                raw_value = stored_data
+        except (json.JSONDecodeError, TypeError):
+            raw_value = config.value
 
-        except (json.JSONDecodeError, TypeError, AttributeError):
-            value_to_send = config.value 
-            type_to_send = 'string'
+        # 2. Correct the type based on the value's appearance
+        if detected_type != 'boolean' and isinstance(raw_value, str) and raw_value.lower() in ('true', 'false'):
+            detected_type = 'boolean'
+        if detected_type != 'boolean' and isinstance(raw_value, bool):
+             detected_type = 'boolean'
+
+        # 3. Cast the value to the final correct Python type for the response model
+        final_value = raw_value
+        if detected_type == 'boolean':
+            final_value = str(raw_value).lower() in ('true', '1', 'yes', 'on')
+        elif detected_type == 'integer':
+            try: final_value = int(raw_value) if raw_value is not None else 0
+            except (ValueError, TypeError): final_value = 0
+        elif detected_type == 'float':
+            try: final_value = float(raw_value) if raw_value is not None else 0.0
+            except (ValueError, TypeError): final_value = 0.0
 
         response_models.append(GlobalConfigPublic(
             key=config.key,
-            value=value_to_send,
-            type=type_to_send,
+            value=final_value,
+            type=detected_type,
             description=description_to_send,
             category=config.category,
         ))
@@ -68,24 +71,41 @@ async def admin_update_global_settings(
 ):
     updated_keys = []
     try:
+        all_db_configs = {c.key: c for c in db.query(DBGlobalConfig).all()}
+
         for key, new_value in update_data.configs.items():
-            db_config = db.query(DBGlobalConfig).filter(DBGlobalConfig.key == key).first()
+            db_config = all_db_configs.get(key)
             if db_config:
                 if key == 'smtp_password' and not new_value:
                     continue
-                
+
+                original_type = 'string'
                 try:
                     stored_data = json.loads(db_config.value)
-                    if not isinstance(stored_data, dict) or 'type' not in stored_data:
-                        stored_data = {'type': 'string', 'value': stored_data}
+                    if isinstance(stored_data, dict) and 'type' in stored_data:
+                        original_type = stored_data.get('type', 'string')
                 except (json.JSONDecodeError, TypeError):
-                    stored_data = {'type': 'string', 'value': db_config.value}
+                    pass
+
+                final_type = original_type
+                coerced_value = new_value
+
+                # Robustly handle booleans - this will fix corrupted data on save
+                if final_type == 'boolean' or isinstance(new_value, bool):
+                    final_type = 'boolean'
+                    coerced_value = str(new_value).lower() in ('true', '1', 'yes', 'on')
+                elif isinstance(new_value, str) and new_value.lower() in ('true', 'false'):
+                    final_type = 'boolean'
+                    coerced_value = new_value.lower() == 'true'
+                elif final_type == 'integer':
+                    try: coerced_value = int(new_value)
+                    except (ValueError, TypeError): coerced_value = 0
+                elif final_type == 'float':
+                    try: coerced_value = float(new_value)
+                    except (ValueError, TypeError): coerced_value = 0.0
                 
-                # FIX: Update ONLY the 'value' field within the stored JSON object.
-                stored_data['value'] = new_value
-                
-                # Save the entire structured object back as a JSON string.
-                db_config.value = json.dumps(stored_data)
+                new_stored_data = {"type": final_type, "value": coerced_value}
+                db_config.value = json.dumps(new_stored_data)
                 updated_keys.append(key)
 
         if updated_keys:

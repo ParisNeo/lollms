@@ -140,6 +140,34 @@ def _bootstrap_global_settings(connection):
             "value": "manual",
             "type": "string", "description": "Password recovery mode: 'manual', 'automatic' (SMTP), or 'system_mail' (uses server's 'mail' command).", "category": "Authentication"
         },
+        "sso_client_enabled": {
+            "value": False,
+            "type": "boolean", "description": "Enable Single Sign-On (SSO) for users to log in via an external provider.", "category": "SSO Client"
+        },
+        "sso_client_provider_url": {
+            "value": "",
+            "type": "string", "description": "The OpenID Connect (OIDC) provider's discovery URL (e.g., https://accounts.google.com/.well-known/openid-configuration).", "category": "SSO Client"
+        },
+        "sso_client_id": {
+            "value": "",
+            "type": "string", "description": "The Client ID provided by your SSO provider.", "category": "SSO Client"
+        },
+        "sso_client_secret": {
+            "value": "",
+            "type": "string", "description": "The Client Secret provided by your SSO provider.", "category": "SSO Client"
+        },
+        "sso_client_display_name": {
+            "value": "Login with SSO",
+            "type": "string", "description": "The text displayed on the SSO login button.", "category": "SSO Client"
+        },
+        "sso_client_icon_url": {
+            "value": "",
+            "type": "string", "description": "URL for an icon to display on the SSO login button.", "category": "SSO Client"
+        },
+        "sso_client_auto_create_users": {
+            "value": True,
+            "type": "boolean", "description": "Automatically create a lollms account for new users who sign in via SSO.", "category": "SSO Client"
+        },
         "smtp_host": {
             "value": "",
             "type": "string", "description": "SMTP server address for sending password recovery emails.", "category": "Email Settings"

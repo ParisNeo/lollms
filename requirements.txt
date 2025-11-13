@@ -10,6 +10,7 @@ toml  # For reading config.toml
 sqlalchemy
 passlib[bcrypt]==1.7.4  # For password hashing (bcrypt is a common and secure scheme)
 python-jose[cryptography] 
+Authlib>=1.0.0
 python-multipart
 bcrypt==4.3.0
 

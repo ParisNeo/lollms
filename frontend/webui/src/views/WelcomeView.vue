@@ -1,5 +1,6 @@
+<!-- [UPDATE] frontend/webui/src/views/WelcomeView.vue -->
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
 import logoDefault from '../assets/logo.png';
@@ -13,6 +14,17 @@ const funFact = computed(() => authStore.funFact);
 const logoSrc = computed(() => authStore.welcome_logo_url);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
 const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
+const ssoClientConfig = computed(() => authStore.ssoClientConfig);
+
+onMounted(() => {
+    if (!authStore.ssoClientConfig.enabled) {
+        authStore.fetchSsoClientConfig();
+    }
+});
+
+function ssoLogin() {
+    window.location.href = '/api/sso-client/login';
+}
 
 const funFactStyle = computed(() => ({
     '--fun-fact-color': funFactColor.value,
@@ -68,6 +80,10 @@ function openRegister() {
         </button>
         <button @click="openRegister" class="btn btn-secondary btn-lg w-full sm:w-auto">
           Register
+        </button>
+        <button v-if="ssoClientConfig.enabled" @click="ssoLogin" class="btn btn-secondary btn-lg w-full sm:w-auto flex items-center justify-center gap-2">
+            <img v-if="ssoClientConfig.icon_url" :src="ssoClientConfig.icon_url" alt="" class="w-6 h-6">
+            {{ ssoClientConfig.display_name }}
         </button>
       </div>
     </div>
