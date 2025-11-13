@@ -186,3 +186,6 @@ immediate sources showing
 add the possibility to add manual metadata as text
 add the possibility to add a processor to dafe_store
 verify that msg files are supported
+
+Add SSO integration
+Use SCIM for group management
