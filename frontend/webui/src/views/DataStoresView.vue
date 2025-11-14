@@ -563,7 +563,7 @@ function scrollToMatch(match) {
                         <option :value="null" disabled>-- Select a Vectorizer or Alias --</option>
                         <template v-for="group in vectorizerOptions">
                             <optgroup :label="group.label">
-                                <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.name }} - <span class="text-gray-400">{{ item.description }}</span></option>
+                                <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.name }} - {{ item.description }}</option>
                             </optgroup>
                         </template>
                     </select>
