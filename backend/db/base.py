@@ -16,10 +16,18 @@ follows_table = Table('follows', Base.metadata,
     Column('created_at', DateTime(timezone=True), server_default=func.now())
 )
 
+# New association table for User-Group many-to-many relationship
+user_group_link = Table('user_group_link', Base.metadata,
+    Column('user_id', Integer, ForeignKey('users.id', ondelete="CASCADE"), primary_key=True),
+    Column('group_id', Integer, ForeignKey('user_groups.id', ondelete="CASCADE"), primary_key=True)
+)
+
+
 class PostVisibility(str, enum.Enum):
     public = "public"
     followers = "followers"
     friends = "friends"
+    group = "group" # New visibility for group posts
 
 class FriendshipStatus(enum.Enum):
     PENDING = "pending"

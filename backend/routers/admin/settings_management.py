@@ -23,43 +23,44 @@ async def admin_get_global_settings(db: Session = Depends(get_db)):
     db_configs = db.query(DBGlobalConfig).order_by(DBGlobalConfig.category, DBGlobalConfig.key).all()
     response_models = []
     for config in db_configs:
-        raw_value = None
-        detected_type = 'string'
-        description_to_send = config.description
-
-        # 1. Extract raw value and type from DB
+        value = config.value
+        val_type = 'string'
+        
         try:
-            stored_data = json.loads(config.value)
-            if isinstance(stored_data, dict) and 'value' in stored_data:
-                raw_value = stored_data.get('value')
-                detected_type = stored_data.get('type', 'string')
+            # Try to parse the stored value as our expected JSON object
+            data = json.loads(value)
+            if isinstance(data, dict) and 'value' in data:
+                value = data.get('value')
+                val_type = data.get('type', 'string')
             else:
-                raw_value = stored_data
+                # It's JSON, but not our format. To prevent sending an object,
+                # we can either stringify it or, if it's not a dict/list, use it directly.
+                if isinstance(data, (dict, list)):
+                    print(f"WARNING: Setting '{config.key}' has an unexpected format. Treating as a raw JSON string.")
+                    value = json.dumps(data)
+                else:
+                    value = data
         except (json.JSONDecodeError, TypeError):
-            raw_value = config.value
-
-        # 2. Correct the type based on the value's appearance
-        if detected_type != 'boolean' and isinstance(raw_value, str) and raw_value.lower() in ('true', 'false'):
-            detected_type = 'boolean'
-        if detected_type != 'boolean' and isinstance(raw_value, bool):
-             detected_type = 'boolean'
-
-        # 3. Cast the value to the final correct Python type for the response model
-        final_value = raw_value
-        if detected_type == 'boolean':
-            final_value = str(raw_value).lower() in ('true', '1', 'yes', 'on')
-        elif detected_type == 'integer':
-            try: final_value = int(raw_value) if raw_value is not None else 0
+            # Not JSON, treat the raw value as a string. `value` is already config.value.
+            pass
+        
+        # Final casting for response model to ensure correct types are sent
+        if val_type == 'boolean':
+            final_value = str(value).lower() in ('true', '1', 'yes', 'on')
+        elif val_type == 'integer':
+            try: final_value = int(value) if value is not None else 0
             except (ValueError, TypeError): final_value = 0
-        elif detected_type == 'float':
-            try: final_value = float(raw_value) if raw_value is not None else 0.0
+        elif val_type == 'float':
+            try: final_value = float(value) if value is not None else 0.0
             except (ValueError, TypeError): final_value = 0.0
+        else: # string, text, json string, etc.
+            final_value = value
 
         response_models.append(GlobalConfigPublic(
             key=config.key,
             value=final_value,
-            type=detected_type,
-            description=description_to_send,
+            type=val_type,
+            description=config.description,
             category=config.category,
         ))
     return response_models
@@ -154,9 +155,18 @@ async def remove_custom_logo(db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Logo setting not found.")
     
     try:
-        stored_data = json.loads(db_config.value)
+        try:
+            stored_data = json.loads(db_config.value)
+            if not isinstance(stored_data, dict):
+                # If the stored value is corrupted (not a dict), create a fresh structure.
+                stored_data = {'type': 'string', 'value': ''}
+        except (json.JSONDecodeError, TypeError):
+            # If it's not valid JSON at all, create a fresh structure.
+            stored_data = {'type': 'string', 'value': ''}
+
         stored_data['value'] = ""
         db_config.value = json.dumps(stored_data)
+        
         db.commit()
         settings.refresh(db)
         manager.broadcast_sync({"type": "settings_updated"})

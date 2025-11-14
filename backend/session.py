@@ -11,7 +11,7 @@ from werkzeug.utils import secure_filename
 from jose import jwt, JWTError
 from ascii_colors import trace_exception, ASCIIColors
 
-from backend.db import get_db
+from backend.db import get_db, session as db_session_module
 from backend.db.models.service import MCP as DBMCP, App as DBApp
 from backend.db.models.user import User as DBUser
 from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
@@ -19,7 +19,8 @@ from backend.db.models.service import MCP as DBMCP
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
 from lollms_client import LollmsClient
-from backend.models import UserAuthDetails, TokenData
+from backend.models.user import UserAuthDetails
+from backend.models.auth import TokenData
 from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM, decode_main_access_token
 from backend.config import (
     APP_DATA_DIR,
@@ -276,7 +277,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             tti_model_forced=tti_model_forced,
             iti_model_forced=iti_model_forced,
             latex_builder_enabled=latex_builder_enabled,
-            # NEW FIELDS
             coding_style_constraints=db_user.coding_style_constraints,
             programming_language_preferences=db_user.programming_language_preferences,
             tell_llm_os=db_user.tell_llm_os,

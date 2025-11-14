@@ -66,6 +66,7 @@ import DiscussionTreeModal from './components/modals/DiscussionTreeModal.vue';
 import EditPromptModal from './components/modals/EditPromptModal.vue';
 import FunFactCategoryModal from './components/modals/FunFactCategoryModal.vue';
 import FunFactModal from './components/modals/FunFactModal.vue';
+import GenerateFunFactsModal from './components/modals/GenerateFunFactsModal.vue';
 import SharePersonalityModal from './components/modals/SharePersonalityModal.vue';
 import DiscussionGroupModal from './components/modals/DiscussionGroupModal.vue';
 import MoveDiscussionModal from './components/modals/MoveDiscussionModal.vue';
@@ -260,6 +261,7 @@ watch(message_font_size, (newSize) => {
     <EditPromptModal v-if="activeModal === 'editPrompt'" />
     <FunFactCategoryModal v-if="activeModal === 'funFactCategory'" />
     <FunFactModal v-if="activeModal === 'funFact'" />
+    <GenerateFunFactsModal v-if="activeModal === 'generateFunFacts'" />
     <SharePersonalityModal v-if="activeModal === 'sharePersonality'" />
     <DiscussionGroupModal v-if="activeModal === 'discussionGroup'" />
     <MoveDiscussionModal v-if="activeModal === 'moveDiscussion'" />

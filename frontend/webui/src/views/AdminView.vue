@@ -67,6 +67,7 @@ const sections = [
   { type: 'link', id: 'global_settings', name: 'Application Settings', icon: markRaw(IconCog) },
   { type: 'link', id: 'email', name: 'Email Settings', icon: markRaw(IconMail) },
   { type: 'link', id: 'sso_client_settings', name: 'SSO Client', icon: markRaw(IconKey) },
+  { type: 'link', id: 'scim_settings', name: 'SCIM Provisioning', icon: markRaw(IconUserGroup) },
   { type: 'link', id: 'import', name: 'Import Tools', icon: markRaw(IconArrowDownTray) },
 ];
 

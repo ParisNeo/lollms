@@ -1,12 +1,13 @@
-# backend/routers/admin/content_management.py
+# [UPDATE] backend/routers/admin/content_management.py
 import json
 import shutil
 import uuid
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, joinedload
+from pydantic import BaseModel
 
 from backend.db import get_db
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
@@ -17,22 +18,16 @@ from backend.models import (
     FunFactCreate, FunFactPublic, FunFactUpdate,
     FunFactsImportRequest, FunFactExport, FunFactCategoryExport, FunFactCategoryImport
 )
-from backend.session import get_current_admin_user, get_user_temp_uploads_path
+from backend.session import get_current_admin_user, get_user_temp_uploads_path, get_user_lollms_client
 from backend.migration_utils import run_openwebui_migration
 from backend.zoo_cache import force_build_full_cache
 from backend.task_manager import task_manager, Task
 
 content_management_router = APIRouter()
 
-def _to_task_info(db_task) -> TaskInfo:
-    return TaskInfo(
-        id=db_task.id, name=db_task.name, description=db_task.description,
-        status=db_task.status, progress=db_task.progress,
-        logs=[log for log in (db_task.logs or [])], result=db_task.result, error=db_task.error,
-        created_at=db_task.created_at, started_at=db_task.started_at, updated_at=db_task.updated_at, completed_at=db_task.completed_at,
-        file_name=db_task.file_name, total_files=db_task.total_files,
-        owner_username=db_task.owner.username if db_task.owner else "System"
-    )
+class GenerateFunFactsRequest(BaseModel):
+    prompt: str
+    category: Optional[str] = None
 
 def _refresh_zoo_cache_task(task: Task):
     task.log("Starting Zoo cache refresh.")
@@ -42,15 +37,65 @@ def _refresh_zoo_cache_task(task: Task):
     task.log("Zoo cache refresh completed.")
     return {"message": "Zoo cache refreshed successfully."}
 
+def _generate_fun_facts_task(task: Task, prompt: str, category: Optional[str], username: str):
+    task.log("Starting fun facts generation task...")
+    
+    lc = get_user_lollms_client(username)
+    task.set_progress(10)
+
+    generation_prompt = f"""
+Generate a list of interesting and verifiable fun facts about the following topic.
+The output must be a single, valid JSON object containing a single key "fun_facts", which is a list of strings.
+Each string in the list should be a single fun fact.
+Generate at least 5 facts.
+
+Topic:
+---
+{prompt}
+---
+
+Return ONLY the JSON object.
+"""
+    if category:
+            generation_prompt += f'\nThe fun facts should relate to the category: "{category}"'
+    data = lc.generate_structured_content(generation_prompt,schema={'fun_facts':"a list of texts each one is a fun fact","category":"the category of the fun facts"}, max_tokens=1000, temperature=0.7, top_p=0.9, stop_sequences=None)
+    task.set_progress(80)
+
+    try:
+        facts_list = data.get("fun_facts", [])
+        category = data.get("category", category)
+
+        if not facts_list:
+            raise ValueError("AI did not return any facts.")
+
+        with task.db_session_factory() as db:
+            category_name = category or "unknonwn"
+            db_category = db.query(DBFunFactCategory).filter(DBFunFactCategory.name == category_name).first()
+            if not db_category:
+                db_category = DBFunFactCategory(name=category_name, is_active=True)
+                db.add(db_category)
+                db.flush()
+            
+            facts_to_add = [DBFunFact(content=fact_content, category_id=db_category.id) for fact_content in facts_list if fact_content.strip()]
+            db.add_all(facts_to_add)
+            db.commit()
+
+            task.set_progress(100)
+            task.log(f"Generated and saved {len(facts_to_add)} fun facts to category '{category_name}'.")
+            return {"facts_added": len(facts_to_add), "category": category_name}
+
+    except Exception as e:
+        task.log(f"Failed to parse AI response or save fun facts. Error: {e}\nRaw Response: {response}", "ERROR")
+        raise
+
 @content_management_router.post("/refresh-zoo-cache", response_model=TaskInfo, status_code=202)
 async def refresh_zoo_cache_endpoint(current_user: UserAuthDetails = Depends(get_current_admin_user)):
-    db_task = task_manager.submit_task(
+    return task_manager.submit_task(
         name="Refreshing Zoo Cache",
         target=_refresh_zoo_cache_task,
         description="Scanning all Zoo repositories and rebuilding the cache.",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
 
 @content_management_router.post("/import-openwebui", response_model=Dict[str, str])
 async def import_openwebui_data(
@@ -159,6 +204,18 @@ async def delete_fun_fact(fact_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Fun fact not found.")
     db.delete(fact)
     db.commit()
+
+@content_management_router.post("/fun-facts/generate-from-prompt", response_model=TaskInfo, status_code=202)
+async def generate_fun_facts_from_prompt(
+    request: GenerateFunFactsRequest,
+    current_admin_user: UserAuthDetails = Depends(get_current_admin_user)
+):
+    return task_manager.submit_task(
+        name=f"Generate Fun Facts for '{request.prompt[:30]}...'",
+        target=_generate_fun_facts_task,
+        args=(request.prompt, request.category, current_admin_user.username),
+        owner_username=current_admin_user.username
+    )
 
 @content_management_router.post("/fun-facts/import", response_model=Dict[str, int])
 async def import_fun_facts(import_data: FunFactsImportRequest, db: Session = Depends(get_db)):

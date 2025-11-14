@@ -10,7 +10,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy import Enum as SQLAlchemyEnum
 
 from backend.security import pwd_context
-from backend.db.base import Base, FriendshipStatus, follows_table
+from backend.db.base import Base, FriendshipStatus, follows_table, user_group_link
 from backend.db.models.discussion import SharedDiscussionLink
 from backend.db.models.memory import UserMemory
 from backend.db.models.discussion_group import DiscussionGroup
@@ -23,6 +23,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
+    external_id = Column(String, unique=True, index=True, nullable=True) # For SCIM
     is_admin = Column(Boolean, default=False)
     is_moderator = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
@@ -127,6 +128,8 @@ class User(Base):
     received_shared_discussions = relationship("SharedDiscussionLink", foreign_keys=[SharedDiscussionLink.shared_with_user_id], back_populates="shared_with_user", cascade="all, delete-orphan")
 
     connections = relationship("WebSocketConnection", back_populates="user", cascade="all, delete-orphan")
+
+    groups = relationship("Group", secondary=user_group_link, back_populates="members")
 
     __table__args__ = (CheckConstraint(rag_graph_response_type.in_(['graph_only', 'chunks_summary', 'full']), name='ck_rag_graph_response_type_valid'), UniqueConstraint('email', name='uq_user_email'),)
     

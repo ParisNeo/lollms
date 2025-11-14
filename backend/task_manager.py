@@ -14,6 +14,7 @@ from backend.ws_manager import manager
 from backend.models.task import TaskInfo
 from backend.db.models.user import User as DBUser
 from backend.db.models.discussion import SharedDiscussionLink
+from backend.tasks.utils import _to_task_info
 
 def _serialize_task(db_task: DBTask) -> Optional[dict]:
     """
@@ -208,7 +209,7 @@ class TaskManager:
                 if task.id in self.active_tasks:
                     del self.active_tasks[task.id]
 
-    def submit_task(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None, owner_username: Optional[str] = None) -> DBTask:
+    def submit_task(self, name: str, target: Callable, args: tuple = (), kwargs: dict = None, description: Optional[str] = None, owner_username: Optional[str] = None) -> TaskInfo:
         """
         Creates a task record in the DB, and starts its execution in a new thread.
         """
@@ -231,11 +232,11 @@ class TaskManager:
             db.commit()
             db.refresh(new_db_task, ['owner'])
             
+            task_info_to_return = _to_task_info(new_db_task)
+
             # Initial broadcast that the task has been created
             task_instance_for_broadcast = Task(id=new_db_task.id, name=name, description=description, target=target, args=args, kwargs=kwargs, owner_username=owner_username, db_session_factory=self.db_session_factory)
             task_instance_for_broadcast._broadcast_update(new_db_task)
-
-            db.expunge(new_db_task)
 
 
         task_instance = Task(id=new_db_task.id, name=name, description=description, target=target, args=args, kwargs=kwargs, owner_username=owner_username, db_session_factory=self.db_session_factory)
@@ -246,7 +247,7 @@ class TaskManager:
         thread = threading.Thread(target=self._run_and_cleanup, args=(task_instance,), daemon=True)
         thread.start()
         
-        return new_db_task
+        return task_info_to_return
 
     def cancel_task(self, task_id: str) -> bool:
         """

@@ -23,6 +23,7 @@ const AiBotSettings = defineAsyncComponent(() => import('./AiBotSettings.vue'));
 const ServicesSettings = defineAsyncComponent(() => import('../settings/ServicesSettings.vue'));
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
 const SSOClientSettings = defineAsyncComponent(() => import('./SSOClientSettings.vue'));
+const SCIMSettings = defineAsyncComponent(() => import('./SCIMSettings.vue'));
 const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
 const AppsManagement = defineAsyncComponent(() => import('./zoos/AppsManagement.vue'));
 const McpsManagement = defineAsyncComponent(() => import('./zoos/McpsManagement.vue'));
@@ -58,6 +59,7 @@ const tabs = [
     { id: 'global_settings', component: GlobalSettings },
     { id: 'email', component: EmailSettings },
     { id: 'sso_client_settings', component: SSOClientSettings },
+    { id: 'scim_settings', component: SCIMSettings },
     { id: 'import', component: ImportTools },
     { id: 'welcome_settings', component: WelcomeSettings },
     { id: 'rss_feeds', component: RssManagement },

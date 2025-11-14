@@ -1,3 +1,4 @@
+# [UPDATE] backend/db/models/social.py
 from sqlalchemy import (
     Column, Integer,
     ForeignKey, UniqueConstraint,
@@ -8,6 +9,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy import Enum as SQLAlchemyEnum
 
 from backend.db.base import Base, PostVisibility
+from backend.db.models.group import Group
 
 class PostLike(Base):
     __tablename__ = 'post_likes'
@@ -21,12 +23,14 @@ class Post(Base):
     __tablename__ = 'posts'
     id = Column(Integer, primary_key=True, index=True)
     author_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"), nullable=False, index=True)
+    group_id = Column(Integer, ForeignKey('user_groups.id', ondelete="CASCADE"), nullable=True, index=True)
     content = Column(Text, nullable=False)
     media = Column(JSON, nullable=True) 
     visibility = Column(SQLAlchemyEnum(PostVisibility), nullable=False, default=PostVisibility.public, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     author = relationship("User", back_populates="posts")
+    group = relationship("Group")
     comments = relationship("Comment", back_populates="post", cascade="all, delete-orphan")
     likes = relationship("PostLike", cascade="all, delete-orphan")
 

@@ -16,6 +16,7 @@ from backend.db.models.service import App # Ensure App is imported
 from backend.db.models.prompt import SavedPrompt
 from backend.db.models.fun_fact import FunFactCategory, FunFact
 from backend.db.models.user import User
+from backend.db.models.group import Group
 from backend.db.models.memory import UserMemory
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.image import UserImage
@@ -167,6 +168,14 @@ def _bootstrap_global_settings(connection):
         "sso_client_auto_create_users": {
             "value": True,
             "type": "boolean", "description": "Automatically create a lollms account for new users who sign in via SSO.", "category": "SSO Client"
+        },
+        "scim_enabled": {
+            "value": False,
+            "type": "boolean", "description": "Enable SCIM 2.0 provisioning for users and groups.", "category": "SCIM Provisioning"
+        },
+        "scim_token": {
+            "value": "",
+            "type": "string", "description": "The bearer token for authenticating SCIM requests. A new one will be generated if left empty.", "category": "SCIM Provisioning"
         },
         "smtp_host": {
             "value": "",
@@ -386,6 +395,18 @@ def _bootstrap_global_settings(connection):
             "type": "integer",
             "description": "How often (in minutes) to check for new articles in the RSS feeds.",
             "category": "News Feed"
+        },
+        "rss_generate_fun_facts": {
+            "value": False,
+            "type": "boolean",
+            "description": "When enabled, an AI will generate a 'fun fact' from the content of each new RSS article.",
+            "category": "News Feed"
+        },
+        "rss_news_retention_days": {
+            "value": 1,
+            "type": "integer",
+            "description": "How many days to keep news articles. Older articles will be deleted daily. Set to 0 to disable cleanup.",
+            "category": "News Feed"
         }
     }
 
@@ -519,7 +540,7 @@ def _bootstrap_lollms_user(connection):
                 "show_token_counter": True,
                 "rag_use_graph": False,
                 "tell_llm_os": False,
-                "share_dynamic_info_with_llm": False,
+                "share_dynamic_info_with_llm": True,
                 "include_memory_date_in_context": False,
                 "message_font_size": 14
             }
@@ -846,6 +867,16 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
     if inspector.has_table("users"):
         user_columns_db = [col['name'] for col in inspector.get_columns('users')]
+
+        if 'external_id' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN external_id VARCHAR"))
+                connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_external_id ON users (external_id)"))
+                print("INFO: Added 'external_id' column and index to 'users' table for SCIM.")
+                connection.commit()
+            except Exception as e:
+                print(f"ERROR: Could not add 'external_id' column to 'users' table: {e}")
+                connection.rollback()
         
         if 'scratchpad' in user_columns_db and 'data_zone' not in user_columns_db:
             try:
@@ -972,6 +1003,16 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         
     # NEW: Migration for posts.visibility case issue
     if inspector.has_table("posts"):
+        posts_columns_db = [col['name'] for col in inspector.get_columns('posts')]
+        if 'group_id' not in posts_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE posts ADD COLUMN group_id INTEGER REFERENCES user_groups(id) ON DELETE CASCADE"))
+                print("INFO: Added 'group_id' column to 'posts' table.")
+                connection.commit()
+            except Exception as e:
+                print(f"ERROR: Could not add 'group_id' column to 'posts' table: {e}")
+                connection.rollback()
+
         try:
             # This query will only update rows where visibility is not already lowercase.
             # It's safe to run multiple times.
@@ -1040,6 +1081,33 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         except Exception as e:
             print(f"WARNING: Could not run cleanup for empty memories. Error: {e}")
             connection.rollback()
+            
+    # NEW: Create SCIM group tables if they don't exist
+    if not inspector.has_table("user_groups"):
+        if inspector.has_table("scim_groups"):
+            connection.execute(text("ALTER TABLE scim_groups RENAME TO user_groups"))
+            print("INFO: Renamed 'scim_groups' table to 'user_groups'.")
+        else:
+            Group.__table__.create(connection)
+            print("INFO: Created 'user_groups' table.")
+        
+        group_columns = [col['name'] for col in inspector.get_columns('user_groups')]
+        new_group_cols = {
+            "description": "TEXT",
+            "icon": "TEXT",
+            "owner_id": "INTEGER REFERENCES users(id) ON DELETE SET NULL"
+        }
+        for col_name, col_type in new_group_cols.items():
+            if col_name not in group_columns:
+                connection.execute(text(f"ALTER TABLE user_groups ADD COLUMN {col_name} {col_type}"))
+                print(f"INFO: Added '{col_name}' to 'user_groups' table.")
+        connection.commit()
+
+    if not inspector.has_table("user_group_link"):
+        from backend.db.base import user_group_link as user_group_link_table
+        user_group_link_table.create(connection)
+        print("INFO: Created 'user_group_link' association table for SCIM/Groups.")
+        connection.commit()
 
     _bootstrap_lollms_user(connection)
 
@@ -1407,7 +1475,7 @@ def _migrate_user_data_folders(connection):
     
     try:
         # Get all usernames from the database
-        usernames = {row for row in connection.execute(text("SELECT username FROM users")).fetchall()}
+        usernames = {row[0] for row in connection.execute(text("SELECT username FROM users")).fetchall()}
         
         migrated_count = 0
         non_user_folders = {USERS_DIR_NAME, "cache", "zoo", "apps", "mcps", "custom_apps", "apps_zoo", "mcps_zoo", "prompts_zoo", "personalities_zoo", "huggingface_cache"}

@@ -51,6 +51,7 @@ from backend.routers.admin import admin_router
 from backend.routers.languages import languages_router
 from backend.routers.personalities import personalities_router
 from backend.routers.friends import friends_router
+from backend.routers.groups import groups_router
 from backend.routers.social.dm import dm_router
 from backend.routers.stores import store_files_router, datastore_router
 from backend.routers.extensions import apps_router, mcp_router, discussion_tools_router
@@ -65,6 +66,7 @@ from backend.routers.files import upload_router, assets_router, files_router
 from backend.routers.ui import add_ui_routes, ui_router
 from backend.routers.sso import sso_router
 from backend.routers.sso_client import sso_client_router
+from backend.routers.scim import scim_router
 from backend.routers.extensions.app_utils import cleanup_and_autostart_apps, synchronize_filesystem_and_db
 from backend.routers.zoos.apps_zoo import apps_zoo_router
 from backend.routers.zoos.mcps_zoo import mcps_zoo_router
@@ -88,7 +90,7 @@ from backend.settings import settings
 
 # --- RSS Feed Imports ---
 from apscheduler.schedulers.background import BackgroundScheduler
-from backend.tasks.news_tasks import _scrape_rss_feeds_task
+from backend.tasks.news_tasks import _scrape_rss_feeds_task, _cleanup_old_news_articles_task
 # --- End RSS Feed Imports ---
 
 broadcast_listener_task = None
@@ -109,6 +111,17 @@ def scheduled_rss_job():
         name="Scheduled RSS Feed Scraping",
         target=_scrape_rss_feeds_task,
         description="Periodically fetching and processing all active RSS feeds.",
+        owner_username=None # System task
+    )
+
+def scheduled_news_cleanup_job():
+    """
+    Wrapper function to submit the news cleanup task to the task manager.
+    """
+    task_manager.submit_task(
+        name="Daily News Article Cleanup",
+        target=_cleanup_old_news_articles_task,
+        description="Deleting old news articles based on retention policy.",
         owner_username=None # System task
     )
 
@@ -401,6 +414,15 @@ async def startup_event():
             # Give the app a few seconds to start before the first run
             next_run = datetime.datetime.now() + datetime.timedelta(seconds=20)
             rss_scheduler.add_job(scheduled_rss_job, 'interval', minutes=interval, next_run_time=next_run)
+            
+            # --- NEW: Schedule daily cleanup ---
+            retention_days = settings.get("rss_news_retention_days", 1)
+            if retention_days > 0:
+                # Schedule to run once daily, e.g., at 3 AM server time
+                rss_scheduler.add_job(scheduled_news_cleanup_job, 'cron', hour=3, minute=0)
+                print(f"INFO: Daily news cleanup scheduled. Articles older than {retention_days} day(s) will be removed.")
+            # --- END NEW ---
+
             rss_scheduler.start()
             print(f"INFO: RSS feed checking scheduled to run every {interval} minutes.")
 
@@ -431,6 +453,7 @@ app.include_router(admin_router)
 app.include_router(languages_router)
 app.include_router(personalities_router)
 app.include_router(friends_router)
+app.include_router(groups_router)
 app.include_router(dm_router)
 app.include_router(store_files_router)
 app.include_router(datastore_router)
@@ -448,6 +471,7 @@ app.include_router(files_router)
 app.include_router(ui_router)
 app.include_router(sso_router)
 app.include_router(sso_client_router)
+app.include_router(scim_router)
 app.include_router(apps_zoo_router)
 app.include_router(mcps_zoo_router)
 app.include_router(prompts_zoo_router)

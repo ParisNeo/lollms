@@ -199,6 +199,7 @@ export const useAdminStore = defineStore('admin', () => {
         const isAppOrMcpTask = (taskName.includes('app') || taskName.includes('mcp')) && (taskName.includes('installing') || taskName.includes('start') || taskName.includes('stop') || taskName.includes('updating') || taskName.includes('fixing') || taskName.includes('purging'));
         const isPromptTask = taskName.includes('prompt');
         const isPersonalityTask = taskName.includes('personality');
+        const isFunFactTask = taskName.includes('fun facts');
 
         const promises = [];
 
@@ -222,6 +223,11 @@ export const useAdminStore = defineStore('admin', () => {
             console.log(`[Admin Store] Refreshing Personalities due to task: ${task.name}`);
             const { useDataStore } = await import('./data.js');
             promises.push(useDataStore().fetchPersonalities(), fetchZooPersonalities());
+        }
+
+        if (isFunFactTask && task.status === 'completed') {
+            console.log(`[Admin Store] Refreshing Fun Facts due to task: ${task.name}`);
+            promises.push(fetchFunFacts(), fetchFunFactCategories());
         }
 
         if (taskName.includes('rss feed scraping')) {
@@ -859,6 +865,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function exportCategory(categoryId, categoryName) { const response = await apiClient.get(`/api/admin/fun-facts/categories/${categoryId}/export`, { responseType: 'blob' }); const url = URL.createObjectURL(new Blob([response.data])); const a = document.createElement('a'); a.href = url; a.download = `fun_facts_${categoryName}.json`; a.click(); URL.revokeObjectURL(url); }
     async function importFunFacts(data) { const payload = { fun_facts: data }; const response = await apiClient.post('/api/admin/fun-facts/import', payload); await Promise.all([fetchFunFacts(), fetchFunFactCategories()]); uiStore.addNotification(`Imported ${response.data.facts_created} facts and ${response.data.categories_created} new categories.`, 'success'); }
     async function importCategoryFromFile(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/fun-facts/categories/import', formData); await Promise.all([fetchFunFacts(), fetchFunFactCategories()]); uiStore.addNotification(`Imported ${response.data.facts_created} facts for category.`, 'success'); }
+    async function generateFunFacts(prompt, category) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post('/api/admin/fun-facts/generate-from-prompt', { prompt, category }); tasksStore.addTask(res.data); return res.data; }
     
     // --- News Article Actions ---
     async function fetchNewsArticles() {
@@ -976,7 +983,7 @@ export const useAdminStore = defineStore('admin', () => {
         funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories,
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact,
         createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, importFunFacts,
-        exportCategory, importCategoryFromFile,
+        exportCategory, importCategoryFromFile, generateFunFacts,
         newsArticles, isLoadingNewsArticles, fetchNewsArticles, updateNewsArticle, deleteBatchNewsArticles,
         connectedUsers, isLoadingConnectedUsers, fetchConnectedUsers,
         serverInfo, isLoadingServerInfo, fetchServerInfo,

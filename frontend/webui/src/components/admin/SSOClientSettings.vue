@@ -1,4 +1,4 @@
-<!-- [CREATE] frontend/webui/src/components/admin/SSOClientSettings.vue -->
+<!-- [UPDATE] frontend/webui/src/components/admin/SSOClientSettings.vue -->
 <script setup>
 import { ref, onMounted, watch, computed } from 'vue';
 import { useAdminStore } from '../../stores/admin';
@@ -14,7 +14,11 @@ let pristineState = '{}';
 const ssoClientSettings = computed(() => {
   return adminStore.globalSettings
     .filter(s => s.category === 'SSO Client')
-    .sort((a, b) => a.key.localeCompare(b.key));
+    .sort((a, b) => {
+        if (a.key === 'sso_client_enabled') return -1;
+        if (b.key === 'sso_client_enabled') return 1;
+        return a.key.localeCompare(b.key);
+    });
 });
 
 function populateForm() {
@@ -87,20 +91,31 @@ async function saveSettings() {
       </div>
       <div v-else class="space-y-6">
         <div v-for="setting in ssoClientSettings" :key="setting.key">
-            <template v-if="setting.type === 'boolean'">
+            <template v-if="setting.key === 'sso_client_enabled'">
                 <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                     <span class="flex-grow flex flex-col pr-4">
-                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ setting.description || setting.key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) }}</span>
+                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ setting.description }}</span>
                     </span>
                     <button @click="settings[setting.key] = !settings[setting.key]" type="button" 
-                            :class="[parseAsBoolean(settings[setting.key]) ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                            :class="[parseAsBoolean(settings[setting.key]) ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                         <span :class="[parseAsBoolean(settings[setting.key]) ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                     </button>
                 </div>
             </template>
-            <template v-else>
-                <div>
-                    <label :for="setting.key" class="block text-sm font-medium">{{ setting.description || setting.key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) }}</label>
+            <template v-else-if="settings.sso_client_enabled">
+                <div v-if="setting.type === 'boolean'" class="mt-4">
+                    <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <span class="flex-grow flex flex-col pr-4">
+                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">{{ setting.description }}</span>
+                        </span>
+                        <button @click="settings[setting.key] = !settings[setting.key]" type="button" 
+                                :class="[parseAsBoolean(settings[setting.key]) ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                            <span :class="[parseAsBoolean(settings[setting.key]) ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                        </button>
+                    </div>
+                </div>
+                <div v-else class="mt-4">
+                    <label :for="setting.key" class="block text-sm font-medium">{{ setting.description }}</label>
                     <input :type="setting.key.includes('secret') ? 'password' : 'text'" 
                            :id="setting.key" 
                            v-model="settings[setting.key]" 
