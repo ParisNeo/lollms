@@ -16,6 +16,7 @@ export const useAuthStore = defineStore('auth', () => {
     const welcome_logo_url = ref(null);
     const welcome_fun_fact_color = ref('#3B82F6');
     const welcome_fun_fact_category = ref(null);
+    const isFetchingFunFact = ref(false);
     const latex_builder_enabled = ref(false);
     const export_to_txt_enabled = ref(true);
     const export_to_markdown_enabled = ref(true);
@@ -66,6 +67,24 @@ export const useAuthStore = defineStore('auth', () => {
             welcome_fun_fact_color.value = '#3B82F6';
             welcome_fun_fact_category.value = 'General';
             latex_builder_enabled.value = false;
+        }
+    }
+
+    async function fetchNewFunFact() {
+        if (isFetchingFunFact.value) return;
+        isFetchingFunFact.value = true;
+        try {
+            const welcomeInfoResponse = await apiClient.get('/api/welcome-info');
+            funFact.value = welcomeInfoResponse.data.fun_fact;
+            welcome_fun_fact_color.value = welcomeInfoResponse.data.fun_fact_color;
+            welcome_fun_fact_category.value = welcomeInfoResponse.data.fun_fact_category;
+        } catch (e) {
+            console.warn("Could not fetch a new fun fact.");
+            funFact.value = "Did you know? The first programmer was Ada Lovelace, who wrote an algorithm for an early mechanical computer in the mid-1800s.";
+            welcome_fun_fact_color.value = '#F59E0B';
+            welcome_fun_fact_category.value = 'History';
+        } finally {
+            isFetchingFunFact.value = false;
         }
     }
     
@@ -591,6 +610,7 @@ export const useAuthStore = defineStore('auth', () => {
         user, token, isAuthenticating, isAuthenticated, isAdmin,
         loadingMessage, loadingProgress, funFact, welcomeText, welcomeSlogan, welcome_logo_url, welcome_fun_fact_color, welcome_fun_fact_category, wsConnected,
         ssoClientConfig,
+        isFetchingFunFact,
         latex_builder_enabled,
         export_to_txt_enabled,
         export_to_markdown_enabled,
@@ -602,7 +622,7 @@ export const useAuthStore = defineStore('auth', () => {
         allow_user_chunking_config,
         default_chunk_size,
         default_chunk_overlap,
-        attemptInitialAuth, login, register, logout, fetchWelcomeInfo,
+        attemptInitialAuth, login, register, logout, fetchWelcomeInfo, fetchNewFunFact,
         updateUserProfile, updateUserPreferences, changePassword,
         ssoLoginWithPassword, ssoAuthorizeApplication,
         fetchScratchpad, updateScratchpad,

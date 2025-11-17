@@ -33,7 +33,7 @@ class SCIMUser(BaseModel):
     meta: Optional[SCIMMeta] = None
 
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
 
 class SCIMListResponse(BaseModel):
     schemas: List[str] = ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
@@ -55,7 +55,7 @@ class SCIMGroup(BaseModel):
     meta: Optional[SCIMMeta] = None
 
     class Config:
-        allow_population_by_field_name = True
+        populate_by_name = True
         
 class SCIMPatchOp(BaseModel):
     op: str # "add", "remove", "replace"

@@ -1,4 +1,3 @@
-# [UPDATE] main.py
 # lollms/main.py
 import shutil
 import datetime
@@ -169,7 +168,6 @@ def run_one_time_startup_tasks(lock: Lock):
                     print(f"Found legacy discussion folder for '{username}'. Starting migration...")
                     if username not in user_sessions:
                         user_sessions[username] = {
-                                                    "lollms_clients_cache": {}, 
                                                     "lollms_model_name": user.lollms_model_name,
                                                     "llm_params": {}
                                                 }
@@ -201,7 +199,6 @@ def run_one_time_startup_tasks(lock: Lock):
                         backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                         shutil.move(str(old_discussion_path), str(backup_path))
                         print(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
-                    if username in user_sessions: user_sessions[username]['lollms_clients_cache'] = {}
                 
             except Exception as e:
                 print(f"CRITICAL ERROR during migration: {e}")
@@ -426,7 +423,7 @@ async def startup_event():
             rss_scheduler.start()
             print(f"INFO: RSS feed checking scheduled to run every {interval} minutes.")
 
-    print(f"INFO: Worker process (PID: {os.getpid()}) started and initialized.")
+    print(f"INFO: Worker {os.getpid()} starting DB broadcast listener.")
 
 async def shutdown_event():
     ASCIIColors.info(f"--- Worker process (PID: {os.getpid()}) shutting down. ---")
@@ -603,6 +600,11 @@ if __name__ == "__main__":
     apps_dir.mkdir(parents=True, exist_ok=True)
     
     workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
+    
+    if os.name == 'nt' and workers > 1 and "LOLLMS_WORKERS" not in os.environ:
+        ASCIIColors.yellow("Multiple workers are not fully stable on Windows and can cause startup errors.")
+        ASCIIColors.yellow("Forcing workers to 1. To override this, set the environment variable LOLLMS_WORKERS to your desired number.")
+        workers = 1
 
     ssl_params = {}
     if settings.get("https_enabled"):
@@ -660,4 +662,4 @@ if __name__ == "__main__":
     ASCIIColors.green(f"Using {workers} Workers")
     print("----------------------")
 
-    uvicorn.run("main:app", host=host_setting, port=int(port_setting), reload=False, workers=workers, timeout_keep_alive=600, backlog=256, **ssl_params)
+    uvicorn.run("main:app", host=host_setting, port=int(port_setting), reload=False, workers=workers, timeout_keep_alive=600, **ssl_params)

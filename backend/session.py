@@ -170,7 +170,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 "put_thoughts_in_context": db_user.put_thoughts_in_context
             }
             user_sessions[username] = {
-                "lollms_clients_cache": {}, "safe_store_instances": {}, "discussions": {},
+                "safe_store_instances": {}, "discussions": {},
                 "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
                 "lollms_model_name": db_user.lollms_model_name,
                 "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
@@ -181,7 +181,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         session = user_sessions[username]
         if session.get("lollms_model_name") != user_model_full:
             session["lollms_model_name"] = user_model_full
-            session["lollms_clients_cache"] = {}
             print(f"INFO: Synced session model name for '{username}' to '{user_model_full}'.")
 
         llm_settings_overridden = False
@@ -368,13 +367,26 @@ def reload_lollms_client_mcp(username: str):
             del session['servers_infos']
             print(f"INFO: Invalidated MCP servers cache for user: {username}")
 
-        if "lollms_clients_cache" in session:
-            session["lollms_clients_cache"] = {}
-            print(f"INFO: Invalidated all lollms_client instances for user: {username}")
-
 
 def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None) -> LollmsClient:
-    return build_lollms_client_from_params(username, binding_alias_override)
+    session = user_sessions.get(username)
+    if not session:
+        print(f"INFO: No active session for '{username}' in get_user_lollms_client. Building temporary client.")
+        return build_lollms_client_from_params(username, binding_alias_override)
+
+    clients_cache = session.setdefault("lollms_clients_cache", {})
+    
+    # Determine cache key: 'default' for user's main model, or the specific override alias
+    cache_key = binding_alias_override or "default"
+
+    if cache_key in clients_cache:
+        # print(f"DEBUG: Returning cached client for user '{username}' with key '{cache_key}'.")
+        return clients_cache[cache_key]
+    
+    print(f"INFO: LollmsClient not in cache for user '{username}' with key '{cache_key}'. Building new client.")
+    client = build_lollms_client_from_params(username, binding_alias_override)
+    clients_cache[cache_key] = client
+    return client
 
 
 def build_lollms_client_from_params(
@@ -390,7 +402,11 @@ def build_lollms_client_from_params(
     tts_params: Optional[Dict[str, Any]] = None,
     stt_binding_alias: Optional[str] = None,
     stt_model_name: Optional[str] = None,
-    stt_params: Optional[Dict[str, Any]] = None
+    stt_params: Optional[Dict[str, Any]] = None,
+    load_llm: bool = True,
+    load_tti: bool = False,
+    load_tts: bool = False,
+    load_stt: bool = False
 ) -> LollmsClient:
     session = user_sessions.get(username)
     
@@ -400,7 +416,6 @@ def build_lollms_client_from_params(
     if not session:
         is_temp_session = True
         session = {
-            "lollms_clients_cache": {},
             "safe_store_instances": {},
             "discussions": {},
             "llm_params": {},
@@ -443,7 +458,14 @@ def build_lollms_client_from_params(
             is_active = db.query(DBSTTBinding.id).filter(DBSTTBinding.alias == binding_alias_check, DBSTTBinding.is_active == True).first()
             if not is_active:
                 user_db.stt_binding_model_name = None
-
+        
+        client_init_params = {
+            "load_llm": load_llm,
+            "load_tti": load_tti,
+            "load_tts": load_tts,
+            "load_stt": load_stt,
+        }
+        
         binding_to_use = None
         
         # Determine the model name from session or DB
@@ -460,7 +482,6 @@ def build_lollms_client_from_params(
         if not binding_to_use:
             binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
         
-        client_init_params = {}
         if binding_to_use:            
             final_alias = binding_to_use.alias
             model_name_for_binding = model_name
@@ -673,22 +694,9 @@ def build_lollms_client_from_params(
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
 
-        cache_key = json.dumps(client_init_params, sort_keys=True) if client_init_params else "{}"
-            
-        session_cache = session.setdefault("lollms_clients_cache", {})
-        
-        # Don't cache for temporary sessions
-        if not is_temp_session and cache_key in session_cache:
-            ASCIIColors.debug(f"INFO: Returning cached LollmsClient for user '{username}'.")
-            return session_cache[cache_key]
-
         try:
             ASCIIColors.magenta(f"INFO: Initializing LollmsClient for user '{username}'.")
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
-            
-            if not is_temp_session:
-                session_cache[cache_key] = lc
-                ASCIIColors.debug(f"INFO: Caching new LollmsClient for user '{username}'.")
             
             return lc
         except Exception as e:

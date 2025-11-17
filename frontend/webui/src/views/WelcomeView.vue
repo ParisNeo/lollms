@@ -4,6 +4,7 @@ import { computed, onMounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
 import logoDefault from '../assets/logo.png';
+import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -15,6 +16,7 @@ const logoSrc = computed(() => authStore.welcome_logo_url);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
 const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
 const ssoClientConfig = computed(() => authStore.ssoClientConfig);
+const isFetchingFunFact = computed(() => authStore.isFetchingFunFact);
 
 onMounted(() => {
     if (!authStore.ssoClientConfig.enabled) {
@@ -70,8 +72,16 @@ function openRegister() {
         {{ welcomeSlogan }}
       </p>
 
-      <div v-if="funFact" :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" class="mt-10 mx-auto max-w-md p-4 border-l-4 rounded-lg text-sm text-left text-gray-900 dark:text-gray-100" :style="funFactStyle">
-        <span class="font-bold" :style="funFactTextStyle">🤓 Fun Fact:</span> {{ funFact }}
+      <div v-if="funFact" class="mt-10 mx-auto max-w-md">
+        <div :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" class="p-4 border-l-4 rounded-lg text-sm text-left text-gray-900 dark:text-gray-100" :style="funFactStyle">
+          <span class="font-bold" :style="funFactTextStyle">🤓 {{ funFactCategory || 'Fun Fact' }}:</span> {{ funFact }}
+        </div>
+        <div class="mt-4">
+            <button @click="authStore.fetchNewFunFact()" class="btn btn-secondary btn-sm min-w-[120px]" :disabled="isFetchingFunFact">
+                <IconAnimateSpin v-if="isFetchingFunFact" class="w-4 h-4 animate-spin" />
+                <span v-else>Next Fun Fact</span>
+            </button>
+        </div>
       </div>
 
       <div class="mt-12 flex flex-col sm:flex-row justify-center items-center space-y-4 sm:space-y-0 sm:space-x-4">

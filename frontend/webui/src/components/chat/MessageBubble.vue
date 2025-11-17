@@ -364,7 +364,7 @@ async function handleSaveEdit() {
     } else {
         const keptImagesB64 = editedImages.value
             .filter(img => !img.isNew)
-            .map(img => img.url.split(','));
+            .map(img => img.url);
 
         await discussionsStore.saveMessageChanges({
             messageId: props.message.id,
@@ -760,4 +760,3 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
 .event-type-step_start .event-icon-container, .event-type-step_end .event-icon-container { @apply bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300; }
 .event-type-step_start .event-title, .event-type-step_end .event-title { @apply text-gray-600 dark:text-gray-300; }
 </style>
-

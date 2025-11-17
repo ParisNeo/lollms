@@ -5,7 +5,7 @@ import json
 import asyncio
 import threading
 import uuid
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -20,7 +20,7 @@ from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
 from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.db.models.personality import Personality as DBPersonality
 from backend.security import verify_api_key
-from backend.session import get_user_lollms_client, user_sessions, build_lollms_client_from_params
+from backend.session import user_sessions, build_lollms_client_from_params
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors
@@ -28,7 +28,7 @@ from backend.routers.services.openai_v1 import (
     ChatMessage, ChatCompletionRequest, UsageInfo,
     ChatCompletionResponseChoice, ChatCompletionResponse, DeltaMessage,
     ChatCompletionResponseStreamChoice, ChatCompletionStreamResponse,
-    preprocess_messages
+    preprocess_messages, find_model_by_alias, resolve_model_name
 )
 
 ollama_v1_router = APIRouter(prefix="/ollama/v1")
@@ -46,13 +46,13 @@ async def get_user_from_api_key(
 
     require_key = settings.get("ollama_require_key", True)
 
-    if not require_key and not authorization:
+    if not require_key:
         admin_user = db.query(DBUser).filter(DBUser.is_admin == True).order_by(DBUser.id).first()
         if not admin_user:
             raise HTTPException(status_code=503, detail="Ollama API is enabled without a key, but no admin user is configured.")
         
         if admin_user.username not in user_sessions:
-            user_sessions[admin_user.username] = { "lollms_clients": {}, "lollms_model_name": admin_user.lollms_model_name, "llm_params": {}}
+            user_sessions[admin_user.username] = { "lollms_model_name": admin_user.lollms_model_name, "llm_params": {}}
         return admin_user
 
     if not authorization:
@@ -75,7 +75,7 @@ async def get_user_from_api_key(
         raise HTTPException(status_code=401, detail="User not found or inactive.")
 
     if user.username not in user_sessions:
-        user_sessions[user.username] = { "lollms_clients": {}, "lollms_model_name": user.lollms_model_name, "llm_params": {}}
+        user_sessions[user.username] = { "lollms_model_name": user.lollms_model_name, "llm_params": {}}
 
     db_key.last_used_at = datetime.datetime.now(datetime.timezone.utc)
     db.commit()
@@ -87,23 +87,51 @@ async def list_models(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    # This mirrors the openai_v1 endpoint, as the keys grant access to the user's models.
     all_models = []
     active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+    model_display_mode = settings.get("model_display_mode", "mixed")
+
     for binding in active_bindings:
         try:
-            lc = get_user_lollms_client(user.username, binding.alias)
+            lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
             models = lc.list_models()
+            
+            model_aliases = binding.model_aliases or {}
+            if isinstance(model_aliases, str):
+                try:
+                    model_aliases = json.loads(model_aliases)
+                except Exception:
+                    model_aliases = {}
+
             if isinstance(models, list):
                 for item in models:
-                    model_id = item.get("model_name") if isinstance(item, dict) else item
-                    if model_id:
-                        full_model_id = f"{binding.alias}/{model_id}"
-                        all_models.append({ "id": full_model_id, "object": "model", "created": int(time.time()), "owned_by": "lollms"})
+                    model_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
+                    if not model_id:
+                        continue
+
+                    alias_data = model_aliases.get(model_id)
+
+                    if model_display_mode == 'aliased' and not alias_data:
+                        continue
+
+                    id_to_send = f"{binding.alias}/{model_id}"
+                    name_to_send = id_to_send
+                    if model_display_mode != 'original' and alias_data and alias_data.get('title'):
+                        name_to_send = alias_data.get('title')
+
+                    all_models.append({
+                        "id": id_to_send,
+                        "name": name_to_send,
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": "lollms"
+                    })
         except Exception as e:
             print(f"Could not fetch models from binding '{binding.alias}' for user '{user.username}': {e}")
             continue
-    return {"object": "list", "data": sorted(all_models, key=lambda x: x['id'])}
+
+    unique_models = {m["id"]: m for m in all_models}
+    return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}
 
 @ollama_v1_router.post("/chat/completions")
 async def chat_completions(
@@ -111,21 +139,21 @@ async def chat_completions(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    if not request.model or '/' not in request.model:
-        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
-    binding_alias, model_name = request.model.split('/', 1)
+    binding_alias, model_name = resolve_model_name(db, request.model)
+
 
     try:
         lc = build_lollms_client_from_params(
             username=user.username, binding_alias=binding_alias, model_name=model_name,
-            llm_params={"temperature": request.temperature, "max_output_tokens": request.max_tokens}
+            llm_params={"temperature": request.temperature, "max_output_tokens": request.max_tokens},
+            load_llm=True
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
 
     messages = list(request.messages)
     images: List[str] = []
-    openai_messages = preprocess_messages(messages, images)
+    openai_messages, images = preprocess_messages(messages)
 
     if request.stream:
         async def stream_generator():

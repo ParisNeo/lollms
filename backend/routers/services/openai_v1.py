@@ -23,7 +23,7 @@ from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
 from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
 from backend.db.models.personality import Personality as DBPersonality
 from backend.security import verify_api_key
-from backend.session import get_user_lollms_client, user_sessions, build_lollms_client_from_params, get_user_data_root
+from backend.session import user_sessions, build_lollms_client_from_params, get_user_data_root
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
@@ -177,6 +177,42 @@ class FileExtractionRequest(BaseModel):
 class FileExtractionResponse(BaseModel):
     text: str = Field(..., description="The extracted text content.")
 
+# --- NEW HELPER FUNCTIONS for model resolution ---
+def find_model_by_alias(db: Session, alias_title: str) -> Optional[Tuple[str, str]]:
+    """Finds the original binding alias and model name from a display alias title."""
+    all_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+    for binding in all_bindings:
+        model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try: model_aliases = json.loads(model_aliases)
+            except Exception: continue
+        
+        for original_name, alias_data in model_aliases.items():
+            if alias_data and alias_data.get('title') == alias_title:
+                return binding.alias, original_name
+    return None, None
+
+def resolve_model_name(db: Session, requested_model: str) -> Tuple[str, str]:
+    """Resolves a requested model name (which could be an alias) to its binding_alias and original model_name."""
+    # 1. First, check if it's already in the format "binding/model"
+    if '/' in requested_model:
+        parts = requested_model.split('/', 1)
+        # Verify this is a valid binding
+        binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
+        if binding:
+            return parts[0], parts[1]
+    
+    # 2. If not, treat it as an alias and search for it.
+    binding_alias, model_name = find_model_by_alias(db, requested_model)
+    if binding_alias:
+        return binding_alias, model_name
+
+    # 3. If it's not found either way, raise an error.
+    raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use 'binding/model_name' format or a valid alias.")
+
+# --- END HELPER FUNCTIONS ---
+
+
 # --- Dependencies ---
 
 async def get_user_from_api_key(
@@ -206,7 +242,7 @@ async def get_user_from_api_key(
                 "repeat_penalty": admin_user.llm_repeat_penalty, "repeat_last_n": admin_user.llm_repeat_last_n
             }
             user_sessions[admin_user.username] = {
-                "lollms_clients": {}, "safe_store_instances": {}, "discussions": {},
+                "safe_store_instances": {}, "discussions": {},
                 "active_vectorizer": admin_user.safe_store_vectorizer,
                 "lollms_model_name": admin_user.lollms_model_name,
                 "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
@@ -244,7 +280,7 @@ async def get_user_from_api_key(
             "repeat_penalty": user.llm_repeat_penalty, "repeat_last_n": user.llm_repeat_last_n
         }
         user_sessions[user.username] = {
-            "lollms_clients": {}, "safe_store_instances": {}, "discussions": {},
+            "safe_store_instances": {}, "discussions": {},
             "active_vectorizer": user.safe_store_vectorizer,
             "lollms_model_name": user.lollms_model_name,
             "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
@@ -295,20 +331,47 @@ async def list_models(
 ):
     all_models = []
     active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+    model_display_mode = settings.get("model_display_mode", "mixed")
 
     for binding in active_bindings:
         try:
-            lc = get_user_lollms_client(user.username, binding.alias)
+            lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
             models = lc.list_models()
+            
+            model_aliases = binding.model_aliases or {}
+            if isinstance(model_aliases, str):
+                try:
+                    model_aliases = json.loads(model_aliases)
+                except Exception:
+                    model_aliases = {}
+
             if isinstance(models, list):
                 for item in models:
-                    model_id = item.get("model_name") if isinstance(item, dict) else item
-                    if model_id:
-                        full_model_id = f"{binding.alias}/{model_id}"
-                        all_models.append({
-                            "id": full_model_id, "object": "model",
-                            "created": int(time.time()), "owned_by": "lollms"
-                        })
+                    model_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
+                    if not model_id:
+                        continue
+
+                    alias_data = model_aliases.get(model_id)
+
+                    if model_display_mode == 'aliased' and not alias_data:
+                        continue
+
+                    # The ID is ALWAYS binding/model_name for the API's internal use.
+                    id_to_send = f"{binding.alias}/{model_id}"
+                    
+                    # The name is what's displayed to the user.
+                    name_to_send = id_to_send
+                    if model_display_mode != 'original' and alias_data and alias_data.get('title'):
+                        name_to_send = alias_data.get('title')
+
+
+                    all_models.append({
+                        "id": id_to_send,
+                        "name": name_to_send,
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": "lollms"
+                    })
         except Exception as e:
             print(f"Could not fetch models from binding '{binding.alias}' for user '{user.username}': {e}")
             continue
@@ -316,6 +379,7 @@ async def list_models(
     if not all_models:
         raise HTTPException(status_code=404, detail="No models found from any active bindings.")
     
+    # Use 'id' for uniqueness as it's the stable identifier
     unique_models = {m["id"]: m for m in all_models}
     return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}
 
@@ -407,10 +471,7 @@ async def chat_completions(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    if not request.model or '/' not in request.model:
-        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
-
-    binding_alias, model_name = request.model.split('/', 1)
+    binding_alias, model_name = resolve_model_name(db, request.model)
 
     try:
         lc = build_lollms_client_from_params(
@@ -420,7 +481,8 @@ async def chat_completions(
             llm_params={
                 "temperature": request.temperature,
                 "max_output_tokens": request.max_tokens
-            }
+            },
+            load_llm=True
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
@@ -578,7 +640,9 @@ async def create_image_generation(
         lc = build_lollms_client_from_params(
             username=user.username,
             tti_binding_alias=tti_binding_alias,
-            tti_model_name=tti_model_name
+            tti_model_name=tti_model_name,
+            load_llm=False,
+            load_tti=True
         )
         
         if not hasattr(lc, 'tti') or not lc.tti:
@@ -624,25 +688,22 @@ async def create_image_generation(
 @openai_v1_router.post("/embeddings", response_model=EmbeddingResponse)
 async def create_embeddings(
     request: EmbeddingRequest,
-    user: DBUser = Depends(get_user_from_api_key)
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
 ):
-    if not request.model or '/' not in request.model:
-        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
-
-    binding_alias, model_name = request.model.split('/', 1)
+    binding_alias, model_name = resolve_model_name(db, request.model)
 
     try:
-        # We need a client to access token counting and embedding functions
         lc = build_lollms_client_from_params(
             username=user.username,
             binding_alias=binding_alias,
-            model_name=model_name
+            model_name=model_name,
+            load_llm=True
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
 
     if request.encoding_format != "float":
-        #raise HTTPException(status_code=400, detail="Only 'float' encoding_format is supported.")
         ASCIIColors.warning(f"The request encoding format {request.encoding_format} is not supported. Only 'float' encoding_format is supported.")
         request.encoding_format = 'float'
     input_texts = [request.input] if isinstance(request.input, str) else request.input
@@ -653,10 +714,8 @@ async def create_embeddings(
     total_tokens = 0
     try:
         for i, text in enumerate(input_texts):
-            # The LollmsLLMBinding.embed method is expected to return a list of floats.
             embedding_vector = lc.embed(text) 
             if not isinstance(embedding_vector, list) or not all(isinstance(f, (float, int)) for f in embedding_vector):
-                # Log the unexpected return type for debugging
                 print(f"Warning: Binding '{binding_alias}' embed function returned an unexpected type for input '{text[:50]}...': {type(embedding_vector)}")
                 raise HTTPException(status_code=500, detail=f"The embedding model for binding '{binding_alias}' returned an invalid data format.")
 
@@ -664,7 +723,6 @@ async def create_embeddings(
             total_tokens += lc.count_tokens(text)
             
     except Exception as e:
-        # Re-raise HTTP exceptions, wrap others
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=f"Failed to generate embeddings: {str(e)}")
@@ -680,18 +738,17 @@ async def create_embeddings(
 @openai_v1_router.post("/tokenize", response_model=TokenizeResponse)
 async def tokenize_text(
     request: TokenizeRequest,
-    user: DBUser = Depends(get_user_from_api_key)
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
 ):
-    if not request.model or '/' not in request.model:
-        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
-    
-    binding_alias, model_name = request.model.split('/', 1)
+    binding_alias, model_name = resolve_model_name(db, request.model)
     
     try:
         lc = build_lollms_client_from_params(
             username=user.username,
             binding_alias=binding_alias,
-            model_name=model_name
+            model_name=model_name,
+            load_llm=True
         )
         tokens = lc.tokenize(request.text)
         return TokenizeResponse(tokens=tokens, count=len(tokens))
@@ -699,7 +756,8 @@ async def tokenize_text(
         lc = build_lollms_client_from_params(
             username=user.username,
             binding_alias=binding_alias,
-            model_name=model_name
+            model_name=model_name,
+            load_llm=True
         )
         count = lc.count_tokens(request.text)
         return TokenizeResponse(count=count, tokens=count)
@@ -711,18 +769,17 @@ async def tokenize_text(
 @openai_v1_router.post("/detokenize", response_model=DetokenizeResponse)
 async def detokenize_tokens(
     request: DetokenizeRequest,
-    user: DBUser = Depends(get_user_from_api_key)
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
 ):
-    if not request.model or '/' not in request.model:
-        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
-    
-    binding_alias, model_name = request.model.split('/', 1)
+    binding_alias, model_name = resolve_model_name(db, request.model)
     
     try:
         lc = build_lollms_client_from_params(
             username=user.username,
             binding_alias=binding_alias,
-            model_name=model_name
+            model_name=model_name,
+            load_llm=True
         )
         text = lc.detokenize(request.tokens)
         return DetokenizeResponse(text=text)
@@ -734,18 +791,17 @@ async def detokenize_tokens(
 @openai_v1_router.post("/count_tokens", response_model=CountTokensResponse)
 async def count_tokens(
     request: CountTokensRequest,
-    user: DBUser = Depends(get_user_from_api_key)
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
 ):
-    if not request.model or '/' not in request.model:
-        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
-    
-    binding_alias, model_name = request.model.split('/', 1)
+    binding_alias, model_name = resolve_model_name(db, request.model)
     
     try:
         lc = build_lollms_client_from_params(
             username=user.username,
             binding_alias=binding_alias,
-            model_name=model_name
+            model_name=model_name,
+            load_llm=True
         )
         count = lc.count_tokens(request.text)
         return CountTokensResponse(count=count)
@@ -753,7 +809,8 @@ async def count_tokens(
         lc = build_lollms_client_from_params(
             username=user.username,
             binding_alias=binding_alias,
-            model_name=model_name
+            model_name=model_name,
+            load_llm=True
         )
         count = lc.count_tokens(request.text)
         return CountTokensResponse(count=count)
@@ -765,21 +822,17 @@ async def count_tokens(
 @openai_v1_router.post("/context_size", response_model=ContextSizeResponse)
 async def get_model_context_size(
     request: ContextSizeRequest,
-    user: DBUser = Depends(get_user_from_api_key)
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
 ):
-    """
-    Retrieves the context window size for a given model.
-    """
-    if not request.model or '/' not in request.model:
-        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'binding_alias/model_name' format.")
-    
-    binding_alias, model_name = request.model.split('/', 1)
+    binding_alias, model_name = resolve_model_name(db, request.model)
     
     try:
         lc = build_lollms_client_from_params(
             username=user.username,
             binding_alias=binding_alias,
-            model_name=model_name
+            model_name=model_name,
+            load_llm=True
         )
         ctx_size = lc.get_ctx_size(model_name)
         return ContextSizeResponse(context_size=ctx_size)
@@ -793,19 +846,10 @@ async def extract_text_from_file(
     request: FileExtractionRequest,
     user: DBUser = Depends(get_user_from_api_key)
 ):
-    """
-    Extracts text content from a base64 encoded file (e.g., PDF, DOCX, TXT)
-    without affecting any discussion state.
-    """
     try:
-        # 1. Decode base64 file content
         file_bytes = base64.b64decode(request.file)
-        
-        # 2. Extract text using the shared utility function
         extracted_text, _ = extract_text_from_file_bytes(file_bytes, request.filename)
-        
         return FileExtractionResponse(text=extracted_text)
-    
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="Invalid base64 encoding.")
     except Exception as e:

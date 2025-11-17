@@ -132,14 +132,17 @@ def build_message_router(router: APIRouter):
         target_message.content = payload.content
 
         final_images_b64 = []
-        final_images_b64.extend(payload.kept_images_b64)
-
-        for b64_data_uri in payload.new_images_b64:
+        all_image_uris = (payload.kept_images_b64 or []) + (payload.new_images_b64 or [])
+        
+        for uri in all_image_uris:
             try:
-                _, encoded = b64_data_uri.split(",", 1)
-                final_images_b64.append(encoded)
+                if isinstance(uri, str) and ',' in uri:
+                    _, encoded = uri.split(',', 1)
+                    final_images_b64.append(encoded)
+                else:
+                    final_images_b64.append(uri)
             except ValueError:
-                final_images_b64.append(b64_data_uri)
+                final_images_b64.append(uri)
         
         target_message.images = final_images_b64
         discussion_obj.commit()

@@ -140,9 +140,6 @@ async def update_binding(binding_id: int, update_data: LLMBindingUpdate, db: Ses
     try:
         db.commit()
         db.refresh(binding_to_update)
-        for session in user_sessions.values():
-            if "lollms_clients_cache" in session:
-                session["lollms_clients_cache"] = {}
         manager.broadcast_sync({"type": "bindings_updated"})
         return binding_to_update
     except Exception as e:
@@ -274,7 +271,7 @@ async def update_tti_model_alias(binding_id: int, payload: TtiModelAliasUpdate, 
     if binding.model_aliases is None:
         binding.model_aliases = {}
     
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    binding.model_aliases[payload.original_model_name] = payload.alias
     flag_modified(binding, "model_aliases")
     
     db.commit()
@@ -406,7 +403,7 @@ async def update_tts_model_alias(binding_id: int, payload: TtsModelAliasUpdate, 
     if binding.model_aliases is None:
         binding.model_aliases = {}
     
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    binding.model_aliases[payload.original_model_name] = payload.alias
     flag_modified(binding, "model_aliases")
     
     db.commit()
@@ -539,7 +536,7 @@ async def update_stt_model_alias(binding_id: int, payload: SttModelAliasUpdate, 
     if binding.model_aliases is None:
         binding.model_aliases = {}
     
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    binding.model_aliases[payload.original_model_name] = payload.alias
     flag_modified(binding, "model_aliases")
     
     db.commit()

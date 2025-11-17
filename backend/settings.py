@@ -30,6 +30,10 @@ class _Settings:
             else:
                 for config in configs:
                     try:
+                        # print(config.key)
+                        # print(config.value)
+                        # if config.key == "export_to_docx_enabled":
+                        #     print("Found export_to_docx_enabled setting")
                         # Value from DB is expected to be a JSON string like '{"value": ..., "type": ...}'
                         structured_data = json.loads(config.value)
                         

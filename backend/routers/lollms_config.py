@@ -159,7 +159,6 @@ async def set_user_lollms_model(model_name: str = Form(...), current_user: UserA
     if not db_user_record:
         raise HTTPException(status_code=404, detail="User not found.")
     user_sessions[current_user.username]["lollms_model_name"] = model_name
-    user_sessions[current_user.username]["lollms_clients_cache"] = {}
     db_user_record.lollms_model_name = model_name
     try:
         db.commit()
@@ -192,7 +191,6 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
             raise
     if session_updated:
         user_sessions[current_user.username]["llm_params"] = {k: v for k, v in session_llm_params.items() if v is not None}
-        user_sessions[current_user.username]["lollms_clients_cache"] = {}
         return {"message": "LLM parameters updated. Client will re-initialize."}
     return {"message": "No changes to LLM parameters."}
 

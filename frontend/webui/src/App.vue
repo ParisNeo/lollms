@@ -169,15 +169,20 @@ watch(message_font_size, (newSize) => {
                 {{ authStore.welcomeSlogan || 'One tool to rule them all' }}
             </p>
             
-            <div v-if="authStore.funFact" 
-                 :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" 
-                 class="mt-8 mx-auto max-w-md p-4 border-l-4 rounded-lg text-sm text-left text-gray-900 dark:text-gray-100" 
-                 :style="funFactStyle">
-                <span class="font-bold" :style="funFactTextStyle">🤓 Fun Fact:</span> {{ authStore.funFact }}
+            <div v-if="authStore.funFact" class="mt-8 mx-auto max-w-md">
+                <div 
+                     :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" 
+                     class="p-4 border-l-4 rounded-lg text-sm text-left text-gray-900 dark:text-gray-100" 
+                     :style="funFactStyle">
+                    <span class="font-bold" :style="funFactTextStyle">🤓 {{ funFactCategory || 'Fun Fact' }}:</span> {{ authStore.funFact }}
+                </div>
+                <div class="mt-4">
+                    <button @click="authStore.fetchNewFunFact()" class="btn btn-secondary btn-sm">Next Fun Fact</button>
+                </div>
             </div>
             <div class="mt-12 w-full px-4">
                 <div class="h-2.5 w-full rounded-full bg-gray-200 dark:bg-gray-600">
-                    <div class="h-2.5 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500" :style="{ width: `${authStore.loadingProgress}%` }"></div>
+                    <div class="h-2.5 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500 progress-bar-animated" :style="{ width: `${authStore.loadingProgress}%` }"></div>
                 </div>
                 <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">{{ authStore.loadingMessage }}</p>
                 <p class="mt-1 text-lg font-semibold text-gray-700 dark:text-gray-200">{{ authStore.loadingProgress }}%</p>
@@ -274,3 +279,15 @@ watch(message_font_size, (newSize) => {
     <AudioPlayer />
   </div>
 </template>
+
+<style>
+@keyframes progress-animation {
+  0% { background-position: 1rem 0; }
+  100% { background-position: 0 0; }
+}
+.progress-bar-animated {
+  background-image: linear-gradient(45deg, rgba(255, 255, 255, .15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .15) 50%, rgba(255, 255, 255, .15) 75%, transparent 75%, transparent);
+  background-size: 1rem 1rem;
+  animation: progress-animation 1s linear infinite;
+}
+</style>

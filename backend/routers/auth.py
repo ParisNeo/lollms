@@ -1,3 +1,4 @@
+# backend/routers/auth.py
 import traceback
 import datetime
 from datetime import timezone, timedelta
@@ -74,7 +75,9 @@ def _generate_user_avatar_task_logic(task: Task, user_id: int, prompt: str, tti_
         client = build_lollms_client_from_params(
             username=username,
             tti_binding_alias=tti_binding_alias,
-            tti_model_name=tti_model_name_part
+            tti_model_name=tti_model_name_part,
+            load_llm=False,
+            load_tti=True
         )
         
         if not client.tti:
@@ -194,7 +197,6 @@ async def login_for_access_token(
         session_llm_params = {k: v for k, v in session_llm_params.items() if v is not None}
 
         user_sessions[user.username] = {
-            "lollms_clients_cache": {}, 
             "safe_store_instances": {},
             "discussions": {}, "discussion_titles": {},
             "active_vectorizer": initial_vectorizer, 
@@ -464,9 +466,10 @@ async def update_my_details(
         session["llm_params"] = {k: v for k, v in session_llm_params.items() if v is not None}
         
         if client_needs_reinit:
-            session["lollms_clients_cache"] = {}  # Invalidate all cached clients
-            manager.broadcast_internal_event_sync("user_cache_invalidate", {"username": username})
-    
+            if username in user_sessions:
+                user_sessions[username].pop("lollms_clients_cache", None)
+                print(f"INFO: Invalidated LollmsClient cache for user '{username}'.")
+
     return get_current_active_user(db_user)
 
 @auth_router.post("/change-password", response_model=Dict[str, str])
