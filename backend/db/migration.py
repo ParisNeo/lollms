@@ -514,14 +514,16 @@ def _bootstrap_lollms_user(connection):
                     first_login_done, receive_notification_emails, is_moderator,
                     put_thoughts_in_context, auto_title, chat_active, first_page,
                     show_token_counter, rag_use_graph, tell_llm_os, share_dynamic_info_with_llm,
-                    include_memory_date_in_context, message_font_size
+                    include_memory_date_in_context, message_font_size,
+                    image_generation_enabled, image_annotation_enabled
                 )
                 VALUES (
                     :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
                     :first_login_done, :receive_notification_emails, :is_moderator,
                     :put_thoughts_in_context, :auto_title, :chat_active, :first_page,
                     :show_token_counter, :rag_use_graph, :tell_llm_os, :share_dynamic_info_with_llm,
-                    :include_memory_date_in_context, :message_font_size
+                    :include_memory_date_in_context, :message_font_size,
+                    :image_generation_enabled, :image_annotation_enabled
                 )
             """),
             {
@@ -542,7 +544,9 @@ def _bootstrap_lollms_user(connection):
                 "tell_llm_os": False,
                 "share_dynamic_info_with_llm": True,
                 "include_memory_date_in_context": False,
-                "message_font_size": 14
+                "message_font_size": 14,
+                "image_generation_enabled": False,
+                "image_annotation_enabled": False,
             }
         )
         connection.commit()
