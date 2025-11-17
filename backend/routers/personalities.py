@@ -212,7 +212,7 @@ async def generate_personality_from_prompt(
         description=f"Generating personality from prompt: '{prompt[:50]}...'",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
+    return db_task
 
 # --- Prompt Enhancement Endpoint ---
 @personalities_router.post("/enhance_prompt", response_model=TaskInfo, status_code=202)
@@ -233,7 +233,7 @@ async def enhance_personality_prompt(
         description="Enhancing personality system prompt.",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
+    return db_task
 
 
 def get_personality_public_from_db(db_personality: DBPersonality, owner_username: Optional[str] = None) -> PersonalityPublic:

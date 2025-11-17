@@ -86,7 +86,7 @@ def build_datazone_router(router: APIRouter):
             description=f"AI is processing the discussion data zone content.",
             owner_username=current_user.username
         )
-        return _to_task_info(db_task)
+        return db_task
 
     @router.post("/{discussion_id}/memorize", response_model=TaskInfo, status_code=202)
     async def memorize_ltm(
@@ -104,7 +104,7 @@ def build_datazone_router(router: APIRouter):
             description="AI is analyzing the conversation to extract key facts for long-term memory.",
             owner_username=current_user.username
         )
-        return _to_task_info(db_task)
+        return db_task
 
     @router.post("/{discussion_id}/images", response_model=DiscussionImageUpdateResponse)
     async def add_discussion_image(

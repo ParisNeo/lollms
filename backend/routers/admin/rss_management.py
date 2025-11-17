@@ -26,7 +26,7 @@ async def trigger_rss_feed_scraping(current_user=Depends(get_current_admin_user)
         description="Fetching and processing all active RSS feeds for new articles.",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
+    return db_task
 
 @rss_management_router.get("/rss-feeds", response_model=List[RSSFeedSourcePublic])
 async def get_rss_feeds(db: Session = Depends(get_db)):

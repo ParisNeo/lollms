@@ -215,7 +215,7 @@ async def purge_temp_files(current_admin: UserAuthDetails = Depends(get_current_
         description="Scans user temp folders and deletes files older than 24 hours.",
         owner_username=current_admin.username
     )
-    return _to_task_info(db_task)
+    return db_task
 
 @system_management_router.get("/global-generation-stats", response_model=GlobalGenerationStats)
 def get_global_generation_stats(db: Session = Depends(get_db)):
@@ -290,4 +290,4 @@ async def create_backup(
         description="Creating a password-protected zip archive of the entire application.",
         owner_username=current_admin.username
     )
-    return _to_task_info(db_task)
+    return db_task

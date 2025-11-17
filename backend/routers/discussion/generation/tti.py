@@ -91,4 +91,4 @@ def build_tti_generation_router(router: APIRouter):
             description=f"Generating image with prompt: '{prompt[:50]}...'",
             owner_username=current_user.username
         )
-        return _to_task_info(db_task)
+        return db_task

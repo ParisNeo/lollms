@@ -140,7 +140,7 @@ async def generate_prompt_from_prompt(
         description=f"Generating a new prompt based on the request: '{payload.prompt[:100]}...'",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
+    return db_task
 
 @prompts_router.get("", response_model=Dict[str, List[PromptPublic]])
 def get_prompts(

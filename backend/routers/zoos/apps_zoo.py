@@ -66,7 +66,7 @@ def purge_broken_installation(payload: BrokenItemPayload):
         target=_purge_broken_task,
         args=(payload.item_type, payload.folder_name)
     )
-    return to_task_info(task)
+    return task
 
 @apps_zoo_router.post("/fix-broken", response_model=TaskInfo, status_code=202)
 def fix_broken_installation(payload: BrokenItemPayload):
@@ -76,7 +76,7 @@ def fix_broken_installation(payload: BrokenItemPayload):
         target=_fix_broken_task,
         args=(payload.item_type, payload.folder_name)
     )
-    return to_task_info(task)
+    return task
 
 
 @apps_zoo_router.post("/sync-installs", response_model=TaskInfo, status_code=202)
@@ -90,7 +90,7 @@ def sync_installed_items():
         target=sync_installs_task,
         description="Scanning installation folders and database to fix inconsistencies."
     )
-    return to_task_info(task)
+    return task
 
 @apps_zoo_router.post("/rescan", response_model=TaskInfo, status_code=202)
 def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_user)):
@@ -101,7 +101,7 @@ def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_us
         description="Scanning all Zoo repositories and rebuilding the cache.",
         owner_username=current_user.username
     )
-    return to_task_info(task)
+    return task
 
 @apps_zoo_router.get("/categories", response_model=List[str])
 def get_app_zoo_categories():
@@ -162,7 +162,7 @@ def pull_app_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
         target=pull_repo_task,
         args=(repo_id, DBAppZooRepository, APPS_ZOO_ROOT_PATH, 'app')
     )
-    return to_task_info(task)
+    return task
 
 @apps_zoo_router.get("/available", response_model=ZooAppInfoResponse)
 def get_available_zoo_apps(
@@ -281,7 +281,7 @@ def install_zoo_app(request: AppInstallRequest):
         target=install_item_task,
         args=(request.repository, request.folder_name, request.port, request.autostart, APPS_ZOO_ROOT_PATH)
     )
-    return to_task_info(task)
+    return task
     
 @apps_zoo_router.get("/get-next-available-port", response_model=Dict[str, int])
 def get_next_port(port: Optional[int] = None, db: Session = Depends(get_db)):
@@ -349,7 +349,7 @@ def start_installed_app(app_id: str, db: Session = Depends(get_db)):
         target=start_app_task,
         args=(app.id,)
     )
-    return to_task_info(task)
+    return task
 
 @apps_zoo_router.post("/installed/{app_id}/stop", response_model=TaskInfo, status_code=202)
 def stop_installed_app(app_id: str, db: Session = Depends(get_db)):
@@ -361,7 +361,7 @@ def stop_installed_app(app_id: str, db: Session = Depends(get_db)):
         target=stop_app_task,
         args=(app.id,)
     )
-    return to_task_info(task)
+    return task
     
 @apps_zoo_router.post("/installed/{app_id}/restart", response_model=TaskInfo, status_code=202)
 def restart_installed_app(app_id: str, db: Session = Depends(get_db)):
@@ -373,7 +373,7 @@ def restart_installed_app(app_id: str, db: Session = Depends(get_db)):
         target=restart_app_task,
         args=(app.id,)
     )
-    return to_task_info(task)
+    return task
 
 @apps_zoo_router.post("/installed/{app_id}/update", response_model=TaskInfo, status_code=202)
 def update_installed_app_from_zoo(app_id: str, db: Session = Depends(get_db)):
@@ -385,7 +385,7 @@ def update_installed_app_from_zoo(app_id: str, db: Session = Depends(get_db)):
         target=update_item_task,
         args=(app.id,)
     )
-    return to_task_info(task)
+    return task
 
 @apps_zoo_router.delete("/installed/{app_id}", response_model=AppActionResponse)
 def uninstall_app(app_id: str, db: Session = Depends(get_db)):
@@ -519,7 +519,7 @@ def start_app(app_id: str, current_user: UserAuthDetails = Depends(get_current_a
         description=f"Initiating startup sequence for {app.name}",
         owner_username=current_user.username
     )
-    return to_task_info(task)
+    return task
 
 @apps_zoo_router.post("/installed/{app_id}/stop", response_model=TaskInfo, status_code=202)
 def stop_app(app_id: str, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
@@ -534,7 +534,7 @@ def stop_app(app_id: str, current_user: UserAuthDetails = Depends(get_current_ad
         description=f"Initiating shutdown sequence for {app.name}",
         owner_username=current_user.username
     )
-    return to_task_info(task)
+    return task
 
 @apps_zoo_router.get("/installed/{app_id}/logs", response_model=dict)
 def get_app_log(app_id: str, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):

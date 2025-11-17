@@ -108,7 +108,7 @@ def build_utils_router(router: APIRouter):
             description="Scans and deletes discussions with 0 or 1 message.",
             owner_username=current_user.username
         )
-        return _to_task_info(db_task)
+        return db_task
 
     @router.post("/{discussion_id}/auto-title", response_model=DiscussionInfo)
     async def generate_discussion_auto_title(

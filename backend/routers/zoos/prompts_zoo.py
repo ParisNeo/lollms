@@ -184,7 +184,7 @@ def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_us
         description="Scanning all Zoo repositories and rebuilding the cache.",
         owner_username=current_user.username
     )
-    return to_task_info(task)
+    return task
     
 @prompts_zoo_router.get("/categories", response_model=List[str])
 def get_prompt_zoo_categories():
@@ -245,7 +245,7 @@ def pull_prompt_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
         target=pull_repo_task,
         args=(repo_id, DBPromptZooRepository, PROMPTS_ZOO_ROOT_PATH, 'prompt')
     )
-    return to_task_info(task)
+    return task
 
 @prompts_zoo_router.get("/available", response_model=ZooPromptInfoResponse)
 def get_available_zoo_prompts(
@@ -334,7 +334,7 @@ def install_zoo_prompt(request: PromptInstallRequest):
         target=_install_prompt_task,
         args=(request.repository, request.folder_name)
     )
-    return to_task_info(task)
+    return task
     
 @prompts_zoo_router.post("/installed/{prompt_id}/update", response_model=TaskInfo, status_code=202)
 def update_installed_prompt(prompt_id: str, db: Session = Depends(get_db)):
@@ -346,7 +346,7 @@ def update_installed_prompt(prompt_id: str, db: Session = Depends(get_db)):
         target=_update_prompt_task,
         args=(prompt.id,)
     )
-    return to_task_info(task)
+    return task
 
 @prompts_zoo_router.post("/installed", response_model=PromptPublic, status_code=status.HTTP_201_CREATED)
 def create_system_prompt(prompt_data: PromptCreate, db: Session = Depends(get_db)):
@@ -390,4 +390,4 @@ def generate_prompt_from_ai(
         description=f"AI is creating a prompt based on: '{request.prompt[:50]}...'",
         owner_username=current_admin_user.username
     )
-    return to_task_info(task)
+    return task

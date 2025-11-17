@@ -348,7 +348,7 @@ async def email_users(payload: EmailUsersRequest, current_admin: UserAuthDetails
         args=(payload.user_ids, payload.subject, payload.body, payload.background_color, payload.send_as_text),
         owner_username=current_admin.username
     )
-    return _to_task_info(db_task)
+    return db_task
 
 @user_management_router.post("/enhance-email", response_model=EnhancedEmailResponse)
 async def enhance_email_with_ai(payload: EnhanceEmailRequest, current_admin: UserAuthDetails = Depends(get_current_admin_user)):

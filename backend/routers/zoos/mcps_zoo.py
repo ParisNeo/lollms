@@ -54,7 +54,7 @@ def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_us
         description="Scanning all Zoo repositories and rebuilding the cache.",
         owner_username=current_user.username
     )
-    return to_task_info(task)
+    return task
 
 
 @mcps_zoo_router.get("/categories", response_model=List[str])
@@ -116,7 +116,7 @@ def pull_mcp_zoo_repository(repo_id: int, db: Session = Depends(get_db)):
         target=pull_repo_task,
         args=(repo_id, DBMCPZooRepository, MCPS_ZOO_ROOT_PATH, 'mcp')
     )
-    return to_task_info(task)
+    return task
 
 @mcps_zoo_router.get("/available", response_model=ZooMCPInfoResponse)
 def get_available_zoo_mcps(
@@ -246,4 +246,4 @@ def install_zoo_mcp(request: AppInstallRequest):
         target=install_item_task,
         args=(request.repository, request.folder_name, request.port, request.autostart, MCPS_ZOO_ROOT_PATH)
     )
-    return to_task_info(task)
+    return task

@@ -100,7 +100,7 @@ def rescan_all_zoos(current_user: UserAuthDetails = Depends(get_current_admin_us
         description="Scanning all Zoo repositories and rebuilding the cache.",
         owner_username=current_user.username
     )
-    return to_task_info(task)
+    return task
 
 @personalities_zoo_router.get("/categories", response_model=List[str])
 def get_personality_zoo_categories():
@@ -153,7 +153,7 @@ def pull_repository(repo_id: int, db: Session = Depends(get_db)):
         target=pull_repo_task,
         args=(repo_id, DBPersonalityZooRepository, PERSONALITIES_ZOO_ROOT_PATH, 'personality')
     )
-    return to_task_info(task)
+    return task
 
 @personalities_zoo_router.get("/available", response_model=ZooPersonalityInfoResponse)
 def get_available(
@@ -235,4 +235,4 @@ def install_personality(request: PersonalityInstallRequest):
         target=_install_personality_task,
         args=(request.repository, request.folder_name)
     )
-    return to_task_info(task)
+    return task

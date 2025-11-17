@@ -527,4 +527,4 @@ def build_artefacts_router(router: APIRouter):
             description=f"Scraping content from URL and saving as artefact.",
             owner_username=current_user.username
         )
-        return _to_task_info(task)
+        return task

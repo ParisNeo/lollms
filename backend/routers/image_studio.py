@@ -125,7 +125,7 @@ async def generate_image(
         description=f"Generating {request_data.get('n', 1)} image(s) with prompt: '{request_data.get('prompt', '')[:50]}...'",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
+    return db_task
 
 
 @image_studio_router.post("/edit", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
@@ -145,7 +145,7 @@ async def edit_image(
         description=f"Editing image(s) with prompt: '{request_data.get('prompt', '')[:50]}...'",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
+    return db_task
 
 @image_studio_router.post("/upload", response_model=List[UserImagePublic])
 async def upload_images(
@@ -237,4 +237,4 @@ async def enhance_image_prompt(
         description="AI is enhancing your prompt...",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
+    return db_task

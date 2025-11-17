@@ -396,7 +396,7 @@ async def upload_rag_documents_to_datastore(
         description=f"Adding {len(files)} files to the '{datastore_record.name}' DataStore.",
         owner_username=current_user.username
     )
-    return _to_task_info(db_task)
+    return db_task
 
 @store_files_router.get("/files", response_model=List[SafeStoreDocumentInfo])
 async def list_rag_documents_in_datastore(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[SafeStoreDocumentInfo]:
@@ -539,7 +539,7 @@ async def generate_datastore_graph(
             description=f"Generating knowledge graph for '{datastore_record.name}'. This may take a while.",
             owner_username=current_user.username
         )
-        return _to_task_info(db_task)
+        return db_task
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
@@ -569,7 +569,7 @@ async def update_datastore_graph(
             description=f"Updating knowledge graph for '{datastore_record.name}'.",
             owner_username=current_user.username
         )
-        return _to_task_info(db_task)
+        return db_task
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:

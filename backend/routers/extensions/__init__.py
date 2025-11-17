@@ -353,7 +353,7 @@ def reload_user_lollms_client(
         args=(current_user.username,),
         description="Refreshes the connection to all MCP servers and re-discovers available tools."
     )
-    return _to_task_info(db_task)
+    return db_task
 
 @mcp_router.get("/tools", response_model=List[ToolInfo])
 def list_all_available_tools(current_user: UserAuthDetails = Depends(get_current_active_user)):
