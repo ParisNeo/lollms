@@ -1,15 +1,17 @@
-# [CREATE] backend/routers/groups.py
+# backend/routers/groups.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import desc
 from typing import List
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.group import Group as DBGroup
-from backend.db.models.social import Post as DBPost
+from backend.db.models.social import Post as DBPost, Comment as DBComment
 from backend.db.base import FriendshipStatus
 from backend.db.utils import get_friendship_record
-from backend.models import UserAuthDetails, PostPublic
+from backend.models import UserAuthDetails
+from backend.models.social import PostPublic
 from backend.models.group import GroupCreate, GroupUpdate, GroupPublic, MemberUpdate
 from backend.session import get_current_db_user_from_token
 from backend.tasks.social_tasks import get_post_public

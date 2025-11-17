@@ -237,6 +237,9 @@ export const useAdminStore = defineStore('admin', () => {
         if (promises.length > 0) {
             await Promise.allSettled(promises);
             console.log(`[Admin Store] UI data refreshed for task: ${task.name}`);
+            if (isAppOrMcpTask) {
+                uiStore.addNotification(`Apps/MCPs list updated after task '${task.name}' completed.`, 'info');
+            }
         }
     }
 
@@ -828,7 +831,12 @@ export const useAdminStore = defineStore('admin', () => {
     async function stopApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/stop`); tasksStore.addTask(res.data); }
     async function restartApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/restart`); tasksStore.addTask(res.data); }
     async function updateApp(appId) { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/update`); tasksStore.addTask(res.data); }
-    async function uninstallApp(appId) { await apiClient.delete(`/api/apps_zoo/installed/${appId}`); await fetchZooApps(); await fetchZooMcps(); }
+    async function uninstallApp(appId) {
+        await apiClient.delete(`/api/apps_zoo/installed/${appId}`);
+        await fetchZooApps();
+        await fetchZooMcps();
+        uiStore.addNotification('Item uninstalled. View has been refreshed.', 'success');
+    }
     async function updateInstalledApp(appId, payload) {
         const allItems = [...(zooApps.value.items || []), ...(zooMcps.value.items || [])];
         const item = allItems.find(i => i.id === appId);
@@ -849,8 +857,16 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateAppConfig(appId, configData) { await apiClient.put(`/api/apps_zoo/installed/${appId}/config`, configData); }
     async function fetchAppEnv(appId) { const res = await apiClient.get(`/api/apps_zoo/installed/${appId}/env`); return res.data; }
     async function updateAppEnv(appId, content) { await apiClient.put(`/api/apps_zoo/installed/${appId}/env`, { content }); uiStore.addNotification('.env file saved successfully.', 'success'); }
-    async function deleteRegisteredApp(appId) { await apiClient.delete(`/api/apps/${appId}`); await fetchZooApps(); }
-    async function deleteRegisteredMcp(mcpId) { await apiClient.delete(`/api/mcps/${mcpId}`); await fetchZooMcps(); }
+    async function deleteRegisteredApp(appId) {
+        await apiClient.delete(`/api/apps/${appId}`);
+        await fetchZooApps();
+        uiStore.addNotification('App registration removed. View has been refreshed.', 'success');
+    }
+    async function deleteRegisteredMcp(mcpId) {
+        await apiClient.delete(`/api/mcps/${mcpId}`);
+        await fetchZooMcps();
+        uiStore.addNotification('MCP registration removed. View has been refreshed.', 'success');
+    }
 
     // --- Fun Fact Actions ---
     async function fetchFunFacts() { isLoadingFunFacts.value = true; try { const res = await apiClient.get('/api/admin/fun-facts'); funFacts.value = res.data; } finally { isLoadingFunFacts.value = false; } }

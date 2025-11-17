@@ -1,4 +1,4 @@
-# [CREATE] backend/models/group.py
+# backend/models/group.py
 from pydantic import BaseModel, Field
 from typing import List, Optional
 from backend.models.user import AuthorPublic

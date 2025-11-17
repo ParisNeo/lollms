@@ -1,4 +1,4 @@
-# [UPDATE] backend/db/base.py
+# backend/db/base.py
 import enum
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import (

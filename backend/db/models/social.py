@@ -1,4 +1,4 @@
-# [UPDATE] backend/db/models/social.py
+# backend/db/models/social.py
 from sqlalchemy import (
     Column, Integer,
     ForeignKey, UniqueConstraint,

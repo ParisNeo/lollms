@@ -1,4 +1,4 @@
-# [UPDATE] backend/db/models/user.py
+# backend/db/models/user.py
 # backend/db/models/user.py
 from sqlalchemy import (
     Column, Integer, String, Boolean,

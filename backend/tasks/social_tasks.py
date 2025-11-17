@@ -9,7 +9,8 @@ from backend.db import get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
 from backend.db.models.social import Post as DBPost, PostLike as DBPostLike, Comment as DBComment
 from backend.db.base import PostVisibility
-from backend.models import UserAuthDetails, PostCreate, PostPublic, CommentCreate, CommentPublic, PostUpdate, AuthorPublic
+from backend.models.social import PostCreate, PostPublic, CommentCreate, CommentPublic, PostUpdate, AuthorPublic
+from backend.models import UserAuthDetails
 from backend.session import get_current_db_user_from_token, build_lollms_client_from_params
 from backend.task_manager import task_manager
 from backend.ws_manager import manager
@@ -169,6 +170,7 @@ def get_main_feed(
     db: Session = Depends(get_db)
 ):
     following_ids = [u.id for u in current_user.following]
+    group_ids = [g.id for g in current_user.groups]
     
     # Base query for posts visible to the current user
     query = db.query(DBPost).options(
@@ -178,7 +180,8 @@ def get_main_feed(
         DBPost.author_id != current_user.id,
         or_(
             DBPost.visibility == PostVisibility.public,
-            and_(DBPost.visibility == PostVisibility.followers, DBPost.author_id.in_(following_ids))
+            and_(DBPost.visibility == PostVisibility.followers, DBPost.author_id.in_(following_ids)),
+            and_(DBPost.visibility == PostVisibility.group, DBPost.group_id.in_(group_ids))
         )
     ).order_by(desc(DBPost.created_at)).offset(skip).limit(limit)
     
@@ -192,11 +195,19 @@ def create_new_post(
     current_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
+    if post_data.visibility == PostVisibility.group:
+        if not post_data.group_id:
+            raise HTTPException(status_code=400, detail="A group ID is required for group posts.")
+        # Verify user is a member of the group
+        if not any(g.id == post_data.group_id for g in current_user.groups):
+            raise HTTPException(status_code=403, detail="You are not a member of this group.")
+
     new_post = DBPost(
         author_id=current_user.id,
         content=post_data.content,
         visibility=post_data.visibility,
-        media=post_data.media
+        media=post_data.media,
+        group_id=post_data.group_id if post_data.visibility == PostVisibility.group else None
     )
     db.add(new_post)
     db.commit()
@@ -207,7 +218,7 @@ def create_new_post(
         task_manager.submit_task(
             name=f"Replying to mention in post {new_post.id}",
             target=_respond_to_mention_task,
-            args=(new_post.id, current_user.username, post_data.content, db_session_module.SessionLocal),
+            args=('post', new_post.id),
             owner_username=current_user.username 
         )
 
@@ -238,7 +249,7 @@ def add_comment_to_post(
         task_manager.submit_task(
             name=f"Replying to mention in comment on post {post_id}",
             target=_respond_to_mention_task,
-            args=(post_id, current_user.username, comment_data.content, db_session_module.SessionLocal, new_comment.id),
+            args=('comment', new_comment.id),
             owner_username=current_user.username
         )
 

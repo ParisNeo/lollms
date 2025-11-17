@@ -26,6 +26,9 @@ from ascii_colors import ASCIIColors
 from filelock import FileLock, Timeout
 
 from backend.db import get_db
+from backend.db.models.user import User as DBUser
+from backend.db.models.api_key import OpenAIAPIKey
+from backend.security import generate_api_key, hash_api_key
 from backend.db.models.service import App as DBApp, MCP as DBMCP, AppZooRepository, MCPZooRepository
 from backend.db.models.db_task import DBTask
 from backend.models import TaskInfo, AppPublic
@@ -815,9 +818,33 @@ def install_item_task(task: Task, repository: str, folder_name: str, port: int, 
                         example_content = f.read()
                     
                     if 'LOLLMS_KEY' in example_content:
-                        task.log("Found LOLLMS_KEY in .env.example, generating a new API key...")
-                        from backend.security import generate_api_key
-                        full_key, _ = generate_api_key()
+                        task.log("Found LOLLMS_KEY in .env.example, generating and storing a new API key...")
+                        full_key, key_prefix = generate_api_key()
+
+                        # --- NEW LOGIC: Save key to DB for @lollms user ---
+                        with task.db_session_factory() as db_for_key:
+                            lollms_bot_user = db_for_key.query(DBUser).filter(DBUser.username == 'lollms').first()
+                            if not lollms_bot_user:
+                                task.log("CRITICAL: The @lollms system user was not found. Cannot create a dedicated API key for this app. The app may not be able to communicate with the main server.", "ERROR")
+                            else:
+                                hashed_key = hash_api_key(full_key)
+                                key_alias = f"App: {item_name}"
+                                
+                                # Check if a key with this alias already exists for the bot
+                                existing_key = db_for_key.query(OpenAIAPIKey).filter_by(user_id=lollms_bot_user.id, alias=key_alias).first()
+                                if existing_key:
+                                    task.log(f"An API key with alias '{key_alias}' already exists for the bot. Reusing it might cause conflicts. A new key will be generated, but consider renaming the old one.", "WARNING")
+
+                                new_api_key = OpenAIAPIKey(
+                                    user_id=lollms_bot_user.id,
+                                    alias=key_alias,
+                                    key_prefix=key_prefix,
+                                    key_hash=hashed_key
+                                )
+                                db_for_key.add(new_api_key)
+                                db_for_key.commit()
+                                task.log(f"Successfully created and stored API key '{key_alias}' for the @lollms bot user.", "INFO")
+                        # --- END NEW LOGIC ---
                         
                         with open(env_path, 'r', encoding='utf-8') as f:
                             env_lines = f.readlines()
@@ -835,7 +862,7 @@ def install_item_task(task: Task, repository: str, folder_name: str, port: int, 
 
                         with open(env_path, 'w', encoding='utf-8') as f:
                             f.writelines(env_lines)
-                        task.log("Successfully generated and set LOLLMS_KEY in the .env file.")
+                        task.log("Successfully set LOLLMS_KEY in the app's .env file.")
                 except Exception as e:
                     task.log(f"An error occurred while trying to auto-generate API key: {e}", "WARNING")
                     trace_exception(e)
