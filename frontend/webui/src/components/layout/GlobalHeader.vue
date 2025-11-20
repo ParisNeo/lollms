@@ -1,14 +1,12 @@
-<!-- [UPDATE] frontend/webui/src/components/layout/GlobalHeader.vue -->
 <script setup>
-// ... imports ...
-import { computed, ref, provide, watch, nextTick } from 'vue';
+import { computed, ref, provide, watch, nextTick, markRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
-import { useSocialStore } from '../../stores/social'; // Add social store
+import { useSocialStore } from '../../stores/social';
 
 import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
 import TasksManagerButton from './TasksManagerButton.vue';
@@ -24,37 +22,28 @@ import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconDataZone from '../../assets/icons/IconDataZone.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
-import IconMessage from '../../assets/icons/IconMessage.vue'; // Import Message Icon
+import IconMessage from '../../assets/icons/IconMessage.vue'; 
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const dataStore = useDataStore();
-const socialStore = useSocialStore(); // Init social store
+const socialStore = useSocialStore();
 const route = useRoute();
 const router = useRouter();
 
-// ... existing computed properties ...
 const user = computed(() => authStore.user);
 const wsConnected = computed(() => authStore.wsConnected);
 const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
 const pageTitle = computed(() => uiStore.pageTitle);
 const pageTitleIcon = computed(() => uiStore.pageTitleIcon);
 const mainView = computed(() => uiStore.mainView);
-const unreadDmCount = computed(() => socialStore.totalUnreadDms); // Compute unread count
+const unreadDmCount = computed(() => socialStore.totalUnreadDms);
 
 const showDataZoneButton = computed(() => {
     return route.name === 'Home' && mainView.value === 'chat';
 });
 
-
-const modelSearchTerm = ref('');
-const personalitySearchTerm = ref('');
-const ttiModelSearchTerm = ref('');
-const ttsModelSearchTerm = ref('');
-const sttModelSearchTerm = ref(''); // New search term for STT
-
-// --- Dropdown Logic ---
 const isMenuOpen = ref(false);
 const menuTriggerRef = ref(null);
 const menuFloatingRef = ref(null);
@@ -67,7 +56,6 @@ const { floatingStyles } = useFloating(menuTriggerRef, menuFloatingRef, {
   middleware: [offset(5), flip(), shift({ padding: 5 })],
 });
 
-// --- FIX: Provide context for submenus ---
 function setSubmenuActive(status) {
     isSubmenuActive.value = status;
 }
@@ -78,7 +66,6 @@ provide('dropdown-context', {
   setSubmenuActive,
   cancelClose
 });
-// --- END FIX ---
 
 const vOnClickOutside = {
   mounted: (el, binding) => {
@@ -96,254 +83,93 @@ const vOnClickOutside = {
   },
 };
 
-const activePersonalityId = computed({
-    get: () => user.value?.active_personality_id,
-    set: (id) => authStore.updateUserPreferences({ active_personality_id: id })
-});
-const activeModelName = computed({
-    get: () => user.value?.lollms_model_name,
-    set: (name) => authStore.updateUserPreferences({ lollms_model_name: name })
-});
-const activeTtiModelName = computed({
-    get: () => user.value?.tti_binding_model_name,
-    set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name })
-});
-const activeItiModelName = computed({
-    get: () => user.value?.iti_binding_model_name,
-    set: (name) => authStore.updateUserPreferences({ iti_binding_model_name: name })
-});
-const activeTtsModelName = computed({
-    get: () => user.value?.tts_binding_model_name,
-    set: (name) => authStore.updateUserPreferences({ tts_binding_model_name: name })
-});
-const activeSttModelName = computed({
-    get: () => user.value?.stt_binding_model_name,
-    set: (name) => authStore.updateUserPreferences({ stt_binding_model_name: name })
-});
+// Model selection state
+const modelSearchTerm = ref('');
+const personalitySearchTerm = ref('');
+const ttiModelSearchTerm = ref('');
+const ttsModelSearchTerm = ref('');
+const sttModelSearchTerm = ref('');
 
+// Active Selections
+const activePersonalityId = computed({ get: () => user.value?.active_personality_id, set: (id) => authStore.updateUserPreferences({ active_personality_id: id }) });
+const activeModelName = computed({ get: () => user.value?.lollms_model_name, set: (name) => authStore.updateUserPreferences({ lollms_model_name: name }) });
+const activeTtiModelName = computed({ get: () => user.value?.tti_binding_model_name, set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name }) });
+const activeItiModelName = computed({ get: () => user.value?.iti_binding_model_name, set: (name) => authStore.updateUserPreferences({ iti_binding_model_name: name }) });
+const activeTtsModelName = computed({ get: () => user.value?.tts_binding_model_name, set: (name) => authStore.updateUserPreferences({ tts_binding_model_name: name }) });
+const activeSttModelName = computed({ get: () => user.value?.stt_binding_model_name, set: (name) => authStore.updateUserPreferences({ stt_binding_model_name: name }) });
 
-const availablePersonalities = computed(() => {
-    return [
-        { isGroup: true, label: 'Personal', items: dataStore.userPersonalities.sort((a, b) => a.name.localeCompare(b.name)) },
-        { isGroup: true, label: 'Public', items: dataStore.publicPersonalities.sort((a, b) => a.name.localeCompare(b.name)) }
-    ].filter(group => group.items.length > 0);
-});
-
+// Available Data
+const availablePersonalities = computed(() => [{ isGroup: true, label: 'Personal', items: dataStore.userPersonalities }, { isGroup: true, label: 'Public', items: dataStore.publicPersonalities }]);
 const formattedAvailableModels = computed(() => dataStore.availableLLMModelsGrouped);
 const formattedAvailableTtiModels = computed(() => dataStore.availableTtiModelsGrouped);
 const formattedAvailableTtsModels = computed(() => dataStore.availableTtsModelsGrouped);
-const formattedAvailableSttModels = computed(() => dataStore.availableSttModelsGrouped); // New getter for STT
+const formattedAvailableSttModels = computed(() => dataStore.availableSttModelsGrouped);
 
-const selectedModel = computed(() => {
-    if (!activeModelName.value || !formattedAvailableModels.value) return null;
-    for (const group of formattedAvailableModels.value) {
-        if (group.items) {
-            const model = group.items.find(item => item.id === activeModelName.value);
-            if (model) return model;
-        }
-    }
-    return null;
-});
-const selectedPersonality = computed(() => {
-    if (!activePersonalityId.value || !availablePersonalities.value) return null;
-    for (const group of availablePersonalities.value) {
-        if(group.items){
-            const personality = group.items.find(item => item.id === activePersonalityId.value);
-            if (personality) return personality;
-        }
-    }
-    return null;
-});
-const selectedTtiModel = computed(() => {
-    if (!activeTtiModelName.value || !formattedAvailableTtiModels.value) return null;
-    for (const group of formattedAvailableTtiModels.value) {
-        if (group.items) {
-            const model = group.items.find(item => item.id === activeTtiModelName.value);
-            if (model) return model;
-        }
-    }
-    return null;
-});
-const selectedItiModel = computed(() => {
-    if (!activeItiModelName.value || !formattedAvailableTtiModels.value) return null;
-    for (const group of formattedAvailableTtiModels.value) {
-        if (group.items) {
-            const model = group.items.find(item => item.id === activeItiModelName.value);
-            if (model) return model;
-        }
-    }
-    return null;
-});
-const selectedTtsModel = computed(() => {
-    if (!activeTtsModelName.value || !formattedAvailableTtsModels.value) return null;
-    for (const group of formattedAvailableTtsModels.value) {
-        if (group.items) {
-            const model = group.items.find(item => item.id === activeTtsModelName.value);
-            if (model) return model;
-        }
-    }
-    return null;
-});
+// Selected Items
+const selectedModel = computed(() => formattedAvailableModels.value.flatMap(g => g.items).find(m => m.id === activeModelName.value));
+const selectedPersonality = computed(() => availablePersonalities.value.flatMap(g => g.items).find(p => p.id === activePersonalityId.value));
+const selectedTtiModel = computed(() => formattedAvailableTtiModels.value.flatMap(g => g.items).find(m => m.id === activeTtiModelName.value));
+const selectedItiModel = computed(() => formattedAvailableTtiModels.value.flatMap(g => g.items).find(m => m.id === activeItiModelName.value));
+const selectedTtsModel = computed(() => formattedAvailableTtsModels.value.flatMap(g => g.items).find(m => m.id === activeTtsModelName.value));
+const selectedSttModel = computed(() => formattedAvailableSttModels.value.flatMap(g => g.items).find(m => m.id === activeSttModelName.value));
 
-const selectedSttModel = computed(() => {
-    if (!activeSttModelName.value || !formattedAvailableSttModels.value) return null;
-    for (const group of formattedAvailableSttModels.value) {
-        if (group.items) {
-            const model = group.items.find(item => item.id === activeSttModelName.value);
-            if (model) return model;
-        }
-    }
-    return null;
-});
-
-const filteredAvailableModels = computed(() => {
-    if (!modelSearchTerm.value) return formattedAvailableModels.value;
-    const term = modelSearchTerm.value.toLowerCase();
-    const result = [];
-    for (const group of formattedAvailableModels.value) {
-        const filteredItems = group.items.filter(item => item.name.toLowerCase().includes(term));
-        if (filteredItems.length > 0) {
-            result.push({ ...group, items: filteredItems });
-        }
-    }
-    return result;
-});
-
-const filteredAvailablePersonalities = computed(() => {
-    if (!personalitySearchTerm.value) return availablePersonalities.value;
-    const term = personalitySearchTerm.value.toLowerCase();
-    const result = [];
-    for (const group of availablePersonalities.value) {
-        const filteredItems = group.items.filter(item => item.name.toLowerCase().includes(term));
-        if (filteredItems.length > 0) {
-            result.push({ ...group, items: filteredItems });
-        }
-    }
-    return result;
-});
-
-const filteredAvailableTtiModels = computed(() => {
-    if (!ttiModelSearchTerm.value) return formattedAvailableTtiModels.value;
-    const term = ttiModelSearchTerm.value.toLowerCase();
-    const result = [];
-    for (const group of formattedAvailableTtiModels.value) {
-        if (group.items) {
-            const filteredItems = group.items.filter(item => item.name.toLowerCase().includes(term));
-            if (filteredItems.length > 0) {
-                result.push({ ...group, items: filteredItems });
-            }
-        }
-    }
-    return result;
-});
-
-const filteredAvailableTtsModels = computed(() => {
-    if (!ttsModelSearchTerm.value) return formattedAvailableTtsModels.value;
-    const term = ttsModelSearchTerm.value.toLowerCase();
-    const result = [];
-    for (const group of formattedAvailableTtsModels.value) {
-        if (group.items) {
-            const filteredItems = group.items.filter(item => item.name.toLowerCase().includes(term));
-            if (filteredItems.length > 0) {
-                result.push({ ...group, items: filteredItems });
-            }
-        }
-    }
-    return result;
-});
-
-const filteredAvailableSttModels = computed(() => {
-    if (!sttModelSearchTerm.value) return formattedAvailableSttModels.value;
-    const term = sttModelSearchTerm.value.toLowerCase();
-    const result = [];
-    for (const group of formattedAvailableSttModels.value) {
-        if (group.items) {
-            const filteredItems = group.items.filter(item => item.name.toLowerCase().includes(term));
-            if (filteredItems.length > 0) {
-                result.push({ ...group, items: filteredItems });
-            }
-        }
-    }
-    return result;
-});
+// Filtering Logic
+const filteredAvailableModels = computed(() => modelSearchTerm.value ? formattedAvailableModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(modelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableModels.value);
+const filteredAvailableTtiModels = computed(() => ttiModelSearchTerm.value ? formattedAvailableTtiModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(ttiModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableTtiModels.value);
+const filteredAvailableTtsModels = computed(() => ttsModelSearchTerm.value ? formattedAvailableTtsModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(ttsModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableTtsModels.value);
+const filteredAvailableSttModels = computed(() => sttModelSearchTerm.value ? formattedAvailableSttModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(sttModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableSttModels.value);
+const filteredAvailablePersonalities = computed(() => personalitySearchTerm.value ? availablePersonalities.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(personalitySearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : availablePersonalities.value);
 
 
-function openModelCard(model) {
-    uiStore.openModal('modelCard', { model });
-}
-
-function selectModel(id) {
-    activeModelName.value = id;
-}
-
-function selectPersonality(id) {
-    activePersonalityId.value = id;
-}
-
-function selectTtiModel(id) {
-    activeTtiModelName.value = id;
-}
-
-function selectItiModel(id) {
-    activeItiModelName.value = id;
-}
-
-function selectTtsModel(id) {
-    activeTtsModelName.value = id;
-}
-
-function selectSttModel(id) {
-    activeSttModelName.value = id;
-}
-
+function openModelCard(model) { uiStore.openModal('modelCard', { model }); }
+function selectModel(id) { activeModelName.value = id; }
+function selectPersonality(id) { activePersonalityId.value = id; }
+function selectTtiModel(id) { activeTtiModelName.value = id; }
+function selectItiModel(id) { activeItiModelName.value = id; }
+function selectTtsModel(id) { activeTtsModelName.value = id; }
+function selectSttModel(id) { activeSttModelName.value = id; }
 function handleEditPersonality(personality, event) {
     event.stopPropagation();
     isMenuOpen.value = false;
     router.push({ path: '/settings', query: { tab: 'personalities' } });
-    nextTick(() => {
-        uiStore.openModal('personalityEditor', { personality: personality, isSystemPersonality: false });
-    });
+    nextTick(() => { uiStore.openModal('personalityEditor', { personality: personality, isSystemPersonality: false }); });
 }
+
 </script>
 
 <template>
   <header class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-2 sm:p-3 flex items-center justify-between shadow-sm z-10">
-    <!-- ... (Left and Center sections remain unchanged) ... -->
     <!-- Left Section: Logo/Title/Model Selector -->
     <div v-if="route.name === 'Home' && user && user.user_ui_level >= 2" class="hidden md:flex items-center gap-2 flex-1 min-w-0 justify-center px-4">
-        <!-- ... (Existing Model Selector Code) ... -->
          <div class="relative">
             <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" class="toolbox-select flex items-center gap-2 max-w-sm !p-1">
                  <div class="flex items-center flex-shrink-0">
-                      <!-- ... (Icons) ... -->
+                      <!-- LLM Icon -->
                       <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md">
                           <img v-if="selectedModel?.alias?.icon" :src="selectedModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
                           <IconCpuChip v-else class="w-4 h-4" />
                       </div>
+                      <!-- TTI Icon -->
                       <div v-if="!user.tti_model_forced" class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
                            <img v-if="selectedTtiModel?.alias?.icon" :src="selectedTtiModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
                            <IconPhoto v-else class="w-4 h-4" />
                       </div>
-                  
-                  <!-- ITI Icon -->
-                  <div v-if="!user.iti_model_forced" class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
-                      <img v-if="selectedItiModel?.alias?.icon" :src="selectedItiModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
-                      <IconPencil v-else class="w-4 h-4" />
-                  </div>
-                  
-                  <!-- TTS Icon -->
-                  <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
-                      <img v-if="selectedTtsModel?.alias?.icon" :src="selectedTtsModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
-                      <IconMicrophone v-else class="w-4 h-4" />
-                  </div>
-                  
-                  <!-- STT Icon -->
-                  <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-20 border-2 border-white dark:border-gray-800">
-                      <img v-if="selectedSttModel?.alias?.icon" :src="selectedSttModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
-                      <IconMicrophone v-else class="w-4 h-4" />
-                  </div>
-
-                  <!-- Personality Icon -->
+                      <!-- ITI Icon -->
+                      <div v-if="!user.iti_model_forced" class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
+                           <img v-if="selectedItiModel?.alias?.icon" :src="selectedItiModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
+                           <IconPencil v-else class="w-4 h-4" />
+                      </div>
+                       <!-- TTS Icon -->
+                      <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
+                           <img v-if="selectedTtsModel?.alias?.icon" :src="selectedTtsModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
+                           <IconMicrophone v-else class="w-4 h-4" />
+                      </div>
+                      <!-- STT Icon -->
+                      <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
+                           <img v-if="selectedSttModel?.alias?.icon" :src="selectedSttModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
+                           <IconMicrophone v-else class="w-4 h-4" />
+                      </div>
+                       <!-- Personality Icon -->
                         <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-20 border-2 border-white dark:border-gray-800">
                             <img v-if="selectedPersonality?.icon_base64" :src="selectedPersonality.icon_base64" class="h-full w-full rounded-md object-cover"/>
                             <IconUserCircle v-else class="w-4 h-4" />
@@ -356,7 +182,6 @@ function handleEditPersonality(personality, event) {
                  <svg class="w-4 h-4 text-gray-400 flex-shrink-0 ml-auto" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
             </button>
             
-            <!-- ... (Teleport Dropdown Content) ... -->
              <Teleport to="body">
                 <Transition
                     enter-active-class="transition ease-out duration-100"
@@ -373,9 +198,7 @@ function handleEditPersonality(personality, event) {
                         v-on-click-outside="() => { isMenuOpen = false; isSubmenuActive = false; }"
                         class="z-50 w-64 origin-top-left rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1 flex flex-col max-h-[80vh]"
                     >
-                         <!-- ... (Dropdown items) ... -->
                          <DropdownSubmenu title="LLM Model" icon="cpu-chip" :icon-src="selectedModel?.alias?.icon">
-                             <!-- ... Content ... -->
                              <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full">
                             </div>
@@ -399,9 +222,7 @@ function handleEditPersonality(personality, event) {
                                 </div>
                             </div>
                          </DropdownSubmenu>
-                         <!-- ... (Other Submenus for TTI, TTS, STT, Personality) ... -->
                          <DropdownSubmenu v-if="!user.tti_model_forced" title="Text-to-Image" icon="photo" :icon-src="selectedTtiModel?.alias?.icon">
-                            <!-- ... Content ... -->
                              <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search TTI models..." class="input-field-sm w-full">
                             </div>
@@ -425,12 +246,8 @@ function handleEditPersonality(personality, event) {
                                 </div>
                             </div>
                          </DropdownSubmenu>
-                        
-                        <DropdownSubmenu v-if="!user.iti_model_forced" title="Image Editing" icon="pencil" :icon-src="selectedItiModel?.alias?.icon">
-                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search Image models..." class="input-field-sm w-full">
-                            </div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                         <DropdownSubmenu v-if="!user.iti_model_forced" title="Image Editing" icon="pencil" :icon-src="selectedItiModel?.alias?.icon">
+                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
                                 <button @click="selectItiModel(null)" class="menu-item-button" :class="{'selected': !activeItiModelName}">
                                     <div class="flex items-center space-x-3 truncate">
                                         <IconPencil class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
@@ -438,8 +255,6 @@ function handleEditPersonality(personality, event) {
                                     </div>
                                 </button>
                                 <div v-if="filteredAvailableTtiModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                <div v-if="dataStore.isLoadingTtiModels" class="text-center p-4 text-sm text-gray-500">Loading models...</div>
-                                <div v-else-if="filteredAvailableTtiModels.length === 0" class="text-center p-4 text-sm text-gray-500">No models found.</div>
                                 <div v-for="group in filteredAvailableTtiModels" :key="group.label">
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
                                     <button v-for="item in group.items" :key="item.id" @click="selectItiModel(item.id)" class="menu-item-button" :class="{'selected': activeItiModelName === item.id}">
@@ -450,10 +265,10 @@ function handleEditPersonality(personality, event) {
                                         </div>
                                     </button>
                                 </div>
-                            </div>
-                        </DropdownSubmenu>
+                             </div>
+                         </DropdownSubmenu>
 
-                        <DropdownSubmenu title="Text-to-Speech" icon="microphone" :icon-src="selectedTtsModel?.alias?.icon">
+                         <DropdownSubmenu title="Text-to-Speech" icon="microphone" :icon-src="selectedTtsModel?.alias?.icon">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search TTS models..." class="input-field-sm w-full">
                             </div>
@@ -465,8 +280,6 @@ function handleEditPersonality(personality, event) {
                                     </div>
                                 </button>
                                 <div v-if="filteredAvailableTtsModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                <div v-if="dataStore.isLoadingTtsModels" class="text-center p-4 text-sm text-gray-500">Loading TTS models...</div>
-                                <div v-else-if="filteredAvailableTtsModels.length === 0" class="text-center p-4 text-sm text-gray-500">No TTS models found.</div>
                                 <div v-for="group in filteredAvailableTtsModels" :key="group.label">
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
                                     <button v-for="item in group.items" :key="item.id" @click="selectTtsModel(item.id)" class="menu-item-button" :class="{'selected': activeTtsModelName === item.id}">
@@ -479,7 +292,7 @@ function handleEditPersonality(personality, event) {
                                 </div>
                             </div>
                         </DropdownSubmenu>
-                        
+
                         <DropdownSubmenu title="Speech-to-Text" icon="microphone" :icon-src="selectedSttModel?.alias?.icon">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="sttModelSearchTerm" @click.stop placeholder="Search STT models..." class="input-field-sm w-full">
@@ -492,8 +305,6 @@ function handleEditPersonality(personality, event) {
                                     </div>
                                 </button>
                                 <div v-if="filteredAvailableSttModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                <div v-if="dataStore.isLoadingSttModels" class="text-center p-4 text-sm text-gray-500">Loading STT models...</div>
-                                <div v-else-if="filteredAvailableSttModels.length === 0" class="text-center p-4 text-sm text-gray-500">No STT models found.</div>
                                 <div v-for="group in filteredAvailableSttModels" :key="group.label">
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
                                     <button v-for="item in group.items" :key="item.id" @click="selectSttModel(item.id)" class="menu-item-button" :class="{'selected': activeSttModelName === item.id}">
@@ -507,8 +318,7 @@ function handleEditPersonality(personality, event) {
                             </div>
                         </DropdownSubmenu>
 
-                        <DropdownSubmenu title="Personality" icon="user-circle" :icon-src="selectedPersonality?.icon_base64">
-                             <!-- ... Content ... -->
+                         <DropdownSubmenu title="Personality" icon="user-circle" :icon-src="selectedPersonality?.icon_base64">
                               <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="personalitySearchTerm" @click.stop placeholder="Search personalities..." class="input-field-sm w-full">
                             </div>
@@ -530,7 +340,7 @@ function handleEditPersonality(personality, event) {
                                                 <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
                                             </div>
                                         </button>
-                                        <button v-if="group.label === 'Personal'" @click="handleEditPersonality(item, $event)" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 opacity-0 group-hover/personality:opacity-100 transition-opacity" title="Edit Personality">
+                                        <button v-if="group.label === 'Personal'" @click="handleEditPersonality(item, $event)" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-50 opacity-0 group-hover/personality:opacity-100 transition-opacity" title="Edit Personality">
                                             <IconPencil class="w-4 h-4"/>
                                         </button>
                                     </div>

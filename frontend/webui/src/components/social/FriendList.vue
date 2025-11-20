@@ -25,13 +25,28 @@ async function handleRemoveFriend(friend) {
     }
 }
 
-function handleMessageFriend(friend) {
-    // Open conversation and rely on the sidebar logic (via store) to show the chat
+async function handleMessageFriend(friend) {
     socialStore.openConversation({
         id: friend.id,
         username: friend.username,
         icon: friend.icon
     });
+    // If the sidebar is handling chat now, we might not want to navigate.
+    // But user request history implied navigation, so keeping it optionally or removing if sidebar is preferred.
+    // Since ChatSidebar is global, opening conversation triggers it.
+    // We can stay on the current page.
+}
+
+function getStatusColor(status) {
+    if (status === 'connected') return 'bg-green-500';
+    if (status === 'absent') return 'bg-yellow-500';
+    return 'bg-gray-400';
+}
+
+function getStatusText(status) {
+    if (status === 'connected') return 'Online';
+    if (status === 'absent') return 'Absent';
+    return 'Offline';
 }
 </script>
 
@@ -46,13 +61,20 @@ function handleMessageFriend(friend) {
     </div>
     <ul v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
       <li v-for="friend in friends" :key="friend.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-sm flex flex-col items-center text-center">
-        <router-link :to="`/profile/${friend.username}`">
+        <router-link :to="`/profile/${friend.username}`" class="relative">
             <UserAvatar :icon="friend.icon" :username="friend.username" size-class="h-20 w-20" />
+            <div 
+                class="absolute bottom-1 right-1 w-5 h-5 border-4 border-white dark:border-gray-800 rounded-full"
+                :class="getStatusColor(friend.status)"
+                :title="getStatusText(friend.status)"
+            ></div>
         </router-link>
         <router-link :to="`/profile/${friend.username}`" class="mt-3 font-bold text-gray-900 dark:text-gray-100 hover:underline truncate w-full">
             {{ friend.username }}
         </router-link>
-        <div class="mt-4 flex items-center space-x-2 w-full">
+        <p class="text-xs text-gray-500 mb-3">{{ getStatusText(friend.status) }}</p>
+        
+        <div class="mt-auto flex items-center space-x-2 w-full">
             <button @click="handleMessageFriend(friend)" class="btn btn-secondary btn-sm flex-1 flex items-center justify-center space-x-1.5">
                 <IconMessage class="w-4 h-4" />
                 <span>Message</span>

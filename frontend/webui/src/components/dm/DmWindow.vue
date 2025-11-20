@@ -1,320 +1,179 @@
-<!-- [UPDATE] frontend/webui/src/components/dm/DmWindow.vue -->
 <script setup>
-import { ref, computed, onMounted, onUpdated, nextTick, watch } from 'vue';
-import { useAuthStore } from '../../stores/auth';
+import { ref, computed, nextTick, onUpdated, onMounted, watch } from 'vue';
 import { useSocialStore } from '../../stores/social';
+import { useAuthStore } from '../../stores/auth';
+import { useUiStore } from '../../stores/ui';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
+import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
+import IconSend from '../../assets/icons/IconSend.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
-import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
-import { useUiStore } from '../../stores/ui';
+import IconTrash from '../../assets/icons/IconTrash.vue';
+import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
+import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
+import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 
 const props = defineProps({
-  conversation: {
-    type: Object,
-    required: true,
-  },
-  compact: {
-    type: Boolean,
-    default: false
-  }
+    conversation: Object,
+    compact: Boolean
 });
-
 const emit = defineEmits(['back']);
 
-const authStore = useAuthStore();
 const socialStore = useSocialStore();
+const authStore = useAuthStore();
 const uiStore = useUiStore();
+const content = ref('');
+const messageContainer = ref(null);
+const fileInput = ref(null);
+const importInput = ref(null);
+const files = ref([]);
+const isUploading = ref(false);
+
+const messages = computed(() => props.conversation.messages);
+const title = computed(() => {
+    if (props.conversation.isGroup) return props.conversation.name;
+    return props.conversation.partner?.username;
+});
+
 const currentUser = computed(() => authStore.user);
 
-const messageContainer = ref(null);
-const newMessageContent = ref('');
-const dmInputRef = ref(null);
-const fileInputRef = ref(null);
+function triggerFile() { fileInput.value.click(); }
+function handleFiles(e) { files.value = Array.from(e.target.files); }
 
-const scrollHeightBeforeLoad = ref(0);
-
-const partner = computed(() => props.conversation.partner);
-const messages = computed(() => props.conversation.messages || []);
-
-// --- MENTION STATE ---
-const mentionQuery = ref('');
-const mentionSuggestions = ref([]);
-const isMentioning = ref(false);
-let mentionDebounceTimer = null;
-const mentionStartIndex = ref(-1);
-
-// --- FILE UPLOAD STATE ---
-const uploadedFiles = ref([]);
-const isUploading = ref(false);
-const isDraggingOver = ref(false);
-
-async function scrollToBottom() {
-  await nextTick();
-  if (messageContainer.value) {
-    messageContainer.value.scrollTop = messageContainer.value.scrollHeight;
-  }
-}
-
-watch(() => messages.value.length, () => {
-    scrollToBottom();
-});
-
-async function handleScroll(event) {
-  const container = event.target;
-  if (container.scrollTop === 0 && !props.conversation.isLoading && !props.conversation.fullyLoaded) {
-    scrollHeightBeforeLoad.value = container.scrollHeight;
-    await socialStore.fetchMoreMessages(partner.value.id);
-  }
-}
-
-function triggerFileUpload() {
-  fileInputRef.value.click();
-}
-
-function handleFileSelection(event) {
-    const files = Array.from(event.target.files);
-    addFiles(files);
-    event.target.value = '';
-}
-
-function addFiles(files) {
-    for (const file of files) {
-        if (file.type.startsWith('image/')) {
-             uploadedFiles.value.push({ file, preview: URL.createObjectURL(file) });
-        } else {
-            uiStore.addNotification(`File ${file.name} is not an image.`, 'warning');
-        }
+async function send() {
+    if (!content.value.trim() && files.value.length === 0) return;
+    isUploading.value = true;
+    try {
+        await socialStore.sendDirectMessage({
+            targetId: props.conversation.id,
+            isGroup: props.conversation.isGroup,
+            content: content.value,
+            files: files.value
+        });
+        content.value = '';
+        files.value = [];
+    } finally {
+        isUploading.value = false;
     }
 }
 
-function removeFile(index) {
-    URL.revokeObjectURL(uploadedFiles.value[index].preview);
-    uploadedFiles.value.splice(index, 1);
-}
-
-function sendMessage() {
-  if (newMessageContent.value.trim() === '' && uploadedFiles.value.length === 0) return;
-  
-  isUploading.value = true;
-  
-  const filesToSend = uploadedFiles.value.map(f => f.file);
-  
-  socialStore.sendDirectMessage({
-    receiverUserId: partner.value.id,
-    content: newMessageContent.value,
-    files: filesToSend
-  }).finally(() => {
-      isUploading.value = false;
+function scrollToBottom() {
+  nextTick(() => {
+      if (messageContainer.value) {
+        messageContainer.value.scrollTop = messageContainer.value.scrollHeight;
+      }
   });
-
-  newMessageContent.value = '';
-  uploadedFiles.value.forEach(f => URL.revokeObjectURL(f.preview));
-  uploadedFiles.value = [];
-  isMentioning.value = false;
 }
 
-onMounted(() => {
-  scrollToBottom();
-  if (partner.value) {
-      socialStore.markConversationAsRead(partner.value.id);
-  }
-});
+watch(() => props.conversation.messages.length, scrollToBottom);
+onMounted(scrollToBottom);
 
-watch(() => partner.value.id, (newId) => {
-    if (newId) {
-        socialStore.markConversationAsRead(newId);
-        scrollToBottom();
-        newMessageContent.value = '';
-        uploadedFiles.value = [];
-    }
-});
-
-onUpdated(() => {
-  if (messageContainer.value) {
-    if (scrollHeightBeforeLoad.value > 0) {
-      const newScrollTop = messageContainer.value.scrollHeight - scrollHeightBeforeLoad.value;
-      messageContainer.value.scrollTop = newScrollTop;
-      scrollHeightBeforeLoad.value = 0;
-    }
-  }
-});
+function openImageViewer(src) {
+    uiStore.openImageViewer({ imageList: [{ src, prompt: 'DM Image' }], startIndex: 0 });
+}
 
 function formatTimestamp(dateString) {
   const date = new Date(dateString);
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-// --- MENTION LOGIC ---
-function handleInputForMentions(event) {
-    const text = event.target.value;
-    const cursorPosition = event.target.selectionStart;
-    
-    const textBeforeCursor = text.substring(0, cursorPosition);
-    const atMatch = textBeforeCursor.match(/@(\w*)$/);
+function removeFile(index) {
+    files.value.splice(index, 1);
+}
 
-    if (atMatch) {
-        mentionStartIndex.value = atMatch.index;
-        const query = atMatch[1];
-        mentionQuery.value = query;
-        isMentioning.value = true;
-
-        clearTimeout(mentionDebounceTimer);
-        mentionDebounceTimer = setTimeout(async () => {
-            if (mentionQuery.value === query) {
-                mentionSuggestions.value = await socialStore.searchForMentions(query);
-            }
-        }, 200);
-    } else {
-        isMentioning.value = false;
-        mentionSuggestions.value = [];
+async function handleDeleteMessage(msgId) {
+    if (confirm("Delete this message?")) {
+        await socialStore.deleteMessage(msgId);
     }
 }
 
-function selectMention(user) {
-    const beforeText = newMessageContent.value.substring(0, mentionStartIndex.value);
-    const afterText = newMessageContent.value.substring(mentionStartIndex.value + mentionQuery.value.length + 1);
-    
-    const newText = `${beforeText}@${user.username} ${afterText}`;
-    newMessageContent.value = newText;
-    
-    isMentioning.value = false;
-    mentionSuggestions.value = [];
-    
-    nextTick(() => {
-        const newCursorPos = beforeText.length + user.username.length + 2;
-        dmInputRef.value.focus();
-        dmInputRef.value.setSelectionRange(newCursorPos, newCursorPos);
-    });
-}
-
-function closeMentionBox() {
-    isMentioning.value = false;
-}
-
-function handleDragOver(event) {
-    event.preventDefault();
-    isDraggingOver.value = true;
-}
-
-function handleDragLeave(event) {
-    if (!event.currentTarget.contains(event.relatedTarget)) {
-        isDraggingOver.value = false;
+async function handleDeleteConversation() {
+    const msg = props.conversation.isGroup ? "Leave this group?" : "Clear conversation history?";
+    if (confirm(msg)) {
+        await socialStore.deleteConversation(props.conversation.id, props.conversation.isGroup);
+        if (props.compact) emit('back');
+        else socialStore.activeConversationId = null;
     }
 }
 
-function handleDrop(event) {
-    event.preventDefault();
-    isDraggingOver.value = false;
-    const files = Array.from(event.dataTransfer.files);
-    addFiles(files);
+async function handleExport() {
+    await socialStore.exportConversation(props.conversation.id, props.conversation.isGroup, title.value);
 }
 
-function handlePaste(event) {
-    const items = (event.clipboardData || window.clipboardData).items;
-    for (const item of items) {
-        if (item.kind === 'file' && item.type.startsWith('image/')) {
-            const file = item.getAsFile();
-            addFiles([file]);
-        }
-    }
+function triggerImport() {
+    importInput.value.click();
 }
 
-function openImageViewer(src) {
-    uiStore.openImageViewer({ imageList: [{ src, prompt: 'DM Image' }], startIndex: 0 });
+async function handleImport(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    await socialStore.importConversation(props.conversation.id, props.conversation.isGroup, file);
+    e.target.value = '';
 }
+
 </script>
 
 <template>
-  <div 
-    v-if="conversation && conversation.partner" 
-    class="flex flex-col h-full bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 shadow-lg"
-    @dragover="handleDragOver"
-    @dragleave="handleDragLeave"
-    @drop="handleDrop"
-    @paste="handlePaste"
-  >
-    <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 z-50 pointer-events-none flex items-center justify-center">
-        <span class="text-blue-600 font-bold text-lg bg-white/80 px-4 py-2 rounded">Drop images here</span>
-    </div>
+    <div class="flex flex-col h-full bg-white dark:bg-gray-900">
+        <div class="flex items-center p-3 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800 justify-between">
+            <div class="flex items-center gap-2 overflow-hidden">
+                <button v-if="compact" @click="$emit('back')" class="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700"><IconArrowLeft class="w-5 h-5"/></button>
+                <UserAvatar v-if="!conversation.isGroup" :icon="conversation.partner?.icon" :username="title" size-class="w-8 h-8" />
+                <div v-else class="w-8 h-8 bg-gray-300 rounded-full flex items-center justify-center font-bold text-gray-700">{{ title[0] }}</div>
+                <span class="font-bold truncate">{{ title }}</span>
+            </div>
+            <div class="flex items-center gap-1">
+                <DropdownMenu icon="ellipsis-vertical" buttonClass="btn-icon p-1">
+                    <button @click="handleExport" class="menu-item"><IconArrowDownTray class="w-4 h-4 mr-2"/>Export JSON</button>
+                    <button @click="triggerImport" class="menu-item"><IconArrowUpTray class="w-4 h-4 mr-2"/>Import JSON</button>
+                    <div class="menu-divider"></div>
+                    <button @click="handleDeleteConversation" class="menu-item text-red-500"><IconTrash class="w-4 h-4 mr-2"/>{{ conversation.isGroup ? 'Leave Group' : 'Clear History' }}</button>
+                </DropdownMenu>
+                <input type="file" ref="importInput" class="hidden" accept=".json" @change="handleImport">
+                <button @click="uiStore.isChatSidebarOpen = false" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"><IconXMark class="w-5 h-5" /></button>
+            </div>
+        </div>
+        
+        <div ref="messageContainer" class="flex-1 overflow-y-auto p-4 space-y-3">
+            <div v-for="msg in messages" :key="msg.id" class="flex flex-col group" :class="msg.sender_id === authStore.user.id ? 'items-end' : 'items-start'">
+                 <div class="relative max-w-[85%] p-2 rounded-lg text-sm shadow-sm border dark:border-gray-700" 
+                      :class="msg.sender_id === authStore.user.id ? 'bg-blue-100 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800' : 'bg-white dark:bg-gray-800'">
+                    
+                    <div v-if="props.conversation.isGroup && msg.sender_id !== authStore.user.id" class="text-xs opacity-75 mb-1 font-bold text-blue-600 dark:text-blue-400">{{ msg.sender_username }}</div>
+                    
+                    <MessageContentRenderer :content="msg.content" />
+                    
+                    <div v-if="msg.image_references && msg.image_references.length > 0" class="mt-2 grid gap-2" :class="msg.image_references.length > 1 ? 'grid-cols-2' : 'grid-cols-1'">
+                        <div v-for="img in msg.image_references" :key="img" class="relative group/img cursor-pointer">
+                            <AuthenticatedImage :src="img" class="rounded-md max-h-48 object-cover w-full border dark:border-gray-600" @click.stop="openImageViewer(img)" />
+                        </div>
+                    </div>
 
-    <header class="flex items-center p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-      <button v-if="compact" @click="$emit('back')" class="mr-2 p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300">
-          <IconArrowLeft class="w-5 h-5" />
-      </button>
-      <UserAvatar :icon="partner.icon" :username="partner.username" size-class="h-9 w-9" />
-      <div class="ml-3">
-        <h3 class="font-semibold text-gray-900 dark:text-gray-100">{{ partner.username }}</h3>
-      </div>
-      <div class="flex-grow"></div>
-      <button @click="socialStore.closeConversation(partner.id)" class="p-1 rounded-full text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600">
-        <IconXMark class="w-5 h-5" />
-      </button>
-    </header>
+                    <button v-if="msg.sender_id === authStore.user.id" @click="handleDeleteMessage(msg.id)" class="absolute -left-8 top-0 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete">
+                        <IconTrash class="w-4 h-4" />
+                    </button>
+                 </div>
+                 <span class="text-[10px] text-gray-400 mt-1 px-1">{{ formatTimestamp(msg.sent_at) }}</span>
+            </div>
+        </div>
 
-    <div ref="messageContainer" @scroll="handleScroll" class="flex-grow p-4 overflow-y-auto">
-      <div v-if="conversation.isLoading" class="text-center py-2 text-sm text-gray-500">Loading...</div>
-      
-      <div v-if="conversation.error" class="text-center py-2 text-red-500 text-sm">
-        {{ conversation.error }}
-      </div>
-
-      <div v-if="conversation.fullyLoaded" class="text-center py-4">
-        <p class="text-xs text-gray-400 dark:text-gray-500">This is the beginning of your conversation with {{ partner.username }}.</p>
-      </div>
-
-      <div v-for="message in conversation.messages" :key="message.id" class="flex my-2" :class="message.sender_id === currentUser.id ? 'justify-end' : 'justify-start'">
-        <div class="max-w-[80%] px-3 py-2 rounded-lg" :class="{
-            'bg-blue-500 text-white': message.sender_id === currentUser.id,
-            'bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-200': message.sender_id !== currentUser.id,
-            'opacity-60': message.isTemporary,
-            'border border-red-500': message.error
-        }">
-            <div v-if="message.image_references && message.image_references.length > 0" class="mb-2 grid gap-1" :class="message.image_references.length > 1 ? 'grid-cols-2' : 'grid-cols-1'">
-                 <div v-for="(imgRef, idx) in message.image_references" :key="idx" class="relative group cursor-pointer">
-                    <AuthenticatedImage :src="imgRef" class="rounded-md max-h-48 object-cover w-full" @click.stop="openImageViewer(imgRef)" />
+        <div class="p-3 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+            <div v-if="files.length > 0" class="flex gap-2 mb-2 overflow-x-auto pb-1">
+                <div v-for="(file, index) in files" :key="index" class="relative bg-white dark:bg-gray-700 rounded border dark:border-gray-600 p-1 text-xs flex items-center shadow-sm">
+                    <span class="truncate max-w-[100px]">{{ file.name }}</span>
+                    <button @click="removeFile(index)" class="ml-2 text-red-500 hover:text-red-700"><IconXMark class="w-3 h-3"/></button>
                 </div>
             </div>
-          <p class="text-sm break-words whitespace-pre-wrap">{{ message.content }}</p>
-          <p class="text-xs mt-1 opacity-70" :class="message.sender_id === currentUser.id ? 'text-right' : 'text-left'">
-            {{ formatTimestamp(message.sent_at) }}
-          </p>
-        </div>
-      </div>
-    </div>
-
-    <footer class="p-3 border-t border-gray-200 dark:border-gray-700 flex-shrink-0 relative">
-      <!-- MENTION POPUP -->
-      <div v-if="isMentioning && mentionSuggestions.length > 0" v-on-click-outside="closeMentionBox" class="absolute bottom-full left-0 right-0 mb-2 p-2 bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto z-10">
-        <ul>
-          <li v-for="user in mentionSuggestions" :key="user.id" @click="selectMention(user)" class="flex items-center p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
-            <UserAvatar :icon="user.icon" :username="user.username" size-class="h-6 w-6" />
-            <span class="ml-2 text-sm font-medium">{{ user.username }}</span>
-          </li>
-        </ul>
-      </div>
-      
-      <!-- IMAGE PREVIEW -->
-        <div v-if="uploadedFiles.length > 0" class="flex gap-2 p-2 bg-gray-50 dark:bg-gray-900 border-t border-gray-200 dark:border-gray-700 overflow-x-auto mb-2 rounded-t-md">
-            <div v-for="(file, index) in uploadedFiles" :key="index" class="relative w-16 h-16 flex-shrink-0 group">
-                <img :src="file.preview" class="w-full h-full object-cover rounded-md border dark:border-gray-600" />
-                <button @click="removeFile(index)" class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
+            <div class="flex gap-2">
+                <button @click="triggerFile" class="btn-icon p-2"><IconPhoto class="w-5 h-5"/></button>
+                <input type="file" ref="fileInput" class="hidden" multiple @change="handleFiles">
+                <input v-model="content" @keyup.enter="send" class="input-field flex-1" placeholder="Type a message..." autocomplete="off" />
+                <button @click="send" class="btn-primary p-2 rounded" :disabled="isUploading || (!content.trim() && files.length === 0)">
+                    <IconSend class="w-4 h-4"/>
+                </button>
             </div>
         </div>
-
-      <form @submit.prevent="sendMessage" class="flex items-center space-x-2">
-         <input type="file" ref="fileInputRef" @change="handleFileSelection" multiple accept="image/*" class="hidden">
-         <button type="button" @click="triggerFileUpload" class="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 dark:text-gray-400">
-             <IconPhoto class="w-5 h-5" />
-         </button>
-        <input ref="dmInputRef" type="text" v-model="newMessageContent" @input="handleInputForMentions" placeholder="Type a message..." class="input-field flex-grow !py-2" autocomplete="off" />
-        <button type="submit" class="btn btn-primary p-2" :disabled="isUploading || (newMessageContent.trim() === '' && uploadedFiles.length === 0)">
-             <IconAnimateSpin v-if="isUploading" class="w-5 h-5 animate-spin" />
-             <span v-else class="text-sm font-semibold px-2">Send</span>
-        </button>
-      </form>
-    </footer>
-  </div>
+    </div>
 </template>

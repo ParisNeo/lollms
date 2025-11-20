@@ -1,4 +1,3 @@
-# [UPDATE] backend/db/migration.py
 import json
 import re
 import shutil
@@ -12,7 +11,7 @@ from sqlalchemy.ext.compiler import compiles
 from backend.config import SERVER_CONFIG, APP_SETTINGS, SAFE_STORE_DEFAULTS, APP_DATA_DIR, USERS_DIR_NAME
 from backend.db.base import CURRENT_DB_VERSION
 from backend.db.models.config import GlobalConfig, LLMBinding, TTIBinding, TTSBinding, DatabaseVersion, RAGBinding, STTBinding
-from backend.db.models.service import App # Ensure App is imported
+from backend.db.models.service import App 
 from backend.db.models.prompt import SavedPrompt
 from backend.db.models.fun_fact import FunFactCategory, FunFact
 from backend.db.models.user import User
@@ -20,6 +19,7 @@ from backend.db.models.group import Group
 from backend.db.models.memory import UserMemory
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.image import UserImage
+from backend.db.models.dm import Conversation, ConversationMember
 from ascii_colors import ASCIIColors, trace_exception
 
 
@@ -1437,6 +1437,25 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         connection.execute(text(f"UPDATE datastores SET chunk_size = {SAFE_STORE_DEFAULTS.get('default_chunk_size', 1024)} WHERE chunk_size IS NULL"))
         connection.execute(text(f"UPDATE datastores SET chunk_overlap = {SAFE_STORE_DEFAULTS.get('default_chunk_overlap', 256)} WHERE chunk_overlap IS NULL"))
         connection.commit()
+        
+    # --- DM / Conversation Migration ---
+    if not inspector.has_table("conversations"):
+        Conversation.__table__.create(connection)
+        print("INFO: Created 'conversations' table.")
+    
+    if not inspector.has_table("conversation_members"):
+        ConversationMember.__table__.create(connection)
+        print("INFO: Created 'conversation_members' table.")
+
+    if inspector.has_table("direct_messages"):
+        dm_columns = [col['name'] for col in inspector.get_columns('direct_messages')]
+        if 'conversation_id' not in dm_columns:
+            try:
+                connection.execute(text("ALTER TABLE direct_messages ADD COLUMN conversation_id INTEGER REFERENCES conversations(id) ON DELETE CASCADE"))
+                print("INFO: Added 'conversation_id' column to 'direct_messages'.")
+            except Exception as e:
+                print(f"WARNING: Could not add conversation_id column: {e}")
+    connection.commit()
 
 
 def check_and_update_db_version(SessionLocal):
