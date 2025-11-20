@@ -30,6 +30,7 @@ export const useUiStore = defineStore('ui', {
     emailModalBackgroundColor: '#f4f4f8',
     emailModalSendAsText: false,
     isSidebarOpen: true,
+    isChatSidebarOpen: false, // NEW: Chat Sidebar State
     keywords: [],
     isDataZoneVisible: false,
     isDataZoneExpanded: false,
@@ -47,6 +48,10 @@ export const useUiStore = defineStore('ui', {
   },
 
   actions: {
+    // NEW: Toggle Chat Sidebar
+    toggleChatSidebar() {
+        this.isChatSidebarOpen = !this.isChatSidebarOpen;
+    },
     async copyToClipboard(textToCopy, successMessage = 'Copied to clipboard!') {
         try {
             if (navigator.clipboard && window.isSecureContext) {
@@ -84,7 +89,7 @@ export const useUiStore = defineStore('ui', {
     },
 
     setMainView(viewName) {
-        if (['feed', 'chat'].includes(viewName)) {
+        if (['feed', 'chat', 'messages'].includes(viewName)) {
             this.mainView = viewName;
         }
     },

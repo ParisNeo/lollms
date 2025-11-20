@@ -1,11 +1,13 @@
 <script setup>
 import { onMounted, computed, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { useSocialStore } from '../../stores/social';
 import { useAuthStore } from '../../stores/auth';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
 
 const socialStore = useSocialStore();
 const authStore = useAuthStore();
+const router = useRouter();
 
 const user = computed(() => authStore.user);
 
@@ -34,6 +36,7 @@ function openDm(user) {
         icon: user.icon || null
     };
     socialStore.openConversation(partner);
+    router.push('/messages');
 }
 
 const contactList = computed(() => {

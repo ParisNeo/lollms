@@ -117,8 +117,15 @@ async function handleRootDrop(event) {
 }
 
 function handleNewDiscussion() { 
-    store.createNewDiscussion(activeDiscussion.value?.group_id || null); 
+    // Create new discussion in the currently selected group (if any)
+    store.createNewDiscussion(store.currentGroupId); 
 }
+
+function handleSelectUngrouped() {
+    store.currentGroupId = null;
+    isUngroupedVisible.value = !isUngroupedVisible.value;
+}
+
 function handleImportClick() { uiStore.openModal('import'); }
 function handleExportClick() { uiStore.openModal('export', { allDiscussions: store.sortedDiscussions }); }
 function handlePrune() { store.pruneDiscussions(); }
@@ -182,7 +189,7 @@ function handleClone() {
                         <IconAdjustmentsHorizontal class="h-4 w-4" />
                     </button>
                 </div>
-                <button @click="handleNewDiscussion()" class="btn-primary-flat !px-2.5" title="New Discussion">
+                <button @click="handleNewDiscussion()" class="btn-primary-flat !px-2.5" :title="store.currentGroupId ? 'New Discussion in Selected Group' : 'New Discussion'">
                     <IconPlus class="h-4 w-4" stroke-width="2.5" />
                 </button>
             </div>
@@ -257,7 +264,7 @@ function handleClone() {
 
                 <!-- Ungrouped Section -->
                 <div v-if="filteredDiscussionTree.ungrouped && filteredDiscussionTree.ungrouped.length > 0">
-                    <button @click="isUngroupedVisible = !isUngroupedVisible" class="section-header-flat mt-4">
+                    <button @click="handleSelectUngrouped" class="section-header-flat mt-4" :class="{'bg-blue-50 dark:bg-blue-900/20': store.currentGroupId === null && !store.currentDiscussionId}">
                         <div class="flex items-center space-x-2">
                             <span class="font-medium text-slate-700 dark:text-gray-300">Discussions</span>
                             <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">

@@ -35,9 +35,6 @@ export const useAuthStore = defineStore('auth', () => {
     const wsConnected = ref(false);
     let reconnectTimeout = null;
 
-    // The apiClient interceptor will now handle adding the auth header.
-    // No need to set it here directly.
-
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
 
@@ -60,13 +57,6 @@ export const useAuthStore = defineStore('auth', () => {
             export_to_pptx_enabled.value = welcomeInfoResponse.data.export_to_pptx_enabled;
         } catch (e) {
             console.warn("Could not fetch welcome info. Using defaults.");
-            funFact.value = 'The LoLLMs project is open source and seeks to democratize AI.';
-            welcomeText.value = 'lollms';
-            welcomeSlogan.value = 'One tool to rule them all';
-            welcome_logo_url.value = null;
-            welcome_fun_fact_color.value = '#3B82F6';
-            welcome_fun_fact_category.value = 'General';
-            latex_builder_enabled.value = false;
         }
     }
 
@@ -78,11 +68,6 @@ export const useAuthStore = defineStore('auth', () => {
             funFact.value = welcomeInfoResponse.data.fun_fact;
             welcome_fun_fact_color.value = welcomeInfoResponse.data.fun_fact_color;
             welcome_fun_fact_category.value = welcomeInfoResponse.data.fun_fact_category;
-        } catch (e) {
-            console.warn("Could not fetch a new fun fact.");
-            funFact.value = "Did you know? The first programmer was Ada Lovelace, who wrote an algorithm for an early mechanical computer in the mid-1800s.";
-            welcome_fun_fact_color.value = '#F59E0B';
-            welcome_fun_fact_category.value = 'History';
         } finally {
             isFetchingFunFact.value = false;
         }
@@ -102,17 +87,14 @@ export const useAuthStore = defineStore('auth', () => {
                 default_chunk_size.value = user.value.default_chunk_size;
                 default_chunk_overlap.value = user.value.default_chunk_overlap;
             }
-            console.log("[AuthStore] User details refreshed.");
         } catch (error) {
             console.error("Failed to refresh user details:", error);
         }
     }
+
     // --- WebSocket Connection Management ---
     function connectWebSocket() {
-        if (!token.value) {
-            return;
-        }
-        if (ws.value && (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING)) {
+        if (!token.value || (ws.value && (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING))) {
             return;
         }
 
@@ -133,6 +115,7 @@ export const useAuthStore = defineStore('auth', () => {
             const { useTasksStore } = await import('./tasks');
             const { useDataStore } = await import('./data');
             const { useDiscussionsStore } = await import('./discussions');
+            
             const socialStore = useSocialStore();
             const uiStore = useUiStore();
             const tasksStore = useTasksStore();
@@ -140,8 +123,15 @@ export const useAuthStore = defineStore('auth', () => {
             const discussionsStore = useDiscussionsStore();
 
             switch (data.type) {
-                case 'new_dm': socialStore.handleNewDm(data.data); break;
-                case 'new_comment': socialStore.handleNewComment(data.data); break;
+                case 'new_dm': 
+                    socialStore.handleNewDm(data.data); 
+                    break;
+                case 'new_comment': 
+                    socialStore.handleNewComment(data.data); 
+                    break;
+                case 'new_friend_request':
+                    socialStore.handleIncomingFriendRequest(data.data);
+                    break;
                 case 'friend_online':
                     uiStore.addNotification(`${data.data.username} is now online.`, 'info', 4000, false, null, data.data.icon);
                     break;
@@ -162,19 +152,25 @@ export const useAuthStore = defineStore('auth', () => {
                     discussionsStore.handleNewMessageFromTask(data.data);
                     break;
                 case 'discussion_unshared':
-                    discussionsStore.fetchSharedWithMe(); // Refresh the list
+                    discussionsStore.fetchSharedWithMe(); 
                     if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
                         discussionsStore.selectDiscussion(null);
                         uiStore.setMainView('feed');
                     }
                     uiStore.addNotification(`Access to a shared discussion was revoked by ${data.data.from_user}.`, 'warning');
                     break;
-                case 'admin_broadcast': uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); break;
-                case 'task_update': tasksStore.addTask(data.data); break;
+                case 'discussion_unsubscribed':
+                     uiStore.addNotification(`${data.data.unsubscribed_user} unsubscribed from '${data.data.discussion_title}'.`, 'info');
+                     break;
+                case 'admin_broadcast': 
+                    uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); 
+                    break;
+                case 'task_update': 
+                    tasksStore.addTask(data.data); 
+                    break;
                 case 'task_end': {
                     tasksStore.addTask(data.data);
                     const task = data.data;
-
                     if (task.status === 'completed' && task.result) {
                         if (task.result.status === 'image_generated_in_message') {
                             discussionsStore.handleNewMessageFromTask({
@@ -182,7 +178,7 @@ export const useAuthStore = defineStore('auth', () => {
                                 message: task.result.new_message
                             });
                             uiStore.addNotification(`Image generated in discussion.`, 'success');
-                        } else if (task.result.zone) { // For data zone processing
+                        } else if (task.result.zone) { 
                             discussionsStore.handleDataZoneUpdate(task.result);
                         } else if (task.name === 'Generate User Avatar' && task.result.new_icon_url) {
                             refreshUser();
@@ -195,16 +191,26 @@ export const useAuthStore = defineStore('auth', () => {
                     }
                     break;
                 }
-                case 'app_status_changed': { const { useAdminStore } = await import('./admin'); useAdminStore().handleAppStatusUpdate(data.data); dataStore.handleServiceStatusUpdate(data.data); break; }
+                case 'app_status_changed': { 
+                    const { useAdminStore } = await import('./admin'); 
+                    useAdminStore().handleAppStatusUpdate(data.data); 
+                    dataStore.handleServiceStatusUpdate(data.data); 
+                    break; 
+                }
                 case 'data_zone_processed':
                     if (data.data.task_data) tasksStore.addTask(data.data.task_data);
                     discussionsStore.handleDataZoneUpdate(data.data);
                     break;
-                case 'discussion_images_updated': discussionsStore.handleDiscussionImagesUpdated(data.data); break;
-                case 'tasks_cleared': tasksStore.handleTasksCleared(data.data); break;
+                case 'discussion_images_updated': 
+                    discussionsStore.handleDiscussionImagesUpdated(data.data); 
+                    break;
+                case 'tasks_cleared': 
+                    tasksStore.handleTasksCleared(data.data); 
+                    break;
                 case 'settings_updated':
                     uiStore.addNotification('Global settings updated by an admin. Refreshing your session...', 'info', 5000);
-                    await refreshUser(); await fetchWelcomeInfo();
+                    await refreshUser(); 
+                    await fetchWelcomeInfo();
                     break;
                 case 'bindings_updated':
                     uiStore.addNotification('LLM bindings updated by an admin. Refreshing model list.', 'info', 5000);
@@ -212,6 +218,8 @@ export const useAuthStore = defineStore('auth', () => {
                     dataStore.fetchAvailableTtiModels();
                     dataStore.fetchAvailableTtsModels();
                     dataStore.fetchAvailableSttModels();
+                    // Force refresh user to pick up any context locks
+                    await refreshUser();
                     break;               
             }
         };
@@ -219,7 +227,7 @@ export const useAuthStore = defineStore('auth', () => {
         ws.value.onclose = (event) => {
             wsConnected.value = false;
             ws.value = null;
-            if (event.code !== 1000) { // 1000 is normal closure
+            if (event.code !== 1000) { 
                 reconnectTimeout = setTimeout(connectWebSocket, 5000);
             }
         };
@@ -258,8 +266,10 @@ export const useAuthStore = defineStore('auth', () => {
             
             const { useDiscussionsStore } = await import('./discussions');
             const { useDataStore } = await import('./data');
+            const { useSocialStore } = await import('./social');
             const discussionsStore = useDiscussionsStore();
             const dataStore = useDataStore();
+            const socialStore = useSocialStore();
             
             loadingProgress.value = 40;
             loadingMessage.value = 'Loading user data...';
@@ -267,7 +277,9 @@ export const useAuthStore = defineStore('auth', () => {
                 discussionsStore.loadDiscussions(),
                 discussionsStore.fetchSharedWithMe(),
                 discussionsStore.fetchDiscussionGroups(),
-                dataStore.loadAllInitialData()
+                dataStore.loadAllInitialData(),
+                socialStore.fetchFriends().catch(() => {}),
+                socialStore.fetchConversations().catch(() => {})
             ]);
 
             loadingProgress.value = 80;
@@ -453,7 +465,6 @@ export const useAuthStore = defineStore('auth', () => {
             const isAdminExists = adminStatusResponse.data.admin_exists;
 
             let finalRegData = registrationData;
-            // Admin creation from wizard doesn't require email
             if (!isAdminExists) {
                 finalRegData = {
                     ...registrationData,
@@ -494,7 +505,7 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
     
-    async function updateUserPreferences(preferences) {
+    async function updateUserPreferences(preferences, notify = true) {
         try {
             const response = await apiClient.put('/api/auth/me', preferences);
             if (user.value) {
@@ -511,7 +522,9 @@ export const useAuthStore = defineStore('auth', () => {
                     discussionsStore.refreshDataZones(discussionsStore.currentDiscussionId);
                 }
             }
-            useUiStore().addNotification('Settings saved successfully.', 'success');
+            if (notify) {
+                useUiStore().addNotification('Settings saved successfully.', 'success');
+            }
         } catch(error) {
             throw error;
         }
@@ -538,7 +551,6 @@ export const useAuthStore = defineStore('auth', () => {
             tasksStore.addTask(task);
             return task;
         } catch (error) {
-            // The global error handler in api.js will show a notification
             console.error("Failed to start avatar generation task:", error);
             return null;
         }
@@ -571,29 +583,12 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function fetchScratchpad() {
-        if (!isAuthenticated.value) return;
-        try {
-            const response = await apiClient.get('/api/auth/me/scratchpad');
-            if (user.value) {
-                user.value.scratchpad = response.data.content;
-            }
-        } catch (error) {
-            console.error("Failed to fetch scratchpad:", error);
-            useUiStore().addNotification('Could not load user scratchpad.', 'error');
-        }
+         // Kept for backwards compatibility if needed, but data-zone is preferred
+         await fetchDataZone();
     }
 
     async function updateScratchpad(content) {
-        if (!isAuthenticated.value) return;
-        try {
-            await apiClient.put('/api/auth/me/scratchpad', { content });
-            if (user.value) {
-                user.value.scratchpad = content;
-            }
-        } catch (error) {
-            useUiStore().addNotification('Failed to save scratchpad.', 'error');
-            throw error;
-        }
+        await updateDataZone(content);
     }
 
     async function fetchSsoClientConfig() {

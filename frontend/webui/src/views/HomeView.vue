@@ -27,7 +27,7 @@ watch(() => discussionsStore.currentDiscussionId, (newId) => {
     <template v-if="isAuthenticated">
       <FeedComponent v-if="mainView === 'feed'" />
       <ChatView v-else-if="mainView === 'chat'" />
-      <!-- Fallback for authenticated user if mainView is not set for some reason -->
+      <!-- Fallback for authenticated user -->
       <FeedComponent v-else />
     </template>
     <template v-else-if="!isAuthenticating">

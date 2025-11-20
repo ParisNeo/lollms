@@ -50,33 +50,6 @@ def _find_unique_port_for_migration(connection, preferred_port: int, already_use
             current_port += 1
         else:
             return current_port
-# This custom compiler allows us to drop tables with cascade in SQLite,
-# though SQLAlchemy's default DROP TABLE handles foreign keys if they are defined correctly.
-# Keeping this for robustness in case `drop table` implicitly needs CASCADE for some reason.
-@compiles(DropTable, "sqlite")
-def _drop_table(element, compiler, **kw):
-    return "DROP TABLE %s;" % compiler.process(element.element)
-
-# NEW HELPER FUNCTIONS FOR PORT UNIQUESS DURING MIGRATION
-def _get_all_existing_app_ports(connection) -> set[int]:
-    """Retrieves all non-null ports currently used by apps in the database."""
-    # Use a direct query to avoid ORM overhead during migration and ensure we get current state
-    return {r for r in connection.execute(text("SELECT port FROM apps WHERE port IS NOT NULL")).fetchall()}
-
-def _find_unique_port_for_migration(connection, preferred_port: int, already_used_in_batch: set) -> int:
-    """
-    Finds a unique port during migration by checking against DB and in-batch used ports.
-    Starts searching from preferred_port upwards.
-    """
-    all_db_used_ports_at_start = _get_all_existing_app_ports(connection)
-    
-    current_port = preferred_port if preferred_port is not None and preferred_port >= 1024 else 9601 # Ensure valid start port
-    
-    while True:
-        if current_port in already_used_in_batch or current_port in all_db_used_ports_at_start:
-            current_port += 1
-        else:
-            return current_port
 
 def _bootstrap_global_settings(connection):
     """
@@ -279,7 +252,8 @@ def _bootstrap_global_settings(connection):
         },
         "force_context_size": {
             "value": 4096,
-            "type": "integer", "description": "The context size (in tokens) to force on all users.", "category": "Global LLM Overrides"
+            "type": "integer",
+            "description": "The context size (in tokens) to force on all users.", "category": "Global LLM Overrides"
         },
         "openai_api_service_enabled": {
             "value": False,
@@ -328,6 +302,14 @@ def _bootstrap_global_settings(connection):
         "ai_bot_system_prompt": {
             "value": "You are lollms, a helpful AI assistant integrated into this social platform. When a user mentions you using '@lollms', you should respond to their post helpfully and concisely. Your goal is to be a friendly and informative presence in the community.",
             "type": "text", "description": "The system prompt to use for the bot if no personality is selected.", "category": "AI Bot"
+        },
+        "ai_bot_binding_model": {
+            "value": "",
+            "type": "string", "description": "The model used by the AI Bot.", "category": "AI Bot"
+        },
+        "ai_bot_personality_id": {
+            "value": "",
+            "type": "string", "description": "The personality used by the AI Bot (optional).", "category": "AI Bot"
         },
         "welcome_text": {
             "value": "lollms",
@@ -907,7 +889,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "user_ui_level":"INTEGER", "ai_response_language":"VARCHAR DEFAULT 'auto'",
             "force_ai_response_language": "BOOLEAN DEFAULT 0 NOT NULL",
             "fun_mode": "BOOLEAN DEFAULT 0 NOT NULL",
-            "chat_active": "BOOLEAN DEFAULT 0 NOT NULL",
+            "chat_active": "BOOLEAN DEFAULT 1 NOT NULL", # DEFAULT CHANGED TO TRUE
             "first_page": "VARCHAR DEFAULT 'feed' NOT NULL",
             "receive_notification_emails": "BOOLEAN DEFAULT 1 NOT NULL",
             "show_token_counter": "BOOLEAN DEFAULT 1 NOT NULL",
@@ -952,6 +934,17 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 except Exception as ex:
                     trace_exception(ex)
                     connection.rollback()
+        
+        # If chat_active was just added, it defaults to 1 (True). If it existed, update it.
+        if 'chat_active' in added_cols:
+             connection.execute(text("UPDATE users SET chat_active = 1 WHERE chat_active IS NULL"))
+             print("INFO: Enabled 'chat_active' for all users by default.")
+             connection.commit()
+        elif 'chat_active' in user_columns_db:
+             # Backfill existing users if needed (optional, but good for fix)
+             connection.execute(text("UPDATE users SET chat_active = 1 WHERE chat_active = 0"))
+             print("INFO: Updated existing users to have 'chat_active' = True.")
+             connection.commit()
 
         if 'is_active' in added_cols:
             connection.execute(text("UPDATE users SET is_active = 1 WHERE is_active IS NULL"))

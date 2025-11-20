@@ -1,73 +1,73 @@
 <script setup>
 import { ref } from 'vue';
 import { useAdminStore } from '../../stores/admin';
+import apiClient from '../../services/api';
 import { useUiStore } from '../../stores/ui';
-import IconSend from '../../assets/icons/IconSend.vue';
-import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
 
 const message = ref('');
-const isLoading = ref(false);
+const isSending = ref(false);
+const broadcastType = ref('notification'); // 'notification' or 'dm'
 
-async function handleBroadcast() {
-    if (!message.value.trim() || isLoading.value) return;
+async function sendBroadcast() {
+    if (!message.value.trim()) return;
     
-    const confirmed = await uiStore.showConfirmation({
-        title: 'Confirm Broadcast',
-        message: 'This will send a notification to all currently connected users. Are you sure?',
-        confirmText: 'Broadcast'
-    });
-
-    if (!confirmed) return;
-
-    isLoading.value = true;
+    isSending.value = true;
     try {
-        await adminStore.broadcastMessage(message.value);
-        uiStore.addNotification('Broadcast sent successfully!', 'success');
+        if (broadcastType.value === 'notification') {
+            await adminStore.broadcastMessage(message.value);
+            uiStore.addNotification('Broadcast notification sent!', 'success');
+        } else {
+            await apiClient.post('/api/dm/broadcast', { content: message.value });
+            uiStore.addNotification('DM broadcast task started. Check Tasks for progress.', 'success');
+        }
         message.value = '';
     } catch (error) {
-        // Error is handled globally
+        uiStore.addNotification('Failed to send broadcast.', 'error');
     } finally {
-        isLoading.value = false;
+        isSending.value = false;
     }
 }
 </script>
 
 <template>
-    <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
-        <div class="p-6 border-b border-gray-200 dark:border-gray-700">
-            <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
-                Broadcast Notification
-            </h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Send a persistent notification message to all online users. It will remain visible until they close it.
-            </p>
+    <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg p-6">
+        <h3 class="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Broadcast Message</h3>
+        <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
+            Send a message to all active users.
+        </p>
+        
+        <div class="mb-4">
+            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Broadcast Type</label>
+            <div class="flex items-center space-x-4">
+                <label class="flex items-center cursor-pointer">
+                    <input type="radio" v-model="broadcastType" value="notification" class="form-radio text-blue-600">
+                    <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">System Notification (Toast)</span>
+                </label>
+                <label class="flex items-center cursor-pointer">
+                    <input type="radio" v-model="broadcastType" value="dm" class="form-radio text-blue-600">
+                    <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">Direct Message (DM)</span>
+                </label>
+            </div>
         </div>
-        <form @submit.prevent="handleBroadcast" class="p-6">
-            <div class="space-y-4">
-                <div>
-                    <label for="broadcast-message" class="block text-sm font-medium">Message</label>
-                    <textarea
-                        id="broadcast-message"
-                        v-model="message"
-                        rows="4"
-                        class="input-field mt-1"
-                        placeholder="Enter your notification message here..."
-                        required
-                    ></textarea>
-                </div>
-            </div>
-            <div class="mt-8 pt-5 border-t border-gray-200 dark:border-gray-700">
-                <div class="flex justify-end">
-                    <button type="submit" class="btn btn-primary" :disabled="isLoading || !message.trim()">
-                        <IconAnimateSpin v-if="isLoading" class="w-5 h-5 mr-2" />
-                        <IconSend v-else class="w-5 h-5 mr-2" />
-                        {{ isLoading ? 'Sending...' : 'Send Broadcast' }}
-                    </button>
-                </div>
-            </div>
-        </form>
+
+        <textarea 
+            v-model="message" 
+            rows="4" 
+            class="input-field w-full mb-4" 
+            placeholder="Type your message here..."
+        ></textarea>
+        
+        <div class="flex justify-end">
+            <button 
+                @click="sendBroadcast" 
+                :disabled="isSending || !message.trim()" 
+                class="btn btn-primary"
+            >
+                {{ isSending ? 'Sending...' : 'Broadcast' }}
+            </button>
+        </div>
     </div>
 </template>

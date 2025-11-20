@@ -34,7 +34,7 @@ from backend.db.models.db_task import DBTask
 from backend.models import TaskInfo, AppPublic
 from backend.config import APPS_ROOT_PATH, MCPS_ROOT_PATH, MCPS_ZOO_ROOT_PATH, APPS_ZOO_ROOT_PATH, APP_DATA_DIR
 from backend.task_manager import task_manager, Task
-from backend.zoo_cache import get_all_items
+from backend.zoo_cache import get_all_items, force_build_full_cache
 from backend.settings import settings
 from backend.utils import get_accessible_host, find_next_available_port
 from backend.session import user_sessions, reload_lollms_client_mcp
@@ -770,6 +770,36 @@ def pull_repo_task(task: Task, repo_id: int, repo_model, root_path: Path, item_t
     finally:
         db_session.close()
 
+def _generate_lollms_key_for_app(task: Task, item_name: str) -> Optional[str]:
+    """Generates and stores a new API key for the @lollms bot, specifically for an app."""
+    task.log(f"Generating a new LOLLMS_KEY for '{item_name}'...")
+    full_key, key_prefix = generate_api_key()
+
+    with task.db_session_factory() as db_for_key:
+        lollms_bot_user = db_for_key.query(DBUser).filter(DBUser.username == 'lollms').first()
+        if not lollms_bot_user:
+            task.log("CRITICAL: The @lollms system user was not found. Cannot create a dedicated API key for this app.", "ERROR")
+            return None
+        
+        hashed_key = hash_api_key(full_key)
+        key_alias = f"App: {item_name}"
+        
+        existing_key = db_for_key.query(OpenAIAPIKey).filter_by(user_id=lollms_bot_user.id, alias=key_alias).first()
+        if existing_key:
+            task.log(f"An API key with alias '{key_alias}' already exists for the bot. This may cause conflicts. Consider renaming the old key.", "WARNING")
+
+        new_api_key = OpenAIAPIKey(
+            user_id=lollms_bot_user.id,
+            alias=key_alias,
+            key_prefix=key_prefix,
+            key_hash=hashed_key
+        )
+        db_for_key.add(new_api_key)
+        db_for_key.commit()
+        task.log(f"Successfully created and stored API key '{key_alias}' for the @lollms bot user.", "INFO")
+    
+    return full_key
+
 def install_item_task(task: Task, repository: str, folder_name: str, port: int, autostart: bool, source_root_path: Path):
     with task.db_session_factory() as db_session:
         try:
@@ -812,57 +842,35 @@ def install_item_task(task: Task, repository: str, folder_name: str, port: int, 
                     shutil.copy(env_example_path, env_path)
                     task.log(f"Created .env file from .env.example for '{item_name}'.")
 
-                # Auto-generate LOLLMS_KEY if present in .env.example
+                # Auto-generate LOLLMS_KEY if present and empty
                 try:
-                    with open(env_example_path, 'r', encoding='utf-8') as f:
-                        example_content = f.read()
-                    
-                    if 'LOLLMS_KEY' in example_content:
-                        task.log("Found LOLLMS_KEY in .env.example, generating and storing a new API key...")
-                        full_key, key_prefix = generate_api_key()
-
-                        # --- NEW LOGIC: Save key to DB for @lollms user ---
-                        with task.db_session_factory() as db_for_key:
-                            lollms_bot_user = db_for_key.query(DBUser).filter(DBUser.username == 'lollms').first()
-                            if not lollms_bot_user:
-                                task.log("CRITICAL: The @lollms system user was not found. Cannot create a dedicated API key for this app. The app may not be able to communicate with the main server.", "ERROR")
-                            else:
-                                hashed_key = hash_api_key(full_key)
-                                key_alias = f"App: {item_name}"
+                    env_content = env_path.read_text('utf-8')
+                    if 'LOLLMS_KEY' in env_content:
+                        lines = env_content.splitlines()
+                        key_found_and_set = False
+                        for line in lines:
+                            if line.strip().startswith('LOLLMS_KEY'):
+                                parts = line.split('=', 1)
+                                if len(parts) > 1 and parts[1].strip() and parts[1].strip() not in ('""', "''"):
+                                    key_found_and_set = True
+                                    break
+                        
+                        if not key_found_and_set:
+                            new_key = _generate_lollms_key_for_app(task, item_name)
+                            if new_key:
+                                updated_lines = []
+                                key_replaced = False
+                                for i, line in enumerate(lines):
+                                    if line.strip().startswith('LOLLMS_KEY'):
+                                        updated_lines.append(f'LOLLMS_KEY="{new_key}"')
+                                        key_replaced = True
+                                    else:
+                                        updated_lines.append(line)
+                                if not key_replaced:
+                                    updated_lines.append(f'\nLOLLMS_KEY="{new_key}"')
                                 
-                                # Check if a key with this alias already exists for the bot
-                                existing_key = db_for_key.query(OpenAIAPIKey).filter_by(user_id=lollms_bot_user.id, alias=key_alias).first()
-                                if existing_key:
-                                    task.log(f"An API key with alias '{key_alias}' already exists for the bot. Reusing it might cause conflicts. A new key will be generated, but consider renaming the old one.", "WARNING")
-
-                                new_api_key = OpenAIAPIKey(
-                                    user_id=lollms_bot_user.id,
-                                    alias=key_alias,
-                                    key_prefix=key_prefix,
-                                    key_hash=hashed_key
-                                )
-                                db_for_key.add(new_api_key)
-                                db_for_key.commit()
-                                task.log(f"Successfully created and stored API key '{key_alias}' for the @lollms bot user.", "INFO")
-                        # --- END NEW LOGIC ---
-                        
-                        with open(env_path, 'r', encoding='utf-8') as f:
-                            env_lines = f.readlines()
-                        
-                        updated = False
-                        for i, line in enumerate(env_lines):
-                            stripped_line = line.strip()
-                            if stripped_line.startswith('LOLLMS_KEY') or (stripped_line.startswith('#') and 'LOLLMS_KEY' in stripped_line):
-                                env_lines[i] = f'LOLLMS_KEY="{full_key}"\n'
-                                updated = True
-                                break
-                        
-                        if not updated:
-                            env_lines.append(f'\nLOLLMS_KEY="{full_key}"\n')
-
-                        with open(env_path, 'w', encoding='utf-8') as f:
-                            f.writelines(env_lines)
-                        task.log("Successfully set LOLLMS_KEY in the app's .env file.")
+                                env_path.write_text('\n'.join(updated_lines))
+                                task.log("Successfully generated and set LOLLMS_KEY in the app's .env file.")
                 except Exception as e:
                     task.log(f"An error occurred while trying to auto-generate API key: {e}", "WARNING")
                     trace_exception(e)
@@ -905,6 +913,12 @@ app.mount("/", StaticFiles(directory=str(Path(__file__).parent / '{static_dir}')
             db_session.refresh(new_app)
             
             if autostart: start_app_task(task, new_app.id)
+            
+            from backend.zoo_cache import force_build_full_cache
+            task.log("Refreshing Zoo cache after installation...")
+            force_build_full_cache()
+            task.log("Zoo cache refreshed.")
+            
             return {"success": True, "message": "Installation successful."}
         except Exception as e:
             if isinstance(e, subprocess.CalledProcessError): task.log(f"STDERR: {e.stderr}", "ERROR")
@@ -934,13 +948,14 @@ def update_item_task(task: Task, app_id: str):
         task.set_progress(10)
         
         installed_path = get_installed_app_path(db, app.id)
+        
+        # --- Backup user-specific files ---
+        env_path = installed_path / '.env'
+        old_env_data = env_path.read_text(encoding='utf-8') if env_path.exists() else None
         config_path = installed_path / 'config.yaml'
         log_path = installed_path / 'app.log'
-        
         config_data = config_path.read_text() if config_path.exists() else None
         log_data = log_path.read_text() if log_path.exists() else None
-        
-        task.log("Backing up configuration and logs...")
         
         zoo_meta = (app.app_metadata or {})
         repo_name = zoo_meta.get('repository')
@@ -961,12 +976,45 @@ def update_item_task(task: Task, app_id: str):
         shutil.rmtree(installed_path)
         shutil.copytree(source_path, installed_path)
 
+        # --- Restore/Merge user-specific files ---
         if config_data:
-            config_path.write_text(config_data)
-            task.log("Restored user configuration.")
+            (installed_path / 'config.yaml').write_text(config_data)
+            task.log("Restored user configuration (config.yaml).")
         if log_data:
-            log_path.write_text(log_data)
-            task.log("Restored previous logs.")
+            (installed_path / 'app.log').write_text(log_data)
+            task.log("Restored previous logs (app.log).")
+
+        new_env_example_path = installed_path / '.env.example'
+        new_env_path = installed_path / '.env'
+
+        if old_env_data:
+            if new_env_example_path.exists():
+                task.log("Merging old .env with new .env.example...")
+                old_vars = {line.split('=', 1)[0].strip(): "=".join(line.split('=', 1)[1:]) for line in old_env_data.splitlines() if '=' in line and not line.strip().startswith('#')}
+                with open(new_env_example_path, 'r', encoding='utf-8') as f_example, open(new_env_path, 'w', encoding='utf-8') as f_final:
+                    for line in f_example:
+                        stripped_line = line.strip()
+                        if not stripped_line or stripped_line.startswith('#'):
+                            f_final.write(line)
+                            continue
+                        if '=' in stripped_line:
+                            key = stripped_line.split('=', 1)[0].strip()
+                            if key in old_vars:
+                                f_final.write(f'{key}={old_vars[key]}\n')
+                            else:
+                                if key == 'LOLLMS_KEY':
+                                    new_key = _generate_lollms_key_for_app(task, app.name)
+                                    f_final.write(f'LOLLMS_KEY="{new_key or ""}"\n')
+                                else:
+                                    f_final.write(line)
+                        else:
+                            f_final.write(line)
+            else:
+                task.log("No new .env.example, restoring old .env file.")
+                new_env_path.write_text(old_env_data)
+        elif new_env_example_path.exists():
+            task.log("Creating new .env from .env.example as no previous .env was found.")
+            install_item_task(task, repo_name, folder_name, app.port, app.autostart, source_root_path)
 
         task.set_progress(50)
         task.log("Re-installing dependencies...")
@@ -992,13 +1040,21 @@ def update_item_task(task: Task, app_id: str):
         app.app_metadata = {**zoo_meta, **new_info}
         db.commit()
 
+        # Refresh the cache to reflect the version update
+        task.log("Refreshing Zoo cache after update...")
+        force_build_full_cache()
+        task.log("Zoo cache refreshed.")
+
         if app.autostart:
             task.log("Autostart is enabled, restarting app...")
-            start_app_task(task, app.id)
+            return start_app_task(task, app.id)
         
         task.set_progress(100)
         task.log("Update completed successfully.")
-        return {"success": True, "message": "Update successful."}
+
+        db.refresh(app, ["owner"])
+        serialized_app = serialize_app_to_public(app, db)
+        return {"success": True, "message": "Update successful.", "updated_app": serialized_app}
 
     except Exception as e:
         db.rollback()
@@ -1008,6 +1064,8 @@ def update_item_task(task: Task, app_id: str):
         db.close()
 
 def _get_db_session_from_url(db_url: str):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
     engine = create_engine(db_url)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     return SessionLocal()

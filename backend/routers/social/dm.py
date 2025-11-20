@@ -1,14 +1,15 @@
-# backend/routers/dm.py
+# backend/routers/social/dm.py
 import uuid
 import json
 import shutil
 from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile, Body
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc, func, update
 from werkzeug.utils import secure_filename
 from datetime import datetime
+from pydantic import BaseModel, Field
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -17,28 +18,82 @@ from backend.models import UserAuthDetails, DirectMessagePublic
 from backend.session import get_current_active_user, get_user_dm_assets_path
 from backend.ws_manager import manager
 from backend.config import DM_ASSETS_DIR_NAME
-
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from fastapi import Body
-from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
-
+from backend.task_manager import task_manager, Task
 
 dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
 
-class DirectMessageCreate(BaseModel):
-    """Payload expected from the client (JSON)."""
+class BroadcastDMRequest(BaseModel):
     content: str = Field(..., min_length=1)
-    receiver_user_id: int = Field(..., alias="receiverUserId")
+
+def _broadcast_dm_task(task: Task, sender_id: int, content: str):
+    db = next(get_db())
+    try:
+        sender = db.query(DBUser).filter(DBUser.id == sender_id).first()
+        if not sender:
+            raise Exception("Sender not found")
+        
+        # Get all active users except sender
+        users = db.query(DBUser).filter(DBUser.id != sender_id, DBUser.is_active == True).all()
+        total = len(users)
+        
+        task.log(f"Starting broadcast to {total} users...")
+        
+        for i, user in enumerate(users):
+            if task.cancellation_event.is_set():
+                task.log("Broadcast cancelled.", "WARNING")
+                break
+            
+            new_message = DBDirectMessage(
+                sender_id=sender_id,
+                receiver_id=user.id,
+                content=content
+            )
+            db.add(new_message)
+            # Commit frequently to ensure messages are saved and accessible immediately
+            db.commit()
+            db.refresh(new_message)
+            
+            message_payload = {
+                "type": "new_dm",
+                "data": {
+                    "id": new_message.id,
+                    "sender_id": sender.id,
+                    "receiver_id": user.id,
+                    "content": new_message.content,
+                    "sent_at": new_message.sent_at.isoformat(),
+                    "read_at": None,
+                    "sender_username": sender.username,
+                    "receiver_username": user.username,
+                    "sender_icon": sender.icon,
+                    "receiver_icon": user.icon,
+                    "image_references": []
+                }
+            }
+            # Send real-time notification. 
+            # Note: We use send_personal_message_sync which handles WS delivery if connected.
+            # If user is offline, the message is safely in DB and will load on next fetch.
+            manager.send_personal_message_sync(message_payload, user.id)
+            
+            if i % 10 == 0 or i == total - 1:
+                task.set_progress(int(((i + 1) / total) * 100))
+                
+        task.set_progress(100)
+        return {"message": f"Broadcasted DM to {total} users."}
+    except Exception as e:
+        task.log(f"Error broadcasting DM: {e}", "ERROR")
+        raise e
+    finally:
+        db.close()
 
 @dm_router.post("/send", response_model=DirectMessagePublic, status_code=201)
 async def send_direct_message(
-    payload: DirectMessageCreate = Body(...),
-    files: Optional[List[UploadFile]] = File(None),  # keep if you still want file upload
+    receiver_user_id: int = Form(..., alias="receiverUserId"),
+    content: str = Form(..., min_length=1),
+    files: Optional[List[UploadFile]] = File(None),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    receiver = db.query(DBUser).filter(DBUser.id == payload.receiver_user_id).first()
+    receiver = db.query(DBUser).filter(DBUser.id == receiver_user_id).first()
     if not receiver:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Receiver user not found.")
 
@@ -49,41 +104,55 @@ async def send_direct_message(
     if files:
         dm_assets_path = get_user_dm_assets_path(current_user.username)
         for file in files:
+            if not file.filename:
+                continue
             s_filename = secure_filename(file.filename or "image.png")
             ext = Path(s_filename).suffix
             unique_filename = f"{uuid.uuid4().hex}{ext}"
             file_path = dm_assets_path / unique_filename
             
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            
-            relative_path = f"{DM_ASSETS_DIR_NAME}/{unique_filename}"
-            image_paths.append(relative_path)
+            try:
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+                
+                relative_path = f"{DM_ASSETS_DIR_NAME}/{unique_filename}"
+                image_paths.append(relative_path)
+            finally:
+                file.file.close()
 
     new_message = DBDirectMessage(
         sender_id=current_user.id,
         receiver_id=receiver.id,
-        content=payload.content,
+        content=content,
         image_references=image_paths if image_paths else None
     )
     db.add(new_message)
     db.commit()
     db.refresh(new_message, ['sender', 'receiver'])
 
-    response_data = DirectMessagePublic.from_orm(new_message)
-    response_data.sender_username = new_message.sender.username
-    response_data.receiver_username = new_message.receiver.username
+    # Manually creating the Pydantic response to ensure usernames are populated correctly
+    response_data = DirectMessagePublic(
+        id=new_message.id,
+        sender_id=new_message.sender_id,
+        receiver_id=new_message.receiver_id,
+        content=new_message.content,
+        sent_at=new_message.sent_at,
+        read_at=new_message.read_at,
+        sender_username=new_message.sender.username,
+        receiver_username=new_message.receiver.username,
+        image_references=new_message.image_references
+    )
     
     message_payload = {
         "type": "new_dm",
         "data": response_data.model_dump(mode="json")
     }
     
-    # Send to recipient
-    await manager.send_personal_message(message_payload, receiver.id)
-    # Send to sender for multi-device sync
-    await manager.send_personal_message(message_payload, current_user.id)
-
+    # Send sync messages to both parties.
+    # This ensures real-time updates if users are online.
+    # If offline, DB persist ensures message is seen later.
+    manager.send_personal_message_sync(message_payload, receiver.id)
+    manager.send_personal_message_sync(message_payload, current_user.id)
 
     return response_data
 
@@ -92,12 +161,13 @@ async def get_user_conversations(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # Use func.min/func.max instead of func.least/func.greatest for SQLite compatibility
     subquery = db.query(
         DBDirectMessage.id,
         func.row_number().over(
             partition_by=(
-                func.least(DBDirectMessage.sender_id, DBDirectMessage.receiver_id),
-                func.greatest(DBDirectMessage.sender_id, DBDirectMessage.receiver_id)
+                func.min(DBDirectMessage.sender_id, DBDirectMessage.receiver_id),
+                func.max(DBDirectMessage.sender_id, DBDirectMessage.receiver_id)
             ),
             order_by=DBDirectMessage.sent_at.desc()
         ).label('rn')
@@ -162,10 +232,9 @@ async def get_conversation_messages(
             read_at=msg.read_at,
             sender_username=msg.sender.username,
             receiver_username=msg.receiver.username,
-            content = msg.content
+            content = msg.content,
+            image_references=msg.image_references
         )
-        msg_public.sender_username = msg.sender.username
-        msg_public.receiver_username = msg.receiver.username
         response_data.append(msg_public)
 
     return response_data
@@ -190,3 +259,20 @@ async def mark_conversation_as_read(
     db.commit()
     
     return {"message": f"Marked {result.rowcount} messages as read."}
+
+@dm_router.post("/broadcast", status_code=202)
+async def broadcast_direct_message(
+    payload: BroadcastDMRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can broadcast DMs.")
+        
+    task = task_manager.submit_task(
+        name="Broadcast DM",
+        target=_broadcast_dm_task,
+        args=(current_user.id, payload.content),
+        description=f"Sending DM to all users: {payload.content[:30]}...",
+        owner_username=current_user.username
+    )
+    return task

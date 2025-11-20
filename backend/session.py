@@ -1,4 +1,4 @@
-# lollms/backend/session.py
+# [UPDATE] backend/session.py
 import json
 import traceback
 import datetime
@@ -159,8 +159,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 print(f"ERROR: Could not persist forced ITI model for user '{db_user.username}'. Error: {e}")
                 db.rollback()
         
-        # The validation of selected models against active bindings is now done in build_lollms_client_from_params
-
+        # Initialize session if needed
         if username not in user_sessions:
             print(f"INFO: Re-initializing session for {username} on first request after server start.")
             session_llm_params = {
@@ -194,37 +193,59 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "put_thoughts_in_context": db_user.put_thoughts_in_context
         }
 
+        # --- Enforce Context Size Lock ---
+        ctx_size_to_enforce = None
         if user_model_full and '/' in user_model_full:
             binding_alias, model_name = user_model_full.split('/', 1)
             binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
             if binding and binding.model_aliases:
-                if isinstance(binding.model_aliases,str):
+                if isinstance(binding.model_aliases, str):
                     try:
                         binding.model_aliases = json.loads(binding.model_aliases)
                     except Exception as e:
                         trace_exception(e)
-                        binding.model_aliases= {}
+                        binding.model_aliases = {}
+                
                 alias_info = binding.model_aliases.get(model_name)
                 
+                # Check for lock
                 if alias_info and alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
-                    locked_ctx_size = alias_info['ctx_size']
-                    effective_llm_params["llm_ctx_size"] = locked_ctx_size
-                    if db_user.llm_ctx_size != locked_ctx_size:
-                        print(f"INFO: Overriding and updating user '{username}' context size from {db_user.llm_ctx_size} to locked value {locked_ctx_size}.")
-                        db_user.llm_ctx_size = locked_ctx_size
-                        try:
-                            db.commit()
-                            db.refresh(db_user)
-                        except Exception as e:
-                            print(f"ERROR: Could not permanently update user context size. Error: {e}")
-                            db.rollback()
-
+                    ctx_size_to_enforce = alias_info['ctx_size']
+                
+                # Check for general overrides
                 if alias_info and not alias_info.get('allow_parameters_override', True):
                     llm_settings_overridden = True
                     param_map = {"ctx_size": "llm_ctx_size", "temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n"}
                     for alias_key, user_key in param_map.items():
                         if alias_key in alias_info and alias_info[alias_key] is not None:
                             effective_llm_params[user_key] = alias_info[alias_key]
+                            if alias_key == 'ctx_size':
+                                ctx_size_to_enforce = alias_info['ctx_size']
+
+        # Apply the enforcement
+        if ctx_size_to_enforce is not None:
+            effective_llm_params["llm_ctx_size"] = ctx_size_to_enforce
+            
+            # 1. Update DB if different
+            if db_user.llm_ctx_size != ctx_size_to_enforce:
+                print(f"INFO: Enforcing locked context size {ctx_size_to_enforce} for user '{username}'.")
+                db_user.llm_ctx_size = ctx_size_to_enforce
+                try:
+                    db.commit()
+                    db.refresh(db_user)
+                except Exception as e:
+                    print(f"ERROR: Could not permanently update user context size. Error: {e}")
+                    db.rollback()
+            
+            # 2. Update Session if different (Critical Fix)
+            # We must ensure the session params also reflect the lock, otherwise the Client builder might use stale session data
+            session_params = user_sessions[username].get("llm_params", {})
+            if session_params.get("ctx_size") != ctx_size_to_enforce:
+                session_params["ctx_size"] = ctx_size_to_enforce
+                user_sessions[username]["llm_params"] = session_params
+                # Invalidate client cache to force rebuild with new size
+                user_sessions[username]["lollms_clients_cache"] = {}
+                print(f"INFO: Updated session params and invalidated client cache for '{username}' due to context size lock.")
 
         
         lc = get_user_lollms_client(username)

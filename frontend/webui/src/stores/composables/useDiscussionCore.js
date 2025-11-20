@@ -3,7 +3,7 @@ import apiClient from '../../services/api';
 import { processMessages } from './discussionProcessor';
 
 export function useDiscussionCore(state, stores, getActions) {
-    const { discussions, currentDiscussionId, messages, isLoadingDiscussions, isLoadingMessages, activeDiscussionParticipants } = state;
+    const { discussions, currentDiscussionId, currentGroupId, messages, isLoadingDiscussions, isLoadingMessages, activeDiscussionParticipants } = state;
     const { uiStore } = stores;
 
     async function fetchParticipants(discussionId) {
@@ -50,6 +50,12 @@ export function useDiscussionCore(state, stores, getActions) {
         
         if (discussionId) {
             localStorage.setItem('lollms_last_discussion_id', discussionId);
+            
+            // Automatically select the group of the discussion
+            if (discussions.value[discussionId]) {
+                currentGroupId.value = discussions.value[discussionId].group_id;
+            }
+            
         } else {
             localStorage.removeItem('lollms_last_discussion_id');
         }

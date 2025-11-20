@@ -103,7 +103,7 @@ class User(Base):
     rag_graph_response_type = Column(String, default="chunks_summary", nullable=True)
     auto_title = Column(Boolean, default=False, nullable=False)
     user_ui_level = Column(Integer, default=0, nullable=True)
-    chat_active = Column(Boolean, default=False, nullable=False)
+    chat_active = Column(Boolean, default=True, nullable=False) # Default changed to True
     first_page = Column(String, default="feed", nullable=False)
     ai_response_language = Column(String, default="auto", nullable=True)
     force_ai_response_language = Column(Boolean, default=False, nullable=False)

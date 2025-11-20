@@ -30,8 +30,12 @@ const isDragOver = ref(false);
 
 const paddingLeft = computed(() => `${props.indentationLevel * 1}rem`);
 
+const isGroupSelected = computed(() => store.currentGroupId === props.group.id);
+
 function toggleGroup() {
   isOpen.value = !isOpen.value;
+  // If opening or selecting, update the global current group selection
+  store.currentGroupId = props.group.id;
 }
 
 function handleNewSubgroup(event) {
@@ -121,11 +125,14 @@ async function handleDrop(event) {
       @dragover.prevent="handleDragOver"
       @dragleave="handleDragLeave"
       @drop="handleDrop"
-      :class="{ 'bg-slate-100 dark:bg-slate-800/50 border-2 border-dashed border-slate-400': isDragOver }"
+      :class="{ 
+        'bg-slate-100 dark:bg-slate-800/50 border-2 border-dashed border-slate-400': isDragOver,
+        'bg-blue-50 dark:bg-blue-900/20': isGroupSelected
+      }"
       >
       <button @click="toggleGroup" class="flex items-center space-x-2 flex-grow min-w-0 h-full text-left">
-        <IconFolder class="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-gray-400" />
-        <span class="font-medium text-slate-700 dark:text-gray-300 truncate">{{ group.name }}</span>
+        <IconFolder class="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-gray-400" :class="{'text-blue-500 dark:text-blue-400': isGroupSelected}" />
+        <span class="font-medium text-slate-700 dark:text-gray-300 truncate" :class="{'text-blue-700 dark:text-blue-300': isGroupSelected}">{{ group.name }}</span>
         <div class="px-1.5 py-0.5 bg-slate-200 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
           {{ group.discussions.length }}
         </div>

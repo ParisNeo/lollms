@@ -34,6 +34,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const sharedWithMe = ref([]);
     const isLoadingDiscussions = ref(false);
     const currentDiscussionId = ref(null);
+    const currentGroupId = ref(null); // NEW: Track selected group context
     const messages = ref([]);
     const isLoadingMessages = ref(false);
     const generationInProgress = ref(false);
@@ -162,7 +163,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const getActions = () => _actions;
 
     const composableState = {
-        discussions, discussionGroups, sharedWithMe, isLoadingDiscussions, currentDiscussionId, messages,
+        discussions, discussionGroups, sharedWithMe, isLoadingDiscussions, currentDiscussionId, currentGroupId, messages,
         isLoadingMessages, 
         generationInProgress, titleGenerationInProgressId, activeDiscussionContextStatus, activeAiTasks,
         activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
@@ -266,6 +267,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         sharedWithMe.value = [];
         isLoadingDiscussions.value = false;
         currentDiscussionId.value = null;
+        currentGroupId.value = null; // Reset
         messages.value = [];
         isLoadingMessages.value = false;
         generationInProgress.value = false;
@@ -288,7 +290,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     return {
-        discussions, currentDiscussionId, messages, generationInProgress, discussionGroups,
+        discussions, currentDiscussionId, currentGroupId, messages, generationInProgress, discussionGroups,
         isLoadingDiscussions, isLoadingMessages, 
         titleGenerationInProgressId, activeDiscussionContextStatus,
         activeAiTasks, activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens,

@@ -1,5 +1,6 @@
+<!-- [UPDATE] frontend/webui/src/App.vue -->
 <script setup>
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, watch, defineAsyncComponent } from 'vue';
 import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useAuthStore } from './stores/auth';
@@ -74,15 +75,15 @@ import EnhancePromptModal from './components/modals/EnhancePromptModal.vue';
 import CameraCaptureModal from './components/modals/CameraCaptureModal.vue';
 import ImageEditorSettingsModal from './components/modals/ImageEditorSettingsModal.vue';
 
+// New Component for Chat Sidebar
+const ChatSidebar = defineAsyncComponent(() => import('./components/chat/ChatSidebar.vue'));
+
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
 const tasksStore = useTasksStore();
-const discussionsStore = useDiscussionsStore();
-const imageStore = useImageStore();
 const route = useRoute();
 const { message_font_size } = storeToRefs(uiStore);
-const { tasks } = storeToRefs(tasksStore);
 
 const activeModal = computed(() => uiStore.activeModal);
 const isAuthenticating = computed(() => authStore.isAuthenticating);
@@ -115,7 +116,6 @@ const layoutState = computed(() => {
 
 const showMainSidebar = computed(() => {
     if (!isAuthenticated.value) return false;
-    // Views that have their own full-screen layouts and do not need the main sidebar
     const noMainSidebarPaths = [
         '/settings',
         '/admin',
@@ -125,7 +125,7 @@ const showMainSidebar = computed(() => {
         '/profile',
         '/messages',
         '/voices-studio',
-        '/image-studio' // This covers both /image-studio and /image-studio/edit/...
+        '/image-studio'
     ];
     return !noMainSidebarPaths.some(path => route.path.startsWith(path));
 });
@@ -157,7 +157,7 @@ watch(message_font_size, (newSize) => {
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900 flex flex-col">
     
-    <div v-if="layoutState === 'loading'" class="fixed inset-0 z- flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
+    <div v-if="layoutState === 'loading'" class="fixed inset-0 z-50 flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
         <div class="w-full max-w-lg mx-auto">
             <div class="flex justify-center mb-6">
                 <img :src="logoSrc" alt="Logo" class="h-24 sm:h-28 w-auto object-contain" />
@@ -194,19 +194,22 @@ watch(message_font_size, (newSize) => {
     </div>
 
     <!-- Authenticated App Layout -->
-    <div v-else-if="layoutState === 'authenticated'" class="flex flex-col flex-grow min-h-0">
-      <div class="flex flex-grow min-h-0 relative">
-        <div v-if="showMainSidebar" class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out" :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
+    <div v-else-if="layoutState === 'authenticated'" class="flex flex-col flex-grow min-h-0 relative overflow-hidden">
+      <div class="flex flex-grow min-h-0 relative w-full h-full">
+        <div v-if="showMainSidebar" class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out h-full" :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
             <Sidebar/>
         </div>
         <div v-if="showMainSidebar && isSidebarOpen" @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/30 z-30 md:hidden"></div>
 
-        <div class="flex-1 flex flex-col overflow-hidden">
+        <div class="flex-1 flex flex-col overflow-hidden h-full relative">
           <GlobalHeader />
-          <main class="flex-1 overflow-hidden">
+          <main class="flex-1 overflow-hidden relative">
               <router-view />
           </main>
         </div>
+        
+        <!-- Global Chat Sidebar -->
+        <ChatSidebar />
       </div>
     </div>
 

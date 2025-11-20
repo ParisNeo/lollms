@@ -1,5 +1,5 @@
 import datetime
-from typing import Optional
+from typing import Optional, List
 from pydantic import BaseModel, Field, constr
 
 class DirectMessageBase(BaseModel):
@@ -7,7 +7,6 @@ class DirectMessageBase(BaseModel):
 
 class DirectMessageCreate(DirectMessageBase):
     receiver_user_id: int = Field(..., alias='receiverUserId')
-    image_references_json: Optional[str] = None
     class Config:
         populate_by_name = True
 
@@ -19,3 +18,7 @@ class DirectMessagePublic(DirectMessageBase):
     read_at: Optional[datetime.datetime] = None
     sender_username: str
     receiver_username: str
+    image_references: Optional[List[str]] = None
+
+    class Config:
+        from_attributes = True

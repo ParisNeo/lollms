@@ -99,7 +99,8 @@ async def send_friend_request(
             "type": "new_friend_request",
             "data": response_data.model_dump(mode="json")
         }
-        await manager.send_personal_message(notification_payload, target_user.id)
+        # Use sync broadcast to ensure reliability across workers
+        manager.send_personal_message_sync(notification_payload, target_user.id)
 
         return response_data
     except IntegrityError:

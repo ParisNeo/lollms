@@ -191,7 +191,7 @@ async def listen_for_broadcasts():
                                 print(f"INFO: Worker {os.getpid()} invalidated client cache for user {username}")
                         continue # Skip to next message
 
-                    # --- SETTINGS UPDATE HANDLING (INTERNAL) ---
+                    # --- SETTINGS UPDATE HANDLING (INTERNAL & FORWARD) ---
                     if payload.get("type") == "settings_updated":
                         print(f"INFO: Worker {os.getpid()} received settings update notification. Refreshing settings cache.")
                         refresh_db = db_session_module.SessionLocal()
@@ -199,7 +199,7 @@ async def listen_for_broadcasts():
                             settings.refresh(refresh_db)
                         finally:
                             refresh_db.close()
-                        continue # Do not forward to clients, it's a server-side signal
+                        # Proceed to broadcast this to clients so they can update their UI state
 
                     # --- FORWARDING TO CLIENTS ---
                     if payload.get("type") == "personal":

@@ -10,6 +10,14 @@ class WelcomeInfo(BaseModel):
     fun_fact: str
     fun_fact_color: Optional[str] = None
     fun_fact_category: Optional[str] = None
+    latex_builder_enabled: bool = False
+    export_to_txt_enabled: bool = True
+    export_to_markdown_enabled: bool = True
+    export_to_html_enabled: bool = True
+    export_to_pdf_enabled: bool = False
+    export_to_docx_enabled: bool = False
+    export_to_xlsx_enabled: bool = False
+    export_to_pptx_enabled: bool = False
 
 
 # --- Fun Fact Management Models (For Admin) ---

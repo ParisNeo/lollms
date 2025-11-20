@@ -169,6 +169,18 @@ def get_available_zoo_mcps(
             'item_type': (mcp.app_metadata or {}).get('item_type', 'mcp')
         }
         
+        if mcp.is_installed and key in all_items_map:
+            zoo_item = all_items_map[key]
+            if mcp.version and zoo_item.get('version'):
+                try:
+                    installed_ver = str(mcp.version or '0.0.0')
+                    repo_ver = str(zoo_item.get('version', '0.0.0'))
+                    if packaging_version.parse(repo_ver) > packaging_version.parse(installed_ver):
+                        item_data_from_db['update_available'] = True
+                        item_data_from_db['repo_version'] = repo_ver
+                except (packaging_version.InvalidVersion, TypeError):
+                    pass
+
         if item_data_from_db['status'] == 'running' and item_data_from_db['port']:
             item_data_from_db['url'] = f"http://{accessible_host}:{item_data_from_db['port']}"
 
@@ -205,6 +217,7 @@ def get_available_zoo_mcps(
     final_list = []
     for item_data in all_items_map.values():
         try:
+            if 'update_available' not in item_data: item_data['update_available'] = False
             final_list.append(ZooMCPInfo(**item_data))
         except PydanticValidationError as e:
             print(f"Validation error for MCP item {item_data.get('name')}: {e}")
@@ -223,7 +236,9 @@ def get_available_zoo_mcps(
         filtered_items = [i for i in filtered_items if q in i.name.lower() or (i.description and q in i.description.lower())]
     
     filtered_items.sort(key=lambda item: (
-        -1 if item.is_broken else (0 if item.is_installed else 1),
+        -1 if item.is_broken else 0,
+        -1 if item.update_available else 0,
+        0 if item.is_installed else 1,
         str(getattr(item, sort_by, '') or '').lower() if sort_order == 'asc' else str(getattr(item, sort_by, '') or '').lower()
     ), reverse=(sort_order == 'desc'))
 

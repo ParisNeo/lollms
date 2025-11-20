@@ -674,7 +674,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                                 <IconAnimateSpin v-if="messageTtsState.isLoading" class="w-4 h-4 animate-spin" />
                                 <IconSpeakerWave v-else class="w-4 h-4" />
                             </button>
-                            <DropdownMenu v-if="exportFormats.length > 0" title="Export" icon="ticket" button-class="action-btn">
+                            <DropdownMenu v-if="exportFormats.length > 0" title="Export" icon="ticket" button-class="action-btn" collection="ui">
                                 <button v-for="format in exportFormats" :key="format.value" @click="handleExport(format.value)" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm">
                                     {{ format.label }}
                                 </button>

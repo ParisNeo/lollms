@@ -25,12 +25,8 @@ async function handleRemoveFriend(friend) {
     }
 }
 
-async function handleMessageFriend(friend) {
-    // 1. Navigate to the HomeView first, as it contains the DM window container.
-    await router.push('/');
-    
-    // 2. Now that we are on the correct view, open the conversation.
-    //    The watcher in HomeView will display the DmWindow component.
+function handleMessageFriend(friend) {
+    // Open conversation and rely on the sidebar logic (via store) to show the chat
     socialStore.openConversation({
         id: friend.id,
         username: friend.username,
