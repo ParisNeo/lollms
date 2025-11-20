@@ -5,6 +5,7 @@ import shutil
 from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile, Body
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc, func, update, and_
 from werkzeug.utils import secure_filename
@@ -18,8 +19,69 @@ from backend.models import UserAuthDetails, DirectMessagePublic, CreateGroupRequ
 from backend.session import get_current_active_user, get_user_dm_assets_path
 from backend.ws_manager import manager
 from backend.config import DM_ASSETS_DIR_NAME
+from backend.task_manager import task_manager, Task
 
 dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
+
+class BroadcastDMRequest(BaseModel):
+    content: str = Field(..., min_length=1)
+
+def _broadcast_dm_task(task: Task, sender_id: int, content: str):
+    db = next(get_db())
+    try:
+        sender = db.query(DBUser).filter(DBUser.id == sender_id).first()
+        if not sender:
+            raise Exception("Sender not found")
+        
+        # Get all active users except sender
+        users = db.query(DBUser).filter(DBUser.id != sender_id, DBUser.is_active == True).all()
+        total = len(users)
+        
+        task.log(f"Starting broadcast to {total} users...")
+        
+        for i, user in enumerate(users):
+            if task.cancellation_event.is_set():
+                task.log("Broadcast cancelled.", "WARNING")
+                break
+            
+            new_message = DBDirectMessage(
+                sender_id=sender_id,
+                receiver_id=user.id,
+                content=content
+            )
+            db.add(new_message)
+            # Commit frequently to ensure messages are saved
+            db.commit()
+            db.refresh(new_message)
+            
+            message_payload = {
+                "type": "new_dm",
+                "data": {
+                    "id": new_message.id,
+                    "sender_id": sender.id,
+                    "receiver_id": user.id,
+                    "content": new_message.content,
+                    "sent_at": new_message.sent_at.isoformat(),
+                    "read_at": None,
+                    "sender_username": sender.username,
+                    "receiver_username": user.username,
+                    "sender_icon": sender.icon,
+                    "receiver_icon": user.icon,
+                    "image_references": []
+                }
+            }
+            manager.send_personal_message_sync(message_payload, user.id)
+            
+            if i % 10 == 0 or i == total - 1:
+                task.set_progress(int(((i + 1) / total) * 100))
+                
+        task.set_progress(100)
+        return {"message": f"Broadcasted DM to {total} users."}
+    except Exception as e:
+        task.log(f"Error broadcasting DM: {e}", "ERROR")
+        raise e
+    finally:
+        db.close()
 
 @dm_router.post("/conversations/group", response_model=ConversationPublic, status_code=201)
 async def create_group_conversation(
@@ -117,7 +179,6 @@ async def add_member_to_group(
 
     return await get_conversation_details_internal(conversation_id, current_user.id, db)
 
-
 @dm_router.post("/send", response_model=DirectMessagePublic, status_code=201)
 async def send_direct_message(
     receiver_user_id: Optional[int] = Form(None, alias="receiverUserId"),
@@ -141,7 +202,8 @@ async def send_direct_message(
             try:
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(file.file, buffer)
-                image_paths.append(f"{DM_ASSETS_DIR_NAME}/{unique_filename}")
+                # Save a URL path that the frontend can use to fetch the image via the new endpoint
+                image_paths.append(f"/api/dm/file/{current_user.username}/{unique_filename}")
             finally:
                 file.file.close()
 
@@ -174,16 +236,16 @@ async def send_direct_message(
     db.commit()
     db.refresh(new_message)
     
-    # Prepare response manually to handle conditional fields
+    # Prepare response
     resp = DirectMessagePublic(
         id=new_message.id,
         sender_id=new_message.sender_id,
-        receiver_id=new_message.receiver_id or 0, # Avoid validation error if null
+        receiver_id=new_message.receiver_id or 0,
         conversation_id=new_message.conversation_id,
         content=new_message.content,
         sent_at=new_message.sent_at,
         sender_username=current_user.username,
-        receiver_username="", # Populated on frontend if needed
+        receiver_username="", 
         image_references=new_message.image_references
     )
 
@@ -194,6 +256,20 @@ async def send_direct_message(
     manager.send_personal_message_sync(payload, current_user.id) # Echo back
 
     return resp
+
+@dm_router.get("/file/{username}/{filename}")
+async def get_dm_attachment(
+    username: str, 
+    filename: str, 
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    # Basic access check: currently allows any authenticated user to fetch if they have the link.
+    # In a stricter system, we would check conversation membership.
+    file_path = get_user_dm_assets_path(username) / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    return FileResponse(file_path)
 
 async def get_conversation_details_internal(conv_id, user_id, db):
     conv = db.query(DBConversation).filter(DBConversation.id == conv_id).first()
@@ -213,7 +289,7 @@ async def get_conversation_details_internal(conv_id, user_id, db):
         members=members,
         last_message=last_msg.content if last_msg else None,
         last_message_at=last_msg.sent_at if last_msg else conv.created_at,
-        unread_count=0 # Logic for unread count in groups is complex, simplifying for now
+        unread_count=0
     )
 
 @dm_router.get("/conversations", response_model=List[ConversationPublic])
@@ -229,7 +305,6 @@ async def get_user_conversations(
     if group_ids:
         groups_db = db.query(DBConversation).filter(DBConversation.id.in_(group_ids)).all()
         for g in groups_db:
-            # Basic info, detailed members fetching might be heavy for list, optimize later
             last_msg = db.query(DBDirectMessage).filter(DBDirectMessage.conversation_id == g.id).order_by(desc(DBDirectMessage.sent_at)).first()
             groups.append(ConversationPublic(
                 id=g.id,
@@ -239,7 +314,7 @@ async def get_user_conversations(
                 last_message_at=last_msg.sent_at if last_msg else g.created_at
             ))
 
-    # 2. Fetch Legacy 1-on-1 DMs (Virtual Conversations)
+    # 2. Fetch Legacy 1-on-1 DMs
     subquery = db.query(
         DBDirectMessage.id,
         func.row_number().over(
@@ -250,7 +325,7 @@ async def get_user_conversations(
             order_by=DBDirectMessage.sent_at.desc()
         ).label('rn')
     ).filter(
-        DBDirectMessage.conversation_id == None # Only legacy
+        DBDirectMessage.conversation_id == None
     ).subquery()
 
     latest_dms = db.query(DBDirectMessage).join(subquery, DBDirectMessage.id == subquery.c.id).filter(
@@ -261,7 +336,6 @@ async def get_user_conversations(
     dms = []
     for msg in latest_dms:
         partner = msg.sender if msg.receiver_id == current_user.id else msg.receiver
-        # Calculate unread
         unread = db.query(DBDirectMessage).filter(
             DBDirectMessage.sender_id == partner.id,
             DBDirectMessage.receiver_id == current_user.id,
@@ -270,7 +344,7 @@ async def get_user_conversations(
         ).count()
         
         dms.append(ConversationPublic(
-            id=partner.id, # Virtual ID for 1-on-1 is partner ID (client handles distinction)
+            id=partner.id,
             is_group=False,
             partner_user_id=partner.id,
             partner_username=partner.username,
@@ -280,7 +354,6 @@ async def get_user_conversations(
             unread_count=unread
         ))
 
-    # Combine and Sort
     all_convos = groups + dms
     all_convos.sort(key=lambda x: x.last_message_at or datetime.min, reverse=True)
     return all_convos
@@ -297,13 +370,11 @@ async def get_conversation_messages(
     query = db.query(DBDirectMessage).options(joinedload(DBDirectMessage.sender))
     
     if is_group:
-        # Check membership
         member = db.query(DBConversationMember).filter_by(conversation_id=target_id, user_id=current_user.id).first()
         if not member and not current_user.is_admin:
             raise HTTPException(status_code=403, detail="Not a member of this group")
         query = query.filter(DBDirectMessage.conversation_id == target_id)
     else:
-        # 1-on-1
         query = query.filter(
             or_(
                 and_(DBDirectMessage.sender_id == current_user.id, DBDirectMessage.receiver_id == target_id),
@@ -314,9 +385,123 @@ async def get_conversation_messages(
 
     messages = query.order_by(desc(DBDirectMessage.sent_at)).offset(skip).limit(limit).all()
     
-    # Map to public
     return [DirectMessagePublic(
         id=m.id, sender_id=m.sender_id, receiver_id=m.receiver_id or 0, conversation_id=m.conversation_id,
         content=m.content, sent_at=m.sent_at, read_at=m.read_at,
         sender_username=m.sender.username, image_references=m.image_references
     ) for m in messages]
+
+@dm_router.post("/conversation/{user_id}/read", status_code=200)
+async def mark_conversation_as_read(
+    user_id: int,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    stmt = (
+        update(DBDirectMessage)
+        .where(
+            DBDirectMessage.sender_id == user_id,
+            DBDirectMessage.receiver_id == current_user.id,
+            DBDirectMessage.read_at.is_(None)
+        )
+        .values(read_at=datetime.utcnow())
+    )
+    result = db.execute(stmt)
+    db.commit()
+    
+    return {"message": f"Marked {result.rowcount} messages as read."}
+
+@dm_router.delete("/messages/{message_id}", status_code=200)
+async def delete_direct_message(
+    message_id: int,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    msg = db.query(DBDirectMessage).filter(DBDirectMessage.id == message_id).first()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    if msg.sender_id != current_user.id and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="You can only delete your own messages")
+        
+    db.delete(msg)
+    db.commit()
+    
+    # Optionally notify recipients about deletion (not strictly required by prompt but good for consistency)
+    
+    return {"message": "Message deleted"}
+
+@dm_router.delete("/conversations/{conversation_id}", status_code=200)
+async def delete_conversation_or_leave_group(
+    conversation_id: int,
+    is_group: bool = False,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if is_group:
+        # Leave group
+        member = db.query(DBConversationMember).filter_by(conversation_id=conversation_id, user_id=current_user.id).first()
+        if member:
+            db.delete(member)
+            
+            # Check if group is empty
+            remaining = db.query(DBConversationMember).filter_by(conversation_id=conversation_id).count()
+            if remaining == 0:
+                conv = db.query(DBConversation).filter_by(id=conversation_id).first()
+                if conv: db.delete(conv)
+                
+            db.commit()
+        return {"message": "Left group"}
+    else:
+        # Delete history (virtual deletion - usually just delete all messages, but for DMs typically we might just want to clear view)
+        # True deletion for both sides? Or just hide?
+        # For simplicity, implementing delete all messages where user is sender, or delete all messages between them.
+        # Deleting strictly requires consensus or just deletes for everyone.
+        # Implementing 'Delete all messages between these two'
+        
+        # Target ID is passed as conversation_id for 1-on-1
+        partner_id = conversation_id 
+        
+        stmt = (
+            update(DBDirectMessage)
+            .where(
+                or_(
+                    and_(DBDirectMessage.sender_id == current_user.id, DBDirectMessage.receiver_id == partner_id),
+                    and_(DBDirectMessage.sender_id == partner_id, DBDirectMessage.receiver_id == current_user.id)
+                ),
+                DBDirectMessage.conversation_id == None
+            )
+            # Mark as deleted? Or physically delete.
+            # Physical delete as per prompt implication "delete discussions"
+        )
+        # SQLAlchemy delete doesn't support join/complex where in same way for some DBs, so fetch ids first
+        msgs = db.query(DBDirectMessage).filter(
+             or_(
+                and_(DBDirectMessage.sender_id == current_user.id, DBDirectMessage.receiver_id == partner_id),
+                and_(DBDirectMessage.sender_id == partner_id, DBDirectMessage.receiver_id == current_user.id)
+            ),
+            DBDirectMessage.conversation_id == None
+        ).all()
+        
+        for m in msgs:
+            db.delete(m)
+        
+        db.commit()
+        return {"message": "Conversation history cleared"}
+
+@dm_router.post("/broadcast", status_code=202)
+async def broadcast_direct_message(
+    payload: BroadcastDMRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only admins can broadcast DMs.")
+        
+    task = task_manager.submit_task(
+        name="Broadcast DM",
+        target=_broadcast_dm_task,
+        args=(current_user.id, payload.content),
+        description=f"Sending DM to all users: {payload.content[:30]}...",
+        owner_username=current_user.username
+    )
+    return task
