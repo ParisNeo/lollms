@@ -19,7 +19,7 @@ from backend.db.models.group import Group
 from backend.db.models.memory import UserMemory
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.image import UserImage
-from backend.db.models.dm import Conversation, ConversationMember
+from backend.db.models.dm import Conversation, ConversationMember, DirectMessage
 from ascii_colors import ASCIIColors, trace_exception
 
 
@@ -629,8 +629,82 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         for col_name, col_sql_def in new_direct_messages_cols_defs.items():
             if col_name not in direct_messages_columns_db:
                 connection.execute(text(f"ALTER TABLE direct_messages ADD COLUMN {col_name} {col_sql_def}"))
-                print(f"INFO: Added missing column '{col_name}' to 'personalities' table.")
-        connection.commit()    
+                print(f"INFO: Added missing column '{col_name}' to 'direct_messages' table.")
+        connection.commit()
+        
+        # NEW: Migrate receiver_id to be nullable for group chats
+        dm_cols_full = inspector.get_columns('direct_messages')
+        receiver_col_info = next((c for c in dm_cols_full if c['name'] == 'receiver_id'), None)
+        
+        if receiver_col_info and not receiver_col_info.get('nullable'):
+            print("INFO: 'direct_messages.receiver_id' is NOT NULL. Migrating to allow NULL for group chats.")
+            try:
+                # 1. Backup data
+                data = connection.execute(text("SELECT * FROM direct_messages")).mappings().all()
+                
+                # 2. Drop old table
+                connection.execute(text("DROP TABLE direct_messages;"))
+                
+                # 3. Recreate with new schema (where receiver_id is nullable)
+                DirectMessage.__table__.create(connection)
+                
+                # 4. Restore data
+                if data:
+                    new_cols = [c.name for c in DirectMessage.__table__.columns]
+                    insert_stmt = DirectMessage.__table__.insert()
+                    restored_count = 0
+                    for row in data:
+                        row_data = {k: v for k, v in row.items() if k in new_cols}
+                        
+                        # Fix datetime strings if needed
+                        for date_field in ['sent_at', 'read_at']:
+                            if date_field in row_data and isinstance(row_data[date_field], str):
+                                try: row_data[date_field] = datetime.fromisoformat(row_data[date_field])
+                                except: pass
+                                
+                        connection.execute(insert_stmt.values(row_data))
+                        restored_count += 1
+                    print(f"INFO: Restored {restored_count} direct messages.")
+                
+                connection.commit()
+                print("INFO: Successfully migrated 'direct_messages' table schema.")
+            except Exception as e:
+                print(f"CRITICAL: Failed to migrate 'direct_messages'. Error: {e}")
+                connection.rollback()
+                trace_exception(e) 
+    
+    # --- NEW: Check conversation_members.id existence ---
+    if inspector.has_table("conversation_members"):
+        cm_cols = [c['name'] for c in inspector.get_columns('conversation_members')]
+        if 'id' not in cm_cols:
+            print("INFO: 'conversation_members.id' missing. Recreating table to fix schema.")
+            try:
+                # 1. Backup data
+                data = connection.execute(text("SELECT * FROM conversation_members")).mappings().all()
+                
+                # 2. Drop old table
+                connection.execute(text("DROP TABLE conversation_members;"))
+                
+                # 3. Recreate with new schema (which includes ID)
+                ConversationMember.__table__.create(connection)
+                
+                # 4. Restore data
+                if data:
+                    insert_stmt = ConversationMember.__table__.insert()
+                    restored_count = 0
+                    for row in data:
+                        # Filter out keys not in new table (should match, but safe practice)
+                        row_data = {k: v for k, v in row.items() if k in cm_cols} 
+                        # Note: old table didn't have ID, so we let DB auto-increment it
+                        connection.execute(insert_stmt.values(row_data))
+                        restored_count += 1
+                    print(f"INFO: Restored {restored_count} conversation members.")
+                
+                connection.commit()
+            except Exception as e:
+                print(f"CRITICAL: Failed to fix 'conversation_members'. Error: {e}")
+                connection.rollback()
+                trace_exception(e)
 
     # Add migration for DatabaseVersion if its column type changed from Integer to String
     if inspector.has_table("database_version"):
@@ -921,6 +995,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "image_generation_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "image_generation_system_prompt": "TEXT",
             "image_annotation_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            # NEW COLUMNS
+            "reasoning_activation": "BOOLEAN DEFAULT 0",
+            "reasoning_effort": "VARCHAR",
+            "reasoning_summary": "BOOLEAN DEFAULT 0"
         }
         
         added_cols = []
@@ -1443,9 +1521,42 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         Conversation.__table__.create(connection)
         print("INFO: Created 'conversations' table.")
     
+    # --- NEW: Check conversation_members table ---
     if not inspector.has_table("conversation_members"):
         ConversationMember.__table__.create(connection)
         print("INFO: Created 'conversation_members' table.")
+    else:
+        # Check if the existing table has the 'id' column. If not, it's the old version and needs to be rebuilt.
+        cm_cols = [c['name'] for c in inspector.get_columns('conversation_members')]
+        if 'id' not in cm_cols:
+            print("INFO: 'conversation_members' table is missing 'id' column. Recreating table.")
+            try:
+                # 1. Backup data
+                data = connection.execute(text("SELECT * FROM conversation_members")).mappings().all()
+                
+                # 2. Drop old table
+                connection.execute(text("DROP TABLE conversation_members;"))
+                
+                # 3. Recreate with new schema (which includes ID)
+                ConversationMember.__table__.create(connection)
+                
+                # 4. Restore data
+                if data:
+                    insert_stmt = ConversationMember.__table__.insert()
+                    restored_count = 0
+                    for row in data:
+                        # Filter out keys not in new table (should match, but safe practice)
+                        row_data = {k: v for k, v in row.items() if k in cm_cols} 
+                        # Note: old table didn't have ID, so we let DB auto-increment it
+                        connection.execute(insert_stmt.values(row_data))
+                        restored_count += 1
+                    print(f"INFO: Restored {restored_count} conversation members.")
+                
+                connection.commit()
+            except Exception as e:
+                print(f"CRITICAL: Failed to fix 'conversation_members'. Error: {e}")
+                connection.rollback()
+                trace_exception(e)
 
     if inspector.has_table("direct_messages"):
         dm_columns = [col['name'] for col in inspector.get_columns('direct_messages')]
@@ -1455,6 +1566,48 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print("INFO: Added 'conversation_id' column to 'direct_messages'.")
             except Exception as e:
                 print(f"WARNING: Could not add conversation_id column: {e}")
+        
+        # NEW: Migrate receiver_id to be nullable for group chats
+        dm_cols_full = inspector.get_columns('direct_messages')
+        receiver_col_info = next((c for c in dm_cols_full if c['name'] == 'receiver_id'), None)
+        
+        if receiver_col_info and not receiver_col_info.get('nullable'):
+            print("INFO: 'direct_messages.receiver_id' is NOT NULL. Migrating to allow NULL for group chats.")
+            try:
+                # 1. Backup data
+                data = connection.execute(text("SELECT * FROM direct_messages")).mappings().all()
+                
+                # 2. Drop old table
+                connection.execute(text("DROP TABLE direct_messages;"))
+                
+                # 3. Recreate with new schema (where receiver_id is nullable)
+                DirectMessage.__table__.create(connection)
+                
+                # 4. Restore data
+                if data:
+                    new_cols = [c.name for c in DirectMessage.__table__.columns]
+                    insert_stmt = DirectMessage.__table__.insert()
+                    restored_count = 0
+                    for row in data:
+                        row_data = {k: v for k, v in row.items() if k in new_cols}
+                        
+                        # Fix datetime strings if needed
+                        for date_field in ['sent_at', 'read_at']:
+                            if date_field in row_data and isinstance(row_data[date_field], str):
+                                try: row_data[date_field] = datetime.fromisoformat(row_data[date_field])
+                                except: pass
+                                
+                        connection.execute(insert_stmt.values(row_data))
+                        restored_count += 1
+                    print(f"INFO: Restored {restored_count} direct messages.")
+                
+                connection.commit()
+                print("INFO: Successfully migrated 'direct_messages' table schema.")
+            except Exception as e:
+                print(f"CRITICAL: Failed to migrate 'direct_messages'. Error: {e}")
+                connection.rollback()
+                trace_exception(e)
+
     connection.commit()
 
 

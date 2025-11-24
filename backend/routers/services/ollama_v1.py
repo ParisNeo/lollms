@@ -1,4 +1,4 @@
-# backend/routers/ollama_v1.py
+# backend/routers/services/ollama_v1.py
 import time
 import datetime
 import json
@@ -28,7 +28,8 @@ from backend.routers.services.openai_v1 import (
     ChatMessage, ChatCompletionRequest, UsageInfo,
     ChatCompletionResponseChoice, ChatCompletionResponse, DeltaMessage,
     ChatCompletionResponseStreamChoice, ChatCompletionStreamResponse,
-    preprocess_messages, find_model_by_alias, resolve_model_name
+    preprocess_messages, find_model_by_alias, resolve_model_name,
+    handle_tools_injection, parse_tool_calls_from_text # Added imports
 )
 
 ollama_v1_router = APIRouter(prefix="/ollama/v1")
@@ -52,7 +53,18 @@ async def get_user_from_api_key(
             raise HTTPException(status_code=503, detail="Ollama API is enabled without a key, but no admin user is configured.")
         
         if admin_user.username not in user_sessions:
-            user_sessions[admin_user.username] = { "lollms_model_name": admin_user.lollms_model_name, "llm_params": {}}
+            session_llm_params = {
+                "ctx_size": admin_user.llm_ctx_size, "temperature": admin_user.llm_temperature,
+                "top_k": admin_user.llm_top_k, "top_p": admin_user.llm_top_p,
+                "repeat_penalty": admin_user.llm_repeat_penalty, "repeat_last_n": admin_user.llm_repeat_last_n
+            }
+            user_sessions[admin_user.username] = {
+                "safe_store_instances": {}, "discussions": {},
+                "active_vectorizer": admin_user.safe_store_vectorizer,
+                "lollms_model_name": admin_user.lollms_model_name,
+                "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
+                "active_personality_id": admin_user.active_personality_id,
+            }
         return admin_user
 
     if not authorization:
@@ -75,7 +87,18 @@ async def get_user_from_api_key(
         raise HTTPException(status_code=401, detail="User not found or inactive.")
 
     if user.username not in user_sessions:
-        user_sessions[user.username] = { "lollms_model_name": user.lollms_model_name, "llm_params": {}}
+        session_llm_params = {
+            "ctx_size": user.llm_ctx_size, "temperature": user.llm_temperature,
+            "top_k": user.llm_top_k, "top_p": user.llm_top_p,
+            "repeat_penalty": user.llm_repeat_penalty, "repeat_last_n": user.llm_repeat_last_n
+        }
+        user_sessions[user.username] = {
+            "safe_store_instances": {}, "discussions": {},
+            "active_vectorizer": user.safe_store_vectorizer,
+            "lollms_model_name": user.lollms_model_name,
+            "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
+            "active_personality_id": user.active_personality_id,
+        }
 
     db_key.last_used_at = datetime.datetime.now(datetime.timezone.utc)
     db.commit()
@@ -141,7 +164,6 @@ async def chat_completions(
 ):
     binding_alias, model_name = resolve_model_name(db, request.model)
 
-
     try:
         lc = build_lollms_client_from_params(
             username=user.username, binding_alias=binding_alias, model_name=model_name,
@@ -152,12 +174,18 @@ async def chat_completions(
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
 
     messages = list(request.messages)
-    images: List[str] = []
     openai_messages, images = preprocess_messages(messages)
+
+    if request.tools:
+        openai_messages = handle_tools_injection(openai_messages, request.tools)
+
+    generation_kwargs = {}
+    if request.reasoning_effort:
+        generation_kwargs["reasoning_effort"] = request.reasoning_effort
 
     if request.stream:
         async def stream_generator():
-            main_loop = asyncio.get_event_loop()
+            main_loop = asyncio.get_running_loop()
             stream_queue = asyncio.Queue()
             stop_event = threading.Event()
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -171,7 +199,7 @@ async def chat_completions(
                 return True
             def blocking_call():
                 try:
-                    lc.generate_from_messages(openai_messages, streaming_callback=llm_callback, images=images, temperature=request.temperature, n_predict=request.max_tokens)
+                    lc.generate_from_messages(openai_messages, streaming_callback=llm_callback, images=images, temperature=request.temperature, n_predict=request.max_tokens, **generation_kwargs)
                 finally:
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
             threading.Thread(target=blocking_call, daemon=True).start()
@@ -184,9 +212,55 @@ async def chat_completions(
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
     else:
         try:
-            result = lc.generate_from_messages(openai_messages, images=images, temperature=request.temperature, n_predict=request.max_tokens)
+            result_content = lc.generate_from_messages(openai_messages, images=images, temperature=request.temperature, n_predict=request.max_tokens, **generation_kwargs)
+            
+            content = result_content
+            finish_reason = "stop"
+            
+            if request.tools:
+                content, tool_calls = parse_tool_calls_from_text(result_content)
+                if tool_calls:
+                    finish_reason = "tool_calls"
+                    # Create dict for choice as manual creation
+                    choice_dict = {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": content,
+                            "tool_calls": tool_calls
+                        },
+                        "finish_reason": finish_reason
+                    }
+                else:
+                    choice_dict = {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": result_content
+                        },
+                        "finish_reason": "stop"
+                    }
+            else:
+                 choice_dict = {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": result_content
+                    },
+                    "finish_reason": "stop"
+                }
+            
             prompt_tokens = lc.count_tokens(str(openai_messages))
-            completion_tokens = lc.count_tokens(result)
-            return ChatCompletionResponse(model=request.model, choices=[ChatCompletionResponseChoice(index=0, message=ChatMessage(role="assistant", content=result), finish_reason="stop")], usage=UsageInfo(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, total_tokens=prompt_tokens + completion_tokens))
+            completion_tokens = lc.count_tokens(result_content)
+
+            return {
+                "id": f"chatcmpl-{uuid.uuid4().hex}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": request.model,
+                "choices": [choice_dict],
+                "usage": UsageInfo(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, total_tokens=prompt_tokens + completion_tokens)
+            }
+
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Generation error: {e}")

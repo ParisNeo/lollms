@@ -153,22 +153,24 @@ You return the JSON without any comments or placeholders."""
     task.set_progress(100)
     return generated_data_dict
 
-@personalities_router.post("/generate_icon", response_model=Dict[str, str])
-async def generate_personality_icon(
-    payload: GenerateIconRequest,
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-):
+# --- Task for Icon Generation ---
+def _generate_icon_task(task: Task, username: str, prompt: str):
+    task.log("Starting icon generation...")
+    task.set_progress(10)
+    
     try:
-        lc = get_user_lollms_client(current_user.username)
+        lc = get_user_lollms_client(username)
         if not lc.tti:
-            raise HTTPException(status_code=400, detail="Text-to-Image service is not configured for this user.")
+            raise Exception("Text-to-Image service is not configured for this user.")
 
+        task.log("Generating image using TTI engine...")
         # Generate image as raw bytes (not base64)
-        img_data = lc.tti.generate_image(payload.prompt, width=512, height=512)
+        img_data = lc.tti.generate_image(prompt, width=512, height=512)
+        
         # If API returns a list, pick the first
         if isinstance(img_data, (list, tuple)):
             if not img_data:
-                raise HTTPException(status_code=500, detail="Image generation returned empty list.")
+                raise Exception("Image generation returned empty list.")
             img_data = img_data[0]
 
         # If the provider sometimes returns a data URI or base64 str, normalize:
@@ -180,7 +182,10 @@ async def generate_personality_icon(
             img_data = base64.b64decode(img_data)
 
         if not isinstance(img_data, (bytes, bytearray)):
-            raise HTTPException(status_code=500, detail="Unsupported image payload type from generator.")
+            raise Exception(f"Unsupported image payload type from generator: {type(img_data)}")
+
+        task.set_progress(80)
+        task.log("Processing image...")
 
         with Image.open(io.BytesIO(img_data)) as img:
             if img.mode not in ("RGB", "RGBA"):
@@ -190,12 +195,28 @@ async def generate_personality_icon(
             img.save(buf, format="PNG")
             icon_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
 
+        task.log("Icon generated successfully.")
+        task.set_progress(100)
         return {"icon_base64": f"data:image/png;base64,{icon_b64}"}
 
-    except HTTPException:
-        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Icon generation failed: {e}")
+        task.log(f"Icon generation failed: {e}", "ERROR")
+        trace_exception(e)
+        raise e
+
+@personalities_router.post("/generate_icon", response_model=TaskInfo, status_code=202)
+async def generate_personality_icon(
+    payload: GenerateIconRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+):
+    task = task_manager.submit_task(
+        name="Generate Icon",
+        target=_generate_icon_task,
+        args=(current_user.username, payload.prompt),
+        description="Generating icon from prompt.",
+        owner_username=current_user.username
+    )
+    return task
 
 # --- Personality Generation from Prompt Endpoint ---
 @personalities_router.post("/generate_from_prompt", response_model=TaskInfo, status_code=202)

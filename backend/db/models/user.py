@@ -1,5 +1,4 @@
 # backend/db/models/user.py
-# backend/db/models/user.py
 from sqlalchemy import (
     Column, Integer, String, Boolean,
     ForeignKey, UniqueConstraint, CheckConstraint,
@@ -93,6 +92,11 @@ class User(Base):
     llm_top_p = Column(Float, nullable=True)
     llm_repeat_penalty = Column(Float, nullable=True)
     llm_repeat_last_n = Column(Integer, nullable=True)
+    # New reasoning fields
+    reasoning_activation = Column(Boolean, default=False, nullable=True)
+    reasoning_effort = Column(String, nullable=True) # low, medium, high
+    reasoning_summary = Column(Boolean, default=False, nullable=True)
+
     put_thoughts_in_context = Column(Boolean, default=False, nullable=False)
     include_memory_date_in_context = Column(Boolean, default=False, nullable=False)
     rag_top_k = Column(Integer, nullable=True)

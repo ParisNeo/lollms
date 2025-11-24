@@ -1,6 +1,9 @@
 # [UPDATE] backend/routers/admin/bindings_management.py
 import json
+import io
+import base64
 from typing import List, Dict, Any, Optional
+from PIL import Image
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -15,7 +18,7 @@ from lollms_client.lollms_stt_binding import get_available_bindings as get_avail
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
-from backend.models import UserAuthDetails, ForceSettingsPayload, ModelInfo
+from backend.models import UserAuthDetails, ForceSettingsPayload, ModelInfo, TaskInfo
 from backend.models.admin import (
     LLMBindingCreate, LLMBindingUpdate, LLMBindingPublicAdmin,
     TTIBindingCreate, TTIBindingUpdate, TTIBindingPublicAdmin,
@@ -24,14 +27,15 @@ from backend.models.admin import (
     ModelAliasUpdate, TtiModelAliasUpdate, TtsModelAliasUpdate, SttModelAliasUpdate,
     ModelAliasDelete, BindingModel, ModelNamePayload
 )
+from backend.models.personality_generation import GenerateIconRequest
 from backend.session import (
     get_current_admin_user,
     user_sessions,
     get_user_lollms_client,
     build_lollms_client_from_params
 )
-from backend.session import get_user_lollms_client, user_sessions, build_lollms_client_from_params
 from backend.ws_manager import manager
+from backend.task_manager import task_manager, Task
 from ascii_colors import trace_exception, ASCIIColors
 
 bindings_management_router = APIRouter()
@@ -83,6 +87,56 @@ def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_t
             processed_config[key] = value
 
     return processed_config
+
+def _generate_model_icon_task(task: Task, username: str, prompt: str):
+    task.log("Starting model icon generation...")
+    task.set_progress(10)
+    
+    try:
+        lc = get_user_lollms_client(username)
+        if not lc.tti:
+            raise Exception("Text-to-Image service is not configured for this user.")
+
+        task.log("Generating image using TTI engine...")
+        # Generate image as raw bytes (not base64)
+        img_data = lc.tti.generate_image(prompt, width=512, height=512)
+        
+        # If API returns a list, pick the first
+        if isinstance(img_data, (list, tuple)):
+            if not img_data:
+                raise Exception("Image generation returned empty list.")
+            img_data = img_data[0]
+
+        # If the provider sometimes returns a data URI or base64 str, normalize:
+        if isinstance(img_data, str):
+            # Remove any data URI prefix if present
+            if img_data.startswith("data:"):
+                img_data = img_data.split(",", 1)[1]
+            # Base64 string -> raw bytes
+            img_data = base64.b64decode(img_data)
+
+        if not isinstance(img_data, (bytes, bytearray)):
+            raise Exception(f"Unsupported image payload type from generator: {type(img_data)}")
+
+        task.set_progress(80)
+        task.log("Processing image...")
+
+        with Image.open(io.BytesIO(img_data)) as img:
+            if img.mode not in ("RGB", "RGBA"):
+                img = img.convert("RGBA")
+            img.thumbnail((128, 128))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            icon_b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+
+        task.log("Icon generated successfully.")
+        task.set_progress(100)
+        return {"icon_base64": f"data:image/png;base64,{icon_b64}"}
+
+    except Exception as e:
+        task.log(f"Icon generation failed: {e}", "ERROR")
+        trace_exception(e)
+        raise e
 
 @bindings_management_router.get("/bindings/available_types", response_model=List[Dict])
 async def get_available_binding_types():
@@ -674,3 +728,17 @@ async def force_settings_once(payload: ForceSettingsPayload, db: Session = Depen
         db.rollback()
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Database error while forcing settings: {e}")
+
+@bindings_management_router.post("/bindings/generate_icon", response_model=TaskInfo, status_code=202)
+async def generate_model_icon(
+    payload: GenerateIconRequest,
+    current_user: UserAuthDetails = Depends(get_current_admin_user),
+):
+    task = task_manager.submit_task(
+        name="Generate Model Icon",
+        target=_generate_model_icon_task,
+        args=(current_user.username, payload.prompt),
+        description="Generating icon from prompt for model alias.",
+        owner_username=current_user.username
+    )
+    return task

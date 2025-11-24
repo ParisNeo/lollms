@@ -132,6 +132,10 @@ class ModelAlias(BaseModel):
     repeat_penalty: Optional[float] = None
     repeat_last_n: Optional[int] = None
     icon: Optional[str] = None
+    # NEW REASONING FIELDS
+    reasoning_activation: Optional[bool] = False
+    reasoning_effort: Optional[str] = None # low, medium, high
+    reasoning_summary: Optional[bool] = False
 
 class TtiModelAlias(BaseModel):
     title: Optional[str] = None

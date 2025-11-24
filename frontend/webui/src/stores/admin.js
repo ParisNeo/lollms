@@ -819,7 +819,8 @@ export const useAdminStore = defineStore('admin', () => {
     async function generateIconForModel(prompt) {
         const { useTasksStore } = await import('./tasks.js');
         const tasksStore = useTasksStore();
-        const response = await apiClient.post('/api/personalities/generate_icon', { prompt });
+        // Updated to use the new dedicated bindings endpoint
+        const response = await apiClient.post('/api/admin/bindings/generate_icon', { prompt });
         tasksStore.addTask(response.data);
         return response.data;
     }

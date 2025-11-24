@@ -304,7 +304,10 @@ def build_llm_generation_router(router: APIRouter):
                             use_data_store=use_rag, 
                             streaming_callback=llm_callback,
                             user_name=current_user.username,
-                            user_icon=current_user.icon
+                            user_icon=current_user.icon,
+                            think=owner_db_user.reasoning_activation,
+                            reasoning_effort=owner_db_user.reasoning_effort,
+                            reasooning_summary=owner_db_user.reasoning_summary
                         )
                     else:
                         result = discussion_obj.chat(
@@ -319,7 +322,11 @@ def build_llm_generation_router(router: APIRouter):
                             rag_min_similarity_percent=owner_db_user.rag_min_sim_percent,
                             debug=SERVER_CONFIG.get("debug", False),
                             user_name=current_user.username,
-                            user_icon=current_user.icon
+                            user_icon=current_user.icon,
+
+                            think=owner_db_user.reasoning_activation,
+                            reasoning_effort=owner_db_user.reasoning_effort,
+                            reasooning_summary=owner_db_user.reasoning_summary
                         )
                     
                     end_time = time.time()

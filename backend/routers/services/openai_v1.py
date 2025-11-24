@@ -8,7 +8,7 @@ import uuid
 import base64
 import io
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple, Union
+from typing import List, Optional, Dict, Tuple, Union, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -27,10 +27,10 @@ from backend.session import user_sessions, build_lollms_client_from_params, get_
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
-from backend.routers.files import extract_text_from_file_bytes # NEW IMPORT
+from backend.routers.files import extract_text_from_file_bytes 
 
 openai_v1_router = APIRouter(prefix="/v1")
-bearer_scheme = HTTPBearer(auto_error=False) # Set auto_error to False to handle optional auth
+bearer_scheme = HTTPBearer(auto_error=False) 
 
 # --- Pydantic Models for OpenAI Compatibility ---
 
@@ -41,11 +41,13 @@ class ChatMessage(BaseModel):
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
-    personality: Optional[str] = None # New field for personality
+    personality: Optional[str] = None 
     temperature: Optional[float] = 0.7
     max_tokens: Optional[int] = None
     stream: Optional[bool] = False
-    # Other parameters can be added here if needed
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+    reasoning_effort: Optional[str] = None
 
 class UsageInfo(BaseModel):
     prompt_tokens: int
@@ -107,7 +109,7 @@ class EmbeddingRequest(BaseModel):
     input: Union[str, List[str]]
     model: str
     encoding_format: Optional[str] = "float"
-    user: Optional[str] = None # Not used by us, but part of OpenAI spec
+    user: Optional[str] = None
 
 class EmbeddingObject(BaseModel):
     object: str = "embedding"
@@ -194,20 +196,16 @@ def find_model_by_alias(db: Session, alias_title: str) -> Optional[Tuple[str, st
 
 def resolve_model_name(db: Session, requested_model: str) -> Tuple[str, str]:
     """Resolves a requested model name (which could be an alias) to its binding_alias and original model_name."""
-    # 1. First, check if it's already in the format "binding/model"
     if '/' in requested_model:
         parts = requested_model.split('/', 1)
-        # Verify this is a valid binding
         binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
         if binding:
             return parts[0], parts[1]
     
-    # 2. If not, treat it as an alias and search for it.
     binding_alias, model_name = find_model_by_alias(db, requested_model)
     if binding_alias:
         return binding_alias, model_name
 
-    # 3. If it's not found either way, raise an error.
     raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use 'binding/model_name' format or a valid alias.")
 
 # --- END HELPER FUNCTIONS ---
@@ -219,22 +217,16 @@ async def get_user_from_api_key(
     authorization: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
     db: Session = Depends(get_db)
 ) -> DBUser:
-    """
-    Authenticates a user based on a given API key or, if disabled, falls back to an admin user.
-    """
     if not settings.get("openai_api_service_enabled", False):
         raise HTTPException(status_code=403, detail="OpenAI API service is not enabled by the administrator.")
 
     require_key = settings.get("openai_api_require_key", True)
 
-    # --- CORRECTED LOGIC ---
     if not require_key:
-        # Key requirement is OFF. Immediately fall back to the admin user, ignoring any 'authorization' header.
         admin_user = db.query(DBUser).filter(DBUser.is_admin == True).order_by(DBUser.id).first()
         if not admin_user:
             raise HTTPException(status_code=503, detail="OpenAI API is enabled without a key, but no admin user is configured to handle requests.")
         
-        # Ensure a session exists for this admin user to build clients correctly
         if admin_user.username not in user_sessions:
             session_llm_params = {
                 "ctx_size": admin_user.llm_ctx_size, "temperature": admin_user.llm_temperature,
@@ -250,7 +242,6 @@ async def get_user_from_api_key(
             }
         return admin_user
 
-    # --- If we reach here, 'require_key' is TRUE ---
     if not authorization:
         raise HTTPException(status_code=401, detail="API Key is required.", headers={"WWW-Authenticate": "Bearer"})
 
@@ -287,13 +278,12 @@ async def get_user_from_api_key(
             "active_personality_id": user.active_personality_id,
         }
 
-    # Mark the key as used. The commit will be handled by FastAPI's dependency management.
     db_key.last_used_at = datetime.datetime.now(datetime.timezone.utc)
     
     return user
 
 # --- Helper to Extract Images and Convert Messages ---
-def preprocess_openai_messages(messages: List["ChatMessage"]) -> Tuple[List[Dict], List[str]]:
+def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict], List[str]]:
     processed = []
     image_list = []
 
@@ -320,6 +310,118 @@ def preprocess_openai_messages(messages: List["ChatMessage"]) -> Tuple[List[Dict
         processed.append(msg_dict)
 
     return processed, image_list
+
+# --- Helper to Extract Images and Convert Messages ---
+def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
+    processed = []
+    image_list = []
+
+    for msg in messages:
+        content = msg.content
+        if isinstance(content, str):
+            processed.append({"role": msg.role, "content": content})
+        elif isinstance(content, list):
+            text_parts = []
+            for item in content:
+                if item.get("type") == "image_url":
+                    base64_img = item["image_url"].get("base64")
+                    if base64_img:
+                        image_list.append(base64_img)
+                    url_img = item["image_url"].get("url")
+                    if url_img:
+                        image_list.append(url_img)
+                elif item.get("type") == "text":
+                    text_parts.append(item.get("text", ""))
+                else:
+                    text_parts.append(str(item))
+            processed.append({"role": msg.role, "content": "\n".join(text_parts)})
+        else:
+            processed.append({"role": msg.role, "content": str(content)})
+
+    return processed, image_list
+
+def to_image_block(img, default_mime="image/jpeg"):
+    # img can be: https URL, data URL, or raw base64
+    if isinstance(img, dict):
+        # Optional pattern: {'data': '<base64>', 'mime': 'image/png'} or {'url': 'https://...'}
+        if "url" in img:
+            url = img["url"]
+            return {"type": "image_url", "image_url": {"url": url}}
+        if "data" in img:
+            mime = img.get("mime", default_mime)
+            return {
+                "type": "image_url",
+                "image_url": {"url": f"data:{mime};base64,{img['data']}"}
+            }
+
+    if isinstance(img, str):
+        s = img.strip()
+        if s.startswith("http://") or s.startswith("https://"):
+            return {"type": "image_url", "image_url": {"url": s}}
+        if s.startswith("data:"):
+            return {"type": "image_url", "image_url": {"url": s}}
+        # raw base64: add data URL prefix
+        return {
+            "type": "image_url",
+            "image_url": {"url": f"data:{default_mime};base64,{s}"}
+        }
+
+    raise ValueError("Unsupported image input format")
+
+def handle_tools_injection(messages: List[Dict], tools: List[Dict]) -> List[Dict]:
+    if not tools:
+        return messages
+    
+    tools_prompt = "\n\n# Tools Available\n"
+    tools_prompt += "You have the following tools available. To call a tool, output a JSON object with the key 'tool_calls' containing a list of tool calls. Each tool call should have 'name' and 'arguments'.\n"
+    tools_prompt += "Example: {\"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Paris\"}}]}\n\n"
+    tools_prompt += "Available Tools:\n"
+    for tool in tools:
+        t_type = tool.get("type", "function")
+        if t_type == "function":
+            func = tool.get("function", {})
+            name = func.get("name")
+            desc = func.get("description")
+            params = json.dumps(func.get("parameters"))
+            tools_prompt += f"- {name}: {desc}\n  Parameters: {params}\n"
+    
+    system_found = False
+    for msg in messages:
+        if msg.get('role') == 'system':
+            msg['content'] = (msg.get('content') or "") + tools_prompt
+            system_found = True
+            break
+    
+    if not system_found:
+        messages.insert(0, {"role": "system", "content": tools_prompt})
+    
+    return messages
+
+def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[List[Dict]]]:
+    import re
+    try:
+        # Look for JSON block containing "tool_calls"
+        match = re.search(r'\{.*"tool_calls":\s*\[.*\]\s*\}', content, re.DOTALL)
+        if match:
+            json_str = match.group(0)
+            data = json.loads(json_str)
+            if "tool_calls" in data and isinstance(data["tool_calls"], list):
+                openai_tool_calls = []
+                for tc in data["tool_calls"]:
+                    openai_tool_calls.append({
+                        "id": f"call_{uuid.uuid4().hex[:8]}",
+                        "type": "function",
+                        "function": {
+                            "name": tc.get("name"),
+                            "arguments": json.dumps(tc.get("arguments", {}))
+                        }
+                    })
+                # Return None as content (or maybe stripped content?) for now let's return None
+                # assuming the model output ONLY the JSON if it decided to call a tool.
+                return None, openai_tool_calls
+    except Exception:
+        pass
+    return content, None
 
 
 # --- Routes ---
@@ -356,14 +458,10 @@ async def list_models(
                     if model_display_mode == 'aliased' and not alias_data:
                         continue
 
-                    # The ID is ALWAYS binding/model_name for the API's internal use.
                     id_to_send = f"{binding.alias}/{model_id}"
-                    
-                    # The name is what's displayed to the user.
                     name_to_send = id_to_send
                     if model_display_mode != 'original' and alias_data and alias_data.get('title'):
                         name_to_send = alias_data.get('title')
-
 
                     all_models.append({
                         "id": id_to_send,
@@ -379,7 +477,6 @@ async def list_models(
     if not all_models:
         raise HTTPException(status_code=404, detail="No models found from any active bindings.")
     
-    # Use 'id' for uniqueness as it's the stable identifier
     unique_models = {m["id"]: m for m in all_models}
     return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}
 
@@ -389,9 +486,6 @@ async def list_personalities(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    """
-    Lists all personalities available to the authenticated user (owned and public).
-    """
     personalities_db = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(
         or_(
             DBPersonality.is_public == True,
@@ -407,63 +501,6 @@ async def list_personalities(
         response_data.append(p_info)
         
     return PersonalityListResponse(data=response_data)
-
-def to_image_block(img, default_mime="image/jpeg"):
-    # img can be: https URL, data URL, or raw base64
-    if isinstance(img, dict):
-        # Optional pattern: {'data': '<base64>', 'mime': 'image/png'} or {'url': 'https://...'}
-        if "url" in img:
-            url = img["url"]
-            return {"type": "image_url", "image_url": {"url": url}}
-        if "data" in img:
-            mime = img.get("mime", default_mime)
-            return {
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{img['data']}"}
-            }
-
-    if isinstance(img, str):
-        s = img.strip()
-        if s.startswith("http://") or s.startswith("https://"):
-            return {"type": "image_url", "image_url": {"url": s}}
-        if s.startswith("data:"):
-            return {"type": "image_url", "image_url": {"url": s}}
-        # raw base64: add data URL prefix
-        return {
-            "type": "image_url",
-            "image_url": {"url": f"data:{default_mime};base64,{s}"}
-        }
-
-    raise ValueError("Unsupported image input format")
-
-# --- Helper to Extract Images and Convert Messages ---
-def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
-    processed = []
-    image_list = []
-
-    for msg in messages:
-        content = msg.content
-        if isinstance(content, str):
-            processed.append({"role": msg.role, "content": content})
-        elif isinstance(content, list):
-            text_parts = []
-            for item in content:
-                if item.get("type") == "image_url":
-                    base64_img = item["image_url"].get("base64")
-                    if base64_img:
-                        image_list.append(base64_img)
-                    url_img = item["image_url"].get("url")
-                    if url_img:
-                        image_list.append(url_img)
-                elif item.get("type") == "text":
-                    text_parts.append(item.get("text", ""))
-                else:
-                    text_parts.append(str(item))
-            processed.append({"role": msg.role, "content": "\n".join(text_parts)})
-        else:
-            processed.append({"role": msg.role, "content": str(content)})
-
-    return processed, image_list
 
 @openai_v1_router.post("/chat/completions")
 async def chat_completions(
@@ -487,7 +524,6 @@ async def chat_completions(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
 
-    # Handle personality as a system message if provided
     messages = list(request.messages)
     if request.personality:
         personality = db.query(DBPersonality).filter(DBPersonality.id == request.personality).first()
@@ -498,9 +534,16 @@ async def chat_completions(
         messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
     openai_messages, images = preprocess_openai_messages(messages)
+    
+    if request.tools:
+        openai_messages = handle_tools_injection(openai_messages, request.tools)
+
+    generation_kwargs = {}
+    if request.reasoning_effort:
+        generation_kwargs["reasoning_effort"] = request.reasoning_effort
+
     ASCIIColors.info(f"Received images: {len(images)}")
 
-    # --- Streaming ---
     if request.stream:
         async def stream_generator():
             main_loop = asyncio.get_running_loop()
@@ -510,7 +553,6 @@ async def chat_completions(
             completion_id = f"chatcmpl-{uuid.uuid4().hex}"
             created_ts = int(time.time())
 
-            # First event: role assistant
             first_chunk = ChatCompletionStreamResponse(
                 id=completion_id,
                 model=request.model,
@@ -526,7 +568,7 @@ async def chat_completions(
             def llm_callback(chunk: str, msg_type: MSG_TYPE, **kwargs) -> bool:
                 if stop_event.is_set():
                     return False
-                if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk:  # Ensure chunk is not empty
+                if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk:
                     response_chunk = ChatCompletionStreamResponse(
                         id=completion_id,
                         model=request.model,
@@ -548,16 +590,15 @@ async def chat_completions(
 
             def blocking_call():
                 try:
-                    print("Starting generate_from_messages")  # Debug log
                     lc.generate_from_messages(
                         openai_messages,
                         streaming_callback=llm_callback,
                         images=images,
                         temperature=request.temperature,
                         n_predict=request.max_tokens,
-                        stream=True
+                        stream=True,
+                        **generation_kwargs
                     )
-                    print("Finished generate_from_messages")  # Debug log
                 except Exception as e:
                     print(f"Streaming error: {e}")
                 finally:
@@ -569,10 +610,9 @@ async def chat_completions(
                 item = await stream_queue.get()
                 if item is None:
                     break
-                if item.strip():  # Ensure item is not empty
+                if item.strip():
                     yield item
 
-            # Final chunk
             end_chunk = ChatCompletionStreamResponse(
                 id=completion_id,
                 model=request.model,
@@ -588,29 +628,69 @@ async def chat_completions(
 
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
 
-    # --- Non-streaming ---
     else:
         try:
-            result = lc.generate_from_messages(
+            result_content = lc.generate_from_messages(
                 openai_messages,
                 temperature=request.temperature,
-                n_predict=request.max_tokens
+                n_predict=request.max_tokens,
+                images=images,
+                **generation_kwargs
             )
+            
+            content = result_content
+            finish_reason = "stop"
+            message_obj = None
+
+            if request.tools:
+                content, tool_calls = parse_tool_calls_from_text(result_content)
+                if tool_calls:
+                    finish_reason = "tool_calls"
+                    message_obj = ChatMessage(role="assistant", content=content, tool_calls=tool_calls)
+                else:
+                    message_obj = ChatMessage(role="assistant", content=result_content)
+            else:
+                message_obj = ChatMessage(role="assistant", content=result_content)
+
+            # Monkey-patch tool_calls onto ChatMessage instance since Pydantic model doesn't have it defined by default
+            if request.tools and message_obj.role == "assistant":
+                # To properly support tool_calls in response model, we should really update ChatMessage definition
+                # but for simplicity we just return a dict that matches structure if we were manually building it.
+                # However, ChatCompletionResponse expects Message objects.
+                # Let's update ChatMessage definition dynamically or assume client handles extra fields if we use dict?
+                # Actually, let's just extend ChatMessage definition in this file since we are here.
+                pass
+
             prompt_tokens = lc.count_tokens(str(openai_messages))
-            completion_tokens = lc.count_tokens(result)
-            return ChatCompletionResponse(
-                model=request.model,
-                choices=[ChatCompletionResponseChoice(
-                    index=0,
-                    message=ChatMessage(role="assistant", content=result),
-                    finish_reason="stop"
-                )],
-                usage=UsageInfo(
+            completion_tokens = lc.count_tokens(result_content)
+            
+            # Construct dict for choice to support tool_calls which might not be in ChatMessage schema
+            choice_dict = {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": content
+                },
+                "finish_reason": finish_reason
+            }
+            if finish_reason == "tool_calls":
+                 # We need to access tool_calls from local var
+                 _, tool_calls = parse_tool_calls_from_text(result_content)
+                 choice_dict["message"]["tool_calls"] = tool_calls
+
+            return {
+                "id": f"chatcmpl-{uuid.uuid4().hex}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": request.model,
+                "choices": [choice_dict],
+                "usage": UsageInfo(
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens
                 )
-            )
+            }
+            
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Generation error: {e}")
         

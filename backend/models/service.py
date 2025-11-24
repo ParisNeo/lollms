@@ -73,6 +73,10 @@ class ModelAlias(BaseModel):
     repeat_penalty: Optional[float] = Field(None, ge=0.0)
     repeat_last_n: Optional[int] = Field(None, ge=0)
     allow_parameters_override: bool = True
+    # NEW REASONING FIELDS
+    reasoning_activation: Optional[bool] = False
+    reasoning_effort: Optional[str] = None # low, medium, high
+    reasoning_summary: Optional[bool] = False
 
 class ModelAliasUpdate(BaseModel):
     original_model_name: str

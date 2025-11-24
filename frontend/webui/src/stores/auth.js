@@ -34,6 +34,7 @@ export const useAuthStore = defineStore('auth', () => {
     const ws = ref(null);
     const wsConnected = ref(false);
     let reconnectTimeout = null;
+    let heartbeatInterval = null; // NEW: Heartbeat
 
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
@@ -107,10 +108,26 @@ export const useAuthStore = defineStore('auth', () => {
         ws.value.onopen = () => {
             wsConnected.value = true;
             clearTimeout(reconnectTimeout);
+            // Start heartbeat
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+            heartbeatInterval = setInterval(() => {
+                if (ws.value && ws.value.readyState === WebSocket.OPEN) {
+                    ws.value.send("ping");
+                }
+            }, 30000); // 30s
         };
 
         ws.value.onmessage = async (event) => {
-            const data = JSON.parse(event.data);
+            if (event.data === "pong") return; // Ignore pong
+            
+            let data;
+            try {
+                data = JSON.parse(event.data);
+            } catch (e) {
+                // If not JSON, might be a simple text message or pong response
+                return; 
+            }
+            
             const { useSocialStore } = await import('./social');
             const { useTasksStore } = await import('./tasks');
             const { useDataStore } = await import('./data');
@@ -218,7 +235,6 @@ export const useAuthStore = defineStore('auth', () => {
                     dataStore.fetchAvailableTtiModels();
                     dataStore.fetchAvailableTtsModels();
                     dataStore.fetchAvailableSttModels();
-                    // Force refresh user to pick up any context locks
                     await refreshUser();
                     break;               
             }
@@ -227,24 +243,28 @@ export const useAuthStore = defineStore('auth', () => {
         ws.value.onclose = (event) => {
             wsConnected.value = false;
             ws.value = null;
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
             if (event.code !== 1000) { 
                 reconnectTimeout = setTimeout(connectWebSocket, 5000);
             }
         };
         ws.value.onerror = (error) => {
             wsConnected.value = false;
-            ws.value?.close();
+            if (ws.value) ws.value.close();
         };
     }
 
     function disconnectWebSocket() {
         wsConnected.value = false;
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
+        if (heartbeatInterval) clearInterval(heartbeatInterval);
         if (ws.value) { 
             ws.value.close(1000, "User logout"); 
             ws.value = null; 
         }
     }
+
+    // ... (fetchUserAndInitialData and other methods remain mostly the same, ensuring they call connectWebSocket)
 
     async function fetchUserAndInitialData() {
         const uiStore = useUiStore();

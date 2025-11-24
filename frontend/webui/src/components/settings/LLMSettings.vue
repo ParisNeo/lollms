@@ -23,7 +23,10 @@ const form = ref({
     llm_top_p: 0.95,
     llm_repeat_penalty: 1.1,
     llm_repeat_last_n: 64,
-    put_thoughts_in_context: false
+    put_thoughts_in_context: false,
+    reasoning_activation: false,
+    reasoning_effort: null,
+    reasoning_summary: false
 });
 const isLoading = ref(false);
 const hasChanges = ref(false);
@@ -127,7 +130,10 @@ const populateForm = () => {
             llm_top_p: user.value.llm_top_p ?? null,
             llm_repeat_penalty: user.value.llm_repeat_penalty ?? null,
             llm_repeat_last_n: user.value.llm_repeat_last_n ?? null,
-            put_thoughts_in_context: user.value.put_thoughts_in_context || false
+            put_thoughts_in_context: user.value.put_thoughts_in_context || false,
+            reasoning_activation: user.value.reasoning_activation || false,
+            reasoning_effort: user.value.reasoning_effort || null,
+            reasoning_summary: user.value.reasoning_summary || false
         };
         pristineState = JSON.parse(JSON.stringify(form.value));
         hasChanges.value = false;
@@ -246,14 +252,52 @@ async function handleSave() {
                     </div>
                 </fieldset>
 
-                <!-- Toggle for 'think' blocks -->
-                <div class="relative flex items-start" :class="{'opacity-60 cursor-not-allowed': areSettingsForced}">
-                    <div class="flex h-6 items-center">
-                        <input id="putThoughts" v-model="form.put_thoughts_in_context" type="checkbox" :disabled="areSettingsForced" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 dark:bg-gray-700 text-blue-600 focus:ring-blue-600 dark:focus:ring-blue-600 dark:ring-offset-gray-800">
-                    </div>
-                    <div class="ml-3 text-sm leading-6">
-                        <label for="putThoughts" class="font-medium text-gray-900 dark:text-gray-300">Include "think" blocks in context</label>
-                        <p class="text-gray-500 dark:text-gray-400">Allows the AI to see its previous reasoning steps.</p>
+                <!-- Reasoning Section -->
+                <div class="border-t dark:border-gray-700 pt-4">
+                    <h3 class="font-semibold text-gray-800 dark:text-gray-200 mb-3">Reasoning Capabilities</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6" :class="{'opacity-60': areSettingsForced}">
+                        <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                            <span class="flex-grow flex flex-col pr-4">
+                                <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Reasoning (Thinking)</span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">Activates thought generation if supported by the model.</span>
+                            </span>
+                            <button @click="form.reasoning_activation = !form.reasoning_activation" type="button" :disabled="areSettingsForced" :class="[form.reasoning_activation ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                                <span :class="[form.reasoning_activation ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+
+                        <div :class="{'cursor-not-allowed': areSettingsForced}">
+                            <label for="reasoning-effort" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Reasoning Effort</label>
+                            <select id="reasoning-effort" v-model="form.reasoning_effort" class="input-field mt-1" :disabled="areSettingsForced">
+                                <option :value="null">Default</option>
+                                <option value="low">Low</option>
+                                <option value="medium">Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                            <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">Controls the depth of reasoning (model dependent).</p>
+                        </div>
+
+                        <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                             <span class="flex-grow flex flex-col pr-4">
+                                <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Reasoning Summary</span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">Enable summarization of reasoning steps in output.</span>
+                            </span>
+                            <button @click="form.reasoning_summary = !form.reasoning_summary" type="button" :disabled="areSettingsForced" :class="[form.reasoning_summary ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                                <span :class="[form.reasoning_summary ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+                        
+                         <!-- Toggle for 'think' blocks -->
+                        <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                             <span class="flex-grow flex flex-col pr-4">
+                                <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Include "think" blocks in context</span>
+                                <span class="text-xs text-gray-500 dark:text-gray-400">Allows the AI to see its previous reasoning steps.</span>
+                            </span>
+                            <button @click="form.put_thoughts_in_context = !form.put_thoughts_in_context" type="button" :disabled="areSettingsForced" :class="[form.put_thoughts_in_context ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                                <span :class="[form.put_thoughts_in_context ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+
                     </div>
                 </div>
 

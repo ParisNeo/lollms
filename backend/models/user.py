@@ -13,6 +13,10 @@ class UserLLMParams(BaseModel):
     llm_repeat_penalty: Optional[float] = Field(None, ge=0.0)
     llm_repeat_last_n: Optional[int] = Field(None, ge=0)
     put_thoughts_in_context: Optional[bool] = False
+    # New reasoning fields
+    reasoning_activation: Optional[bool] = False
+    reasoning_effort: Optional[str] = None
+    reasoning_summary: Optional[bool] = False
 
 class DataZoneUpdate(BaseModel):
     content: str
@@ -125,6 +129,11 @@ class UserUpdate(BaseModel):
     image_studio_generation_params: Optional[Dict[str, Any]] = None
     image_generation_enabled: Optional[bool] = None
     image_annotation_enabled: Optional[bool] = None
+    # New fields
+    reasoning_activation: Optional[bool] = None
+    reasoning_effort: Optional[str] = None
+    reasoning_summary: Optional[bool] = None
+
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None    

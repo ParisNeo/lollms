@@ -1,4 +1,4 @@
-<!-- [REWRITE] frontend/webui/src/components/modals/ManageModelsModal.vue -->
+<!-- frontend/webui/src/components/modals/ManageModelsModal.vue -->
 <template>
     <GenericModal modal-name="manageModels" :title="binding ? `Manage Models for: ${binding.alias}` : 'Manage Models'" maxWidthClass="max-w-5xl">
         <template #body>
@@ -101,6 +101,38 @@
                                     <div><label for="alias-top-p" class="label text-xs">Top P</label><input id="alias-top-p" v-model="form.top_p" type="number" step="0.01" class="input-field" placeholder="e.g., 0.95"></div>
                                     <div><label for="alias-repeat-penalty" class="label text-xs">Repeat Penalty</label><input id="alias-repeat-penalty" v-model="form.repeat_penalty" type="number" step="0.01" class="input-field" placeholder="e.g., 1.1"></div>
                                     <div><label for="alias-repeat-last-n" class="label text-xs">Repeat Last N</label><input id="alias-repeat-last-n" v-model="form.repeat_last_n" type="number" class="input-field" placeholder="e.g., 64"></div>
+                                </div>
+                                <div class="mt-4 border-t pt-4 dark:border-gray-600">
+                                    <h4 class="font-medium mb-2 text-sm">Reasoning Capabilities</h4>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                                            <span class="flex-grow flex flex-col pr-4">
+                                                <span class="text-sm font-medium">Enable Reasoning (Thinking)</span>
+                                                <span class="text-xs text-gray-500 dark:text-gray-400">Activates thought generation if supported.</span>
+                                            </span>
+                                            <button @click="form.reasoning_activation = !form.reasoning_activation" type="button" :class="[form.reasoning_activation ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                                <span :class="[form.reasoning_activation ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                            </button>
+                                        </div>
+                                        <div>
+                                            <label for="reasoning-effort" class="label text-xs">Reasoning Effort</label>
+                                            <select id="reasoning-effort" v-model="form.reasoning_effort" class="input-field mt-1">
+                                                <option :value="null">Default</option>
+                                                <option value="low">Low</option>
+                                                <option value="medium">Medium</option>
+                                                <option value="high">High</option>
+                                            </select>
+                                        </div>
+                                         <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md md:col-span-2">
+                                            <span class="flex-grow flex flex-col pr-4">
+                                                <span class="text-sm font-medium">Reasoning Summary</span>
+                                                <span class="text-xs text-gray-500 dark:text-gray-400">Enable summarization of reasoning steps in output.</span>
+                                            </span>
+                                            <button @click="form.reasoning_summary = !form.reasoning_summary" type="button" :class="[form.reasoning_summary ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                                <span :class="[form.reasoning_summary ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             
@@ -252,7 +284,10 @@ const getInitialFormState = () => ({
     top_p: null,
     repeat_penalty: null,
     repeat_last_n: null,
-    allow_parameters_override: true
+    allow_parameters_override: true,
+    reasoning_activation: false,
+    reasoning_effort: null,
+    reasoning_summary: false
 });
 
 const form = ref(getInitialFormState());

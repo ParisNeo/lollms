@@ -190,10 +190,14 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "llm_top_p": db_user.llm_top_p,
             "llm_repeat_penalty": db_user.llm_repeat_penalty,
             "llm_repeat_last_n": db_user.llm_repeat_last_n,
-            "put_thoughts_in_context": db_user.put_thoughts_in_context
+            "put_thoughts_in_context": db_user.put_thoughts_in_context,
+            # Reasoning params - merged later with alias if needed
+            "reasoning_activation": db_user.reasoning_activation,
+            "reasoning_effort": db_user.reasoning_effort,
+            "reasoning_summary": db_user.reasoning_summary
         }
 
-        # --- Enforce Context Size Lock ---
+        # --- Enforce Context Size Lock and other alias overrides ---
         ctx_size_to_enforce = None
         if user_model_full and '/' in user_model_full:
             binding_alias, model_name = user_model_full.split('/', 1)
@@ -215,7 +219,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 # Check for general overrides
                 if alias_info and not alias_info.get('allow_parameters_override', True):
                     llm_settings_overridden = True
-                    param_map = {"ctx_size": "llm_ctx_size", "temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n"}
+                    param_map = {"ctx_size": "llm_ctx_size", "temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n", "reasoning_activation": "reasoning_activation", "reasoning_effort": "reasoning_effort", "reasoning_summary": "reasoning_summary"}
                     for alias_key, user_key in param_map.items():
                         if alias_key in alias_info and alias_info[alias_key] is not None:
                             effective_llm_params[user_key] = alias_info[alias_key]
@@ -516,7 +520,11 @@ def build_lollms_client_from_params(
                 "ctx_size": user_db.llm_ctx_size, "temperature": user_db.llm_temperature,
                 "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
                 "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
-                "put_thoughts_in_context": user_db.put_thoughts_in_context
+                "put_thoughts_in_context": user_db.put_thoughts_in_context,
+                # NEW: Add reasoning parameters here
+                "reasoning_activation": user_db.reasoning_activation,
+                "reasoning_effort": user_db.reasoning_effort,
+                "reasoning_summary": user_db.reasoning_summary
             }
             user_session_params = session.get("llm_params", {})
             
