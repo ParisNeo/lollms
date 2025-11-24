@@ -37,11 +37,12 @@ bearer_scheme = HTTPBearer(auto_error=False)
 # --- Pydantic Models for OpenAI Compatibility ---
 
 class FunctionCall(BaseModel):
-    name: str
-    arguments: str 
+    name: Optional[str] = None
+    arguments: Optional[str] = None
 
 class ToolCall(BaseModel):
-    id: str
+    index: Optional[int] = None
+    id: Optional[str] = None
     type: str = "function"
     function: FunctionCall
 
@@ -661,8 +662,92 @@ async def chat_completions(
 
     ASCIIColors.info(f"Received images: {len(images)}")
 
-    if request.stream:
-        # Note: Tool calling via stream is currently not parsed into tool_call chunks
+    # Special handling for Streaming + Tools
+    # If tools are requested, we must buffer the response to correctly parse JSON tool calls
+    # before emitting them as a stream. This prevents raw JSON from leaking into 'content'.
+    if request.stream and request.tools:
+        async def stream_with_tools_generator():
+            # 1. Generate fully (blocking/sync logic wrapped in thread)
+            ASCIIColors.info("Tools requested in stream mode. Buffering generation for safe parsing...")
+            result_content = await asyncio.to_thread(
+                lc.generate_from_messages,
+                openai_messages,
+                temperature=request.temperature,
+                n_predict=request.max_tokens,
+                images=images,
+                **generation_kwargs
+            )
+
+            # 2. Parse the full content
+            content, tool_calls = parse_tool_calls_from_text(result_content)
+
+            completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+            created_ts = int(time.time())
+
+            # 3. Emit Initial Role Chunk
+            first_chunk = ChatCompletionStreamResponse(
+                id=completion_id,
+                model=request.model,
+                created=created_ts,
+                choices=[ChatCompletionResponseStreamChoice(
+                    index=0,
+                    delta=DeltaMessage(role="assistant"),
+                    finish_reason=None
+                )]
+            )
+            yield f"data: {first_chunk.model_dump_json()}\n\n".encode('utf-8')
+
+            # 4. Emit Content Chunk (if any text exists before the tool)
+            if content:
+                content_chunk = ChatCompletionStreamResponse(
+                    id=completion_id,
+                    model=request.model,
+                    created=created_ts,
+                    choices=[ChatCompletionResponseStreamChoice(
+                        index=0,
+                        delta=DeltaMessage(content=content),
+                        finish_reason=None
+                    )]
+                )
+                yield f"data: {content_chunk.model_dump_json()}\n\n".encode('utf-8')
+
+            # 5. Emit Tool Calls Chunk (if any)
+            if tool_calls:
+                for i, tc in enumerate(tool_calls):
+                    # Set the index for the tool call as required by streaming spec
+                    tc.index = i
+                    # Wrap in list
+                    tool_chunk = ChatCompletionStreamResponse(
+                        id=completion_id,
+                        model=request.model,
+                        created=created_ts,
+                        choices=[ChatCompletionResponseStreamChoice(
+                            index=0,
+                            delta=DeltaMessage(tool_calls=[tc]),
+                            finish_reason=None
+                        )]
+                    )
+                    yield f"data: {tool_chunk.model_dump_json()}\n\n".encode('utf-8')
+            
+            # 6. Emit Finish Chunk
+            finish_reason = "tool_calls" if tool_calls else "stop"
+            end_chunk = ChatCompletionStreamResponse(
+                id=completion_id,
+                model=request.model,
+                created=created_ts,
+                choices=[ChatCompletionResponseStreamChoice(
+                    index=0,
+                    delta=DeltaMessage(),
+                    finish_reason=finish_reason
+                )]
+            )
+            yield f"data: {end_chunk.model_dump_json()}\n\n".encode('utf-8')
+            yield "data: [DONE]\n\n".encode('utf-8')
+
+        return EventSourceResponse(stream_with_tools_generator(), media_type="text/event-stream")
+
+    elif request.stream:
+        # Standard Streaming (No tools) - Token by token
         async def stream_generator():
             main_loop = asyncio.get_running_loop()
             stream_queue = asyncio.Queue()
@@ -747,6 +832,7 @@ async def chat_completions(
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
 
     else:
+        # Standard Non-Streaming
         try:
             ASCIIColors.info("Generating non-streaming response...")
             result_content = lc.generate_from_messages(
