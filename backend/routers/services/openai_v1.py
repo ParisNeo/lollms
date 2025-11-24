@@ -442,13 +442,15 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
     matched_text_segment = None
 
     # Strategy 1: Look for Markdown Code Blocks (Most Reliable)
-    code_block_pattern = r"```(?:json)?\s*(.*?)\s*```"
-    code_blocks = re.findall(code_block_pattern, content, re.DOTALL)
+    # Using case-insensitive regex for 'json' and DOTALL for newlines
+    code_block_pattern = r"```(?:json|JSON)?\s*(.*?)\s*```"
+    code_blocks = re.findall(code_block_pattern, content, re.DOTALL | re.IGNORECASE)
     
     if code_blocks:
         ASCIIColors.info(f"Found {len(code_blocks)} code blocks.")
         for block in code_blocks:
             clean_block = block.strip()
+            # Ensure it looks like what we want
             if "tool_calls" in clean_block:
                 try:
                     data = json.loads(clean_block)
@@ -467,9 +469,10 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
                             break
                     except: pass
     
-    # Strategy 2: Fallback to scanning raw text for JSON objects (If model forgot backticks)
+    # Strategy 2: Fallback to scanning raw text for JSON objects
+    # This runs if Strategy 1 found no valid tool calls (even if it found blocks that were malformed)
     if not valid_tool_call_data:
-        ASCIIColors.info("No valid JSON in code blocks. Scanning raw text...")
+        ASCIIColors.info("Scanning raw text for JSON candidates (Fallback)...")
         candidates = extract_json_candidates(content)
         for candidate in candidates:
             if "tool_calls" in candidate:
@@ -523,8 +526,8 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
                 idx = content.find(matched_text_segment)
                 if idx > 0:
                     text_before = content[:idx]
-                    # Clean up trailing backticks from the split
-                    text_before = re.sub(r'```(?:json)?\s*$', '', text_before).strip()
+                    # Clean up trailing backticks from the split (case insensitive)
+                    text_before = re.sub(r'```(?:json|JSON)?\s*$', '', text_before, flags=re.IGNORECASE).strip()
                     if text_before:
                         final_content = text_before
             
