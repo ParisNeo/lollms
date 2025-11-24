@@ -371,7 +371,8 @@ def to_image_block(img, default_mime="image/jpeg"):
 def handle_tools_injection(messages: List[Dict], tools: List[Dict]) -> List[Dict]:
     if not tools:
         return messages
-    
+    ASCIIColors.magenta("Injecting tools into system prompt for OpenAI chat completion.")
+    ASCIIColors.magenta(f"Available tools: {[tool.get('function', {}).get('name') for tool in tools if tool.get('type', 'function') == 'function']}")
     tools_prompt = "\n\n# Tools Available\n"
     tools_prompt += "You have the following tools available. To call a tool, output a JSON object with the key 'tool_calls' containing a list of tool calls. Each tool call should have 'name' and 'arguments'.\n"
     tools_prompt += "Example: {\"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Paris\"}}]}\n\n"
