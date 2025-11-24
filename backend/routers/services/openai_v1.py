@@ -368,62 +368,117 @@ def to_image_block(img, default_mime="image/jpeg"):
 
     raise ValueError("Unsupported image input format")
 
-def handle_tools_injection(messages: List[Dict], tools: List[Dict]) -> List[Dict]:
+def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice: Union[str, Dict] = None) -> List[Dict]:
+    """
+    Injects tool definitions into the system prompt with stricter formatting instructions.
+    Respects tool_choice ('none', 'auto', or specific function).
+    """
+    # 1. Check if tools should be ignored based on tool_choice
+    if isinstance(tool_choice, str) and tool_choice == "none":
+        return messages
+
     if not tools:
         return messages
+
     ASCIIColors.magenta("Injecting tools into system prompt for OpenAI chat completion.")
-    ASCIIColors.magenta(f"Available tools: {[tool.get('function', {}).get('name') for tool in tools if tool.get('type', 'function') == 'function']}")
-    tools_prompt = "\n\n# Tools Available\n"
-    tools_prompt += "You have the following tools available. To call a tool, output a JSON object with the key 'tool_calls' containing a list of tool calls. Each tool call should have 'name' and 'arguments'.\n"
-    tools_prompt += "Example: {\"tool_calls\": [{\"name\": \"get_weather\", \"arguments\": {\"location\": \"Paris\"}}]}\n\n"
-    tools_prompt += "Available Tools:\n"
+    
+    # 2. Build the detailed prompt
+    tools_prompt = "\n\n### FUNCTION CALLING INSTRUCTIONS\n"
+    tools_prompt += "You are capable of calling functions to get external data. "
+    tools_prompt += "When you need to call a function, you MUST output a SINGLE valid JSON object. "
+    tools_prompt += "Do NOT wrap the JSON in markdown code blocks (like ```json). Just output the raw JSON.\n"
+    tools_prompt += "The JSON format must be:\n"
+    tools_prompt += '{"tool_calls": [{"name": "function_name", "arguments": {"arg1": "value1"}}]}\n\n'
+    
+    tools_prompt += "### AVAILABLE TOOLS:\n"
     for tool in tools:
         t_type = tool.get("type", "function")
         if t_type == "function":
             func = tool.get("function", {})
             name = func.get("name")
-            desc = func.get("description")
-            params = json.dumps(func.get("parameters"))
-            tools_prompt += f"- {name}: {desc}\n  Parameters: {params}\n"
-    
+            desc = func.get("description", "")
+            params = json.dumps(func.get("parameters", {}))
+            tools_prompt += f"- Name: {name}\n  Description: {desc}\n  Parameters: {params}\n"
+
+    # 3. Handle tool_choice enforcement
+    if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
+        forced_name = tool_choice.get("function", {}).get("name")
+        tools_prompt += f"\nIMPORTANT: You MUST call the function '{forced_name}' in your next response."
+    elif tool_choice == "required":
+        tools_prompt += "\nIMPORTANT: You MUST call one of the available tools in your next response."
+    else:
+        # Default 'auto' behavior
+        tools_prompt += "\nIf the user's request requires these tools, output the JSON tool call. If not, reply normally."
+
+    # 4. Inject into the latest System message or create one
     system_found = False
     for msg in messages:
         if msg.get('role') == 'system':
+            # Append to existing system prompt
             msg['content'] = (msg.get('content') or "") + tools_prompt
             system_found = True
             break
     
     if not system_found:
+        # Insert at the beginning
         messages.insert(0, {"role": "system", "content": tools_prompt})
     
     return messages
 
 def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[List[Dict]]]:
-    import re
+    """
+    Attempts to extract a JSON tool call from the LLM output.
+    Handles Markdown code blocks and mixed text/JSON content.
+    """
+    if not content:
+        return content, None
+
+    # 1. Clean up Markdown code blocks if present (common LLM behavior)
+    # This regex removes ```json ... ``` wrappers but keeps the content inside
+    cleaned_content = re.sub(r'```(?:json)?\s*(.*?)\s*```', r'\1', content, flags=re.DOTALL)
+    
+    # 2. Try to find the specific JSON structure for tool_calls
+    # We look for {"tool_calls": [...]} 
+    # We use a greedy match on the list content to try and capture nested objects
     try:
-        # Look for JSON block containing "tool_calls"
-        match = re.search(r'\{.*"tool_calls":\s*\[.*\]\s*\}', content, re.DOTALL)
+        match = re.search(r'(\{.*"tool_calls":\s*\[.*\].*\})', cleaned_content, re.DOTALL)
         if match:
-            json_str = match.group(0)
-            data = json.loads(json_str)
+            json_candidate = match.group(1)
+            try:
+                data = json.loads(json_candidate)
+            except json.JSONDecodeError:
+                # Fallback: sometimes LLMs produce single quotes or trailing commas
+                # Using a loose load or strictly failing. 
+                # For now, let's fail gracefully and return text.
+                return content, None
+
             if "tool_calls" in data and isinstance(data["tool_calls"], list):
                 openai_tool_calls = []
                 for tc in data["tool_calls"]:
+                    # Ensure the strict OpenAI format structure
                     openai_tool_calls.append({
                         "id": f"call_{uuid.uuid4().hex[:8]}",
                         "type": "function",
                         "function": {
                             "name": tc.get("name"),
-                            "arguments": json.dumps(tc.get("arguments", {}))
+                            # OpenAI expects arguments to be a stringified JSON
+                            "arguments": json.dumps(tc.get("arguments", {})) if isinstance(tc.get("arguments"), dict) else str(tc.get("arguments", ""))
                         }
                     })
-                # Return None as content (or maybe stripped content?) for now let's return None
-                # assuming the model output ONLY the JSON if it decided to call a tool.
-                return None, openai_tool_calls
-    except Exception:
+                
+                # If we successfully parsed tools, we usually strip the JSON from the user-facing content
+                # check if there was text *before* the JSON (Chain of Thought)
+                text_before = content[:content.find(match.group(0))].strip()
+                
+                # If text_before is very short or just whitespace, return None as content (standard OpenAI behavior)
+                final_content = text_before if len(text_before) > 0 else None
+                
+                return final_content, openai_tool_calls
+    except Exception as e:
+        print(f"Error parsing tool calls: {e}")
         pass
-    return content, None
 
+    return content, None
 
 # --- Routes ---
 
@@ -537,7 +592,7 @@ async def chat_completions(
     openai_messages, images = preprocess_openai_messages(messages)
     
     if request.tools:
-        openai_messages = handle_tools_injection(openai_messages, request.tools)
+        openai_messages = handle_tools_injection(openai_messages, request.tools, tool_choice=request.tool_choice)
 
     generation_kwargs = {}
     if request.reasoning_effort:
@@ -630,6 +685,7 @@ async def chat_completions(
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
 
     else:
+        # Non-streaming response
         try:
             result_content = lc.generate_from_messages(
                 openai_messages,
@@ -639,34 +695,20 @@ async def chat_completions(
                 **generation_kwargs
             )
             
+            # --- UPDATED BLOCK START ---
             content = result_content
             finish_reason = "stop"
-            message_obj = None
-
+            tool_calls = None
+            
+            # Only attempt to parse tools if they were requested
             if request.tools:
                 content, tool_calls = parse_tool_calls_from_text(result_content)
+                
                 if tool_calls:
                     finish_reason = "tool_calls"
-                    message_obj = ChatMessage(role="assistant", content=content, tool_calls=tool_calls)
-                else:
-                    message_obj = ChatMessage(role="assistant", content=result_content)
-            else:
-                message_obj = ChatMessage(role="assistant", content=result_content)
-
-            # Monkey-patch tool_calls onto ChatMessage instance since Pydantic model doesn't have it defined by default
-            if request.tools and message_obj.role == "assistant":
-                # To properly support tool_calls in response model, we should really update ChatMessage definition
-                # but for simplicity we just return a dict that matches structure if we were manually building it.
-                # However, ChatCompletionResponse expects Message objects.
-                # Let's update ChatMessage definition dynamically or assume client handles extra fields if we use dict?
-                # Actually, let's just extend ChatMessage definition in this file since we are here.
-                pass
-
-            prompt_tokens = lc.count_tokens(str(openai_messages))
-            completion_tokens = lc.count_tokens(result_content)
             
-            # Construct dict for choice to support tool_calls which might not be in ChatMessage schema
-            choice_dict = {
+            # Construct the choice object
+            choice_data = {
                 "index": 0,
                 "message": {
                     "role": "assistant",
@@ -674,17 +716,21 @@ async def chat_completions(
                 },
                 "finish_reason": finish_reason
             }
-            if finish_reason == "tool_calls":
-                 # We need to access tool_calls from local var
-                 _, tool_calls = parse_tool_calls_from_text(result_content)
-                 choice_dict["message"]["tool_calls"] = tool_calls
 
+            # Add tool_calls to the message object if they exist
+            if tool_calls:
+                choice_data["message"]["tool_calls"] = tool_calls
+            # --- UPDATED BLOCK END ---
+
+            prompt_tokens = lc.count_tokens(str(openai_messages))
+            completion_tokens = lc.count_tokens(result_content)
+            
             return {
                 "id": f"chatcmpl-{uuid.uuid4().hex}",
                 "object": "chat.completion",
                 "created": int(time.time()),
                 "model": request.model,
-                "choices": [choice_dict],
+                "choices": [choice_data],
                 "usage": UsageInfo(
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
@@ -693,6 +739,7 @@ async def chat_completions(
             }
             
         except Exception as e:
+            trace_exception(e) # Good idea to trace explicitly
             raise HTTPException(status_code=500, detail=f"Generation error: {e}")
         
         
