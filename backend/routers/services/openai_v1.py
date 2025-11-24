@@ -315,6 +315,7 @@ def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict],
 
     return processed, image_list
 
+
 # --- Helper to Extract Images and Convert Messages ---
 def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
     processed = []
@@ -371,7 +372,6 @@ def to_image_block(img, default_mime="image/jpeg"):
         }
 
     raise ValueError("Unsupported image input format")
-
 
 def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice: Union[str, Dict] = None) -> List[Dict]:
     """
@@ -437,10 +437,44 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
     return messages
 
 
+def extract_first_json_block(text: str) -> Optional[str]:
+    """
+    Extracts the first valid JSON block from the text by counting braces.
+    Robust against nested structures.
+    """
+    start_index = text.find('{')
+    if start_index == -1:
+        return None
+        
+    brace_count = 0
+    in_string = False
+    escape = False
+    
+    for i in range(start_index, len(text)):
+        char = text[i]
+        
+        if char == '"' and not escape:
+            in_string = not in_string
+        
+        if not in_string:
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                
+        if char == '\\':
+            escape = not escape
+        else:
+            escape = False
+            
+        if brace_count == 0:
+            return text[start_index : i + 1]
+            
+    return None
+
 def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[List[Dict]]]:
     """
-    Parses the LLM output to find JSON tool calls.
-    Includes heavy debugging to see raw model output vs parsed result.
+    Parses the LLM output to find JSON tool calls with high resilience to bad formatting.
     """
     ASCIIColors.yellow("--- TOOL PARSING START ---")
     if not content:
@@ -448,61 +482,84 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
 
     ASCIIColors.cyan(f"Raw LLM Output (First 500 chars):\n{content[:500]}...")
 
-    # 1. Strip Markdown Code Blocks (common issue with Llama-3/Mistral)
-    # This regex removes ```json ... ``` but keeps the internal text
+    # 1. Strip Markdown Code Blocks
     cleaned_content = re.sub(r'```(?:json)?\s*(.*?)\s*```', r'\1', content, flags=re.DOTALL)
     
-    # 2. Regex to find the specific JSON structure {"tool_calls": [...]}
-    # We accept optional text before/after, but capture the JSON object.
-    regex_pattern = r'(\{.*"tool_calls":\s*\[.*\].*\})'
+    # 2. Attempt to extract the JSON block specifically containing "tool_calls"
+    # We first look for the substring "tool_calls" and then backtrack to find the enclosing JSON
+    match = re.search(r'("tool_calls"\s*:\s*\[)', cleaned_content)
     
-    match = re.search(regex_pattern, cleaned_content, re.DOTALL)
+    json_candidate = None
     
     if match:
-        json_str = match.group(1)
-        ASCIIColors.green(f"Found JSON candidate:\n{json_str}")
+        # Find the start of the object containing this key. 
+        # This is a bit tricky with Regex, so we use the brace counter on the whole text
+        # assuming the tool call is the main JSON object.
+        json_candidate = extract_first_json_block(cleaned_content)
+    
+    # Fallback: if brace counting failed, try the regex greedy match
+    if not json_candidate:
+         match_regex = re.search(r'(\{.*"tool_calls":\s*\[.*\].*\})', cleaned_content, re.DOTALL)
+         if match_regex:
+             json_candidate = match_regex.group(1)
+
+    if json_candidate:
+        ASCIIColors.green(f"Found JSON candidate:\n{json_candidate}")
         
+        data = None
         try:
-            data = json.loads(json_str)
-            
-            if "tool_calls" in data and isinstance(data["tool_calls"], list):
-                openai_tool_calls = []
-                for tc in data["tool_calls"]:
-                    # OpenAI Spec: 'arguments' must be a STRINGIFIED JSON, not a dict.
-                    args = tc.get("arguments", {})
-                    if isinstance(args, dict):
-                        args_str = json.dumps(args)
-                    else:
-                        args_str = str(args)
+            data = json.loads(json_candidate)
+        except json.JSONDecodeError:
+            ASCIIColors.warning("Standard JSON parse failed. Attempting to repair quotes...")
+            try:
+                # Common Error: Single quotes instead of double quotes
+                # Very naive replacement, but often works for simple tool calls
+                repaired_json = json_candidate.replace("'", '"')
+                # Also fix True/False to true/false
+                repaired_json = repaired_json.replace("True", "true").replace("False", "false")
+                data = json.loads(repaired_json)
+                ASCIIColors.success("JSON repaired successfully.")
+            except json.JSONDecodeError as e:
+                ASCIIColors.error(f"JSON Repair failed: {e}")
+                data = None
 
-                    tool_call_obj = {
-                        "id": f"call_{uuid.uuid4().hex[:8]}",
-                        "type": "function",
-                        "function": {
-                            "name": tc.get("name"),
-                            "arguments": args_str
-                        }
+        if data and "tool_calls" in data and isinstance(data["tool_calls"], list):
+            openai_tool_calls = []
+            for tc in data["tool_calls"]:
+                # OpenAI Spec: 'arguments' must be a STRINGIFIED JSON, not a dict.
+                args = tc.get("arguments", {})
+                if isinstance(args, dict):
+                    args_str = json.dumps(args)
+                else:
+                    args_str = str(args)
+
+                tool_call_obj = {
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "type": "function",
+                    "function": {
+                        "name": tc.get("name"),
+                        "arguments": args_str
                     }
-                    openai_tool_calls.append(tool_call_obj)
-                
-                ASCIIColors.success(f"Successfully parsed {len(openai_tool_calls)} tool calls.")
-                
-                # Determine what 'content' to return. 
-                # If there was text before the JSON (Chain of Thought), keep it.
-                start_index = content.find(match.group(0))
-                text_before = content[:start_index].strip()
-                
-                final_content = text_before if text_before else None
-                
-                ASCIIColors.yellow("--- TOOL PARSING END (Success) ---")
-                return final_content, openai_tool_calls
+                }
+                openai_tool_calls.append(tool_call_obj)
+            
+            ASCIIColors.success(f"Successfully parsed {len(openai_tool_calls)} tool calls.")
+            
+            # Determine content return
+            # Find where the JSON starts in the ORIGINAL content
+            # We use cleaned_content for index finding to match the block
+            start_index = cleaned_content.find(json_candidate)
+            if start_index == -1: 
+                # Fallback if cleaner changed spacing too much, just return None if tools found
+                return None, openai_tool_calls
+            
+            text_before = cleaned_content[:start_index].strip()
+            final_content = text_before if text_before else None
+            
+            ASCIIColors.yellow("--- TOOL PARSING END (Success) ---")
+            return final_content, openai_tool_calls
 
-        except json.JSONDecodeError as e:
-            ASCIIColors.error(f"JSON Decode Error: {e}")
-            # Fallback for minor JSON errors could be added here
-    else:
-        ASCIIColors.red("No 'tool_calls' JSON pattern found in output.")
-
+    ASCIIColors.red("No valid 'tool_calls' JSON structure found.")
     ASCIIColors.yellow("--- TOOL PARSING END (No Tools) ---")
     return content, None
 
