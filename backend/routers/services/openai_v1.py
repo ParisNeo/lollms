@@ -8,6 +8,8 @@ import uuid
 import base64
 import re
 import io
+import random
+import string
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union, Any
 
@@ -222,6 +224,10 @@ def resolve_model_name(db: Session, requested_model: str) -> Tuple[str, str]:
 
     raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use 'binding/model_name' format or a valid alias.")
 
+def generate_mistral_compatible_id() -> str:
+    """Generates a 9-character alphanumeric ID required by Mistral/LiteLLM."""
+    return ''.join(random.choices(string.ascii_letters + string.digits, k=9))
+
 # --- END HELPER FUNCTIONS ---
 
 
@@ -307,15 +313,12 @@ def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict],
             "content": msg.content
         }
 
-        # Preserve Tool Call ID (Critical for 'tool' role)
         if msg.tool_call_id:
             msg_dict["tool_call_id"] = msg.tool_call_id
 
-        # Preserve Name (Optional but good for 'tool' role)
         if msg.name:
             msg_dict["name"] = msg.name
 
-        # Preserve Tool Calls (Critical for 'assistant' role causing a tool call)
         if msg.tool_calls:
             msg_dict["tool_calls"] = [
                 tc.model_dump() if hasattr(tc, 'model_dump') else tc
@@ -464,7 +467,6 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
     matched_text_segment = None
 
     # Strategy 1: Look for Markdown Code Blocks (Most Reliable)
-    # Using case-insensitive regex for 'json' and DOTALL for newlines
     code_block_pattern = r"```(?:json|JSON)?\s*(.*?)\s*```"
     code_blocks = re.findall(code_block_pattern, content, re.DOTALL | re.IGNORECASE)
     
@@ -472,7 +474,6 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
         ASCIIColors.info(f"Found {len(code_blocks)} code blocks.")
         for block in code_blocks:
             clean_block = block.strip()
-            # Ensure it looks like what we want
             if "tool_calls" in clean_block:
                 try:
                     data = json.loads(clean_block)
@@ -481,7 +482,6 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
                         matched_text_segment = block
                         break
                 except json.JSONDecodeError:
-                    # Try simple repair
                     try:
                         repaired = clean_block.replace("'", '"').replace("True", "true").replace("False", "false")
                         data = json.loads(repaired)
@@ -492,7 +492,6 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
                     except: pass
     
     # Strategy 2: Fallback to scanning raw text for JSON objects
-    # This runs if Strategy 1 found no valid tool calls (even if it found blocks that were malformed)
     if not valid_tool_call_data:
         ASCIIColors.info("Scanning raw text for JSON candidates (Fallback)...")
         candidates = extract_json_candidates(content)
@@ -516,19 +515,20 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
 
     if valid_tool_call_data:
         openai_tool_calls = []
-        # Parse into strictly typed ToolCall objects
         if isinstance(valid_tool_call_data.get("tool_calls"), list):
             for tc in valid_tool_call_data["tool_calls"]:
                 try:
-                    # Extract args and ensure it is a string
                     args = tc.get("arguments", {})
                     if isinstance(args, dict):
                         args_str = json.dumps(args)
                     else:
                         args_str = str(args)
 
+                    # Generate ID compliant with strict Mistral/LiteLLM requirements (9 alphanum chars)
+                    t_id = generate_mistral_compatible_id()
+
                     tool_call = ToolCall(
-                        id=f"call_{uuid.uuid4().hex[:8]}",
+                        id=t_id,
                         type="function",
                         function=FunctionCall(
                             name=tc.get("name"),
@@ -542,13 +542,11 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
         if openai_tool_calls:
             ASCIIColors.success(f"Successfully parsed {len(openai_tool_calls)} tool calls.")
             
-            # Determine text content (everything before the tool call)
             final_content = None
             if matched_text_segment:
                 idx = content.find(matched_text_segment)
                 if idx > 0:
                     text_before = content[:idx]
-                    # Clean up trailing backticks from the split (case insensitive)
                     text_before = re.sub(r'```(?:json|JSON)?\s*$', '', text_before, flags=re.IGNORECASE).strip()
                     if text_before:
                         final_content = text_before
@@ -684,17 +682,11 @@ async def chat_completions(
     ASCIIColors.info(f"Received images: {len(images)}")
 
     if request.stream:
-        # --------------------------------------------------------------------------------
-        # STREAMING LOGIC WITH ROBUST ERROR HANDLING AND BUFFERING FOR TOOLS
-        # --------------------------------------------------------------------------------
         async def stream_generator():
             try:
-                # If tools are requested, BUFFER the output first to parse it, 
-                # then stream the chunks. This prevents raw JSON from leaking to 'content'.
                 if request.tools:
                     ASCIIColors.info("Tools requested in stream mode. Buffering generation for safe parsing...")
                     
-                    # 1. Blocking Generation
                     result_content = await asyncio.to_thread(
                         lc.generate_from_messages,
                         openai_messages,
@@ -704,13 +696,11 @@ async def chat_completions(
                         **generation_kwargs
                     )
 
-                    # 2. Parse Content
                     content, tool_calls = parse_tool_calls_from_text(result_content)
 
                     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
                     created_ts = int(time.time())
 
-                    # 3. Emit Role
                     chunk = ChatCompletionStreamResponse(
                         id=completion_id,
                         model=request.model,
@@ -719,7 +709,6 @@ async def chat_completions(
                     )
                     yield f"data: {chunk.model_dump_json()}\n\n"
 
-                    # 4. Emit Text Content (if any)
                     if content:
                         chunk = ChatCompletionStreamResponse(
                             id=completion_id,
@@ -729,7 +718,6 @@ async def chat_completions(
                         )
                         yield f"data: {chunk.model_dump_json()}\n\n"
 
-                    # 5. Emit Tool Calls (if any)
                     if tool_calls:
                         for i, tc in enumerate(tool_calls):
                             tc.index = i
@@ -744,7 +732,6 @@ async def chat_completions(
                             )
                             yield f"data: {chunk.model_dump_json()}\n\n"
                     
-                    # 6. Emit Finish
                     finish_reason = "tool_calls" if tool_calls else "stop"
                     chunk = ChatCompletionStreamResponse(
                         id=completion_id,
@@ -756,18 +743,15 @@ async def chat_completions(
                     yield "data: [DONE]\n\n"
 
                 else:
-                    # Standard Streaming (Token by Token)
                     main_loop = asyncio.get_running_loop()
                     stream_queue = asyncio.Queue()
                     stop_event = threading.Event()
                     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
                     created_ts = int(time.time())
 
-                    # Callback for LLM
                     def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
                         if stop_event.is_set(): return False
                         if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
-                            # Build chunk object
                             response_chunk = ChatCompletionStreamResponse(
                                 id=completion_id,
                                 model=request.model,
@@ -777,14 +761,12 @@ async def chat_completions(
                                     delta=DeltaMessage(content=chunk_text)
                                 )]
                             )
-                            # Put raw formatted string into queue
                             main_loop.call_soon_threadsafe(
                                 stream_queue.put_nowait,
                                 f"data: {response_chunk.model_dump_json()}\n\n"
                             )
                         return True
 
-                    # Run generation in thread
                     def blocking_gen():
                         try:
                             lc.generate_from_messages(
@@ -803,7 +785,6 @@ async def chat_completions(
 
                     threading.Thread(target=blocking_gen, daemon=True).start()
 
-                    # Emit Role First
                     start_chunk = ChatCompletionStreamResponse(
                         id=completion_id,
                         model=request.model,
@@ -812,14 +793,12 @@ async def chat_completions(
                     )
                     yield f"data: {start_chunk.model_dump_json()}\n\n"
 
-                    # Yield tokens from queue
                     while True:
                         item = await stream_queue.get()
                         if item is None:
                             break
                         yield item
 
-                    # Emit Stop
                     end_chunk = ChatCompletionStreamResponse(
                         id=completion_id,
                         model=request.model,
@@ -831,14 +810,11 @@ async def chat_completions(
 
             except Exception as e:
                 ASCIIColors.error(f"Stream Generator Crash: {e}")
-                # We can't easily send an HTTP error code since headers are sent, 
-                # but we can try to close the stream cleanly.
                 yield "data: [DONE]\n\n"
 
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
     else:
-        # Non-Streaming Response
         try:
             ASCIIColors.info("Generating non-streaming response...")
             result_content = lc.generate_from_messages(
