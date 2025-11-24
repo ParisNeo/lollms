@@ -370,25 +370,30 @@ def to_image_block(img, default_mime="image/jpeg"):
 
 def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice: Union[str, Dict] = None) -> List[Dict]:
     """
-    Injects tool definitions into the system prompt with stricter formatting instructions.
-    Respects tool_choice ('none', 'auto', or specific function).
+    Injects tool definitions into the system prompt.
+    Includes debug prints to verify tools are actually being processed.
     """
-    # 1. Check if tools should be ignored based on tool_choice
+    ASCIIColors.yellow("--- TOOL INJECTION START ---")
+    
+    # 1. Check strict tool_choice "none"
     if isinstance(tool_choice, str) and tool_choice == "none":
+        ASCIIColors.yellow("Tool choice is 'none'. Skipping injection.")
         return messages
 
     if not tools:
+        ASCIIColors.yellow("No tools provided in request.")
         return messages
 
-    ASCIIColors.magenta("Injecting tools into system prompt for OpenAI chat completion.")
-    
-    # 2. Build the detailed prompt
+    ASCIIColors.info(f"Processing {len(tools)} tools...")
+
+    # 2. Build the System Prompt Appendage
+    # We use a very explicit format to help smaller/local models understand.
     tools_prompt = "\n\n### FUNCTION CALLING INSTRUCTIONS\n"
-    tools_prompt += "You are capable of calling functions to get external data. "
-    tools_prompt += "When you need to call a function, you MUST output a SINGLE valid JSON object. "
-    tools_prompt += "Do NOT wrap the JSON in markdown code blocks (like ```json). Just output the raw JSON.\n"
+    tools_prompt += "You are an AI assistant capable of calling external functions.\n"
+    tools_prompt += "To call a function, you MUST output a JSON object. Do not output python code.\n"
+    tools_prompt += "Do NOT wrap the JSON in markdown blocks (like ```json). Just output the raw JSON.\n"
     tools_prompt += "The JSON format must be:\n"
-    tools_prompt += '{"tool_calls": [{"name": "function_name", "arguments": {"arg1": "value1"}}]}\n\n'
+    tools_prompt += '{"tool_calls": [{"name": "function_name", "arguments": {"arg_name": "value"}}]}\n\n'
     
     tools_prompt += "### AVAILABLE TOOLS:\n"
     for tool in tools:
@@ -396,90 +401,108 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
         if t_type == "function":
             func = tool.get("function", {})
             name = func.get("name")
-            desc = func.get("description", "")
+            desc = func.get("description", "No description provided.")
             params = json.dumps(func.get("parameters", {}))
-            tools_prompt += f"- Name: {name}\n  Description: {desc}\n  Parameters: {params}\n"
+            tools_prompt += f"- Function: {name}\n  Description: {desc}\n  Parameters: {params}\n\n"
 
-    # 3. Handle tool_choice enforcement
+    # 3. Handle tool_choice logic
     if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
         forced_name = tool_choice.get("function", {}).get("name")
-        tools_prompt += f"\nIMPORTANT: You MUST call the function '{forced_name}' in your next response."
+        tools_prompt += f"IMPORTANT: You MUST choose to call the function '{forced_name}' in your response.\n"
+        ASCIIColors.cyan(f"Forcing tool usage: {forced_name}")
     elif tool_choice == "required":
-        tools_prompt += "\nIMPORTANT: You MUST call one of the available tools in your next response."
+        tools_prompt += "IMPORTANT: You MUST call one of the available functions in your response.\n"
+        ASCIIColors.cyan("Forcing required tool usage.")
     else:
-        # Default 'auto' behavior
-        tools_prompt += "\nIf the user's request requires these tools, output the JSON tool call. If not, reply normally."
+        tools_prompt += "If the user input requires a tool, output the JSON tool call. If not, respond normally with text.\n"
 
-    # 4. Inject into the latest System message or create one
+    # 4. Inject into messages
     system_found = False
     for msg in messages:
         if msg.get('role') == 'system':
-            # Append to existing system prompt
+            ASCIIColors.info("Appending tools to existing system prompt.")
             msg['content'] = (msg.get('content') or "") + tools_prompt
             system_found = True
             break
     
     if not system_found:
-        # Insert at the beginning
+        ASCIIColors.info("Creating new system prompt for tools.")
         messages.insert(0, {"role": "system", "content": tools_prompt})
     
+    ASCIIColors.yellow("--- TOOL INJECTION END ---")
     return messages
+
 
 def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[List[Dict]]]:
     """
-    Attempts to extract a JSON tool call from the LLM output.
-    Handles Markdown code blocks and mixed text/JSON content.
+    Parses the LLM output to find JSON tool calls.
+    Includes heavy debugging to see raw model output vs parsed result.
     """
+    ASCIIColors.yellow("--- TOOL PARSING START ---")
     if not content:
         return content, None
 
-    # 1. Clean up Markdown code blocks if present (common LLM behavior)
-    # This regex removes ```json ... ``` wrappers but keeps the content inside
+    ASCIIColors.cyan(f"Raw LLM Output (First 500 chars):\n{content[:500]}...")
+
+    # 1. Strip Markdown Code Blocks (common issue with Llama-3/Mistral)
+    # This regex removes ```json ... ``` but keeps the internal text
     cleaned_content = re.sub(r'```(?:json)?\s*(.*?)\s*```', r'\1', content, flags=re.DOTALL)
     
-    # 2. Try to find the specific JSON structure for tool_calls
-    # We look for {"tool_calls": [...]} 
-    # We use a greedy match on the list content to try and capture nested objects
-    try:
-        match = re.search(r'(\{.*"tool_calls":\s*\[.*\].*\})', cleaned_content, re.DOTALL)
-        if match:
-            json_candidate = match.group(1)
-            try:
-                data = json.loads(json_candidate)
-            except json.JSONDecodeError:
-                # Fallback: sometimes LLMs produce single quotes or trailing commas
-                # Using a loose load or strictly failing. 
-                # For now, let's fail gracefully and return text.
-                return content, None
-
+    # 2. Regex to find the specific JSON structure {"tool_calls": [...]}
+    # We accept optional text before/after, but capture the JSON object.
+    # The regex looks for the start of the object { ... "tool_calls": ... }
+    regex_pattern = r'(\{.*"tool_calls":\s*\[.*\].*\})'
+    
+    match = re.search(regex_pattern, cleaned_content, re.DOTALL)
+    
+    if match:
+        json_str = match.group(1)
+        ASCIIColors.green(f"Found JSON candidate:\n{json_str}")
+        
+        try:
+            data = json.loads(json_str)
+            
             if "tool_calls" in data and isinstance(data["tool_calls"], list):
                 openai_tool_calls = []
                 for tc in data["tool_calls"]:
-                    # Ensure the strict OpenAI format structure
-                    openai_tool_calls.append({
+                    # OpenAI Spec: 'arguments' must be a STRINGIFIED JSON, not a dict.
+                    args = tc.get("arguments", {})
+                    if isinstance(args, dict):
+                        args_str = json.dumps(args)
+                    else:
+                        args_str = str(args)
+
+                    tool_call_obj = {
                         "id": f"call_{uuid.uuid4().hex[:8]}",
                         "type": "function",
                         "function": {
                             "name": tc.get("name"),
-                            # OpenAI expects arguments to be a stringified JSON
-                            "arguments": json.dumps(tc.get("arguments", {})) if isinstance(tc.get("arguments"), dict) else str(tc.get("arguments", ""))
+                            "arguments": args_str
                         }
-                    })
+                    }
+                    openai_tool_calls.append(tool_call_obj)
                 
-                # If we successfully parsed tools, we usually strip the JSON from the user-facing content
-                # check if there was text *before* the JSON (Chain of Thought)
-                text_before = content[:content.find(match.group(0))].strip()
+                ASCIIColors.success(f"Successfully parsed {len(openai_tool_calls)} tool calls.")
                 
-                # If text_before is very short or just whitespace, return None as content (standard OpenAI behavior)
-                final_content = text_before if len(text_before) > 0 else None
+                # Determine what 'content' to return. 
+                # If there was text before the JSON (Chain of Thought), keep it.
+                # If the whole message was just JSON, content should be None (standard OpenAI).
+                start_index = content.find(match.group(0))
+                text_before = content[:start_index].strip()
                 
+                final_content = text_before if text_before else None
+                
+                ASCIIColors.yellow("--- TOOL PARSING END (Success) ---")
                 return final_content, openai_tool_calls
-    except Exception as e:
-        print(f"Error parsing tool calls: {e}")
-        pass
 
+        except json.JSONDecodeError as e:
+            ASCIIColors.error(f"JSON Decode Error: {e}")
+            # Optional: Add retry logic here for malformed JSON (e.g., single quotes)
+    else:
+        ASCIIColors.red("No 'tool_calls' JSON pattern found in output.")
+
+    ASCIIColors.yellow("--- TOOL PARSING END (No Tools) ---")
     return content, None
-
 # --- Routes ---
 
 @openai_v1_router.get("/models")
