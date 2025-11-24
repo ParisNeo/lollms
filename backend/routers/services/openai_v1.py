@@ -7,6 +7,7 @@ import threading
 import uuid
 import base64
 import re
+import io
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union, Any
 
@@ -36,7 +37,9 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 class ChatMessage(BaseModel):
     role: str
-    content: str|List[Dict]
+    content: Optional[Union[str, List[Dict]]] = None
+    tool_calls: Optional[List[Dict]] = None
+    name: Optional[str] = None
 
 class ChatCompletionRequest(BaseModel):
     model: str
@@ -71,6 +74,7 @@ class ChatCompletionResponse(BaseModel):
 class DeltaMessage(BaseModel):
     role: Optional[str] = None
     content: Optional[str] = None
+    tool_calls: Optional[List[Dict]] = None
 
 class ChatCompletionResponseStreamChoice(BaseModel):
     index: int
@@ -368,10 +372,10 @@ def to_image_block(img, default_mime="image/jpeg"):
 
     raise ValueError("Unsupported image input format")
 
+
 def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice: Union[str, Dict] = None) -> List[Dict]:
     """
-    Injects tool definitions into the system prompt.
-    Includes debug prints to verify tools are actually being processed.
+    Injects tool definitions into the system prompt with debugging and strict formatting instructions.
     """
     ASCIIColors.yellow("--- TOOL INJECTION START ---")
     
@@ -450,7 +454,6 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
     
     # 2. Regex to find the specific JSON structure {"tool_calls": [...]}
     # We accept optional text before/after, but capture the JSON object.
-    # The regex looks for the start of the object { ... "tool_calls": ... }
     regex_pattern = r'(\{.*"tool_calls":\s*\[.*\].*\})'
     
     match = re.search(regex_pattern, cleaned_content, re.DOTALL)
@@ -486,7 +489,6 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
                 
                 # Determine what 'content' to return. 
                 # If there was text before the JSON (Chain of Thought), keep it.
-                # If the whole message was just JSON, content should be None (standard OpenAI).
                 start_index = content.find(match.group(0))
                 text_before = content[:start_index].strip()
                 
@@ -497,12 +499,14 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
 
         except json.JSONDecodeError as e:
             ASCIIColors.error(f"JSON Decode Error: {e}")
-            # Optional: Add retry logic here for malformed JSON (e.g., single quotes)
+            # Fallback for minor JSON errors could be added here
     else:
         ASCIIColors.red("No 'tool_calls' JSON pattern found in output.")
 
     ASCIIColors.yellow("--- TOOL PARSING END (No Tools) ---")
     return content, None
+
+
 # --- Routes ---
 
 @openai_v1_router.get("/models")
@@ -588,7 +592,7 @@ async def chat_completions(
     db: Session = Depends(get_db)
 ):
     ASCIIColors.bold(f"Received Chat Completion Request. Model: {request.model}, Stream: {request.stream}")
-    
+
     binding_alias, model_name = resolve_model_name(db, request.model)
 
     try:
@@ -606,36 +610,113 @@ async def chat_completions(
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
 
     messages = list(request.messages)
-    
-    # Handle Personality Injection
     if request.personality:
         personality = db.query(DBPersonality).filter(DBPersonality.id == request.personality).first()
-        if personality:
-            messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
+        if not personality:
+            raise HTTPException(status_code=404, detail="Personality not found.")
+        if not personality.is_public and personality.owner_user_id != user.id:
+            raise HTTPException(status_code=403, detail="You cannot use this personality.")
+        messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
-    # Preprocess (handle images)
     openai_messages, images = preprocess_openai_messages(messages)
     
-    # --- TOOL INJECTION ---
+    # --- TOOL INJECTION WITH DEBUGGING ---
     if request.tools:
-        # Pass tool_choice to help the injector force the model if needed
         openai_messages = handle_tools_injection(openai_messages, request.tools, request.tool_choice)
 
     generation_kwargs = {}
     if request.reasoning_effort:
         generation_kwargs["reasoning_effort"] = request.reasoning_effort
 
+    ASCIIColors.info(f"Received images: {len(images)}")
+
     if request.stream:
-        # ... [Keep existing Streaming logic, usually tools + streaming is complex, assume non-stream for tools for now] ...
         async def stream_generator():
-            # (Use the code from your previous version for streaming)
-            # ...
-            pass 
+            main_loop = asyncio.get_running_loop()
+            stream_queue = asyncio.Queue()
+            stop_event = threading.Event()
+
+            completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+            created_ts = int(time.time())
+
+            first_chunk = ChatCompletionStreamResponse(
+                id=completion_id,
+                model=request.model,
+                created=created_ts,
+                choices=[ChatCompletionResponseStreamChoice(
+                    index=0,
+                    delta=DeltaMessage(role="assistant"),
+                    finish_reason=None
+                )]
+            )
+            yield f"data: {first_chunk.model_dump_json()}\n\n".encode('utf-8')
+
+            def llm_callback(chunk: str, msg_type: MSG_TYPE, **kwargs) -> bool:
+                if stop_event.is_set():
+                    return False
+                if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk:
+                    response_chunk = ChatCompletionStreamResponse(
+                        id=completion_id,
+                        model=request.model,
+                        created=created_ts,
+                        choices=[ChatCompletionResponseStreamChoice(
+                            index=0,
+                            delta=DeltaMessage(content=chunk)
+                        )]
+                    )
+                    try:
+                        json_data = response_chunk.model_dump_json()
+                        main_loop.call_soon_threadsafe(
+                            stream_queue.put_nowait,
+                            f"data: {json_data}\n\n".encode('utf-8')
+                        )
+                    except Exception as e:
+                        print(f"Error serializing chunk: {e}")
+                return True
+
+            def blocking_call():
+                try:
+                    lc.generate_from_messages(
+                        openai_messages,
+                        streaming_callback=llm_callback,
+                        images=images,
+                        temperature=request.temperature,
+                        n_predict=request.max_tokens,
+                        stream=True,
+                        **generation_kwargs
+                    )
+                except Exception as e:
+                    print(f"Streaming error: {e}")
+                finally:
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
+
+            threading.Thread(target=blocking_call, daemon=True).start()
+
+            while True:
+                item = await stream_queue.get()
+                if item is None:
+                    break
+                if item.strip():
+                    yield item
+
+            end_chunk = ChatCompletionStreamResponse(
+                id=completion_id,
+                model=request.model,
+                created=created_ts,
+                choices=[ChatCompletionResponseStreamChoice(
+                    index=0,
+                    delta=DeltaMessage(),
+                    finish_reason="stop"
+                )]
+            )
+            yield f"data: {end_chunk.model_dump_json()}\n\n".encode('utf-8')
+            yield "data: [DONE]\n\n".encode('utf-8')
+
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
 
     else:
         try:
-            ASCIIColors.info("Generating response from LLM...")
+            ASCIIColors.info("Generating non-streaming response...")
             result_content = lc.generate_from_messages(
                 openai_messages,
                 temperature=request.temperature,
@@ -648,48 +729,43 @@ async def chat_completions(
             content = result_content
             finish_reason = "stop"
             tool_calls = None
-            
-            # Only check for tools if they were defined in the request
+
             if request.tools:
                 content, tool_calls = parse_tool_calls_from_text(result_content)
                 if tool_calls:
                     finish_reason = "tool_calls"
-                    ASCIIColors.success("Response contains valid tool calls.")
+                    ASCIIColors.success("Tool calls detected and parsed.")
             
-            # --- RESPONSE CONSTRUCTION ---
-            # Create the message dict manually to include 'tool_calls'
-            message_dict = {
-                "role": "assistant",
-                "content": content
-            }
+            # Construct message with potential tool calls
+            # We map explicit keys to match Pydantic model
+            msg_obj = ChatMessage(role="assistant", content=content)
             if tool_calls:
-                message_dict["tool_calls"] = tool_calls
+                msg_obj.tool_calls = tool_calls
 
-            choice_data = {
-                "index": 0,
-                "message": message_dict,
-                "finish_reason": finish_reason
-            }
+            choice = ChatCompletionResponseChoice(
+                index=0,
+                message=msg_obj,
+                finish_reason=finish_reason
+            )
 
             prompt_tokens = lc.count_tokens(str(openai_messages))
             completion_tokens = lc.count_tokens(result_content)
             
-            return {
-                "id": f"chatcmpl-{uuid.uuid4().hex}",
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": request.model,
-                "choices": [choice_data],
-                "usage": UsageInfo(
+            return ChatCompletionResponse(
+                id=f"chatcmpl-{uuid.uuid4().hex}",
+                model=request.model,
+                choices=[choice],
+                usage=UsageInfo(
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens
                 )
-            }
+            )
             
         except Exception as e:
             trace_exception(e)
-            raise HTTPException(status_code=500, detail=f"Generation error: {e}")      
+            raise HTTPException(status_code=500, detail=f"Generation error: {e}")
+        
         
 @openai_v1_router.post("/images/generations", response_model=ImageGenerationResponse)
 async def create_image_generation(
