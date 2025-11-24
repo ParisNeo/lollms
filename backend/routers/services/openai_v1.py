@@ -30,6 +30,7 @@ from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
 from backend.routers.files import extract_text_from_file_bytes 
 
+# --- Router Definition (Strictly named openai_v1_router) ---
 openai_v1_router = APIRouter(prefix="/v1")
 bearer_scheme = HTTPBearer(auto_error=False) 
 
@@ -319,6 +320,7 @@ def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict],
 def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice: Union[str, Dict] = None) -> List[Dict]:
     """
     Injects tool definitions into the system prompt.
+    FORCES the model to use Markdown code blocks for JSON.
     """
     ASCIIColors.yellow("--- TOOL INJECTION START ---")
     
@@ -334,10 +336,9 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
 
     tools_prompt = "\n\n### FUNCTION CALLING INSTRUCTIONS\n"
     tools_prompt += "You are an AI assistant capable of calling external functions.\n"
-    tools_prompt += "To call a function, you MUST output a JSON object. Do not output python code.\n"
-    tools_prompt += "Do NOT wrap the JSON in markdown blocks (like ```json). Just output the raw JSON.\n"
-    tools_prompt += "The JSON format must be:\n"
-    tools_prompt += '{"tool_calls": [{"name": "function_name", "arguments": {"arg_name": "value"}}]}\n\n'
+    tools_prompt += "To call a function, you MUST output a JSON object wrapped in a markdown code block.\n"
+    tools_prompt += "Example:\n```json\n{\"tool_calls\": [{\"name\": \"my_func\", \"arguments\": {\"arg\": \"val\"}}]}\n```\n"
+    tools_prompt += "Do not output the JSON without the ```json wrapper.\n"
     
     tools_prompt += "### AVAILABLE TOOLS:\n"
     for tool in tools:
@@ -357,7 +358,7 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
         tools_prompt += "IMPORTANT: You MUST call one of the available functions in your response.\n"
         ASCIIColors.cyan("Forcing required tool usage.")
     else:
-        tools_prompt += "If the user input requires a tool, output the JSON tool call. If not, respond normally with text.\n"
+        tools_prompt += "If the user input requires a tool, output the markdown wrapped JSON. If not, respond normally with text.\n"
 
     system_found = False
     for msg in messages:
@@ -373,51 +374,10 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
     return messages
 
 
-def extract_json_candidates(text: str) -> List[str]:
-    """
-    Extracts ALL valid top-level JSON-like blocks from the text.
-    Handles nested braces and string escaping.
-    """
-    candidates = []
-    brace_count = 0
-    in_string = False
-    escape = False
-    start_index = -1
-    
-    i = 0
-    while i < len(text):
-        char = text[i]
-        
-        if char == '"' and not escape:
-            in_string = not in_string
-        
-        if not in_string:
-            if char == '{':
-                if brace_count == 0:
-                    start_index = i
-                brace_count += 1
-            elif char == '}':
-                if brace_count > 0:
-                    brace_count -= 1
-                    if brace_count == 0 and start_index != -1:
-                        # Found a complete block
-                        candidates.append(text[start_index : i + 1])
-                        start_index = -1
-                else:
-                    # Unbalanced closing brace, ignore or reset
-                    start_index = -1
-        
-        if char == '\\':
-            escape = not escape
-        else:
-            escape = False
-        i += 1
-        
-    return candidates
-
 def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[List[Dict]]]:
     """
-    Parses the LLM output to find JSON tool calls by iterating over all JSON candidates.
+    Parses the LLM output to find JSON tool calls.
+    PRIORITIZES content inside ```json code blocks.
     """
     ASCIIColors.yellow("--- TOOL PARSING START ---")
     if not content:
@@ -425,44 +385,58 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
 
     ASCIIColors.cyan(f"Raw LLM Output (First 500 chars):\n{content[:500]}...")
 
-    # 1. Strip Markdown Code Blocks
-    cleaned_content = re.sub(r'```(?:json)?\s*(.*?)\s*```', r'\1', content, flags=re.DOTALL)
+    # Regex to find content inside ```json ... ``` or just ``` ... ```
+    # matches ```(?:json)? (capture) ```
+    code_block_pattern = r"```(?:json)?\s*(.*?)\s*```"
     
-    # 2. Extract ALL JSON candidates
-    candidates = extract_json_candidates(cleaned_content)
+    # Find all blocks
+    code_blocks = re.findall(code_block_pattern, content, re.DOTALL)
     
-    if not candidates:
-        ASCIIColors.red("No JSON-like structures found in content.")
-        return content, None
-
     valid_tool_call_data = None
-    matched_candidate_text = None
+    matched_block_text = None
 
-    # 3. Iterate through candidates to find one that contains "tool_calls"
-    for candidate in candidates:
-        # Quick pre-check string matching
-        if "tool_calls" not in candidate:
-            continue
+    if code_blocks:
+        ASCIIColors.info(f"Found {len(code_blocks)} code blocks. Checking for JSON tool calls...")
+        for block_content in code_blocks:
+            # Clean up potential whitespace
+            clean_block = block_content.strip()
             
-        try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError:
-            # Try repair
+            # Quick check if it looks like the right JSON
+            if "tool_calls" not in clean_block:
+                continue
+
             try:
-                repaired = candidate.replace("'", '"')\
-                                    .replace("True", "true")\
-                                    .replace("False", "false")\
-                                    .replace("None", "null")
-                data = json.loads(repaired)
-            except Exception:
-                continue # Move to next candidate
-        
-        # Check structure
-        if data and isinstance(data, dict) and "tool_calls" in data and isinstance(data["tool_calls"], list):
-            valid_tool_call_data = data
-            matched_candidate_text = candidate
-            break
-    
+                data = json.loads(clean_block)
+            except json.JSONDecodeError:
+                # Try repair quotes
+                try:
+                    repaired = clean_block.replace("'", '"')\
+                                        .replace("True", "true")\
+                                        .replace("False", "false")\
+                                        .replace("None", "null")
+                    data = json.loads(repaired)
+                except Exception:
+                    continue 
+
+            if data and isinstance(data, dict) and "tool_calls" in data and isinstance(data["tool_calls"], list):
+                valid_tool_call_data = data
+                matched_block_text = block_content # Store raw content for splitting text later if needed
+                break
+    else:
+        ASCIIColors.info("No markdown code blocks found. Checking raw text as fallback...")
+        # Fallback: Try to find raw JSON if model forgot the backticks but outputted JSON
+        # Similar logic to previous version but used only if blocks fail
+        match_regex = re.search(r'(\{.*[\'"]tool_calls[\'"]:\s*\[.*\].*\})', content, re.DOTALL)
+        if match_regex:
+            raw_candidate = match_regex.group(1)
+            try:
+                data = json.loads(raw_candidate)
+                if "tool_calls" in data:
+                    valid_tool_call_data = data
+                    matched_block_text = raw_candidate
+            except:
+                pass
+
     if valid_tool_call_data:
         openai_tool_calls = []
         for tc in valid_tool_call_data["tool_calls"]:
@@ -485,18 +459,29 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
         
         ASCIIColors.success(f"Successfully parsed {len(openai_tool_calls)} tool calls.")
         
-        # Calculate text before the JSON
-        start_index = cleaned_content.find(matched_candidate_text)
-        if start_index > 0:
-            text_before = cleaned_content[:start_index].strip()
-            final_content = text_before if text_before else None
-        else:
-            final_content = None
+        # If we found the JSON inside the text, separate text_before from the JSON
+        # If matched_block_text was found, we look for it in original content
+        final_content = None
+        if matched_block_text:
+            # We search for the specific text that made up the JSON body
+            # If it was in a block, content has ``` ... matched_text ... ```
+            # We just split by matched_block_text or find index
+            idx = content.find(matched_block_text)
+            if idx > 0:
+                # But wait, we might have backticks before it.
+                # Simplification: If tools are found, usually the whole message is the tool call,
+                # or there is some "thinking" text before.
+                # Let's take everything before the JSON structure (ignoring opening backticks if roughly adjacent)
+                text_chunk = content[:idx]
+                # Remove trailing backticks from the text part
+                text_chunk = re.sub(r'```(?:json)?\s*$', '', text_chunk.strip())
+                if text_chunk:
+                    final_content = text_chunk
         
         ASCIIColors.yellow("--- TOOL PARSING END (Success) ---")
         return final_content, openai_tool_calls
 
-    ASCIIColors.red("No valid 'tool_calls' structure found in any JSON candidate.")
+    ASCIIColors.red("No valid 'tool_calls' structure found.")
     ASCIIColors.yellow("--- TOOL PARSING END (No Tools) ---")
     return content, None
 
@@ -1001,7 +986,7 @@ async def extract_text_from_file(
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"File extraction failed: {str(e)}")
-
+    
    
 # KEEP THISE FUNCTIONS FOR COMPATIBILITY
 # --- Helper to Extract Images and Convert Messages ---
