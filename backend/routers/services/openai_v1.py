@@ -30,6 +30,7 @@ from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
 from backend.routers.files import extract_text_from_file_bytes 
 
+# --- Router Definition (Strictly named openai_v1_router) ---
 openai_v1_router = APIRouter(prefix="/v1")
 bearer_scheme = HTTPBearer(auto_error=False) 
 
@@ -316,70 +317,13 @@ def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict],
     return processed, image_list
 
 
-# --- Helper to Extract Images and Convert Messages ---
-def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
-    processed = []
-    image_list = []
-
-    for msg in messages:
-        content = msg.content
-        if isinstance(content, str):
-            processed.append({"role": msg.role, "content": content})
-        elif isinstance(content, list):
-            text_parts = []
-            for item in content:
-                if item.get("type") == "image_url":
-                    base64_img = item["image_url"].get("base64")
-                    if base64_img:
-                        image_list.append(base64_img)
-                    url_img = item["image_url"].get("url")
-                    if url_img:
-                        image_list.append(url_img)
-                elif item.get("type") == "text":
-                    text_parts.append(item.get("text", ""))
-                else:
-                    text_parts.append(str(item))
-            processed.append({"role": msg.role, "content": "\n".join(text_parts)})
-        else:
-            processed.append({"role": msg.role, "content": str(content)})
-
-    return processed, image_list
-
-def to_image_block(img, default_mime="image/jpeg"):
-    # img can be: https URL, data URL, or raw base64
-    if isinstance(img, dict):
-        # Optional pattern: {'data': '<base64>', 'mime': 'image/png'} or {'url': 'https://...'}
-        if "url" in img:
-            url = img["url"]
-            return {"type": "image_url", "image_url": {"url": url}}
-        if "data" in img:
-            mime = img.get("mime", default_mime)
-            return {
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{img['data']}"}
-            }
-
-    if isinstance(img, str):
-        s = img.strip()
-        if s.startswith("http://") or s.startswith("https://"):
-            return {"type": "image_url", "image_url": {"url": s}}
-        if s.startswith("data:"):
-            return {"type": "image_url", "image_url": {"url": s}}
-        # raw base64: add data URL prefix
-        return {
-            "type": "image_url",
-            "image_url": {"url": f"data:{default_mime};base64,{s}"}
-        }
-
-    raise ValueError("Unsupported image input format")
-
 def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice: Union[str, Dict] = None) -> List[Dict]:
     """
-    Injects tool definitions into the system prompt with debugging and strict formatting instructions.
+    Injects tool definitions into the system prompt with detailed instruction.
     """
     ASCIIColors.yellow("--- TOOL INJECTION START ---")
     
-    # 1. Check strict tool_choice "none"
+    # Check tool_choice
     if isinstance(tool_choice, str) and tool_choice == "none":
         ASCIIColors.yellow("Tool choice is 'none'. Skipping injection.")
         return messages
@@ -390,8 +334,7 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
 
     ASCIIColors.info(f"Processing {len(tools)} tools...")
 
-    # 2. Build the System Prompt Appendage
-    # We use a very explicit format to help smaller/local models understand.
+    # Build Prompt
     tools_prompt = "\n\n### FUNCTION CALLING INSTRUCTIONS\n"
     tools_prompt += "You are an AI assistant capable of calling external functions.\n"
     tools_prompt += "To call a function, you MUST output a JSON object. Do not output python code.\n"
@@ -409,7 +352,7 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
             params = json.dumps(func.get("parameters", {}))
             tools_prompt += f"- Function: {name}\n  Description: {desc}\n  Parameters: {params}\n\n"
 
-    # 3. Handle tool_choice logic
+    # Enforce tool choice
     if isinstance(tool_choice, dict) and tool_choice.get("type") == "function":
         forced_name = tool_choice.get("function", {}).get("name")
         tools_prompt += f"IMPORTANT: You MUST choose to call the function '{forced_name}' in your response.\n"
@@ -420,17 +363,15 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
     else:
         tools_prompt += "If the user input requires a tool, output the JSON tool call. If not, respond normally with text.\n"
 
-    # 4. Inject into messages
+    # Append to System Prompt
     system_found = False
     for msg in messages:
         if msg.get('role') == 'system':
-            ASCIIColors.info("Appending tools to existing system prompt.")
             msg['content'] = (msg.get('content') or "") + tools_prompt
             system_found = True
             break
     
     if not system_found:
-        ASCIIColors.info("Creating new system prompt for tools.")
         messages.insert(0, {"role": "system", "content": tools_prompt})
     
     ASCIIColors.yellow("--- TOOL INJECTION END ---")
@@ -485,21 +426,19 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
     # 1. Strip Markdown Code Blocks
     cleaned_content = re.sub(r'```(?:json)?\s*(.*?)\s*```', r'\1', content, flags=re.DOTALL)
     
-    # 2. Attempt to extract the JSON block specifically containing "tool_calls"
-    # We first look for the substring "tool_calls" and then backtrack to find the enclosing JSON
-    match = re.search(r'("tool_calls"\s*:\s*\[)', cleaned_content)
+    # 2. Look for "tool_calls" key
+    # We use a broad check for "tool_calls": or 'tool_calls':
+    match = re.search(r'([\'"]tool_calls[\'"]\s*:\s*\[)', cleaned_content)
     
     json_candidate = None
     
     if match:
-        # Find the start of the object containing this key. 
-        # This is a bit tricky with Regex, so we use the brace counter on the whole text
-        # assuming the tool call is the main JSON object.
+        # If we found the key, look for the full object starting from the first curly brace
         json_candidate = extract_first_json_block(cleaned_content)
     
-    # Fallback: if brace counting failed, try the regex greedy match
+    # Fallback: Regex Greedy Match
     if not json_candidate:
-         match_regex = re.search(r'(\{.*"tool_calls":\s*\[.*\].*\})', cleaned_content, re.DOTALL)
+         match_regex = re.search(r'(\{.*[\'"]tool_calls[\'"]:\s*\[.*\].*\})', cleaned_content, re.DOTALL)
          if match_regex:
              json_candidate = match_regex.group(1)
 
@@ -512,11 +451,10 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
         except json.JSONDecodeError:
             ASCIIColors.warning("Standard JSON parse failed. Attempting to repair quotes...")
             try:
-                # Common Error: Single quotes instead of double quotes
-                # Very naive replacement, but often works for simple tool calls
+                # REPAIR: Swap single quotes to double quotes
+                # Also fix Python boolean literals
                 repaired_json = json_candidate.replace("'", '"')
-                # Also fix True/False to true/false
-                repaired_json = repaired_json.replace("True", "true").replace("False", "false")
+                repaired_json = repaired_json.replace("True", "true").replace("False", "false").replace("None", "null")
                 data = json.loads(repaired_json)
                 ASCIIColors.success("JSON repaired successfully.")
             except json.JSONDecodeError as e:
@@ -526,7 +464,7 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
         if data and "tool_calls" in data and isinstance(data["tool_calls"], list):
             openai_tool_calls = []
             for tc in data["tool_calls"]:
-                # OpenAI Spec: 'arguments' must be a STRINGIFIED JSON, not a dict.
+                # OpenAI Spec: arguments MUST be a stringified JSON
                 args = tc.get("arguments", {})
                 if isinstance(args, dict):
                     args_str = json.dumps(args)
@@ -545,16 +483,13 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
             
             ASCIIColors.success(f"Successfully parsed {len(openai_tool_calls)} tool calls.")
             
-            # Determine content return
-            # Find where the JSON starts in the ORIGINAL content
-            # We use cleaned_content for index finding to match the block
+            # Content separation
             start_index = cleaned_content.find(json_candidate)
-            if start_index == -1: 
-                # Fallback if cleaner changed spacing too much, just return None if tools found
-                return None, openai_tool_calls
-            
-            text_before = cleaned_content[:start_index].strip()
-            final_content = text_before if text_before else None
+            if start_index > 0:
+                text_before = cleaned_content[:start_index].strip()
+                final_content = text_before if text_before else None
+            else:
+                final_content = None
             
             ASCIIColors.yellow("--- TOOL PARSING END (Success) ---")
             return final_content, openai_tool_calls
@@ -677,7 +612,6 @@ async def chat_completions(
 
     openai_messages, images = preprocess_openai_messages(messages)
     
-    # --- TOOL INJECTION WITH DEBUGGING ---
     if request.tools:
         openai_messages = handle_tools_injection(openai_messages, request.tools, request.tool_choice)
 
@@ -688,6 +622,7 @@ async def chat_completions(
     ASCIIColors.info(f"Received images: {len(images)}")
 
     if request.stream:
+        # Note: Tool calling via stream is complex, currently treating as standard stream
         async def stream_generator():
             main_loop = asyncio.get_running_loop()
             stream_queue = asyncio.Queue()
@@ -782,7 +717,6 @@ async def chat_completions(
                 **generation_kwargs
             )
             
-            # --- TOOL PARSING ---
             content = result_content
             finish_reason = "stop"
             tool_calls = None
@@ -791,13 +725,14 @@ async def chat_completions(
                 content, tool_calls = parse_tool_calls_from_text(result_content)
                 if tool_calls:
                     finish_reason = "tool_calls"
-                    ASCIIColors.success("Tool calls detected and parsed.")
+                    ASCIIColors.success(f"Parsed {len(tool_calls)} tool calls.")
             
-            # Construct message with potential tool calls
-            # We map explicit keys to match Pydantic model
-            msg_obj = ChatMessage(role="assistant", content=content)
-            if tool_calls:
-                msg_obj.tool_calls = tool_calls
+            # Construct message with explicit tool_calls
+            msg_obj = ChatMessage(
+                role="assistant", 
+                content=content,
+                tool_calls=tool_calls if tool_calls else None
+            )
 
             choice = ChatCompletionResponseChoice(
                 index=0,
