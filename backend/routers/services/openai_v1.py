@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse  # Changed from EventSourceResponse for raw control
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
@@ -428,14 +428,19 @@ def extract_json_candidates(text: str) -> List[str]:
     return candidates
 
 
-def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[List[ToolCall]]]:
+def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[List[ToolCall]]]:
     """
     Parses the LLM output to find JSON tool calls.
     PRIORITIZES content inside ```json code blocks, but falls back to scanning.
     """
     ASCIIColors.yellow("--- TOOL PARSING START ---")
+    
     if not content:
-        return content, None
+        return None, None
+    
+    # Ensure content is a string before processing to avoid TypeErrors
+    if not isinstance(content, str):
+        content = str(content)
 
     ASCIIColors.cyan(f"Raw LLM Output (First 500 chars):\n{content[:500]}...")
 
@@ -1112,7 +1117,7 @@ async def extract_text_from_file(
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"File extraction failed: {str(e)}")
-    
+   
    
 # KEEP THISE FUNCTIONS FOR COMPATIBILITY
 # --- Helper to Extract Images and Convert Messages ---
