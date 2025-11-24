@@ -50,6 +50,7 @@ class ChatMessage(BaseModel):
     role: str
     content: Optional[Union[str, List[Dict]]] = None
     tool_calls: Optional[List[ToolCall]] = None
+    tool_call_id: Optional[str] = None
     name: Optional[str] = None
 
 class ChatCompletionRequest(BaseModel):
@@ -305,6 +306,21 @@ def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict],
             "role": msg.role,
             "content": msg.content
         }
+
+        # Preserve Tool Call ID (Critical for 'tool' role)
+        if msg.tool_call_id:
+            msg_dict["tool_call_id"] = msg.tool_call_id
+
+        # Preserve Name (Optional but good for 'tool' role)
+        if msg.name:
+            msg_dict["name"] = msg.name
+
+        # Preserve Tool Calls (Critical for 'assistant' role causing a tool call)
+        if msg.tool_calls:
+            msg_dict["tool_calls"] = [
+                tc.model_dump() if hasattr(tc, 'model_dump') else tc
+                for tc in msg.tool_calls
+            ]
 
         if isinstance(msg.content, list):
             for item in msg.content:
@@ -1117,7 +1133,8 @@ async def extract_text_from_file(
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"File extraction failed: {str(e)}")
-   
+
+  
    
 # KEEP THISE FUNCTIONS FOR COMPATIBILITY
 # --- Helper to Extract Images and Convert Messages ---
