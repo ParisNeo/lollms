@@ -22,7 +22,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy import func
-from ascii_colors import ASCIIColors
+from ascii_colors import ASCIIColors, trace_exception
 from filelock import FileLock, Timeout
 
 from backend.db import get_db
