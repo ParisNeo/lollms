@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse  # Changed from EventSourceResponse for raw control
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
-from sse_starlette.sse import EventSourceResponse
 from pydantic import BaseModel, Field
 
 from backend.db import get_db
@@ -662,177 +662,162 @@ async def chat_completions(
 
     ASCIIColors.info(f"Received images: {len(images)}")
 
-    # Special handling for Streaming + Tools
-    # If tools are requested, we must buffer the response to correctly parse JSON tool calls
-    # before emitting them as a stream. This prevents raw JSON from leaking into 'content'.
-    if request.stream and request.tools:
-        async def stream_with_tools_generator():
-            # 1. Generate fully (blocking/sync logic wrapped in thread)
-            ASCIIColors.info("Tools requested in stream mode. Buffering generation for safe parsing...")
-            result_content = await asyncio.to_thread(
-                lc.generate_from_messages,
-                openai_messages,
-                temperature=request.temperature,
-                n_predict=request.max_tokens,
-                images=images,
-                **generation_kwargs
-            )
-
-            # 2. Parse the full content
-            content, tool_calls = parse_tool_calls_from_text(result_content)
-
-            completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-            created_ts = int(time.time())
-
-            # 3. Emit Initial Role Chunk
-            first_chunk = ChatCompletionStreamResponse(
-                id=completion_id,
-                model=request.model,
-                created=created_ts,
-                choices=[ChatCompletionResponseStreamChoice(
-                    index=0,
-                    delta=DeltaMessage(role="assistant"),
-                    finish_reason=None
-                )]
-            )
-            yield f"data: {first_chunk.model_dump_json()}\n\n".encode('utf-8')
-
-            # 4. Emit Content Chunk (if any text exists before the tool)
-            if content:
-                content_chunk = ChatCompletionStreamResponse(
-                    id=completion_id,
-                    model=request.model,
-                    created=created_ts,
-                    choices=[ChatCompletionResponseStreamChoice(
-                        index=0,
-                        delta=DeltaMessage(content=content),
-                        finish_reason=None
-                    )]
-                )
-                yield f"data: {content_chunk.model_dump_json()}\n\n".encode('utf-8')
-
-            # 5. Emit Tool Calls Chunk (if any)
-            if tool_calls:
-                for i, tc in enumerate(tool_calls):
-                    # Set the index for the tool call as required by streaming spec
-                    tc.index = i
-                    # Wrap in list
-                    tool_chunk = ChatCompletionStreamResponse(
-                        id=completion_id,
-                        model=request.model,
-                        created=created_ts,
-                        choices=[ChatCompletionResponseStreamChoice(
-                            index=0,
-                            delta=DeltaMessage(tool_calls=[tc]),
-                            finish_reason=None
-                        )]
-                    )
-                    yield f"data: {tool_chunk.model_dump_json()}\n\n".encode('utf-8')
-            
-            # 6. Emit Finish Chunk
-            finish_reason = "tool_calls" if tool_calls else "stop"
-            end_chunk = ChatCompletionStreamResponse(
-                id=completion_id,
-                model=request.model,
-                created=created_ts,
-                choices=[ChatCompletionResponseStreamChoice(
-                    index=0,
-                    delta=DeltaMessage(),
-                    finish_reason=finish_reason
-                )]
-            )
-            yield f"data: {end_chunk.model_dump_json()}\n\n".encode('utf-8')
-            yield "data: [DONE]\n\n".encode('utf-8')
-
-        return EventSourceResponse(stream_with_tools_generator(), media_type="text/event-stream")
-
-    elif request.stream:
-        # Standard Streaming (No tools) - Token by token
+    if request.stream:
+        # --------------------------------------------------------------------------------
+        # STREAMING LOGIC WITH ROBUST ERROR HANDLING AND BUFFERING FOR TOOLS
+        # --------------------------------------------------------------------------------
         async def stream_generator():
-            main_loop = asyncio.get_running_loop()
-            stream_queue = asyncio.Queue()
-            stop_event = threading.Event()
-
-            completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-            created_ts = int(time.time())
-
-            first_chunk = ChatCompletionStreamResponse(
-                id=completion_id,
-                model=request.model,
-                created=created_ts,
-                choices=[ChatCompletionResponseStreamChoice(
-                    index=0,
-                    delta=DeltaMessage(role="assistant"),
-                    finish_reason=None
-                )]
-            )
-            yield f"data: {first_chunk.model_dump_json()}\n\n".encode('utf-8')
-
-            def llm_callback(chunk: str, msg_type: MSG_TYPE, **kwargs) -> bool:
-                if stop_event.is_set():
-                    return False
-                if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk:
-                    response_chunk = ChatCompletionStreamResponse(
-                        id=completion_id,
-                        model=request.model,
-                        created=created_ts,
-                        choices=[ChatCompletionResponseStreamChoice(
-                            index=0,
-                            delta=DeltaMessage(content=chunk)
-                        )]
-                    )
-                    try:
-                        json_data = response_chunk.model_dump_json()
-                        main_loop.call_soon_threadsafe(
-                            stream_queue.put_nowait,
-                            f"data: {json_data}\n\n".encode('utf-8')
-                        )
-                    except Exception as e:
-                        print(f"Error serializing chunk: {e}")
-                return True
-
-            def blocking_call():
-                try:
-                    lc.generate_from_messages(
+            try:
+                # If tools are requested, BUFFER the output first to parse it, 
+                # then stream the chunks. This prevents raw JSON from leaking to 'content'.
+                if request.tools:
+                    ASCIIColors.info("Tools requested in stream mode. Buffering generation for safe parsing...")
+                    
+                    # 1. Blocking Generation
+                    result_content = await asyncio.to_thread(
+                        lc.generate_from_messages,
                         openai_messages,
-                        streaming_callback=llm_callback,
-                        images=images,
                         temperature=request.temperature,
                         n_predict=request.max_tokens,
-                        stream=True,
+                        images=images,
                         **generation_kwargs
                     )
-                except Exception as e:
-                    print(f"Streaming error: {e}")
-                finally:
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
-            threading.Thread(target=blocking_call, daemon=True).start()
+                    # 2. Parse Content
+                    content, tool_calls = parse_tool_calls_from_text(result_content)
 
-            while True:
-                item = await stream_queue.get()
-                if item is None:
-                    break
-                if item.strip():
-                    yield item
+                    completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+                    created_ts = int(time.time())
 
-            end_chunk = ChatCompletionStreamResponse(
-                id=completion_id,
-                model=request.model,
-                created=created_ts,
-                choices=[ChatCompletionResponseStreamChoice(
-                    index=0,
-                    delta=DeltaMessage(),
-                    finish_reason="stop"
-                )]
-            )
-            yield f"data: {end_chunk.model_dump_json()}\n\n".encode('utf-8')
-            yield "data: [DONE]\n\n".encode('utf-8')
+                    # 3. Emit Role
+                    chunk = ChatCompletionStreamResponse(
+                        id=completion_id,
+                        model=request.model,
+                        created=created_ts,
+                        choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role="assistant"))]
+                    )
+                    yield f"data: {chunk.model_dump_json()}\n\n"
 
-        return EventSourceResponse(stream_generator(), media_type="text/event-stream")
+                    # 4. Emit Text Content (if any)
+                    if content:
+                        chunk = ChatCompletionStreamResponse(
+                            id=completion_id,
+                            model=request.model,
+                            created=created_ts,
+                            choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(content=content))]
+                        )
+                        yield f"data: {chunk.model_dump_json()}\n\n"
+
+                    # 5. Emit Tool Calls (if any)
+                    if tool_calls:
+                        for i, tc in enumerate(tool_calls):
+                            tc.index = i
+                            chunk = ChatCompletionStreamResponse(
+                                id=completion_id,
+                                model=request.model,
+                                created=created_ts,
+                                choices=[ChatCompletionResponseStreamChoice(
+                                    index=0,
+                                    delta=DeltaMessage(tool_calls=[tc])
+                                )]
+                            )
+                            yield f"data: {chunk.model_dump_json()}\n\n"
+                    
+                    # 6. Emit Finish
+                    finish_reason = "tool_calls" if tool_calls else "stop"
+                    chunk = ChatCompletionStreamResponse(
+                        id=completion_id,
+                        model=request.model,
+                        created=created_ts,
+                        choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(), finish_reason=finish_reason)]
+                    )
+                    yield f"data: {chunk.model_dump_json()}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                else:
+                    # Standard Streaming (Token by Token)
+                    main_loop = asyncio.get_running_loop()
+                    stream_queue = asyncio.Queue()
+                    stop_event = threading.Event()
+                    completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+                    created_ts = int(time.time())
+
+                    # Callback for LLM
+                    def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
+                        if stop_event.is_set(): return False
+                        if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
+                            # Build chunk object
+                            response_chunk = ChatCompletionStreamResponse(
+                                id=completion_id,
+                                model=request.model,
+                                created=created_ts,
+                                choices=[ChatCompletionResponseStreamChoice(
+                                    index=0,
+                                    delta=DeltaMessage(content=chunk_text)
+                                )]
+                            )
+                            # Put raw formatted string into queue
+                            main_loop.call_soon_threadsafe(
+                                stream_queue.put_nowait,
+                                f"data: {response_chunk.model_dump_json()}\n\n"
+                            )
+                        return True
+
+                    # Run generation in thread
+                    def blocking_gen():
+                        try:
+                            lc.generate_from_messages(
+                                openai_messages,
+                                streaming_callback=llm_callback,
+                                images=images,
+                                temperature=request.temperature,
+                                n_predict=request.max_tokens,
+                                stream=True,
+                                **generation_kwargs
+                            )
+                        except Exception as ex:
+                            ASCIIColors.error(f"Streaming Generation Error: {ex}")
+                        finally:
+                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
+
+                    threading.Thread(target=blocking_gen, daemon=True).start()
+
+                    # Emit Role First
+                    start_chunk = ChatCompletionStreamResponse(
+                        id=completion_id,
+                        model=request.model,
+                        created=created_ts,
+                        choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role="assistant"))]
+                    )
+                    yield f"data: {start_chunk.model_dump_json()}\n\n"
+
+                    # Yield tokens from queue
+                    while True:
+                        item = await stream_queue.get()
+                        if item is None:
+                            break
+                        yield item
+
+                    # Emit Stop
+                    end_chunk = ChatCompletionStreamResponse(
+                        id=completion_id,
+                        model=request.model,
+                        created=created_ts,
+                        choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(), finish_reason="stop")]
+                    )
+                    yield f"data: {end_chunk.model_dump_json()}\n\n"
+                    yield "data: [DONE]\n\n"
+
+            except Exception as e:
+                ASCIIColors.error(f"Stream Generator Crash: {e}")
+                # We can't easily send an HTTP error code since headers are sent, 
+                # but we can try to close the stream cleanly.
+                yield "data: [DONE]\n\n"
+
+        return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
     else:
-        # Standard Non-Streaming
+        # Non-Streaming Response
         try:
             ASCIIColors.info("Generating non-streaming response...")
             result_content = lc.generate_from_messages(
@@ -853,11 +838,9 @@ async def chat_completions(
                     finish_reason = "tool_calls"
                     ASCIIColors.success(f"Parsed {len(tool_calls)} tool calls.")
             
-            # OpenAI Spec: If tool_calls present, content should be null unless there is actual text
             if tool_calls and not content:
                 content = None
 
-            # Construct message with explicit tool_calls
             msg_obj = ChatMessage(
                 role="assistant", 
                 content=content,
