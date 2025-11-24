@@ -36,10 +36,9 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 # --- Pydantic Models for OpenAI Compatibility ---
 
-# Explicit Tool Call Models to ensure strict schema compliance
 class FunctionCall(BaseModel):
     name: str
-    arguments: str # OpenAI requires this to be a JSON string, not a dict
+    arguments: str 
 
 class ToolCall(BaseModel):
     id: str
@@ -328,7 +327,7 @@ def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict],
 def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice: Union[str, Dict] = None) -> List[Dict]:
     """
     Injects tool definitions into the system prompt.
-    FORCES the model to use Markdown code blocks for JSON.
+    Explicitly instructs the model to use multiline JSON in markdown blocks.
     """
     ASCIIColors.yellow("--- TOOL INJECTION START ---")
     
@@ -345,8 +344,20 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
     tools_prompt = "\n\n### FUNCTION CALLING INSTRUCTIONS\n"
     tools_prompt += "You are an AI assistant capable of calling external functions.\n"
     tools_prompt += "To call a function, you MUST output a JSON object wrapped in a markdown code block.\n"
-    tools_prompt += "Example:\n```json\n{\"tool_calls\": [{\"name\": \"my_func\", \"arguments\": {\"arg\": \"val\"}}]}\n```\n"
-    tools_prompt += "Ensure the 'arguments' field is a dictionary matching the function parameters.\n"
+    tools_prompt += "Please write the JSON on multiple lines inside the code block for clarity.\n\n"
+    tools_prompt += "Example:\n"
+    tools_prompt += "```json\n"
+    tools_prompt += "{\n"
+    tools_prompt += '  "tool_calls": [\n'
+    tools_prompt += '    {\n'
+    tools_prompt += '      "name": "my_func",\n'
+    tools_prompt += '      "arguments": {\n'
+    tools_prompt += '        "arg": "value"\n'
+    tools_prompt += '      }\n'
+    tools_prompt += '    }\n'
+    tools_prompt += '  ]\n'
+    tools_prompt += "}\n"
+    tools_prompt += "```\n"
     
     tools_prompt += "### AVAILABLE TOOLS:\n"
     for tool in tools:
@@ -385,7 +396,6 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
 def extract_json_candidates(text: str) -> List[str]:
     """
     Scans the text for valid top-level JSON objects by matching braces.
-    Returns a list of strings that potentially contain JSON.
     """
     candidates = []
     brace_count = 0
