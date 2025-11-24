@@ -30,16 +30,26 @@ from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
 from backend.routers.files import extract_text_from_file_bytes 
 
-# --- Router Definition (Strictly named openai_v1_router) ---
+# --- Router Definition ---
 openai_v1_router = APIRouter(prefix="/v1")
 bearer_scheme = HTTPBearer(auto_error=False) 
 
 # --- Pydantic Models for OpenAI Compatibility ---
 
+# Explicit Tool Call Models to ensure strict schema compliance
+class FunctionCall(BaseModel):
+    name: str
+    arguments: str # OpenAI requires this to be a JSON string, not a dict
+
+class ToolCall(BaseModel):
+    id: str
+    type: str = "function"
+    function: FunctionCall
+
 class ChatMessage(BaseModel):
     role: str
     content: Optional[Union[str, List[Dict]]] = None
-    tool_calls: Optional[List[Dict]] = None
+    tool_calls: Optional[List[ToolCall]] = None
     name: Optional[str] = None
 
 class ChatCompletionRequest(BaseModel):
@@ -75,7 +85,7 @@ class ChatCompletionResponse(BaseModel):
 class DeltaMessage(BaseModel):
     role: Optional[str] = None
     content: Optional[str] = None
-    tool_calls: Optional[List[Dict]] = None
+    tool_calls: Optional[List[ToolCall]] = None
 
 class ChatCompletionResponseStreamChoice(BaseModel):
     index: int
@@ -186,7 +196,6 @@ class FileExtractionResponse(BaseModel):
 
 # --- NEW HELPER FUNCTIONS for model resolution ---
 def find_model_by_alias(db: Session, alias_title: str) -> Optional[Tuple[str, str]]:
-    """Finds the original binding alias and model name from a display alias title."""
     all_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
     for binding in all_bindings:
         model_aliases = binding.model_aliases or {}
@@ -200,7 +209,6 @@ def find_model_by_alias(db: Session, alias_title: str) -> Optional[Tuple[str, st
     return None, None
 
 def resolve_model_name(db: Session, requested_model: str) -> Tuple[str, str]:
-    """Resolves a requested model name (which could be an alias) to its binding_alias and original model_name."""
     if '/' in requested_model:
         parts = requested_model.split('/', 1)
         binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
@@ -338,7 +346,7 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
     tools_prompt += "You are an AI assistant capable of calling external functions.\n"
     tools_prompt += "To call a function, you MUST output a JSON object wrapped in a markdown code block.\n"
     tools_prompt += "Example:\n```json\n{\"tool_calls\": [{\"name\": \"my_func\", \"arguments\": {\"arg\": \"val\"}}]}\n```\n"
-    tools_prompt += "Do not output the JSON without the ```json wrapper.\n"
+    tools_prompt += "Ensure the 'arguments' field is a dictionary matching the function parameters.\n"
     
     tools_prompt += "### AVAILABLE TOOLS:\n"
     for tool in tools:
@@ -374,10 +382,45 @@ def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice:
     return messages
 
 
-def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[List[Dict]]]:
+def extract_json_candidates(text: str) -> List[str]:
+    """
+    Scans the text for valid top-level JSON objects by matching braces.
+    Returns a list of strings that potentially contain JSON.
+    """
+    candidates = []
+    brace_count = 0
+    start_index = -1
+    in_string = False
+    escape = False
+
+    for i, char in enumerate(text):
+        if char == '"' and not escape:
+            in_string = not in_string
+        
+        if not in_string:
+            if char == '{':
+                if brace_count == 0:
+                    start_index = i
+                brace_count += 1
+            elif char == '}':
+                if brace_count > 0:
+                    brace_count -= 1
+                    if brace_count == 0:
+                        candidates.append(text[start_index : i+1])
+                        start_index = -1
+        
+        if char == '\\':
+            escape = not escape
+        else:
+            escape = False
+            
+    return candidates
+
+
+def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[List[ToolCall]]]:
     """
     Parses the LLM output to find JSON tool calls.
-    PRIORITIZES content inside ```json code blocks.
+    PRIORITIZES content inside ```json code blocks, but falls back to scanning.
     """
     ASCIIColors.yellow("--- TOOL PARSING START ---")
     if not content:
@@ -385,101 +428,98 @@ def parse_tool_calls_from_text(content: str) -> Tuple[Optional[str], Optional[Li
 
     ASCIIColors.cyan(f"Raw LLM Output (First 500 chars):\n{content[:500]}...")
 
-    # Regex to find content inside ```json ... ``` or just ``` ... ```
-    # matches ```(?:json)? (capture) ```
+    valid_tool_call_data = None
+    matched_text_segment = None
+
+    # Strategy 1: Look for Markdown Code Blocks (Most Reliable)
     code_block_pattern = r"```(?:json)?\s*(.*?)\s*```"
-    
-    # Find all blocks
     code_blocks = re.findall(code_block_pattern, content, re.DOTALL)
     
-    valid_tool_call_data = None
-    matched_block_text = None
-
     if code_blocks:
-        ASCIIColors.info(f"Found {len(code_blocks)} code blocks. Checking for JSON tool calls...")
-        for block_content in code_blocks:
-            # Clean up potential whitespace
-            clean_block = block_content.strip()
-            
-            # Quick check if it looks like the right JSON
-            if "tool_calls" not in clean_block:
-                continue
-
-            try:
-                data = json.loads(clean_block)
-            except json.JSONDecodeError:
-                # Try repair quotes
+        ASCIIColors.info(f"Found {len(code_blocks)} code blocks.")
+        for block in code_blocks:
+            clean_block = block.strip()
+            if "tool_calls" in clean_block:
                 try:
-                    repaired = clean_block.replace("'", '"')\
-                                        .replace("True", "true")\
-                                        .replace("False", "false")\
-                                        .replace("None", "null")
-                    data = json.loads(repaired)
-                except Exception:
-                    continue 
-
-            if data and isinstance(data, dict) and "tool_calls" in data and isinstance(data["tool_calls"], list):
-                valid_tool_call_data = data
-                matched_block_text = block_content # Store raw content for splitting text later if needed
-                break
-    else:
-        ASCIIColors.info("No markdown code blocks found. Checking raw text as fallback...")
-        # Fallback: Try to find raw JSON if model forgot the backticks but outputted JSON
-        # Similar logic to previous version but used only if blocks fail
-        match_regex = re.search(r'(\{.*[\'"]tool_calls[\'"]:\s*\[.*\].*\})', content, re.DOTALL)
-        if match_regex:
-            raw_candidate = match_regex.group(1)
-            try:
-                data = json.loads(raw_candidate)
-                if "tool_calls" in data:
-                    valid_tool_call_data = data
-                    matched_block_text = raw_candidate
-            except:
-                pass
+                    data = json.loads(clean_block)
+                    if isinstance(data, dict) and "tool_calls" in data:
+                        valid_tool_call_data = data
+                        matched_text_segment = block
+                        break
+                except json.JSONDecodeError:
+                    # Try simple repair
+                    try:
+                        repaired = clean_block.replace("'", '"').replace("True", "true").replace("False", "false")
+                        data = json.loads(repaired)
+                        if isinstance(data, dict) and "tool_calls" in data:
+                            valid_tool_call_data = data
+                            matched_text_segment = block
+                            break
+                    except: pass
+    
+    # Strategy 2: Fallback to scanning raw text for JSON objects (If model forgot backticks)
+    if not valid_tool_call_data:
+        ASCIIColors.info("No valid JSON in code blocks. Scanning raw text...")
+        candidates = extract_json_candidates(content)
+        for candidate in candidates:
+            if "tool_calls" in candidate:
+                try:
+                    data = json.loads(candidate)
+                    if isinstance(data, dict) and "tool_calls" in data:
+                        valid_tool_call_data = data
+                        matched_text_segment = candidate
+                        break
+                except json.JSONDecodeError:
+                    try:
+                        repaired = candidate.replace("'", '"').replace("True", "true").replace("False", "false")
+                        data = json.loads(repaired)
+                        if isinstance(data, dict) and "tool_calls" in data:
+                            valid_tool_call_data = data
+                            matched_text_segment = candidate
+                            break
+                    except: pass
 
     if valid_tool_call_data:
         openai_tool_calls = []
-        for tc in valid_tool_call_data["tool_calls"]:
-            # OpenAI Spec: arguments MUST be a stringified JSON
-            args = tc.get("arguments", {})
-            if isinstance(args, dict):
-                args_str = json.dumps(args)
-            else:
-                args_str = str(args)
+        # Parse into strictly typed ToolCall objects
+        if isinstance(valid_tool_call_data.get("tool_calls"), list):
+            for tc in valid_tool_call_data["tool_calls"]:
+                try:
+                    # Extract args and ensure it is a string
+                    args = tc.get("arguments", {})
+                    if isinstance(args, dict):
+                        args_str = json.dumps(args)
+                    else:
+                        args_str = str(args)
 
-            tool_call_obj = {
-                "id": f"call_{uuid.uuid4().hex[:8]}",
-                "type": "function",
-                "function": {
-                    "name": tc.get("name"),
-                    "arguments": args_str
-                }
-            }
-            openai_tool_calls.append(tool_call_obj)
-        
-        ASCIIColors.success(f"Successfully parsed {len(openai_tool_calls)} tool calls.")
-        
-        # If we found the JSON inside the text, separate text_before from the JSON
-        # If matched_block_text was found, we look for it in original content
-        final_content = None
-        if matched_block_text:
-            # We search for the specific text that made up the JSON body
-            # If it was in a block, content has ``` ... matched_text ... ```
-            # We just split by matched_block_text or find index
-            idx = content.find(matched_block_text)
-            if idx > 0:
-                # But wait, we might have backticks before it.
-                # Simplification: If tools are found, usually the whole message is the tool call,
-                # or there is some "thinking" text before.
-                # Let's take everything before the JSON structure (ignoring opening backticks if roughly adjacent)
-                text_chunk = content[:idx]
-                # Remove trailing backticks from the text part
-                text_chunk = re.sub(r'```(?:json)?\s*$', '', text_chunk.strip())
-                if text_chunk:
-                    final_content = text_chunk
-        
-        ASCIIColors.yellow("--- TOOL PARSING END (Success) ---")
-        return final_content, openai_tool_calls
+                    tool_call = ToolCall(
+                        id=f"call_{uuid.uuid4().hex[:8]}",
+                        type="function",
+                        function=FunctionCall(
+                            name=tc.get("name"),
+                            arguments=args_str
+                        )
+                    )
+                    openai_tool_calls.append(tool_call)
+                except Exception as e:
+                    ASCIIColors.warning(f"Skipping malformed tool call: {e}")
+
+        if openai_tool_calls:
+            ASCIIColors.success(f"Successfully parsed {len(openai_tool_calls)} tool calls.")
+            
+            # Determine text content (everything before the tool call)
+            final_content = None
+            if matched_text_segment:
+                idx = content.find(matched_text_segment)
+                if idx > 0:
+                    text_before = content[:idx]
+                    # Clean up trailing backticks from the split
+                    text_before = re.sub(r'```(?:json)?\s*$', '', text_before).strip()
+                    if text_before:
+                        final_content = text_before
+            
+            ASCIIColors.yellow("--- TOOL PARSING END (Success) ---")
+            return final_content, openai_tool_calls
 
     ASCIIColors.red("No valid 'tool_calls' structure found.")
     ASCIIColors.yellow("--- TOOL PARSING END (No Tools) ---")
@@ -609,7 +649,7 @@ async def chat_completions(
     ASCIIColors.info(f"Received images: {len(images)}")
 
     if request.stream:
-        # Note: Tool calling via stream is complex, currently treating as standard stream
+        # Note: Tool calling via stream is currently not parsed into tool_call chunks
         async def stream_generator():
             main_loop = asyncio.get_running_loop()
             stream_queue = asyncio.Queue()
@@ -714,11 +754,15 @@ async def chat_completions(
                     finish_reason = "tool_calls"
                     ASCIIColors.success(f"Parsed {len(tool_calls)} tool calls.")
             
+            # OpenAI Spec: If tool_calls present, content should be null unless there is actual text
+            if tool_calls and not content:
+                content = None
+
             # Construct message with explicit tool_calls
             msg_obj = ChatMessage(
                 role="assistant", 
                 content=content,
-                tool_calls=tool_calls if tool_calls else None
+                tool_calls=tool_calls
             )
 
             choice = ChatCompletionResponseChoice(
