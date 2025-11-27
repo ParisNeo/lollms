@@ -124,6 +124,10 @@ async def create_group_conversation(
         }
     }
     for m in members_public:
+        # Try direct send for instant feedback
+        if m.user_id in manager.active_connections:
+            await manager.send_personal_message(notification, m.user_id)
+        # Also queue for reliability
         if m.user_id != current_user.id:
             manager.send_personal_message_sync(notification, m.user_id)
             
@@ -175,6 +179,9 @@ async def add_member_to_group(
         
         # Notify
         notification = {"type": "conversation_update", "data": {"id": conversation_id, "action": "member_added"}}
+        # Try direct send
+        if payload.user_id in manager.active_connections:
+            await manager.send_personal_message(notification, payload.user_id)
         manager.send_personal_message_sync(notification, payload.user_id)
 
     return await get_conversation_details_internal(conversation_id, current_user.id, db)
@@ -251,9 +258,20 @@ async def send_direct_message(
 
     payload = { "type": "new_dm", "data": json.loads(resp.model_dump_json()) }
     
+    # 1. Send Immediately to recipients if connected locally (Realtime Fix)
+    for uid in recipient_ids:
+        if uid in manager.active_connections:
+            await manager.send_personal_message(payload, uid)
+            
+    # Echo back to sender immediately for consistency across tabs
+    if current_user.id in manager.active_connections:
+        await manager.send_personal_message(payload, current_user.id)
+
+    # 2. Queue for Broadcast (Multi-worker support & Persistence guarantee)
+    # The frontend is responsible for de-duplicating messages if it receives both
     for uid in recipient_ids:
         manager.send_personal_message_sync(payload, uid)
-    manager.send_personal_message_sync(payload, current_user.id) # Echo back
+    manager.send_personal_message_sync(payload, current_user.id) 
 
     return resp
 

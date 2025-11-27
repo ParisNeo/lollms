@@ -438,8 +438,11 @@ export const useSocialStore = defineStore('social', () => {
             });
             const msg = res.data;
             
+            // We manually push here for immediate UI update, but the WebSocket might also arrive.
+            // Duplicate ID check is handled in handleNewDm, but we should do it here too just in case.
             if (activeConversations.value[targetId]) {
-                activeConversations.value[targetId].messages.push(msg);
+                const exists = activeConversations.value[targetId].messages.some(m => m.id === msg.id);
+                if (!exists) activeConversations.value[targetId].messages.push(msg);
             }
             
             const listIndex = conversations.value.findIndex(c => isGroup ? c.id === targetId : c.partner_user_id === targetId);
@@ -516,11 +519,13 @@ export const useSocialStore = defineStore('social', () => {
         let convoKey = message.conversation_id || (message.sender_id === currentUser.id ? message.receiver_id : message.sender_id);
         let isGroup = !!message.conversation_id;
 
+        // Push message to active conversation cache if exists (De-duplication critical here)
         if (activeConversations.value[convoKey]) {
             const exists = activeConversations.value[convoKey].messages.some(m => m.id === message.id);
             if (!exists) activeConversations.value[convoKey].messages.push(message);
         }
 
+        // Update conversation list summary
         let listIndex = isGroup ? conversations.value.findIndex(c => c.id === convoKey && c.is_group) : conversations.value.findIndex(c => !c.is_group && c.partner_user_id === convoKey);
         
         if (listIndex > -1) {
@@ -530,9 +535,11 @@ export const useSocialStore = defineStore('social', () => {
             if (message.sender_id !== currentUser.id) convo.unread_count = (convo.unread_count || 0) + 1;
             conversations.value.unshift(convo);
         } else {
+            // New conversation discovered via websocket
             fetchConversations();
         }
         
+        // Notification for new message if not in active view
         if (message.sender_id !== currentUser.id && activeConversationId.value !== convoKey) {
              uiStore.addNotification(`New message from ${message.sender_username}`, 'info');
         }

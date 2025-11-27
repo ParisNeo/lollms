@@ -10,6 +10,7 @@ import IconError from '../../assets/icons/IconError.vue';
 import IconClose from '../../assets/icons/IconClose.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconSend from '../../assets/icons/IconSend.vue';
+import IconTrash from '../../assets/icons/IconTrash.vue';
 
 const uiStore = useUiStore();
 const { notifications } = storeToRefs(uiStore);
@@ -62,6 +63,17 @@ const handleClose = (notificationId) => {
   uiStore.removeNotification(notificationId);
 };
 
+const clearAll = () => {
+    // Clear all timers first
+    Object.values(timers.value).forEach(clearTimeout);
+    timers.value = {};
+    // Assuming uiStore has a clear method or we empty the array if exposed
+    if (uiStore.notifications) {
+        // If we can't replace the array ref directly, we splice it
+        uiStore.notifications.splice(0, uiStore.notifications.length);
+    }
+};
+
 const copyMessage = (message) => {
   uiStore.copyToClipboard(message);
 };
@@ -88,12 +100,21 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="fixed bottom-4 right-4 z-[9999] w-full max-w-sm space-y-2">
+  <div class="fixed bottom-4 right-4 z-[9999] w-full max-w-sm space-y-2 flex flex-col items-end">
+    <!-- Clear All Button -->
+    <button 
+        v-if="notifications.length > 1" 
+        @click="clearAll"
+        class="mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded-full shadow hover:bg-gray-700 transition-colors flex items-center gap-1"
+    >
+        <IconTrash class="w-3 h-3" /> Clear All
+    </button>
+
     <transition-group name="list">
       <div
         v-for="notification in notifications"
         :key="notification.id"
-        class="flex items-start p-3 rounded-md shadow-lg"
+        class="flex items-start p-3 rounded-md shadow-lg w-full"
         :class="getTypeClass(notification.type)"
         @mouseenter="pauseAndClearTimer(notification.id)"
         @mouseleave="startTimer(notification, 1000)"

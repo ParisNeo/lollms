@@ -169,7 +169,9 @@ async def listen_for_broadcasts():
     last_processed_id = 0
     while True:
         try:
-            await asyncio.sleep(1) # Poll every 0.1 second for faster messaging
+            # Poll frequently for near-realtime updates (0.1s)
+            await asyncio.sleep(0.1)
+            
             db: Session = db_session_module.SessionLocal()
             try:
                 if last_processed_id == 0:
@@ -225,4 +227,4 @@ async def listen_for_broadcasts():
         except Exception as e:
             print(f"ERROR: Error in broadcast listener loop (worker {os.getpid()}): {e}")
             trace_exception(e)
-            await asyncio.sleep(2) # Wait a bit longer after an error
+            await asyncio.sleep(1) # Wait a bit longer after an error before retrying

@@ -7,8 +7,9 @@ import { useTasksStore } from '../../stores/tasks';
 import { storeToRefs } from 'pinia';
 import InteractiveGraphViewer from './InteractiveGraphViewer.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
-import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
+import IconMaximize from '../../assets/icons/IconMaximize.vue';
+import IconTrash from '../../assets/icons/IconTrash.vue';
 
 const props = defineProps({
     store: {
@@ -28,17 +29,37 @@ const tasksStore = useTasksStore();
 const { user } = storeToRefs(authStore);
 const { availableLLMModelsGrouped } = storeToRefs(dataStore);
 
+const graphViewer = ref(null);
 const graphStats = ref({ nodes: 0, edges: 0 });
 const graphData = ref({ nodes: [], edges: [] });
 const isLoadingGraph = ref(false);
 const ontologyFileInput = ref(null);
+
+const defaultOntology = `{
+  "entities": [
+    {"name": "Person", "description": "Key individuals mentioned in the text"},
+    {"name": "Organization", "description": "Companies, institutions, or groups"},
+    {"name": "Location", "description": "Cities, countries, or physical places"},
+    {"name": "Date", "description": "Specific points in time or durations"},
+    {"name": "Concept", "description": "Abstract ideas, theories, or methodologies"},
+    {"name": "Technology", "description": "Software, hardware, or tools"}
+  ],
+  "relationships": [
+    {"source": "Person", "target": "Organization", "label": "WORKS_FOR"},
+    {"source": "Person", "target": "Location", "label": "LOCATED_IN"},
+    {"source": "Organization", "target": "Location", "label": "HEADQUARTERED_IN"},
+    {"source": "Person", "target": "Person", "label": "KNOWS"},
+    {"source": "Organization", "target": "Product", "label": "PRODUCES"},
+    {"source": "Concept", "target": "Concept", "label": "RELATES_TO"}
+  ]
+}`;
 
 const generationParams = ref({
     model_binding: '',
     model_name: '',
     chunk_size: 2048,
     overlap_size: 256,
-    ontology: '{\n  "entities": ["Person", "Organization", "Location", "Date", "Product", "Event"],\n  "relationships": [\n    {"source": "Person", "target": "Organization", "label": "WORKS_FOR"},\n    {"source": "Person", "target": "Location", "label": "LIVES_IN"},\n    {"source": "Organization", "target": "Location", "label": "LOCATED_IN"},\n    {"source": "Event", "target": "Date", "label": "OCCURRED_ON"}\n  ]\n}'
+    ontology: defaultOntology
 });
 
 const selectedFullModel = ref('');
@@ -72,6 +93,7 @@ async function fetchGraph() {
             edges: data?.edges?.length || 0
         };
     } catch (error) {
+        console.error("Failed to fetch graph:", error);
         graphData.value = { nodes: [], edges: [] };
         graphStats.value = { nodes: 0, edges: 0 };
     } finally {
@@ -111,8 +133,9 @@ async function handleWipeGraph() {
         try {
             await dataStore.wipeDataStoreGraph(props.store.id);
             fetchGraph();
+            uiStore.addNotification("Graph wiped successfully", "success");
         } catch(e) {
-            // error handled by store
+            uiStore.addNotification("Failed to wipe graph", "error");
         }
     }
 }
@@ -146,32 +169,51 @@ function handleDeselect() {
     selectedEdge.value = null;
 }
 
+// Updated Modal Calls using Component Names usually registered in GenericModal or similar
 function openAddNodeModal() {
-    uiStore.openModal('nodeEdit', {
+    uiStore.openModal('NodeEditModal', {
         onConfirm: async (nodeData) => {
-            await dataStore.addGraphNode({ storeId: props.store.id, nodeData });
-            fetchGraph();
+            try {
+                await dataStore.addGraphNode({ storeId: props.store.id, nodeData });
+                uiStore.addNotification('Node added successfully', 'success');
+                fetchGraph();
+            } catch (error) {
+                uiStore.addNotification('Failed to add node', 'error');
+                console.error(error);
+            }
         }
     });
 }
 
 function openAddEdgeModal() {
-    uiStore.openModal('edgeEdit', {
+    uiStore.openModal('EdgeEditModal', {
         sourceId: selectedNode.value?.id || '',
         onConfirm: async (edgeData) => {
-            await dataStore.addGraphEdge({ storeId: props.store.id, edgeData });
-            fetchGraph();
+            try {
+                await dataStore.addGraphEdge({ storeId: props.store.id, edgeData });
+                uiStore.addNotification('Edge added successfully', 'success');
+                fetchGraph();
+            } catch (error) {
+                uiStore.addNotification('Failed to add edge', 'error');
+                console.error(error);
+            }
         }
     });
 }
 
 function openEditNodeModal() {
     if (!selectedNode.value) return;
-    uiStore.openModal('nodeEdit', {
+    uiStore.openModal('NodeEditModal', {
         node: selectedNode.value,
         onConfirm: async (nodeData) => {
-            await dataStore.updateGraphNode({ storeId: props.store.id, nodeId: selectedNode.value.id, nodeData });
-            fetchGraph();
+             try {
+                await dataStore.updateGraphNode({ storeId: props.store.id, nodeId: selectedNode.value.id, nodeData });
+                uiStore.addNotification('Node updated successfully', 'success');
+                fetchGraph();
+            } catch (error) {
+                uiStore.addNotification('Failed to update node', 'error');
+                console.error(error);
+            }
         }
     });
 }
@@ -180,8 +222,13 @@ async function deleteSelectedNode() {
     if (!selectedNode.value) return;
     const { confirmed } = await uiStore.showConfirmation({ title: 'Delete Node?', message: `Delete node "${selectedNode.value.label}" (ID: ${selectedNode.value.id})? This will also delete connected edges.`});
     if (confirmed) {
-        await dataStore.deleteGraphNode({ storeId: props.store.id, nodeId: selectedNode.value.id });
-        fetchGraph();
+        try {
+            await dataStore.deleteGraphNode({ storeId: props.store.id, nodeId: selectedNode.value.id });
+            uiStore.addNotification('Node deleted', 'success');
+            fetchGraph();
+        } catch (error) {
+             uiStore.addNotification('Failed to delete node', 'error');
+        }
     }
 }
 
@@ -189,8 +236,13 @@ async function deleteSelectedEdge() {
     if (!selectedEdge.value) return;
     const { confirmed } = await uiStore.showConfirmation({ title: 'Delete Edge?', message: `Delete edge "${selectedEdge.value.label}"?`});
     if (confirmed) {
-        await dataStore.deleteGraphEdge({ storeId: props.store.id, edgeId: selectedEdge.value.id });
-        fetchGraph();
+         try {
+            await dataStore.deleteGraphEdge({ storeId: props.store.id, edgeId: selectedEdge.value.id });
+            uiStore.addNotification('Edge deleted', 'success');
+            fetchGraph();
+        } catch (error) {
+             uiStore.addNotification('Failed to delete edge', 'error');
+        }
     }
 }
 
@@ -208,12 +260,17 @@ async function onOntologyFileSelected(event) {
         generationParams.value.ontology = textContent;
         uiStore.addNotification('Ontology file imported successfully.', 'success');
     } catch (error) {
-        // The store handles the error notification
         console.error("Ontology import failed:", error);
     } finally {
         if (ontologyFileInput.value) {
             ontologyFileInput.value.value = '';
         }
+    }
+}
+
+function fitGraph() {
+    if(graphViewer.value) {
+        graphViewer.value.resetView();
     }
 }
 
@@ -231,10 +288,8 @@ watch(() => props.store.id, fetchGraph);
 watch(() => props.task, (newTask, oldTask) => {
     const wasRunning = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending');
     if (wasRunning && !newTask) {
-        const lastTaskState = tasksStore.tasks.find(t => t.id === oldTask.id);
-        if (lastTaskState && ['completed', 'failed', 'cancelled'].includes(lastTaskState.status)) {
-            fetchGraph();
-        }
+        // Task finished
+        fetchGraph();
     }
 });
 
@@ -244,101 +299,157 @@ watch(() => props.task, (newTask, oldTask) => {
     <div class="h-full flex flex-col lg:flex-row gap-6">
         <!-- Controls Column -->
         <div class="w-full lg:w-96 lg:flex-shrink-0 space-y-6 h-full overflow-y-auto custom-scrollbar pr-4">
+            <!-- Stats -->
             <div class="grid grid-cols-2 gap-4">
-                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
+                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center border dark:border-gray-600">
                     <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400">Nodes</h4>
                     <p v-if="isLoadingGraph" class="text-xl font-bold animate-pulse">...</p>
                     <p v-else class="text-xl font-bold">{{ graphStats.nodes }}</p>
                 </div>
-                 <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center">
+                 <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center border dark:border-gray-600">
                     <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400">Edges</h4>
                      <p v-if="isLoadingGraph" class="text-xl font-bold animate-pulse">...</p>
                     <p v-else class="text-xl font-bold">{{ graphStats.edges }}</p>
                 </div>
             </div>
-             <div v-if="task" class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                <h4 class="font-semibold text-blue-800 dark:text-blue-200 text-sm">{{ task.name }}</h4>
-                <p class="text-xs text-blue-700 dark:text-blue-300">{{ task.description }} ({{ task.progress }}%)</p>
-                <div class="w-full bg-blue-200 rounded-full h-1.5 mt-1">
-                    <div class="bg-blue-600 h-1.5 rounded-full" :style="{ width: task.progress + '%' }"></div>
+
+            <!-- Task Progress -->
+             <div v-if="task" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
+                <h4 class="font-semibold text-blue-800 dark:text-blue-200 text-sm flex justify-between">
+                    {{ task.name }}
+                    <span class="text-xs opacity-75">{{ task.progress }}%</span>
+                </h4>
+                <p class="text-xs text-blue-700 dark:text-blue-300 mt-1">{{ task.description }}</p>
+                <div class="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-1.5 mt-2">
+                    <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-500" :style="{ width: task.progress + '%' }"></div>
                 </div>
             </div>
             
-            <div v-if="selectedNode" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg space-y-3">
-                <h3 class="font-semibold">Node: {{ selectedNode.label }} <span class="font-mono text-xs">(ID: {{ selectedNode.id }})</span></h3>
-                <pre class="text-xs bg-white dark:bg-gray-800 p-2 rounded max-h-40 overflow-auto">{{ JSON.stringify(selectedNode.properties, null, 2) }}</pre>
-                <div class="flex gap-2">
-                    <button @click="openEditNodeModal" class="btn btn-secondary btn-sm">Edit</button>
-                    <button @click="deleteSelectedNode" class="btn btn-danger btn-sm">Delete</button>
+            <!-- Selection Details -->
+            <div v-if="selectedNode" class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700 space-y-3">
+                <div class="flex justify-between items-start">
+                    <h3 class="font-semibold text-lg">{{ selectedNode.label }}</h3>
+                    <span class="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs">{{ selectedNode.group }}</span>
+                </div>
+                <div class="text-xs text-gray-500 font-mono">ID: {{ selectedNode.id }}</div>
+                
+                <div class="bg-gray-50 dark:bg-gray-900 p-2 rounded max-h-40 overflow-auto custom-scrollbar">
+                    <pre class="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{{ JSON.stringify(selectedNode.properties, null, 2) }}</pre>
+                </div>
+                
+                <div class="flex gap-2 pt-2">
+                    <button @click="openEditNodeModal" class="btn btn-secondary btn-sm flex-1">Edit Properties</button>
+                    <button @click="deleteSelectedNode" class="btn btn-danger btn-sm flex-1">Delete</button>
                 </div>
             </div>
-             <div v-if="selectedEdge" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg space-y-3">
-                <h3 class="font-semibold">Edge: {{ selectedEdge.label }}</h3>
-                <p class="text-sm">From: {{ selectedEdge.source }} To: {{ selectedEdge.target }}</p>
-                <div class="flex gap-2">
-                    <button @click="deleteSelectedEdge" class="btn btn-danger btn-sm">Delete Edge</button>
+            
+            <div v-if="selectedEdge" class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700 space-y-3">
+                <h3 class="font-semibold text-lg border-b pb-2 dark:border-gray-700">Relationship</h3>
+                <div class="flex items-center justify-between text-sm">
+                    <span class="font-medium">{{ selectedEdge.label }}</span>
+                </div>
+                <div class="text-xs text-gray-500 space-y-1">
+                    <div><span class="font-semibold">Source:</span> {{ selectedEdge.source }}</div>
+                    <div><span class="font-semibold">Target:</span> {{ selectedEdge.target }}</div>
+                </div>
+                 <div class="flex gap-2 pt-2">
+                    <button @click="deleteSelectedEdge" class="btn btn-danger btn-sm w-full">Delete Relationship</button>
                 </div>
             </div>
 
-            <div class="space-y-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                <h3 class="text-base font-semibold">Graph Management</h3>
+            <!-- Graph Management Actions -->
+            <div class="space-y-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
+                <h3 class="text-base font-semibold flex items-center gap-2">
+                    <span class="w-1 h-4 bg-primary-500 rounded-full"></span>
+                    Graph Actions
+                </h3>
+                
                 <div class="flex gap-2">
                      <button @click="openAddNodeModal" :disabled="!!task" class="btn btn-secondary btn-sm flex-1">Add Node</button>
-                     <button @click="openAddEdgeModal" :disabled="!!task || !selectedNode" class="btn btn-secondary btn-sm flex-1">Add Edge</button>
+                     <button @click="openAddEdgeModal" :disabled="!!task" class="btn btn-secondary btn-sm flex-1">Add Edge</button>
+                     <button @click="fitGraph" class="btn btn-ghost btn-sm px-2" title="Fit Graph"><IconMaximize class="w-4 h-4"/></button>
                 </div>
-                <hr class="dark:border-gray-600">
-                <div>
-                    <div class="flex justify-between items-center mb-1">
-                        <label class="block text-sm font-medium">Ontology / Guidance</label>
-                        <button type="button" @click="handleImportOntology" class="btn btn-secondary btn-sm !py-1 !px-2 flex items-center gap-1">
-                            <IconArrowUpTray class="w-4 h-4" />
-                            Import
-                        </button>
+                
+                <hr class="dark:border-gray-700">
+                
+                <div class="space-y-2">
+                     <div>
+                        <label for="model-select" class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">LLM Model</label>
+                        <select id="model-select" v-model="selectedFullModel" class="input-field text-sm">
+                            <option disabled value="">Select a model</option>
+                            <optgroup v-for="group in availableLLMModelsGrouped" :key="group.label" :label="group.label">
+                                <option v-for="model in group.items" :key="model.id" :value="model.id">{{ model.name }}</option>
+                            </optgroup>
+                        </select>
                     </div>
-                    <textarea v-model="generationParams.ontology" rows="5" class="input-field font-mono text-xs"></textarea>
-                    <input type="file" ref="ontologyFileInput" @change="onOntologyFileSelected" class="hidden" accept=".owl,.rdf,.ttl,.jsonld,.pdf,.docx,.txt,.md,.json">
+
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="block text-xs font-bold uppercase tracking-wider text-gray-500">Ontology Schema</label>
+                            <button type="button" @click="handleImportOntology" class="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1">
+                                <IconArrowUpTray class="w-3 h-3" />
+                                Import
+                            </button>
+                        </div>
+                        <textarea v-model="generationParams.ontology" rows="6" class="input-field font-mono text-xs leading-relaxed" placeholder="Define entities and relationships..."></textarea>
+                        <input type="file" ref="ontologyFileInput" @change="onOntologyFileSelected" class="hidden" accept=".owl,.rdf,.ttl,.jsonld,.pdf,.docx,.txt,.md,.json">
+                        <p class="text-[10px] text-gray-400 mt-1">Defines the structure for the LLM to extract knowledge.</p>
+                    </div>
                 </div>
-                 <div>
-                    <label for="model-select" class="block text-sm font-medium mb-1">Model</label>
-                    <select id="model-select" v-model="selectedFullModel" class="input-field">
-                        <option disabled value="">Select a model</option>
-                        <optgroup v-for="group in availableLLMModelsGrouped" :key="group.label" :label="group.label">
-                            <option v-for="model in group.items" :key="model.id" :value="model.id">{{ model.name }}</option>
-                        </optgroup>
-                    </select>
-                </div>
-                <div class="grid grid-cols-2 gap-4 pt-2">
+
+                <div class="grid grid-cols-2 gap-3 pt-2">
                     <button @click="handleGenerateGraph" :disabled="!!task" class="btn btn-primary btn-sm">
-                        {{ graphStats.nodes > 0 ? 'Re-Generate' : 'Generate' }}
+                        {{ graphStats.nodes > 0 ? 'Re-Generate' : 'Generate Graph' }}
                     </button>
                     <button @click="handleUpdateGraph" :disabled="!!task || graphStats.nodes === 0" class="btn btn-secondary btn-sm">
-                        Update
+                        Update Graph
                     </button>
                 </div>
-                 <div class="pt-2 border-t dark:border-gray-600">
-                    <button @click="handleWipeGraph" :disabled="!!task || graphStats.nodes === 0" class="btn btn-danger w-full btn-sm">
-                        Wipe Graph
+                
+                 <div class="pt-2">
+                    <button @click="handleWipeGraph" :disabled="!!task || graphStats.nodes === 0" class="btn btn-ghost text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 w-full btn-sm flex items-center justify-center gap-2">
+                        <IconTrash class="w-4 h-4"/> Wipe All Data
                     </button>
                 </div>
             </div>
             
-            <div class="space-y-4 p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                <h3 class="text-base font-semibold">Query Graph</h3>
+            <!-- Query Section -->
+            <div class="space-y-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
+                <h3 class="text-base font-semibold flex items-center gap-2">
+                    <span class="w-1 h-4 bg-green-500 rounded-full"></span>
+                    Query Graph
+                </h3>
                 <form @submit.prevent="handleQuery" class="flex gap-2">
-                    <input v-model="query" type="text" placeholder="Query..." class="input-field flex-grow">
-                    <button type="submit" :disabled="isQuerying || !query.trim()" class="btn btn-primary">Query</button>
+                    <input v-model="query" type="text" placeholder="Search for concepts..." class="input-field flex-grow text-sm">
+                    <button type="submit" :disabled="isQuerying || !query.trim()" class="btn btn-primary btn-sm px-4">Find</button>
                 </form>
-                <div v-if="isQuerying" class="text-center p-2"><IconAnimateSpin class="w-5 h-5 animate-spin mx-auto"/></div>
-                <div v-if="queryResults.length > 0" class="space-y-2 max-h-60 overflow-y-auto">
-                    <div v-for="(result, index) in queryResults" :key="index" class="p-2 bg-white dark:bg-gray-800 rounded-md text-xs">
-                       <pre class="whitespace-pre-wrap">{{ result }}</pre>
+                
+                <div v-if="isQuerying" class="flex justify-center p-4">
+                    <IconAnimateSpin class="w-6 h-6 text-primary-500" />
+                </div>
+                
+                <div v-if="queryResults.length > 0" class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar bg-gray-50 dark:bg-gray-900 p-2 rounded-md">
+                    <div v-for="(result, index) in queryResults" :key="index" class="p-2 bg-white dark:bg-gray-800 rounded border dark:border-gray-700 text-xs shadow-sm">
+                       <pre class="whitespace-pre-wrap font-sans">{{ result }}</pre>
                     </div>
+                </div>
+                 <div v-else-if="!isQuerying && query && queryResults.length === 0" class="text-center text-gray-500 text-xs italic">
+                    No results found.
                 </div>
             </div>
         </div>
+
         <!-- Graph Viewer Column -->
-        <div class="flex-grow h-full min-h-[400px] lg:min-h-0">
-            <InteractiveGraphViewer :nodes="graphData.nodes" :edges="graphData.edges" :is-loading="isLoadingGraph" @node-select="handleNodeSelect" @edge-select="handleEdgeSelect" @deselect="handleDeselect"/>
+        <div class="flex-grow h-[500px] lg:h-full lg:min-h-0 bg-white dark:bg-gray-900 rounded-lg shadow-inner border dark:border-gray-700 p-1">
+            <InteractiveGraphViewer 
+                ref="graphViewer"
+                :nodes="graphData.nodes" 
+                :edges="graphData.edges" 
+                :is-loading="isLoadingGraph" 
+                @node-select="handleNodeSelect" 
+                @edge-select="handleEdgeSelect" 
+                @deselect="handleDeselect"
+            />
         </div>
     </div>
 </template>

@@ -28,7 +28,6 @@ const TTISettings = defineAsyncComponent(() => import('../components/settings/TT
 const TTSSettings = defineAsyncComponent(() => import('../components/settings/TTSSettings.vue'));
 const STTSettings = defineAsyncComponent(() => import('../components/settings/STTSettings.vue'));
 const ApiKeysSettings = defineAsyncComponent(() => import('../components/settings/ApiKeysSettings.vue'));
-const ServicesSettings = defineAsyncComponent(() => import('../components/settings/ServicesSettings.vue'));
 const PersonalitiesSettings = defineAsyncComponent(() => import('../components/settings/PersonalitiesSettings.vue'));
 const PromptsSettings = defineAsyncComponent(() => import('../components/settings/PromptsSettings.vue'));
 const McpsSettings = defineAsyncComponent(() => import('../components/settings/McpsSettings.vue'));
@@ -50,7 +49,6 @@ const sections = [
     { id: 'stt', name: 'STT', icon: markRaw(IconMicrophone), component: STTSettings },
     { type: 'divider' },
     { id: 'api_keys', name: 'API Keys', icon: markRaw(IconKey), component: ApiKeysSettings },
-    { id: 'services', name: 'Services', icon: markRaw(IconTool), component: ServicesSettings },
 ];
 
 const activeSectionId = computed({

@@ -20,7 +20,6 @@ const TTSBindingsSettings = defineAsyncComponent(() => import('./bindings/TTSBin
 const STTBindingsSettings = defineAsyncComponent(() => import('./bindings/STTBindingsSettings.vue'));
 const RAGBindingsSettings = defineAsyncComponent(() => import('./bindings/RAGBindingsSettings.vue'));
 const AiBotSettings = defineAsyncComponent(() => import('./AiBotSettings.vue'));
-const ServicesSettings = defineAsyncComponent(() => import('../settings/ServicesSettings.vue'));
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
 const SSOClientSettings = defineAsyncComponent(() => import('./SSOClientSettings.vue'));
 const SCIMSettings = defineAsyncComponent(() => import('./SCIMSettings.vue'));
@@ -51,7 +50,6 @@ const tabs = [
     { id: 'rag_bindings', component: RAGBindingsSettings },
     { id: 'builders', component: BuildersSettings },
     { id: 'ai_bot', component: AiBotSettings },
-    { id: 'services', component: ServicesSettings },
     { id: 'apps', component: AppsManagement },
     { id: 'mcps', component: McpsManagement },
     { id: 'personalities', component: PersonalitiesManagement },
