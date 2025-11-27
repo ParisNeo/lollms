@@ -12,10 +12,24 @@ from backend.config import (
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
+from backend.db.models.social import Post
 from backend.security import get_password_hash as hash_password
 from backend.settings import settings
+from backend.db import init_database, get_db, session as db_session_module
+from backend.db.base import Base
+from backend.db.migration import run_schema_migrations_and_bootstrap, check_and_update_db_version
+from backend.db.models.user import User as DBUser
+from backend.db.models.personality import Personality as DBPersonality
+from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
+from backend.db.models.config import LLMBinding as DBLLMBinding
+from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
+from backend.db.models.connections import WebSocketConnection
+from backend.security import get_password_hash as hash_password
+from backend.migration_utils import LegacyDiscussion
+from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
+from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
 
-
+from backend.db.models.personality import Personality as DBPersonality
 import uvicorn
 from backend.settings import settings
 init_database(APP_DB_URL)
