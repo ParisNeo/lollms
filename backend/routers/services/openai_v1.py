@@ -566,6 +566,7 @@ async def list_models(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
+    print("here")
     all_models = []
     active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
     model_display_mode = settings.get("model_display_mode", "mixed")
