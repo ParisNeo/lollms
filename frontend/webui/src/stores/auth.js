@@ -33,8 +33,14 @@ export const useAuthStore = defineStore('auth', () => {
     // --- WebSocket State ---
     const ws = ref(null);
     const wsConnected = ref(false);
+    const hasConnectedOnce = ref(false); // Track initial connection for recovery detection
     let reconnectTimeout = null;
-    let heartbeatInterval = null; // NEW: Heartbeat
+    let heartbeatInterval = null;
+
+    // --- Audio Objects ---
+    const audioChime = new Audio('/audio/chime_aud.wav');
+    const audioLost = new Audio('/audio/connection_lost.wav');
+    const audioRecovered = new Audio('/audio/connection_recovered.wav');
 
     const isAuthenticated = computed(() => !!user.value);
     const isAdmin = computed(() => user.value?.is_admin || false);
@@ -106,7 +112,14 @@ export const useAuthStore = defineStore('auth', () => {
         ws.value = new WebSocket(wsUrl);
 
         ws.value.onopen = () => {
+            if (hasConnectedOnce.value && !wsConnected.value) {
+                audioRecovered.play().catch(() => {});
+                const uiStore = useUiStore();
+                uiStore.addNotification('Connection recovered', 'success');
+            }
+
             wsConnected.value = true;
+            hasConnectedOnce.value = true;
             clearTimeout(reconnectTimeout);
             // Start heartbeat
             if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -124,7 +137,6 @@ export const useAuthStore = defineStore('auth', () => {
             try {
                 data = JSON.parse(event.data);
             } catch (e) {
-                // If not JSON, might be a simple text message or pong response
                 return; 
             }
             
@@ -141,7 +153,16 @@ export const useAuthStore = defineStore('auth', () => {
 
             switch (data.type) {
                 case 'new_dm': 
-                    socialStore.handleNewDm(data.data); 
+                    socialStore.handleNewDm(data.data);
+                    if (user.value && data.data.sender_id !== user.value.id) {
+                        audioChime.play().catch(() => {});
+                        if ("Notification" in window && Notification.permission === "granted") {
+                             new Notification(`Message from ${data.data.sender_username}`, {
+                                 body: data.data.content,
+                                 icon: data.data.sender_icon || '/favicon.ico'
+                             });
+                        }
+                    }
                     break;
                 case 'new_comment': 
                     socialStore.handleNewComment(data.data); 
@@ -241,6 +262,11 @@ export const useAuthStore = defineStore('auth', () => {
         };
 
         ws.value.onclose = (event) => {
+            if (wsConnected.value) {
+                audioLost.play().catch(() => {});
+                const uiStore = useUiStore();
+                uiStore.addNotification('Connection lost', 'error');
+            }
             wsConnected.value = false;
             ws.value = null;
             if (heartbeatInterval) clearInterval(heartbeatInterval);
@@ -264,8 +290,6 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    // ... (fetchUserAndInitialData and other methods remain mostly the same, ensuring they call connectWebSocket)
-
     async function fetchUserAndInitialData() {
         const uiStore = useUiStore();
         try {
@@ -280,6 +304,11 @@ export const useAuthStore = defineStore('auth', () => {
                 allow_user_chunking_config.value = user.value.allow_user_chunking_config;
                 default_chunk_size.value = user.value.default_chunk_size;
                 default_chunk_overlap.value = user.value.default_chunk_overlap;
+            }
+
+            // Request notification permission on load
+            if ("Notification" in window && Notification.permission === "default") {
+                Notification.requestPermission();
             }
             
             connectWebSocket();
