@@ -197,9 +197,10 @@ def build_llm_generation_router(router: APIRouter):
                 "To create a note, output a code block with the language `note`. The content inside the block will be the note's body.\n"
                 "Example:\n"
                 "```note\n"
-                "# Meeting Notes\n"
-                "- Point 1\n"
-                "- Point 2\n"
+                "# Note title\n"
+                "Structured markdown formatted note information depending on the user's request.\n"
+                "You are encouraged to use tables, lists, sections, equations ...\n"
+                "If you need to show code, use code environments with mandatory code language specifier.\n"
                 "```"
             )
 
