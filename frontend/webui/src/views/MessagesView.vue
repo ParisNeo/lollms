@@ -1,13 +1,16 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, markRaw } from 'vue';
+import { useRouter } from 'vue-router';
 import { useSocialStore } from '../stores/social';
 import { useUiStore } from '../stores/ui';
 import ConversationList from '../components/dm/ConversationList.vue';
 import DmWindow from '../components/dm/DmWindow.vue';
 import IconMessage from '../assets/icons/IconMessage.vue';
+import IconArrowLeft from '../assets/icons/IconArrowLeft.vue';
 
 const socialStore = useSocialStore();
 const uiStore = useUiStore();
+const router = useRouter();
 
 const activeConversationUserId = computed(() => socialStore.activeConversationUserId);
 
@@ -32,6 +35,10 @@ function handleConversationSelect(userId) {
     }
 }
 
+function handleBack() {
+    router.push('/');
+}
+
 onMounted(() => {
     uiStore.setPageTitle({ title: 'Messages', icon: markRaw(IconMessage) });
     socialStore.fetchConversations();
@@ -45,11 +52,24 @@ onUnmounted(() => {
 <template>
     <div class="flex h-full bg-white dark:bg-gray-900 overflow-hidden">
         <!-- Sidebar List -->
-        <div class="w-80 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 h-full overflow-hidden">
-            <ConversationList 
-                :model-value="activeConversationUserId"
-                @update:model-value="handleConversationSelect"
-            />
+        <div class="w-80 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 h-full flex flex-col overflow-hidden">
+            <div class="flex-1 overflow-hidden">
+                <ConversationList 
+                    :model-value="activeConversationUserId"
+                    @update:model-value="handleConversationSelect"
+                />
+            </div>
+            
+            <!-- Back Button Footer -->
+            <div class="p-4 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+                <button 
+                    @click="handleBack" 
+                    class="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                    <IconArrowLeft class="w-5 h-5" />
+                    <span>Back to Discussion</span>
+                </button>
+            </div>
         </div>
         
         <!-- Main Message Area -->

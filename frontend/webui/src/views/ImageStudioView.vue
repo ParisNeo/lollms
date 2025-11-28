@@ -84,8 +84,8 @@
                     </div>
                 </div>
                 <div class="p-4 border-t dark:border-gray-700 flex-shrink-0">
-                    <router-link to="/" class="btn btn-secondary w-full flex items-center justify-center" title="Back to Main App">
-                        <IconArrowLeft class="w-5 h-5 mr-2" />
+                    <router-link to="/" class="w-full flex items-center gap-3 px-3 py-2.5 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors" title="Back to Main App">
+                        <IconArrowLeft class="w-5 h-5" />
                         <span>Back to App</span>
                     </router-link>
                 </div>

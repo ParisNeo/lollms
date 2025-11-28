@@ -151,7 +151,13 @@ async function handleImport(e) {
                         </div>
                     </div>
 
-                    <button v-if="msg.sender_id === authStore.user.id" @click="handleDeleteMessage(msg.id)" class="absolute -left-8 top-0 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" title="Delete">
+                    <button 
+                        v-if="msg.sender_id === authStore.user.id || authStore.user.is_admin" 
+                        @click="handleDeleteMessage(msg.id)" 
+                        class="absolute top-0 p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                        :class="msg.sender_id === authStore.user.id ? '-left-8' : '-right-8'"
+                        title="Delete"
+                    >
                         <IconTrash class="w-4 h-4" />
                     </button>
                  </div>
