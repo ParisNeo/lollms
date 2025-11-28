@@ -70,6 +70,18 @@ export function useDiscussionDataZones(state, stores, getActions) {
             throw error;
         }
     }
+
+    async function appendToDataZone({ discussionId, content }) {
+        const discussion = discussions.value[discussionId];
+        if (!discussion) return;
+
+        const currentContent = discussion.discussion_data_zone || '';
+        const separator = currentContent.trim() ? '\n\n' : '';
+        const newContent = currentContent + separator + content;
+
+        await updateDataZone({ discussionId, content: newContent });
+        uiStore.addNotification('Content appended to Data Zone.', 'success');
+    }
     
     async function summarizeDiscussionDataZone(discussionId, prompt = null) {
         if (activeAiTasks.value[discussionId]) {
@@ -292,7 +304,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
 
 
     return {
-        fetchContextStatus, fetchDataZones, updateDataZone,
+        fetchContextStatus, fetchDataZones, updateDataZone, appendToDataZone,
         summarizeDiscussionDataZone, generateImageFromDataZone, memorizeLTM,
         handleDataZoneUpdate, setDiscussionDataZoneContent, refreshDataZones,
         updateLiveTokenCount, handleDiscussionImagesUpdated,

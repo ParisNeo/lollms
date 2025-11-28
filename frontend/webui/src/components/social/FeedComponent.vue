@@ -12,7 +12,7 @@ const authStore = useAuthStore();
 const showCreateForm = ref(false);
 
 const user = computed(() => authStore.user);
-const feedPosts = computed(() => socialStore.feedPosts);
+const feedPosts = computed(() => socialStore.feedPosts || []); // SAFEGUARD
 const isLoading = computed(() => socialStore.isLoadingFeed);
 
 const canPost = computed(() => user.value && user.value.user_ui_level >= 2);

@@ -74,6 +74,8 @@ import MoveDiscussionModal from './components/modals/MoveDiscussionModal.vue';
 import EnhancePromptModal from './components/modals/EnhancePromptModal.vue';
 import CameraCaptureModal from './components/modals/CameraCaptureModal.vue';
 import ImageEditorSettingsModal from './components/modals/ImageEditorSettingsModal.vue';
+import NoteEditorModal from './components/modals/NoteEditorModal.vue'; // NEW
+import NoteGroupModal from './components/modals/NoteGroupModal.vue'; // NEW
 
 // New Component for Chat Sidebar
 const ChatSidebar = defineAsyncComponent(() => import('./components/chat/ChatSidebar.vue'));
@@ -276,6 +278,8 @@ watch(message_font_size, (newSize) => {
     <EnhancePromptModal v-if="activeModal === 'enhancePrompt'" />
     <CameraCaptureModal v-if="activeModal === 'cameraCapture'" />
     <ImageEditorSettingsModal v-if="activeModal === 'imageEditorSettings'" />
+    <NoteEditorModal v-if="activeModal === 'noteEditor'" />
+    <NoteGroupModal v-if="activeModal === 'noteGroup'" />
     
     <!-- Always rendered panels -->
     <NotificationPanel />

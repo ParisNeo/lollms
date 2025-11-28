@@ -71,6 +71,7 @@ class UserCreateAdmin(UserLLMParams):
     fun_mode: Optional[bool] = False
     ai_response_language: Optional[str] = "auto"
     force_ai_response_language: Optional[bool] = False
+    note_generation_enabled: Optional[bool] = False # NEW
 
 class UserUpdate(BaseModel):
     first_name: Optional[str] = Field(None, max_length=100)
@@ -129,10 +130,16 @@ class UserUpdate(BaseModel):
     image_studio_generation_params: Optional[Dict[str, Any]] = None
     image_generation_enabled: Optional[bool] = None
     image_annotation_enabled: Optional[bool] = None
+    note_generation_enabled: Optional[bool] = None # NEW
     # New fields
     reasoning_activation: Optional[bool] = None
     reasoning_effort: Optional[str] = None
     reasoning_summary: Optional[bool] = None
+    
+    # NEW FIELDS for User Personal Info
+    preferred_name: Optional[str] = None
+    user_personal_info: Optional[str] = None
+    share_personal_info_with_llm: Optional[bool] = None
 
 class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
@@ -311,6 +318,12 @@ class UserAuthDetails(UserPublic):
     image_studio_generation_params: Optional[Dict[str, Any]] = None
     image_generation_enabled: bool
     image_annotation_enabled: bool
+    note_generation_enabled: bool # NEW
+    
+    # NEW: User Personal Info
+    preferred_name: Optional[str] = None
+    user_personal_info: Optional[str] = None
+    share_personal_info_with_llm: bool
 
 class RelationshipStatus(BaseModel):
     is_following: bool

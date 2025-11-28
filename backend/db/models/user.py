@@ -16,11 +16,14 @@ from backend.db.models.discussion_group import DiscussionGroup
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.voice import UserVoice
 from backend.db.models.image import UserImage
+# NEW: Import Note models for relationship mapping (string reference avoids circular imports at runtime)
+# from backend.db.models.note import Note, NoteGroup 
 
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
+    preferred_name = Column(String, nullable=True) # NEW
     hashed_password = Column(String, nullable=False)
     external_id = Column(String, unique=True, index=True, nullable=True) # For SCIM
     is_admin = Column(Boolean, default=False)
@@ -39,7 +42,11 @@ class User(Base):
     receive_notification_emails = Column(Boolean, default=True, nullable=False)
     is_searchable = Column(Boolean, default=True, nullable=False, index=True)
     first_login_done = Column(Boolean, default=False, nullable=False)
-    data_zone = Column(Text, nullable=True)
+    
+    # Data Zones
+    data_zone = Column(Text, nullable=True) # General Info
+    user_personal_info = Column(Text, nullable=True) # NEW: Sensitive/Personal Info
+    share_personal_info_with_llm = Column(Boolean, default=False, nullable=False) # NEW
     
     # NEW FIELDS
     coding_style_constraints = Column(Text, nullable=True)
@@ -61,6 +68,14 @@ class User(Base):
     image_generation_system_prompt = Column(Text, nullable=True)
     image_annotation_enabled = Column(Boolean, default=False, nullable=False)
 
+    # NEW FIELD for Notes
+    note_generation_enabled = Column(Boolean, default=False, nullable=False)
+
+    # New reasoning fields
+    reasoning_activation = Column(Boolean, default=False, nullable=True)
+    reasoning_effort = Column(String, nullable=True) # low, medium, high
+    reasoning_summary = Column(Boolean, default=False, nullable=True)
+
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
     following = relationship(
@@ -74,6 +89,10 @@ class User(Base):
     api_keys = relationship("OpenAIAPIKey", back_populates="user", cascade="all, delete-orphan")
     memories = relationship("UserMemory", back_populates="owner", cascade="all, delete-orphan", foreign_keys="[UserMemory.owner_user_id]")
     discussion_groups = relationship("DiscussionGroup", back_populates="owner", cascade="all, delete-orphan")
+
+    # NEW Relationships for Notes
+    notes = relationship("Note", back_populates="owner", cascade="all, delete-orphan")
+    note_groups = relationship("NoteGroup", back_populates="owner", cascade="all, delete-orphan")
 
     lollms_model_name = Column(String, nullable=True)
     tti_binding_model_name = Column(String, nullable=True)
@@ -92,10 +111,6 @@ class User(Base):
     llm_top_p = Column(Float, nullable=True)
     llm_repeat_penalty = Column(Float, nullable=True)
     llm_repeat_last_n = Column(Integer, nullable=True)
-    # New reasoning fields
-    reasoning_activation = Column(Boolean, default=False, nullable=True)
-    reasoning_effort = Column(String, nullable=True) # low, medium, high
-    reasoning_summary = Column(Boolean, default=False, nullable=True)
 
     put_thoughts_in_context = Column(Boolean, default=False, nullable=False)
     include_memory_date_in_context = Column(Boolean, default=False, nullable=False)
@@ -139,6 +154,7 @@ class User(Base):
     
     def verify_password(self, plain_password):
         return pwd_context.verify(plain_password, self.hashed_password)
+
    
 
 class UserStarredDiscussion(Base):
@@ -172,3 +188,4 @@ class Friendship(Base):
     user2 = relationship("User", foreign_keys=[user2_id], backref="received_friend_requests_or_friendships")
     action_user = relationship("User", foreign_keys=[action_user_id])
     __table__args__ = (UniqueConstraint('user1_id', 'user2_id', name='uq_friendship_pair'),)
+

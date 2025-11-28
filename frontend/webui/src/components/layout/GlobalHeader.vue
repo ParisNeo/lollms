@@ -212,11 +212,21 @@ function handleEditPersonality(personality, event) {
                                 <div v-if="filteredAvailableModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
                                 <div v-for="group in filteredAvailableModels" :key="group.label">
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
-                                    <button v-for="item in group.items" :key="item.id" @click="selectModel(item.id)" class="menu-item-button" :class="{'selected': activeModelName === item.id}">
-                                         <div class="flex items-center space-x-3 truncate">
+                                    <button v-for="item in group.items" :key="item.id" @click="selectModel(item.id)" class="menu-item-button group/item" :class="{'selected': activeModelName === item.id}">
+                                         <div class="flex items-center space-x-3 truncate flex-1 min-w-0">
                                             <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
                                             <IconCpuChip v-else class="w-6 h-6 p-0.5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                            <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
+                                            <div class="truncate text-left flex-1 min-w-0">
+                                                <p class="font-medium truncate text-sm">{{ item.name }}</p>
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-1 pl-2 flex-shrink-0">
+                                            <IconEye v-if="item.alias?.has_vision" class="w-4 h-4 text-blue-500" title="Vision Supported" />
+                                            <div class="opacity-0 group-hover/item:opacity-100 focus-within:opacity-100 transition-opacity w-6 h-6 flex items-center justify-center">
+                                                <div @click.stop="openModelCard(item)" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full cursor-pointer" title="Model Information">
+                                                    <IconInfo class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                                </div>
+                                            </div>
                                         </div>
                                     </button>
                                 </div>
@@ -363,7 +373,7 @@ function handleEditPersonality(personality, event) {
     <div class="flex items-center space-x-1 sm:space-x-2">
       <div 
         class="w-3 h-3 rounded-full transition-colors flex-shrink-0"
-        :class="wsConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'"
+        :class="wsConnected ? 'bg-green-50 animate-pulse' : 'bg-red-500'"
         :title="wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected. Attempting to reconnect...'"
       ></div>
       <ThemeToggle />

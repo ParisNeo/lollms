@@ -427,6 +427,10 @@ async def update_my_details(
         if db.query(DBUser).filter(DBUser.email == updated_fields['email'], DBUser.id != db_user.id).first():
             raise HTTPException(status_code=400, detail="This email address is already in use by another account.")
 
+    # Handle new fields explicitly if they are not automatically handled by setattr loop below (though loop handles them)
+    # The new fields are: preferred_name, user_personal_info, share_personal_info_with_llm
+    # They are part of UserUpdate so they are in updated_fields
+
     for field, value in updated_fields.items():
         if hasattr(db_user, field):
             setattr(db_user, field, value)

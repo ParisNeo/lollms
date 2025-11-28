@@ -8,6 +8,7 @@ import { useDiscussionsStore } from '../../../stores/discussions';
 import { useAuthStore } from '../../../stores/auth';
 import IconLatex from '../../../assets/icons/IconLatex.vue';
 import IconPhoto from '../../../assets/icons/IconPhoto.vue';
+import IconSave from '../../../assets/icons/IconSave.vue'; 
 
 const props = defineProps({
   language: {
@@ -52,6 +53,9 @@ const canvasSelector = `#${canvasId}`;
 
 const highlightedCode = computed(() => {
   const lang = props.language || 'plaintext';
+  if (lang.toLowerCase() === 'note') {
+      return props.code; 
+  }
   if (hljs.getLanguage(lang)) {
     try {
       return hljs.highlight(props.code, { language: lang, ignoreIllegals: true }).value;
@@ -65,6 +69,7 @@ const isPython = computed(() => props.language?.toLowerCase() === 'python');
 const isLatex = computed(() => ['latex', 'tex'].includes(props.language?.toLowerCase()));
 const isLatexBuilderEnabled = computed(() => authStore.latex_builder_enabled);
 const isGenerativeImage = computed(() => props.language?.toLowerCase() === 'generate_image');
+const isNote = computed(() => props.language?.toLowerCase() === 'note');
 const canExecute = computed(() => ['python', 'javascript', 'html', 'svg', 'mermaid'].includes(props.language?.toLowerCase()));
 
 const executeButtonText = computed(() => {
@@ -91,6 +96,31 @@ function copyCode() {
   uiStore.copyToClipboard(props.code).then(() => {
       copyStatus.value = 'Copied!';
       setTimeout(() => { copyStatus.value = 'Copy'; }, 2000);
+    });
+}
+
+function saveNote() {
+    const rawCode = props.code.trim();
+    const lines = rawCode.split('\n');
+    let noteTitle = 'New AI Note';
+    let noteContent = rawCode;
+    
+    // Find the first line starting with # to use as title
+    const headerIndex = lines.findIndex(line => line.trim().startsWith('#'));
+    
+    if (headerIndex !== -1) {
+        // Extract title from the header line, removing # chars
+        noteTitle = lines[headerIndex].trim().replace(/^#+\s*/, '');
+        
+        // Remove the header line from the content to avoid duplication/clutter
+        const contentLines = [...lines];
+        contentLines.splice(headerIndex, 1);
+        noteContent = contentLines.join('\n').trim();
+    }
+
+    uiStore.openModal('noteEditor', { 
+        title: noteTitle,
+        content: noteContent
     });
 }
 
@@ -375,6 +405,11 @@ async function downloadCreatedFile(filename) {
           <button v-if="isGenerativeImage" @click="generateImage" class="code-action-btn" :disabled="isExecuting" title="Generate Image">
               <IconPhoto class="h-4 w-4" />
               <span>{{ isExecuting ? 'Generating...' : 'Generate' }}</span>
+          </button>
+          <!-- NOTE BUTTON -->
+          <button v-if="isNote" @click="saveNote" class="code-action-btn" title="Save as Note">
+              <IconSave class="h-4 w-4" />
+              <span>Save Note</span>
           </button>
           <button v-if="canExecute" @click="executeCode" class="code-action-btn" :disabled="isExecuting" title="Execute code">
               <svg v-if="!isExecuting" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" /></svg>

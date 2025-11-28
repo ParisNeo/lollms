@@ -316,7 +316,11 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             image_studio_seed=db_user.image_studio_seed,
             image_studio_generation_params=db_user.image_studio_generation_params,
             image_generation_enabled=db_user.image_generation_enabled,
-            image_annotation_enabled=db_user.image_annotation_enabled
+            image_annotation_enabled=db_user.image_annotation_enabled,
+            note_generation_enabled=db_user.note_generation_enabled, # NEW: Added missing field
+            preferred_name=db_user.preferred_name, # NEW: Added missing field
+            user_personal_info=db_user.user_personal_info, # NEW: Added missing field
+            share_personal_info_with_llm=db_user.share_personal_info_with_llm # NEW: Added missing field
         )
     finally:
         if db_was_created:
