@@ -93,8 +93,8 @@ export const useAdminStore = defineStore('admin', () => {
     const globalSettings = ref([]);
     const isLoadingSettings = ref(false);
 
-    const aiBotSettings = ref(null); // NEW: For @lollms user settings
-    const isLoadingAiBotSettings = ref(false); // NEW
+    const aiBotSettings = ref(null);
+    const isLoadingAiBotSettings = ref(false);
 
     const isImporting = ref(false);
     const isEnhancingEmail = ref(false);
@@ -341,8 +341,8 @@ export const useAdminStore = defineStore('admin', () => {
         tasksStore.addTask(response.data);
         return response.data;
     }
-    
-        async function fetchSystemStatus() {
+        
+    async function fetchSystemStatus() {
         isLoadingSystemStatus.value = true;
         try {
             const response = await apiClient.get('/api/admin/system-status');
@@ -359,7 +359,6 @@ export const useAdminStore = defineStore('admin', () => {
         tasksStore.addTask(response.data);
         return response.data;
     }
-
 
     async function fetchAllUsers(filters = {}) {
         isLoadingUsers.value = true;
@@ -477,6 +476,10 @@ export const useAdminStore = defineStore('admin', () => {
         const index = bindings.value.findIndex(b => b.id === bindingId);
         if (index !== -1) bindings.value[index] = response.data;
     }
+    async function executeBindingCommand(bindingId, commandName, parameters = {}) {
+        const response = await apiClient.post(`/api/admin/bindings/${bindingId}/execute_command`, { command_name: commandName, parameters });
+        return response.data;
+    }
 
     // --- TTI Actions ---
     async function fetchTtiBindings() {
@@ -522,6 +525,10 @@ export const useAdminStore = defineStore('admin', () => {
         const index = ttiBindings.value.findIndex(b => b.id === bindingId);
         if (index !== -1) ttiBindings.value[index] = response.data;
     }
+    async function executeTtiBindingCommand(bindingId, commandName, parameters = {}) {
+        const response = await apiClient.post(`/api/admin/tti-bindings/${bindingId}/execute_command`, { command_name: commandName, parameters });
+        return response.data;
+    }
 
     // --- TTS Actions ---
     async function fetchTtsBindings() {
@@ -566,6 +573,10 @@ export const useAdminStore = defineStore('admin', () => {
         const response = await apiClient.delete(`/api/admin/tts-bindings/${bindingId}/alias`, { data: { original_model_name: modelName } });
         const index = ttsBindings.value.findIndex(b => b.id === bindingId);
         if (index !== -1) ttsBindings.value[index] = response.data;
+    }
+    async function executeTtsBindingCommand(bindingId, commandName, parameters = {}) {
+        const response = await apiClient.post(`/api/admin/tts-bindings/${bindingId}/execute_command`, { command_name: commandName, parameters });
+        return response.data;
     }
 
     // --- STT Actions ---
@@ -613,6 +624,10 @@ export const useAdminStore = defineStore('admin', () => {
         const response = await apiClient.delete(`/api/admin/stt-bindings/${bindingId}/alias`, { data: { original_model_name: modelName } });
         const index = sttBindings.value.findIndex(b => b.id === bindingId);
         if (index !== -1) sttBindings.value[index] = response.data;
+    }
+    async function executeSttBindingCommand(bindingId, commandName, parameters = {}) {
+        const response = await apiClient.post(`/api/admin/stt-bindings/${bindingId}/execute_command`, { command_name: commandName, parameters });
+        return response.data;
     }
 
     // --- RAG Actions ---
@@ -963,16 +978,16 @@ export const useAdminStore = defineStore('admin', () => {
         dashboardStats, isLoadingDashboardStats, fetchDashboardStats, broadcastMessage,
         allUsers, isLoadingUsers, fetchAllUsers, sendEmailToUsers, batchUpdateUsers,
         bindings, isLoadingBindings, availableBindingTypes, fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding,
-        fetchBindingModels, saveModelAlias, deleteModelAlias, getModelCtxSize,
+        fetchBindingModels, saveModelAlias, deleteModelAlias, getModelCtxSize, executeBindingCommand,
         ttiBindings, isLoadingTtiBindings, availableTtiBindingTypes,
         fetchTtiBindings, fetchAvailableTtiBindingTypes, addTtiBinding, updateTtiBinding, deleteTtiBinding,
-        fetchTtiBindingModels, saveTtiModelAlias, deleteTtiModelAlias,
+        fetchTtiBindingModels, saveTtiModelAlias, deleteTtiModelAlias, executeTtiBindingCommand,
         ttsBindings, isLoadingTtsBindings, availableTtsBindingTypes,
         fetchTtsBindings, fetchAvailableTtsBindingTypes, addTtsBinding, updateTtsBinding, deleteTtsBinding,
-        fetchTtsBindingModels, saveTtsModelAlias, deleteTtsModelAlias,
+        fetchTtsBindingModels, saveTtsModelAlias, deleteTtsModelAlias, executeTtsBindingCommand,
         sttBindings, isLoadingSttBindings, availableSttBindingTypes,
         fetchSttBindings, fetchAvailableSttBindingTypes, addSttBinding, updateSttBinding, deleteSttBinding,
-        fetchSttBindingModels, saveSttModelAlias, deleteSttModelAlias,
+        fetchSttBindingModels, saveSttModelAlias, deleteSttModelAlias, executeSttBindingCommand,
         ragBindings, isLoadingRagBindings, availableRagBindingTypes,
         fetchRagBindings, fetchAvailableRagBindingTypes, addRagBinding, updateRagBinding, deleteRagBinding,
         fetchRagBindingModels, saveRagModelAlias, deleteRagModelAlias, fetchRagModelsForType,

@@ -2,10 +2,13 @@
 import { ref, watch, onMounted, computed } from 'vue';
 import { useAdminStore } from '../../stores/admin';
 import { useDataStore } from '../../stores/data';
+import { useUiStore } from '../../stores/ui';
+import apiClient from '../../services/api';
 import { storeToRefs } from 'pinia';
 
 const adminStore = useAdminStore();
 const dataStore = useDataStore();
+const uiStore = useUiStore();
 
 const { globalSettings, aiBotSettings, isLoadingAiBotSettings } = storeToRefs(adminStore);
 const { availableLollmsModels, publicPersonalities } = storeToRefs(dataStore);
@@ -25,6 +28,7 @@ const form = ref({
 });
 
 const isLoading = ref(false);
+const isTriggering = ref(false);
 const hasChanges = ref(false);
 let pristineState = '{}';
 
@@ -94,9 +98,28 @@ async function handleSave() {
             adminStore.updateGlobalSettings(globalPayload),
             adminStore.updateAiBotSettings(botUserPayload)
         ]);
+        uiStore.addNotification('Settings saved successfully', 'success');
+        populateForm(); // Reset pristine state
 
+    } catch (e) {
+        uiStore.addNotification('Failed to save settings', 'error');
     } finally {
         isLoading.value = false;
+    }
+}
+
+async function triggerPostNow() {
+    if(!confirm("This will force the bot to generate and publish a post immediately using the current settings. Continue?")) return;
+    
+    isTriggering.value = true;
+    try {
+        await apiClient.post('/api/admin/trigger-post');
+        uiStore.addNotification('Post generation task started!', 'success');
+    } catch (e) {
+        console.error(e);
+        uiStore.addNotification('Failed to trigger post.', 'error');
+    } finally {
+        isTriggering.value = false;
     }
 }
 </script>
@@ -150,7 +173,26 @@ async function handleSave() {
 
                 <!-- Auto-Posting Settings -->
                 <div class="space-y-6 pt-6 border-t dark:border-gray-600">
-                    <h4 class="text-lg font-medium text-gray-900 dark:text-white">Auto-Posting Feed</h4>
+                    <div class="flex items-center justify-between">
+                        <h4 class="text-lg font-medium text-gray-900 dark:text-white">Auto-Posting Feed</h4>
+                        
+                        <button 
+                            v-if="form.ai_bot_auto_post"
+                            type="button" 
+                            @click="triggerPostNow" 
+                            :disabled="isTriggering"
+                            class="btn btn-secondary btn-sm flex items-center gap-2"
+                        >
+                            <svg v-if="isTriggering" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            {{ isTriggering ? 'Generating...' : 'Trigger Post Now' }}
+                        </button>
+                    </div>
                     
                     <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                         <span class="flex-grow flex flex-col">

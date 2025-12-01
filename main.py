@@ -76,6 +76,10 @@ from backend.routers.voices_studio import voices_studio_router
 from backend.routers.image_studio import image_studio_router
 from backend.routers.notes import notes_router # NEW
 
+from backend.routers.admin.email_marketing import router as email_marketing_router # NEW
+from backend.db.models.email_marketing import EmailProposal, EmailTopic # Ensure models loaded
+from backend.tasks.email_tasks import _generate_email_proposal_task # NEW
+
 from backend.routers.tasks import tasks_router
 from backend.task_manager import task_manager
 from backend.ws_manager import manager, listen_for_broadcasts
@@ -134,6 +138,17 @@ def scheduled_bot_posting_job():
         name="AI Bot Auto-Posting",
         target=_generate_feed_post_task,
         description="Generating and posting social feed content from AI Bot.",
+        owner_username=None
+    )
+
+def scheduled_email_proposal_job():
+    """
+    Wrapper for email proposal generation.
+    """
+    task_manager.submit_task(
+        name="Generate Email Proposal",
+        target=_generate_email_proposal_task,
+        description="Lollms researching and drafting email content.",
         owner_username=None
     )
 
@@ -441,6 +456,15 @@ async def startup_event():
         rss_scheduler.add_job(scheduled_bot_posting_job, 'interval', minutes=30, next_run_time=datetime.datetime.now() + datetime.timedelta(minutes=1))
         # --- END NEW ---
 
+        # Schedule Email Generation (e.g., every 24 hours)
+        if settings.get("email_marketing_enabled", False):
+            rss_scheduler.add_job(
+                scheduled_email_proposal_job, 
+                'interval', 
+                hours=24, 
+                next_run_time=datetime.datetime.now() + datetime.timedelta(minutes=5)
+            )
+
         if not rss_scheduler.running:
             rss_scheduler.start()
 
@@ -465,7 +489,7 @@ app = FastAPI(
     on_startup=[startup_event],
     on_shutdown=[shutdown_event]
 )
-
+app.include_router(email_marketing_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(languages_router)

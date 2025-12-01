@@ -5,6 +5,10 @@ from typing import Optional
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
+from backend.task_manager import task_manager
+from backend.tasks.social_tasks import _generate_feed_post_task
+from backend.session import get_current_active_user
+from backend.models import UserAuthDetails
 
 bot_management_router = APIRouter(tags=["Administration", "AI Bot"])
 
@@ -45,3 +49,18 @@ async def update_ai_bot_settings(settings: AiBotSettingsUpdate, db: Session = De
     db.commit()
     db.refresh(bot_user)
     return bot_user
+
+@bot_management_router.post("/trigger-post", status_code=202)
+async def trigger_ai_bot_post(
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Manually triggers the AI Bot to generate and post content to the feed immediately.
+    """
+    task_manager.submit_task(
+        name="Manual AI Bot Post",
+        target=_generate_feed_post_task,
+        description="Manually triggered AI bot post generation.",
+        owner_username=current_user.username
+    )
+    return {"message": "Post generation task started."}

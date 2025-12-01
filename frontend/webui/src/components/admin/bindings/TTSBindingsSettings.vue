@@ -17,6 +17,7 @@ const editingBinding = ref(null);
 const isLoadingForm = ref(false);
 const isKeyVisible = ref({});
 const localTtsModelDisplayMode = ref('mixed');
+const commandParams = ref({});
 
 const getInitialFormState = () => ({
     id: null,
@@ -96,6 +97,7 @@ function showAddForm() {
     editingBinding.value = null;
     form.value = getInitialFormState();
     isKeyVisible.value = {};
+    commandParams.value = {};
     isFormVisible.value = true;
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -107,6 +109,24 @@ function showEditForm(binding) {
         form.value.config = {};
     }
     isKeyVisible.value = {};
+    
+    // Initialize command params
+    const bindingType = availableTtsBindingTypes.value.find(b => b.binding_name === binding.name);
+    if(bindingType && bindingType.commands){
+        const params = {};
+        bindingType.commands.forEach(cmd => {
+            params[cmd.name] = {};
+            if(cmd.parameters){
+                cmd.parameters.forEach(p => {
+                    params[cmd.name][p.name] = p.default !== undefined ? p.default : '';
+                });
+            }
+        });
+        commandParams.value = params;
+    } else {
+        commandParams.value = {};
+    }
+
     isFormVisible.value = true;
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -178,6 +198,24 @@ function getBindingTitle(name) {
     const bindingType = availableTtsBindingTypes.value.find(b => b.binding_name === name);
     return bindingType ? bindingType.title : name;
 }
+
+async function executeCommand(cmd) {
+    if (!editingBinding.value) return;
+    try {
+        uiStore.addNotification(`Executing command '${cmd.title || cmd.name}'...`, 'info');
+        const params = commandParams.value[cmd.name] || {};
+        const result = await adminStore.executeTtsBindingCommand(editingBinding.value.id, cmd.name, params);
+        if (result.status) {
+             uiStore.addNotification('Command executed successfully.', 'success');
+             if(result.result) {
+                 uiStore.showGenericModal({title:"Command Execution Result", content: JSON.stringify(result.result, null, 2)});
+             }
+        }
+    } catch (e) {
+        console.error(e);
+        uiStore.addNotification(`Command execution failed: ${e.message}`, 'error');
+    }
+}
 </script>
 
 <template>
@@ -233,6 +271,38 @@ function getBindingTitle(name) {
                     </div>
                 </div>
                 
+                <!-- Binding Commands Section -->
+                <div v-if="isEditMode && selectedBindingType && selectedBindingType.commands && selectedBindingType.commands.length > 0" class="mt-6 border-t dark:border-gray-700 pt-6">
+                    <h4 class="text-lg font-semibold mb-4">Binding Commands</h4>
+                    <div class="grid grid-cols-1 gap-4">
+                        <div v-for="cmd in selectedBindingType.commands" :key="cmd.name" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600">
+                            <div class="flex justify-between items-start mb-3">
+                                <div>
+                                    <h5 class="font-bold text-md">{{ cmd.title || cmd.name }}</h5>
+                                    <p class="text-sm text-gray-600 dark:text-gray-400">{{ cmd.description }}</p>
+                                </div>
+                            </div>
+                            
+                            <div v-if="cmd.parameters && cmd.parameters.length > 0" class="space-y-3 mb-4">
+                                <div v-for="p in cmd.parameters" :key="p.name">
+                                    <label class="block text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">{{ p.name }}</label>
+                                    <input v-if="p.type !== 'bool'" type="text" v-model="commandParams[cmd.name][p.name]" class="input-field text-sm" :placeholder="p.default">
+                                    <div v-else class="flex items-center gap-2">
+                                        <button @click="commandParams[cmd.name][p.name] = !commandParams[cmd.name][p.name]" type="button" :class="[commandParams[cmd.name][p.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                            <span :class="[commandParams[cmd.name][p.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                        </button>
+                                        <span class="text-sm">{{ p.description }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="flex justify-end">
+                                <button type="button" @click="executeCommand(cmd)" class="btn btn-primary btn-sm">Execute</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                     <span class="flex-grow flex flex-col"><span class="text-sm font-medium text-gray-900 dark:text-gray-100">Active</span><span class="text-sm text-gray-500 dark:text-gray-400">If disabled, this TTS service will not be available.</span></span>
                     <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
