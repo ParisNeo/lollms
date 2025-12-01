@@ -23,6 +23,21 @@ const mentionStartIndex = ref(-1);
 
 const user = computed(() => authStore.user);
 
+// --- DIRECTIVE: v-on-click-outside ---
+const vOnClickOutside = {
+  mounted(el, binding) {
+    el.clickOutsideEvent = function(event) {
+      if (!(el === event.target || el.contains(event.target))) {
+        binding.value(event, el);
+      }
+    };
+    document.body.addEventListener('click', el.clickOutsideEvent);
+  },
+  unmounted(el) {
+    document.body.removeEventListener('click', el.clickOutsideEvent);
+  },
+};
+
 const isPostDisabled = computed(() => {
   return isSubmitting.value || content.value.trim() === '';
 });
@@ -98,7 +113,7 @@ function closeMentionBox() {
   <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
     <div class="flex space-x-4">
       <div class="flex-shrink-0">
-        <UserAvatar v-if="user" :icon="user.icon" :username="user.username" size-class="h-10 w-10" />
+        <UserAvatar v-if="user" :icon="user.icon" :username="user.username || 'User'" size-class="h-10 w-10" />
       </div>
 
       <div class="flex-1 min-w-0 relative">

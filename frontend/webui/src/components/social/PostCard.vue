@@ -22,20 +22,35 @@ const isOptionsMenuOpen = ref(false);
 const isCommentsVisible = ref(false);
 
 const user = computed(() => authStore.user);
-const isAuthor = computed(() => user.value?.id === props.post.author.id);
+// Safe access to author properties
+const isAuthor = computed(() => user.value?.id === props.post.author?.id);
 const canDelete = computed(() => isAuthor.value || user.value?.is_admin || user.value?.is_moderator);
 
-// --- NEW: Computed property for comment count ---
 const commentCount = computed(() => {
   const comments = socialStore.getCommentsForPost(props.post.id);
   return comments ? comments.length : (props.post.comments?.length || 0);
 });
 
 const formattedContent = computed(() => {
-  return marked.parse(props.post.content, { gfm: true, breaks: true });
+  if (!props.post.content) return '';
+  try {
+      // Robust check for marked availability
+      if (typeof marked === 'function') {
+          return marked(props.post.content);
+      } else if (marked && typeof marked.parse === 'function') {
+          return marked.parse(props.post.content, { gfm: true, breaks: true });
+      } else {
+          // Fallback if marked is missing/broken
+          return props.post.content.replace(/\n/g, '<br>');
+      }
+  } catch (e) {
+      console.error("Markdown parsing error:", e);
+      return props.post.content;
+  }
 });
 
 function formatTimestamp(dateString) {
+  if (!dateString) return '';
   const date = new Date(dateString);
   return date.toLocaleString(undefined, {
     dateStyle: 'medium',
@@ -90,8 +105,8 @@ function handleCopyMarkdown() {
 
 async function handleShare() {
   const shareData = {
-    title: `Post by ${props.post.author.username}`,
-    text: `Check out this post by ${props.post.author.username}`,
+    title: `Post by ${props.post.author?.username}`,
+    text: `Check out this post by ${props.post.author?.username}`,
     url: window.location.origin + `/posts/${props.post.id}`
   };
   if (navigator.share && navigator.canShare(shareData)) {
@@ -115,8 +130,8 @@ function toggleComments() {
     <div class="p-4 flex space-x-4">
       <!-- Avatar Column -->
       <div class="flex-shrink-0">
-        <router-link :to="`/profile/${post.author.username}`">
-          <UserAvatar :icon="post.author.icon" :username="post.author.username" size-class="h-10 w-10" />
+        <router-link :to="`/profile/${post.author?.username}`">
+          <UserAvatar :icon="post.author?.icon" :username="post.author?.username" size-class="h-10 w-10" />
         </router-link>
       </div>
 
@@ -125,8 +140,8 @@ function toggleComments() {
         <!-- Post Header -->
         <div class="flex justify-between items-center">
           <div>
-            <router-link :to="`/profile/${post.author.username}`" class="font-bold text-gray-900 dark:text-gray-100 hover:underline">
-              {{ post.author.username }}
+            <router-link :to="`/profile/${post.author?.username}`" class="font-bold text-gray-900 dark:text-gray-100 hover:underline">
+              {{ post.author?.username }}
             </router-link>
             <span class="text-sm text-gray-500 dark:text-gray-400 ml-2">
               · {{ formatTimestamp(post.created_at) }}
@@ -169,7 +184,6 @@ function toggleComments() {
             <span v-if="post.like_count > 0" class="text-xs font-bold">{{ post.like_count }}</span>
           </button>
           
-          <!-- MODIFIED: Comment button now includes the count -->
           <button @click="toggleComments" class="flex items-center space-x-2 hover:text-green-500 transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 5v8a2 2 0 01-2 2h-5l-5 4v-4H4a2 2 0 01-2-2V5a2 2 0 012-2h12a2 2 0 012 2zM7 8H5v2h2V8zm2 0h2v2H9V8zm6 0h-2v2h2V8z" clip-rule="evenodd" /></svg>
             <span>Comment</span>

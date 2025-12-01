@@ -49,7 +49,8 @@ export const useSocialStore = defineStore('social', () => {
     async function searchForMentions(query) {
         if (!query) return [];
         try {
-            const response = await apiClient.get('/api/users/mention_search', { params: { q: query } });
+            // Using the specialized social mentions endpoint for better context (friends, bot, etc.)
+            const response = await apiClient.get('/api/social/mentions/search', { params: { q: query } });
             return response.data;
         } catch (error) {
             console.error("Failed to search for mentions:", error);
@@ -609,8 +610,36 @@ export const useSocialStore = defineStore('social', () => {
     }
 
     return {
-        friends, conversations, activeConversations, activeConversationId,
-        totalUnreadDms, friendRequestCount, isLoadingFriends, isLoadingConversations,
+        // STATE EXPORTS
+        friends, 
+        pendingFriendRequests, 
+        blockedUsers, 
+        feedPosts, // EXPORTED
+        profiles, // EXPORTED
+        userPosts, // EXPORTED
+        comments, // EXPORTED
+        conversations, 
+        activeConversations, 
+        activeConversationId,
+        
+        // LOADING STATES
+        isLoadingFriends, 
+        isLoadingFeed, // EXPORTED
+        isLoadingProfile, // EXPORTED
+        isLoadingRequests, // EXPORTED
+        isLoadingBlocked, // EXPORTED
+        isLoadingComments, // EXPORTED
+        isLoadingConversations, 
+        isLoadingMessages, // EXPORTED
+
+        // COMPUTED / GETTERS
+        totalUnreadDms, 
+        friendRequestCount,
+        getPostsByUsername, // EXPORTED
+        getActiveConversation,
+        getCommentsForPost,
+
+        // ACTIONS
         fetchFriends, fetchConversations, openConversation, sendDirectMessage,
         deleteMessage, deleteConversation, exportConversation, importConversation, createGroupConversation, addMemberToGroup,
         fetchPendingRequests, fetchBlockedUsers, fetchUserProfile, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser,

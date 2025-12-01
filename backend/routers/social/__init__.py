@@ -1,9 +1,8 @@
-# backend/routers/social.py
-from typing import List
+# backend/routers/social/__init__.py
+from typing import List, Optional
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_, exists, select, insert, delete
+from sqlalchemy import or_, and_, exists, select, insert, delete, func
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func
 from ascii_colors import trace_exception
 import re
 from backend.settings import settings
@@ -22,15 +21,8 @@ from backend.models import (
     CommentCreate,
     CommentPublic
 )
-from backend.session import get_current_active_user
+from backend.session import get_current_active_user, get_current_db_user_from_token
 from backend.routers.social.mentions import mentions_router
-
-
-from sqlalchemy.orm import Session
-from backend.db import get_db
-from backend.db.models.user import User as DBUser
-from backend.db.models.social import Comment as DBComment, Post as DBPost
-from backend.session import get_current_db_user_from_token
 
 social_router = APIRouter(
     prefix="/api/social",
@@ -277,12 +269,13 @@ def get_main_feed(
     db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    print(f"--- FEED: Fetching feed for user {current_user.id} ({current_user.username}) ---")
+    # print(f"--- FEED: Fetching feed for user {current_user.id} ({current_user.username}) ---")
     try:
         # 1. Get IDs of users the current user follows
         following_ids_query = select(follows_table.c.following_id).where(follows_table.c.follower_id == current_user.id)
-        following_ids = db.execute(following_ids_query).scalars().all()
-        print(f"--- FEED: Following IDs: {following_ids} ---")
+        following_ids_res = db.execute(following_ids_query).scalars().all()
+        following_ids = [uid for uid in following_ids_res if uid is not None]
+        # print(f"--- FEED: Following IDs: {following_ids} ---")
 
         # 2. Get IDs of friends
         friend_ids_q1 = select(DBFriendship.user2_id).where(
@@ -293,22 +286,31 @@ def get_main_feed(
             DBFriendship.user2_id == current_user.id,
             DBFriendship.status == FriendshipStatus.ACCEPTED
         )
-        friend_ids = db.execute(friend_ids_q1).scalars().all() + db.execute(friend_ids_q2).scalars().all()
-        print(f"--- FEED: Friend IDs: {friend_ids} ---")
+        friend_ids = list(db.execute(friend_ids_q1).scalars().all()) + list(db.execute(friend_ids_q2).scalars().all())
+        friend_ids = [uid for uid in friend_ids if uid is not None]
+        # print(f"--- FEED: Friend IDs: {friend_ids} ---")
 
-        # 3. Construct visibility conditions
-        visibility_conditions = or_(
+        # 3. Construct visibility conditions securely
+        # Start with conditions that always apply (Public posts and Own posts)
+        conditions = [
             DBPost.visibility == PostVisibility.public,
-            DBPost.author_id == current_user.id,
-            and_(
+            DBPost.author_id == current_user.id
+        ]
+        
+        # Add dynamic conditions only if the lists are not empty to avoid invalid IN clauses
+        if following_ids:
+            conditions.append(and_(
                 DBPost.visibility == PostVisibility.followers,
                 DBPost.author_id.in_(following_ids)
-            ),
-            and_(
+            ))
+            
+        if friend_ids:
+            conditions.append(and_(
                 DBPost.visibility == PostVisibility.friends,
                 DBPost.author_id.in_(friend_ids)
-            )
-        )
+            ))
+
+        visibility_conditions = or_(*conditions)
 
         like_count_subquery = select(func.count(DBPostLike.user_id)).where(DBPostLike.post_id == DBPost.id).scalar_subquery()
 
@@ -332,7 +334,7 @@ def get_main_feed(
             visibility_conditions
         ).order_by(DBPost.created_at.desc()).limit(50).all()
         
-        print(f"--- FEED: Found {len(results)} posts from DB query. ---")
+        # print(f"--- FEED: Found {len(results)} posts from DB query. ---")
 
         response = []
         for i, (post, like_count, has_liked) in enumerate(results):
@@ -344,7 +346,7 @@ def get_main_feed(
             except Exception as e_model:
                 print(f"--- FEED: Error validating post model for post ID {post.id} (index {i}): {e_model} ---")
         
-        print(f"--- FEED: Successfully processed {len(response)} posts. ---")
+        # print(f"--- FEED: Successfully processed {len(response)} posts. ---")
         return response
     except Exception as e:
         print(f"--- FEED: CRITICAL ERROR fetching feed for user {current_user.id} ---")
@@ -383,17 +385,43 @@ def create_comment_for_post(
     db.commit()
     db.refresh(new_comment, ['author'])
     
-    # --- NEW: Check for @lollms mention ---
+    # --- NEW: Check for Bot Participation Conditions ---
     if settings.get("ai_bot_enabled", False):
         # Avoid the bot replying to itself
-        if current_user.username != 'lollms' and re.search(r'\B@lollms\b', comment_data.content, re.IGNORECASE):
-            task_manager.submit_task(
-                name=f"AI Bot responding to comment by {current_user.username}",
-                target=_respond_to_mention_task,
-                args=('comment', new_comment.id),
-                description=f"Generating AI reply for comment ID: {new_comment.id}",
-                owner_username='lollms'
-            )
+        if current_user.username != 'lollms':
+            # Conditions to trigger the bot:
+            # 1. Explicit mention in the new comment
+            is_explicit_mention = re.search(r'\B@lollms\b', comment_data.content, re.IGNORECASE)
+            
+            # 2. Bot is the author of the original post
+            # We need to ensure we have the author username. post is a DB object attached to session.
+            # Assuming 'lollms' username is consistent.
+            # We can also check ID if we fetched the bot user, but username is safer for settings.
+            post_author_username = post.author.username if post.author else db.query(DBUser.username).filter(DBUser.id == post.author_id).scalar()
+            is_bot_post = (post_author_username == 'lollms')
+
+            # 3. Bot was mentioned in the original post
+            was_mentioned_in_post = re.search(r'\B@lollms\b', post.content, re.IGNORECASE)
+            
+            # 4. Bot has already commented in this thread (Active participant)
+            lollms_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
+            is_active_participant = False
+            if lollms_user:
+                is_active_participant = db.query(exists().where(
+                    and_(
+                        DBComment.post_id == post_id,
+                        DBComment.author_id == lollms_user.id
+                    )
+                )).scalar()
+            
+            if is_explicit_mention or is_bot_post or was_mentioned_in_post or is_active_participant:
+                task_manager.submit_task(
+                    name=f"AI Bot responding to comment by {current_user.username}",
+                    target=_respond_to_mention_task,
+                    args=('comment', new_comment.id),
+                    description=f"Generating AI reply for comment ID: {new_comment.id} (Thread monitoring)",
+                    owner_username='lollms'
+                )
     # --- END NEW ---
     
     return new_comment

@@ -14,7 +14,14 @@ const form = ref({
     ai_bot_enabled: false,
     ai_bot_system_prompt: '',
     lollms_model_name: '',
-    active_personality_id: ''
+    active_personality_id: '',
+    // Auto-posting settings
+    ai_bot_auto_post: false,
+    ai_bot_post_interval: 24, // hours
+    ai_bot_content_mode: 'static_text', // static_text, file
+    ai_bot_static_content: '',
+    ai_bot_file_path: '',
+    ai_bot_generation_prompt: 'Generate an interesting and engaging social media post based on the provided context. Keep it under 500 characters.'
 });
 
 const isLoading = ref(false);
@@ -70,6 +77,12 @@ async function handleSave() {
         const globalPayload = {
             ai_bot_enabled: form.value.ai_bot_enabled,
             ai_bot_system_prompt: form.value.ai_bot_system_prompt,
+            ai_bot_auto_post: form.value.ai_bot_auto_post,
+            ai_bot_post_interval: parseFloat(form.value.ai_bot_post_interval),
+            ai_bot_content_mode: form.value.ai_bot_content_mode,
+            ai_bot_static_content: form.value.ai_bot_static_content,
+            ai_bot_file_path: form.value.ai_bot_file_path,
+            ai_bot_generation_prompt: form.value.ai_bot_generation_prompt,
         };
         
         const botUserPayload = {
@@ -95,15 +108,16 @@ async function handleSave() {
                 AI Bot Settings
             </h3>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Configure the automated AI assistant that responds to @lollms mentions and performs system tasks like RSS processing.
+                Configure the automated AI assistant that responds to @lollms mentions and auto-posts content.
             </p>
         </div>
         <div v-if="isLoadingAiBotSettings" class="p-6 text-center">Loading settings...</div>
         <form v-else-if="Object.keys(form).length" @submit.prevent="handleSave" class="p-6">
             <div class="space-y-8">
+                <!-- General Settings -->
                 <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                     <span class="flex-grow flex flex-col">
-                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable AI Bot</span>
+                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable AI Bot Responses</span>
                         <span class="text-sm text-gray-500 dark:text-gray-400">Allow the bot to reply to @lollms mentions.</span>
                     </span>
                     <button @click="form.ai_bot_enabled = !form.ai_bot_enabled" type="button" :class="[form.ai_bot_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
@@ -130,8 +144,53 @@ async function handleSave() {
                     </div>
                     <div v-if="!form.active_personality_id">
                         <label for="bot-prompt" class="block text-sm font-medium">Default System Prompt</label>
-                        <textarea id="bot-prompt" v-model="form.ai_bot_system_prompt" rows="6" class="input-field mt-1"></textarea>
-                        <p class="mt-1 text-xs text-gray-500">The system prompt used if no personality is selected.</p>
+                        <textarea id="bot-prompt" v-model="form.ai_bot_system_prompt" rows="3" class="input-field mt-1"></textarea>
+                    </div>
+                </div>
+
+                <!-- Auto-Posting Settings -->
+                <div class="space-y-6 pt-6 border-t dark:border-gray-600">
+                    <h4 class="text-lg font-medium text-gray-900 dark:text-white">Auto-Posting Feed</h4>
+                    
+                    <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                        <span class="flex-grow flex flex-col">
+                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Auto-Posting</span>
+                            <span class="text-sm text-gray-500 dark:text-gray-400">The bot will post to the main feed periodically based on provided material.</span>
+                        </span>
+                        <button @click="form.ai_bot_auto_post = !form.ai_bot_auto_post" type="button" :class="[form.ai_bot_auto_post ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                            <span :class="[form.ai_bot_auto_post ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                        </button>
+                    </div>
+
+                    <div v-if="form.ai_bot_auto_post" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-medium">Posting Interval (Hours)</label>
+                            <input type="number" v-model="form.ai_bot_post_interval" min="1" step="0.5" class="input-field mt-1">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium">Content Source</label>
+                            <select v-model="form.ai_bot_content_mode" class="input-field mt-1">
+                                <option value="static_text">Manual Text (Knowledge Base)</option>
+                                <option value="file">File Path (Server Side)</option>
+                            </select>
+                        </div>
+
+                        <div v-if="form.ai_bot_content_mode === 'static_text'">
+                            <label class="block text-sm font-medium">Knowledge Base Material</label>
+                            <textarea v-model="form.ai_bot_static_content" rows="6" class="input-field mt-1" placeholder="Paste interesting facts, news, or context here..."></textarea>
+                        </div>
+
+                        <div v-if="form.ai_bot_content_mode === 'file'">
+                            <label class="block text-sm font-medium">Absolute File Path</label>
+                            <input type="text" v-model="form.ai_bot_file_path" class="input-field mt-1" placeholder="/path/to/interesting_content.txt">
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium">Generation Prompt</label>
+                            <textarea v-model="form.ai_bot_generation_prompt" rows="3" class="input-field mt-1"></textarea>
+                            <p class="mt-1 text-xs text-gray-500">Instructions for the AI on how to use the material to create a post.</p>
+                        </div>
                     </div>
                 </div>
 

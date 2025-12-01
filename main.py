@@ -91,6 +91,7 @@ from backend.settings import settings
 # --- RSS Feed Imports ---
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.tasks.news_tasks import _scrape_rss_feeds_task, _cleanup_old_news_articles_task
+from backend.tasks.social_tasks import _generate_feed_post_task # NEW: Import
 # --- End RSS Feed Imports ---
 
 broadcast_listener_task = None
@@ -123,6 +124,17 @@ def scheduled_news_cleanup_job():
         target=_cleanup_old_news_articles_task,
         description="Deleting old news articles based on retention policy.",
         owner_username=None # System task
+    )
+
+def scheduled_bot_posting_job():
+    """
+    Wrapper function to submit the AI bot auto-posting task.
+    """
+    task_manager.submit_task(
+        name="AI Bot Auto-Posting",
+        target=_generate_feed_post_task,
+        description="Generating and posting social feed content from AI Bot.",
+        owner_username=None
     )
 
 
@@ -406,10 +418,11 @@ async def startup_event():
     # We can't directly check the lock state across processes easily, but we can assume
     # the main process is the first one to start. This is a reasonable heuristic.
     if os.getpid() == os.getppid() or os.getenv("WORKER_ID") == "1":
+        # Initialize scheduler
+        rss_scheduler = BackgroundScheduler(daemon=True)
+
         if settings.get("rss_feed_enabled"):
             interval = settings.get("rss_feed_check_interval_minutes", 60)
-            rss_scheduler = BackgroundScheduler(daemon=True)
-            # Give the app a few seconds to start before the first run
             next_run = datetime.datetime.now() + datetime.timedelta(seconds=20)
             rss_scheduler.add_job(scheduled_rss_job, 'interval', minutes=interval, next_run_time=next_run)
             
@@ -421,8 +434,15 @@ async def startup_event():
                 print(f"INFO: Daily news cleanup scheduled. Articles older than {retention_days} day(s) will be removed.")
             # --- END NEW ---
 
-            rss_scheduler.start()
             print(f"INFO: RSS feed checking scheduled to run every {interval} minutes.")
+        
+        # --- NEW: Schedule Bot Auto-Posting (Check every 30 mins) ---
+        # The task itself checks the "last_posted_at" timestamp against the configured interval.
+        rss_scheduler.add_job(scheduled_bot_posting_job, 'interval', minutes=30, next_run_time=datetime.datetime.now() + datetime.timedelta(minutes=1))
+        # --- END NEW ---
+
+        if not rss_scheduler.running:
+            rss_scheduler.start()
 
     print(f"INFO: Worker {os.getpid()} starting DB broadcast listener.")
 

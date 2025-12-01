@@ -119,7 +119,7 @@ function selectMention(user) {
 
     <div v-if="canComment" class="mt-4 flex space-x-3 items-start">
       <div class="flex-shrink-0">
-        <UserAvatar v-if="user" :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
+        <UserAvatar v-if="user" :icon="user.icon" :username="user.username || 'User'" size-class="h-8 w-8" />
       </div>
       <div class="flex-1 min-w-0 relative">
         <!-- MENTION POPUP -->

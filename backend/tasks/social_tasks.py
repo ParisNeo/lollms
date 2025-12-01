@@ -1,13 +1,16 @@
 # backend/tasks/social_tasks.py
 import re
+import datetime
+from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload, contains_eager
-from sqlalchemy import or_, and_, desc, func
+from sqlalchemy import or_, and_, desc, func, update
 
 from backend.db import get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
 from backend.db.models.social import Post as DBPost, PostLike as DBPostLike, Comment as DBComment
+from backend.db.models.config import GlobalConfig 
 from backend.db.base import PostVisibility
 from backend.models.social import PostCreate, PostPublic, CommentCreate, CommentPublic, PostUpdate, AuthorPublic
 from backend.models import UserAuthDetails
@@ -16,7 +19,7 @@ from backend.task_manager import task_manager
 from backend.ws_manager import manager
 from sqlalchemy.orm import Session
 from lollms_client import LollmsClient
-from ascii_colors import trace_exception
+from ascii_colors import trace_exception, ASCIIColors
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -31,6 +34,7 @@ social_router = APIRouter(prefix="/api/social", tags=["Social"])
 def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
     """
     A background task to generate and post a reply from the @lollms bot.
+    Supports smart decision making (reply or ignore).
     """
     task.log(f"Starting AI response task for {mention_type} ID: {item_id}")
     db = next(get_db())
@@ -46,29 +50,38 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             task.log("AI Bot is disabled in settings. Aborting.", "WARNING")
             return {"status": "aborted", "reason": "AI Bot is disabled."}
             
-        # Relaxed check: We rely on build_lollms_client_from_params to find a default model if not set.
         if not lollms_bot_user.lollms_model_name:
              task.log("AI Bot model not explicitly configured. Attempting to use system default.", "INFO")
 
-        task.log(f"Bot enabled. Model configured: {lollms_bot_user.lollms_model_name or 'System Default'}")
-
-        # 2. Fetch the content that triggered the mention
+        # 2. Build Context (Thread History)
         post_id = None
-        context_text = ""
+        thread_context = ""
+        context_instruction = ""
+        
         if mention_type == 'post':
             post = db.query(DBPost).options(joinedload(DBPost.author)).filter(DBPost.id == item_id).first()
             if not post:
                 raise Exception(f"Post with ID {item_id} not found.")
             post_id = post.id
-            context_text = f"User '{post.author.username}' wrote a post: {post.content}"
+            thread_context = f"[Post] {post.author.username}: {post.content}"
+            context_instruction = "You were mentioned in this post."
+            
         elif mention_type == 'comment':
-            comment = db.query(DBComment).options(joinedload(DBComment.author)).filter(DBComment.id == item_id).first()
-            if not comment:
+            triggering_comment = db.query(DBComment).options(joinedload(DBComment.author)).filter(DBComment.id == item_id).first()
+            if not triggering_comment:
                 raise Exception(f"Comment with ID {item_id} not found.")
-            post_id = comment.post_id
-            context_text = f"In response to a post, user '{comment.author.username}' commented: {comment.content}"
-        else:
-            raise ValueError(f"Invalid mention type: {mention_type}")
+            
+            post_id = triggering_comment.post_id
+            post = db.query(DBPost).options(joinedload(DBPost.author)).filter(DBPost.id == post_id).first()
+            
+            # Fetch last N comments for context
+            comments = db.query(DBComment).options(joinedload(DBComment.author)).filter(DBComment.post_id == post_id).order_by(DBComment.created_at.asc()).all()
+            
+            thread_context = f"[Post] {post.author.username}: {post.content}\n"
+            for c in comments:
+                thread_context += f"[Comment] {c.author.username}: {c.content}\n"
+            
+            context_instruction = f"A new comment was added by {triggering_comment.author.username}."
 
         task.set_progress(20)
 
@@ -77,37 +90,57 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         
         lc = build_lollms_client_from_params(username=lollms_bot_user.username)
         
-        # Determine system prompt: personality first, then global setting
-        system_prompt = ""
+        # Determine system prompt
+        base_system_prompt = settings.get("ai_bot_system_prompt") or "You are @lollms, a helpful AI assistant residing in this social platform."
         if lollms_bot_user.active_personality_id:
             personality = db.query(DBPersonality).filter(DBPersonality.id == lollms_bot_user.active_personality_id).first()
             if personality:
-                system_prompt = personality.prompt_text
+                base_system_prompt = personality.prompt_text
                 task.log(f"Using personality: '{personality.name}'")
         
-        if not system_prompt:
-            system_prompt = settings.get("ai_bot_system_prompt")
-            task.log("Using global default system prompt.")
+        # Augmented System Prompt for Thread Awareness and Decision Making
+        augmented_prompt = (
+            f"{base_system_prompt}\n\n"
+            "## Task\n"
+            "You are observing a social media thread. "
+            "You must decide if a response from you is necessary or helpful.\n\n"
+            "## Rules\n"
+            "1. Respond if you are explicitly mentioned (@lollms).\n"
+            "2. Respond if you are the author of the post and the comment is relevant to you.\n"
+            "3. Respond if you are part of the conversation and the user is addressing you.\n"
+            "4. **IF NO RESPONSE IS NEEDED** (e.g., users talking amongst themselves, spam, or simple acknowledgement not requiring a bot), you MUST output exactly: [[IGNORE]]\n"
+            "5. Keep responses concise (under 2000 chars) and relevant.\n"
+            "6. Do not reply to yourself."
+        )
+
+        full_user_input = f"{context_instruction}\n\n[THREAD HISTORY]:\n{thread_context}\n\n[INSTRUCTION]: Generate your reply or [[IGNORE]]."
         
         response_text = lc.generate_text(
-            context_text, 
-            system_prompt=system_prompt + "\n**Important:** You are commenting on the user's post. Your response must not exceed 2000 characters.", 
+            full_user_input, 
+            system_prompt=augmented_prompt, 
             stream=False,
             max_new_tokens=512
         )
         
-        if not response_text or not response_text.strip():
+        clean_response = response_text.strip()
+        
+        if "[[IGNORE]]" in clean_response:
+            task.log("AI decided to ignore this interaction.", "INFO")
+            task.set_progress(100)
+            return {"status": "ignored"}
+
+        if not clean_response:
             task.log("AI generated an empty response. Aborting.", "WARNING")
             return {"status": "aborted", "reason": "Empty response from AI."}
 
-        task.log(f"AI Response: {response_text[:100]}...")
+        task.log(f"AI Response: {clean_response[:100]}...")
         task.set_progress(80)
 
         # 4. Create and save the new comment from the bot
         new_comment = DBComment(
             post_id=post_id,
             author_id=lollms_bot_user.id,
-            content=response_text.strip()[:2000] # Enforce character limit
+            content=clean_response[:2000] # Enforce character limit
         )
         db.add(new_comment)
         db.commit()
@@ -145,6 +178,130 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
     finally:
         if db:
             db.close()
+
+def _generate_feed_post_task(task: Task):
+    """
+    Scheduled task to generate a new post for the bot based on configured material.
+    """
+    task.log("Checking AI Bot Auto-Posting Schedule...")
+    db = next(get_db())
+    try:
+        # 1. Check if enabled
+        if not settings.get("ai_bot_auto_post", False):
+            task.log("Auto-posting is disabled in settings.", "INFO")
+            return
+
+        # 2. Check Interval
+        last_posted_str = settings.get("ai_bot_last_posted_at")
+        interval_hours = float(settings.get("ai_bot_post_interval", 24))
+        
+        if last_posted_str:
+            try:
+                last_posted = datetime.datetime.fromisoformat(last_posted_str)
+                # Ensure UTC awareness if needed, but simple subtraction works if both align
+                time_diff = datetime.datetime.utcnow() - last_posted
+                if time_diff.total_seconds() < interval_hours * 3600:
+                    task.log(f"Not enough time elapsed. Last posted: {last_posted_str}. Interval: {interval_hours}h.", "INFO")
+                    return
+            except ValueError:
+                task.log("Invalid date format for last_posted_at. Proceeding with post.", "WARNING")
+
+        # 3. Get Bot User
+        bot_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
+        if not bot_user:
+            task.log("@lollms user not found!", "ERROR")
+            return
+
+        # 4. Get Content Material
+        mode = settings.get("ai_bot_content_mode", "static_text")
+        context_material = ""
+        
+        if mode == "file":
+            file_path_str = settings.get("ai_bot_file_path", "")
+            if file_path_str:
+                path = Path(file_path_str)
+                if path.exists() and path.is_file():
+                    try:
+                        context_material = path.read_text(encoding='utf-8')
+                        task.log(f"Loaded {len(context_material)} chars from file: {path}")
+                    except Exception as e:
+                        task.log(f"Error reading file {path}: {e}", "ERROR")
+                else:
+                    task.log(f"File not found: {path}", "WARNING")
+        else:
+            context_material = settings.get("ai_bot_static_content", "")
+            
+        if not context_material or len(context_material.strip()) < 10:
+            task.log("No sufficient context material found to generate post.", "WARNING")
+            return
+
+        # 5. Generate Post
+        task.log("Generating post content...")
+        lc = build_lollms_client_from_params(username=bot_user.username)
+        
+        system_prompt = settings.get("ai_bot_system_prompt") or "You are a helpful AI assistant."
+        if bot_user.active_personality_id:
+            p = db.query(DBPersonality).filter(DBPersonality.id == bot_user.active_personality_id).first()
+            if p: system_prompt = p.prompt_text
+
+        user_prompt = settings.get("ai_bot_generation_prompt", "Generate an engaging social media post based on this information.")
+        
+        full_prompt = f"{user_prompt}\n\n[CONTEXT MATERIAL]:\n{context_material[:5000]}" # Limit context to avoid overflow
+
+        generated_content = lc.generate_text(
+            full_prompt, 
+            system_prompt=system_prompt,
+            max_new_tokens=1024
+        )
+
+        if not generated_content or len(generated_content.strip()) < 5:
+            task.log("Generated content was empty.", "WARNING")
+            return
+
+        # 6. Post to Feed
+        new_post = DBPost(
+            author_id=bot_user.id,
+            content=generated_content.strip(),
+            visibility=PostVisibility.public
+        )
+        db.add(new_post)
+        
+        # 7. Update Last Posted Time
+        now_iso = datetime.datetime.utcnow().isoformat()
+        
+        # We need to update the global config in the DB manually as 'settings' is a read wrapper + load
+        # Check if config exists
+        config_entry = db.query(GlobalConfig).filter(GlobalConfig.key == "ai_bot_last_posted_at").first()
+        if config_entry:
+            config_entry.value = now_iso
+        else:
+            # Create if not exists (though usually settings only read what's there, we can insert)
+            db.add(GlobalConfig(key="ai_bot_last_posted_at", value=now_iso, type="string", category="AI Bot"))
+        
+        db.commit()
+        db.refresh(new_post) # refresh post to get ID
+        
+        # 8. Broadcast
+        post_public = get_post_public(db, new_post, bot_user.id) # Use bot ID as viewer, doesn't matter for public
+        # Ideally we want the public view
+        
+        payload = {
+            "type": "new_post",
+            "data": post_public.model_dump(mode="json")
+        }
+        manager.broadcast_sync(payload)
+        
+        # Update cache in memory
+        settings._settings_cache["ai_bot_last_posted_at"] = now_iso
+        
+        task.log(f"Successfully posted new bot content. ID: {new_post.id}", "SUCCESS")
+
+    except Exception as e:
+        task.log(f"Error in auto-posting task: {e}", "ERROR")
+        trace_exception(e)
+    finally:
+        db.close()
+
 def get_post_public(db: Session, db_post: DBPost, current_user_id: int) -> PostPublic:
     like_count = db.query(func.count(DBPostLike.user_id)).filter(DBPostLike.post_id == db_post.id).scalar() or 0
     has_liked = db.query(DBPostLike).filter(DBPostLike.post_id == db_post.id, DBPostLike.user_id == current_user_id).first() is not None

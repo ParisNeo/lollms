@@ -45,6 +45,26 @@ def search_for_users(
     return users
 
 
+@users_router.get("/mention_search", response_model=List[UserPublic])
+def search_for_mentions(
+    q: str = Query(..., min_length=1, max_length=50),
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Searches for users to mention.
+    Returns users whose username starts with the query and are searchable.
+    Excludes the current user.
+    """
+    search_term = f"{q}%"
+    users = db.query(DBUser).filter(
+        DBUser.id != current_user.id,
+        DBUser.is_searchable == True,
+        DBUser.username.ilike(search_term)
+    ).limit(5).all()
+    return users
+
+
 @users_router.get("/{username}", response_model=UserProfileResponse)
 def get_user_profile(
     username: str,
@@ -74,22 +94,3 @@ def get_user_profile(
             "friendship_status": friendship_status
         }
     )
-
-@users_router.get("/mention_search", response_model=List[UserPublic])
-def search_for_mentions(
-    q: str = Query(..., min_length=1, max_length=50),
-    db: Session = Depends(get_db),
-    current_user: UserAuthDetails = Depends(get_current_active_user)
-):
-    """
-    Searches for users to mention.
-    Returns users whose username starts with the query and are searchable.
-    Excludes the current user.
-    """
-    search_term = f"{q}%"
-    users = db.query(DBUser).filter(
-        DBUser.id != current_user.id,
-        DBUser.is_searchable == True,
-        DBUser.username.ilike(search_term)
-    ).limit(5).all()
-    return users
