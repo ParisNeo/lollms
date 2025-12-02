@@ -183,7 +183,8 @@ app_main.db
 zoo_cache.json
 
 # models
-models
-
+models/
+!backend/models/
+!backend/db/models/
 # lollms vscoder discussions
 .lollms
