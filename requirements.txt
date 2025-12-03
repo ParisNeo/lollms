@@ -86,3 +86,6 @@ markdown2
 aioredis
 pydub
 latex2mathml
+
+# For exporting the database
+pyzipper

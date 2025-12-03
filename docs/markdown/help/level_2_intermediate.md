@@ -1,36 +1,36 @@
-# Intermediate Concepts
+# Intermediate Guide
 
-Ready to unlock more of LoLLMs' power? This section covers key features that enhance your interaction with the AI.
+Once you are comfortable with basic chatting, explore these powerful features.
 
-<h2 id="personalities">Understanding Personalities</h2>
+## 1. Data Stores (RAG)
 
-A **Personality** is a pre-defined set of instructions that tells the AI how to behave. It's more than just a system prompt; it can include:
+"Retrieval Augmented Generation" (RAG) allows the AI to read your documents.
 
--   A core system prompt defining its role, tone, and rules.
--   A custom icon and description.
--   Pre-activated MCPs (Tools).
--   A dedicated knowledge base using a Data Store.
+1.  Go to the **Data Stores** view (Database icon).
+2.  Create a new Data Store.
+3.  Upload PDF, TXT, or DOCX files.
+4.  **Mounting**: In your chat settings or personality settings, select this Data Store. The AI can now answer questions based on those documents.
 
-You can switch personalities at any time from the dropdown in the global header. You can also create your own in **Settings -> Personalities**.
+## 2. Image Generation
 
-<h2 id="data-stores">Data Stores and RAG</h2>
+If the server has an image generation engine (TTI) enabled:
+*   Ask the AI to "Draw a picture of..." or "Generate an image of...".
+*   In **Image Studio**, you can use specialized tools to edit or generate images with more control.
 
-**Retrieval-Augmented Generation (RAG)** allows the AI to use information from your own documents to answer questions. In LoLLMs, this is managed through **Data Stores**.
+## 3. Social Features
 
-1.  **Create a Store:** Go to the "Data Stores" page from the user menu. Create a new store and give it a name.
-2.  **Upload Documents:** Upload files (`.pdf`, `.docx`, `.txt`, etc.) to your store. The system will automatically chunk and index them.
-3.  **Use in Chat:** In the chat view, open the **Data Zone**, select the "Discussion" tab, and use the RAG dropdown to attach one or more Data Stores to your current conversation.
+*   **Friends**: Add other users on the server as friends to send Direct Messages (DM).
+*   **Social Feed**: Share your interesting AI discussions or images with the community.
 
-The AI will now automatically search the selected stores for relevant information when you ask a question.
+## 4. Personal Profile
 
-<h2 id="mcp-tools">MCPs (Tools)</h2>
+Go to **Settings > Account** to:
+*   Change your Avatar.
+*   Update your password.
+*   Set a "Personal Information" note that the AI will always know about you (e.g., "I am a Python developer").
 
-**Modular Communication Protocols (MCPs)** are tools that extend the AI's capabilities, allowing it to interact with external services or perform complex tasks.
+## 5. Exporting
 
-You can enable specific tools for your conversation from the chat input bar. When a tool is active, the AI can decide to use it to answer your prompt.
-
-Examples include:
-- A `Web Search` tool to get live information from the internet.
-- A `Code Interpreter` to execute Python code.
-
-Administrators can add and configure new MCPs from the Admin Panel.
+You can export your discussions to save them offline:
+*   **Formats**: JSON, Markdown, or Plain Text.
+*   **Location**: Look for the export button in the discussion header.

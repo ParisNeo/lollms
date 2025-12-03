@@ -1,160 +1,198 @@
 <script setup>
-import { computed } from 'vue';
-import { storeToRefs } from 'pinia';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useAdminStore } from '../../stores/admin';
-import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
+import { useTasksStore } from '../../stores/tasks';
+import { useUiStore } from '../../stores/ui';
+import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import IconGpu from '../../assets/icons/IconGpu.vue';
+import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 import IconHardDrive from '../../assets/icons/IconHardDrive.vue';
-import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
+import IconTrash from '../../assets/icons/IconTrash.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
 
 const adminStore = useAdminStore();
-const { systemStatus, isLoadingSystemStatus } = storeToRefs(adminStore);
+const tasksStore = useTasksStore();
+const uiStore = useUiStore();
+const systemStatus = computed(() => adminStore.systemStatus);
 
-const gpus = computed(() => systemStatus.value?.gpus || []);
-const totalVramUsedGb = computed(() => gpus.value.reduce((acc, gpu) => acc + gpu.vram_used_gb, 0));
-const totalVramTotalGb = computed(() => gpus.value.reduce((acc, gpu) => acc + gpu.vram_total_gb, 0));
-const totalVramUsagePercent = computed(() => {
-    return totalVramTotalGb.value > 0 ? (totalVramUsedGb.value / totalVramTotalGb.value) * 100 : 0;
+const lastAnalysisReport = ref(null);
+const isAnalyzing = ref(false);
+
+const analysisTasks = computed(() => {
+    return tasksStore.tasks.filter(t => t.name === "Analyze System Logs").sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 });
 
-const dataDisk = computed(() => {
-    if (!systemStatus.value || !systemStatus.value.disks) return null;
-    let disk = systemStatus.value.disks.find(d => d.is_data_disk);
-    if (!disk && systemStatus.value.disks.length > 0) {
-        disk = systemStatus.value.disks[0];
+// Watch for changes in analysis tasks to update the report view
+watch(analysisTasks, (tasks) => {
+    const latest = tasks[0];
+    if (latest) {
+        if (latest.status === 'running' || latest.status === 'pending') {
+            isAnalyzing.value = true;
+        } else {
+            isAnalyzing.value = false;
+            if (latest.status === 'completed' && latest.result?.report) {
+                lastAnalysisReport.value = latest.result;
+            }
+        }
+    } else {
+        isAnalyzing.value = false;
+        lastAnalysisReport.value = null;
     }
-    return disk;
-});
+}, { immediate: true });
 
-const formatBytes = (gb) => {
-    if (gb === undefined || gb === null) return 'N/A';
-    return `${gb.toFixed(1)} GB`;
-};
+async function analyzeLogs() {
+    try {
+        await adminStore.analyzeSystemLogs();
+        isAnalyzing.value = true;
+    } catch (e) {
+        // Error handled in store
+    }
+}
 
-const formatPercent = (percent) => {
-    if (percent === undefined || percent === null) return 'N/A';
-    return `${percent.toFixed(2)}%`;
-};
+async function killProcess(pid, gpuName) {
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Kill Process?',
+        message: `Are you sure you want to kill process ${pid} on ${gpuName}? This might crash running generations.`,
+        confirmText: 'Kill',
+        isDanger: true
+    });
+    if(confirmed.confirmed) {
+        await adminStore.killProcess(pid);
+    }
+}
+
+const formatBytes = (gb) => gb ? `${gb.toFixed(1)} GB` : '0 GB';
+const formatPercent = (pct) => pct ? `${pct.toFixed(1)}%` : '0%';
 </script>
 
 <template>
-    <div class="space-y-6">
-        <div class="flex items-center justify-between">
-            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">System Status</h2>
-            <button @click="adminStore.fetchSystemStatus" class="btn btn-secondary btn-sm" :disabled="isLoadingSystemStatus">
-                <IconArrowPath class="w-4 h-4" :class="{'animate-spin': isLoadingSystemStatus}" />
-            </button>
-        </div>
-
-        <div v-if="isLoadingSystemStatus && !systemStatus" class="text-center p-8">
-            <p>Loading system status...</p>
-        </div>
-
-        <div v-else-if="systemStatus" class="space-y-6">
-            <!-- Summary Cards -->
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                <!-- GPU VRAM Summary -->
-                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
-                    <div class="flex items-center">
-                        <IconGpu class="w-6 h-6 mr-3 text-gray-400" />
-                        <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">GPU VRAM</h3>
-                    </div>
-                    <p class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">
-                        {{ totalVramTotalGb > 0 ? `${formatBytes(totalVramUsedGb)} / ${formatBytes(totalVramTotalGb)}` : 'N/A' }}
-                    </p>
-                    <p class="text-sm text-gray-500 dark:text-gray-400">
-                        {{ totalVramTotalGb > 0 ? `(${formatPercent(totalVramUsagePercent)})` : 'No compatible GPU found' }}
-                    </p>
+    <div v-if="systemStatus" class="space-y-6">
+        <h3 class="text-xl font-bold text-gray-900 dark:text-white">Hardware Status</h3>
+        
+        <!-- Resources Summary -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <!-- CPU RAM -->
+            <div class="bg-white dark:bg-gray-800 p-5 rounded-xl shadow-sm border dark:border-gray-700">
+                <div class="flex items-center mb-4 text-blue-600">
+                    <IconCpuChip class="w-6 h-6 mr-2"/> <span class="font-semibold">System RAM</span>
                 </div>
-
-                <!-- CPU RAM Summary -->
-                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
-                    <div class="flex items-center">
-                        <IconCpuChip class="w-6 h-6 mr-3 text-gray-400" />
-                        <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">CPU RAM</h3>
-                    </div>
-                    <p class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">
-                        {{ formatBytes(systemStatus.cpu_ram_used_gb) }} / {{ formatBytes(systemStatus.cpu_ram_total_gb) }}
-                    </p>
-                     <p class="text-sm text-gray-500 dark:text-gray-400">({{ formatPercent(systemStatus.cpu_ram_usage_percent) }})</p>
-                </div>
-
-                <!-- Disk Summary (focused on Data disk) -->
-                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
-                    <div class="flex items-center">
-                        <IconHardDrive class="w-6 h-6 mr-3 text-gray-400" />
-                        <h3 class="text-lg font-semibold text-gray-800 dark:text-gray-200">Data Disk</h3>
-                    </div>
-                    <p v-if="dataDisk" class="mt-2 text-2xl font-bold text-gray-900 dark:text-white">
-                        {{ formatBytes(dataDisk.used_gb) }} / {{ formatBytes(dataDisk.total_gb) }}
-                    </p>
-                     <p v-if="dataDisk" class="text-sm text-gray-500 dark:text-gray-400">({{ formatPercent(dataDisk.usage_percent) }})</p>
-                     <p v-else class="mt-2 text-lg text-gray-500 dark:text-gray-400">No disk info</p>
+                <div class="space-y-2">
+                    <div class="flex justify-between text-sm"><span>Usage</span><span>{{ formatPercent(systemStatus.cpu_ram_usage_percent) }}</span></div>
+                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2"><div class="bg-blue-600 h-2 rounded-full" :style="{width: systemStatus.cpu_ram_usage_percent+'%'}"></div></div>
+                    <div class="text-xs text-gray-500 text-right">{{ formatBytes(systemStatus.cpu_ram_used_gb) }} / {{ formatBytes(systemStatus.cpu_ram_total_gb) }}</div>
                 </div>
             </div>
 
-            <!-- Detailed Sections -->
-            <!-- CPU RAM Details -->
-            <div class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
-                <div class="flex items-center mb-2">
-                     <IconCpuChip class="w-5 h-5 mr-2 text-gray-400" />
-                     <h4 class="font-semibold text-gray-800 dark:text-gray-200">CPU RAM Usage Details</h4>
-                </div>
-                <div class="text-sm text-gray-600 dark:text-gray-300 space-y-1">
-                    <p>Available: <span class="font-medium text-gray-900 dark:text-white">{{ formatBytes(systemStatus.cpu_ram_available_gb) }}</span></p>
-                    <p>Usage: <span class="font-medium text-gray-900 dark:text-white">{{ formatBytes(systemStatus.cpu_ram_used_gb) }} / {{ formatBytes(systemStatus.cpu_ram_total_gb) }} ({{ formatPercent(systemStatus.cpu_ram_usage_percent) }})</span></p>
-                </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-3">
-                    <div class="bg-gradient-to-r from-blue-400 to-purple-500 h-2.5 rounded-full" :style="{ width: systemStatus.cpu_ram_usage_percent + '%' }"></div>
-                </div>
-            </div>
-
-            <!-- All Disks Details -->
+            <!-- Disks -->
             <div v-for="disk in systemStatus.disks" :key="disk.mount_point" 
-                 class="p-4 rounded-lg shadow-md border-l-4"
-                 :class="{
-                    'bg-white dark:bg-gray-800 border-transparent': !disk.is_app_disk && !disk.is_data_disk,
-                    'bg-blue-50 dark:bg-blue-900/20 border-blue-500': disk.is_data_disk && !disk.is_app_disk,
-                    'bg-green-50 dark:bg-green-900/20 border-green-500': disk.is_app_disk && !disk.is_data_disk,
-                    'bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 border-purple-500': disk.is_app_disk && disk.is_data_disk
-                 }">
-                <div class="flex items-center mb-2">
-                     <IconHardDrive class="w-5 h-5 mr-2 text-gray-400" />
-                     <h4 class="font-semibold text-gray-800 dark:text-gray-200">Disk: {{ disk.mount_point }}</h4>
-                     <span v-if="disk.is_data_disk" class="ml-3 text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300">Data</span>
-                     <span v-if="disk.is_app_disk" class="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300">App</span>
+                 class="bg-white dark:bg-gray-800 p-5 rounded-xl shadow-sm border-l-4"
+                 :class="{'border-green-500': disk.is_app_disk, 'border-purple-500': disk.is_data_disk, 'border-gray-300 dark:border-gray-600': !disk.is_app_disk && !disk.is_data_disk}">
+                <div class="flex items-center justify-between mb-4">
+                    <div class="flex items-center text-gray-700 dark:text-gray-200">
+                        <IconHardDrive class="w-6 h-6 mr-2"/> 
+                        <span class="font-semibold truncate max-w-[120px]" :title="disk.mount_point">{{ disk.mount_point }}</span>
+                    </div>
+                    <div class="flex gap-1">
+                        <span v-if="disk.is_app_disk" class="px-2 py-0.5 rounded bg-green-100 text-green-800 text-xs font-bold">CODE</span>
+                        <span v-if="disk.is_data_disk" class="px-2 py-0.5 rounded bg-purple-100 text-purple-800 text-xs font-bold">DATA</span>
+                    </div>
                 </div>
-                <div class="text-sm text-gray-600 dark:text-gray-300 space-y-1">
-                    <p>Available: <span class="font-medium text-gray-900 dark:text-white">{{ formatBytes(disk.available_gb) }}</span></p>
-                    <p>Usage: <span class="font-medium text-gray-900 dark:text-white">{{ formatBytes(disk.used_gb) }} / {{ formatBytes(disk.total_gb) }} ({{ formatPercent(disk.usage_percent) }})</span></p>
+                <div class="space-y-2">
+                    <div class="flex justify-between text-sm"><span>Used</span><span>{{ formatPercent(disk.usage_percent) }}</span></div>
+                    <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2"><div class="bg-gray-600 dark:bg-gray-400 h-2 rounded-full" :style="{width: disk.usage_percent+'%'}"></div></div>
+                    <div class="text-xs text-gray-500 text-right">{{ formatBytes(disk.used_gb) }} / {{ formatBytes(disk.total_gb) }}</div>
                 </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-3">
-                    <div class="bg-gradient-to-r from-cyan-400 to-teal-500 h-2.5 rounded-full" :style="{ width: disk.usage_percent + '%' }"></div>
-                </div>
-            </div>
-            
-            <!-- GPU Details -->
-            <div v-if="gpus.length > 0" v-for="(gpu, index) in gpus" :key="gpu.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md">
-                <div class="flex items-center mb-2">
-                     <IconGpu class="w-5 h-5 mr-2 text-gray-400" />
-                     <h4 class="font-semibold text-gray-800 dark:text-gray-200">GPU {{ index + 1 }} Usage Details</h4>
-                </div>
-                 <div class="text-sm text-gray-600 dark:text-gray-300 space-y-1">
-                    <p>Model: <span class="font-medium text-gray-900 dark:text-white">{{ gpu.name }}</span></p>
-                    <p>Available VRAM: <span class="font-medium text-gray-900 dark:text-white">{{ formatBytes(gpu.vram_total_gb - gpu.vram_used_gb) }}</span></p>
-                    <p>Usage: <span class="font-medium text-gray-900 dark:text-white">{{ formatBytes(gpu.vram_used_gb) }} / {{ formatBytes(gpu.vram_total_gb) }} ({{ formatPercent(gpu.vram_usage_percent) }})</span></p>
-                </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-3">
-                    <div class="bg-gradient-to-r from-indigo-500 to-pink-500 h-2.5 rounded-full" :style="{ width: gpu.vram_usage_percent + '%' }"></div>
-                </div>
-            </div>
-             <div v-else class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md text-center text-gray-500 dark:text-gray-400">
-                <p>No NVIDIA GPU detected or pynvml library not installed on the server.</p>
             </div>
         </div>
 
-        <div v-else-if="!isLoadingSystemStatus" class="text-center p-8">
-            <p class="text-red-500">Failed to load system status. Please check server logs.</p>
+        <!-- GPU Details Table -->
+        <div v-if="systemStatus.gpus && systemStatus.gpus.length" class="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden border dark:border-gray-700">
+            <div class="p-4 bg-gray-50 dark:bg-gray-700/30 border-b dark:border-gray-700 font-semibold">GPU Details</div>
+            <div v-for="gpu in systemStatus.gpus" :key="gpu.id" class="p-6 border-b last:border-0 dark:border-gray-700">
+                <div class="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-6">
+                    <div class="flex items-center gap-3 min-w-[200px]">
+                        <IconGpu class="w-8 h-8 text-green-500"/>
+                        <div>
+                            <h4 class="font-bold text-lg">{{ gpu.name }} <span class="text-sm font-normal text-gray-500">[ID: {{ gpu.id }}]</span></h4>
+                        </div>
+                    </div>
+                    
+                    <div class="flex-grow space-y-3">
+                        <!-- Compute Load -->
+                        <div>
+                            <div class="flex justify-between text-xs mb-1"><span>Compute Load</span><span class="font-bold">{{ gpu.gpu_utilization }}%</span></div>
+                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div class="bg-orange-500 h-2 rounded-full transition-all duration-500" :style="{width: gpu.gpu_utilization + '%'}"></div>
+                            </div>
+                        </div>
+                        <!-- VRAM Usage -->
+                        <div>
+                            <div class="flex justify-between text-xs mb-1">
+                                <span>VRAM</span>
+                                <span>{{ formatBytes(gpu.vram_used_gb) }} / {{ formatBytes(gpu.vram_total_gb) }} ({{ formatPercent(gpu.vram_usage_percent) }})</span>
+                            </div>
+                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div class="bg-indigo-500 h-2 rounded-full transition-all duration-500" :style="{width: gpu.vram_usage_percent + '%'}"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Process Table -->
+                <div v-if="gpu.processes && gpu.processes.length" class="mt-4 border dark:border-gray-600 rounded-lg overflow-hidden">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs text-gray-500 uppercase bg-gray-50 dark:bg-gray-900/50">
+                            <tr>
+                                <th class="px-4 py-2">PID</th>
+                                <th class="px-4 py-2">Process Name</th>
+                                <th class="px-4 py-2">VRAM Usage</th>
+                                <th class="px-4 py-2 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="proc in gpu.processes" :key="proc.pid" class="border-t dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800/50">
+                                <td class="px-4 py-2 font-mono">{{ proc.pid }}</td>
+                                <td class="px-4 py-2">{{ proc.name }}</td>
+                                <td class="px-4 py-2">{{ proc.memory_used.toFixed(0) }} MB</td>
+                                <td class="px-4 py-2 text-right">
+                                    <button @click="killProcess(proc.pid, gpu.name)" class="text-red-500 hover:text-red-700 px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-900/20" title="Kill Process">
+                                        <IconTrash class="w-4 h-4"/>
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div v-else class="mt-2 text-xs text-gray-500 italic">No active processes detected on this GPU.</div>
+            </div>
+        </div>
+
+        <!-- Log Analysis Zone -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-gray-900 dark:text-white">AI Log Analysis</h3>
+                <button 
+                    @click="analyzeLogs" 
+                    :disabled="isAnalyzing"
+                    class="btn btn-secondary btn-sm flex items-center gap-2"
+                >
+                    <IconAnimateSpin v-if="isAnalyzing" class="w-4 h-4 animate-spin"/>
+                    <IconPlayCircle v-else class="w-4 h-4"/>
+                    {{ isAnalyzing ? 'Analyzing...' : (lastAnalysisReport ? 'Regenerate Analysis' : 'Analyze Logs') }}
+                </button>
+            </div>
+
+            <div v-if="lastAnalysisReport" class="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4 text-sm border dark:border-gray-700">
+                <div class="flex justify-between items-center mb-3 text-xs text-gray-500">
+                    <span class="font-semibold">Analysis Report</span>
+                    <span>Generated: {{ new Date(lastAnalysisReport.generated_at).toLocaleString() }}</span>
+                </div>
+                <MessageContentRenderer :content="lastAnalysisReport.report" class="prose dark:prose-invert prose-sm max-w-none"/>
+            </div>
+            <div v-else class="text-center py-8 text-gray-500 dark:text-gray-400 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
+                <p>Click "Analyze Logs" to have the AI scan recent system tasks and identify potential issues.</p>
+            </div>
         </div>
     </div>
 </template>

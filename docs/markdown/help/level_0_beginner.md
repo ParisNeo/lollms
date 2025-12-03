@@ -1,24 +1,33 @@
-# Beginner's Guide
+# Beginner's Guide to LoLLMs
 
-Welcome to the LoLLMs platform! This guide will walk you through the fundamental features to get you started.
+Welcome to LoLLMs! This guide will help you get started with chatting and using basic features.
 
-<h2 id="introduction">Introduction to the Interface</h2>
+## 1. Getting Started
 
-The main interface is divided into three key areas:
+### Logging In
+If your server requires authentication, enter your username and password. If you don't have an account, click **Register**. Depending on server settings, you may need to wait for an administrator to approve your account.
 
-1.  **Sidebar (Left):** This is your main navigation hub. You can start new chats, browse your past conversations, and access other parts of the application like Settings and this Help page.
-2.  **Chat Area (Center):** This is where your conversation with the AI takes place. Messages are displayed here in a familiar chat format.
-3.  **Data Zone (Right):** A powerful area for managing context. You can add documents, text snippets (artefacts), and manage long-term memory for the AI. You can toggle its visibility from the header bar.
+### The Chat Interface
+*   **Message Input**: Type your message at the bottom of the screen. Press `Enter` to send.
+*   **New Discussion**: Click the `+` button in the sidebar or top bar to start a fresh conversation.
+*   **History**: Your past discussions are listed in the sidebar. Click one to resume it.
 
-## Sending Your First Message
+## 2. Personalities
 
-1.  Click the **"New Chat"** button in the sidebar to start a fresh conversation.
-2.  At the bottom of the screen, you'll find the **chat input bar**.
-3.  Type your question or prompt, for example: `Hello! Can you tell me a fun fact?`
-4.  Press **Enter** to send your message.
+LoLLMs uses "Personalities" to change how the AI behaves.
+*   **Selection**: Click the personality name (usually in the header or sidebar) to choose a different one.
+*   **Types**:
+    *   *Helpful Assistant*: Good for general questions.
+    *   *Creative Writer*: Better for stories and poems.
+    *   *Code Expert*: Specialized in programming help.
 
-The AI will process your request and stream its response back to you in the chat area.
+## 3. Basic Settings
 
-## What's Next?
+Click the **Settings** (Gear icon) to access basic preferences:
+*   **UI Level**: Set this to "Beginner" to hide complex options.
+*   **Theme**: Toggle between Light and Dark mode.
+*   **Language**: Set your preferred interface language.
 
-Once you're comfortable with the basics, try exploring different **Personalities** from the dropdown menu at the top of the screen. They can dramatically change how the AI interacts with you!
+## 4. Tips
+*   **Stop Generation**: If the AI is talking too long, click the "Stop" (Square) button in the input bar.
+*   **Edit Message**: You can edit your own messages to correct mistakes; the AI will regenerate its response.

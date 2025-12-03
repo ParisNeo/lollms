@@ -1,22 +1,42 @@
 import json
 import base64
-from typing import List, Dict
+import socket
+import ipaddress
+import datetime
+from typing import List, Dict, Any
 import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
 from backend.db.models.config import GlobalConfig as DBGlobalConfig
-from backend.models import UserAuthDetails, GlobalConfigPublic, GlobalConfigUpdate
+from backend.models import UserAuthDetails, GlobalConfigPublic, GlobalConfigUpdate, TaskInfo
 from backend.ws_manager import manager
 from backend.settings import settings
 from ascii_colors import trace_exception
 from backend.config import APP_DATA_DIR
+from backend.session import get_current_admin_user
+from backend.task_manager import task_manager
+from backend.tasks.system_tasks import _generate_self_signed_cert_task
 
 
 settings_management_router = APIRouter()
+
+def _parse_setting_value(value_str):
+    try:
+        # Try to parse the stored value as our expected JSON object
+        data = json.loads(value_str)
+        if isinstance(data, dict) and 'value' in data:
+            return data.get('value'), data.get('type', 'string')
+        else:
+            if isinstance(data, (dict, list)):
+                return json.dumps(data), 'json'
+            return data, 'string'
+    except (json.JSONDecodeError, TypeError):
+        return value_str, 'string'
 
 @settings_management_router.get("/settings", response_model=List[GlobalConfigPublic])
 async def admin_get_global_settings(db: Session = Depends(get_db)):
@@ -26,34 +46,26 @@ async def admin_get_global_settings(db: Session = Depends(get_db)):
         value = config.value
         val_type = 'string'
         
-        try:
-            # Try to parse the stored value as our expected JSON object
-            data = json.loads(value)
-            if isinstance(data, dict) and 'value' in data:
-                value = data.get('value')
-                val_type = data.get('type', 'string')
-            else:
-                # It's JSON, but not our format. To prevent sending an object,
-                # we can either stringify it or, if it's not a dict/list, use it directly.
-                if isinstance(data, (dict, list)):
-                    print(f"WARNING: Setting '{config.key}' has an unexpected format. Treating as a raw JSON string.")
-                    value = json.dumps(data)
-                else:
-                    value = data
-        except (json.JSONDecodeError, TypeError):
-            # Not JSON, treat the raw value as a string. `value` is already config.value.
-            pass
+        if isinstance(value, dict):
+            if 'value' in value:
+                val_type = value.get('type', 'string')
+                value = value.get('value')
+        else:
+            value, val_type = _parse_setting_value(value)
         
-        # Final casting for response model to ensure correct types are sent
+        # Final casting for response model
         if val_type == 'boolean':
-            final_value = str(value).lower() in ('true', '1', 'yes', 'on')
+            if isinstance(value, bool):
+                final_value = value
+            else:
+                final_value = str(value).lower() in ('true', '1', 'yes', 'on')
         elif val_type == 'integer':
             try: final_value = int(value) if value is not None else 0
             except (ValueError, TypeError): final_value = 0
         elif val_type == 'float':
             try: final_value = float(value) if value is not None else 0.0
             except (ValueError, TypeError): final_value = 0.0
-        else: # string, text, json string, etc.
+        else:
             final_value = value
 
         response_models.append(GlobalConfigPublic(
@@ -81,22 +93,28 @@ async def admin_update_global_settings(
                     continue
 
                 original_type = 'string'
-                try:
-                    stored_data = json.loads(db_config.value)
-                    if isinstance(stored_data, dict) and 'type' in stored_data:
-                        original_type = stored_data.get('type', 'string')
-                except (json.JSONDecodeError, TypeError):
-                    pass
+                current_val_in_db = db_config.value
+                
+                if isinstance(current_val_in_db, dict) and 'type' in current_val_in_db:
+                    original_type = current_val_in_db.get('type', 'string')
+                else:
+                    try:
+                        stored_data = json.loads(current_val_in_db)
+                        if isinstance(stored_data, dict) and 'type' in stored_data:
+                            original_type = stored_data.get('type', 'string')
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
                 final_type = original_type
                 coerced_value = new_value
 
-                # Robustly handle booleans - this will fix corrupted data on save
                 if final_type == 'boolean' or isinstance(new_value, bool):
                     final_type = 'boolean'
-                    coerced_value = str(new_value).lower() in ('true', '1', 'yes', 'on')
-                elif isinstance(new_value, str) and new_value.lower() in ('true', 'false'):
-                    final_type = 'boolean'
+                    if isinstance(new_value, bool):
+                        coerced_value = new_value
+                    else:
+                        coerced_value = str(new_value).lower() in ('true', '1', 'yes', 'on')
+                elif isinstance(new_value, str) and new_value.lower() in ('true', 'false') and final_type == 'boolean':
                     coerced_value = new_value.lower() == 'true'
                 elif final_type == 'integer':
                     try: coerced_value = int(new_value)
@@ -133,7 +151,14 @@ async def upload_custom_logo(file: UploadFile = File(...)):
         
         db_config = db.query(DBGlobalConfig).filter(DBGlobalConfig.key == "welcome_logo_url").first()
         if db_config:
-            stored_data = json.loads(db_config.value)
+            try:
+                if isinstance(db_config.value, dict):
+                    stored_data = db_config.value
+                else:
+                    stored_data = json.loads(db_config.value)
+            except (json.JSONDecodeError, TypeError):
+                stored_data = {'type': 'string', 'value': ''}
+                
             stored_data['value'] = logo_url
             db_config.value = json.dumps(stored_data)
             db.commit()
@@ -156,12 +181,13 @@ async def remove_custom_logo(db: Session = Depends(get_db)):
     
     try:
         try:
-            stored_data = json.loads(db_config.value)
+            if isinstance(db_config.value, dict):
+                stored_data = db_config.value
+            else:
+                stored_data = json.loads(db_config.value)
             if not isinstance(stored_data, dict):
-                # If the stored value is corrupted (not a dict), create a fresh structure.
                 stored_data = {'type': 'string', 'value': ''}
         except (json.JSONDecodeError, TypeError):
-            # If it's not valid JSON at all, create a fresh structure.
             stored_data = {'type': 'string', 'value': ''}
 
         stored_data['value'] = ""
@@ -184,11 +210,11 @@ async def upload_ssl_file(
     if file_type not in ['cert', 'key']:
         raise HTTPException(status_code=400, detail="Invalid file_type. Must be 'cert' or 'key'.")
 
-    certs_dir = APP_DATA_DIR / "certs"
+    certs_dir = APP_DATA_DIR / "certificates"
     certs_dir.mkdir(exist_ok=True, parents=True)
     
     if not file.filename:
-        filename = f"{file_type}.pem"
+        filename = f"uploaded_{file_type}.pem"
     else:
         filename = Path(file.filename).name
 
@@ -208,7 +234,11 @@ async def upload_ssl_file(
     db_config = db.query(DBGlobalConfig).filter(DBGlobalConfig.key == setting_key).first()
     if db_config:
         try:
-            stored_data = json.loads(db_config.value)
+            if isinstance(db_config.value, dict):
+                stored_data = db_config.value
+            else:
+                stored_data = json.loads(db_config.value)
+                
             if not isinstance(stored_data, dict) or 'type' not in stored_data:
                 stored_data = {'type': 'string', 'value': stored_data}
         except (json.JSONDecodeError, TypeError):
@@ -224,3 +254,30 @@ async def upload_ssl_file(
         return {"message": f"{file_type.capitalize()} file uploaded and path updated.", "path": absolute_path}
     else:
         raise HTTPException(status_code=404, detail=f"Setting key '{setting_key}' not found.")
+
+@settings_management_router.post("/generate-cert", response_model=TaskInfo, status_code=202)
+async def generate_self_signed_cert(current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    """Starts a background task to generate a self-signed certificate."""
+    db_task = task_manager.submit_task(
+        name="Generate Self-Signed Certificate",
+        target=_generate_self_signed_cert_task,
+        description="Generating SSL certificate and private key.",
+        owner_username=current_user.username
+    )
+    return db_task
+
+@settings_management_router.get("/download-cert")
+async def download_cert(db: Session = Depends(get_db)):
+    config = db.query(DBGlobalConfig).filter(DBGlobalConfig.key == "ssl_certfile").first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Certificate path setting not found.")
+    
+    val, _ = _parse_setting_value(config.value)
+    if not val:
+        raise HTTPException(status_code=404, detail="Certificate path is empty.")
+    
+    path = Path(val)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Certificate file not found on server.")
+        
+    return FileResponse(path, media_type='application/x-pem-file', filename="lollms_cert.pem")

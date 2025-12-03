@@ -4,6 +4,9 @@ import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
 import StringListEditor from '../ui/StringListEditor.vue';
+import IconLock from '../../assets/icons/IconLock.vue';
+import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
@@ -27,6 +30,32 @@ const serverSettings = computed(() => adminStore.globalSettings.filter(s => s.ca
 const registrationSettings = computed(() => adminStore.globalSettings.filter(s => s.category === 'Registration'));
 const defaultSettings = computed(() => adminStore.globalSettings.filter(s => s.category === 'Defaults'));
 const allModels = computed(() => dataStore.availableLollmsModels);
+
+// Group models by binding name for better display
+const groupedModels = computed(() => {
+    const groups = {};
+    if (!allModels.value) return {};
+    
+    allModels.value.forEach(model => {
+        let binding = 'Other';
+        let name = model.name;
+        
+        if (model.name.includes('/')) {
+            const parts = model.name.split('/');
+            binding = parts[0];
+            name = parts.slice(1).join('/');
+        }
+        
+        if (!groups[binding]) groups[binding] = [];
+        groups[binding].push({ ...model, displayName: name });
+    });
+    
+    // Sort keys and return object
+    return Object.keys(groups).sort().reduce((acc, key) => {
+        acc[key] = groups[key].sort((a, b) => a.displayName.localeCompare(b.displayName));
+        return acc;
+    }, {});
+});
 
 onMounted(async () => {
     if (adminStore.globalSettings.length === 0) {
@@ -92,6 +121,34 @@ async function handleSave() {
         isLoading.value = false;
     }
 }
+
+async function generateCert() {
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Generate Certificate?',
+        message: 'This will generate a new self-signed certificate and overwrite existing SSL settings. A server restart will be required.',
+        confirmText: 'Generate & Enable'
+    });
+    if (!confirmed.confirmed) return;
+    
+    isLoading.value = true;
+    try {
+        // This now triggers a background task
+        await adminStore.generateSelfSignedCert();
+        // UI updates are handled via task completion event in store
+    } catch(e) {
+        // Error handled in store
+    } finally {
+        isLoading.value = false;
+    }
+}
+
+function downloadCert() {
+    adminStore.downloadCertificate();
+}
+
+function isFullWidth(key) {
+    return ['cors_origins_exceptions', 'data_path', 'huggingface_cache_path', 'ssl_certfile', 'ssl_keyfile'].includes(key);
+}
 </script>
 
 <template>
@@ -100,112 +157,186 @@ async function handleSave() {
             <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">Server Settings</h3>
             <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Manage core server behavior, user registration, and defaults for new users.</p>
         </div>
+        
         <form v-if="Object.keys(form).length" @submit.prevent="handleSave" class="p-6">
-            <div class="space-y-10">
+            <div class="space-y-12">
                 
                 <!-- Server Configuration -->
                 <div v-if="serverSettings.length > 0">
                     <h4 class="settings-category-title">Server Configuration</h4>
-                    <div class="space-y-6">
-                        <div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 text-yellow-800 dark:text-yellow-200 rounded-r-lg">
-                            <p class="text-sm font-medium">A server restart is required for any changes in this section to take effect.</p>
-                        </div>
-                        <div v-for="setting in serverSettings" :key="setting.key" class="space-y-1">
-                            <label :for="setting.key" class="label">{{ setting.description }}</label>
+                    <div class="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-400 text-blue-800 dark:text-blue-200 rounded-r-lg">
+                        <p class="text-sm font-medium">Note: Changing server host, port, or SSL settings requires a server restart.</p>
+                    </div>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div v-for="setting in serverSettings.filter(s => !['ssl_certfile', 'ssl_keyfile', 'https_enabled'].includes(s.key))" 
+                             :key="setting.key" 
+                             class="setting-card"
+                             :class="{'md:col-span-2': isFullWidth(setting.key)}">
+                            
+                            <label :for="setting.key" class="label mb-2">{{ setting.description }}</label>
                             
                             <StringListEditor v-if="setting.key === 'cors_origins_exceptions'" v-model="form[setting.key]" />
                             
-                            <div v-else-if="setting.key === 'ssl_certfile'" class="flex items-center gap-2">
-                                <input type="text" :id="setting.key" v-model="form[setting.key]" class="input-field flex-grow" placeholder="/path/to/cert.pem">
-                                <input type="file" ref="certFileInput" @change="event => handleFileUpload(event, 'cert')" class="hidden">
-                                <button @click.prevent="certFileInput[0].click()" type="button" class="btn btn-secondary">Upload</button>
-                            </div>
-
-                            <div v-else-if="setting.key === 'ssl_keyfile'" class="flex items-center gap-2">
-                                <input type="text" :id="setting.key" v-model="form[setting.key]" class="input-field flex-grow" placeholder="/path/to/key.pem">
-                                <input type="file" ref="keyFileInput" @change="event => handleFileUpload(event, 'key')" class="hidden">
-                                <button @click.prevent="keyFileInput[0].click()" type="button" class="btn btn-secondary">Upload</button>
-                            </div>
-                            
-                            <div v-else-if="setting.type === 'boolean'" class="toggle-container-flat">
-                                <button @click="form[setting.key] = !form[setting.key]" type="button" :class="[form[setting.key] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'toggle-switch']"><span :class="[form[setting.key] ? 'translate-x-5' : 'translate-x-0', 'toggle-knob']"></span></button>
+                            <div v-else-if="setting.type === 'boolean'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg border dark:border-gray-600">
+                                <span class="text-sm text-gray-700 dark:text-gray-300">{{ setting.description }}</span>
+                                <button @click="form[setting.key] = !form[setting.key]" type="button" :class="[form[setting.key] ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600', 'toggle-switch']">
+                                    <span :class="[form[setting.key] ? 'translate-x-5' : 'translate-x-0', 'toggle-knob']"></span>
+                                </button>
                             </div>
 
                             <input v-else
-                                :type="setting.type === 'string' ? 'text' : (setting.type === 'integer' || setting.type === 'float' ? 'number' : 'text')"
+                                :type="setting.type === 'string' ? 'text' : 'number'"
+                                :step="setting.type === 'float' ? '0.1' : '1'"
                                 :id="setting.key"
                                 v-model="form[setting.key]"
-                                class="input-field"
+                                class="input-field w-full"
                                 :readonly="setting.key === 'data_path' || setting.key === 'huggingface_cache_path'"
-                                :class="{'bg-gray-100 dark:bg-gray-700 cursor-not-allowed': setting.key === 'data_path' || setting.key === 'huggingface_cache_path'}"
+                                :class="{'bg-gray-100 dark:bg-gray-700 cursor-not-allowed opacity-75': setting.key === 'data_path' || setting.key === 'huggingface_cache_path'}"
                             >
                         </div>
                     </div>
                 </div>
 
-                <!-- Registration -->
-                <div v-if="registrationSettings.length > 0">
-                    <h4 class="settings-category-title">New User Registration</h4>
-                    <div class="space-y-6">
-                        <div v-for="setting in registrationSettings.filter(s => s.type === 'boolean')" :key="setting.key" class="toggle-container">
-                            <span class="toggle-label">{{ setting.description }}</span>
-                            <button @click="form[setting.key] = !form[setting.key]" type="button" :class="[form[setting.key] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'toggle-switch']"><span :class="[form[setting.key] ? 'translate-x-5' : 'translate-x-0', 'toggle-knob']"></span></button>
+                <!-- HTTPS Configuration Block -->
+                <div class="border-t pt-8 dark:border-gray-700">
+                    <h4 class="settings-category-title flex items-center gap-2 mb-6">
+                        <IconLock class="w-5 h-5 text-green-600 dark:text-green-400"/> HTTPS Configuration
+                    </h4>
+                    
+                    <div class="bg-gray-50 dark:bg-gray-700/20 p-6 rounded-xl border dark:border-gray-700">
+                        <div class="flex items-center justify-between mb-6 pb-6 border-b dark:border-gray-600">
+                            <div>
+                                <h5 class="text-base font-semibold text-gray-900 dark:text-gray-100">Enable Secure Connection</h5>
+                                <p class="text-sm text-gray-500 dark:text-gray-400">Toggle HTTPS support. Requires valid certificate files.</p>
+                            </div>
+                            <button @click="form.https_enabled = !form.https_enabled" type="button" :class="[form.https_enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600', 'toggle-switch']">
+                                <span :class="[form.https_enabled ? 'translate-x-5' : 'translate-x-0', 'toggle-knob']"></span>
+                            </button>
                         </div>
-                        <div v-for="setting in registrationSettings.filter(s => s.key === 'registration_mode')" :key="setting.key">
-                            <label :for="setting.key" class="label">{{ setting.description }}</label>
-                            <select :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
-                                <option value="direct">Direct (instantly active)</option>
-                                <option value="admin_approval">Admin Approval</option>
-                            </select>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <!-- Certificate -->
+                            <div>
+                                <label class="label">SSL Certificate</label>
+                                <div class="flex gap-2 mt-1">
+                                    <input type="text" v-model="form.ssl_certfile" class="input-field flex-grow text-xs font-mono" placeholder="/path/to/cert.pem">
+                                    <input type="file" ref="certFileInput" @change="e => handleFileUpload(e, 'cert')" class="hidden">
+                                    <button @click.prevent="$refs.certFileInput.click()" type="button" class="btn btn-secondary text-xs whitespace-nowrap">Upload PEM</button>
+                                </div>
+                            </div>
+                            <!-- Private Key -->
+                            <div>
+                                <label class="label">SSL Private Key</label>
+                                <div class="flex gap-2 mt-1">
+                                    <input type="text" v-model="form.ssl_keyfile" class="input-field flex-grow text-xs font-mono" placeholder="/path/to/key.pem">
+                                    <input type="file" ref="keyFileInput" @change="e => handleFileUpload(e, 'key')" class="hidden">
+                                    <button @click.prevent="$refs.keyFileInput.click()" type="button" class="btn btn-secondary text-xs whitespace-nowrap">Upload PEM</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap gap-4 pt-6 mt-2">
+                            <button type="button" @click="generateCert" class="btn btn-primary flex items-center gap-2" :disabled="isLoading">
+                                <IconSparkles class="w-4 h-4" /> Auto-Generate Self-Signed Cert
+                            </button>
+                            <button type="button" @click="downloadCert" class="btn btn-secondary flex items-center gap-2" :disabled="!form.ssl_certfile">
+                                <IconArrowDownTray class="w-4 h-4" /> Download Certificate
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Registration -->
+                <div v-if="registrationSettings.length > 0" class="border-t pt-8 dark:border-gray-700">
+                    <h4 class="settings-category-title">New User Registration</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div v-for="setting in registrationSettings" :key="setting.key" 
+                             class="setting-card" :class="{'md:col-span-2': setting.key === 'registration_mode' && setting.description.length > 50}">
+                            
+                            <template v-if="setting.type === 'boolean'">
+                                <div class="flex items-center justify-between h-full bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg border dark:border-gray-600">
+                                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300 pr-4">{{ setting.description }}</span>
+                                    <button @click="form[setting.key] = !form[setting.key]" type="button" :class="[form[setting.key] ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600', 'toggle-switch flex-shrink-0']">
+                                        <span :class="[form[setting.key] ? 'translate-x-5' : 'translate-x-0', 'toggle-knob']"></span>
+                                    </button>
+                                </div>
+                            </template>
+                            
+                            <template v-else-if="setting.key === 'registration_mode'">
+                                <label :for="setting.key" class="label mb-1">{{ setting.description }}</label>
+                                <select :id="setting.key" v-model="form[setting.key]" class="input-field w-full">
+                                    <option value="direct">Direct (Instantly Active)</option>
+                                    <option value="admin_approval">Admin Approval Required</option>
+                                </select>
+                            </template>
                         </div>
                     </div>
                 </div>
 
                 <!-- Defaults -->
-                <div v-if="defaultSettings.length > 0">
+                <div v-if="defaultSettings.length > 0" class="border-t pt-8 dark:border-gray-700">
                     <h4 class="settings-category-title">Defaults for New Users</h4>
-                    <div class="space-y-6">
-                        <div v-for="setting in defaultSettings.filter(s => s.type === 'boolean')" :key="setting.key" class="toggle-container">
-                            <span class="toggle-label">{{ setting.description }}</span>
-                            <button @click="form[setting.key] = !form[setting.key]" type="button" :class="[form[setting.key] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'toggle-switch']"><span :class="[form[setting.key] ? 'translate-x-5' : 'translate-x-0', 'toggle-knob']"></span></button>
-                        </div>
-                        <div v-for="setting in defaultSettings.filter(s => s.type !== 'boolean' && s.key !== 'default_user_ui_level')" :key="setting.key">
-                            <label :for="setting.key" class="label">{{ setting.description }}</label>
-                            <input v-if="setting.key !== 'default_lollms_model_name'" :type="setting.type === 'string' ? 'text' : 'number'" :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
-                            <select v-else :id="setting.key" v-model="form[setting.key]" class="input-field mt-1">
-                                <option value="">(None)</option>
-                                <option v-for="model in allModels" :key="model.id" :value="model.id">{{ model.name }}</option>
-                            </select>
-                        </div>
-                        <div v-for="setting in defaultSettings.filter(s => s.key === 'default_user_ui_level')" :key="setting.key">
-                            <label :for="setting.key" class="label">{{ setting.description }}</label>
-                            <select :id="setting.key" v-model.number="form[setting.key]" class="input-field mt-1">
-                                <option v-for="level in uiLevels" :key="level.value" :value="level.value">{{ level.label }}</option>
-                            </select>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div v-for="setting in defaultSettings" :key="setting.key" class="setting-card">
+                            
+                            <template v-if="setting.type === 'boolean'">
+                                <div class="flex items-center justify-between h-full bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg border dark:border-gray-600">
+                                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300 pr-4">{{ setting.description }}</span>
+                                    <button @click="form[setting.key] = !form[setting.key]" type="button" :class="[form[setting.key] ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600', 'toggle-switch flex-shrink-0']">
+                                        <span :class="[form[setting.key] ? 'translate-x-5' : 'translate-x-0', 'toggle-knob']"></span>
+                                    </button>
+                                </div>
+                            </template>
+
+                            <template v-else>
+                                <label :for="setting.key" class="label mb-1">{{ setting.description }}</label>
+                                
+                                <select v-if="setting.key === 'default_lollms_model_name'" :id="setting.key" v-model="form[setting.key]" class="input-field w-full">
+                                    <option value="">(None - User Selects)</option>
+                                    <optgroup v-for="(models, binding) in groupedModels" :key="binding" :label="binding">
+                                        <option v-for="model in models" :key="model.id" :value="model.id">
+                                            {{ model.displayName }}
+                                        </option>
+                                    </optgroup>
+                                </select>
+
+                                <select v-else-if="setting.key === 'default_user_ui_level'" :id="setting.key" v-model.number="form[setting.key]" class="input-field w-full">
+                                    <option v-for="level in uiLevels" :key="level.value" :value="level.value">{{ level.label }}</option>
+                                </select>
+
+                                <input v-else 
+                                    :type="setting.type === 'string' ? 'text' : 'number'" 
+                                    :id="setting.key" 
+                                    v-model="form[setting.key]" 
+                                    class="input-field w-full"
+                                >
+                            </template>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="mt-8 pt-5 border-t border-gray-200 dark:border-gray-700">
+            <div class="mt-8 pt-6 border-t border-gray-200 dark:border-gray-700">
                 <div class="flex justify-end">
-                    <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">{{ isLoading ? 'Saving...' : 'Save Settings' }}</button>
+                    <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">
+                        {{ isLoading ? 'Saving...' : 'Save All Settings' }}
+                    </button>
                 </div>
             </div>
         </form>
-        <div v-else class="p-6 text-center text-gray-500">
-            <p v-if="adminStore.isLoadingSettings">Loading settings...</p>
+        
+        <div v-else class="p-12 text-center text-gray-500">
+            <p v-if="adminStore.isLoadingSettings" class="animate-pulse">Loading settings...</p>
             <p v-else>Could not load server settings.</p>
         </div>
     </div>
 </template>
 
 <style scoped>
-.settings-category-title { @apply text-lg font-medium text-gray-800 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600 pb-2 mb-6; }
+.settings-category-title { @apply text-lg font-bold text-gray-800 dark:text-gray-100 mb-4; }
 .label { @apply block text-sm font-medium text-gray-700 dark:text-gray-300; }
-.toggle-container { @apply flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg; }
-.toggle-label { @apply flex-grow flex flex-col text-sm font-medium text-gray-900 dark:text-gray-100; }
-.toggle-switch { @apply relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out; }
+.toggle-switch { @apply relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800; }
 .toggle-knob { @apply pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out; }
-.toggle-container-flat { @apply pt-2; }
+.setting-card { @apply flex flex-col justify-center; }
 </style>

@@ -1,25 +1,36 @@
-# Expert Configuration & Features
+# Expert & Developer Guide
 
-This guide is for power users, developers, and administrators who want to leverage the full capabilities of the LoLLMs platform.
+For power users, developers, and prompt engineers.
 
-<h2 id="api-usage">API Usage</h2>
+## 1. Managing Bindings
 
-LoLLMs exposes a comprehensive FastAPI backend. You can access the interactive API documentation (Swagger UI) at the `/docs` endpoint of your instance (e.g., `http://localhost:9642/docs`).
+Bindings connect LoLLMs to the underlying AI engines.
+*   **Changing Models**: Go to **Settings > Bindings**. You can switch the active model for a binding (e.g., change from `llama3-8b` to `mistral-7b`).
+*   **Parameters**: Fine-tune generation parameters like `Temperature`, `Top-K`, `Top-P`, and `Context Size`.
 
-This allows you to programmatically:
-- Manage users and discussions.
-- Send generation requests.
-- Interact with Data Stores.
+## 2. The Zoos
 
-All API endpoints require a bearer token for authentication, which can be generated from your user settings.
+The "Zoo" system allows installing new capabilities.
+*   **Models Zoo**: Download generic GGUF models from HuggingFace or other sources.
+*   **Personalities Zoo**: Install community-created personalities with specialized prompts and tools.
+*   **Apps Zoo**: Install server-side extensions (e.g., a simplified UI, a specific workflow tool).
 
-<h2 id="custom-bindings">Custom Bindings</h2>
+## 3. API Access
 
-The power of LoLLMs comes from its modular binding system. A **Binding** is a Python class that acts as a bridge to a specific LLM, TTI (Text-to-Image), or TTS (Text-to-Speech) backend.
+LoLLMs provides a REST API compatible with OpenAI libraries.
+1.  Go to **Settings > API Keys**.
+2.  Generate a new API Key.
+3.  Endpoint: `http://your-server:9642/v1`.
+4.  You can use this with tools like AutoGen, LangChain, or standard OpenAI client libraries.
 
-As an administrator, you can configure new bindings from the **Admin Panel**. This allows you to connect LoLLMs to:
-- Local models running via `Ollama`, `GPT4All`, etc.
-- Hosted services like `OpenAI`, `Anthropic`, `Mistral`, etc.
-- Custom-built model servers.
+## 4. Scripting & Tools
 
-Each binding has its own set of configuration parameters, such as API keys, base URLs, and model paths.
+*   **Python Code Execution**: Some personalities (like "Lollms Coder") can write and execute Python code in a sandboxed environment on the server.
+*   **MCPs (Model Context Protocol)**: LoLLMs supports MCP, allowing you to connect external tools (like database access, web search) that the AI can invoke autonomously.
+
+## 5. Custom Personalities
+
+You can create your own personality:
+1.  Go to **Settings > Personalities**.
+2.  Click **+** to create new.
+3.  Define the `System Prompt`, initial message, and even attach python scripts for complex logic.
