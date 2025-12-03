@@ -182,13 +182,22 @@ watch(message_font_size, (newSize) => {
                     <button @click="authStore.fetchNewFunFact()" class="btn btn-secondary btn-sm">Next Fun Fact</button>
                 </div>
             </div>
+            
+            <!-- Glassmorphism Progress Bar -->
             <div class="mt-12 w-full px-4">
-                <div class="h-2.5 w-full rounded-full bg-gray-200 dark:bg-gray-600">
-                    <div class="h-2.5 rounded-full bg-gradient-to-r from-cyan-400 to-blue-500 transition-all duration-500 progress-bar-animated" :style="{ width: `${authStore.loadingProgress}%` }"></div>
+                <div class="h-4 w-full rounded-full bg-gray-200/20 backdrop-blur-md border border-white/20 dark:border-gray-600/30 overflow-hidden shadow-inner relative">
+                    <div class="h-full rounded-full bg-gradient-to-r from-cyan-400/90 to-blue-500/90 backdrop-blur-sm transition-all duration-500 relative" 
+                         :style="{ width: `${authStore.loadingProgress}%` }">
+                         <!-- Shine effect -->
+                         <div class="absolute top-0 left-0 bottom-0 right-0 bg-gradient-to-b from-white/30 to-transparent"></div>
+                         <!-- Striped animation (optional css class or inline) -->
+                         <div class="absolute inset-0 w-full h-full progress-bar-animated opacity-30"></div>
+                    </div>
                 </div>
-                <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">{{ authStore.loadingMessage }}</p>
-                <p class="mt-1 text-lg font-semibold text-gray-700 dark:text-gray-200">{{ authStore.loadingProgress }}%</p>
+                <p class="mt-3 text-sm text-gray-600 dark:text-gray-300 font-medium tracking-wide">{{ authStore.loadingMessage }}</p>
+                <p class="mt-1 text-lg font-bold text-gray-700 dark:text-gray-200">{{ authStore.loadingProgress }}%</p>
             </div>
+
         </div>
         <footer class="absolute bottom-4 w-full text-center text-xs text-gray-500 dark:text-gray-400">
             Powered by <a href="https://github.com/ParisNeo/lollms-webui" target="_blank" class="font-semibold hover:underline">LoLLMs</a> by <a href="https://github.com/ParisNeo" target="_blank" class="font-semibold hover:underline">ParisNeo</a>

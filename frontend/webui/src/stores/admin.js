@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 import { ref, reactive, watch, onMounted } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
+import { useTasksStore } from './tasks'; // Static import
 import useEventBus from '../services/eventBus';
 
 // Helper to safely get and parse localStorage data
@@ -37,6 +38,7 @@ const castSettingValue = (value, type) => {
 
 export const useAdminStore = defineStore('admin', () => {
     const uiStore = useUiStore();
+    const tasksStore = useTasksStore();
     const { on } = useEventBus();
 
     // --- State ---
@@ -144,7 +146,7 @@ export const useAdminStore = defineStore('admin', () => {
 
         if (taskName.includes('generate self-signed certificate') && task.status === 'completed') {
             fetchGlobalSettings();
-            uiStore.addNotification('Certificate generated successfully.', 'success', 6000);
+            uiStore.addNotification('Certificate generated successfully. Reloading settings...', 'success', 6000);
         }
     }
     on('task:completed', handleTaskCompletion);
@@ -183,16 +185,12 @@ export const useAdminStore = defineStore('admin', () => {
     async function broadcastMessage(message) { await apiClient.post('/api/admin/broadcast', { message }); }
 
     async function createBackup(password) {
-        const { useTasksStore } = await import('./tasks.js');
-        const tasksStore = useTasksStore();
         const response = await apiClient.post('/api/admin/backup/create', { password });
         tasksStore.addTask(response.data);
         return response.data;
     }
 
     async function analyzeSystemLogs() {
-        const { useTasksStore } = await import('./tasks.js');
-        const tasksStore = useTasksStore();
         try {
             const response = await apiClient.post('/api/admin/system/analyze-logs');
             tasksStore.addTask(response.data);
@@ -237,12 +235,11 @@ export const useAdminStore = defineStore('admin', () => {
     }
 
     async function purgeUnusedUploads() {
-        const { useTasksStore } = await import('./tasks');
-        const tasksStore = useTasksStore();
         const response = await apiClient.post('/api/admin/purge-unused-uploads');
         tasksStore.addTask(response.data);
     }
 
+    
     async function fetchGlobalGenerationStats() {
         isLoadingGlobalGenerationStats.value = true;
         try {
@@ -283,7 +280,6 @@ export const useAdminStore = defineStore('admin', () => {
         }
     }
 
-    
     async function fetchAllUsers(filters = {}) {
         isLoadingUsers.value = true;
         try {
@@ -313,8 +309,6 @@ export const useAdminStore = defineStore('admin', () => {
     }
 
     async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) {
-        const { useTasksStore } = await import('./tasks');
-        const tasksStore = useTasksStore();
         const r = await apiClient.post('/api/admin/email-users', { subject, body, user_ids, background_color: backgroundColor, send_as_text: sendAsText });
         tasksStore.addTask(r.data);
         return true;
@@ -387,12 +381,10 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function generateSelfSignedCert() {
         try {
-            const { useTasksStore } = await import('./tasks.js');
-            const tasksStore = useTasksStore();
             console.log("[AdminStore] Requesting certificate generation task...");
             const response = await apiClient.post('/api/admin/generate-cert');
             tasksStore.addTask(response.data);
-            uiStore.addNotification('Certificate generation task started.', 'info');
+            uiStore.addNotification('Certificate generation task started. Check tasks for progress.', 'info');
             return response.data;
         } catch(e) {
             console.error("[AdminStore] Certificate generation task failed:", e);
@@ -414,6 +406,26 @@ export const useAdminStore = defineStore('admin', () => {
             link.remove();
         } catch(e) {
             uiStore.addNotification('Failed to download certificate.', 'error');
+        }
+    }
+
+    async function downloadTrustScript(type) {
+        try {
+            const response = await apiClient.get('/api/admin/download-trust-script', { 
+                params: { script_type: type },
+                responseType: 'blob' 
+            });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            const ext = type === 'windows' ? 'bat' : 'sh';
+            link.setAttribute('download', `install_lollms_cert.${ext}`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        } catch(e) {
+            console.error(e);
+            uiStore.addNotification('Failed to download trust script.', 'error');
         }
     }
 
@@ -440,8 +452,6 @@ export const useAdminStore = defineStore('admin', () => {
     }
 
     async function generateIconForModel(prompt) {
-        const { useTasksStore } = await import('./tasks.js');
-        const tasksStore = useTasksStore();
         const response = await apiClient.post('/api/admin/bindings/generate_icon', { prompt });
         tasksStore.addTask(response.data);
         return response.data;
@@ -631,6 +641,6 @@ export const useAdminStore = defineStore('admin', () => {
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact, createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, exportCategory, importFunFacts, importCategoryFromFile, generateFunFacts,
         fetchNewsArticles, updateNewsArticle, deleteBatchNewsArticles,
         
-        sendEmailToUsers, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate
+        sendEmailToUsers, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript
     };
 });

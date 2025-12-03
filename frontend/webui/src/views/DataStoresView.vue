@@ -52,8 +52,6 @@ const folderInputRef = ref(null);
 const currentUploadTask = ref(null);
 const currentGraphTask = ref(null);
 const dragOver = ref(false);
-const vectorizerModels = ref([]);
-const isLoadingVectorizerModels = ref(false);
 const selectedFilesToDelete = ref(new Set());
 
 const queryText = ref('');
@@ -81,24 +79,29 @@ const someFilesSelected = computed(() => {
     return selectedFilesToDelete.value.size > 0 && !allFilesSelected.value;
 });
 
-const vectorizerOptions = computed(() => {
-    const options = [];
-    const aliases = availableVectorizers.value.filter(v => v.is_alias);
-    const rawVectorizers = availableVectorizers.value.filter(v => !v.is_alias);
-    if (aliases.length > 0) {
-        options.push({ isGroup: true, label: 'Configured Bindings', items: aliases.map(v => ({ id: `alias:${v.name}`, name: v.name, description: v.title, isAlias: true, ...v })) });
-    }
-    if (rawVectorizers.length > 0) {
-        options.push({ isGroup: true, label: 'Raw Vectorizers', items: rawVectorizers.map(v => ({ id: v.name, name: v.name, description: v.title, isAlias: false, ...v })) });
-    }
-    return options;
-});
+// Use availableVectorizers directly which now contains models
+const vectorizerOptions = computed(() => availableVectorizers.value);
 
 const selectedVectorizerDetails = computed(() => {
     if (!newStoreForm.value.selectedVectorizerKey) return null;
-    for (const group of vectorizerOptions.value) {
-        const found = group.items.find(item => item.id === newStoreForm.value.selectedVectorizerKey);
-        if (found) return found;
+    
+    const parts = newStoreForm.value.selectedVectorizerKey.split('/');
+    if (parts.length < 2) return null;
+    
+    // The key format is `${group.alias}/${model.value}`
+    // Since model.value can contain slashes (e.g. 'ollama/llama3'), we need to be careful.
+    // The first part is always the alias.
+    const bindingAlias = parts[0];
+    const modelValue = parts.slice(1).join('/');
+    
+    // Find the binding in availableVectorizers
+    const foundBinding = vectorizerOptions.value.find(group => group.alias === bindingAlias);
+    
+    if (foundBinding) {
+        return {
+            ...foundBinding,
+            selectedModelName: modelValue
+        };
     }
     return null;
 });
@@ -154,25 +157,16 @@ watch(selectedStoreId, (newId) => {
     }
 }, { immediate: true });
 
-watch(selectedVectorizerDetails, async (details) => {
+watch(selectedVectorizerDetails, (details) => {
     newStoreForm.value.config = {};
-    vectorizerModels.value = [];
     if (!details) return;
-    if (details.isAlias) { newStoreForm.value.config = { ...(details.vectorizer_config || {}) }; } 
-    else { (details.input_parameters || []).forEach(param => { newStoreForm.value.config[param.name] = param.default; }); }
-    const modelParam = (details.input_parameters || []).find(p => p.name === 'model');
-    if (modelParam && !details.isAlias) {
-        isLoadingVectorizerModels.value = true;
-        try {
-            const vectorizerType = details.vectorizer_name || details.name;
-            const models = await adminStore.fetchRagModelsForType(vectorizerType);
-            vectorizerModels.value = Array.isArray(models) ? models : [];
-        } catch (error) {
-            console.error("Failed to fetch vectorizer models:", error);
-            vectorizerModels.value = [];
-        } finally {
-            isLoadingVectorizerModels.value = false;
-        }
+    
+    // Copy base config from binding
+    newStoreForm.value.config = { ...(details.vectorizer_config || {}) };
+    
+    // Override model name if selected
+    if (details.selectedModelName) {
+        newStoreForm.value.config['model_name'] = details.selectedModelName;
     }
 }, { deep: true });
 
@@ -203,7 +197,7 @@ async function handleAddStore() {
         const payload = {
             name: newStoreForm.value.name,
             description: newStoreForm.value.description,
-            vectorizer_name: selectedVectorizerDetails.value.isAlias ? selectedVectorizerDetails.value.vectorizer_name : selectedVectorizerDetails.value.name,
+            vectorizer_name: selectedVectorizerDetails.value.vectorizer_name, // Send raw vectorizer name
             vectorizer_config: newStoreForm.value.config || {},
             chunk_size: newStoreForm.value.chunk_size,
             chunk_overlap: newStoreForm.value.chunk_overlap
@@ -560,28 +554,34 @@ function scrollToMatch(match) {
                 <div>
                     <label for="new-ds-vectorizer" class="block text-sm font-medium">Vectorizer</label>
                     <select id="new-ds-vectorizer" v-model="newStoreForm.selectedVectorizerKey" class="input-field mt-1">
-                        <option :value="null" disabled>-- Select a Vectorizer or Alias --</option>
-                        <template v-for="group in vectorizerOptions">
-                            <optgroup :label="group.label">
-                                <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.name }} - {{ item.description }}</option>
-                            </optgroup>
-                        </template>
+                        <option :value="null" disabled>-- Select a Vectorizer Model --</option>
+                        <optgroup 
+                            v-for="group in vectorizerOptions" 
+                            :key="group.id" 
+                            :label="group.alias || group.vectorizer_name"
+                        >
+                            <option 
+                                v-for="model in group.models" 
+                                :key="`${group.id}-${model.value}`" 
+                                :value="`${group.alias}/${model.value}`"
+                            >
+                                {{ model.name }}
+                            </option>
+                        </optgroup>
                     </select>
+                    <p v-if="vectorizerOptions.length === 0" class="text-xs text-red-500 mt-1">
+                        No active RAG bindings found. Please configure them in Settings.
+                    </p>
                 </div>
                 <div v-if="selectedVectorizerDetails" class="p-4 border dark:border-gray-700 rounded-lg space-y-4">
                     <h4 class="font-medium text-lg">{{ selectedVectorizerDetails.title || selectedVectorizerDetails.name }}</h4>
                     <p class="text-sm text-gray-500">{{ selectedVectorizerDetails.description }}</p>
                     <div v-if="selectedVectorizerDetails.input_parameters?.length > 0" class="space-y-4">
                         <div v-for="param in selectedVectorizerDetails.input_parameters" :key="param.name">
-                            <div v-if="!(selectedVectorizerDetails.isAlias && param.name === 'model')">
+                            <!-- Model parameter is handled by the main select, only show others -->
+                            <div v-if="param.name !== 'model'">
                                 <label :for="`param-${param.name}`" class="block text-sm font-medium">{{ param.name }} <span v-if="param.mandatory" class="text-red-500">*</span></label>
-                                <div v-if="param.name === 'model'">
-                                    <select v-if="!isLoadingVectorizerModels && vectorizerModels.length > 0" v-model="newStoreForm.config.model" class="input-field mt-1">
-                                        <option v-for="modelName in vectorizerModels" :key="modelName" :value="modelName">{{ modelName }}</option>
-                                    </select>
-                                    <input v-else type="text" v-model="newStoreForm.config.model" class="input-field mt-1" :placeholder="isLoadingVectorizerModels ? 'Loading models...' : 'Enter model name'">
-                                </div>
-                                <div v-else class="relative mt-1">
+                                <div class="relative mt-1">
                                     <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'" v-model="newStoreForm.config[param.name]" class="input-field pr-10" :placeholder="param.description">
                                     <button v-if="param.name.includes('key') || param.name.includes('token')" type="button" @click="isKeyVisible[param.name] = !isKeyVisible[param.name]" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" :title="isKeyVisible[param.name] ? 'Hide' : 'Show'">
                                         <IconEyeOff v-if="isKeyVisible[param.name]" class="w-5 h-5" /><IconEye v-else class="w-5 h-5" />
@@ -590,7 +590,6 @@ function scrollToMatch(match) {
                             </div>
                         </div>
                     </div>
-                    <p v-else class="text-sm text-gray-500 italic">This vectorizer requires no additional configuration.</p>
                 </div>
                 <div class="flex justify-end gap-3">
                     <button type="button" @click="isAddFormVisible=false; selectStore(myDataStores[0]?.id)" class="btn btn-secondary">Cancel</button>

@@ -472,7 +472,8 @@ export const useDataStore = defineStore('data', () => {
     }
     
     async function fetchAvailableVectorizers() {
-        if (availableVectorizers.value.length > 0) return;
+        // Disabled cache check to ensure we always get fresh models list when view is mounted
+        // if (availableVectorizers.value.length > 0) return;
         try {
             const response = await apiClient.get('/api/datastores/available-vectorizers');
             availableVectorizers.value = response.data;
@@ -790,6 +791,16 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
+    async function fetchRagBindingModels(bindingId) {
+        try {
+            const response = await apiClient.get(`/api/datastores/bindings/${bindingId}/models`);
+            return response.data || [];
+        } catch (error) {
+            console.error("Failed to fetch models for binding:", error);
+            return [];
+        }
+    }
+
     function $reset() {
         availableLollmsModels.value = [];
         availableTtiModels.value = [];
@@ -866,6 +877,7 @@ export const useDataStore = defineStore('data', () => {
 
         handleServiceStatusUpdate,
         extractTextFromFile,
+        fetchRagBindingModels,
         $reset
     };
 });

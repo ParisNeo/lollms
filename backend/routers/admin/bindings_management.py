@@ -2,6 +2,7 @@
 import json
 import io
 import base64
+import inspect
 from typing import List, Dict, Any, Optional
 from PIL import Image
 from pydantic import BaseModel
@@ -92,6 +93,67 @@ def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_t
             processed_config[key] = value
 
     return processed_config
+
+def _execute_binding_command_task(task: Task, binding_type: str, binding_data: Dict, command_name: str, parameters: Dict[str, Any], username: str):
+    task.log(f"Starting execution of command '{command_name}' for {binding_type.upper()} binding '{binding_data['alias']}'...")
+    task.set_progress(10)
+    
+    try:
+        service = None
+        if binding_type == "llm":
+            # For LLM, we leverage the user's existing client context to ensure loaded models are reused if possible
+            lc = get_user_lollms_client(username, binding_data['alias'])
+            service = lc.llm
+        elif binding_type == "tti":
+            client_params = { "tti_binding_name": binding_data['name'], "tti_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] } }
+            lc = LollmsClient(**client_params)
+            service = lc.tti
+        elif binding_type == "tts":
+            client_params = { "tts_binding_name": binding_data['name'], "tts_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] } }
+            lc = LollmsClient(**client_params)
+            service = lc.tts
+        elif binding_type == "stt":
+            client_params = { "stt_binding_name": binding_data['name'], "stt_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] } }
+            lc = LollmsClient(**client_params)
+            service = lc.stt
+        else:
+            raise ValueError(f"Unknown binding type: {binding_type}")
+
+        if not service:
+             raise Exception(f"{binding_type.upper()} engine could not be initialized. Please check configuration.")
+
+        if hasattr(service, command_name):
+             method = getattr(service, command_name)
+             if callable(method):
+                 task.log(f"Executing method: {command_name}")
+                 
+                 # Check signature for callback
+                 sig = inspect.signature(method)
+                 if 'callback' in sig.parameters:
+                     def progress_callback(data: dict):
+                         # Expected format: {'status': str, 'completed': int, 'total': int}
+                         status = data.get('status', 'Processing...')
+                         task.log(status)
+                         
+                         total = data.get('total', 100)
+                         completed = data.get('completed', 0)
+                         if total > 0:
+                             percent = (completed / total) * 100
+                             task.set_progress(percent)
+                             
+                     parameters['callback'] = progress_callback
+                 
+                 result = method(**parameters)
+                 task.log(f"Command '{command_name}' completed successfully.")
+                 task.set_progress(100)
+                 return result
+        
+        raise Exception(f"Command '{command_name}' not supported by binding '{binding_data['name']}'.")
+        
+    except Exception as e:
+        task.log(f"Command execution failed: {e}", "ERROR")
+        trace_exception(e)
+        raise e
 
 def _generate_model_icon_task(task: Task, username: str, prompt: str):
     task.log("Starting model icon generation...")
@@ -220,24 +282,27 @@ async def delete_binding(binding_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-@bindings_management_router.post("/bindings/{binding_id}/execute_command", response_model=Dict[str, Any])
+@bindings_management_router.post("/bindings/{binding_id}/execute_command", response_model=TaskInfo, status_code=202)
 async def execute_llm_binding_command(binding_id: int, payload: BindingCommandRequest, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
     
-    try:
-        lc = get_user_lollms_client(current_user.username, binding.alias)
-        
-        if hasattr(lc.llm, payload.command_name):
-             method = getattr(lc.llm, payload.command_name)
-             if callable(method):
-                 result = method(**payload.parameters)
-                 return {"status": True, "result": result}
-        
-        raise HTTPException(status_code=400, detail=f"Command '{payload.command_name}' not supported by binding.")
-    except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"Execution failed: {e}")
+    binding_data = {
+        "id": binding.id,
+        "name": binding.name,
+        "alias": binding.alias,
+        "config": binding.config,
+        "default_model_name": binding.default_model_name
+    }
+    
+    task = task_manager.submit_task(
+        name=f"Exec LLM Cmd: {payload.command_name}",
+        target=_execute_binding_command_task,
+        args=("llm", binding_data, payload.command_name, payload.parameters, current_user.username),
+        description=f"Executing command {payload.command_name} on binding {binding.alias}",
+        owner_username=current_user.username
+    )
+    return task
 
 @bindings_management_router.get("/tti-bindings/available_types", response_model=List[Dict])
 async def get_available_tti_binding_types():
@@ -316,28 +381,27 @@ async def delete_tti_binding(binding_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-@bindings_management_router.post("/tti-bindings/{binding_id}/execute_command", response_model=Dict[str, Any])
+@bindings_management_router.post("/tti-bindings/{binding_id}/execute_command", response_model=TaskInfo, status_code=202)
 async def execute_tti_binding_command(binding_id: int, payload: BindingCommandRequest, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="TTI Binding not found.")
     
-    try:
-        client_params = { "tti_binding_name": binding.name, "tti_binding_config": { **binding.config, "model_name": binding.default_model_name } }
-        lc = LollmsClient(**client_params)
-        
-        if not lc.tti:
-             raise HTTPException(status_code=400, detail="TTI engine could not be initialized.")
-
-        if hasattr(lc.tti, payload.command_name):
-             method = getattr(lc.tti, payload.command_name)
-             if callable(method):
-                 result = method(**payload.parameters)
-                 return {"status": True, "result": result}
-        
-        raise HTTPException(status_code=400, detail=f"Command '{payload.command_name}' not supported by binding.")
-    except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"Execution failed: {e}")
+    binding_data = {
+        "id": binding.id,
+        "name": binding.name,
+        "alias": binding.alias,
+        "config": binding.config,
+        "default_model_name": binding.default_model_name
+    }
+    
+    task = task_manager.submit_task(
+        name=f"Exec TTI Cmd: {payload.command_name}",
+        target=_execute_binding_command_task,
+        args=("tti", binding_data, payload.command_name, payload.parameters, current_user.username),
+        description=f"Executing command {payload.command_name} on binding {binding.alias}",
+        owner_username=current_user.username
+    )
+    return task
 
 @bindings_management_router.get("/tti-bindings/{binding_id}/models", response_model=List[BindingModel])
 async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db)):
@@ -470,28 +534,27 @@ async def delete_tts_binding(binding_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-@bindings_management_router.post("/tts-bindings/{binding_id}/execute_command", response_model=Dict[str, Any])
+@bindings_management_router.post("/tts-bindings/{binding_id}/execute_command", response_model=TaskInfo, status_code=202)
 async def execute_tts_binding_command(binding_id: int, payload: BindingCommandRequest, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="TTS Binding not found.")
     
-    try:
-        client_params = { "tts_binding_name": binding.name, "tts_binding_config": { **binding.config, "model_name": binding.default_model_name } }
-        lc = LollmsClient(**client_params)
-        
-        if not lc.tts:
-             raise HTTPException(status_code=400, detail="TTS engine could not be initialized.")
-
-        if hasattr(lc.tts, payload.command_name):
-             method = getattr(lc.tts, payload.command_name)
-             if callable(method):
-                 result = method(**payload.parameters)
-                 return {"status": True, "result": result}
-        
-        raise HTTPException(status_code=400, detail=f"Command '{payload.command_name}' not supported by binding.")
-    except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"Execution failed: {e}")
+    binding_data = {
+        "id": binding.id,
+        "name": binding.name,
+        "alias": binding.alias,
+        "config": binding.config,
+        "default_model_name": binding.default_model_name
+    }
+    
+    task = task_manager.submit_task(
+        name=f"Exec TTS Cmd: {payload.command_name}",
+        target=_execute_binding_command_task,
+        args=("tts", binding_data, payload.command_name, payload.parameters, current_user.username),
+        description=f"Executing command {payload.command_name} on binding {binding.alias}",
+        owner_username=current_user.username
+    )
+    return task
 
 @bindings_management_router.get("/tts-bindings/{binding_id}/models", response_model=List[BindingModel])
 async def get_tts_binding_models(binding_id: int, db: Session = Depends(get_db)):
@@ -626,28 +689,27 @@ async def delete_stt_binding(binding_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-@bindings_management_router.post("/stt-bindings/{binding_id}/execute_command", response_model=Dict[str, Any])
+@bindings_management_router.post("/stt-bindings/{binding_id}/execute_command", response_model=TaskInfo, status_code=202)
 async def execute_stt_binding_command(binding_id: int, payload: BindingCommandRequest, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
     binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="STT Binding not found.")
     
-    try:
-        client_params = { "stt_binding_name": binding.name, "stt_binding_config": { **binding.config, "model_name": binding.default_model_name } }
-        lc = LollmsClient(**client_params)
-        
-        if not lc.stt:
-             raise HTTPException(status_code=400, detail="STT engine could not be initialized.")
-
-        if hasattr(lc.stt, payload.command_name):
-             method = getattr(lc.stt, payload.command_name)
-             if callable(method):
-                 result = method(**payload.parameters)
-                 return {"status": True, "result": result}
-        
-        raise HTTPException(status_code=400, detail=f"Command '{payload.command_name}' not supported by binding.")
-    except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"Execution failed: {e}")
+    binding_data = {
+        "id": binding.id,
+        "name": binding.name,
+        "alias": binding.alias,
+        "config": binding.config,
+        "default_model_name": binding.default_model_name
+    }
+    
+    task = task_manager.submit_task(
+        name=f"Exec STT Cmd: {payload.command_name}",
+        target=_execute_binding_command_task,
+        args=("stt", binding_data, payload.command_name, payload.parameters, current_user.username),
+        description=f"Executing command {payload.command_name} on binding {binding.alias}",
+        owner_username=current_user.username
+    )
+    return task
 
 @bindings_management_router.get("/stt-bindings/{binding_id}/models", response_model=List[BindingModel])
 async def get_stt_binding_models(binding_id: int, db: Session = Depends(get_db)):

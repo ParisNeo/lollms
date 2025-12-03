@@ -10,8 +10,8 @@ const adminStore = useAdminStore();
 const dataStore = useDataStore();
 const uiStore = useUiStore();
 
-const { globalSettings, aiBotSettings, isLoadingAiBotSettings } = storeToRefs(adminStore);
-const { availableLollmsModels, publicPersonalities } = storeToRefs(dataStore);
+const { globalSettings, aiBotSettings, isLoadingAiBotSettings, adminAvailableLollmsModels } = storeToRefs(adminStore);
+const { publicPersonalities } = storeToRefs(dataStore);
 
 const form = ref({
     ai_bot_enabled: false,
@@ -32,10 +32,6 @@ const isTriggering = ref(false);
 const hasChanges = ref(false);
 let pristineState = '{}';
 
-const botGlobalSettings = computed(() => {
-    return globalSettings.value.filter(s => s.category === 'AI Bot');
-});
-
 const availablePersonalitiesForSelect = computed(() => {
     return publicPersonalities.value.map(p => ({
         id: p.id,
@@ -43,32 +39,69 @@ const availablePersonalitiesForSelect = computed(() => {
     }));
 });
 
+// Group models by binding name for better display
+const groupedModels = computed(() => {
+    const groups = {};
+    if (!adminAvailableLollmsModels.value) return {};
+    
+    adminAvailableLollmsModels.value.forEach(model => {
+        let binding = 'Aliases'; // Default group for aliased models (no slash)
+        let name = model.name;
+        
+        // Check if binding is explicitly provided (backend support)
+        if (model.binding) {
+            binding = model.binding;
+        } 
+        // Parse binding from name if formatted as binding/model
+        else if (model.name && model.name.includes('/')) {
+            const parts = model.name.split('/');
+            binding = parts[0];
+            name = parts.slice(1).join('/');
+        }
+        
+        // Formatting: Capitalize
+        binding = binding.charAt(0).toUpperCase() + binding.slice(1);
+
+        if (!groups[binding]) groups[binding] = [];
+        groups[binding].push({ ...model, displayName: name });
+    });
+    
+    // Sort keys and return object
+    return Object.keys(groups).sort().reduce((acc, key) => {
+        acc[key] = groups[key].sort((a, b) => a.displayName.localeCompare(b.displayName));
+        return acc;
+    }, {});
+});
+
 onMounted(() => {
-    if (globalSettings.value.length === 0) adminStore.fetchGlobalSettings();
+    // Only fetch the consolidated settings endpoint
     if (!aiBotSettings.value) adminStore.fetchAiBotSettings();
-    if (availableLollmsModels.value.length === 0) dataStore.fetchAdminAvailableLollmsModels();
+    if (adminAvailableLollmsModels.value.length === 0) adminStore.fetchAdminAvailableLollmsModels();
     if (publicPersonalities.value.length === 0) dataStore.fetchPersonalities();
 });
 
-watch([globalSettings, aiBotSettings], populateForm, { deep: true });
+watch(aiBotSettings, populateForm, { deep: true });
 
 watch(form, (newValue) => {
     hasChanges.value = JSON.stringify(newValue) !== pristineState;
 }, { deep: true });
 
 function populateForm() {
-    const newFormState = { ...form.value };
-    
-    if (botGlobalSettings.value.length > 0) {
-        botGlobalSettings.value.forEach(setting => {
-            newFormState[setting.key] = setting.value;
-        });
-    }
+    if (!aiBotSettings.value) return;
 
-    if (aiBotSettings.value) {
-        newFormState.lollms_model_name = aiBotSettings.value.lollms_model_name;
-        newFormState.active_personality_id = aiBotSettings.value.active_personality_id;
-    }
+    const s = aiBotSettings.value;
+    const newFormState = {
+        lollms_model_name: s.lollms_model_name || '',
+        active_personality_id: s.active_personality_id || '',
+        ai_bot_enabled: s.ai_bot_enabled ?? false,
+        ai_bot_system_prompt: s.ai_bot_system_prompt || '',
+        ai_bot_auto_post: s.ai_bot_auto_post ?? false,
+        ai_bot_post_interval: s.ai_bot_post_interval || 24,
+        ai_bot_content_mode: s.ai_bot_content_mode || 'static_text',
+        ai_bot_static_content: s.ai_bot_static_content || '',
+        ai_bot_file_path: s.ai_bot_file_path || '',
+        ai_bot_generation_prompt: s.ai_bot_generation_prompt || ''
+    };
     
     form.value = newFormState;
     pristineState = JSON.stringify(form.value);
@@ -78,30 +111,15 @@ function populateForm() {
 async function handleSave() {
     isLoading.value = true;
     try {
-        const globalPayload = {
-            ai_bot_enabled: form.value.ai_bot_enabled,
-            ai_bot_system_prompt: form.value.ai_bot_system_prompt,
-            ai_bot_auto_post: form.value.ai_bot_auto_post,
-            ai_bot_post_interval: parseFloat(form.value.ai_bot_post_interval),
-            ai_bot_content_mode: form.value.ai_bot_content_mode,
-            ai_bot_static_content: form.value.ai_bot_static_content,
-            ai_bot_file_path: form.value.ai_bot_file_path,
-            ai_bot_generation_prompt: form.value.ai_bot_generation_prompt,
-        };
+        // Send consolidated payload to the bot settings endpoint
+        const payload = { ...form.value };
         
-        const botUserPayload = {
-            lollms_model_name: form.value.lollms_model_name,
-            active_personality_id: form.value.active_personality_id
-        };
-
-        await Promise.all([
-            adminStore.updateGlobalSettings(globalPayload),
-            adminStore.updateAiBotSettings(botUserPayload)
-        ]);
+        await adminStore.updateAiBotSettings(payload);
+        
         uiStore.addNotification('Settings saved successfully', 'success');
-        populateForm(); // Reset pristine state
-
+        // No need to manually populate, the store update triggers the watch
     } catch (e) {
+        console.error(e);
         uiStore.addNotification('Failed to save settings', 'error');
     } finally {
         isLoading.value = false;
@@ -153,7 +171,9 @@ async function triggerPostNow() {
                         <label for="bot-model" class="block text-sm font-medium">Bot Model</label>
                         <select id="bot-model" v-model="form.lollms_model_name" class="input-field mt-1">
                             <option value="">-- Select a Model --</option>
-                            <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
+                            <optgroup v-for="(models, binding) in groupedModels" :key="binding" :label="binding">
+                                <option v-for="model in models" :key="model.id" :value="model.id">{{ model.displayName }}</option>
+                            </optgroup>
                         </select>
                         <p class="mt-1 text-xs text-gray-500">The model the bot will use for all system-level generations.</p>
                     </div>

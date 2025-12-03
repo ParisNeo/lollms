@@ -6,6 +6,8 @@ import { useUiStore } from '../../../stores/ui';
 import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
 import IconEye from '../../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
+import IconTerminal from '../../../assets/icons/ui/IconTerminal.vue';
+import GenericModal from '../../modals/GenericModal.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
@@ -18,6 +20,14 @@ const isLoadingForm = ref(false);
 const isKeyVisible = ref({});
 const localTtsModelDisplayMode = ref('mixed');
 const commandParams = ref({});
+
+// Modal state for commands
+const isCommandsModalVisible = ref(false);
+const activeBindingForCommands = ref(null);
+const activeBindingCommands = ref([]);
+const selectedCommand = ref(null);
+const modalCommandParams = ref({});
+const isExecutingCommand = ref(false);
 
 const getInitialFormState = () => ({
     id: null,
@@ -199,21 +209,49 @@ function getBindingTitle(name) {
     return bindingType ? bindingType.title : name;
 }
 
-async function executeCommand(cmd) {
-    if (!editingBinding.value) return;
+async function executeCommand(cmd, bindingId, params) {
     try {
-        uiStore.addNotification(`Executing command '${cmd.title || cmd.name}'...`, 'info');
-        const params = commandParams.value[cmd.name] || {};
-        const result = await adminStore.executeTtsBindingCommand(editingBinding.value.id, cmd.name, params);
-        if (result.status) {
-             uiStore.addNotification('Command executed successfully.', 'success');
-             if(result.result) {
-                 uiStore.showGenericModal({title:"Command Execution Result", content: JSON.stringify(result.result, null, 2)});
-             }
+        uiStore.addNotification(`Submitting command '${cmd.title || cmd.name}'...`, 'info');
+        const result = await adminStore.executeTtsBindingCommand(bindingId, cmd.name, params);
+        if (result) {
+             uiStore.addNotification(`Task started: ${cmd.title || cmd.name}. Check Task Manager for progress.`, 'success', 5000);
+             return result;
         }
     } catch (e) {
         console.error(e);
-        uiStore.addNotification(`Command execution failed: ${e.message}`, 'error');
+        uiStore.addNotification(`Command submission failed: ${e.message}`, 'error');
+    }
+}
+
+// ----- Commands Modal Logic -----
+function showCommands(binding) {
+    activeBindingForCommands.value = binding;
+    const bindingType = availableTtsBindingTypes.value.find(b => b.binding_name === binding.name);
+    activeBindingCommands.value = bindingType ? (bindingType.commands || []) : [];
+    selectedCommand.value = null;
+    modalCommandParams.value = {};
+    isCommandsModalVisible.value = true;
+}
+
+function selectCommandInModal(cmd) {
+    selectedCommand.value = cmd;
+    modalCommandParams.value = {};
+    if(cmd.parameters) {
+        cmd.parameters.forEach(p => {
+             modalCommandParams.value[p.name] = p.default !== undefined ? p.default : '';
+        });
+    }
+}
+
+async function executeModalCommand() {
+    if (!selectedCommand.value || !activeBindingForCommands.value) return;
+    
+    isExecutingCommand.value = true;
+    try {
+        await executeCommand(selectedCommand.value, activeBindingForCommands.value.id, modalCommandParams.value);
+        isCommandsModalVisible.value = false;
+    } finally {
+        isExecutingCommand.value = false;
     }
 }
 </script>
@@ -297,7 +335,7 @@ async function executeCommand(cmd) {
                             </div>
                             
                             <div class="flex justify-end">
-                                <button type="button" @click="executeCommand(cmd)" class="btn btn-primary btn-sm">Execute</button>
+                                <button type="button" @click="executeCommand(cmd, editingBinding.id, commandParams[cmd.name])" class="btn btn-primary btn-sm">Execute</button>
                             </div>
                         </div>
                     </div>
@@ -365,7 +403,10 @@ async function executeCommand(cmd) {
                             <p v-if="binding.default_model_name"><span class="font-semibold">Default Model:</span> {{ binding.default_model_name }}</p>
                         </div>
                     </div>
-                    <div class="border-t dark:border-gray-700 pt-3 flex justify-end">
+                    <div class="border-t dark:border-gray-700 pt-3 flex justify-end gap-2">
+                        <button v-if="availableTtsBindingTypes.find(b => b.binding_name === binding.name)?.commands?.length" @click="showCommands(binding)" class="btn btn-secondary btn-sm flex items-center gap-2" title="Execute Commands">
+                            <IconTerminal class="w-4 h-4" /> Commands
+                        </button>
                         <button @click="manageModels(binding)" class="btn btn-secondary btn-sm flex items-center gap-2">
                             <IconCpuChip class="w-4 h-4" /> Manage Models
                         </button>
@@ -373,5 +414,61 @@ async function executeCommand(cmd) {
                 </div>
             </div>
         </div>
+        
+        <!-- Commands Modal -->
+        <GenericModal :visible="isCommandsModalVisible" title="TTS Binding Commands" @close="isCommandsModalVisible = false">
+            <div class="space-y-4">
+                <div v-if="!activeBindingCommands.length" class="text-center text-gray-500">
+                    No commands available for this binding.
+                </div>
+                <div v-else class="flex gap-4">
+                    <div class="w-1/3 border-r dark:border-gray-700 pr-4 space-y-2">
+                        <button 
+                            v-for="cmd in activeBindingCommands" 
+                            :key="cmd.name"
+                            @click="selectCommandInModal(cmd)"
+                            :class="['w-full text-left px-3 py-2 rounded-md text-sm transition-colors', selectedCommand && selectedCommand.name === cmd.name ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-200 font-medium' : 'hover:bg-gray-100 dark:hover:bg-gray-700']"
+                        >
+                            {{ cmd.title || cmd.name }}
+                        </button>
+                    </div>
+                    <div class="w-2/3 pl-2">
+                        <div v-if="selectedCommand">
+                            <h4 class="font-bold text-lg mb-2">{{ selectedCommand.title || selectedCommand.name }}</h4>
+                            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">{{ selectedCommand.description }}</p>
+                            
+                            <div v-if="selectedCommand.parameters && selectedCommand.parameters.length" class="space-y-3 mb-4 bg-gray-50 dark:bg-gray-800 p-3 rounded-md border dark:border-gray-700">
+                                <div v-for="p in selectedCommand.parameters" :key="p.name">
+                                    <label class="block text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">{{ p.name }}</label>
+                                    <input v-if="p.type !== 'bool'" type="text" v-model="modalCommandParams[p.name]" class="input-field text-sm" :placeholder="p.default">
+                                    <div v-else class="flex items-center gap-2">
+                                        <button @click="modalCommandParams[p.name] = !modalCommandParams[p.name]" type="button" :class="[modalCommandParams[p.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                            <span :class="[modalCommandParams[p.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                        </button>
+                                        <span class="text-sm">{{ p.description }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="flex justify-end">
+                                <button 
+                                    @click="executeModalCommand" 
+                                    class="btn btn-primary" 
+                                    :disabled="isExecutingCommand"
+                                >
+                                    {{ isExecutingCommand ? 'Starting Task...' : 'Execute Command' }}
+                                </button>
+                            </div>
+                        </div>
+                        <div v-else class="h-full flex items-center justify-center text-gray-400 text-sm">
+                            Select a command to view details.
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <template #footer>
+                <button @click="isCommandsModalVisible = false" class="btn btn-secondary">Close</button>
+            </template>
+        </GenericModal>
     </div>
 </template>

@@ -1,14 +1,16 @@
 <!-- [UPDATE] frontend/webui/src/views/WelcomeView.vue -->
 <script setup>
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
+import apiClient from '../services/api';
 import logoDefault from '../assets/logo.png';
 import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
+import IconLock from '../assets/icons/IconLock.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
-
+  
 const welcomeText = computed(() => authStore.welcomeText);
 const welcomeSlogan = computed(() => authStore.welcomeSlogan);
 const funFact = computed(() => authStore.funFact);
@@ -18,9 +20,28 @@ const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
 const ssoClientConfig = computed(() => authStore.ssoClientConfig);
 const isFetchingFunFact = computed(() => authStore.isFetchingFunFact);
 
-onMounted(() => {
+const isHttpsEnabled = ref(false);
+const appVersion = ref('');
+
+onMounted(async () => {
     if (!authStore.ssoClientConfig.enabled) {
         authStore.fetchSsoClientConfig();
+    }
+    
+    // Check SSL status from public endpoint
+    try {
+        const res = await apiClient.get('/api/public/ssl-status');
+        isHttpsEnabled.value = res.data.is_https_enabled;
+    } catch (e) {
+        console.error("Failed to check SSL status", e);
+    }
+
+    // Fetch App Version
+    try {
+        const res = await apiClient.get('/api/public/version');
+        appVersion.value = res.data.version;
+    } catch (e) {
+        console.error("Failed to fetch version", e);
     }
 });
 
@@ -43,6 +64,11 @@ function openLogin() {
 }
 function openRegister() {
   uiStore.openModal('register');
+}
+
+function installCert(type) {
+    const url = `/api/public/cert/install-script?script_type=${type}`;
+    window.open(url, '_blank');
 }
 </script>
 
@@ -97,8 +123,22 @@ function openRegister() {
         </button>
       </div>
     </div>
-    <footer class="absolute bottom-4 w-full text-center text-xs text-gray-500 dark:text-gray-400">
-      Powered by <a href="https://github.com/ParisNeo/lollms-webui" target="_blank" class="font-semibold hover:underline">LoLLMs</a> by <a href="https://github.com/ParisNeo" target="_blank" class="font-semibold hover:underline">ParisNeo</a>
+    
+    <!-- Footer Section -->
+    <footer class="absolute bottom-4 w-full flex flex-col items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+        <div v-if="isHttpsEnabled" class="flex gap-4">
+            <button @click="installCert('windows')" class="hover:underline flex items-center gap-1 text-gray-600 dark:text-gray-400 hover:text-blue-500 dark:hover:text-blue-400">
+                <IconLock class="w-3 h-3" />
+                Install Certificate (Windows)
+            </button>
+            <button @click="installCert('linux')" class="hover:underline flex items-center gap-1 text-gray-600 dark:text-gray-400 hover:text-blue-500 dark:hover:text-blue-400">
+                <IconLock class="w-3 h-3" />
+                Install Certificate (Linux)
+            </button>
+        </div>
+        <div class="flex items-center gap-1">
+            <span>Powered by <a href="https://github.com/ParisNeo/lollms-webui" target="_blank" class="font-semibold hover:underline">LoLLMs</a> v{{ appVersion }} by <a href="https://github.com/ParisNeo" target="_blank" class="font-semibold hover:underline">ParisNeo</a></span>
+        </div>
     </footer>
   </div>
 </template>

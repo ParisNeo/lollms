@@ -8,7 +8,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
@@ -281,3 +281,61 @@ async def download_cert(db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Certificate file not found on server.")
         
     return FileResponse(path, media_type='application/x-pem-file', filename="lollms_cert.pem")
+
+@settings_management_router.get("/download-trust-script")
+async def download_trust_script(script_type: str, db: Session = Depends(get_db)):
+    """
+    Generates and downloads a script to install the current certificate into the system trust store.
+    """
+    config = db.query(DBGlobalConfig).filter(DBGlobalConfig.key == "ssl_certfile").first()
+    if not config:
+        raise HTTPException(status_code=404, detail="Certificate not configured.")
+    
+    cert_path_str, _ = _parse_setting_value(config.value)
+    if not cert_path_str or not Path(cert_path_str).exists():
+        raise HTTPException(status_code=404, detail="Certificate file missing on server.")
+        
+    try:
+        with open(cert_path_str, 'r') as f:
+            cert_content = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not read certificate: {e}")
+
+    if script_type == 'windows':
+        # Batch script for Windows using certutil
+        # We use a temporary filename to avoid conflicts, then delete it.
+        content = f"""@echo off
+echo Installing LoLLMs Certificate to Current User Trusted Root Store...
+echo Please accept the prompt if requested.
+(
+echo {cert_content}
+) > lollms_cert_temp.crt
+certutil -user -addstore "Root" lollms_cert_temp.crt
+del lollms_cert_temp.crt
+echo.
+echo Certificate installed. You may need to restart your browser.
+pause
+"""
+        filename = "install_lollms_cert.bat"
+        media_type = "application/x-bat"
+    
+    elif script_type == 'linux':
+        # Bash script for Linux (Debian/Ubuntu style)
+        content = f"""#!/bin/bash
+if [ "$EUID" -ne 0 ]
+  then echo "Please run as root (e.g. sudo ./install_lollms_cert.sh)"
+  exit
+fi
+echo "Installing Certificate..."
+cat <<EOF > /usr/local/share/ca-certificates/lollms_local.crt
+{cert_content}
+EOF
+update-ca-certificates
+echo "Done. You may need to restart your browser."
+"""
+        filename = "install_lollms_cert.sh"
+        media_type = "application/x-sh"
+    else:
+        raise HTTPException(status_code=400, detail="Invalid script type. Use 'windows' or 'linux'.")
+
+    return Response(content=content, media_type=media_type, headers={"Content-Disposition": f"attachment; filename={filename}"})

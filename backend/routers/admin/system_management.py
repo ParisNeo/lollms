@@ -27,6 +27,7 @@ from backend.ws_manager import manager
 from backend.task_manager import task_manager, Task
 from backend.utils import get_local_ip_addresses
 from backend.tasks.system_tasks import _create_backup_task, _analyze_logs_task
+from backend.settings import settings
 from ascii_colors import trace_exception
 
 system_management_router = APIRouter()
@@ -252,9 +253,10 @@ async def get_server_info(request: Request, db: Session = Depends(get_db)):
 
     allowed_origins = next((m.options.get('allow_origins', []) for m in request.app.user_middleware if "CORSMiddleware" in str(m)), [])
     
-    host = SERVER_CONFIG.get("host", "localhost")
-    port = SERVER_CONFIG.get("port", 9642)
-    https = SERVER_CONFIG.get("https_enabled", False)
+    # Use 'settings' to get the live value from DB if available, fallback to env/default
+    host = settings.get("host", SERVER_CONFIG.get("host", "localhost"))
+    port = settings.get("port", SERVER_CONFIG.get("port", 9642))
+    https = settings.get("https_enabled", SERVER_CONFIG.get("https_enabled", False))
     protocol = "https" if https else "http"
     
     local_ips = None

@@ -195,7 +195,7 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
                     ss.add_document(
                         str(file_path),
                         metadata=metadata,
-                        vectorize_with_metadata=vectorize_with_metadata,
+                        vectorize_with_metadata=vectorize_with_metadata if metadata else False,
                     )
                     processed_count += 1
                     try:
@@ -541,7 +541,7 @@ async def generate_datastore_graph(
         )
         return db_task
     except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        raise HTTPException(status_code=430, detail=str(e))
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"An error occurred during graph generation: {e}")
@@ -739,34 +739,146 @@ async def list_available_vectorizers(db: Session = Depends(get_db)):
         raise HTTPException(status_code=501, detail="SafeStore not available.")
     
     try:
+        # Get Display Mode
+        mode_setting = settings.get("rag_model_display_mode", "mixed") # 'original', 'aliased', 'mixed'
+        
+        # Query active bindings only
         rag_bindings = db.query(DBRAGBinding).filter(DBRAGBinding.is_active == True).all()
+        results = []
 
-        aliased_vectorizers = []
         for binding in rag_bindings:
-            base_vectorizer_details = next((v for v in safe_store.SafeStore.list_available_vectorizers() if v['name'] == binding.name), {})
-            aliased_vectorizers.append({
-                "is_alias": True,
-                "name": binding.alias,
-                "title": binding.alias,
-                "description": f"Configured binding for '{binding.name}'",
-                "vectorizer_name": binding.name,
-                "vectorizer_config": binding.config or {},
-                "input_parameters": base_vectorizer_details.get("input_parameters", [])
-            })
+            try:
+                # Ensure config is a dict (handle potential DB string/json issues)
+                binding_config = binding.config
+                if isinstance(binding_config, str):
+                    try:
+                        binding_config = json.loads(binding_config)
+                    except Exception:
+                        binding_config = {}
+                if not isinstance(binding_config, dict):
+                    binding_config = {}
 
-        restrict_to_aliases = settings.get("restrict_vectorizers_to_aliases", False)
-        
-        if restrict_to_aliases:
-            return aliased_vectorizers
+                # Fetch raw models from safe_store
+                raw_models_list = safe_store.SafeStore.list_models(
+                    vectorizer_name=binding.name,
+                    vectorizer_config=binding_config
+                )
+                
+                # Normalize raw model names and ensure uniqueness
+                raw_names = set()
+                if raw_models_list:
+                    for m in raw_models_list:
+                        if isinstance(m, str):
+                            raw_names.add(m)
+                        elif isinstance(m, dict):
+                            # Try 'model_name' then 'name'
+                            name = m.get("model_name") or m.get("name")
+                            if name:
+                                raw_names.add(name)
+                        else:
+                            # Try attribute access for objects
+                            if hasattr(m, "model_name"):
+                                raw_names.add(m.model_name)
+                            elif hasattr(m, "name"):
+                                raw_names.add(m.name)
+                
+                sorted_raw_names = sorted(list(raw_names))
+                
+                # Apply Aliasing Logic
+                aliases = {}
+                if binding.model_aliases:
+                    try:
+                        if isinstance(binding.model_aliases, str):
+                            aliases = json.loads(binding.model_aliases)
+                        else:
+                            aliases = binding.model_aliases
+                    except Exception as e:
+                        print(f"Error parsing aliases for binding {binding.alias}: {e}")
+                        pass
 
-        full_list = safe_store.SafeStore.list_available_vectorizers()
-        for v in full_list:
-            v['is_alias'] = False
-        
-        return aliased_vectorizers + full_list
+                processed_models = []
+                
+                if not sorted_raw_names:
+                    # If no models returned (e.g. TF-IDF or just failed), provide a default option representing the binding itself
+                    processed_models.append({"name": binding.alias, "value": ""})
+                else:
+                    for raw_name in sorted_raw_names:
+                        alias_info = aliases.get(raw_name)
+                        alias_name = None
+                        if alias_info:
+                            alias_name = alias_info.get("name") if isinstance(alias_info, dict) else alias_info
+                        
+                        entry = {"value": raw_name}
+                        
+                        if mode_setting == 'aliased':
+                            if alias_name:
+                                entry["name"] = alias_name
+                                processed_models.append(entry)
+                        elif mode_setting == 'original':
+                            entry["name"] = raw_name
+                            processed_models.append(entry)
+                        else: # mixed
+                            entry["name"] = alias_name or raw_name
+                            processed_models.append(entry)
+                
+                    # Sort models by name
+                    processed_models.sort(key=lambda x: x['name'])
+
+                    # [FIX] Fallback: If filtering resulted in empty list (e.g. aliased mode but no aliases set), 
+                    # show original names so the user is not left with an empty list.
+                    if not processed_models and sorted_raw_names:
+                         for raw_name in sorted_raw_names:
+                            processed_models.append({"name": raw_name, "value": raw_name})
+                         processed_models.sort(key=lambda x: x['name'])
+
+                results.append({
+                    "id": binding.id,
+                    "alias": binding.alias, # The binding name shown to user
+                    "vectorizer_name": binding.name, # The raw type (ollama, etc)
+                    "vectorizer_config": binding_config,
+                    "models": processed_models
+                })
+
+            except Exception as e:
+                print(f"Error listing models for binding {binding.alias}: {e}")
+                trace_exception(e)
+                # Include binding even if model listing fails, so user can potentially configure manually
+                results.append({
+                    "id": binding.id,
+                    "alias": binding.alias,
+                    "vectorizer_name": binding.name,
+                    "vectorizer_config": binding.config or {},
+                    "models": [{"name": f"{binding.alias} (Error loading models)", "value": ""}],
+                    "error": str(e)
+                })
+
+        return results
+
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=str(e))
+
+@datastore_router.get("/bindings/{binding_id}/models", response_model=List[str])
+async def get_rag_binding_models_public(binding_id: int, db: Session = Depends(get_db)):
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    binding = db.query(DBRAGBinding).filter(DBRAGBinding.id == binding_id, DBRAGBinding.is_active == True).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="RAG Binding not found.")
+    
+    try:
+        raw_models = safe_store.SafeStore.list_models(
+            vectorizer_name=binding.name, 
+            vectorizer_config=binding.config or {}
+        )
+        
+        models_list = [item if isinstance(item, str) else item.get("model_name") for item in raw_models if (isinstance(item, str) or item.get("model_name"))]
+        
+        return sorted(list(set(models_list))) # Unique and sorted
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Could not list models: {e}")
 
 @datastore_router.get("", response_model=List[DataStorePublic])
 async def list_my_datastores(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DataStorePublic]:
@@ -886,8 +998,8 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreEdit, current_
              created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at,
              vectorizer_name=ds_db_obj.vectorizer_name,
              vectorizer_config=ds_db_obj.vectorizer_config or {},
-             chunk_size=ds_db_obj.chunk_size,
-             chunk_overlap=ds_db_obj.chunk_overlap
+             chunk_size=ds_db.chunk_size,
+             chunk_overlap=ds_db.chunk_overlap
         )
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error updating datastore: {e}")

@@ -74,11 +74,12 @@ from backend.routers.zoos.personalities_zoo import personalities_zoo_router
 from backend.routers.discussion_groups import discussion_groups_router
 from backend.routers.voices_studio import voices_studio_router
 from backend.routers.image_studio import image_studio_router
-from backend.routers.notes import notes_router # NEW
+from backend.routers.notes import notes_router 
+from backend.routers.public import public_router # NEW: Public Router
 
-from backend.routers.admin.email_marketing import router as email_marketing_router # NEW
-from backend.db.models.email_marketing import EmailProposal, EmailTopic # Ensure models loaded
-from backend.tasks.email_tasks import _generate_email_proposal_task # NEW
+from backend.routers.admin.email_marketing import router as email_marketing_router 
+from backend.db.models.email_marketing import EmailProposal, EmailTopic 
+from backend.tasks.email_tasks import _generate_email_proposal_task 
 
 from backend.routers.tasks import tasks_router
 from backend.task_manager import task_manager
@@ -87,6 +88,7 @@ from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
 from backend.routers.news import news_router
+from backend.routers.public import public_router
 from backend.zoo_cache import load_cache
 
 import uvicorn
@@ -95,12 +97,12 @@ from backend.settings import settings
 # --- RSS Feed Imports ---
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.tasks.news_tasks import _scrape_rss_feeds_task, _cleanup_old_news_articles_task
-from backend.tasks.social_tasks import _generate_feed_post_task # NEW: Import
+from backend.tasks.social_tasks import _generate_feed_post_task 
 # --- End RSS Feed Imports ---
 
 broadcast_listener_task = None
 rss_scheduler = None
-startup_lock = Lock() # Moved to global scope
+startup_lock = Lock() 
 
 def scheduled_rss_job():
     """
@@ -530,6 +532,7 @@ app.include_router(discussion_groups_router)
 app.include_router(voices_studio_router)
 app.include_router(image_studio_router)
 app.include_router(notes_router)
+app.include_router(public_router) # Include public router
 
 
 add_ui_routes(app)

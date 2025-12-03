@@ -29,33 +29,10 @@ const uiLevels = [
 const serverSettings = computed(() => adminStore.globalSettings.filter(s => s.category === 'Server'));
 const registrationSettings = computed(() => adminStore.globalSettings.filter(s => s.category === 'Registration'));
 const defaultSettings = computed(() => adminStore.globalSettings.filter(s => s.category === 'Defaults'));
-const allModels = computed(() => dataStore.availableLollmsModels);
+const availableVectorizers = computed(() => dataStore.availableVectorizers);
 
-// Group models by binding name for better display
-const groupedModels = computed(() => {
-    const groups = {};
-    if (!allModels.value) return {};
-    
-    allModels.value.forEach(model => {
-        let binding = 'Other';
-        let name = model.name;
-        
-        if (model.name.includes('/')) {
-            const parts = model.name.split('/');
-            binding = parts[0];
-            name = parts.slice(1).join('/');
-        }
-        
-        if (!groups[binding]) groups[binding] = [];
-        groups[binding].push({ ...model, displayName: name });
-    });
-    
-    // Sort keys and return object
-    return Object.keys(groups).sort().reduce((acc, key) => {
-        acc[key] = groups[key].sort((a, b) => a.displayName.localeCompare(b.displayName));
-        return acc;
-    }, {});
-});
+// Use the shared grouping logic from dataStore to match GlobalHeader
+const groupedModels = computed(() => dataStore.availableLLMModelsGrouped);
 
 onMounted(async () => {
     if (adminStore.globalSettings.length === 0) {
@@ -64,6 +41,7 @@ onMounted(async () => {
     if (dataStore.availableLollmsModels.length === 0) {
         await dataStore.fetchAdminAvailableLollmsModels();
     }
+    await dataStore.fetchAvailableVectorizers();
 });
 
 watch(() => adminStore.globalSettings, populateForm, { deep: true, immediate: true });
@@ -128,13 +106,13 @@ async function generateCert() {
         message: 'This will generate a new self-signed certificate and overwrite existing SSL settings. A server restart will be required.',
         confirmText: 'Generate & Enable'
     });
-    if (!confirmed.confirmed) return;
+    
+    const isConfirmed = typeof confirmed === 'object' ? confirmed.confirmed : confirmed;
+    if (!isConfirmed) return;
     
     isLoading.value = true;
     try {
-        // This now triggers a background task
         await adminStore.generateSelfSignedCert();
-        // UI updates are handled via task completion event in store
     } catch(e) {
         // Error handled in store
     } finally {
@@ -144,6 +122,10 @@ async function generateCert() {
 
 function downloadCert() {
     adminStore.downloadCertificate();
+}
+
+function downloadTrustScript(type) {
+    adminStore.downloadTrustScript(type);
 }
 
 function isFullWidth(key) {
@@ -200,7 +182,7 @@ function isFullWidth(key) {
 
                 <!-- HTTPS Configuration Block -->
                 <div class="border-t pt-8 dark:border-gray-700">
-                    <h4 class="settings-category-title flex items-center gap-2 mb-6">
+                    <h4 class="settings-category-title flex items-center gap-2">
                         <IconLock class="w-5 h-5 text-green-600 dark:text-green-400"/> HTTPS Configuration
                     </h4>
                     
@@ -243,6 +225,15 @@ function isFullWidth(key) {
                             <button type="button" @click="downloadCert" class="btn btn-secondary flex items-center gap-2" :disabled="!form.ssl_certfile">
                                 <IconArrowDownTray class="w-4 h-4" /> Download Certificate
                             </button>
+                            <!-- New Install Buttons -->
+                            <div class="flex gap-2">
+                                <button type="button" @click="downloadTrustScript('windows')" class="btn btn-secondary flex items-center gap-2" :disabled="!form.ssl_certfile" title="Download .bat script to trust cert on Windows">
+                                    <IconArrowDownTray class="w-4 h-4" /> Trust Script (Win)
+                                </button>
+                                <button type="button" @click="downloadTrustScript('linux')" class="btn btn-secondary flex items-center gap-2" :disabled="!form.ssl_certfile" title="Download .sh script to trust cert on Linux">
+                                    <IconArrowDownTray class="w-4 h-4" /> Trust Script (Linux)
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -294,11 +285,22 @@ function isFullWidth(key) {
                                 
                                 <select v-if="setting.key === 'default_lollms_model_name'" :id="setting.key" v-model="form[setting.key]" class="input-field w-full">
                                     <option value="">(None - User Selects)</option>
-                                    <optgroup v-for="(models, binding) in groupedModels" :key="binding" :label="binding">
-                                        <option v-for="model in models" :key="model.id" :value="model.id">
-                                            {{ model.displayName }}
+                                    <optgroup v-for="group in groupedModels" :key="group.label" :label="group.label">
+                                        <option v-for="model in group.items" :key="model.id" :value="model.id">
+                                            {{ model.name }}
                                         </option>
                                     </optgroup>
+                                </select>
+
+                                <select v-else-if="setting.key === 'default_safe_store_vectorizer'" :id="setting.key" v-model="form[setting.key]" class="input-field w-full">
+                                    <option value="" disabled>Select Vectorizer Model</option>
+                                    <template v-for="group in availableVectorizers" :key="group.id">
+                                        <optgroup :label="group.alias || group.vectorizer_name">
+                                            <option v-for="model in group.models" :key="model.value" :value="`${group.alias}/${model.value}`">
+                                                {{ model.name }}
+                                            </option>
+                                        </optgroup>
+                                    </template>
                                 </select>
 
                                 <select v-else-if="setting.key === 'default_user_ui_level'" :id="setting.key" v-model.number="form[setting.key]" class="input-field w-full">

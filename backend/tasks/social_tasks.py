@@ -179,32 +179,37 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         if db:
             db.close()
 
-def _generate_feed_post_task(task: Task):
+def _generate_feed_post_task(task: Task, force: bool = False):
     """
     Scheduled task to generate a new post for the bot based on configured material.
     """
-    task.log("Checking AI Bot Auto-Posting Schedule...")
+    if force:
+        task.log("Manual Post Triggered. Bypassing schedule/enabled checks.")
+    else:
+        task.log("Checking AI Bot Auto-Posting Schedule...")
+        
     db = next(get_db())
     try:
         # 1. Check if enabled
-        if not settings.get("ai_bot_auto_post", False):
+        if not force and not settings.get("ai_bot_auto_post", False):
             task.log("Auto-posting is disabled in settings.", "INFO")
             return
 
         # 2. Check Interval
-        last_posted_str = settings.get("ai_bot_last_posted_at")
-        interval_hours = float(settings.get("ai_bot_post_interval", 24))
-        
-        if last_posted_str:
-            try:
-                last_posted = datetime.datetime.fromisoformat(last_posted_str)
-                # Ensure UTC awareness if needed, but simple subtraction works if both align
-                time_diff = datetime.datetime.utcnow() - last_posted
-                if time_diff.total_seconds() < interval_hours * 3600:
-                    task.log(f"Not enough time elapsed. Last posted: {last_posted_str}. Interval: {interval_hours}h.", "INFO")
-                    return
-            except ValueError:
-                task.log("Invalid date format for last_posted_at. Proceeding with post.", "WARNING")
+        if not force:
+            last_posted_str = settings.get("ai_bot_last_posted_at")
+            interval_hours = float(settings.get("ai_bot_post_interval", 24))
+            
+            if last_posted_str:
+                try:
+                    last_posted = datetime.datetime.fromisoformat(last_posted_str)
+                    # Ensure UTC awareness if needed, but simple subtraction works if both align
+                    time_diff = datetime.datetime.utcnow() - last_posted
+                    if time_diff.total_seconds() < interval_hours * 3600:
+                        task.log(f"Not enough time elapsed. Last posted: {last_posted_str}. Interval: {interval_hours}h.", "INFO")
+                        return
+                except ValueError:
+                    task.log("Invalid date format for last_posted_at. Proceeding with post.", "WARNING")
 
         # 3. Get Bot User
         bot_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
