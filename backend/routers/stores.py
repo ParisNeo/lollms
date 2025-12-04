@@ -187,7 +187,7 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
                                 "required": ["title", "subject"]
                             }
                             truncated_text = text_content[:12000]
-                            metadata = lc.generate_structured_content(truncated_text, metadata_prompt, schema)
+                            metadata = lc.generate_structured_content(truncated_text, schema=schema, system_prompt=metadata_prompt)
                             task.log(f"Generated metadata: {metadata}")
                         else:
                             task.log(f"Skipping metadata generation for empty file {file_path.name}", "WARNING")
