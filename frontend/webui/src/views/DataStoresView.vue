@@ -652,6 +652,7 @@ function scrollToMatch(match) {
                                 <option value="none">None</option>
                                 <option value="manual">Manual Entry</option>
                                 <option value="auto-generate">Auto-generate for each file</option>
+                                <option value="rewrite-chunk">Rewrite full content with metadata for each chunk</option>
                             </select>
                             <p class="text-xs text-gray-500 mt-1">Choose how to handle metadata for uploaded files.</p>
                         </div>

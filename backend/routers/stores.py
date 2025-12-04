@@ -143,7 +143,7 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
         ss = get_safe_store_instance(username, datastore_id, db, permission_level="read_write")
         
         lc = None
-        if metadata_option == 'auto-generate':
+        if metadata_option in ['auto-generate', 'rewrite-chunk']:
             from backend.session import build_lollms_client_from_params
             lc = build_lollms_client_from_params(username=username)
 
