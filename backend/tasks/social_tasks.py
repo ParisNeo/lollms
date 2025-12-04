@@ -281,7 +281,7 @@ def _generate_feed_post_task(task: Task, force: bool = False):
             config_entry.value = now_iso
         else:
             # Create if not exists (though usually settings only read what's there, we can insert)
-            db.add(GlobalConfig(key="ai_bot_last_posted_at", value=now_iso, type="string", category="AI Bot"))
+            db.add(GlobalConfig(key="ai_bot_last_posted_at", value=now_iso, category="AI Bot"))
         
         db.commit()
         db.refresh(new_post) # refresh post to get ID
