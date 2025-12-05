@@ -10,6 +10,7 @@ import IconHardDrive from '../../assets/icons/IconHardDrive.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
 
 const adminStore = useAdminStore();
 const tasksStore = useTasksStore();
@@ -172,15 +173,24 @@ const formatPercent = (pct) => pct ? `${pct.toFixed(1)}%` : '0%';
         <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border dark:border-gray-700 p-6">
             <div class="flex items-center justify-between mb-4">
                 <h3 class="text-lg font-bold text-gray-900 dark:text-white">AI Log Analysis</h3>
-                <button 
-                    @click="analyzeLogs" 
-                    :disabled="isAnalyzing"
-                    class="btn btn-secondary btn-sm flex items-center gap-2"
-                >
-                    <IconAnimateSpin v-if="isAnalyzing" class="w-4 h-4 animate-spin"/>
-                    <IconPlayCircle v-else class="w-4 h-4"/>
-                    {{ isAnalyzing ? 'Analyzing...' : (lastAnalysisReport ? 'Regenerate Analysis' : 'Analyze Logs') }}
-                </button>
+                <div class="flex gap-2">
+                    <button 
+                        @click="uiStore.openModal('systemLog')" 
+                        class="btn btn-secondary btn-sm flex items-center gap-2"
+                    >
+                        <IconFileText class="w-4 h-4"/>
+                        View Logs
+                    </button>
+                    <button 
+                        @click="analyzeLogs" 
+                        :disabled="isAnalyzing"
+                        class="btn btn-secondary btn-sm flex items-center gap-2"
+                    >
+                        <IconAnimateSpin v-if="isAnalyzing" class="w-4 h-4 animate-spin"/>
+                        <IconPlayCircle v-else class="w-4 h-4"/>
+                        {{ isAnalyzing ? 'Analyzing...' : (lastAnalysisReport ? 'Regenerate Analysis' : 'Analyze Logs') }}
+                    </button>
+                </div>
             </div>
 
             <div v-if="lastAnalysisReport" class="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-4 text-sm border dark:border-gray-700">

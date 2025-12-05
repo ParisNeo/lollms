@@ -114,6 +114,8 @@ export const useAdminStore = defineStore('admin', () => {
     const isEnhancingEmail = ref(false);
     const adminAvailableLollmsModels = ref([]);
     const isLoadingLollmsModels = ref(false);
+    const systemLogs = ref([]);
+    const isLoadingSystemLogs = ref(false);
 
     const appFilters = reactive(getStoredFilters('lollms-app-filters', {
         searchQuery: '', selectedCategory: 'All', installationStatusFilter: 'All', selectedRepository: 'All', sortKey: 'last_update_date', sortOrder: 'desc', currentPage: 1, pageSize: 24
@@ -207,6 +209,18 @@ export const useAdminStore = defineStore('admin', () => {
             const response = await apiClient.get('/api/admin/system-status');
             systemStatus.value = response.data;
         } finally { isLoadingSystemStatus.value = false; }
+    }
+
+    async function fetchSystemLogs() {
+        isLoadingSystemLogs.value = true;
+        try {
+            const response = await apiClient.get('/api/admin/system/logs');
+            systemLogs.value = response.data;
+        } catch (error) {
+            uiStore.addNotification('Failed to fetch system logs.', 'error');
+        } finally {
+            isLoadingSystemLogs.value = false;
+        }
     }
 
     async function killProcess(pid) {
@@ -610,7 +624,7 @@ export const useAdminStore = defineStore('admin', () => {
         systemStatus, isLoadingSystemStatus, connectedUsers, isLoadingConnectedUsers, serverInfo, isLoadingServerInfo, globalGenerationStats, isLoadingGlobalGenerationStats, modelUsageStats, isLoadingModelUsageStats,
         funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories, newsArticles, isLoadingNewsArticles,
         isImporting, isEnhancingEmail, adminAvailableLollmsModels, isLoadingLollmsModels,
-        appFilters, mcpFilters, promptFilters,
+        appFilters, mcpFilters, promptFilters, systemLogs, isLoadingSystemLogs,
 
         // Actions
         fetchDashboardStats, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
@@ -639,7 +653,7 @@ export const useAdminStore = defineStore('admin', () => {
         deleteRegisteredApp, deleteRegisteredMcp, syncInstallations, purgeBrokenInstallation, fixBrokenInstallation, handleAppStatusUpdate,
 
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact, createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, exportCategory, importFunFacts, importCategoryFromFile, generateFunFacts,
-        fetchNewsArticles, updateNewsArticle, deleteBatchNewsArticles,
+        fetchNewsArticles, updateNewsArticle, deleteBatchNewsArticles, fetchSystemLogs,
         
         sendEmailToUsers, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript
     };

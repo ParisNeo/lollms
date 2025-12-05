@@ -80,6 +80,13 @@ class ModelUsageStat(BaseModel):
     model_name: str
     count: int
 
+class LogEntry(BaseModel):
+    task_id: str
+    task_name: str
+    timestamp: str
+    level: str
+    message: str
+
 def _purge_unused_temp_files_task(task: Task):
     task.log("Starting purge of unused temporary files older than 24 hours.")
     deleted_count, total_scanned = 0, 0
@@ -223,6 +230,29 @@ async def analyze_logs(current_user: UserAuthDetails = Depends(get_current_admin
         owner_username=current_user.username
     )
     return db_task
+
+@system_management_router.get("/system/logs", response_model=List[LogEntry])
+async def get_system_logs(limit: int = 200, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    """
+    Retrieves aggregated logs from recent tasks.
+    """
+    recent_tasks = db.query(DBTask).order_by(desc(DBTask.updated_at)).limit(50).all()
+    
+    all_logs = []
+    for t in recent_tasks:
+        if t.logs:
+            for l in t.logs:
+                all_logs.append(LogEntry(
+                    task_id=t.id,
+                    task_name=t.name,
+                    timestamp=l.get('timestamp') or datetime.now().isoformat(),
+                    level=l.get('level', 'INFO'),
+                    message=l.get('message', '')
+                ))
+    
+    # Sort by timestamp descending
+    all_logs.sort(key=lambda x: x.timestamp, reverse=True)
+    return all_logs[:limit]
 
 @system_management_router.post("/system/kill-process")
 async def kill_process(payload: KillProcessRequest, current_user: UserAuthDetails = Depends(get_current_admin_user)):
