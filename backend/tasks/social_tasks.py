@@ -1,4 +1,4 @@
-# backend/tasks/social_tasks.py
+# [UPDATE] backend/tasks/social_tasks.py
 import re
 import datetime
 import json
@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload, contains_eager
-from sqlalchemy import or_, and_, desc, func, update
+from sqlalchemy import or_, and_, desc, func, update, select, exists
 
 from backend.db import get_db, session as db_session_module
 from backend.db.models.user import User as DBUser
@@ -32,6 +32,63 @@ try:
     import safe_store
 except ImportError:
     safe_store = None
+
+def _send_moderation_dm(db: Session, bot_user: DBUser, target_user_id: int, content_snippet: str, reason: str):
+    try:
+        # Find existing 1-on-1 conversation between bot and target
+        # We look for a conversation where target is a member, AND bot is a member, AND is_group is False
+        conv = db.query(Conversation).join(ConversationMember, Conversation.id == ConversationMember.conversation_id)\
+            .filter(ConversationMember.user_id == target_user_id)\
+            .filter(exists().where(and_(
+                ConversationMember.conversation_id == Conversation.id,
+                ConversationMember.user_id == bot_user.id
+            )))\
+            .filter(Conversation.is_group == False)\
+            .first()
+            
+        if not conv:
+            conv = Conversation(is_group=False)
+            db.add(conv)
+            db.commit()
+            db.refresh(conv)
+            
+            m1 = ConversationMember(conversation_id=conv.id, user_id=bot_user.id)
+            m2 = ConversationMember(conversation_id=conv.id, user_id=target_user_id)
+            db.add_all([m1, m2])
+            db.commit()
+    
+        msg_content = f"Your content was flagged by the moderation system.\n\nReason: {reason}\n\nContent: \"{content_snippet}...\""
+        
+        dm = DirectMessage(
+            sender_id=bot_user.id,
+            conversation_id=conv.id,
+            content=msg_content,
+            sent_at=datetime.datetime.utcnow()
+        )
+        db.add(dm)
+        db.commit()
+        db.refresh(dm)
+        
+        # Notify via WS
+        payload = {
+            "type": "new_dm",
+            "data": {
+                "id": dm.id,
+                "sender_id": bot_user.id,
+                "receiver_id": target_user_id,
+                "conversation_id": conv.id,
+                "content": dm.content,
+                "sent_at": dm.sent_at.isoformat(),
+                "sender_username": bot_user.username,
+                "sender_icon": bot_user.icon,
+                "is_group": False
+            }
+        }
+        manager.send_personal_message_sync(payload, target_user_id)
+        
+    except Exception as e:
+        print(f"Error sending moderation DM to user {target_user_id}: {e}")
+        trace_exception(e)
 
 def _moderate_content_task(task: Task, content_type: str, content_id: int):
     """
@@ -83,22 +140,12 @@ def _moderate_content_task(task: Task, content_type: str, content_id: int):
         try:
             task.log("Initializing LLM client for moderation...")
             lc = build_lollms_client_from_params(username='lollms')
-            
-            # Debug: Log active binding info
-            if lc.llm:
-                task.log(f"LLM Client initialized with binding: {getattr(lc.llm, 'binding_name', 'Unknown')}")
-            else:
-                task.log("LLM Client initialized but no LLM service found!", "ERROR")
-                return
-                
         except Exception as e:
              task.log(f"Failed to initialize LLM client for moderation: {e}", "ERROR")
              trace_exception(e)
              return
 
-        # Strict prompt
-        prompt = f"""You are a strict content moderator AI. Your job is to classify the text below based ONLY on the provided criteria.
-
+        prompt = f"""You are a strict content moderator AI.
 [MODERATION CRITERIA]
 {criteria}
 
@@ -107,47 +154,51 @@ def _moderate_content_task(task: Task, content_type: str, content_id: int):
 
 [INSTRUCTION]
 Analyze the text carefully against the criteria.
-1. If the text violates ANY of the criteria above, output exactly: [[VIOLATION]]
-2. If the text implies a violation (e.g. useless spam when rules say 'no useless posts'), output exactly: [[VIOLATION]]
-3. If the text is compliant with ALL criteria, output exactly: [[SAFE]]
-
-Do not provide explanations. Output ONLY the tag.
+1. If the text violates ANY of the criteria, output: [[VIOLATION]] followed by a short, polite explanation for the user.
+2. If the text is compliant, output: [[SAFE]]
 """
-        task.log(f"Sending prompt to LLM (Text length: {len(content_text)} chars)...")
+        task.log(f"Sending prompt to LLM (Length: {len(content_text)} chars)...")
         
         try:
-            response = lc.generate_text(prompt, max_new_tokens=20, temperature=0.0).strip()
-            task.log(f"LLM Raw Response: '{response}'")
+            response = lc.generate_text(prompt, max_new_tokens=100, temperature=0.0).strip()
+            task.log(f"LLM Response: '{response}'")
+            
+            if "[[VIOLATION]]" in response:
+                reason = response.replace("[[VIOLATION]]", "").strip()
+                if not reason: reason = "Content violates community guidelines."
+                
+                task.log(f"VIOLATION detected for {content_type} {content_id}. Reason: {reason}", "WARNING")
+                content_obj.moderation_status = "flagged"
+                db.commit()
+                
+                if lollms_bot_user:
+                    _send_moderation_dm(db, lollms_bot_user, author_id, content_text[:50], reason)
+                    task.log("Sent DM notification to user.")
+                    
+            elif "[[SAFE]]" in response:
+                content_obj.moderation_status = "validated"
+                db.commit()
+                task.log("Content validated as SAFE.", "INFO")
+            else:
+                # Fallback check for raw response text
+                normalized_response = response.lower()
+                if "violation" in normalized_response or "unsafe" in normalized_response:
+                    task.log(f"Heuristic violation detected. Response: {response}", "WARNING")
+                    content_obj.moderation_status = "flagged"
+                    db.commit()
+                elif "safe" in normalized_response:
+                    task.log(f"Heuristic safe detected. Response: {response}", "INFO")
+                    content_obj.moderation_status = "validated"
+                    db.commit()
+                else:
+                    task.log(f"Ambiguous response from LLM. Leaving as pending. Response: {response}", "WARNING")
+
         except Exception as e:
             task.log(f"Error during LLM generation: {e}", "ERROR")
             trace_exception(e)
-            return
-        
-        if "[[VIOLATION]]" in response:
-            task.log(f"VIOLATION detected for {content_type} {content_id}.", "WARNING")
-            content_obj.moderation_status = "flagged"
-            db.commit()
-            task.log("Content status updated to 'flagged'.")
-        elif "[[SAFE]]" in response:
-            content_obj.moderation_status = "validated"
-            db.commit()
-            task.log("Content validated as SAFE.", "INFO")
-        else:
-            # Fallback check for raw response text
-            normalized_response = response.lower()
-            if "violation" in normalized_response or "unsafe" in normalized_response:
-                task.log(f"Heuristic violation detected. Response: {response}", "WARNING")
-                content_obj.moderation_status = "flagged"
-                db.commit()
-            elif "safe" in normalized_response:
-                task.log(f"Heuristic safe detected. Response: {response}", "INFO")
-                content_obj.moderation_status = "validated"
-                db.commit()
-            else:
-                task.log(f"Ambiguous response from LLM. Leaving as pending. Response: {response}", "WARNING")
 
     except Exception as e:
-        task.log(f"Unexpected error in moderation task: {e}", "ERROR")
+        task.log(f"Moderation task error: {e}", "ERROR")
         trace_exception(e)
     finally:
         db.close()
@@ -162,7 +213,7 @@ def _batch_moderate_content_task(task: Task):
             task.log("Moderation disabled. Aborting batch.", "WARNING")
             return
         
-    task.log("Starting batch moderation (pending items)...")
+    task.log("Starting batch moderation...")
     db = next(get_db())
     
     try:
@@ -170,7 +221,7 @@ def _batch_moderate_content_task(task: Task):
         pending_comments = db.query(DBComment).filter(or_(DBComment.moderation_status == "pending", DBComment.moderation_status == None)).all()
         
         total = len(pending_posts) + len(pending_comments)
-        task.log(f"Found {total} pending items to moderate.")
+        task.log(f"Found {total} items to moderate.")
         
         _run_moderation_loop(task, db, pending_posts + pending_comments, total)
         
@@ -243,18 +294,24 @@ def _run_moderation_loop(task, db, items, total_count):
 "{item.content}"
 
 [INSTRUCTION]
-1. If content violates criteria, output: [[VIOLATION]]
+1. If content violates criteria, output: [[VIOLATION]] followed by a short explanation.
 2. If content is compliant, output: [[SAFE]]
 """
         try:
             # task.log(f"Checking item {item.id}...")
-            response = lc.generate_text(prompt, max_new_tokens=20, temperature=0.0).strip()
+            response = lc.generate_text(prompt, max_new_tokens=100, temperature=0.0).strip()
             # task.log(f"Response: {response}")
 
             if "[[VIOLATION]]" in response:
+                reason = response.replace("[[VIOLATION]]", "").strip()
+                if not reason: reason = "Violated community guidelines."
+                
                 if item.moderation_status != "flagged":
                     item.moderation_status = "flagged"
-                    task.log(f"Flagged item {item.id}.", "WARNING")
+                    task.log(f"Flagged item {item.id}. Reason: {reason}", "WARNING")
+                    if lollms_bot_user:
+                        _send_moderation_dm(db, lollms_bot_user, item.author_id, item.content[:50], reason)
+
             elif "[[SAFE]]" in response:
                 if item.moderation_status != "validated":
                     item.moderation_status = "validated"
@@ -262,11 +319,10 @@ def _run_moderation_loop(task, db, items, total_count):
                 # Fallback
                 if "violation" in response.lower():
                     item.moderation_status = "flagged"
-                    task.log(f"Flagged item {item.id} (heuristic).", "WARNING")
                 elif "safe" in response.lower():
                     item.moderation_status = "validated"
                 else:
-                    task.log(f"Ambiguous response for {item.id}: {response}")
+                    task.log(f"Ambiguous: {response}")
             
             processed += 1
             if processed % 10 == 0:
@@ -303,42 +359,31 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         context_instruction = ""
         
         post = None
-        
         if mention_type == 'post':
             post = db.query(DBPost).options(joinedload(DBPost.author)).filter(DBPost.id == item_id).first()
-            if not post:
-                raise Exception(f"Post with ID {item_id} not found.")
+            if not post: return
             post_id = post.id
             thread_context = f"[Post] {post.author.username}: {post.content}"
             context_instruction = "You were mentioned in this post."
-            
         elif mention_type == 'comment':
             triggering_comment = db.query(DBComment).options(joinedload(DBComment.author)).filter(DBComment.id == item_id).first()
-            if not triggering_comment:
-                raise Exception(f"Comment with ID {item_id} not found.")
-            
+            if not triggering_comment: return
             post_id = triggering_comment.post_id
             post = db.query(DBPost).options(joinedload(DBPost.author)).filter(DBPost.id == post_id).first()
-            
             comments = db.query(DBComment).options(joinedload(DBComment.author)).filter(DBComment.post_id == post_id).order_by(DBComment.created_at.asc()).all()
-            
             thread_context = f"[Post] {post.author.username}: {post.content}\n"
             for c in comments:
                 thread_context += f"[Comment] {c.author.username}: {c.content}\n"
-            
             context_instruction = f"A new comment was added by {triggering_comment.author.username}."
 
         task.set_progress(20)
-
-        # 3. Generate response
-        task.log("Generating AI response...")
+        task.log("Generating response...")
         lc = build_lollms_client_from_params(username=lollms_bot_user.username)
         
         base_system_prompt = settings.get("ai_bot_system_prompt") or "You are @lollms, a helpful AI assistant."
         if lollms_bot_user.active_personality_id:
             personality = db.query(DBPersonality).filter(DBPersonality.id == lollms_bot_user.active_personality_id).first()
-            if personality:
-                base_system_prompt = personality.prompt_text
+            if personality: base_system_prompt = personality.prompt_text
         
         augmented_prompt = (
             f"{base_system_prompt}\n\n"
@@ -371,7 +416,7 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             task.log("AI generated empty content.", "WARNING")
             return {"status": "aborted"}
 
-        task.log(f"AI Response: {final_content[:100]}...")
+        task.log(f"AI Response ({'New Post' if is_new_post else 'Reply'}): {final_content[:100]}...")
         task.set_progress(80)
 
         if is_new_post:
@@ -449,7 +494,6 @@ def _generate_feed_post_task(task: Task, force: bool = False):
             task.log("@lollms user not found!", "ERROR")
             return
 
-        # ... (Content retrieval logic omitted for brevity, same as before) ...
         mode = settings.get("ai_bot_content_mode", "static_text")
         context_material = ""
         user_prompt = settings.get("ai_bot_generation_prompt", "Generate an engaging social media post.")

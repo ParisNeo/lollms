@@ -224,7 +224,7 @@ def _bootstrap_lollms_user(connection):
                     show_token_counter, rag_use_graph, tell_llm_os, share_dynamic_info_with_llm,
                     include_memory_date_in_context, message_font_size,
                     image_generation_enabled, image_annotation_enabled,
-                    force_ai_response_language
+                    force_ai_response_language, share_personal_info_with_llm, note_generation_enabled
                 )
                 VALUES (
                     :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
@@ -233,7 +233,7 @@ def _bootstrap_lollms_user(connection):
                     :show_token_counter, :rag_use_graph, :tell_llm_os, :share_dynamic_info_with_llm,
                     :include_memory_date_in_context, :message_font_size,
                     :image_generation_enabled, :image_annotation_enabled,
-                    :force_ai_response_language
+                    :force_ai_response_language, :share_personal_info_with_llm, :note_generation_enabled
                 )
             """),
             {
@@ -257,7 +257,9 @@ def _bootstrap_lollms_user(connection):
                 "message_font_size": 14,
                 "image_generation_enabled": False,
                 "image_annotation_enabled": False,
-                "force_ai_response_language": False # Added missing required field
+                "force_ai_response_language": False, # Added missing required field
+                "share_personal_info_with_llm": False,
+                "note_generation_enabled": False
             }
         )
         connection.commit()
