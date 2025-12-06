@@ -14,7 +14,6 @@ from backend.models import UserAuthDetails
 from backend.models.social import PostPublic
 from backend.models.group import GroupCreate, GroupUpdate, GroupPublic, MemberUpdate
 from backend.session import get_current_db_user_from_token
-from backend.tasks.social_tasks import get_post_public
 
 groups_router = APIRouter(
     prefix="/api/groups",
@@ -159,13 +158,19 @@ def get_group_feed(
     current_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
+    from backend.routers.social import get_post_public
+    
     group = db.query(DBGroup).filter(DBGroup.id == group_id).first()
     if not group or current_user not in group.members:
         raise HTTPException(status_code=403, detail="You are not a member of this group")
 
+    # Filter flagged posts
     posts_db = db.query(DBPost).options(
         joinedload(DBPost.author),
         joinedload(DBPost.comments).joinedload(DBComment.author)
-    ).filter(DBPost.group_id == group_id).order_by(DBPost.created_at.desc()).all()
+    ).filter(
+        DBPost.group_id == group_id,
+        DBPost.moderation_status != 'flagged'
+    ).order_by(DBPost.created_at.desc()).all()
 
     return [get_post_public(db, post, current_user.id) for post in posts_db]

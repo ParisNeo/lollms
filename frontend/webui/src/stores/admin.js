@@ -1,12 +1,13 @@
 // frontend/webui/src/stores/admin.js
+// ... (imports remain same)
 import { defineStore } from 'pinia';
 import { ref, reactive, watch, onMounted } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
-import { useTasksStore } from './tasks'; // Static import
+import { useTasksStore } from './tasks'; 
 import useEventBus from '../services/eventBus';
 
-// Helper to safely get and parse localStorage data
+// ... (helpers)
 function getStoredFilters(key, defaults) {
     try {
         const stored = localStorage.getItem(key);
@@ -37,12 +38,11 @@ const castSettingValue = (value, type) => {
 };
 
 export const useAdminStore = defineStore('admin', () => {
+    // ... (state)
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
     const { on } = useEventBus();
 
-    // --- State ---
-    
     // Dashboard & Users
     const dashboardStats = ref(null);
     const isLoadingDashboardStats = ref(false);
@@ -127,9 +127,11 @@ export const useAdminStore = defineStore('admin', () => {
         searchQuery: '', selectedCategory: 'All', installationStatusFilter: 'All', selectedRepository: 'All', sortKey: 'name', sortOrder: 'asc', currentPage: 1, pageSize: 24
     }));
 
+    // ... (watchers)
     watch(appFilters, (newFilters) => { localStorage.setItem('lollms-app-filters', JSON.stringify(newFilters)); }, { deep: true });
     watch(mcpFilters, (newFilters) => { localStorage.setItem('lollms-mcp-filters', JSON.stringify(newFilters)); }, { deep: true });
     watch(promptFilters, (newFilters) => { localStorage.setItem('lollms-prompt-filters', JSON.stringify(newFilters)); }, { deep: true });
+
 
     async function handleTaskCompletion(task) {
         if (!task || !['completed', 'failed', 'cancelled'].includes(task.status)) return;
@@ -150,6 +152,10 @@ export const useAdminStore = defineStore('admin', () => {
             fetchGlobalSettings();
             uiStore.addNotification('Certificate generated successfully. Reloading settings...', 'success', 6000);
         }
+        
+        if (taskName.includes('content') && task.status === 'completed') {
+            uiStore.addNotification('Moderation task completed.', 'success', 6000);
+        }
     }
     on('task:completed', handleTaskCompletion);
 
@@ -165,313 +171,55 @@ export const useAdminStore = defineStore('admin', () => {
     }
 
     // --- Actions ---
-
-    async function fetchDashboardStats() {
-        isLoadingDashboardStats.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/stats');
-            dashboardStats.value = response.data;
-        } catch { dashboardStats.value = null; } 
-        finally { isLoadingDashboardStats.value = false; }
-    }
-
-    async function fetchConnectedUsers() {
-        isLoadingConnectedUsers.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/ws-connections');
-            connectedUsers.value = response.data;
-        } catch { connectedUsers.value = []; } 
-        finally { isLoadingConnectedUsers.value = false; }
-    }
-
+    // (Existing actions omitted for brevity but must be present)
+    async function fetchDashboardStats() { isLoadingDashboardStats.value = true; try { const response = await apiClient.get('/api/admin/stats'); dashboardStats.value = response.data; } catch { dashboardStats.value = null; } finally { isLoadingDashboardStats.value = false; } }
+    async function fetchConnectedUsers() { isLoadingConnectedUsers.value = true; try { const response = await apiClient.get('/api/admin/ws-connections'); connectedUsers.value = response.data; } catch { connectedUsers.value = []; } finally { isLoadingConnectedUsers.value = false; } }
     async function broadcastMessage(message) { await apiClient.post('/api/admin/broadcast', { message }); }
+    async function createBackup(password) { const response = await apiClient.post('/api/admin/backup/create', { password }); tasksStore.addTask(response.data); return response.data; }
+    async function analyzeSystemLogs() { try { const response = await apiClient.post('/api/admin/system/analyze-logs'); tasksStore.addTask(response.data); return response.data; } catch (error) { uiStore.addNotification('Failed to start log analysis.', 'error'); throw error; } }
+    async function fetchSystemStatus() { isLoadingSystemStatus.value = true; try { const response = await apiClient.get('/api/admin/system-status'); systemStatus.value = response.data; } finally { isLoadingSystemStatus.value = false; } }
+    async function fetchSystemLogs() { isLoadingSystemLogs.value = true; try { const response = await apiClient.get('/api/admin/system/logs'); systemLogs.value = response.data; } catch (error) { uiStore.addNotification('Failed to fetch system logs.', 'error'); } finally { isLoadingSystemLogs.value = false; } }
+    async function killProcess(pid) { await apiClient.post('/api/admin/system/kill-process', { pid }); uiStore.addNotification(`Process ${pid} killed.`, 'success'); fetchSystemStatus(); }
+    async function fetchModelUsageStats() { isLoadingModelUsageStats.value = true; try { const response = await apiClient.get('/api/admin/model-usage-stats'); modelUsageStats.value = response.data || []; } catch (error) { console.error("Failed to fetch model usage stats:", error); modelUsageStats.value = []; } finally { isLoadingModelUsageStats.value = false; } }
+    async function fetchServerInfo() { isLoadingServerInfo.value = true; try { const response = await apiClient.get('/api/admin/server-info'); serverInfo.value = response.data; } finally { isLoadingServerInfo.value = false; } }
+    async function purgeUnusedUploads() { const response = await apiClient.post('/api/admin/purge-unused-uploads'); tasksStore.addTask(response.data); }
 
-    async function createBackup(password) {
-        const response = await apiClient.post('/api/admin/backup/create', { password });
-        tasksStore.addTask(response.data);
-        return response.data;
-    }
-
-    async function analyzeSystemLogs() {
-        try {
-            const response = await apiClient.post('/api/admin/system/analyze-logs');
-            tasksStore.addTask(response.data);
-            return response.data;
-        } catch (error) {
-            uiStore.addNotification('Failed to start log analysis.', 'error');
-            throw error;
-        }
-    }
-
-    async function fetchSystemStatus() {
-        isLoadingSystemStatus.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/system-status');
-            systemStatus.value = response.data;
-        } finally { isLoadingSystemStatus.value = false; }
-    }
-
-    async function fetchSystemLogs() {
-        isLoadingSystemLogs.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/system/logs');
-            systemLogs.value = response.data;
-        } catch (error) {
-            uiStore.addNotification('Failed to fetch system logs.', 'error');
-        } finally {
-            isLoadingSystemLogs.value = false;
-        }
-    }
-
-    async function killProcess(pid) {
-        await apiClient.post('/api/admin/system/kill-process', { pid });
-        uiStore.addNotification(`Process ${pid} killed.`, 'success');
-        fetchSystemStatus(); 
-    }
-
-    async function fetchModelUsageStats() {
-        isLoadingModelUsageStats.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/model-usage-stats');
-            modelUsageStats.value = response.data || [];
-        } catch (error) {
-            console.error("Failed to fetch model usage stats:", error);
-            modelUsageStats.value = [];
-        } finally { isLoadingModelUsageStats.value = false; }
-    }
-
-    async function fetchServerInfo() {
-        isLoadingServerInfo.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/server-info');
-            serverInfo.value = response.data;
-        } finally { isLoadingServerInfo.value = false; }
-    }
-
-    async function purgeUnusedUploads() {
-        const response = await apiClient.post('/api/admin/purge-unused-uploads');
+    async function triggerBatchModeration() {
+        const response = await apiClient.post('/api/admin/trigger-moderation');
         tasksStore.addTask(response.data);
     }
-
     
-    async function fetchGlobalGenerationStats() {
-        isLoadingGlobalGenerationStats.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/global-generation-stats');
-            globalGenerationStats.value = response.data;
-        } catch (error) {
-            globalGenerationStats.value = null;
-        } finally {
-            isLoadingGlobalGenerationStats.value = false;
-        }
-    }
-
-    async function triggerRssScraping() {
-        const { useTasksStore } = await import('./tasks.js');
-        const tasksStore = useTasksStore();
-        try {
-            const response = await apiClient.post('/api/admin/rss-feeds/scrape');
-            const task = response.data;
-            tasksStore.addTask(task);
-            return task;
-        } catch (error) {
-            uiStore.addNotification('Failed to start RSS scraping task.', 'error');
-            return null;
-        }
-    }
-
-    async function refreshZooCache() {
-        const { useTasksStore } = await import('./tasks.js');
-        const tasksStore = useTasksStore();
-        try {
-            const response = await apiClient.post('/api/admin/refresh-zoo-cache');
-            const task = response.data;
-            tasksStore.addTask(task);
-            return task;
-        } catch (error) {
-            uiStore.addNotification('Failed to start Zoo cache refresh.', 'error');
-            return null;
-        }
-    }
-
-    async function fetchAllUsers(filters = {}) {
-        isLoadingUsers.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/users', { params: filters });
-            allUsers.value = response.data;
-        } finally { isLoadingUsers.value = false; }
-    }
-
-    async function activateUser(userId) {
-        await apiClient.post(`/api/admin/users/${userId}/activate`);
-        uiStore.addNotification('User activated.', 'success');
-        fetchAllUsers();
-    }
-
-    async function fetchUserStats(userId) {
-        try {
-            const response = await apiClient.get(`/api/admin/users/${userId}/stats`);
-            return response.data;
-        } catch (error) {
-            return null;
-        }
-    }    
-
-    async function batchUpdateUsers(payload) {
-        await apiClient.post('/api/admin/users/batch-update-settings', payload);
-        await fetchAllUsers();
-    }
-
-    async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) {
-        const r = await apiClient.post('/api/admin/email-users', { subject, body, user_ids, background_color: backgroundColor, send_as_text: sendAsText });
-        tasksStore.addTask(r.data);
-        return true;
-    }
-
-    async function enhanceEmail(subject, body, backgroundColor, prompt) {
-        isEnhancingEmail.value = true;
-        try {
-            const response = await apiClient.post('/api/admin/enhance-email', { subject, body, background_color: backgroundColor, prompt });
-            return response.data;
-        } finally {
-            isEnhancingEmail.value = false;
-        }
-    }
-
-    // --- Actions: Settings ---
-
-    async function fetchGlobalSettings() {
-        isLoadingSettings.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/settings');
-            globalSettings.value = response.data.map(s => ({ ...s, value: castSettingValue(s.value, s.type) }));
-        } finally { isLoadingSettings.value = false; }
-    }
-
-    async function updateGlobalSettings(configs) {
-        await apiClient.put('/api/admin/settings', { configs });
-        fetchGlobalSettings();
-        uiStore.addNotification('Settings updated.', 'success');
-    }
-
-    async function fetchAiBotSettings() {
-        isLoadingAiBotSettings.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/ai-bot-settings');
-            aiBotSettings.value = response.data;
-        } finally { isLoadingAiBotSettings.value = false; }
-    }
-
-    async function updateAiBotSettings(settings) {
-        const response = await apiClient.put('/api/admin/ai-bot-settings', settings);
-        aiBotSettings.value = response.data;
-        uiStore.addNotification('AI Bot user settings updated.', 'success');
-    }
-
-    async function uploadWelcomeLogo(file) {
-        const formData = new FormData();
-        formData.append('file', file);
-        const response = await apiClient.post('/api/admin/upload-logo', formData);
-        await fetchGlobalSettings();
-        uiStore.addNotification(response.data.message, 'success');
-    }
-
-    async function removeWelcomeLogo() {
-        await apiClient.delete('/api/admin/remove-logo');
-        await fetchGlobalSettings();
-        uiStore.addNotification('Custom logo removed.', 'success');
-    }
-
-    async function uploadSslFile(file, fileType) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('file_type', fileType);
-        const response = await apiClient.post('/api/admin/upload-ssl-file', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-        });
-        await fetchGlobalSettings();
-        return response.data.path;
-    }
-
-    async function generateSelfSignedCert() {
-        try {
-            console.log("[AdminStore] Requesting certificate generation task...");
-            const response = await apiClient.post('/api/admin/generate-cert');
-            tasksStore.addTask(response.data);
-            uiStore.addNotification('Certificate generation task started. Check tasks for progress.', 'info');
-            return response.data;
-        } catch(e) {
-            console.error("[AdminStore] Certificate generation task failed:", e);
-            const msg = e.response?.data?.detail || 'Failed to start certificate task.';
-            uiStore.addNotification(msg, 'error');
-            throw e;
-        }
-    }
-
-    async function downloadCertificate() {
-        try {
-            const response = await apiClient.get('/api/admin/download-cert', { responseType: 'blob' });
-            const url = window.URL.createObjectURL(new Blob([response.data]));
-            const link = document.createElement('a');
-            link.href = url;
-            link.setAttribute('download', 'lollms_cert.pem');
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-        } catch(e) {
-            uiStore.addNotification('Failed to download certificate.', 'error');
-        }
-    }
-
-    async function downloadTrustScript(type) {
-        try {
-            const response = await apiClient.get('/api/admin/download-trust-script', { 
-                params: { script_type: type },
-                responseType: 'blob' 
-            });
-            const url = window.URL.createObjectURL(new Blob([response.data]));
-            const link = document.createElement('a');
-            link.href = url;
-            const ext = type === 'windows' ? 'bat' : 'sh';
-            link.setAttribute('download', `install_lollms_cert.${ext}`);
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-        } catch(e) {
-            console.error(e);
-            uiStore.addNotification('Failed to download trust script.', 'error');
-        }
-    }
-
-    async function importOpenWebUIData(file) {
-        isImporting.value = true;
-        const formData = new FormData();
-        formData.append('file', file);
-        try {
-            await apiClient.post('/api/admin/import-openwebui', formData);
-        } finally {
-            isImporting.value = false;
-        }
-    }
-
-    async function fetchAdminAvailableLollmsModels() {
-        if (adminAvailableLollmsModels.value.length > 0) return;
-        isLoadingLollmsModels.value = true;
-        try {
-            const response = await apiClient.get('/api/admin/available-models');
-            adminAvailableLollmsModels.value = response.data;
-        } finally {
-            isLoadingLollmsModels.value = false;
-        }
-    }
-
-    async function generateIconForModel(prompt) {
-        const response = await apiClient.post('/api/admin/bindings/generate_icon', { prompt });
+    async function triggerFullRemoderation() {
+        const response = await apiClient.post('/api/admin/trigger-full-remoderation');
         tasksStore.addTask(response.data);
-        return response.data;
     }
 
-    // --- Actions: Bindings (LLM) ---
+    // ... (rest of existing actions)
+    async function fetchGlobalGenerationStats() { isLoadingGlobalGenerationStats.value = true; try { const response = await apiClient.get('/api/admin/global-generation-stats'); globalGenerationStats.value = response.data; } catch (error) { globalGenerationStats.value = null; } finally { isLoadingGlobalGenerationStats.value = false; } }
+    async function triggerRssScraping() { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); try { const response = await apiClient.post('/api/admin/rss-feeds/scrape'); const task = response.data; tasksStore.addTask(task); return task; } catch (error) { uiStore.addNotification('Failed to start RSS scraping task.', 'error'); return null; } }
+    async function refreshZooCache() { const { useTasksStore } = await import('./tasks.js'); const tasksStore = useTasksStore(); try { const response = await apiClient.post('/api/admin/refresh-zoo-cache'); const task = response.data; tasksStore.addTask(task); return task; } catch (error) { uiStore.addNotification('Failed to start Zoo cache refresh.', 'error'); return null; } }
+    async function fetchAllUsers(filters = {}) { isLoadingUsers.value = true; try { const response = await apiClient.get('/api/admin/users', { params: filters }); allUsers.value = response.data; } finally { isLoadingUsers.value = false; } }
+    async function activateUser(userId) { await apiClient.post(`/api/admin/users/${userId}/activate`); uiStore.addNotification('User activated.', 'success'); fetchAllUsers(); }
+    async function fetchUserStats(userId) { try { const response = await apiClient.get(`/api/admin/users/${userId}/stats`); return response.data; } catch (error) { return null; } }    
+    async function batchUpdateUsers(payload) { await apiClient.post('/api/admin/users/batch-update-settings', payload); await fetchAllUsers(); }
+    async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) { const r = await apiClient.post('/api/admin/email-users', { subject, body, user_ids, background_color: backgroundColor, send_as_text: sendAsText }); tasksStore.addTask(r.data); return true; }
+    async function enhanceEmail(subject, body, backgroundColor, prompt) { isEnhancingEmail.value = true; try { const response = await apiClient.post('/api/admin/enhance-email', { subject, body, background_color: backgroundColor, prompt }); return response.data; } finally { isEnhancingEmail.value = false; } }
+
+    async function fetchGlobalSettings() { isLoadingSettings.value = true; try { const response = await apiClient.get('/api/admin/settings'); globalSettings.value = response.data.map(s => ({ ...s, value: castSettingValue(s.value, s.type) })); } finally { isLoadingSettings.value = false; } }
+    async function updateGlobalSettings(configs) { await apiClient.put('/api/admin/settings', { configs }); fetchGlobalSettings(); uiStore.addNotification('Settings updated.', 'success'); }
+    async function fetchAiBotSettings() { isLoadingAiBotSettings.value = true; try { const response = await apiClient.get('/api/admin/ai-bot-settings'); aiBotSettings.value = response.data; } finally { isLoadingAiBotSettings.value = false; } }
+    async function updateAiBotSettings(settings) { const response = await apiClient.put('/api/admin/ai-bot-settings', settings); aiBotSettings.value = response.data; uiStore.addNotification('AI Bot user settings updated.', 'success'); }
+    async function uploadWelcomeLogo(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/upload-logo', formData); await fetchGlobalSettings(); uiStore.addNotification(response.data.message, 'success'); }
+    async function removeWelcomeLogo() { await apiClient.delete('/api/admin/remove-logo'); await fetchGlobalSettings(); uiStore.addNotification('Custom logo removed.', 'success'); }
+    async function uploadSslFile(file, fileType) { const formData = new FormData(); formData.append('file', file); formData.append('file_type', fileType); const response = await apiClient.post('/api/admin/upload-ssl-file', formData, { headers: { 'Content-Type': 'multipart/form-data' }, }); await fetchGlobalSettings(); return response.data.path; }
+    async function generateSelfSignedCert() { try { const response = await apiClient.post('/api/admin/generate-cert'); tasksStore.addTask(response.data); uiStore.addNotification('Certificate generation task started. Check tasks for progress.', 'info'); return response.data; } catch(e) { const msg = e.response?.data?.detail || 'Failed to start certificate task.'; uiStore.addNotification(msg, 'error'); throw e; } }
+    async function downloadCertificate() { try { const response = await apiClient.get('/api/admin/download-cert', { responseType: 'blob' }); const url = window.URL.createObjectURL(new Blob([response.data])); const link = document.createElement('a'); link.href = url; link.setAttribute('download', 'lollms_cert.pem'); document.body.appendChild(link); link.click(); link.remove(); } catch(e) { uiStore.addNotification('Failed to download certificate.', 'error'); } }
+    async function downloadTrustScript(type) { try { const response = await apiClient.get('/api/admin/download-trust-script', { params: { script_type: type }, responseType: 'blob' }); const url = window.URL.createObjectURL(new Blob([response.data])); const link = document.createElement('a'); link.href = url; const ext = type === 'windows' ? 'bat' : 'sh'; link.setAttribute('download', `install_lollms_cert.${ext}`); document.body.appendChild(link); link.click(); link.remove(); } catch(e) { console.error(e); uiStore.addNotification('Failed to download trust script.', 'error'); } }
+    async function importOpenWebUIData(file) { isImporting.value = true; const formData = new FormData(); formData.append('file', file); try { await apiClient.post('/api/admin/import-openwebui', formData); } finally { isImporting.value = false; } }
+    async function fetchAdminAvailableLollmsModels() { if (adminAvailableLollmsModels.value.length > 0) return; isLoadingLollmsModels.value = true; try { const response = await apiClient.get('/api/admin/available-models'); adminAvailableLollmsModels.value = response.data; } finally { isLoadingLollmsModels.value = false; } }
+    async function generateIconForModel(prompt) { const response = await apiClient.post('/api/admin/bindings/generate_icon', { prompt }); tasksStore.addTask(response.data); return response.data; }
+    
+    // Bindings & Zoos Actions (omitted for brevity, assume present)
     async function fetchBindings() { isLoadingBindings.value = true; try { const r = await apiClient.get('/api/admin/bindings'); bindings.value = r.data; } finally { isLoadingBindings.value = false; } }
     async function fetchAvailableBindingTypes() { const r = await apiClient.get('/api/admin/bindings/available_types'); availableBindingTypes.value = r.data; }
     async function addBinding(payload) { const r = await apiClient.post('/api/admin/bindings', payload); bindings.value.push(r.data); uiStore.addNotification(`Binding '${r.data.alias}' created.`, 'success'); }
@@ -482,7 +230,9 @@ export const useAdminStore = defineStore('admin', () => {
     async function saveModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/bindings/${id}/alias`, payload); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) bindings.value[i] = r.data; }
     async function deleteModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/bindings/${id}/alias`, { data: { original_model_name: name } }); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) bindings.value[i] = r.data; }
     async function executeBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
-
+    
+    // ... (rest of TTI/TTS/STT/RAG/Zoos actions)
+    // For brevity I am just ensuring the new actions are returned
     async function fetchTtiBindings() { isLoadingTtiBindings.value = true; try { const r = await apiClient.get('/api/admin/tti-bindings'); ttiBindings.value = r.data; } finally { isLoadingTtiBindings.value = false; } }
     async function fetchAvailableTtiBindingTypes() { const r = await apiClient.get('/api/admin/tti-bindings/available_types'); availableTtiBindingTypes.value = r.data; }
     async function addTtiBinding(payload) { const r = await apiClient.post('/api/admin/tti-bindings', payload); ttiBindings.value.push(r.data); uiStore.addNotification(`TTI Binding '${r.data.alias}' created.`, 'success'); }
@@ -609,6 +359,22 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateNewsArticle(id, payload) { await apiClient.put(`/api/admin/news-articles/${id}`, payload); await fetchNewsArticles(); uiStore.addNotification('Article updated.', 'success'); }
     async function deleteBatchNewsArticles(ids) { await apiClient.post('/api/admin/news-articles/batch-delete', { article_ids: ids }); await fetchNewsArticles(); uiStore.addNotification(`${ids.length} article(s) deleted.`, 'success'); }
 
+    // --- Moderation Actions ---
+    async function fetchModerationQueue(filter = null) {
+        const params = {};
+        if (filter) params.status_filter = filter;
+        const response = await apiClient.get('/api/admin/moderation/queue', { params });
+        return response.data;
+    }
+
+    async function approveContent(type, id) {
+        await apiClient.post(`/api/admin/moderation/${type}/${id}/approve`);
+    }
+
+    async function deleteContent(type, id) {
+        await apiClient.delete(`/api/admin/moderation/${type}/${id}`);
+    }
+
     return {
         // State
         dashboardStats, isLoadingDashboardStats, allUsers, isLoadingUsers,
@@ -630,7 +396,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchDashboardStats, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
         fetchSystemStatus, killProcess, fetchModelUsageStats, fetchServerInfo, purgeUnusedUploads,
         fetchAllUsers, activateUser, fetchUserStats, batchUpdateUsers, fetchGlobalGenerationStats,
-        fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings,
+        fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,
         uploadWelcomeLogo, removeWelcomeLogo, uploadSslFile, importOpenWebUIData, fetchAdminAvailableLollmsModels, generateIconForModel,
         
         fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding, fetchBindingModels, getModelCtxSize, saveModelAlias, deleteModelAlias, executeBindingCommand,
@@ -655,6 +421,9 @@ export const useAdminStore = defineStore('admin', () => {
         fetchFunFacts, fetchFunFactCategories, createFunFact, updateFunFact, deleteFunFact, createFunFactCategory, updateFunFactCategory, deleteFunFactCategory, exportFunFacts, exportCategory, importFunFacts, importCategoryFromFile, generateFunFacts,
         fetchNewsArticles, updateNewsArticle, deleteBatchNewsArticles, fetchSystemLogs,
         
-        sendEmailToUsers, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript
+        sendEmailToUsers, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript,
+
+        // Moderation
+        fetchModerationQueue, approveContent, deleteContent
     };
 });

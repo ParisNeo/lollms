@@ -28,6 +28,7 @@ import IconDatabase from '../assets/icons/IconDatabase.vue';
 import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
 import IconFileText from '../assets/icons/IconFileText.vue';
 import IconKey from '../assets/icons/IconKey.vue';
+import IconEye from '../assets/icons/IconEye.vue'; // Icon for moderation
 
 const route = useRoute();
 const router = useRouter();
@@ -42,6 +43,7 @@ const sections = [
   { type: 'link', id: 'server_settings', name: 'Server Settings', icon: markRaw(IconServer) },
   { type: 'divider', label: 'Management' },
   { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },
+  { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) }, // New Entry
   { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
   { type: 'link', id: 'broadcast', name: 'Broadcast', icon: markRaw(IconSend) },
   { type: 'divider', label: 'Content' },
@@ -61,7 +63,6 @@ const sections = [
   { type: 'link', id: 'rag_bindings', name: 'RAG Bindings', icon: markRaw(IconDatabase) },
   { type: 'link', id: 'builders', name: 'Code Builders', icon: markRaw(IconBuild) },
   { type: 'link', id: 'ai_bot', name: 'AI Bot', icon: markRaw(IconLollms) },
-  { type: 'link', id: 'services', name: 'API Services', icon: markRaw(IconServer) },
   { type: 'divider', label: 'System & Tools' },
   { type: 'link', id: 'welcome_settings', name: 'Welcome Page', icon: markRaw(IconHome) },
   { type: 'link', id: 'global_settings', name: 'Application Settings', icon: markRaw(IconCog) },
@@ -104,7 +105,7 @@ const activeSectionId = computed({
             </template>
         </template>
         <template #main>
-            <div class="p-4 sm:p-6">
+            <div class="p-4 sm:p-6 h-full">
                 <AdminPanel :active-tab="activeSectionId" />
             </div>
         </template>

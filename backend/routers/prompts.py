@@ -101,7 +101,7 @@ help: Select the language you want to translate the text into.
             user_prompt,
             system_prompt=system_prompt,
             schema=prompt_schema,
-            n_predict=settings.get("default_llm_ctx_size", 4096)
+            #n_predict=settings.get("default_llm_ctx_size", 4096)
         )
 
         task.log("Creating new prompt in the database...")

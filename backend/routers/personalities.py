@@ -86,7 +86,7 @@ Your task is to create a new personality based on the user's prompt."""
         generated_data_dict = lc.generate_structured_content(prompt,
                                                              system_prompt=system_prompt,
                                                              schema=personality_schema,
-                                                             n_predict=settings.get("default_llm_ctx_size")
+                                                             #n_predict=settings.get("default_llm_ctx_size")
                                                             )
 
         task.log("Creating new personality in the database...")
@@ -146,7 +146,7 @@ You return the JSON without any comments or placeholders."""
     generated_data_dict = lc.generate_structured_content(enhance_instruction,
                                                             system_prompt=system_prompt,
                                                             schema=output_schema,
-                                                            n_predict=settings.get("default_llm_ctx_size")
+                                                            #n_predict=settings.get("default_llm_ctx_size")
                                                         )
     
     task.log("Prompt enhanced successfully.")

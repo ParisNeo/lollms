@@ -112,6 +112,8 @@ def _bootstrap_global_settings(connection):
         "ai_bot_system_prompt": { "value": "You are lollms, a helpful AI assistant integrated into this social platform. When a user mentions you using '@lollms', you should respond to their post helpfully and concisely. Your goal is to be a friendly and informative presence in the community.", "type": "text", "description": "The system prompt to use for the bot if no personality is selected.", "category": "AI Bot" },
         "ai_bot_binding_model": { "value": "", "type": "string", "description": "The model used by the AI Bot.", "category": "AI Bot" },
         "ai_bot_personality_id": { "value": "", "type": "string", "description": "The personality used by the AI Bot (optional).", "category": "AI Bot" },
+        "ai_bot_moderation_enabled": { "value": False, "type": "boolean", "description": "Enable moderation for AI Bot.", "category": "AI Bot" },
+        "ai_bot_moderation_criteria": { "value": "Be polite and respectful. No hate speech, spam, or explicit content.", "type": "text", "description": "Criteria for AI Bot moderation.", "category": "AI Bot" },
         "welcome_text": { "value": "lollms", "type": "string", "description": "The main text displayed on the welcome page.", "category": "Welcome Page" },
         "welcome_slogan": { "value": "One tool to rule them all", "type": "string", "description": "The slogan displayed under the main text on the welcome page.", "category": "Welcome Page" },
         "welcome_logo_url": { "value": "", "type": "string", "description": "URL to a custom logo for the welcome page. Leave empty for default.", "category": "Welcome Page" },
@@ -626,11 +628,27 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("ALTER TABLE posts ADD COLUMN group_id INTEGER REFERENCES user_groups(id) ON DELETE CASCADE"))
                 connection.commit()
             except Exception: connection.rollback()
+        
+        if 'moderation_status' not in posts_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE posts ADD COLUMN moderation_status VARCHAR DEFAULT 'pending' NOT NULL"))
+                connection.execute(text("UPDATE posts SET moderation_status = 'pending'"))
+                connection.commit()
+            except Exception: connection.rollback()
 
         try:
             result = connection.execute(text("UPDATE posts SET visibility = LOWER(visibility) WHERE visibility != LOWER(visibility)"))
             if result.rowcount > 0: connection.commit()
         except Exception: connection.rollback()
+
+    if inspector.has_table("comments"):
+        comments_columns_db = [col['name'] for col in inspector.get_columns('comments')]
+        if 'moderation_status' not in comments_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE comments ADD COLUMN moderation_status VARCHAR DEFAULT 'pending' NOT NULL"))
+                connection.execute(text("UPDATE comments SET moderation_status = 'pending'"))
+                connection.commit()
+            except Exception: connection.rollback()
 
     if inspector.has_table("discussion_groups"):
         discussion_groups_columns = [col['name'] for col in inspector.get_columns('discussion_groups')]

@@ -1,6 +1,6 @@
 # backend/db/models/social.py
 from sqlalchemy import (
-    Column, Integer,
+    Column, Integer, String,
     ForeignKey, UniqueConstraint,
     DateTime, Text, JSON
 )
@@ -27,6 +27,7 @@ class Post(Base):
     content = Column(Text, nullable=False)
     media = Column(JSON, nullable=True) 
     visibility = Column(SQLAlchemyEnum(PostVisibility), nullable=False, default=PostVisibility.public, index=True)
+    moderation_status = Column(String, default="pending", nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     author = relationship("User", back_populates="posts")
@@ -40,6 +41,7 @@ class Comment(Base):
     post_id = Column(Integer, ForeignKey('posts.id', ondelete="CASCADE"), nullable=False, index=True)
     author_id = Column(Integer, ForeignKey('users.id', ondelete="CASCADE"), nullable=False, index=True)
     content = Column(Text, nullable=False)
+    moderation_status = Column(String, default="pending", nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     
     post = relationship("Post", back_populates="comments")

@@ -199,7 +199,13 @@ async def chat_completions(
                 return True
             def blocking_call():
                 try:
-                    lc.generate_from_messages(openai_messages, streaming_callback=llm_callback, images=images, temperature=request.temperature, n_predict=request.max_tokens, **generation_kwargs)
+                    lc.generate_from_messages(
+                        openai_messages, 
+                        streaming_callback=llm_callback, 
+                        images=images, 
+                        temperature=request.temperature, 
+                        #n_predict=request.max_tokens, 
+                        **generation_kwargs)
                 finally:
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
             threading.Thread(target=blocking_call, daemon=True).start()

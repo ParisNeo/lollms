@@ -11,6 +11,7 @@ from .rag_management import rag_management_router
 from .rss_management import rss_management_router
 from .bot_management import bot_management_router
 from .news_management import news_management_router
+from .moderation_management import router as moderation_router
 
 # This is the main router that will be imported by the main application.
 # It aggregates all the theme-based admin routers.
@@ -30,3 +31,4 @@ admin_router.include_router(rag_management_router)
 admin_router.include_router(rss_management_router)
 admin_router.include_router(bot_management_router)
 admin_router.include_router(news_management_router)
+admin_router.include_router(moderation_router)
