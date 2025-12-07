@@ -1,37 +1,37 @@
-pip>=21.2.3
-sse_starlette
+pip==25.3
+sse_starlette==3.0.2
 # --- Core FastAPI and Server ---
-fastapi
-uvicorn[standard]  # Includes python-multipart and other useful server extras
-werkzeug           # For secure_filename
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+werkzeug==3.1.3
 
 # --- Configuration & Utilities ---
-toml  # For reading config.toml
-sqlalchemy
-passlib[bcrypt]==1.7.4  # For password hashing (bcrypt is a common and secure scheme)
-python-jose[cryptography] 
-Authlib>=1.0.0
-python-multipart
+toml==0.10.2
+sqlalchemy==2.0.43
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.5.0
+Authlib==1.6.5
+python-multipart==0.0.20
 bcrypt==4.0.1
 
 # --- LoLLMs Client Library and Common Backends ---
-lollms-client>=1.7.2
-ascii_colors>0.11.0
-pipmaster>=1.0.5
+lollms-client==1.6.4
+ascii_colors==0.11.4
+pipmaster==1.0.8
 
 # Dependencies for specific lollms_client backends (based on your config examples):
-openai  # If using the OpenAI binding (e.g., for gpt-3.5-turbo)
-tiktoken # Required by the OpenAI binding in lollms_client for tokenization
+openai==2.1.0
+tiktoken==0.11.0
 
-ollama # for ollama
+ollama==0.6.0
 # Add other lollms_client backend dependencies if you plan to use them, e.g.:
 # torch
 # transformers
 # accelerate
 # (Note: lollms-client itself pulls in requests, ascii-colors, pillow, pipmaster, yaml, pydantic, lollmsvectordb, numpy)
-pydantic
-pydantic[email] #for email validation
-Pillow
+pydantic==2.11.10
+pydantic[email]==2.11.10
+Pillow==11.3.0
 
 # --- SafeStore Library and Common Features ---
 # Using safe_store[all] is a convenient way to get most features.
@@ -41,8 +41,8 @@ Pillow
 # - pypdf, python-docx, beautifulsoup4, lxml (for document parsing)
 # - cryptography (for encryption)
 # - filelock (core concurrency mechanism for safe_store)
-safe_store[all]>=2.6.5
-wcwidth
+safe_store[all]==3.2.1
+wcwidth==0.2.14
 # If you prefer to install safe_store features individually:
 # safe_store
 # sentence-transformers  # For 'st:' vectorizers like all-MiniLM-L6-v2
@@ -53,39 +53,39 @@ wcwidth
 # python-docx           # For DOCX parsing
 # scikit-learn          # For TF-IDF vectorizers (if you plan to use them)
 
-python-multipart
+python-multipart==0.0.20
 
 # for migrated databases 
-argon2-cffi
+argon2-cffi==25.1.0
 
 # for documents import/export
-pypdf>=6.0.0
-python-docx
-python-pptx
-mdtopptx
-docx2python
-openpyxl
-markdown_pdf
-pandas
-extract-msg
+pypdf==6.1.1
+python-docx==1.2.0
+python-pptx==1.0.2
+mdtopptx==0.1.0
+docx2python==3.5.0
+openpyxl==3.1.5
+markdown_pdf==1.10
+pandas==2.3.3
+extract-msg==0.55.0
 
-psutil
-nvidia-ml-py
+psutil==7.1.0
+nvidia-ml-py==13.580.82
 
 # required for uploading pdfs
-PyMuPDF
-pyyaml
-filelock
-packaging
-jsonschema
-ScrapeMaster
-apscheduler
-feedparser
+PyMuPDF==1.26.4
+pyyaml==6.0.3
+filelock==3.19.1
+packaging==25.0
+jsonschema==4.25.1
+ScrapeMaster==0.4.2
+apscheduler==3.11.1
+feedparser==6.0.12
 
-markdown2
-aioredis
-pydub
-latex2mathml
+markdown2==2.5.4
+aioredis==2.0.1
+pydub==0.25.1
+latex2mathml==3.78.1
 
 # For exporting the database
-pyzipper
+pyzipper==0.3.6
