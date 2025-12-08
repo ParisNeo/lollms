@@ -422,6 +422,34 @@ async def list_rag_documents_in_datastore(datastore_id: str, current_user: UserA
     
     return sorted_unique_docs
 
+@store_files_router.get("/files/content")
+async def get_rag_file_content(
+    datastore_id: str,
+    filename: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_query")
+    
+    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+    
+    # We need to resolve the full path stored in the DB for this filename.
+    # Since we don't store the full path mapping easily in SQL, we rely on the convention used in upload.
+    datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / datastore_id
+    file_path = datastore_docs_path / secure_filename(filename)
+    
+    try:
+        # reconstruct_document_text should return the full text
+        content = ss.reconstruct_document_text(str(file_path))
+        if content is None:
+             raise HTTPException(status_code=404, detail="Content not found or could not be reconstructed.")
+        return {"content": content}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Error retrieving file content: {e}")
 
 @store_files_router.delete("/files/{filename}") 
 async def delete_rag_document_from_datastore(datastore_id: str, filename: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:

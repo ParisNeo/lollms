@@ -89,3 +89,8 @@ latex2mathml==3.78.1
 
 # For exporting the database
 pyzipper==0.3.6
+
+# AI Bot Tools
+duckduckgo-search==5.3.0
+arxiv==2.1.0
+google-api-python-client==2.118.0

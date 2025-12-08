@@ -1,10 +1,10 @@
 <script setup>
-import { ref, computed, onMounted, defineAsyncComponent, nextTick } from 'vue';
+import { ref, computed, onMounted, nextTick } from 'vue';
 import { useSocialStore } from '../../stores/social';
 import { useAuthStore } from '../../stores/auth';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
-
-const CommentCard = defineAsyncComponent(() => import('./CommentCard.vue'));
+// Changed from async import to static to prevent chunk loading errors
+import CommentCard from './CommentCard.vue';
 
 const props = defineProps({
   postId: {
@@ -33,6 +33,7 @@ const user = computed(() => authStore.user);
 const canComment = computed(() => user.value && user.value.user_ui_level >= 2);
 
 onMounted(() => {
+  // If comments are not already loaded in store, fetch them
   if (!comments.value) {
     socialStore.fetchComments(props.postId);
   }

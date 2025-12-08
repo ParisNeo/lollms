@@ -1,3 +1,4 @@
+// [UPDATE] frontend/webui/src/stores/data.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -517,6 +518,16 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
+    async function fetchFileContent(storeId, filename) {
+        try {
+            const response = await apiClient.get(`/api/store/${storeId}/files/content`, { params: { filename } });
+            return response.data.content;
+        } catch (error) {
+            useUiStore().addNotification('Failed to fetch file content.', 'error');
+            throw error;
+        }
+    }
+
     async function fetchDataStoreDetails(storeId) {
         try {
             const response = await apiClient.get(`/api/store/${storeId}/details`);
@@ -849,6 +860,7 @@ export const useDataStore = defineStore('data', () => {
         fetchAvailableVectorizers, availableVectorizers,
         fetchStoreFiles, uploadFilesToStore,
         deleteFileFromStore, deleteFilesFromStore,
+        fetchFileContent, // New method added
         fetchDataStoreDetails,
         generateDataStoreGraph,
         updateDataStoreGraph,

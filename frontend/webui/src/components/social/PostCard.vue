@@ -1,11 +1,11 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
-import { marked } from 'marked';
 import { useAuthStore } from '../../stores/auth';
 import { useSocialStore } from '../../stores/social';
 import { useUiStore } from '../../stores/ui';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
 import CommentSection from './CommentSection.vue';
+import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 
 const props = defineProps({
   post: {
@@ -29,24 +29,6 @@ const canDelete = computed(() => isAuthor.value || user.value?.is_admin || user.
 const commentCount = computed(() => {
   const comments = socialStore.getCommentsForPost(props.post.id);
   return comments ? comments.length : (props.post.comments?.length || 0);
-});
-
-const formattedContent = computed(() => {
-  if (!props.post.content) return '';
-  try {
-      // Robust check for marked availability
-      if (typeof marked === 'function') {
-          return marked(props.post.content);
-      } else if (marked && typeof marked.parse === 'function') {
-          return marked.parse(props.post.content, { gfm: true, breaks: true });
-      } else {
-          // Fallback if marked is missing/broken
-          return props.post.content.replace(/\n/g, '<br>');
-      }
-  } catch (e) {
-      console.error("Markdown parsing error:", e);
-      return props.post.content;
-  }
 });
 
 function formatTimestamp(dateString) {
@@ -174,7 +156,7 @@ function toggleComments() {
         </div>
 
         <!-- Post Content -->
-        <div class="mt-2 prose prose-sm dark:prose-invert max-w-none" v-html="formattedContent"></div>
+        <MessageContentRenderer :content="post.content" class="mt-2 prose prose-sm dark:prose-invert max-w-none" />
 
         <!-- Action Buttons -->
         <div class="mt-4 flex justify-between text-gray-500">

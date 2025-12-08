@@ -12,6 +12,7 @@ import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
 import DataStoreGraphManager from '../components/datastores/DataStoreGraphManager.vue';
 import JsonRenderer from '../components/ui/JsonRenderer.vue';
+import GenericModal from '../components/modals/GenericModal.vue'; // Make sure this import is correct
 
 // Icons
 import IconDatabase from '../assets/icons/IconDatabase.vue';
@@ -64,6 +65,7 @@ const searchInChunks = ref('');
 const searchMatches = ref([]);
 const currentMatchIndex = ref(-1);
 
+const viewingFile = ref(null); // Ref to hold file data for viewer
 
 const metadataOption = ref('none');
 const manualMetadata = ref({});
@@ -490,6 +492,21 @@ function scrollToMatch(match) {
         }
     }
 }
+
+async function viewFileContent(file) {
+    uiStore.addNotification('Fetching document content...', 'info');
+    try {
+        const content = await dataStore.fetchFileContent(currentSelectedStore.value.id, file.filename);
+        viewingFile.value = {
+            filename: file.filename,
+            metadata: file.metadata,
+            content: content
+        };
+        uiStore.openModal('fileContent');
+    } catch (e) {
+        // notification handled in store
+    }
+}
 </script>
 
 <template>
@@ -750,7 +767,7 @@ function scrollToMatch(match) {
                                 class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-4 flex-shrink-0"
                             >
                             <div class="flex-grow min-w-0">
-                                <span class="text-sm font-medium truncate">{{ file.filename }}</span>
+                                <span class="text-sm font-medium truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400" @click="viewFileContent(file)">{{ file.filename }}</span>
                                 <details v-if="file.metadata && Object.keys(file.metadata).length > 0" class="mt-2 text-xs">
                                     <summary class="cursor-pointer text-gray-500">View Metadata</summary>
                                     <div class="mt-1 p-2 bg-gray-100 dark:bg-gray-700/50 rounded">
@@ -829,6 +846,24 @@ function scrollToMatch(match) {
                 <DataStoreGraphManager :store="currentSelectedStore" :task="currentGraphTask" />
             </div>
         </div>
+        
+        <!-- File Viewer Modal -->
+        <GenericModal modalName="fileContent" title="Document Viewer" size="3xl">
+            <template #body>
+                <div v-if="viewingFile" class="space-y-4">
+                    <div v-if="viewingFile.metadata && Object.keys(viewingFile.metadata).length > 0" class="bg-gray-100 dark:bg-gray-700/50 p-3 rounded-lg text-sm">
+                        <h4 class="font-bold mb-2">Metadata</h4>
+                        <JsonRenderer :json="viewingFile.metadata" />
+                    </div>
+                    <div class="p-4 border rounded-lg dark:border-gray-700 bg-white dark:bg-gray-900 overflow-auto max-h-[60vh] whitespace-pre-wrap font-mono text-sm">
+                        {{ viewingFile.content }}
+                    </div>
+                </div>
+            </template>
+            <template #footer>
+                <button @click="uiStore.closeModal('fileContent')" class="btn btn-primary">Close</button>
+            </template>
+        </GenericModal>
     </template>
   </PageViewLayout>
 </template>

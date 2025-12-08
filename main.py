@@ -108,7 +108,6 @@ def scheduled_rss_job():
     """
     Wrapper function to submit the RSS scraping task to the task manager.
     """
-    # Check if a scraping task is already running to avoid duplicates
     active_tasks = task_manager.get_all_tasks()
     if any(t.name == "Scheduled RSS Feed Scraping" and t.status in ['running', 'pending'] for t in active_tasks):
         print("INFO: Scheduled RSS scraping skipped as a similar task is already running.")
@@ -118,35 +117,75 @@ def scheduled_rss_job():
         name="Scheduled RSS Feed Scraping",
         target=_scrape_rss_feeds_task,
         description="Periodically fetching and processing all active RSS feeds.",
-        owner_username=None # System task
+        owner_username=None
     )
 
 def scheduled_news_cleanup_job():
-    """
-    Wrapper function to submit the news cleanup task to the task manager.
-    """
     task_manager.submit_task(
         name="Daily News Article Cleanup",
         target=_cleanup_old_news_articles_task,
         description="Deleting old news articles based on retention policy.",
-        owner_username=None # System task
-    )
-
-def scheduled_bot_posting_job():
-    """
-    Wrapper function to submit the AI bot auto-posting task.
-    """
-    task_manager.submit_task(
-        name="AI Bot Auto-Posting",
-        target=_generate_feed_post_task,
-        description="Generating and posting social feed content from AI Bot.",
         owner_username=None
     )
 
+def check_and_run_scheduled_posts():
+    """
+    Checks the current time against the configured schedule and triggers a post if needed.
+    """
+    db = db_session_module.SessionLocal()
+    try:
+        settings.load_from_db(db)
+        
+        if not settings.get("ai_bot_auto_post", False):
+            return
+
+        schedule = settings.get("ai_bot_post_schedule", [])
+        if not schedule:
+            return
+
+        # Check last posted time
+        last_posted_str = settings.get("ai_bot_last_posted_at")
+        last_posted = None
+        if last_posted_str:
+            try:
+                last_posted = datetime.datetime.fromisoformat(last_posted_str)
+            except ValueError: pass
+
+        now = datetime.datetime.now()
+        current_time_str = now.strftime("%H:%M")
+        
+        # Check if we should post now
+        should_post = False
+        
+        for time_slot in schedule:
+            # Check if current time matches slot (with some tolerance, e.g. same minute)
+            if current_time_str == time_slot:
+                # Check if we ALREADY posted for this slot today
+                if last_posted:
+                    time_diff = now - last_posted
+                    # If we posted less than 59 minutes ago, assume we hit this slot already
+                    if time_diff.total_seconds() < 3540: 
+                        continue
+                
+                should_post = True
+                break
+        
+        if should_post:
+            print(f"INFO: Triggering scheduled post for slot {current_time_str}")
+            task_manager.submit_task(
+                name="AI Bot Scheduled Post",
+                target=_generate_feed_post_task,
+                args=(True,), # Force=True ignores internal interval checks inside the task
+                description=f"Scheduled post for {current_time_str}",
+                owner_username=None
+            )
+
+    except Exception as e:
+        print(f"Error in scheduler check: {e}")
+    finally:
+        db.close()
+
 def scheduled_email_proposal_job():
-    """
-    Wrapper for email proposal generation.
-    """
     task_manager.submit_task(
         name="Generate Email Proposal",
         target=_generate_email_proposal_task,
@@ -156,10 +195,7 @@ def scheduled_email_proposal_job():
 
 
 def run_one_time_startup_tasks(lock: Lock):
-    """
-    This function runs all tasks that should only be executed once across all worker processes.
-    It uses a multiprocessing lock to ensure single execution.
-    """
+    # ... (content remains same as previous full file content) ...
     acquired = lock.acquire(block=False)
     if not acquired:
         return
@@ -359,6 +395,7 @@ def run_one_time_startup_tasks(lock: Lock):
 
         ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
 
+
         ASCIIColors.yellow("--- Synchronizing Filesystem Installations with Database ---")
         db_for_sync: Optional[Session] = None
         try:
@@ -376,8 +413,6 @@ def run_one_time_startup_tasks(lock: Lock):
         db_for_ws_cleanup: Optional[Session] = None
         try:
             db_for_ws_cleanup = next(get_db())
-            # This is a simple approach: clear all on startup.
-            # A more advanced approach might check PIDs, but this is safer for now.
             num_deleted = db_for_ws_cleanup.query(WebSocketConnection).delete()
             db_for_ws_cleanup.commit()
             if num_deleted > 0:
@@ -391,8 +426,6 @@ def run_one_time_startup_tasks(lock: Lock):
         # --- END NEW ---
 
         load_cache()
-        
-        # Initialize the task manager AFTER DB is stable
         task_manager.init_app(db_session_module.SessionLocal)
 
         try:
@@ -413,11 +446,8 @@ async def startup_event():
     """
     global broadcast_listener_task, rss_scheduler, startup_lock
     
-    # Each worker must initialize its own database connection pool.
     init_database(APP_DB_URL)
     
-    # Each worker needs to load settings into its own memory.
-    # The _is_loaded flag in settings will prevent redundant logging.
     db = db_session_module.SessionLocal()
     try:
         settings.load_from_db(db)
@@ -429,13 +459,7 @@ async def startup_event():
     
     broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
     
-    # Check if this is the main process that acquired the lock.
-    # This check is a bit indirect but works for uvicorn's process model.
-    # The process that successfully ran run_one_time_startup_tasks will have the lock released.
-    # We can't directly check the lock state across processes easily, but we can assume
-    # the main process is the first one to start. This is a reasonable heuristic.
     if os.getpid() == os.getppid() or os.getenv("WORKER_ID") == "1":
-        # Initialize scheduler
         rss_scheduler = BackgroundScheduler(daemon=True)
 
         if settings.get("rss_feed_enabled"):
@@ -443,22 +467,17 @@ async def startup_event():
             next_run = datetime.datetime.now() + datetime.timedelta(seconds=20)
             rss_scheduler.add_job(scheduled_rss_job, 'interval', minutes=interval, next_run_time=next_run)
             
-            # --- NEW: Schedule daily cleanup ---
             retention_days = settings.get("rss_news_retention_days", 1)
             if retention_days > 0:
-                # Schedule to run once daily, e.g., at 3 AM server time
                 rss_scheduler.add_job(scheduled_news_cleanup_job, 'cron', hour=3, minute=0)
-                print(f"INFO: Daily news cleanup scheduled. Articles older than {retention_days} day(s) will be removed.")
-            # --- END NEW ---
+                print(f"INFO: Daily news cleanup scheduled.")
 
             print(f"INFO: RSS feed checking scheduled to run every {interval} minutes.")
         
-        # --- NEW: Schedule Bot Auto-Posting (Check every 30 mins) ---
-        # The task itself checks the "last_posted_at" timestamp against the configured interval.
-        rss_scheduler.add_job(scheduled_bot_posting_job, 'interval', minutes=30, next_run_time=datetime.datetime.now() + datetime.timedelta(minutes=1))
-        # --- END NEW ---
+        # Check for scheduled posts every minute
+        rss_scheduler.add_job(check_and_run_scheduled_posts, 'interval', minutes=1)
+        print(f"INFO: Bot Auto-Posting schedule checker active.")
 
-        # Schedule Email Generation (e.g., every 24 hours)
         if settings.get("email_marketing_enabled", False):
             rss_scheduler.add_job(
                 scheduled_email_proposal_job, 
@@ -532,15 +551,12 @@ app.include_router(discussion_groups_router)
 app.include_router(voices_studio_router)
 app.include_router(image_studio_router)
 app.include_router(notes_router)
-app.include_router(public_router) # Include public router
+app.include_router(public_router)
 
 
 add_ui_routes(app)
 
 if __name__ == "__main__":
-    # Set the multiprocessing start method for Windows compatibility.
-    # This must be done inside the __name__ == "__main__" block and before any other
-    # multiprocessing-related code is executed.
     if os.name == 'nt':
         try:
             set_start_method('spawn')
@@ -548,12 +564,10 @@ if __name__ == "__main__":
             if "context has already been set" not in str(e):
                 raise
             else:
-                pass # If it's already been set, we can ignore the error.
+                pass
 
     init_database(APP_DB_URL)
 
-    # Determine if it's a first run by checking for the DB file's existence.
-    # This is more robust than querying a table that might not have the latest schema.
     db_path_str = APP_DB_URL.replace("sqlite:///", "")
     db_path = Path(db_path_str)
     is_first_run = not db_path.exists()
@@ -564,7 +578,6 @@ if __name__ == "__main__":
             print("--- First time setup: launching setup wizard ---")
             python_executable = sys.executable
             env = os.environ.copy()
-            # Construct PYTHONPATH to ensure the script can find backend modules
             project_root_path = str(Path(__file__).resolve().parent)
             current_python_path = env.get("PYTHONPATH", "")
             new_python_path = f"{project_root_path}{os.pathsep}{current_python_path}"
@@ -574,7 +587,6 @@ if __name__ == "__main__":
             
             if result.returncode != 0:
                 ASCIIColors.red("\n[ERROR] Setup wizard failed or was cancelled. Exiting application.")
-                print("You can try running the wizard again by deleting the 'data/app_main.db' file, or configure the application manually from the UI.")
                 sys.exit(1)
         else:
             print(ASCIIColors.yellow("[WARNING] Setup wizard script not found. Proceeding with default setup."))
@@ -584,10 +596,8 @@ if __name__ == "__main__":
     
     db = db_session_module.SessionLocal()
     try:
-        # Load settings once for the main process to use for CORS, etc.
         settings.load_from_db(db)
         
-        # --- Use DB settings for server config ---
         host_setting = settings.get("host", SERVER_CONFIG.get("host", "0.0.0.0"))
         port_setting = settings.get("port", SERVER_CONFIG.get("port", 9642))
         https_enabled = settings.get("https_enabled", False)
@@ -651,45 +661,27 @@ if __name__ == "__main__":
     workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
     
     if os.name == 'nt' and workers > 1 and "LOLLMS_WORKERS" not in os.environ:
-        ASCIIColors.yellow("Multiple workers are not fully stable on Windows and can cause startup errors.")
-        ASCIIColors.yellow("Forcing workers to 1. To override this, set the environment variable LOLLMS_WORKERS to your desired number.")
+        ASCIIColors.yellow("Multiple workers are not fully stable on Windows.")
         workers = 1
 
     ssl_params = {}
     if settings.get("https_enabled"):
-        ASCIIColors.green("Https enabled")
         certfile = settings.get("ssl_certfile")
         keyfile = settings.get("ssl_keyfile")
-        ASCIIColors.green(f"certfile:{certfile}")
-        ASCIIColors.green(f"keyfile:{keyfile}")
-
         try:
             if certfile and keyfile and Path(certfile).is_file() and Path(keyfile).is_file():
                 ssl_params["ssl_certfile"] = certfile
                 ssl_params["ssl_keyfile"] = keyfile
             else:
-                raise FileNotFoundError("Certificate or key file is missing, not found, or invalid.")
+                raise FileNotFoundError("Certificate or key file is missing.")
         except Exception as e:
-            print(f"WARNING: HTTPS is enabled in settings, but the certificate or key file is missing, not found, or invalid. Error: {e}")
-            print(f"         Certfile path: '{certfile}'")
-            print(f"         Keyfile path: '{keyfile}'")
-            print("         Server will start without HTTPS to avoid crashing.")
+            print(f"WARNING: HTTPS config error: {e}. Server will start without HTTPS.")
 
-    # This banner is now printed only once by the main process
     print("")
     ASCIIColors.cyan(f"--- LoLLMs Plateform (v{APP_VERSION}) ---")
     protocol = "https" if ssl_params else "http"
 
     if host_setting == "0.0.0.0":
-        if sys.platform == "win32":
-            ASCIIColors.yellow("\n--- IMPORTANT WINDOWS FIREWALL NOTICE ---")
-            ASCIIColors.yellow(f"You are running on Windows with host '0.0.0.0', making the app accessible on your network.")
-            ASCIIColors.yellow("However, Windows Defender Firewall will likely block incoming connections by default.")
-            ASCIIColors.yellow(f"If you cannot access the UI from another device, you may need to create an")
-            ASCIIColors.yellow(f"inbound firewall rule to allow connections on TCP port {port_setting}.")
-            ASCIIColors.yellow("The 'install.bat' and 'install.ps1' scripts now attempt to do this automatically for new installations.")
-            ASCIIColors.yellow("-------------------------------------------\n")
-            
         import psutil
         import socket
         from backend.utils import get_accessible_host
@@ -699,15 +691,9 @@ if __name__ == "__main__":
             ASCIIColors.magenta(f"Recommended public access URL: {protocol}://{accessible_host}:{port_setting}/")
 
         ASCIIColors.magenta(f"Or access locally at: {protocol}://localhost:{port_setting}/")
-
-        for iface, addrs in psutil.net_if_addrs().items():
-            for addr in addrs:
-                if addr.family == socket.AF_INET:
-                    if addr.address != accessible_host and addr.address != '127.0.0.1':
-                        ASCIIColors.magenta(f"Also available at: {protocol}://{addr.address}:{port_setting}/")
-
     else:
         ASCIIColors.magenta(f"Access UI at: {protocol}://{host_setting}:{port_setting}/")
+    
     ASCIIColors.green(f"Using {workers} Workers")
     print("----------------------")
 

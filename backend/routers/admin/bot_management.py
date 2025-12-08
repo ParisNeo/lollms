@@ -23,7 +23,9 @@ class AiBotSettingsUpdate(BaseModel):
     ai_bot_enabled: Optional[bool] = None
     ai_bot_system_prompt: Optional[str] = None
     ai_bot_auto_post: Optional[bool] = None
-    ai_bot_post_interval: Optional[float] = None
+    # Replaced interval with schedule
+    ai_bot_post_schedule: Optional[List[str]] = None 
+    
     ai_bot_content_mode: Optional[str] = None
     ai_bot_static_content: Optional[str] = None
     ai_bot_file_path: Optional[str] = None
@@ -33,6 +35,15 @@ class AiBotSettingsUpdate(BaseModel):
     # Moderation Support
     ai_bot_moderation_enabled: Optional[bool] = None
     ai_bot_moderation_criteria: Optional[str] = None
+    
+    # Tools Support
+    ai_bot_tool_ddg_enabled: Optional[bool] = None
+    ai_bot_tool_google_enabled: Optional[bool] = None
+    ai_bot_tool_google_api_key: Optional[str] = None
+    ai_bot_tool_google_cse_id: Optional[str] = None
+    ai_bot_tool_arxiv_enabled: Optional[bool] = None
+    ai_bot_tool_scraper_enabled: Optional[bool] = None
+    ai_bot_tool_rss_enabled: Optional[bool] = None
 
 class AiBotSettingsPublic(BaseModel):
     lollms_model_name: Optional[str] = None
@@ -41,7 +52,8 @@ class AiBotSettingsPublic(BaseModel):
     ai_bot_enabled: bool = False
     ai_bot_system_prompt: str = ""
     ai_bot_auto_post: bool = False
-    ai_bot_post_interval: float = 24.0
+    ai_bot_post_schedule: List[str] = []
+    
     ai_bot_content_mode: str = "static_text"
     ai_bot_static_content: str = ""
     ai_bot_file_path: str = ""
@@ -51,6 +63,15 @@ class AiBotSettingsPublic(BaseModel):
     # Moderation Support
     ai_bot_moderation_enabled: bool = False
     ai_bot_moderation_criteria: str = ""
+    
+    # Tools Support
+    ai_bot_tool_ddg_enabled: bool = False
+    ai_bot_tool_google_enabled: bool = False
+    ai_bot_tool_google_api_key: str = ""
+    ai_bot_tool_google_cse_id: str = ""
+    ai_bot_tool_arxiv_enabled: bool = False
+    ai_bot_tool_scraper_enabled: bool = False
+    ai_bot_tool_rss_enabled: bool = False
 
     class Config:
         from_attributes = True
@@ -73,14 +94,23 @@ async def get_ai_bot_settings(db: Session = Depends(get_db)):
         ai_bot_enabled=lollms_settings.get("ai_bot_enabled", False),
         ai_bot_system_prompt=lollms_settings.get("ai_bot_system_prompt", ""),
         ai_bot_auto_post=lollms_settings.get("ai_bot_auto_post", False),
-        ai_bot_post_interval=float(lollms_settings.get("ai_bot_post_interval", 24.0)),
+        ai_bot_post_schedule=lollms_settings.get("ai_bot_post_schedule", ["09:00"]),
+        
         ai_bot_content_mode=lollms_settings.get("ai_bot_content_mode", "static_text"),
         ai_bot_static_content=lollms_settings.get("ai_bot_static_content", ""),
         ai_bot_file_path=lollms_settings.get("ai_bot_file_path", ""),
         ai_bot_generation_prompt=lollms_settings.get("ai_bot_generation_prompt", ""),
         ai_bot_rag_datastore_ids=lollms_settings.get("ai_bot_rag_datastore_ids", []),
         ai_bot_moderation_enabled=lollms_settings.get("ai_bot_moderation_enabled", False),
-        ai_bot_moderation_criteria=lollms_settings.get("ai_bot_moderation_criteria", "Be polite and respectful.")
+        ai_bot_moderation_criteria=lollms_settings.get("ai_bot_moderation_criteria", "Be polite and respectful."),
+        
+        ai_bot_tool_ddg_enabled=lollms_settings.get("ai_bot_tool_ddg_enabled", False),
+        ai_bot_tool_google_enabled=lollms_settings.get("ai_bot_tool_google_enabled", False),
+        ai_bot_tool_google_api_key=lollms_settings.get("ai_bot_tool_google_api_key", ""),
+        ai_bot_tool_google_cse_id=lollms_settings.get("ai_bot_tool_google_cse_id", ""),
+        ai_bot_tool_arxiv_enabled=lollms_settings.get("ai_bot_tool_arxiv_enabled", False),
+        ai_bot_tool_scraper_enabled=lollms_settings.get("ai_bot_tool_scraper_enabled", False),
+        ai_bot_tool_rss_enabled=lollms_settings.get("ai_bot_tool_rss_enabled", False)
     )
 
 @bot_management_router.put("/ai-bot-settings", response_model=AiBotSettingsPublic)
@@ -88,7 +118,7 @@ async def update_ai_bot_settings(settings: AiBotSettingsUpdate, db: Session = De
     """
     Updates the specific settings for the @lollms system user and global configs.
     """
-    ASCIIColors.info(f"Updating AI Bot Settings. Moderation Enabled: {settings.ai_bot_moderation_enabled}")
+    ASCIIColors.info(f"Updating AI Bot Settings. Schedule: {settings.ai_bot_post_schedule}")
     
     bot_user = db.query(DBUser).filter(DBUser.username == "lollms").first()
     if not bot_user:
@@ -105,7 +135,8 @@ async def update_ai_bot_settings(settings: AiBotSettingsUpdate, db: Session = De
         ("ai_bot_enabled", settings.ai_bot_enabled, "boolean"),
         ("ai_bot_system_prompt", settings.ai_bot_system_prompt, "text"),
         ("ai_bot_auto_post", settings.ai_bot_auto_post, "boolean"),
-        ("ai_bot_post_interval", settings.ai_bot_post_interval, "float"),
+        ("ai_bot_post_schedule", settings.ai_bot_post_schedule, "json"), # List of times
+        
         ("ai_bot_content_mode", settings.ai_bot_content_mode, "string"),
         ("ai_bot_static_content", settings.ai_bot_static_content, "text"),
         ("ai_bot_file_path", settings.ai_bot_file_path, "string"),
@@ -113,6 +144,14 @@ async def update_ai_bot_settings(settings: AiBotSettingsUpdate, db: Session = De
         ("ai_bot_rag_datastore_ids", settings.ai_bot_rag_datastore_ids, "json"),
         ("ai_bot_moderation_enabled", settings.ai_bot_moderation_enabled, "boolean"),
         ("ai_bot_moderation_criteria", settings.ai_bot_moderation_criteria, "text"),
+        
+        ("ai_bot_tool_ddg_enabled", settings.ai_bot_tool_ddg_enabled, "boolean"),
+        ("ai_bot_tool_google_enabled", settings.ai_bot_tool_google_enabled, "boolean"),
+        ("ai_bot_tool_google_api_key", settings.ai_bot_tool_google_api_key, "string"),
+        ("ai_bot_tool_google_cse_id", settings.ai_bot_tool_google_cse_id, "string"),
+        ("ai_bot_tool_arxiv_enabled", settings.ai_bot_tool_arxiv_enabled, "boolean"),
+        ("ai_bot_tool_scraper_enabled", settings.ai_bot_tool_scraper_enabled, "boolean"),
+        ("ai_bot_tool_rss_enabled", settings.ai_bot_tool_rss_enabled, "boolean"),
     ]
 
     for key, value, type_ in configs_to_update:

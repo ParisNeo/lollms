@@ -7,6 +7,7 @@ import CreatePostForm from './CreatePostForm.vue';
 import PostCard from './PostCard.vue';
 import DmFooter from '../layout/DmFooter.vue';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
 
 const socialStore = useSocialStore();
 const authStore = useAuthStore();
@@ -24,15 +25,28 @@ onMounted(() => {
   }
 });
 
+function refreshFeed() {
+    socialStore.fetchFeed();
+}
 </script>
 
 <template>
   <div class="flex flex-col h-full">
     <div class="flex-grow bg-gray-100 dark:bg-gray-900 overflow-y-auto">
       <div class="mx-auto py-6 px-4">
-        <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-6">
-          Home Feed
-        </h1>
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">
+            Home Feed
+            </h1>
+            <button 
+                @click="refreshFeed" 
+                class="btn-icon p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"
+                :disabled="isLoadingFeed"
+                title="Refresh Feed"
+            >
+                <IconRefresh class="w-5 h-5 text-gray-600 dark:text-gray-400" :class="{'animate-spin': isLoadingFeed}" />
+            </button>
+        </div>
 
         <div v-if="canPost" class="mb-6">
           <!-- Placeholder that reveals the form on click -->

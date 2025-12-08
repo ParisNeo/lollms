@@ -2,6 +2,7 @@
 import re
 import datetime
 import json
+import random
 from pathlib import Path
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -32,6 +33,32 @@ try:
     import safe_store
 except ImportError:
     safe_store = None
+
+# Tool Imports
+try:
+    from duckduckgo_search import DDGS
+except ImportError:
+    DDGS = None
+
+try:
+    import arxiv
+except ImportError:
+    arxiv = None
+
+try:
+    from googleapiclient.discovery import build as google_build
+except ImportError:
+    google_build = None
+
+try:
+    import feedparser
+except ImportError:
+    feedparser = None
+
+try:
+    from scrapemaster import ScrapeMaster
+except ImportError:
+    ScrapeMaster = None
 
 def _send_moderation_dm(db: Session, bot_user: DBUser, target_user_id: int, content_snippet: str, reason: str):
     try:
@@ -91,16 +118,12 @@ def _send_moderation_dm(db: Session, bot_user: DBUser, target_user_id: int, cont
         trace_exception(e)
 
 def _moderate_content_task(task: Task, content_type: str, content_id: int):
-    """
-    Task to check a post or comment against moderation criteria.
-    """
     task.log(f"Starting moderation task for {content_type} ID: {content_id}")
 
     # Ensure settings are refreshed
     with task.db_session_factory() as db:
         settings.refresh(db)
         is_enabled = settings.get("ai_bot_moderation_enabled", False)
-        task.log(f"Moderation Enabled Status: {is_enabled}")
     
     if not is_enabled:
         task.log("Moderation disabled. Skipping.", "INFO")
@@ -135,10 +158,8 @@ def _moderate_content_task(task: Task, content_type: str, content_id: int):
 
         # 2. Check Criteria
         criteria = settings.get("ai_bot_moderation_criteria", "Be polite and respectful. No hate speech, spam, or explicit content.")
-        task.log(f"Moderation Criteria: {criteria}")
         
         try:
-            task.log("Initializing LLM client for moderation...")
             lc = build_lollms_client_from_params(username='lollms')
         except Exception as e:
              task.log(f"Failed to initialize LLM client for moderation: {e}", "ERROR")
@@ -157,41 +178,33 @@ Analyze the text carefully against the criteria.
 1. If the text violates ANY of the criteria, output: [[VIOLATION]] followed by a short, polite explanation for the user.
 2. If the text is compliant, output: [[SAFE]]
 """
-        task.log(f"Sending prompt to LLM (Length: {len(content_text)} chars)...")
         
         try:
             response = lc.generate_text(prompt, max_new_tokens=100, temperature=0.0).strip()
-            task.log(f"LLM Response: '{response}'")
             
             if "[[VIOLATION]]" in response:
                 reason = response.replace("[[VIOLATION]]", "").strip()
                 if not reason: reason = "Content violates community guidelines."
                 
-                task.log(f"VIOLATION detected for {content_type} {content_id}. Reason: {reason}", "WARNING")
+                task.log(f"VIOLATION detected. Reason: {reason}", "WARNING")
                 content_obj.moderation_status = "flagged"
                 db.commit()
                 
                 if lollms_bot_user:
                     _send_moderation_dm(db, lollms_bot_user, author_id, content_text[:50], reason)
-                    task.log("Sent DM notification to user.")
                     
             elif "[[SAFE]]" in response:
                 content_obj.moderation_status = "validated"
                 db.commit()
-                task.log("Content validated as SAFE.", "INFO")
             else:
                 # Fallback check for raw response text
                 normalized_response = response.lower()
                 if "violation" in normalized_response or "unsafe" in normalized_response:
-                    task.log(f"Heuristic violation detected. Response: {response}", "WARNING")
                     content_obj.moderation_status = "flagged"
                     db.commit()
                 elif "safe" in normalized_response:
-                    task.log(f"Heuristic safe detected. Response: {response}", "INFO")
                     content_obj.moderation_status = "validated"
                     db.commit()
-                else:
-                    task.log(f"Ambiguous response from LLM. Leaving as pending. Response: {response}", "WARNING")
 
         except Exception as e:
             task.log(f"Error during LLM generation: {e}", "ERROR")
@@ -204,9 +217,7 @@ Analyze the text carefully against the criteria.
         db.close()
 
 def _batch_moderate_content_task(task: Task):
-    """
-    Task to moderate all old posts/comments that are pending moderation.
-    """
+    # ... (existing code) ...
     with task.db_session_factory() as db:
         settings.refresh(db)
         if not settings.get("ai_bot_moderation_enabled", False):
@@ -232,9 +243,7 @@ def _batch_moderate_content_task(task: Task):
         db.close()
 
 def _full_remoderation_task(task: Task):
-    """
-    Task to force re-moderation on ALL posts and comments in the system.
-    """
+    # ... (existing code) ...
     with task.db_session_factory() as db:
         settings.refresh(db)
         if not settings.get("ai_bot_moderation_enabled", False):
@@ -259,12 +268,9 @@ def _full_remoderation_task(task: Task):
         db.close()
 
 def _run_moderation_loop(task, db, items, total_count):
-    """
-    Shared logic for iterating over a list of content items and moderating them.
-    """
+    # ... (existing code) ...
     lollms_bot_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
     criteria = settings.get("ai_bot_moderation_criteria", "")
-    task.log(f"Criteria: {criteria}")
 
     try:
         lc = build_lollms_client_from_params(username='lollms')
@@ -298,9 +304,7 @@ def _run_moderation_loop(task, db, items, total_count):
 2. If content is compliant, output: [[SAFE]]
 """
         try:
-            # task.log(f"Checking item {item.id}...")
             response = lc.generate_text(prompt, max_new_tokens=100, temperature=0.0).strip()
-            # task.log(f"Response: {response}")
 
             if "[[VIOLATION]]" in response:
                 reason = response.replace("[[VIOLATION]]", "").strip()
@@ -308,21 +312,12 @@ def _run_moderation_loop(task, db, items, total_count):
                 
                 if item.moderation_status != "flagged":
                     item.moderation_status = "flagged"
-                    task.log(f"Flagged item {item.id}. Reason: {reason}", "WARNING")
                     if lollms_bot_user:
                         _send_moderation_dm(db, lollms_bot_user, item.author_id, item.content[:50], reason)
 
             elif "[[SAFE]]" in response:
                 if item.moderation_status != "validated":
                     item.moderation_status = "validated"
-            else:
-                # Fallback
-                if "violation" in response.lower():
-                    item.moderation_status = "flagged"
-                elif "safe" in response.lower():
-                    item.moderation_status = "validated"
-                else:
-                    task.log(f"Ambiguous: {response}")
             
             processed += 1
             if processed % 10 == 0:
@@ -333,27 +328,203 @@ def _run_moderation_loop(task, db, items, total_count):
             task.log(f"Error processing item {item.id}: {e}", "ERROR")
     
     db.commit()
-    task.log(f"Moderation run complete. Processed {processed}/{total_count}.", "SUCCESS")
     task.set_progress(100)
 
+def _research_and_post_task(task: Task, topic: str, user_instructions: str):
+    task.log(f"Starting research task for query: {topic}")
+    task.set_progress(5)
+    db = next(get_db())
+    try:
+        settings.refresh(db)
+        lollms_bot_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
+        if not lollms_bot_user: return
+
+        # 1. Gather Tools
+        enabled_tools = []
+        if settings.get("ai_bot_tool_ddg_enabled", False): enabled_tools.append("DuckDuckGo")
+        if settings.get("ai_bot_tool_google_enabled", False): enabled_tools.append("Google")
+        if settings.get("ai_bot_tool_arxiv_enabled", False): enabled_tools.append("ArXiv")
+        if settings.get("ai_bot_tool_scraper_enabled", False): enabled_tools.append("Scraper")
+        
+        task.log(f"Enabled Tools: {enabled_tools}")
+        task.set_progress(10)
+        
+        # 2. Research
+        research_data = []
+        lc = build_lollms_client_from_params(username='lollms')
+        
+        # Calculate progress step for tools
+        # 10% to 70% is allocated for tools (60% total)
+        total_tools = len(enabled_tools)
+        progress_per_tool = 60 / total_tools if total_tools > 0 else 0
+        current_progress = 10
+
+        # --- DuckDuckGo ---
+        if "DuckDuckGo" in enabled_tools:
+            if DDGS:
+                try:
+                    task.log("Tool: DuckDuckGo - Searching...")
+                    with DDGS() as ddgs:
+                        results = [r for r in ddgs.text(topic, max_results=5)]
+                        if results:
+                            formatted_results = [f"Title: {r.get('title')}\nLink: {r.get('href')}\nSnippet: {r.get('body')}" for r in results]
+                            research_data.append(f"### DuckDuckGo Search Results for '{topic}':\n" + "\n---\n".join(formatted_results))
+                            task.log(f"Tool: DuckDuckGo - Found {len(results)} results.")
+                        else:
+                            task.log("Tool: DuckDuckGo - No results found.", "WARNING")
+                except Exception as e:
+                    task.log(f"Tool: DuckDuckGo - Error: {e}", "ERROR")
+            else:
+                task.log("Tool: DuckDuckGo - Library not available.", "WARNING")
+            
+            current_progress += progress_per_tool
+            task.set_progress(int(current_progress))
+
+        # --- Google ---
+        if "Google" in enabled_tools:
+            if google_build:
+                api_key = settings.get("ai_bot_tool_google_api_key")
+                cse_id = settings.get("ai_bot_tool_google_cse_id")
+                if api_key and cse_id:
+                    try:
+                        task.log("Tool: Google Search - Searching...")
+                        service = google_build("customsearch", "v1", developerKey=api_key)
+                        res = service.cse().list(q=topic, cx=cse_id, num=5).execute()
+                        items = res.get('items', [])
+                        if items:
+                            formatted_items = [f"Title: {item['title']}\nSnippet: {item.get('snippet', '')}\nLink: {item['link']}" for item in items]
+                            research_data.append(f"### Google Search Results for '{topic}':\n" + "\n---\n".join(formatted_items))
+                            task.log(f"Tool: Google Search - Found {len(items)} results.")
+                        else:
+                            task.log("Tool: Google Search - No results found.", "WARNING")
+                    except Exception as e:
+                        task.log(f"Tool: Google Search - Error: {e}", "ERROR")
+                else:
+                    task.log("Tool: Google Search - Missing API Key or CSE ID.", "WARNING")
+            else:
+                task.log("Tool: Google Search - Library not available.", "WARNING")
+
+            current_progress += progress_per_tool
+            task.set_progress(int(current_progress))
+
+        # --- ArXiv ---
+        if "ArXiv" in enabled_tools:
+            if arxiv:
+                try:
+                    task.log("Tool: ArXiv - Searching...")
+                    # Construct client to be safe with 2.x API
+                    client = arxiv.Client()
+                    search = arxiv.Search(query=topic, max_results=5, sort_by=arxiv.SortCriterion.Relevance)
+                    results = []
+                    for result in client.results(search):
+                        results.append(f"Title: {result.title}\nSummary: {result.summary}\nURL: {result.entry_id}")
+                    
+                    if results:
+                        research_data.append(f"### ArXiv Papers for '{topic}':\n" + "\n---\n".join(results))
+                        task.log(f"Tool: ArXiv - Found {len(results)} papers.")
+                    else:
+                        task.log("Tool: ArXiv - No results found.", "WARNING")
+                except Exception as e:
+                    task.log(f"Tool: ArXiv - Error: {e}", "ERROR")
+            else:
+                task.log("Tool: ArXiv - Library not available.", "WARNING")
+
+            current_progress += progress_per_tool
+            task.set_progress(int(current_progress))
+
+        # --- Scraper ---
+        if "Scraper" in enabled_tools:
+            if ScrapeMaster:
+                urls = re.findall(r'(https?://[^\s]+)', topic + " " + user_instructions)
+                if urls:
+                    task.log(f"Tool: Scraper - Found {len(urls)} URLs to scrape.")
+                    try:
+                        scraper = ScrapeMaster()
+                        for url in urls[:2]: # Limit scraping
+                            task.log(f"Tool: Scraper - Scraping {url}...")
+                            try:
+                                content = scraper.scrape(url)
+                                if content:
+                                    research_data.append(f"### Scraped Content from {url}:\n{content[:2000]}...")
+                                    task.log(f"Tool: Scraper - Successfully scraped {url}")
+                                else:
+                                    task.log(f"Tool: Scraper - Empty content from {url}", "WARNING")
+                            except Exception as scrape_err:
+                                task.log(f"Tool: Scraper - Failed to scrape {url}: {scrape_err}", "WARNING")
+                    except Exception as e:
+                        task.log(f"Tool: Scraper - Error: {e}", "ERROR")
+                else:
+                    task.log("Tool: Scraper - No URLs found in prompt to scrape.")
+            else:
+                task.log("Tool: Scraper - Library not available.", "WARNING")
+            
+            current_progress += progress_per_tool
+            task.set_progress(int(current_progress))
+
+        full_context = "\n\n".join(research_data)
+        
+        has_real_data = len(research_data) > 0
+        
+        if not has_real_data:
+            task.log("No external data found from enabled tools.", "WARNING")
+            full_context = "No external data found."
+
+        # 4. Generate Post
+        task.set_progress(70)
+        task.log("Generating post content with LLM...")
+        prompt = f"""You are @lollms, an AI assistant.
+[USER INSTRUCTIONS]: {user_instructions}
+[RESEARCH TOPIC]: {topic}
+
+[RESEARCH DATA]:
+{full_context}
+
+[INSTRUCTION]:
+Write a comprehensive and engaging social media post based on the topic and the research data provided above.
+Use markdown formatting. Cite sources if available in the research data.
+If NO research data was found, acknowledge that you searched but found nothing specific, and provide a general informative response about the topic based on your internal knowledge instead.
+"""
+        post_content = lc.generate_text(prompt, max_new_tokens=2048)
+        task.set_progress(90)
+        
+        if post_content:
+            new_post = DBPost(
+                author_id=lollms_bot_user.id,
+                content=post_content,
+                visibility=PostVisibility.public
+            )
+            db.add(new_post)
+            db.commit()
+            db.refresh(new_post)
+            
+            from backend.routers.social import get_post_public
+            post_public = get_post_public(db, new_post, lollms_bot_user.id)
+            manager.broadcast_sync({"type": "new_post", "data": post_public.model_dump(mode="json")})
+            task.log(f"Post created successfully. ID: {new_post.id}", "SUCCESS")
+            task.set_progress(100)
+        else:
+            task.log("Failed to generate post content.", "ERROR")
+            task.set_progress(100)
+
+    except Exception as e:
+        task.log(f"Research task failed: {e}", "CRITICAL")
+        trace_exception(e)
+    finally:
+        db.close()
+
 def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
-    """
-    A background task to generate and post a reply from the @lollms bot.
-    """
+    # ... (existing code for respond to mention) ...
     task.log(f"Starting AI response task for {mention_type} ID: {item_id}")
     db = next(get_db())
     try:
         lollms_bot_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
-        if not lollms_bot_user:
-            task.log("CRITICAL: @lollms user not found.", "ERROR")
-            return
+        if not lollms_bot_user: return
 
         settings.refresh(db)
         if not settings.get("ai_bot_enabled", False):
             task.log("AI Bot disabled.", "INFO")
             return
 
-        # 2. Build Context
         post_id = None
         thread_context = ""
         context_instruction = ""
@@ -388,18 +559,21 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         augmented_prompt = (
             f"{base_system_prompt}\n\n"
             "## Task\n"
-            "Decide on the best action:\n"
-            "1. **Reply** to the thread.\n"
-            "2. **Create a new post** if topic warrants it.\n"
-            "3. **Ignore** if no response needed.\n\n"
+            "You have been summoned by a user. Analyze their request and the thread context.\n"
+            "1. **Direct Reply**: If the request is simple, conversational, or can be answered directly, reply to the thread.\n"
+            "2. **Research & Post**: If the request requires detailed research, web browsing, ArXiv search, website analysis, or is a request for a full article/post, you must:\n"
+            "   a. Reply to the user acknowledging the request and stating that you will research and create a dedicated post about it.\n"
+            "   b. Define the topic and instructions for the research task.\n"
+            "3. **Ignore**: If the mention is trivial or requires no response.\n\n"
             "## Output Format\n"
-            "Start with:\n"
-            "- [[REPLY]] <content>\n"
-            "- [[POST]] <content>\n"
-            "- [[IGNORE]]\n"
+            "Start your response with ONE of these tags:\n"
+            "- `[[REPLY]] <your direct answer here>`\n"
+            "- `[[RESEARCH_AND_POST]] <acknowledgment comment to user> || <EXACT KEYWORD SEARCH QUERY>`\n"
+            "- `[[IGNORE]]`\n"
+            "For RESEARCH_AND_POST, the part after || must be a concise search string (e.g., 'quantum computing advances 2024' or 'https://example.com/article')."
         )
 
-        full_user_input = f"{context_instruction}\n\n[THREAD HISTORY]:\n{thread_context}\n\n[INSTRUCTION]: Generate your response starting with [[REPLY]], [[POST]], or [[IGNORE]]."
+        full_user_input = f"{context_instruction}\n\n[THREAD HISTORY]:\n{thread_context}\n\n[INSTRUCTION]: Generate your response starting with [[REPLY]], [[RESEARCH_AND_POST]], or [[IGNORE]]."
         
         response_text = lc.generate_text(full_user_input, system_prompt=augmented_prompt, stream=False, max_new_tokens=512)
         clean_response = response_text.strip()
@@ -409,41 +583,27 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             task.set_progress(100)
             return {"status": "ignored"}
 
-        is_new_post = "[[POST]]" in clean_response
-        final_content = clean_response.replace("[[POST]]", "").replace("[[REPLY]]", "").strip()
-
-        if not final_content:
-            task.log("AI generated empty content.", "WARNING")
-            return {"status": "aborted"}
-
-        task.log(f"AI Response ({'New Post' if is_new_post else 'Reply'}): {final_content[:100]}...")
-        task.set_progress(80)
-
-        if is_new_post:
-            new_db_post = DBPost(
-                author_id=lollms_bot_user.id,
-                content=final_content[:5000],
-                visibility=PostVisibility.public,
-                group_id=post.group_id if post and post.group_id else None
-            )
-            db.add(new_db_post)
-            db.commit()
-            db.refresh(new_db_post)
+        if "[[RESEARCH_AND_POST]]" in clean_response:
+            # Parse split
+            content_part = clean_response.replace("[[RESEARCH_AND_POST]]", "").strip()
+            parts = content_part.split("||")
             
-            from backend.routers.social import get_post_public
-            post_public = get_post_public(db, new_db_post, lollms_bot_user.id)
-            manager.broadcast_sync({"type": "new_post", "data": post_public.model_dump(mode="json")})
-            task.log(f"Created new post ID: {new_db_post.id}")
-        else:
+            ack_comment = parts[0].strip()
+            research_instructions = parts[1].strip() if len(parts) > 1 else ack_comment
+            
+            if not ack_comment: ack_comment = "I'm on it! I'll research this and create a post shortly."
+
+            # 1. Post acknowledgment comment
             new_comment = DBComment(
                 post_id=post_id,
                 author_id=lollms_bot_user.id,
-                content=final_content[:2000]
+                content=ack_comment[:2000]
             )
             db.add(new_comment)
             db.commit()
             db.refresh(new_comment, ['author'])
             
+            # Broadcast comment
             comment_public = CommentPublic(
                 id=new_comment.id,
                 content=new_comment.content,
@@ -454,7 +614,46 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
                 "type": "new_comment",
                 "data": {"post_id": post_id, "comment": comment_public.model_dump(mode="json")}
             })
-            task.log(f"Bot commented on post ID: {post_id}")
+            task.log(f"Bot acknowledged request on post ID: {post_id}")
+
+            # 2. Trigger Research Task
+            task_manager.submit_task(
+                name=f"Research & Post: {research_instructions[:30]}...",
+                target=_research_and_post_task,
+                args=(research_instructions, thread_context), # passing instruction as topic, and thread context as user_instructions for context
+                description=f"Researching topic requested by user.",
+                owner_username='lollms'
+            )
+            return {"status": "research_triggered"}
+
+        # Handle simple reply (or fallback if tag missing but content exists)
+        final_content = clean_response.replace("[[REPLY]]", "").strip()
+        
+        if not final_content:
+            task.log("AI generated empty reply.", "WARNING")
+            return {"status": "aborted"}
+
+        new_comment = DBComment(
+            post_id=post_id,
+            author_id=lollms_bot_user.id,
+            content=final_content[:2000]
+        )
+        db.add(new_comment)
+        db.commit()
+        db.refresh(new_comment, ['author'])
+        
+        comment_public = CommentPublic(
+            id=new_comment.id,
+            content=new_comment.content,
+            created_at=new_comment.created_at,
+            author=AuthorPublic.from_orm(new_comment.author)
+        )
+        manager.broadcast_sync({
+            "type": "new_comment",
+            "data": {"post_id": post_id, "comment": comment_public.model_dump(mode="json")}
+        })
+        task.log(f"Bot commented on post ID: {post_id}")
+        return {"status": "replied"}
 
     except Exception as e:
         task.log(f"Error in AI response task: {e}", "CRITICAL")
@@ -466,9 +665,10 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
 def _generate_feed_post_task(task: Task, force: bool = False):
     """
     Scheduled task to generate a new post for the bot.
+    Supports: Static Text, File, RAG, and Auto-Discovery modes.
     """
     if force: task.log("Manual Post Triggered.")
-    else: task.log("Checking AI Bot Auto-Posting Schedule...")
+    else: task.log("Running Auto-Posting Job...")
         
     db = next(get_db())
     try:
@@ -477,42 +677,111 @@ def _generate_feed_post_task(task: Task, force: bool = False):
             task.log("Auto-posting is disabled.", "INFO")
             return
 
-        if not force:
-            last_posted_str = settings.get("ai_bot_last_posted_at")
-            interval_hours = float(settings.get("ai_bot_post_interval", 24))
-            if last_posted_str:
-                try:
-                    last_posted = datetime.datetime.fromisoformat(last_posted_str)
-                    time_diff = datetime.datetime.utcnow() - last_posted
-                    if time_diff.total_seconds() < interval_hours * 3600:
-                        task.log(f"Not enough time elapsed.", "INFO")
-                        return
-                except ValueError: pass
-
         bot_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
         if not bot_user:
             task.log("@lollms user not found!", "ERROR")
             return
 
         mode = settings.get("ai_bot_content_mode", "static_text")
+        task.log(f"Posting Mode: {mode}")
+        
         context_material = ""
         user_prompt = settings.get("ai_bot_generation_prompt", "Generate an engaging social media post.")
         
-        if mode == "static_text":
-             context_material = settings.get("ai_bot_static_content", "")
-        # ... (other modes omitted for brevity) ...
+        # --- MODE: AUTO DISCOVERY ---
+        if mode == "auto_discovery":
+            task.log("Auto Discovery: Mining feed for topics...")
+            
+            # 1. Fetch recent posts to analyze
+            recent_posts = db.query(DBPost).filter(
+                DBPost.visibility == 'public',
+                DBPost.author_id != bot_user.id
+            ).order_by(desc(DBPost.created_at)).limit(30).all()
+            
+            if len(recent_posts) < 3:
+                task.log("Not enough recent public posts for auto-discovery.", "WARNING")
+                if not force: return
+                posts_text = "No recent activity."
+            else:
+                # Sample random posts to diversify
+                sampled_posts = random.sample(recent_posts, min(len(recent_posts), 5))
+                posts_text = "\n".join([f"- {p.content[:200]}..." for p in sampled_posts])
 
+            # 2. Get Topic History
+            topic_history = settings.get("ai_bot_topic_history", [])
+            history_text = ", ".join(topic_history[-10:]) # Send last 10 topics
+            
+            discovery_prompt = f"""Analyze these recent posts from the community feed:
+{posts_text}
+
+[HISTORY]: The bot has recently posted about: {history_text}.
+
+[INSTRUCTION]:
+Identify a trending topic or a fun, engaging subject based on the community activity.
+It MUST be different from the history.
+If the feed is quiet or boring, pick a general interesting topic related to technology, science, or AI.
+Return ONLY the topic name/summary.
+"""
+            lc = build_lollms_client_from_params(username=bot_user.username)
+            topic = lc.generate_text(discovery_prompt, max_new_tokens=100).strip()
+            task.log(f"Discovered Topic: {topic}")
+            
+            # Update Context for generation
+            context_material = f"The community is talking about or interested in: {topic}."
+            user_prompt = f"Create a post about {topic}. Make it engaging and ask a question to spark discussion."
+            
+            # Save to history
+            if topic:
+                topic_history.append(topic)
+                # Keep history manageable (last 50 topics)
+                if len(topic_history) > 50: topic_history = topic_history[-50:]
+                
+                # Update GlobalConfig for history
+                config_entry = db.query(GlobalConfig).filter(GlobalConfig.key == "ai_bot_topic_history").first()
+                val_str = json.dumps({"value": topic_history, "type": "json"})
+                if config_entry: config_entry.value = val_str
+                else: db.add(GlobalConfig(key="ai_bot_topic_history", value=val_str, type="json", category="AI Bot"))
+                db.commit()
+
+        # --- MODE: STATIC / FILE / RAG ---
+        elif mode == "static_text":
+             context_material = settings.get("ai_bot_static_content", "")
+        elif mode == "file":
+             path = settings.get("ai_bot_file_path", "")
+             if path and Path(path).exists():
+                 try: context_material = Path(path).read_text(encoding='utf-8')
+                 except Exception as e: task.log(f"Error reading file: {e}", "ERROR")
+        elif mode == "rag":
+             # Basic implementation: just pass the prompt, let the binding handle it if configured, 
+             # or here we could query the vector store if we wanted specific context injection.
+             # For simplicity, we assume the LLM binding might have RAG enabled or we rely on the prompt.
+             # A full RAG query here would require querying the SafeStore with the prompt first.
+             datastore_ids = settings.get("ai_bot_rag_datastore_ids", [])
+             if datastore_ids and safe_store:
+                 try:
+                     docs = []
+                     for ds_id in datastore_ids:
+                         ss = get_safe_store_instance(bot_user.username, ds_id, db)
+                         results = ss.query(user_prompt, top_k=3)
+                         docs.extend([r['chunk_text'] for r in results])
+                     context_material = "\n\n".join(docs)
+                 except Exception as e:
+                     task.log(f"RAG query failed: {e}", "ERROR")
+
+        # --- GENERATION ---
         task.log("Generating post content...")
-        lc = build_lollms_client_from_params(username=bot_user.username)
-        system_prompt = settings.get("ai_bot_system_prompt") or "You are a helpful AI assistant."
+        if 'lc' not in locals(): lc = build_lollms_client_from_params(username=bot_user.username)
         
-        full_prompt = f"{user_prompt}\n\n[CONTEXT MATERIAL]:\n{context_material[:10000]}"
+        system_prompt = settings.get("ai_bot_system_prompt") or "You are a helpful AI assistant."
+        full_prompt = f"{user_prompt}\n\n[CONTEXT MATERIAL]:\n{context_material[:5000]}"
+        
         generated_content = lc.generate_text(full_prompt, system_prompt=system_prompt, max_new_tokens=1024)
 
         if not generated_content or len(generated_content.strip()) < 5:
             task.log("Generated content was empty.", "WARNING")
             return
 
+        # --- POSTING ---
         new_post = DBPost(
             author_id=bot_user.id,
             content=generated_content.strip(),
@@ -520,11 +789,12 @@ def _generate_feed_post_task(task: Task, force: bool = False):
         )
         db.add(new_post)
         
+        # Update last posted time
         now_iso = datetime.datetime.utcnow().isoformat()
-        # Update last posted time in DB
         config_entry = db.query(GlobalConfig).filter(GlobalConfig.key == "ai_bot_last_posted_at").first()
-        if config_entry: config_entry.value = now_iso
-        else: db.add(GlobalConfig(key="ai_bot_last_posted_at", value=now_iso, type="string", category="AI Bot"))
+        val_str = json.dumps({"value": now_iso, "type": "string"})
+        if config_entry: config_entry.value = val_str
+        else: db.add(GlobalConfig(key="ai_bot_last_posted_at", value=val_str, type="string", category="AI Bot"))
         
         db.commit()
         db.refresh(new_post)
@@ -533,7 +803,6 @@ def _generate_feed_post_task(task: Task, force: bool = False):
         post_public = get_post_public(db, new_post, bot_user.id)
         manager.broadcast_sync({"type": "new_post", "data": post_public.model_dump(mode="json")})
         
-        settings._settings_cache["ai_bot_last_posted_at"] = now_iso
         task.log(f"Successfully posted. ID: {new_post.id}", "SUCCESS")
 
     except Exception as e:

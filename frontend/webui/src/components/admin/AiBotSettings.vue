@@ -31,7 +31,15 @@ const form = ref({
     ai_bot_rag_datastore_ids: [],
     // Moderation
     ai_bot_moderation_enabled: false,
-    ai_bot_moderation_criteria: ''
+    ai_bot_moderation_criteria: '',
+    // Tools
+    ai_bot_tool_ddg_enabled: false,
+    ai_bot_tool_google_enabled: false,
+    ai_bot_tool_google_api_key: '',
+    ai_bot_tool_google_cse_id: '',
+    ai_bot_tool_arxiv_enabled: false,
+    ai_bot_tool_scraper_enabled: false,
+    ai_bot_tool_rss_enabled: false
 });
 
 const isLoading = ref(false);
@@ -42,7 +50,6 @@ const hasChanges = ref(false);
 let pristineState = '{}';
 
 const availablePersonalitiesForSelect = computed(() => {
-    // FIX: Added defensive check (publicPersonalities.value || [])
     return (publicPersonalities.value || []).map(p => ({
         id: p.id,
         name: `${p.name} (by ${p.author})`
@@ -50,7 +57,6 @@ const availablePersonalitiesForSelect = computed(() => {
 });
 
 const availableDataStores = computed(() => {
-    // FIX: Added defensive check (userDataStores.value || []) to prevent map on undefined
     return (userDataStores.value || []).map(ds => ({
         id: ds.id,
         name: ds.name
@@ -90,7 +96,6 @@ const groupedModels = computed(() => {
 onMounted(() => {
     if (!aiBotSettings.value) adminStore.fetchAiBotSettings();
     if (adminAvailableLollmsModels.value.length === 0) adminStore.fetchAdminAvailableLollmsModels();
-    // Use optional chaining or checks to safely call fetch if array is empty or undefined
     if (!publicPersonalities.value || publicPersonalities.value.length === 0) dataStore.fetchPersonalities();
     dataStore.fetchDataStores(); 
 });
@@ -118,7 +123,16 @@ function populateForm() {
         ai_bot_generation_prompt: s.ai_bot_generation_prompt || '',
         ai_bot_rag_datastore_ids: s.ai_bot_rag_datastore_ids || [],
         ai_bot_moderation_enabled: s.ai_bot_moderation_enabled ?? false,
-        ai_bot_moderation_criteria: s.ai_bot_moderation_criteria || 'Be polite and respectful.'
+        ai_bot_moderation_criteria: s.ai_bot_moderation_criteria || 'Be polite and respectful.',
+        
+        // Tools
+        ai_bot_tool_ddg_enabled: s.ai_bot_tool_ddg_enabled ?? false,
+        ai_bot_tool_google_enabled: s.ai_bot_tool_google_enabled ?? false,
+        ai_bot_tool_google_api_key: s.ai_bot_tool_google_api_key || '',
+        ai_bot_tool_google_cse_id: s.ai_bot_tool_google_cse_id || '',
+        ai_bot_tool_arxiv_enabled: s.ai_bot_tool_arxiv_enabled ?? false,
+        ai_bot_tool_scraper_enabled: s.ai_bot_tool_scraper_enabled ?? false,
+        ai_bot_tool_rss_enabled: s.ai_bot_tool_rss_enabled ?? false,
     };
     
     form.value = newFormState;
@@ -238,6 +252,74 @@ async function triggerFullRemoderation() {
                     </div>
                 </div>
 
+                <!-- Activable Tools -->
+                <div class="space-y-6 pt-6 border-t dark:border-gray-600">
+                    <h4 class="text-lg font-medium text-gray-900 dark:text-white">Activable Tools</h4>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Enable tools the bot can use to research or generate content.</p>
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <!-- DuckDuckGo -->
+                        <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                            <span class="flex-grow flex flex-col">
+                                <span class="text-sm font-medium">DuckDuckGo Search</span>
+                            </span>
+                            <button @click="form.ai_bot_tool_ddg_enabled = !form.ai_bot_tool_ddg_enabled" type="button" :class="[form.ai_bot_tool_ddg_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span :class="[form.ai_bot_tool_ddg_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+
+                        <!-- ArXiv -->
+                        <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                            <span class="flex-grow flex flex-col">
+                                <span class="text-sm font-medium">ArXiv Research</span>
+                            </span>
+                            <button @click="form.ai_bot_tool_arxiv_enabled = !form.ai_bot_tool_arxiv_enabled" type="button" :class="[form.ai_bot_tool_arxiv_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span :class="[form.ai_bot_tool_arxiv_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+
+                        <!-- Web Scraper -->
+                        <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                            <span class="flex-grow flex flex-col">
+                                <span class="text-sm font-medium">Web Scraper</span>
+                            </span>
+                            <button @click="form.ai_bot_tool_scraper_enabled = !form.ai_bot_tool_scraper_enabled" type="button" :class="[form.ai_bot_tool_scraper_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span :class="[form.ai_bot_tool_scraper_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+
+                        <!-- RSS Feeds -->
+                        <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                            <span class="flex-grow flex flex-col">
+                                <span class="text-sm font-medium">RSS Feeds Knowledge</span>
+                            </span>
+                            <button @click="form.ai_bot_tool_rss_enabled = !form.ai_bot_tool_rss_enabled" type="button" :class="[form.ai_bot_tool_rss_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span :class="[form.ai_bot_tool_rss_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Google Search (Special Handling for Credentials) -->
+                    <div class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600">
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="text-sm font-medium">Google Custom Search</span>
+                            <button @click="form.ai_bot_tool_google_enabled = !form.ai_bot_tool_google_enabled" type="button" :class="[form.ai_bot_tool_google_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span :class="[form.ai_bot_tool_google_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+                        <div v-if="form.ai_bot_tool_google_enabled" class="space-y-3">
+                            <div>
+                                <label class="block text-xs font-medium">API Key</label>
+                                <input type="password" v-model="form.ai_bot_tool_google_api_key" class="input-field-sm w-full mt-1">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium">Search Engine ID (CSE ID)</label>
+                                <input type="text" v-model="form.ai_bot_tool_google_cse_id" class="input-field-sm w-full mt-1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Moderation Settings -->
                 <div class="space-y-6 pt-6 border-t dark:border-gray-600">
                     <div class="flex items-center justify-between">
@@ -335,7 +417,6 @@ async function triggerFullRemoderation() {
 
                         <div v-if="form.ai_bot_content_mode === 'rag'">
                             <label class="block text-sm font-medium mb-1">Select Datastores</label>
-                            <!-- FIX: Added fallback for availableDataStores to ensure it's always an array before map -->
                             <MultiSelectMenu 
                                 :options="(availableDataStores || []).map(ds => ({ label: ds.name, value: ds.id }))" 
                                 v-model="form.ai_bot_rag_datastore_ids" 
