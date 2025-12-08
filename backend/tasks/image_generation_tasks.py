@@ -1,4 +1,4 @@
-# [UPDATE] backend/tasks/image_generation_tasks.py
+# backend/tasks/image_generation_tasks.py
 import base64
 import uuid
 import json
@@ -133,6 +133,7 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
             else:
                 raise Exception("No active TTI binding found to determine a default.")
 
+        # Rebuild client with specific TTI params
         lc = build_lollms_client_from_params(
             username=username,
             tti_binding_alias=tti_binding_alias,
@@ -153,9 +154,14 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
         size_str = generation_params.pop('size', "1024x1024")
         
         try:
-            width_str, height_str = size_str.split('x')
-            generation_params["width"] = int(width_str)
-            generation_params["height"] = int(height_str)
+            if isinstance(size_str, str) and 'x' in size_str:
+                width_str, height_str = size_str.split('x')
+                generation_params["width"] = int(width_str)
+                generation_params["height"] = int(height_str)
+            elif "width" not in generation_params or "height" not in generation_params:
+                # Default fallback
+                generation_params["width"] = 1024
+                generation_params["height"] = 1024
         except ValueError:
             task.log(f"Invalid size format '{size_str}'. Using default 1024x1024.", "WARNING")
             generation_params["width"] = 1024
@@ -167,8 +173,14 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
                 task.log("Task cancelled by user.", "WARNING")
                 break
             task.log(f"Generating image {i+1}/{n_images}...")
+            
+            # Pass cancellation check to binding if supported? (not standardized yet)
             image_bytes = lc.tti.generate_image(**generation_params)
             
+            if not image_bytes:
+                task.log(f"Image {i+1} generation failed (empty response).", "ERROR")
+                continue
+
             filename = f"{uuid.uuid4().hex}.png"
             file_path = user_images_path / filename
             with open(file_path, "wb") as f:
@@ -368,7 +380,14 @@ def _image_studio_enhance_prompt_task(task: Task, username: str, request_data: d
 
         if request.image_b64s:
             cleaned_images = [b64.split(',')[-1] for b64 in request.image_b64s]
-            raw_response = lc.binding.generate_with_images(user_prompt, cleaned_images, system_prompt=system_prompt, max_generation_size=2048)
+            # Try to resolve the correct method for vision generation
+            if hasattr(lc, 'generate_with_images'):
+                raw_response = lc.generate_with_images(user_prompt, cleaned_images, system_prompt=system_prompt, max_generation_size=2048)
+            elif hasattr(lc, 'binding') and hasattr(lc.binding, 'generate_with_images'):
+                raw_response = lc.binding.generate_with_images(user_prompt, cleaned_images, system_prompt=system_prompt, max_generation_size=2048)
+            else:
+                task.log("Vision generation method not found on client. Falling back to text-only enhancement.", "WARNING")
+                raw_response = lc.generate_text(user_prompt, system_prompt=system_prompt, stream=False, max_generation_size=2048)
         else:
             raw_response = lc.generate_text(user_prompt, system_prompt=system_prompt, stream=False, max_generation_size=2048)
         
@@ -377,13 +396,20 @@ def _image_studio_enhance_prompt_task(task: Task, username: str, request_data: d
 
         json_match = raw_response[raw_response.find('{'):raw_response.rfind('}') + 1]
         if not json_match:
-            raise Exception("AI did not return a valid JSON object.")
-            
-        enhanced_data = json.loads(json_match)
-        
-        response_data = {}
-        if 'prompt' in enhanced_data: response_data['prompt'] = enhanced_data.get('prompt')
-        if 'negative_prompt' in enhanced_data: response_data['negative_prompt'] = enhanced_data.get('negative_prompt')
+            # Fallback: try to interpret raw response as prompt if simple enhancement
+            if request.mode == 'description' and request.target == 'prompt':
+                 task.log("AI did not return valid JSON. Treating response as prompt.", "WARNING")
+                 response_data = {'prompt': raw_response.strip()}
+            else:
+                 raise Exception("AI did not return a valid JSON object.")
+        else:
+            try:
+                enhanced_data = json.loads(json_match)
+                response_data = {}
+                if 'prompt' in enhanced_data: response_data['prompt'] = enhanced_data.get('prompt')
+                if 'negative_prompt' in enhanced_data: response_data['negative_prompt'] = enhanced_data.get('negative_prompt')
+            except json.JSONDecodeError:
+                 raise Exception("Failed to decode AI response as JSON.")
 
         task.log("Prompt enhanced successfully.")
         task.set_progress(100)
